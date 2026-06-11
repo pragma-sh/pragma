@@ -1,0 +1,2 @@
+# Auto-fix staged files (oxlint --fix, oxfmt --write, rustfmt). See .lintstagedrc.json.
+bunx lint-staged
