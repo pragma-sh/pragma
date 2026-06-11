@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Constants",
+  "description": "Shared compile-time constants. Single source of truth for both the TypeScript frontend (src) and the Rust backend (src-tauri). Edit values.json; never edit generated code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["app", "window", "links"],
+  "properties": {
+    "app": { "$ref": "#/definitions/AppInfo" },
+    "window": { "$ref": "#/definitions/WindowDefaults" },
+    "links": { "$ref": "#/definitions/Links" }
+  },
+  "definitions": {
+    "AppInfo": {
+      "title": "AppInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "identifier", "version"],
+      "properties": {
+        "name": { "type": "string", "description": "Human-readable product name." },
+        "identifier": { "type": "string", "description": "Reverse-DNS bundle identifier." },
+        "version": { "type": "string", "description": "Semantic version string." }
+      }
+    },
+    "WindowDefaults": {
+      "title": "WindowDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultWidth", "defaultHeight", "minWidth", "minHeight"],
+      "properties": {
+        "defaultWidth": { "type": "integer", "minimum": 1 },
+        "defaultHeight": { "type": "integer", "minimum": 1 },
+        "minWidth": { "type": "integer", "minimum": 1 },
+        "minHeight": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "Links": {
+      "title": "Links",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["homepage", "support"],
+      "properties": {
+        "homepage": { "type": "string", "format": "uri" },
+        "support": { "type": "string", "format": "uri" }
+      }
+    }
+  }
+}
