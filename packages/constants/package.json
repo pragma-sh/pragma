@@ -1,0 +1,25 @@
+{
+  "name": "@pragma/constants",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared constants for the Pragma frontend and Tauri backend. Source of truth: schema.json + values.json.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./values.json": "./values.json"
+  },
+  "scripts": {
+    "generate": "json2ts --input schema.json --output src/generated/constants.ts --no-additionalProperties --bannerComment \"/* AUTO-GENERATED from schema.json. Do not edit. Run \\`bun run generate\\`. */\"",
+    "build": "bun run generate",
+    "typecheck": "tsc --noEmit",
+    "pretypecheck": "bun run generate",
+    "test": "vitest run",
+    "pretest": "bun run generate",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

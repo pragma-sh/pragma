@@ -1,0 +1,18 @@
+[package]
+name = "pragma-constants"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Shared constants for Pragma, generated from schema.json + values.json."
+
+[lib]
+name = "pragma_constants"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+typify = "0.7"

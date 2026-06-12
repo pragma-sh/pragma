@@ -1,0 +1,5 @@
+{
+  "*.{ts,tsx,js,jsx,mjs,cjs}": ["oxlint --fix", "oxfmt --write"],
+  "*.json": ["oxfmt --write"],
+  "*.rs": ["rustfmt --edition 2021"]
+}

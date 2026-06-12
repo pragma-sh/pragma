@@ -1,0 +1,9 @@
+# Formatting rules kept intentionally close to the TypeScript side (oxfmt).
+# See AGENTS.md "Code standards" for the cross-language rationale.
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true

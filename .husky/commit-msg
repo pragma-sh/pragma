@@ -1,0 +1,2 @@
+# Enforce Conventional Commits. See commitlint.config.js.
+bunx --no -- commitlint --edit "$1"

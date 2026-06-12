@@ -1,0 +1,18 @@
+{
+  "maxParallelAgents": 8,
+  "app": {
+    "name": "Pragma",
+    "identifier": "com.pragma.app",
+    "version": "0.0.0"
+  },
+  "window": {
+    "defaultWidth": 1024,
+    "defaultHeight": 768,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  "links": {
+    "homepage": "https://pragma.example.com",
+    "support": "https://pragma.example.com/support"
+  }
+}

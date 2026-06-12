@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["apps/pragma/src-tauri", "packages/constants"]
+
+# Shared dependency versions for every crate in the workspace.
+# Crates opt in with `serde = { workspace = true }`.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Consistent lint policy across the whole Rust workspace.
+# Crates opt in with `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pragmatic allows so pedantic stays useful without being noisy.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

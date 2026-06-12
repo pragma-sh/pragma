@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnp.*
+
+# Build output
+dist/
+build/
+out/
+.turbo/
+
+# Rust
+target/
+
+# Generated code (regenerated from packages/constants/{schema,values}.json)
+**/src/generated/
+
+# Tauri
+apps/*/src-tauri/gen/
+
+# Test / coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+*.local
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs / env
+*.log
+.env
+.env.*
+!.env.example
