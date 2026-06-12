@@ -119,7 +119,6 @@ bun install                # Install all workspace deps
 
 # App
 bun run dev                # Run the desktop app — native window + Vite (Tauri dev)
-bun run dev:web            # Vite dev server ONLY, in a browser (no native shell)
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
 
 # Quality gates (root)

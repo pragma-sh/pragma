@@ -29,8 +29,8 @@ jobs:
       - name: Validate PR commit messages
         run: bunx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
 
-  web:
-    name: Web (lint, format, typecheck, test)
+  frontend:
+    name: Frontend (lint, format, typecheck, test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +80,7 @@ jobs:
 
   build:
     name: Build app (${{ matrix.os }})
-    needs: [web, rust]
+    needs: [frontend, rust]
     strategy:
       fail-fast: false
       matrix:
