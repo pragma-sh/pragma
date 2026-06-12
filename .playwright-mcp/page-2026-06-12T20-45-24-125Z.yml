@@ -1,0 +1,13 @@
+- generic [ref=e3]:
+    - generic [ref=e4]:
+        - generic [ref=e5]:
+            - button "No project" [ref=e6]:
+                - generic [ref=e7]: No project
+            - button "New worktree" [ref=e8]:
+                - img [ref=e9]
+        - button "New project" [ref=e12]:
+            - img [ref=e13]
+    - generic [ref=e15]:
+        - button "New tab" [ref=e16]:
+            - img [ref=e17]
+        - generic [ref=e18]: ⌃Tab cycles

@@ -3,6 +3,8 @@ import type { Constants } from "./generated/constants";
 
 export type { Constants, AppInfo, WindowDefaults, Links } from "./generated/constants";
 
+export type { Project, Worktree, Tab, ProjectIcon } from "./types";
+
 /**
  * Shared application constants.
  *

@@ -1,0 +1,18 @@
+[package]
+name = "pragma-daemon"
+version = "0.0.0"
+description = "Background PTY daemon for Pragma — survives app restarts"
+authors = ["Pragma"]
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+portable-pty = "0.8"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"

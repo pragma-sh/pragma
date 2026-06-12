@@ -54,7 +54,13 @@ than no guide.
 | Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)              |
 | Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript           |
 | Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) |
-| Backend          | Rust (Tauri commands)                                                           |
+| Backend          | Rust (Tauri commands) + detached PTY daemon                                     |
+| Terminal         | [xterm.js](https://xtermjs.org) + addon-fit + addon-web-links                   |
+| PTY              | [portable-pty](https://github.com/wez/wezterm/tree/main/pty) (in daemon)        |
+| SQLite           | [rusqlite](https://github.com/rusqlite/rusqlite) (bundled)                      |
+| IPC              | Tauri `Channel` for PTY events; Unix domain socket for daemon                   |
+| Animation        | [motion](https://motion.dev) (React)                                            |
+| File picker      | [@tauri-apps/plugin-dialog](https://v2.tauri.app/plugin/dialog) (native)        |
 | Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)          |
 | Lint (TS)        | [oxlint](https://oxc.rs)                                                        |
 | Format (TS)      | [oxfmt](https://oxc.rs)                                                         |
@@ -72,24 +78,59 @@ than no guide.
 ├── apps/
 │   └── pragma/                  # The Tauri desktop app
 │       ├── src/                 # React frontend (TypeScript)
-│       │   ├── components/ui/   # shadcn/ui primitives (generated; avoid hand-edits)
+│       │   ├── components/
+│       │   │   ├── ui/          # shadcn/ui primitives (generated; avoid hand-edits)
+│       │   │   ├── dialogs/     # CreateProjectDialog, CreateWorktreeDialog
+│       │   │   ├── sidebar/     # ProjectSidebar, WorktreeTree, ProjectSwitcher
+│       │   │   ├── tabs/        # TerminalTabs
+│       │   │   ├── terminal/    # TerminalHost, TerminalView
+│       │   │   └── workspace/   # WorkspaceShell
+│       │   ├── hooks/           # use-shortcuts.ts
 │       │   ├── lib/             # Reusable, framework-agnostic helpers
 │       │   │   ├── tauri.ts     # Typed bridge to Rust commands — the ONLY place invoke() is called
+│       │   │   ├── terminal-manager.ts  # Non-React xterm session registry
+│       │   │   ├── platform.ts  # isMac, projectModifierPressed, modifierLabel
+│       │   │   ├── worktree-tree.ts     # Worktree[] → tree builder
 │       │   │   └── utils.ts     # cn() + small utilities
+│       │   ├── state/
+│       │   │   └── workspace-context.tsx  # WorkspaceProvider + reducer
 │       │   ├── test/setup.ts    # Vitest setup
 │       │   ├── App.tsx
 │       │   └── main.tsx
 │       └── src-tauri/           # Rust backend
-│           ├── src/lib.rs       # Commands + app wiring (#[tauri::command])
-│           ├── src/main.rs      # Thin entrypoint
-│           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
+│           ├── sql/schema.sql   # SQLite DDL (tables: projects, worktrees, settings, tabs)
+│           ├── src/
+│           │   ├── lib.rs       # Builder, managed state, Tauri commands (pty, projects, worktrees, tabs, icon)
+│           │   ├── main.rs      # Thin entrypoint
+│           │   ├── error.rs     # AppError (thiserror)
+│           │   ├── pty.rs       # DaemonClient — Unix socket proxy to pragma-daemon
+│           │   ├── db.rs        # Db(Mutex<Connection>), PRAGMA migrations, typed CRUD
+│           │   ├── git.rs       # git CLI wrapper — clone, worktree add/remove, exclude
+│           │   ├── projects.rs  # list/add/clone_project (persists projectsDirectory), get_projects_directory
+│           │   ├── worktrees.rs # list_worktrees, create_worktree
+│           │   ├── tabs.rs      # list_tabs, create_tab, delete_tab (persisted tab strip)
+│           │   └── icons.rs     # project_icon — favicon probe + base64
+│           ├── capabilities/default.json
+│           └── tauri.conf.json
+├── crates/
+│   └── pragma-daemon/           # Detached background PTY daemon (binary crate)
+│       └── src/
+│           ├── main.rs          # Unix socket accept loop, single-instance lock
+│           ├── lib.rs           # Re-exports protocol module for app use
+│           ├── protocol.rs      # Request/Response enums + length-prefixed JSON framing
+│           ├── session.rs       # PTY spawn, reader thread, UTF-8 carry-over, scrollback
+│           └── registry.rs      # Session map: spawn/attach/write/resize/kill
 ├── packages/
 │   └── constants/               # Dual TS + Rust package — shared source of truth
 │       ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
 │       ├── values.json          # The actual values. EDIT THIS to change values.
-│       ├── src/index.ts         # Typed TS export
-│       ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
-│       └── src/generated/       # Generated TS types (git-ignored; never edit)
+│       ├── src/
+│       │   ├── index.ts         # Typed TS export (generated types + hand-written types)
+│       │   ├── types.ts         # Hand-written TS types (Project, Worktree, Tab, ProjectIcon)
+│       │   ├── lib.rs           # Rust export (typify-generated types + parsed values)
+│       │   └── generated/       # Generated TS types (git-ignored; never edit)
+│       ├── package.json
+│       └── Cargo.toml
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -118,7 +159,8 @@ manager and **turbo** as the task runner.
 bun install                # Install all workspace deps
 
 # App
-bun run dev                # Run the desktop app — native window + Vite (Tauri dev)
+bun run dev                # Run the desktop app — builds pragma-daemon first, then native window + Vite (Tauri dev)
+bun run daemon:build       # Build just the pragma-daemon binary (target/debug/pragma-daemon)
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
 
 # Quality gates (root)

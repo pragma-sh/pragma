@@ -48,6 +48,59 @@
         "homepage": { "type": "string", "format": "uri" },
         "support": { "type": "string", "format": "uri" }
       }
+    },
+    "Project": {
+      "title": "Project",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "path", "orderIndex", "createdAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "orderIndex": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "Worktree": {
+      "title": "Worktree",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "projectId", "branch", "path", "isMain", "createdAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "branch": { "type": "string" },
+        "title": { "type": "string" },
+        "path": { "type": "string" },
+        "isMain": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "Tab": {
+      "title": "Tab",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "projectId", "worktreeId", "orderIndex", "createdAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "title": { "type": "string" },
+        "orderIndex": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "ProjectIcon": {
+      "title": "ProjectIcon",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "dataBase64"],
+      "properties": {
+        "mime": { "type": "string" },
+        "dataBase64": { "type": "string" }
+      }
     }
   }
 }

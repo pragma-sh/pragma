@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["apps/pragma/src-tauri", "packages/constants"]
+members = ["apps/pragma/src-tauri", "packages/constants", "crates/pragma-daemon"]
 
 # Shared dependency versions for every crate in the workspace.
 # Crates opt in with `serde = { workspace = true }`.
@@ -11,7 +11,7 @@ serde_json = "1"
 # Consistent lint policy across the whole Rust workspace.
 # Crates opt in with `[lints] workspace = true`.
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

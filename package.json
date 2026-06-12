@@ -9,7 +9,8 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build",
-    "dev": "bun run --filter pragma tauri:dev",
+    "daemon:build": "cargo build -p pragma-daemon",
+    "dev": "bun run daemon:build && bun run --filter pragma tauri:dev",
     "generate": "turbo run generate",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

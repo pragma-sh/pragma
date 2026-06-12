@@ -19,8 +19,26 @@ tauri-build = { version = "2.6.2", features = [] }
 
 [dependencies]
 pragma-constants = { path = "../../../packages/constants" }
+pragma-daemon = { path = "../../../crates/pragma-daemon" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = "0.4"
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["sync", "io-util"] }
+tiny_http = "0.12"
+scopeguard = "1"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
