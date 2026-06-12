@@ -8,9 +8,10 @@
 - Custom Protocols
 
 > Covers system tray integration, sidecar processes, deep links, and custom protocols.
-> *Last verified: 2026-04-02. Check official Tauri v2+ docs for updates.*
+> _Last verified: 2026-04-02. Check official Tauri v2+ docs for updates._
 
 **See also:**
+
 - [plugin-reference.md](plugin-reference.md) — plugin installation and permissions
 - [capabilities-reference.md](capabilities-reference.md) — capability/permission model
 
@@ -67,6 +68,7 @@ let tray = TrayIconBuilder::new()
 ```
 
 Platform notes:
+
 - **macOS:** tray icon appears in menu bar; supports template images
 - **Windows:** tray icon in system tray; click events differ from macOS
 - **Linux:** tray support varies by desktop environment (requires `libappindicator` or `libayatana-appindicator`)
@@ -79,9 +81,7 @@ Show config and usage for bundled executables:
 // tauri.conf.json
 {
   "bundle": {
-    "externalBin": [
-      "binaries/my-sidecar"
-    ]
+    "externalBin": ["binaries/my-sidecar"]
   }
 }
 ```
@@ -93,9 +93,7 @@ Capability permission required:
   "permissions": [
     {
       "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "my-sidecar", "args": true, "sidecar": true }
-      ]
+      "allow": [{ "name": "my-sidecar", "args": true, "sidecar": true }]
     }
   ]
 }
@@ -115,12 +113,13 @@ async fn run_sidecar(app: tauri::AppHandle) -> Result<String, String> {
         .output()
         .await
         .map_err(|e| e.to_string())?;
-    
+
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 ```
 
 Binary naming convention (for cross-platform bundling):
+
 - **macOS (Intel):** `my-sidecar-x86_64-apple-darwin`
 - **macOS (ARM):** `my-sidecar-aarch64-apple-darwin`
 - **Windows:** `my-sidecar-x86_64-pc-windows-msvc.exe`
@@ -138,12 +137,8 @@ Config in tauri.conf.json:
 {
   "plugins": {
     "deep-link": {
-      "mobile": [
-        { "scheme": "myapp" }
-      ],
-      "desktop": [
-        { "schemes": ["myapp"] }
-      ]
+      "mobile": [{ "scheme": "myapp" }],
+      "desktop": [{ "schemes": ["myapp"] }]
     }
   }
 }
@@ -166,6 +161,7 @@ app.deep_link().on_open_url(|event| {
 ```
 
 Platform notes:
+
 - **macOS:** registers URL scheme in Info.plist automatically
 - **Windows:** registry entry created during install
 - **Linux:** .desktop file update required
@@ -190,7 +186,7 @@ Show asset protocol access (most common use case):
 
 ```typescript
 // Access local file via asset protocol
-const imgSrc = convertFileSrc('/path/to/image.png');
+const imgSrc = convertFileSrc("/path/to/image.png");
 ```
 
 Note: Full custom protocol registration (`tauri::Builder::register_uri_scheme_protocol`) is available but underdocumented in official v2+ docs as of 2026-04-02. Prefer asset protocol for local file serving.

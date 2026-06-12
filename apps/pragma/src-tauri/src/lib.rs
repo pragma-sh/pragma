@@ -20,6 +20,11 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Same shared scalar constant the frontend reads (constants.maxParallelAgents).
+            log::info!(
+                "Pragma supports up to {} parallel agents",
+                CONSTANTS.max_parallel_agents
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![app_info])

@@ -25,6 +25,9 @@ function App() {
         <p className="text-muted-foreground text-sm">
           v{constants.app.version} · {constants.app.identifier}
         </p>
+        <p className="text-muted-foreground text-sm">
+          Runs up to {constants.maxParallelAgents} agents in parallel
+        </p>
       </header>
 
       <Button onClick={pingBackend}>Ping Rust backend</Button>

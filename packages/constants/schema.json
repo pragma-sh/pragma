@@ -4,8 +4,13 @@
   "description": "Shared compile-time constants. Single source of truth for both the TypeScript frontend (src) and the Rust backend (src-tauri). Edit values.json; never edit generated code.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["app", "window", "links"],
+  "required": ["maxParallelAgents", "app", "window", "links"],
   "properties": {
+    "maxParallelAgents": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of agents Pragma runs in parallel. A single shared scalar constant used by both the TypeScript frontend and the Rust backend."
+    },
     "app": { "$ref": "#/definitions/AppInfo" },
     "window": { "$ref": "#/definitions/WindowDefaults" },
     "links": { "$ref": "#/definitions/Links" }

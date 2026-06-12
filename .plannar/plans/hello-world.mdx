@@ -1,0 +1,63 @@
+import { Button } from "@/components/ui/button";
+
+# Hello, Plannar!
+
+> A worked example of what a real plan looks like. Delete this file
+> when you write your first one — or keep it around as a reference.
+
+## Plan: add `--dry-run` to `plannar export`
+
+Today `plannar export` writes HTML to disk immediately. Reviewers
+who just want to see *what* would be written — and where — have to
+delete the output after the fact.
+
+A `--dry-run` flag prints the resolved plan list, output paths,
+and total size, then exits without touching the filesystem.
+
+## Behavior
+
+Toggle the flag to see the difference:
+
+<Playground>
+  <Button
+    bind="dryRun:false"
+    onClick={() => setDryRun(!dryRun)}
+    variant="outline"
+  >
+    {dryRun ? "--dry-run ON" : "--dry-run OFF"}
+  </Button>
+
+  <pre className="mt-3 rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+    {dryRun
+      ? `$ plannar export --dry-run
+[dry-run] would write 3 plans:
+  .plannar/exports/onboarding.html   (42 KB)
+  .plannar/exports/pagination.html   (38 KB)
+  .plannar/exports/rate-limit.html   (51 KB)
+[dry-run] total: 131 KB — no files written`
+      : `$ plannar export
+✓ wrote .plannar/exports/onboarding.html
+✓ wrote .plannar/exports/pagination.html
+✓ wrote .plannar/exports/rate-limit.html
+3 plans exported (131 KB)`}
+  </pre>
+</Playground>
+
+## Edge cases
+
+- **Empty plans directory** — exit 0 with `no plans found` (same as today).
+- **`--out` set to a non-existent dir** — dry-run still validates the path and warns; no `mkdir`.
+- **A plan fails to compile** — dry-run reports the error and exits non-zero, matching the non-dry path.
+
+## Acceptance
+
+- [ ] `plannar export --dry-run` exits 0 and writes nothing
+- [ ] Output lists each plan, target path, and byte size
+- [ ] Same exit codes as a real export on compile errors
+- [ ] Covered by a test in `packages/plannar/src/commands/export.test.ts`
+
+## Next steps for you
+
+- Edit this file in `.plannar/plans/hello-world.mdx` to draft your own plan
+- Run `plannar editor` to preview it live with HMR
+- Run `plannar export <name>` to package it as a single HTML file

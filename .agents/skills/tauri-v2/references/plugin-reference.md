@@ -18,7 +18,7 @@
 
 **Important:** Installing a plugin is not enough. Every plugin's permissions must be **explicitly granted** in a capability file under `src-tauri/capabilities/`. Without this, plugin calls will fail silently with permission errors.
 
-*Last verified: 2026-04-02. Check the official plugin changelogs when install flow or permission names change.*
+_Last verified: 2026-04-02. Check the official plugin changelogs when install flow or permission names change._
 
 ## General Installation Pattern
 
@@ -29,6 +29,7 @@ cargo tauri add <plugin-name>
 ```
 
 This command automatically:
+
 1. Adds the Rust crate to `src-tauri/Cargo.toml`.
 2. Adds the JS/TS package to `package.json` (if applicable).
 3. Registers the plugin in `src-tauri/src/lib.rs` (often requiring manual verification).
@@ -38,11 +39,13 @@ This command automatically:
 Access the local file system.
 
 **Install:**
+
 ```bash
 cargo tauri add fs
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_fs::init())
 ```
@@ -50,6 +53,7 @@ cargo tauri add fs
 **JS Package:** `@tauri-apps/plugin-fs`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["fs:default"]
@@ -57,6 +61,7 @@ cargo tauri add fs
 ```
 
 **Common permissions:**
+
 - `fs:allow-read-file`: Read file contents.
 - `fs:allow-write-file`: Write/create files.
 - `fs:allow-read-dir`: List directory contents.
@@ -71,11 +76,13 @@ Path access is restricted by scopes. Common variables: `$APPDATA`, `$HOME`, `$DO
 Native system dialogs for file picking and messages.
 
 **Install:**
+
 ```bash
 cargo tauri add dialog
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_dialog::init())
 ```
@@ -83,6 +90,7 @@ cargo tauri add dialog
 **JS Package:** `@tauri-apps/plugin-dialog`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["dialog:default"]
@@ -90,6 +98,7 @@ cargo tauri add dialog
 ```
 
 **Common permissions:**
+
 - `dialog:allow-open`: Open file/directory picker.
 - `dialog:allow-save`: Save file picker.
 - `dialog:allow-message`: Show message box.
@@ -100,11 +109,13 @@ cargo tauri add dialog
 Spawn child processes or open URLs.
 
 **Install:**
+
 ```bash
 cargo tauri add shell
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_shell::init())
 ```
@@ -112,6 +123,7 @@ cargo tauri add shell
 **JS Package:** `@tauri-apps/plugin-shell`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["shell:default"]
@@ -119,6 +131,7 @@ cargo tauri add shell
 ```
 
 **Common permissions:**
+
 - `shell:allow-open`: Open URLs in default browser.
 - `shell:allow-execute`: Execute arbitrary programs (requires heavy scoping).
 
@@ -131,11 +144,13 @@ cargo tauri add shell
 Perform HTTP requests from the Rust backend (bypassing CORS).
 
 **Install:**
+
 ```bash
 cargo tauri add http
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_http::init())
 ```
@@ -143,6 +158,7 @@ cargo tauri add http
 **JS Package:** `@tauri-apps/plugin-http`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["http:default"]
@@ -150,6 +166,7 @@ cargo tauri add http
 ```
 
 **Common permissions:**
+
 - `http:default`: Basic request/response capabilities.
 
 **Scoping:**
@@ -161,11 +178,13 @@ Access can be restricted to specific domains or URL patterns.
 Simple key-value persistence.
 
 **Install:**
+
 ```bash
 cargo tauri add store
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_store::Builder::default().build())
 ```
@@ -173,6 +192,7 @@ cargo tauri add store
 **JS Package:** `@tauri-apps/plugin-store`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["store:default"]
@@ -180,6 +200,7 @@ cargo tauri add store
 ```
 
 **Common permissions:**
+
 - `store:allow-get`: Retrieve values.
 - `store:allow-set`: Save values.
 - `store:allow-load`: Load store from disk.
@@ -189,11 +210,13 @@ cargo tauri add store
 Read and write to the system clipboard.
 
 **Install:**
+
 ```bash
 cargo tauri add clipboard-manager
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_clipboard_manager::init())
 ```
@@ -201,6 +224,7 @@ cargo tauri add clipboard-manager
 **JS Package:** `@tauri-apps/plugin-clipboard-manager`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["clipboard-manager:default"]
@@ -208,6 +232,7 @@ cargo tauri add clipboard-manager
 ```
 
 **Common permissions:**
+
 - `clipboard-manager:allow-read`: Read clipboard content.
 - `clipboard-manager:allow-write`: Write to clipboard.
 
@@ -216,11 +241,13 @@ cargo tauri add clipboard-manager
 Send native desktop notifications.
 
 **Install:**
+
 ```bash
 cargo tauri add notification
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_notification::init())
 ```
@@ -228,6 +255,7 @@ cargo tauri add notification
 **JS Package:** `@tauri-apps/plugin-notification`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["notification:default"]
@@ -235,6 +263,7 @@ cargo tauri add notification
 ```
 
 **Common permissions:**
+
 - `notification:allow-send`: Trigger notifications.
 - `notification:allow-request-permission`: Check/ask for user permission.
 
@@ -243,11 +272,13 @@ cargo tauri add notification
 Register system-wide keyboard shortcuts.
 
 **Install:**
+
 ```bash
 cargo tauri add global-shortcut
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_global_shortcut::Builder::new().build())
 ```
@@ -255,6 +286,7 @@ cargo tauri add global-shortcut
 **JS Package:** `@tauri-apps/plugin-global-shortcut`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["global-shortcut:default"]
@@ -262,6 +294,7 @@ cargo tauri add global-shortcut
 ```
 
 **Common permissions:**
+
 - `global-shortcut:allow-register`: Register a new shortcut.
 - `global-shortcut:allow-is-registered`: Check if a shortcut is active.
 
@@ -272,11 +305,13 @@ cargo tauri add global-shortcut
 Automated application updates.
 
 **Install:**
+
 ```bash
 cargo tauri add updater
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_updater::Builder::new().build())
 ```
@@ -284,6 +319,7 @@ cargo tauri add updater
 **JS Package:** `@tauri-apps/plugin-updater`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["updater:default"]
@@ -291,6 +327,7 @@ cargo tauri add updater
 ```
 
 **Common permissions:**
+
 - `updater:allow-check`: Check for updates.
 - `updater:allow-download-and-install`: Execute update.
 
@@ -302,11 +339,13 @@ cargo tauri add updater
 Register and handle custom URL schemes (e.g., `myapp://`).
 
 **Install:**
+
 ```bash
 cargo tauri add deep-link
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_deep_link::init())
 ```
@@ -314,6 +353,7 @@ cargo tauri add deep-link
 **JS Package:** `@tauri-apps/plugin-deep-link`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["deep-link:default"]
@@ -321,6 +361,7 @@ cargo tauri add deep-link
 ```
 
 **Common permissions:**
+
 - `deep-link:allow-get-current-url`: Retrieve the URL that launched the app.
 
 ## 11. Opener (`tauri-plugin-opener`)
@@ -328,11 +369,13 @@ cargo tauri add deep-link
 Open files or URLs using the system's default applications. Replaces `shell:open` for many v2 use cases.
 
 **Install:**
+
 ```bash
 cargo tauri add opener
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_opener::init())
 ```
@@ -340,6 +383,7 @@ cargo tauri add opener
 **JS Package:** `@tauri-apps/plugin-opener`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["opener:default"]
@@ -347,6 +391,7 @@ cargo tauri add opener
 ```
 
 **Common permissions:**
+
 - `opener:allow-open-url`: Open a website URL.
 - `opener:allow-open-path`: Open a local file path with its associated app.
 
@@ -355,11 +400,13 @@ cargo tauri add opener
 Control the application process (restart, exit).
 
 **Install:**
+
 ```bash
 cargo tauri add process
 ```
 
 **Rust registration** (in `src-tauri/src/lib.rs`):
+
 ```rust
 .plugin(tauri_plugin_process::init())
 ```
@@ -367,6 +414,7 @@ cargo tauri add process
 **JS Package:** `@tauri-apps/plugin-process`
 
 **Capability permissions** (add to `src-tauri/capabilities/*.json`):
+
 ```json
 {
   "permissions": ["process:default"]
@@ -374,6 +422,7 @@ cargo tauri add process
 ```
 
 **Common permissions:**
+
 - `process:allow-restart`: Restart the app.
 - `process:allow-exit`: Exit the app programmatically.
 

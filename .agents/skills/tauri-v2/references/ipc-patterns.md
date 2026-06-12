@@ -15,25 +15,30 @@
 ## Overview
 
 Tauri v2+ provides three IPC primitives:
+
 1. **Commands**: Request-response (most common)
 2. **Events**: Fire-and-forget notifications
 3. **Channels**: High-frequency streaming
 
 **See also:** [Capabilities Reference](capabilities-reference.md) for permission setup | [Plugin Reference](plugin-reference.md) for plugin-specific IPC
 
-*Last verified: 2026-04-02. Check the official Tauri changelog when IPC API timing matters.*
+_Last verified: 2026-04-02. Check the official Tauri changelog when IPC API timing matters._
 
 ## IPC Decision Framework
 
 ### Commands: Request-Response
+
 Use `invoke()` when:
+
 - Frontend needs data from Rust (fetch, compute, query)
 - Frontend triggers an action and needs a result
 - Error handling is needed (returns `Result<T, E>`)
 - **Direction: Frontend → Rust → Frontend** (request/response)
 
 ### Events: Fire-and-Forget Notifications
+
 Use `emit()`/`listen()` when:
+
 - Rust needs to notify frontend of a background event
 - Multiple windows need to receive the same notification
 - Broadcasting state changes that don't require acknowledgment
@@ -41,7 +46,9 @@ Use `emit()`/`listen()` when:
 - **Important:** Events are fire-and-forget — there is NO acknowledgment or response channel
 
 ### Channels: Typed Streaming
+
 Use `Channel<T>` when:
+
 - High-frequency progress updates from a long-running operation
 - Streaming data from Rust to frontend
 - Strongly typed discriminated message streams
@@ -53,6 +60,7 @@ Use `Channel<T>` when:
 ### Basic Command
 
 **Rust:**
+
 ```rust
 #[tauri::command]
 fn greet(name: String) -> String {
@@ -65,15 +73,17 @@ tauri::Builder::default()
 ```
 
 **Frontend:**
-```typescript
-import { invoke } from '@tauri-apps/api/core';
 
-const result = await invoke<string>('greet', { name: 'World' });
+```typescript
+import { invoke } from "@tauri-apps/api/core";
+
+const result = await invoke<string>("greet", { name: "World" });
 ```
 
 ### Command with Multiple Arguments
 
 **Rust:**
+
 ```rust
 #[tauri::command]
 fn calculate(a: i32, b: i32, operation: String) -> i32 {
@@ -88,17 +98,19 @@ fn calculate(a: i32, b: i32, operation: String) -> i32 {
 ```
 
 **Frontend:**
+
 ```typescript
-const result = await invoke<number>('calculate', {
-    a: 10,
-    b: 5,
-    operation: 'add'
+const result = await invoke<number>("calculate", {
+  a: 10,
+  b: 5,
+  operation: "add",
 });
 ```
 
 ### Async Command
 
 **Rust:**
+
 ```rust
 #[tauri::command]
 async fn fetch_data(url: String) -> Result<String, String> {
@@ -114,17 +126,19 @@ async fn fetch_data(url: String) -> Result<String, String> {
 ```
 
 **Frontend:**
+
 ```typescript
 try {
-    const data = await invoke<string>('fetch_data', { url: 'https://api.example.com' });
+  const data = await invoke<string>("fetch_data", { url: "https://api.example.com" });
 } catch (error) {
-    console.error('Failed:', error);
+  console.error("Failed:", error);
 }
 ```
 
 ### Command with Result Error Handling
 
 **Rust:**
+
 ```rust
 use thiserror::Error;
 
@@ -155,18 +169,20 @@ fn read_config(path: String) -> Result<Config, AppError> {
 ```
 
 **Frontend:**
+
 ```typescript
 try {
-    const config = await invoke<Config>('read_config', { path: '/config.json' });
+  const config = await invoke<Config>("read_config", { path: "/config.json" });
 } catch (error) {
-    // error is the serialized error string
-    console.error('Config error:', error);
+  // error is the serialized error string
+  console.error("Config error:", error);
 }
 ```
 
 ### Command with State
 
 **Rust:**
+
 ```rust
 use std::sync::Mutex;
 use tauri::State;
@@ -202,6 +218,7 @@ tauri::Builder::default()
 ### Command with Window Access
 
 **Rust:**
+
 ```rust
 use tauri::{WebviewWindow, AppHandle};
 
@@ -227,6 +244,7 @@ fn create_window(app: AppHandle) -> Result<(), String> {
 ### Command with Raw Binary Data
 
 **Rust:**
+
 ```rust
 use tauri::ipc::Response;
 
@@ -246,13 +264,14 @@ fn upload_file(request: tauri::ipc::Request) -> Result<(), String> {
 ```
 
 **Frontend:**
+
 ```typescript
 // Reading binary
-const data = await invoke<ArrayBuffer>('read_binary_file', { path: '/file.bin' });
+const data = await invoke<ArrayBuffer>("read_binary_file", { path: "/file.bin" });
 
 // Uploading binary
 const fileData = new Uint8Array([1, 2, 3, 4]);
-await invoke('upload_file', fileData);
+await invoke("upload_file", fileData);
 ```
 
 ---
@@ -264,6 +283,7 @@ await invoke('upload_file', fileData);
 ### Emit from Rust to Frontend
 
 **Rust:**
+
 ```rust
 use tauri::Emitter;
 
@@ -286,17 +306,18 @@ fn notify_window(app: tauri::AppHandle, window_label: String, message: String) {
 ```
 
 **Frontend:**
+
 ```typescript
-import { listen, once } from '@tauri-apps/api/event';
+import { listen, once } from "@tauri-apps/api/event";
 
 // Listen continuously
-const unlisten = await listen<number>('progress', (event) => {
-    console.log(`Progress: ${event.payload}%`);
+const unlisten = await listen<number>("progress", (event) => {
+  console.log(`Progress: ${event.payload}%`);
 });
 
 // Listen once
-await once<string>('complete', (event) => {
-    console.log(event.payload);
+await once<string>("complete", (event) => {
+  console.log(event.payload);
 });
 
 // Clean up when done
@@ -306,13 +327,15 @@ unlisten();
 ### Emit from Frontend to Rust
 
 **Frontend:**
-```typescript
-import { emit } from '@tauri-apps/api/event';
 
-await emit('user-action', { action: 'click', target: 'button' });
+```typescript
+import { emit } from "@tauri-apps/api/event";
+
+await emit("user-action", { action: "click", target: "button" });
 ```
 
 **Rust (in setup or command):**
+
 ```rust
 use tauri::Listener;
 
@@ -326,6 +349,7 @@ fn setup_listeners(app: &tauri::App) {
 ### Window-Specific Events
 
 **Rust:**
+
 ```rust
 use tauri::{Emitter, WebviewWindow};
 
@@ -340,11 +364,13 @@ fn emit_to_window(window: WebviewWindow, message: String) {
 ## Typed Streaming Channels
 
 `Channel<TSend>` is a typed streaming primitive. The type parameter `TSend` defines what messages can be sent. Both Rust and TypeScript must agree on the shape:
+
 - Rust: `Channel<MyEvent>` where `MyEvent: serde::Serialize + Clone`
 - Frontend: `new Channel<MyEvent>()` with matching TypeScript type
 - Use `#[serde(tag = "event", content = "data")]` on enums for discriminated union patterns.
 
 **Rust:**
+
 ```rust
 use tauri::ipc::Channel;
 
@@ -376,30 +402,32 @@ async fn process_files(
 ```
 
 **Frontend:**
+
 ```typescript
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { invoke, Channel } from "@tauri-apps/api/core";
 
 interface ProgressUpdate {
-    current: number;
-    total: number;
-    message: string;
+  current: number;
+  total: number;
+  message: string;
 }
 
 const channel = new Channel<ProgressUpdate>();
 channel.onmessage = (update) => {
-    const percent = (update.current / update.total) * 100;
-    console.log(`${percent}% - ${update.message}`);
+  const percent = (update.current / update.total) * 100;
+  console.log(`${percent}% - ${update.message}`);
 };
 
-await invoke('process_files', {
-    files: ['file1.txt', 'file2.txt'],
-    onProgress: channel
+await invoke("process_files", {
+  files: ["file1.txt", "file2.txt"],
+  onProgress: channel,
 });
 ```
 
 ### Tagged Union Events (Discriminated)
 
 **Rust:**
+
 ```rust
 use tauri::ipc::Channel;
 
@@ -440,37 +468,38 @@ async fn download_file(
 ```
 
 **Frontend:**
+
 ```typescript
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { invoke, Channel } from "@tauri-apps/api/core";
 
 type DownloadEvent =
-    | { event: 'Started'; data: { url: string; size: number } }
-    | { event: 'Progress'; data: { downloaded: number; total: number } }
-    | { event: 'Complete'; data: { path: string } }
-    | { event: 'Error'; data: { message: string } };
+  | { event: "Started"; data: { url: string; size: number } }
+  | { event: "Progress"; data: { downloaded: number; total: number } }
+  | { event: "Complete"; data: { path: string } }
+  | { event: "Error"; data: { message: string } };
 
 const channel = new Channel<DownloadEvent>();
 channel.onmessage = (msg) => {
-    switch (msg.event) {
-        case 'Started':
-            console.log(`Starting download: ${msg.data.url} (${msg.data.size} bytes)`);
-            break;
-        case 'Progress':
-            const percent = (msg.data.downloaded / msg.data.total) * 100;
-            console.log(`Download: ${percent.toFixed(1)}%`);
-            break;
-        case 'Complete':
-            console.log(`Downloaded to: ${msg.data.path}`);
-            break;
-        case 'Error':
-            console.error(`Download failed: ${msg.data.message}`);
-            break;
-    }
+  switch (msg.event) {
+    case "Started":
+      console.log(`Starting download: ${msg.data.url} (${msg.data.size} bytes)`);
+      break;
+    case "Progress":
+      const percent = (msg.data.downloaded / msg.data.total) * 100;
+      console.log(`Download: ${percent.toFixed(1)}%`);
+      break;
+    case "Complete":
+      console.log(`Downloaded to: ${msg.data.path}`);
+      break;
+    case "Error":
+      console.error(`Download failed: ${msg.data.message}`);
+      break;
+  }
 };
 
-const path = await invoke<string>('download_file', {
-    url: 'https://example.com/file.zip',
-    onEvent: channel
+const path = await invoke<string>("download_file", {
+  url: "https://example.com/file.zip",
+  onEvent: channel,
 });
 ```
 
@@ -478,27 +507,30 @@ const path = await invoke<string>('download_file', {
 
 ## IPC Selection Guide
 
-| Pattern | Use Case | Direction | Frequency |
-|---------|----------|-----------|-----------|
-| **Commands** | Request-response, data fetching | Frontend → Rust | One-time |
-| **Events** | Notifications, state changes | Bidirectional | Low-medium |
-| **Channels** | Progress updates, streaming data | Rust → Frontend | High |
+| Pattern      | Use Case                         | Direction       | Frequency  |
+| ------------ | -------------------------------- | --------------- | ---------- |
+| **Commands** | Request-response, data fetching  | Frontend → Rust | One-time   |
+| **Events**   | Notifications, state changes     | Bidirectional   | Low-medium |
+| **Channels** | Progress updates, streaming data | Rust → Frontend | High       |
 
 ### When to Use Each
 
 **Commands (invoke)**
+
 - Fetching data from Rust
 - Performing actions that return results
 - CRUD operations
 - Most common pattern
 
 **Events (emit/listen)**
+
 - Notifying UI of background changes
 - Broadcasting to multiple windows
 - Fire-and-forget notifications
 - System events (window close, minimize)
 
 **Channels**
+
 - File download/upload progress
 - Long-running operations with updates
 - Streaming log output

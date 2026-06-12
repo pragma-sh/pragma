@@ -38,4 +38,12 @@ mod tests {
         assert!(CONSTANTS.window.default_width >= CONSTANTS.window.min_width);
         assert!(CONSTANTS.window.default_height >= CONSTANTS.window.min_height);
     }
+
+    #[test]
+    fn max_parallel_agents_is_positive() {
+        // Same value the frontend reads as `constants.maxParallelAgents`.
+        // `minimum: 1` in the schema makes typify generate a `NonZeroU64`, so the
+        // Rust side is statically guaranteed non-zero; `.get()` reads the value.
+        assert!(CONSTANTS.max_parallel_agents.get() >= 1);
+    }
 }

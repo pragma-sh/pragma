@@ -1,4 +1,5 @@
 {
+  "maxParallelAgents": 8,
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",
