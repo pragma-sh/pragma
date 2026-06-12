@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 ## Plan: add `--dry-run` to `plannar export`
 
 Today `plannar export` writes HTML to disk immediately. Reviewers
-who just want to see *what* would be written — and where — have to
+who just want to see _what_ would be written — and where — have to
 delete the output after the fact.
 
 A `--dry-run` flag prints the resolved plan list, output paths,
@@ -27,20 +27,21 @@ Toggle the flag to see the difference:
     {dryRun ? "--dry-run ON" : "--dry-run OFF"}
   </Button>
 
-  <pre className="mt-3 rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
-    {dryRun
-      ? `$ plannar export --dry-run
+<pre className="mt-3 rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+  {dryRun
+    ? `$ plannar export --dry-run
 [dry-run] would write 3 plans:
   .plannar/exports/onboarding.html   (42 KB)
   .plannar/exports/pagination.html   (38 KB)
   .plannar/exports/rate-limit.html   (51 KB)
 [dry-run] total: 131 KB — no files written`
-      : `$ plannar export
+    : `$ plannar export
 ✓ wrote .plannar/exports/onboarding.html
 ✓ wrote .plannar/exports/pagination.html
 ✓ wrote .plannar/exports/rate-limit.html
 3 plans exported (131 KB)`}
-  </pre>
+</pre>
+
 </Playground>
 
 ## Edge cases
