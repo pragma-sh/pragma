@@ -16,7 +16,7 @@ mod generated {
 pub use generated::{
     AppInfo, Constants, EditorLauncher, EditorLaunchers, KeybindingChord,
     KeybindingChordModifiersItem, Keybindings, KeybindingsConfig, Links, PlatformChord, Project,
-    ProjectIcon, Tab, TabKind, WindowDefaults, Worktree,
+    ProjectIcon, Tab, TabKind, WindowDefaults, Worktree, WorktreeStatus,
 };
 
 /// The parsed, shared constants.

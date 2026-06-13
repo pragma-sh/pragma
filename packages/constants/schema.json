@@ -102,7 +102,17 @@
       "title": "Worktree",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "projectId", "parentId", "branch", "title", "path", "isMain", "createdAt"],
+      "required": [
+        "id",
+        "projectId",
+        "parentId",
+        "branch",
+        "title",
+        "path",
+        "isMain",
+        "hidden",
+        "createdAt"
+      ],
       "properties": {
         "id": { "type": "string" },
         "projectId": { "type": "string" },
@@ -111,6 +121,10 @@
         "title": { "type": ["string", "null"] },
         "path": { "type": "string" },
         "isMain": { "type": "boolean" },
+        "hidden": {
+          "type": "boolean",
+          "description": "True when the user has hidden this worktree from the sidebar. Persists across restarts."
+        },
         "createdAt": { "type": "string" }
       }
     },
@@ -156,6 +170,19 @@
       "properties": {
         "mime": { "type": "string" },
         "dataBase64": { "type": "string" }
+      }
+    },
+    "WorktreeStatus": {
+      "title": "WorktreeStatus",
+      "description": "Status of a worktree's working copy, used to warn the user before destructive operations.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dirty"],
+      "properties": {
+        "dirty": {
+          "type": "boolean",
+          "description": "True when the worktree has uncommitted changes, staged changes, or untracked files that `git status` would surface."
+        }
       }
     },
     "KeybindingChord": {

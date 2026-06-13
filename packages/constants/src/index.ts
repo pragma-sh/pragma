@@ -10,6 +10,7 @@ export type {
   EditorLauncher,
   Project,
   Worktree,
+  WorktreeStatus,
   Tab,
   TabKind,
   ProjectIcon,
