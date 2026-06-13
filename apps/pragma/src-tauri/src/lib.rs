@@ -5,6 +5,7 @@ mod browser;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
 mod dev_bridge;
+mod editors;
 mod error;
 mod git;
 mod icons;
@@ -194,6 +195,7 @@ pub fn run() {
             projects::get_projects_directory,
             worktrees::list_worktrees,
             worktrees::create_worktree,
+            editors::open_worktree,
             project_icon,
             list_tabs,
             create_tab,

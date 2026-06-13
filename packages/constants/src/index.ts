@@ -6,6 +6,8 @@ export type {
   AppInfo,
   WindowDefaults,
   Links,
+  EditorLaunchers,
+  EditorLauncher,
   Project,
   Worktree,
   Tab,
