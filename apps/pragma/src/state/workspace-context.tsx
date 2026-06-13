@@ -11,6 +11,7 @@ import {
 
 import type { Project, ProjectIcon, Tab, Worktree } from "@pragma/constants";
 
+import { terminalManager } from "@/lib/terminal-manager";
 import {
   closeTab as closeTabCommand,
   createTab as createTabCommand,
@@ -233,6 +234,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const closeTerminalTab = useCallback(async (tabId: string) => {
+    terminalManager.dispose(tabId);
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });

@@ -10,6 +10,10 @@ export type {
   Worktree,
   Tab,
   ProjectIcon,
+  KeybindingChord,
+  PlatformChord,
+  Keybindings,
+  KeybindingsConfig,
 } from "./generated/constants";
 
 /**

@@ -1,7 +1,6 @@
 import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -32,10 +31,7 @@ export function TerminalTabs() {
               <button
                 aria-label="Close tab"
                 className="rounded p-0.5 opacity-60 hover:bg-white/10 hover:opacity-100"
-                onClick={() => {
-                  terminalManager.dispose(tab.id);
-                  void workspace.closeTerminalTab(tab.id);
-                }}
+                onClick={() => void workspace.closeTerminalTab(tab.id)}
               >
                 <X className="size-3" />
               </button>

@@ -15,6 +15,12 @@ export function WorkspaceShell() {
     onProject: (index) => void workspace.selectProject(workspace.projects[index]?.id ?? null),
     onNextTab: () => workspace.cycleTab(1),
     onPreviousTab: () => workspace.cycleTab(-1),
+    onCloseTopTab: () => {
+      if (workspace.activeTabId) {
+        void workspace.closeTerminalTab(workspace.activeTabId);
+      }
+    },
+    onNewTerminalTab: () => void workspace.createTerminalTab(),
   });
 
   return (

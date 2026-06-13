@@ -101,6 +101,74 @@
         "mime": { "type": "string" },
         "dataBase64": { "type": "string" }
       }
+    },
+    "KeybindingChord": {
+      "title": "KeybindingChord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modifiers", "key"],
+      "properties": {
+        "modifiers": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["cmd", "ctrl", "alt", "shift"] }
+        },
+        "key": { "type": "string" }
+      }
+    },
+    "PlatformChord": {
+      "title": "PlatformChord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mac", "linux"],
+      "properties": {
+        "mac": { "$ref": "#/definitions/KeybindingChord" },
+        "linux": { "$ref": "#/definitions/KeybindingChord" }
+      }
+    },
+    "Keybindings": {
+      "title": "Keybindings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nextTab",
+        "previousTab",
+        "closeTopTab",
+        "newTerminalTab",
+        "switchToWorkspace1",
+        "switchToWorkspace2",
+        "switchToWorkspace3",
+        "switchToWorkspace4",
+        "switchToWorkspace5",
+        "switchToWorkspace6",
+        "switchToWorkspace7",
+        "switchToWorkspace8",
+        "switchToWorkspace9"
+      ],
+      "properties": {
+        "nextTab": { "$ref": "#/definitions/PlatformChord" },
+        "previousTab": { "$ref": "#/definitions/PlatformChord" },
+        "closeTopTab": { "$ref": "#/definitions/PlatformChord" },
+        "newTerminalTab": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace1": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace2": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace3": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace4": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace5": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace6": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace7": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace8": { "$ref": "#/definitions/PlatformChord" },
+        "switchToWorkspace9": { "$ref": "#/definitions/PlatformChord" }
+      }
+    },
+    "KeybindingsConfig": {
+      "title": "KeybindingsConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "bindings"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "bindings": { "$ref": "#/definitions/Keybindings" }
+      }
     }
   }
 }

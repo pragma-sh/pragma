@@ -1,4 +1,11 @@
-import type { AppInfo, Project, ProjectIcon, Tab, Worktree } from "@pragma/constants";
+import type {
+  AppInfo,
+  KeybindingsConfig,
+  Project,
+  ProjectIcon,
+  Tab,
+  Worktree,
+} from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -129,4 +136,19 @@ export function closeTab(tabId: string): Promise<void> {
 export async function pickDirectory(defaultPath?: string): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false, defaultPath });
   return typeof selected === "string" ? selected : null;
+}
+
+/** Returns the runtime platform name used to pick keybinding chords ("mac" or "linux"). */
+export function getPlatform(): Promise<"mac" | "linux"> {
+  return invoke<"mac" | "linux">("platform_name");
+}
+
+/** Loads the user keybindings config, writing the default file first if it is missing. */
+export function loadKeybindings(): Promise<KeybindingsConfig> {
+  return invoke<KeybindingsConfig>("load_keybindings");
+}
+
+/** Saves a keybindings config back to `~/.pragma/keybindings.json`. */
+export function saveKeybindings(config: KeybindingsConfig): Promise<void> {
+  return invoke("save_keybindings", { config });
 }

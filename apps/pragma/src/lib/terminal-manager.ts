@@ -5,6 +5,7 @@ import type { Channel } from "@tauri-apps/api/core";
 
 import type { Tab } from "@pragma/constants";
 
+import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEvent } from "@/lib/tauri";
 
 const RESIZE_DEBOUNCE_MS = 75;
@@ -86,6 +87,15 @@ export class TerminalManager {
     terminal.loadAddon(new WebLinksAddon());
     terminal.attachCustomKeyEventHandler((event) => {
       if ((event.ctrlKey || event.altKey) && (event.key === "Tab" || /^[1-9]$/.test(event.key))) {
+        return false;
+      }
+      // Let platform-specific close/new-tab shortcuts bubble to the window listener
+      // instead of being consumed by the terminal.
+      const isMac = isMacPlatform();
+      if (isMac && event.metaKey && (event.key === "w" || event.key === "t")) {
+        return false;
+      }
+      if (!isMac && event.ctrlKey && (event.key === "w" || event.key === "t")) {
         return false;
       }
       return true;

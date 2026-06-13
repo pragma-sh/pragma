@@ -7,11 +7,12 @@ mod dev_bridge;
 mod error;
 mod git;
 mod icons;
+mod keybindings;
 mod projects;
 mod pty;
 mod worktrees;
 
-use pragma_constants::{AppInfo, ProjectIcon, Tab, CONSTANTS};
+use pragma_constants::{AppInfo, KeybindingsConfig, ProjectIcon, Tab, CONSTANTS};
 use tauri::ipc::Channel;
 use tauri::Manager;
 
@@ -24,6 +25,30 @@ use crate::pty::{PtyClient, PtyEvent};
 #[tauri::command]
 fn app_info() -> AppInfo {
     CONSTANTS.app.clone()
+}
+
+/// Returns the runtime platform name used to select keybinding chords.
+///
+/// Pragma targets macOS and Linux only; this collapses to "mac" or "linux".
+#[tauri::command]
+fn platform_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    }
+}
+
+/// Loads the user keybindings config, writing the default file if it is missing.
+#[tauri::command]
+fn load_keybindings(app_handle: tauri::AppHandle) -> AppResult<KeybindingsConfig> {
+    keybindings::load_or_ensure(app_handle.path().home_dir()?)
+}
+
+/// Saves a keybindings config back to `~/.pragma/keybindings.json`.
+#[tauri::command]
+fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> AppResult<()> {
+    keybindings::save(app_handle.path().home_dir()?, &config)
 }
 
 #[tauri::command]
@@ -125,6 +150,9 @@ pub fn run() {
             app.manage(Db::open(app_data_dir.join("pragma.db"))?);
             app.manage(PtyClient::new(app_data_dir));
             app.manage(GitLocks::default());
+            if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
+                log::warn!("failed to load keybindings config: {error}");
+            }
             if cfg!(debug_assertions) {
                 if let Err(error) = dev_bridge::start_bridge(app.handle()).map(|_| ()) {
                     log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
@@ -138,6 +166,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            platform_name,
+            load_keybindings,
+            save_keybindings,
             pty_spawn,
             pty_attach,
             pty_write,
