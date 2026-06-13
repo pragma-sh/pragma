@@ -1,0 +1,590 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+
+# Terminal workspace
+
+Turn the Pragma scaffold into a terminal workspace for juggling shells across multiple
+projects and **nested git worktrees**. Three panes: a worktree sidebar with a project
+switcher, a top tab strip, and an xterm.js terminal. Business logic (PTY, git, SQLite,
+favicons) lives in Rust; the frontend is React + shadcn/ui + `motion/react`.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and what it costs</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **New npm deps:** `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`, `motion`, `@tauri-apps/plugin-dialog`
+- **New crates:** `portable-pty`, `rusqlite` (bundled), `uuid`, `thiserror`, `base64`, `tauri-plugin-dialog`; plus a new **`pragma-daemon`** binary crate that owns the PTYs
+- **New shadcn:** `sidebar`, `tabs`, `dialog`, `tooltip`, `collapsible`, `input`, `label`, `scroll-area`, `separator`, `radio-group`
+- **14 Tauri commands** (5 PTY — spawn/attach/write/resize/kill, now proxied to the daemon, 4 project, 2 worktree, 1 icon, 1 settings, 1 existing)
+- **Background PTY daemon** — a detached `pragma-daemon` process owns every shell over a Unix socket. **Shells keep running when the app window closes** and reattach with replayed scrollback on relaunch (tmux-style sessions)
+- **SQLite** at `app_data_dir/pragma.db` tracks projects, worktree nesting (git can't), the default projects directory, and **open tabs** (so they reattach to live daemon sessions)
+- **Worktree checkouts** live at `<project>/.pragma/worktrees/<id>`, excluded via `.git/info/exclude`
+
+</CardContent>
+</Card>
+
+## The workspace, interactively
+
+Click around: tabs switch, worktrees select (watch the terminal cwd), the chevron
+collapses the nested worktree, project icons switch projects. Hover the sidebar rows
+to see the collapse / new-worktree affordances.
+
+<Playground>
+  <div bind="tab:0" className="hidden" />
+  <div bind="sel:'main'" className="hidden" />
+  <div bind="proj:0" className="hidden" />
+  <div bind="open:true" className="hidden" />
+
+  <div className="flex h-105 overflow-hidden rounded-lg border bg-background text-sm shadow-sm">
+    {/* ── Sidebar ─────────────────────────────── */}
+    <div className="flex w-56 shrink-0 flex-col border-r bg-muted/30">
+      {/* project name → main branch */}
+      <button
+        onClick={() => setSel("main")}
+        className={`mx-2 mt-2 rounded-md px-2 py-1.5 text-left font-semibold ${sel === "main" ? "bg-accent" : "hover:bg-accent/50"}`}
+      >
+        {["pragma", "plannar", "dotfiles"][proj]}
+        <span className="ml-2 text-xs font-normal text-muted-foreground">main</span>
+      </button>
+
+      {/* worktree tree */}
+      <div className="mt-1 flex-1 space-y-0.5 px-2">
+        <div className="group flex items-center">
+          <button
+            onClick={() => setSel("wt-auth")}
+            className={`flex flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left ${sel === "wt-auth" ? "bg-accent" : "hover:bg-accent/50"}`}
+          >
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(!open);
+              }}
+              className="w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              {open ? "▾" : "▸"}
+            </span>
+            feature-auth
+          </button>
+          <button
+            title="New nested worktree"
+            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
+          >
+            +
+          </button>
+        </div>
+
+        {open && (
+          <div className="group ml-5 flex items-center border-l pl-2">
+            <button
+              onClick={() => setSel("wt-auth-ui")}
+              className={`flex-1 rounded-md px-2 py-1.5 text-left ${sel === "wt-auth-ui" ? "bg-accent" : "hover:bg-accent/50"}`}
+            >
+              auth-ui
+            </button>
+            <button
+              title="New nested worktree"
+              className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
+            >
+              +
+            </button>
+          </div>
+        )}
+
+        <div className="group flex items-center">
+          <button
+            onClick={() => setSel("wt-fix-ci")}
+            className={`flex flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left ${sel === "wt-fix-ci" ? "bg-accent" : "hover:bg-accent/50"}`}
+          >
+            <span className="w-4" />
+            fix-ci
+          </button>
+          <button
+            title="New nested worktree"
+            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* project switcher */}
+      <div className="flex items-center gap-2 border-t p-2">
+        {[0, 1, 2].map((i) => (
+          <button
+            key={i}
+            title={["pragma", "plannar", "dotfiles"][i]}
+            onClick={() => {
+              setProj(i);
+              setSel("main");
+            }}
+            className={`flex size-7 items-center justify-center rounded-md text-xs font-medium transition-all ${
+              proj === i
+                ? "scale-110 bg-primary text-primary-foreground ring-2 ring-primary/40"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            {i === 0 ? "◆" : i + 1}
+          </button>
+        ))}
+        <button
+          title="New project"
+          className="ml-auto flex size-7 items-center justify-center rounded-md border border-dashed text-muted-foreground hover:bg-accent"
+        >
+          +
+        </button>
+      </div>
+    </div>
+
+    {/* ── Tabs + terminal ─────────────────────── */}
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b px-2 pt-1.5 pb-0">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            onClick={() => setTab(i)}
+            className={`group flex cursor-pointer items-center gap-2 rounded-t-md border border-b-0 px-3 py-1.5 ${
+              tab === i ? "bg-background font-medium" : "bg-muted/40 text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Terminal {i + 1}
+            <span className="rounded px-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100">
+              ×
+            </span>
+          </div>
+        ))}
+        <button className="ml-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent" title="New tab">
+          +
+        </button>
+        <span className="ml-auto pb-1 text-[10px] text-muted-foreground">⌃Tab cycles</span>
+      </div>
+
+      <div className="flex-1 overflow-hidden bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-200">
+        <div className="text-zinc-500">
+          # tab {tab + 1} · login shell ($SHELL -l) · cwd ={" "}
+          {sel === "main"
+            ? `~/dev/${["pragma", "plannar", "dotfiles"][proj]}`
+            : `~/dev/${["pragma", "plannar", "dotfiles"][proj]}/.pragma/worktrees/${sel}`}
+        </div>
+        <div className="mt-2">
+          <span className="text-emerald-400">ekrich</span>
+          <span className="text-zinc-500"> @ </span>
+          <span className="text-sky-400">
+            {sel === "main" ? ["pragma", "plannar", "dotfiles"][proj] : sel}
+          </span>
+          <span className="text-zinc-500"> ❯ </span>
+          <span>git status</span>
+        </div>
+        <div className="text-zinc-400">
+          On branch {sel === "main" ? "main" : sel.replace("wt-", "")} — nothing to commit
+        </div>
+        <div className="mt-1">
+          <span className="text-emerald-400">ekrich</span>
+          <span className="text-zinc-500"> @ </span>
+          <span className="text-sky-400">
+            {sel === "main" ? ["pragma", "plannar", "dotfiles"][proj] : sel}
+          </span>
+          <span className="text-zinc-500"> ❯ </span>
+          <span className="animate-pulse">▍</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</Playground>
+
+## Design
+
+<Tabs defaultValue="ux" className="my-4">
+  <TabsList>
+    <TabsTrigger value="ux">Layout & UX</TabsTrigger>
+    <TabsTrigger value="frontend">Frontend</TabsTrigger>
+    <TabsTrigger value="rust">Rust backend</TabsTrigger>
+    <TabsTrigger value="data">Data & shared types</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="ux" className="space-y-3">
+
+### Sidebar
+
+- **Top row:** the project name. It _is_ the main checkout — modeled as a `worktrees` row with `isMain = 1` — so clicking it selects the main branch and the tree stays uniform.
+- **Tree:** worktrees nest via `parentId` (SQLite, not git). Children render indented inside their parent. Hover reveals two affordances per row: a collapse chevron (shadcn `Collapsible`, only when the row has children) and a **+** that opens the create-worktree dialog pre-based on that row.
+- **Footer — project switcher:** one icon per project, ordered by `orderIndex`. Icon = project favicon (served from Rust as base64); fallback = the project's 1-based order number. shadcn `Tooltip` shows the name on hover; click switches. A trailing dashed **+** opens the create-project dialog.
+- **Swipe:** a `wheel` listener on the sidebar accumulates horizontal `deltaX` with a threshold + ~300ms cooldown → previous/next project. Works for trackpads on both macOS and Linux.
+- **Animation:** `motion/react` — `AnimatePresence` slides the worktree tree out/in on project switch (quick, ~150ms, direction matches swipe), and a `layoutId` indicator glides between switcher icons.
+
+### Top tabs
+
+shadcn `Tabs` as the strip chrome, state owned by the workspace reducer. Placeholder titles ("Terminal 1", "Terminal 2", …), an **×** per tab, a trailing **+** that opens a new tab whose cwd is the **selected worktree's path**. Tab content hosts one terminal each; inactive terminals are hidden with CSS, never unmounted, so sessions and scrollback survive switching.
+
+### Keyboard shortcuts
+
+| Chord                                     | Action                         |
+| ----------------------------------------- | ------------------------------ |
+| `Ctrl` (macOS) / `Alt` (Linux) + `1`–`9`  | Jump to project by order index |
+| modifier + `Tab` / modifier + `Shift+Tab` | Cycle tabs forward / back      |
+
+One window-level `keydown` hook (`use-shortcuts.ts`); `navigator.platform` picks the modifier. **Gotcha:** xterm swallows keystrokes when focused, so every terminal installs `attachCustomKeyEventHandler` returning `false` for these chords so they bubble up.
+
+### Dialogs
+
+Both are shadcn `Dialog`s. Try them:
+
+<Playground>
+  <div bind="mode:'open'" className="hidden" />
+  <div className="mx-auto max-w-md rounded-lg border bg-background p-5 shadow-lg">
+    <div className="font-semibold">New project</div>
+    <div className="mt-3 flex gap-2 text-xs">
+      <button
+        onClick={() => setMode("open")}
+        className={`flex-1 rounded-md border px-3 py-2 ${mode === "open" ? "border-primary bg-primary/10 font-medium" : "text-muted-foreground"}`}
+      >
+        Open from disk
+      </button>
+      <button
+        onClick={() => setMode("clone")}
+        className={`flex-1 rounded-md border px-3 py-2 ${mode === "clone" ? "border-primary bg-primary/10 font-medium" : "text-muted-foreground"}`}
+      >
+        Clone a remote
+      </button>
+    </div>
+    {mode === "clone" && (
+      <div className="mt-3 space-y-1">
+        <div className="text-xs text-muted-foreground">Git remote</div>
+        <div className="rounded-md border px-3 py-2 font-mono text-xs text-muted-foreground">
+          git@github.com:ethan-krich/pragma.git
+        </div>
+      </div>
+    )}
+    <button className="mt-3 w-full rounded-md border bg-muted/40 px-3 py-2 text-left text-xs">
+      📁 {mode === "clone" ? "Choose directory to clone into…" : "Choose project directory…"}
+      <span className="mt-0.5 block text-muted-foreground">
+        native picker · opens at the saved “projects directory”
+      </span>
+    </button>
+    <button className="mt-4 w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+      {mode === "clone" ? "Clone & open" : "Open project"}
+    </button>
+  </div>
+</Playground>
+
+- **Create project** — two paths: pick an existing directory, or enter a remote URL then pick the clone destination. Both use the **native** picker (`@tauri-apps/plugin-dialog`, `directory: true`) — never a typed path. Whichever directory is used, its parent (open) or itself (clone destination) is persisted as `projectsDirectory` in settings and becomes the picker's `defaultPath` next time.
+- **Create worktree** — shows which worktree it's based on (the row whose **+** was clicked), one required branch-name `Input`, one optional title `Input`. The new checkout branches off the **parent worktree's HEAD**, which is what makes nesting meaningful on the git side.
+
+</TabsContent>
+
+  <TabsContent value="frontend" className="space-y-3">
+
+### New files (`apps/pragma/src/`)
+
+| File                                          | Responsibility                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/tauri.ts` _(extend)_                     | Typed wrappers for every command; owns `Channel` construction and the `PtyEvent` TS union. Still the only `invoke()` call site. Exposes both `ptySpawn` (new shell) and `ptyAttach` (reconnect to a live daemon session).                                                                                                                                        |
+| `lib/platform.ts`                             | `isMac`, `projectModifierPressed(e)`, modifier label for tooltips                                                                                                                                                                                                                                                                                                |
+| `lib/terminal-manager.ts`                     | **Non-React** session registry `Map<tabId, { term, fit, dispose }>`. Builds the xterm `Terminal`, opens a session via `ptySpawn` **or** `ptyAttach` (replayed scrollback arrives as ordinary `Output` frames), wires Channel → `term.write`, `onData` → `ptyWrite`, ResizeObserver + FitAddon → debounced (~75ms) `ptyResize`. Output never touches React state. |
+| `lib/worktree-tree.ts`                        | Pure `Worktree[] → tree` builder (Vitest-friendly)                                                                                                                                                                                                                                                                                                               |
+| `state/workspace-context.tsx`                 | `WorkspaceProvider` + one reducer: projects, active project, worktrees, selection, tabs per project, active tab, icon cache                                                                                                                                                                                                                                      |
+| `hooks/use-shortcuts.ts`                      | Window-level chords (project digits, tab cycling)                                                                                                                                                                                                                                                                                                                |
+| `components/workspace/WorkspaceShell.tsx`     | Grid: sidebar / tab strip / terminal host                                                                                                                                                                                                                                                                                                                        |
+| `components/sidebar/ProjectSidebar.tsx`       | shadcn `Sidebar` composition                                                                                                                                                                                                                                                                                                                                     |
+| `components/sidebar/WorktreeTree.tsx`         | Recursive nodes, `Collapsible`, hover affordances, motion transitions                                                                                                                                                                                                                                                                                            |
+| `components/sidebar/ProjectSwitcher.tsx`      | Icon row, tooltips, swipe handler, `layoutId` indicator, + button                                                                                                                                                                                                                                                                                                |
+| `components/tabs/TerminalTabs.tsx`            | Tab strip: placeholders, ×, +                                                                                                                                                                                                                                                                                                                                    |
+| `components/terminal/TerminalHost.tsx`        | Renders every open tab's terminal; hides inactive with CSS (no unmount)                                                                                                                                                                                                                                                                                          |
+| `components/terminal/TerminalView.tsx`        | Container div + one-shot `createSession`; imports `@xterm/xterm/css/xterm.css`; custom key handler passthrough                                                                                                                                                                                                                                                   |
+| `components/dialogs/CreateProjectDialog.tsx`  | Clone / open flows, native picker                                                                                                                                                                                                                                                                                                                                |
+| `components/dialogs/CreateWorktreeDialog.tsx` | Branch + optional title                                                                                                                                                                                                                                                                                                                                          |
+
+### State
+
+React context + `useReducer` — no new state dep. The only high-frequency stream
+(terminal output) bypasses React entirely via `terminal-manager.ts`, so the reducer
+only handles low-frequency workspace shape. Tabs are **persisted** (a `tabs` row per
+open terminal): because the daemon keeps shells alive across app restarts, on launch
+the reducer rehydrates tabs and each `TerminalView` **reattaches** to its existing
+daemon session — replayed scrollback included — instead of spawning a fresh shell.
+
+### PTY data flow
+
+<Playground>
+  <div className="space-y-2 text-xs">
+    <div className="flex items-center gap-2">
+      <div className="flex-1 rounded-md border bg-sky-500/10 p-2 text-center font-medium">
+        xterm.js
+        <br />
+        <span className="font-normal text-muted-foreground">onData / write()</span>
+      </div>
+      <div className="text-muted-foreground">⇄</div>
+      <div className="flex-1 rounded-md border bg-sky-500/10 p-2 text-center font-medium">
+        terminal-manager.ts
+        <br />
+        <span className="font-normal text-muted-foreground">session registry, fit, debounce</span>
+      </div>
+      <div className="text-muted-foreground">⇄</div>
+      <div className="flex-1 rounded-md border bg-sky-500/10 p-2 text-center font-medium">
+        lib/tauri.ts
+        <br />
+        <span className="font-normal text-muted-foreground">ptyWrite / ptyResize / Channel</span>
+      </div>
+    </div>
+    <div className="text-center text-muted-foreground">
+      ⇅ IPC — commands down · Channel&lt;PtyEvent&gt; up
+    </div>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 rounded-md border bg-orange-500/10 p-2 text-center font-medium">
+        pty.rs (app)
+        <br />
+        <span className="font-normal text-muted-foreground">
+          daemon client — proxies spawn / write / resize / kill / attach
+        </span>
+      </div>
+      <div className="text-muted-foreground">⇄</div>
+      <div className="flex-1 rounded-md border bg-orange-500/10 p-2 text-center font-medium">
+        pragma-daemon
+        <br />
+        <span className="font-normal text-muted-foreground">
+          detached process · Unix socket · session map + scrollback ring
+        </span>
+      </div>
+    </div>
+    <div className="text-center text-muted-foreground">
+      ⇅ Unix domain socket (length-prefixed JSON frames) — survives app close
+    </div>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 rounded-md border bg-orange-500/10 p-2 text-center font-medium">
+        PTY master
+        <br />
+        <span className="font-normal text-muted-foreground">portable-pty (in daemon)</span>
+      </div>
+      <div className="text-muted-foreground">⇄</div>
+      <div className="flex-1 rounded-md border bg-orange-500/10 p-2 text-center font-medium">
+        $SHELL -l
+        <br />
+        <span className="font-normal text-muted-foreground">cwd = worktree path</span>
+      </div>
+    </div>
+    <div className="rounded-md border border-dashed p-2 text-center text-muted-foreground">
+      daemon reader thread per session: blocking 8KB reads → UTF-8 carry-over → append to scrollback
+      ring + fan-out to attached clients → Exit on EOF. On <code>attach</code>, the daemon replays
+      the ring before live frames.
+    </div>
+  </div>
+</Playground>
+
+</TabsContent>
+
+  <TabsContent value="rust" className="space-y-3">
+
+### Module layout (`apps/pragma/src-tauri/src/`)
+
+| File                       | Responsibility                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib.rs` _(rewire)_        | Builder wiring only: manage `DaemonClient` / `Db` / `GitLocks`, register `tauri_plugin_dialog`, `generate_handler!`. **Detach** every session on `RunEvent::Exit` (close the socket; never kill the daemon or its children)                                                                                           |
+| `error.rs`                 | `AppError` (thiserror) serialized as a message string                                                                                                                                                                                                                                                                 |
+| `pty.rs` _(daemon client)_ | `DaemonClient`: ensures the daemon is running (connect to socket, else spawn detached + retry), holds the `UnixStream`, frames requests, and demuxes daemon `Output`/`Exit` frames onto the per-session Tauri `Channel`. The 4 `pty_*` commands + `pty_attach` are thin proxies — **no PTYs live in the app process** |
+| `db.rs`                    | `Db(Mutex<Connection>)`, `PRAGMA user_version` migrations, typed CRUD incl. the `tabs` table (unit-testable in-memory)                                                                                                                                                                                                |
+| `git.rs`                   | `run_git(dir, args)`, `is_repo`, `current_branch`, `clone`, `worktree_add`, `ensure_pragma_excluded`; per-project `Mutex` serializes mutating ops                                                                                                                                                                     |
+| `projects.rs`              | `list_projects`, `add_project`, `clone_project`, `get_projects_directory`                                                                                                                                                                                                                                             |
+| `worktrees.rs`             | `list_worktrees`, `create_worktree`                                                                                                                                                                                                                                                                                   |
+| `icons.rs`                 | `project_icon` — favicon probe + base64                                                                                                                                                                                                                                                                               |
+
+### The daemon (`crates/pragma-daemon/src/`)
+
+A standalone binary crate in the Cargo workspace, **not** a Tauri sidecar (sidecars die
+with the app — that would defeat the point). The app launches it detached (`setsid`, new
+session, stdio to a log file) so it outlives every window. It is idempotent: a second
+launch sees the socket already bound and exits.
+
+| File          | Responsibility                                                                                                                                                                                                                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.rs`     | Bind the Unix socket (single-instance via flock on a lockfile), accept loop, graceful idle shutdown when the last session exits **and** no client is attached                                                                                      |
+| `session.rs`  | `Session { pty, child, writer, scrollback: RingBuffer, subscribers }`; spawns `$SHELL -l`, owns the PTY master + reader thread with UTF-8 carry-over, appends to a bounded scrollback ring (e.g. last 256 KB), fans output out to attached clients |
+| `protocol.rs` | The wire protocol — `Request` / `Response` tagged enums, length-prefixed JSON framing. **Shared with the app via `@pragma/constants`** so both ends use one contract                                                                               |
+| `registry.rs` | `Mutex<HashMap<sessionId, Session>>`; `attach` replays scrollback then streams live frames; `spawn` / `write` / `resize` / `kill`                                                                                                                  |
+
+**Socket path:** `$XDG_RUNTIME_DIR/pragma/daemon.sock` on Linux, falling back to
+`app_data_dir/daemon.sock` (used directly on macOS, which has no `XDG_RUNTIME_DIR`).
+
+### Command surface
+
+| Command                  | Params                                                   | Returns                                              |
+| ------------------------ | -------------------------------------------------------- | ---------------------------------------------------- |
+| `pty_spawn`              | `sessionId, cwd, cols, rows, onEvent: Channel<PtyEvent>` | `Result<()>`                                         |
+| `pty_attach`             | `sessionId, cols, rows, onEvent: Channel<PtyEvent>`      | `Result<()>` (replays scrollback, then streams live) |
+| `pty_write`              | `sessionId, data`                                        | `Result<()>`                                         |
+| `pty_resize`             | `sessionId, cols, rows`                                  | `Result<()>`                                         |
+| `pty_kill`               | `sessionId`                                              | `Result<()>`                                         |
+| `list_projects`          | —                                                        | `Vec<Project>`                                       |
+| `add_project`            | `path`                                                   | `Project`                                            |
+| `clone_project`          | `remoteUrl, intoDirectory`                               | `Project` (async)                                    |
+| `get_projects_directory` | —                                                        | `Option<String>`                                     |
+| `list_worktrees`         | `projectId`                                              | `Vec<Worktree>`                                      |
+| `create_worktree`        | `projectId, parentWorktreeId, branch, title?`            | `Worktree`                                           |
+| `project_icon`           | `projectId`                                              | `Option<ProjectIcon>`                                |
+
+Every command has a same-named camelCase wrapper in `lib/tauri.ts`, per convention.
+
+### Key decisions
+
+- **Background daemon, not in-process PTYs** — the whole point is that shells survive the window closing, so PTYs live in a separate detached `pragma-daemon` process the app attaches to over a Unix socket (the tmux model). A Tauri sidecar won't do — sidecars are killed with the app. The app **launches the daemon detached** (`setsid` + new session, stdio redirected to a log) on first connect, then talks length-prefixed JSON frames. On window close the app just drops the socket; the daemon and every shell keep running. On relaunch the app reads persisted `tabs` and `pty_attach`es each one, getting replayed scrollback first. The daemon idle-exits once its last session ends and no client is attached, so it never leaks forever.
+- **`portable-pty`** — wezterm-extracted, no tokio coupling, and its internal `unsafe` lives outside our `unsafe_code = "forbid"` workspace. Runs **inside the daemon**, never the app. Shell = `$SHELL` (fallback `/bin/zsh` on macOS, `/bin/sh` on Linux) launched with `-l` so the user's profile/rc files load; env gets `TERM=xterm-256color`, `COLORTERM=truecolor`.
+- **Tauri `Channel<PtyEvent>`, not events** — per-session, ordered, no global event-name namespacing, no extra capability permissions. `PtyEvent` is a small hand-written tagged enum on both sides (the one documented exception to schema-generated types — typify's tagged-union output is brittle for a 2-variant streaming protocol):
+
+```rust
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PtyEvent {
+    Output { data: String },
+    Exit { code: Option<i32> },
+}
+```
+
+- **git CLI over `git2`** — clone reuses the user's ssh-agent / credential helpers for free, worktree support is complete, and compile times stay sane. `create_worktree` runs `git -C <parent_path> worktree add -b <branch> <path>` so the base commit is the **parent worktree's HEAD**. `.pragma/` is appended idempotently to `.git/info/exclude` (shared across all worktrees, never dirties the repo).
+- **Favicon probe** — ordered dirs `["", "public", "static", "assets", "src", "src/assets", "app"]` × names `["favicon.svg", "favicon.ico", "favicon.png", "icon.svg", "icon.png"]`, first hit returns `{ mime, dataBase64 }`; frontend caches per project for the app run.
+- **Capabilities** — add `"dialog:default"` to `capabilities/default.json`; channels are covered by `core:default`.
+
+</TabsContent>
+
+  <TabsContent value="data" className="space-y-3">
+
+### SQLite schema (`app_data_dir/pragma.db`, rusqlite bundled)
+
+```sql
+CREATE TABLE projects (
+  id          TEXT PRIMARY KEY,              -- uuid v4
+  name        TEXT NOT NULL,
+  path        TEXT NOT NULL UNIQUE,          -- absolute root checkout path
+  order_index INTEGER NOT NULL,              -- switcher order, number badge, shortcut digit
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE worktrees (
+  id         TEXT PRIMARY KEY,               -- uuid v4 = dir name under .pragma/worktrees/
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_id  TEXT REFERENCES worktrees(id) ON DELETE CASCADE,  -- NULL for main
+  branch     TEXT NOT NULL,
+  title      TEXT,                           -- optional display title
+  path       TEXT NOT NULL UNIQUE,
+  is_main    INTEGER NOT NULL DEFAULT 0,     -- 1 = project root checkout
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_worktrees_project ON worktrees(project_id);
+
+CREATE TABLE settings (
+  key   TEXT PRIMARY KEY,                    -- 'projectsDirectory'
+  value TEXT NOT NULL
+);
+
+CREATE TABLE tabs (
+  id           TEXT PRIMARY KEY,             -- uuid v4 = daemon sessionId
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  worktree_id  TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+  title        TEXT,                         -- optional display title
+  order_index  INTEGER NOT NULL,             -- position in the tab strip
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_tabs_project ON tabs(project_id);
+```
+
+**Modeling note:** the project's root checkout is itself a `worktrees` row
+(`is_main = 1`, `parent_id = NULL`). The sidebar tree is uniform — the project-name
+header row _is_ the main worktree. Nesting lives entirely in `parent_id`, which is
+exactly the part git can't express.
+
+**Tabs are persisted now** (they weren't in the ephemeral design) because the daemon
+keeps each shell alive across restarts. A `tabs` row's `id` _is_ the daemon `sessionId`,
+so on launch the app reattaches each tab to its still-running session. A row is deleted
+when the user closes the tab (which `pty_kill`s the session) or when the daemon reports
+that session already `Exit`ed while the app was away.
+
+### Shared types (`packages/constants`)
+
+`Project`, `Worktree`, `Tab`, and `ProjectIcon` are added to `schema.json` as
+**unreferenced definitions** — both generators (`json-schema-to-typescript` and typify)
+emit types for all definitions, so we get one cross-language contract with **no
+`values.json` change** and no new tooling. Keep these definitions constraint-free (no
+`minimum`/`format`) to avoid typify surprises like `NonZeroU64`. Re-export from
+`src/index.ts` and `src/lib.rs`.
+
+The **daemon wire protocol** (`Request` / `Response` enums) is shared the same way, so
+the app's `DaemonClient` and the daemon's `protocol.rs` are generated from one schema —
+no hand-kept duplicate of the frame shapes across the socket. The streaming `PtyEvent`
+tagged enum stays the one documented hand-written exception (see Rust → Key decisions).
+
+</TabsContent>
+</Tabs>
+
+## Build sequence
+
+<Card className="my-4">
+  <CardContent className="pt-4 text-sm">
+
+1. **Plumbing** — npm deps, crates, the `crates/pragma-daemon` workspace member, shadcn adds, dialog plugin + capability. `bun run check` green.
+2. **Shared types** — `schema.json` definitions (incl. the daemon `Request`/`Response` protocol and `Tab`), `bun run generate`, confirm typify output compiles.
+3. **Daemon core** _(riskiest, de-risk first)_ — `pragma-daemon`: socket bind + single-instance lock, `session.rs` (portable-pty, reader thread, UTF-8 carry-over, scrollback ring), `registry.rs` spawn/attach/write/resize/kill. Drive it with a throwaway socket client test — no UI yet.
+4. **App ⇄ daemon slice** — `error.rs`, `pty.rs` `DaemonClient` (auto-spawn detached + connect + retry), `pty_*` + `pty_attach` wrappers, `terminal-manager.ts`, `TerminalView` mounted full-screen with cwd `$HOME`. Verify prompt, typing, resize, exit — **then close the app, reopen, and confirm the shell + scrollback survive.**
+5. **Tabs + reattach** — reducer (persisted tabs slice), `db.rs` `tabs` CRUD, `TerminalTabs` + `TerminalHost`, +/×, modifier+Tab cycling, xterm key passthrough; on launch rehydrate tabs and `pty_attach` each.
+6. **Projects + persistence** — `db.rs` (projects/worktrees/settings) + `git.rs` (+ tests), `projects.rs`, `icons.rs`, `CreateProjectDialog` with native picker + saved projects directory, `ProjectSwitcher` (icons, tooltips, digits, swipe, animation).
+7. **Worktrees** — `worktrees.rs`, `worktree-tree.ts`, `WorktreeTree` (collapse, hover +), `CreateWorktreeDialog`; new tabs open in the selected worktree.
+8. **Polish** — motion transitions, empty states, inline dialog errors; update `AGENTS.md` repo map + skills (per the self-improvement rule).
+
+</CardContent>
+</Card>
+
+## Details worth reading before implementing
+
+<Accordion type="multiple" className="my-4">
+  <AccordionItem value="risks">
+    <AccordionTrigger>Risks & gotchas</AccordionTrigger>
+    <AccordionContent className="space-y-2 text-sm">
+
+- **UTF-8 chunk splitting** — the daemon's PTY reader must carry incomplete trailing bytes between 8KB reads (`from_utf8` + `valid_up_to()`); `from_utf8_lossy` is a latent mojibake bug for multibyte output. The scrollback ring stores raw bytes, so split a multibyte char only at the carry boundary, never at the ring's truncation edge.
+- **Don't kill PTYs on app exit (it's now the bug, not the fix)** — the daemon owns the shells precisely so they outlive the window. On `RunEvent::Exit` the app only closes its socket; the daemon must keep running. Inverting the old "kill all on exit" rule is the whole feature — make sure nothing (sidecar semantics, child-process groups) drags the daemon down with the app.
+- **Reader thread shutdown (daemon side)** — blocking `read()` only unblocks when the PTY master drops. `kill` (from a closed tab) must kill the child **and** drop master + writer; never join first. This lives in the daemon, isolated from the app lifecycle.
+- **Daemon single-instance & races** — two windows (or a fast relaunch) can both try to spawn the daemon. Guard the socket with an flock'd lockfile; the loser connects to the winner's socket. A stale socket file after a crash must be detected (connect-fails → unlink → rebind) so launch doesn't wedge.
+- **Reattach resize** — a reattached tab's xterm may differ in size from when it detached; send a `pty_resize` immediately after `pty_attach` so the daemon SIGWINCHes the shell to the current geometry before/after replaying scrollback.
+- **Hidden-tab resize** — xterm can't measure `display:none` containers; call FitAddon on tab activation, and debounce resize (~75ms) so TUIs don't flicker under SIGWINCH storms.
+- **xterm steals shortcuts** — without `attachCustomKeyEventHandler` returning `false` for our chords, tab cycling dies whenever a terminal is focused.
+- **xterm CSS** — `@xterm/xterm/css/xterm.css` must be imported or the terminal renders broken. Skip the WebGL addon: unreliable on WebKitGTK (Linux).
+- **git worktree locking** — serialize mutating git ops per project; `worktree add -b` fails if the branch already exists or is checked out elsewhere — surface stderr verbatim in the dialog.
+- **Output flooding** — `cat bigfile` spams the channel; xterm buffers writes so 8KB reads are usually fine, but never route output through React state.
+- **rusqlite is `!Sync`** — `Mutex<Connection>` in managed state.
+- **clippy pedantic** — budget for `u16`→`usize` cast lints in PTY sizing; justify any `#[allow]`.
+
+</AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="testing">
+    <AccordionTrigger>Testing strategy</AccordionTrigger>
+    <AccordionContent className="space-y-2 text-sm">
+
+- **Rust:** `db.rs` CRUD + migrations against `Connection::open_in_memory()` (incl. the `tabs` table); `git.rs` integration tests on `tempfile` throwaway repos; the UTF-8 carry-over and the scrollback ring extracted as pure functions and unit-tested; `icons.rs` against a tempdir with planted favicons.
+- **Daemon:** an integration test binds the socket on a tempdir path, then over a raw client: `spawn` (`/bin/sh -c "printf hi"`) → assert `Output`/`Exit`; `spawn` a long-lived shell → write → **drop the client, reconnect, `attach`** → assert replayed scrollback arrives before live output (the survive-app-close guarantee); `kill` → assert reader thread unblocks and the session is dropped; second `spawn` of the daemon → assert single-instance lock makes it exit.
+- **TS (Vitest/jsdom):** mock `@tauri-apps/api/core` (invoke + a fake `Channel`) and mock `@xterm/xterm` entirely (jsdom has no canvas). Pure tests for `worktree-tree.ts`, the reducer, and `platform.ts`; component tests for tab create/close/cycle and both dialogs — asserting the dialog-plugin mock is invoked and **no text path input exists**.
+
+</AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="alternatives">
+    <AccordionTrigger>Alternatives considered</AccordionTrigger>
+    <AccordionContent className="space-y-2 text-sm">
+
+- **`tauri-plugin-sql`** — rejected: pushes SQL strings into the frontend; the requirement keeps business logic in Rust, and rusqlite is directly `cargo test`-able.
+- **`git2` crate** — rejected: partial worktree support, heavy compile, and clone needs manual credential-callback plumbing the CLI gets free from the user's config.
+- **Tauri events for PTY output** — rejected: global broadcast requires per-session event-name namespacing and extra capability surface; `Channel` is ordered and scoped.
+- **zustand** — rejected: with terminal output bypassing React, remaining state is low-frequency; context + reducer carries it without a new dependency.
+- **Ephemeral (non-persisted) tabs** — rejected once the daemon exists: a reattached tab is the _same live shell_ with replayed scrollback, not a fresh one, so persisting tabs is what makes the background daemon visible to the user. Hence the `tabs` table.
+- **In-process PTYs + kill-on-exit** — the original design; rejected because shells must survive window close. Replaced by the detached daemon (see Rust → Key decisions).
+- **Tauri sidecar for the daemon** — rejected: Tauri terminates sidecars when the app exits, which is exactly what we need to avoid. The daemon is launched fully detached (`setsid`) instead.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>

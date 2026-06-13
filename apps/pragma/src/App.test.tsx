@@ -1,6 +1,4 @@
-import { constants } from "@pragma/constants";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -8,30 +6,42 @@ import App from "./App";
 const invokeMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class MockChannel<T> {
+    onmessage?: (message: T) => void;
+  },
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+
+vi.mock("@/lib/terminal-manager", () => ({
+  terminalManager: {
+    activate: vi.fn(),
+    dispose: vi.fn(),
+    mount: vi.fn(),
+    resize: vi.fn(),
+  },
 }));
 
 describe("App", () => {
   beforeEach(() => {
     invokeMock.mockReset();
-  });
-
-  it("renders the app name from the shared constants", () => {
-    render(<App />);
-    expect(screen.getByRole("heading", { name: constants.app.name })).toBeInTheDocument();
-  });
-
-  it("shows backend info after pinging the Rust command", async () => {
-    invokeMock.mockResolvedValue({
-      name: "Pragma",
-      identifier: "com.pragma.app",
-      version: "9.9.9",
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "list_projects") {
+        return Promise.resolve([]);
+      }
+      if (command === "get_projects_directory") {
+        return Promise.resolve("/tmp");
+      }
+      return Promise.resolve(null);
     });
+  });
 
+  it("renders the terminal workspace empty state", async () => {
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: /ping/i }));
-
-    expect(await screen.findByText(/9\.9\.9/)).toBeInTheDocument();
-    expect(invokeMock).toHaveBeenCalledWith("app_info");
+    expect(await screen.findByRole("heading", { name: /no projects yet/i })).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("list_projects");
   });
 });

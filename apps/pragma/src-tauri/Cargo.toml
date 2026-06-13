@@ -21,6 +21,19 @@ tauri-build = { version = "2.6.2", features = [] }
 pragma-constants = { path = "../../../packages/constants" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+base64 = "0.22"
 log = "0.4"
+rand = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+scopeguard = "1"
 tauri = { version = "2.11.2", features = [] }
+tauri-plugin-dialog = "2.7.1"
 tauri-plugin-log = "2"
+tiny_http = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+
+[dev-dependencies]
+tempfile = "3"
