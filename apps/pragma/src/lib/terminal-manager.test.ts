@@ -1,0 +1,106 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { Tab } from "@pragma/constants";
+
+const invokeMock = vi.fn();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class MockChannel<T> {
+    onmessage: (message: T) => void = () => {};
+  },
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+
+const terminalDispose = vi.fn();
+
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class MockTerminal {
+    cols = 80;
+    rows = 24;
+    element: HTMLElement | null = null;
+    loadAddon = vi.fn();
+    attachCustomKeyEventHandler = vi.fn();
+    onData = vi.fn();
+    write = vi.fn();
+    writeln = vi.fn();
+    dispose = terminalDispose;
+    open(container: HTMLElement) {
+      this.element = container;
+    }
+  },
+}));
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class MockFitAddon {
+    fit = vi.fn();
+  },
+}));
+
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class MockWebLinksAddon {
+    activate = vi.fn();
+  },
+}));
+
+import {
+  TERMINAL_FONT_FAMILY,
+  TERMINAL_FONT_SIZE,
+  TERMINAL_LINE_HEIGHT,
+  TerminalManager,
+} from "./terminal-manager";
+
+const tab = { id: "tab-1", worktreeId: "wt-1" } as Tab;
+
+describe("TerminalManager font configuration", () => {
+  it("uses a Nerd Font-first font stack so box-drawing and block glyphs render in text form", () => {
+    expect(TERMINAL_FONT_FAMILY).toContain("JetBrainsMonoNL Nerd Font");
+    expect(TERMINAL_FONT_FAMILY).toContain("SF Mono");
+    expect(TERMINAL_FONT_FAMILY).toContain("Menlo");
+    expect(TERMINAL_FONT_FAMILY).toContain("Monaco");
+    expect(TERMINAL_FONT_FAMILY).toContain("ui-monospace");
+    expect(TERMINAL_FONT_FAMILY).toMatch(/monospace\s*$/);
+  });
+
+  it("sizes the cell at 14px so half-block glyphs fill the row without an anti-aliased seam", () => {
+    expect(TERMINAL_FONT_SIZE).toBe(14);
+    expect(TERMINAL_LINE_HEIGHT).toBe(1.0);
+  });
+
+  it("exposes the same font configuration on the manager class", () => {
+    expect(TerminalManager.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+    expect(TerminalManager.fontSize).toBe(TERMINAL_FONT_SIZE);
+    expect(TerminalManager.lineHeight).toBe(TERMINAL_LINE_HEIGHT);
+  });
+});
+
+describe("TerminalManager lifecycle", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    terminalDispose.mockClear();
+  });
+
+  it("kills the daemon session and disposes the xterm widget on dispose", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    // Let the attach promise settle so the channel is retained.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    manager.dispose(tab.id);
+
+    expect(terminalDispose).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("pty_kill", { sessionId: tab.id });
+  });
+
+  it("ignores dispose for an unknown tab without calling the backend", () => {
+    const manager = new TerminalManager();
+    manager.dispose("missing");
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_kill", expect.anything());
+  });
+});
