@@ -1,17 +1,118 @@
-use pragma_constants::{AppInfo, CONSTANTS};
+// Tauri command extraction requires owned IPC arguments and `State<T>` values.
+#![allow(clippy::needless_pass_by_value)]
+
+mod db;
+#[allow(clippy::all, clippy::pedantic, dead_code)]
+mod dev_bridge;
+mod error;
+mod git;
+mod icons;
+mod projects;
+mod pty;
+mod worktrees;
+
+use pragma_constants::{AppInfo, ProjectIcon, Tab, CONSTANTS};
+use tauri::ipc::Channel;
+use tauri::Manager;
+
+use crate::db::Db;
+use crate::error::{AppError, AppResult};
+use crate::git::GitLocks;
+use crate::pty::{PtyClient, PtyEvent};
 
 /// Returns the shared application info (name, identifier, version).
-///
-/// Backed by `@pragma/constants`, so the value is identical to what the
-/// frontend imports — one source of truth across the language boundary.
 #[tauri::command]
 fn app_info() -> AppInfo {
     CONSTANTS.app.clone()
 }
 
+#[tauri::command]
+async fn pty_spawn(
+    pty: tauri::State<'_, PtyClient>,
+    session_id: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<PtyEvent>,
+) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.spawn(session_id, cwd, cols, rows, on_event)).await
+}
+
+#[tauri::command]
+async fn pty_attach(
+    pty: tauri::State<'_, PtyClient>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<PtyEvent>,
+) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.attach(session_id, cols, rows, on_event)).await
+}
+
+#[tauri::command]
+async fn pty_write(
+    pty: tauri::State<'_, PtyClient>,
+    session_id: String,
+    data: String,
+) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.write(session_id, data)).await
+}
+
+#[tauri::command]
+async fn pty_resize(
+    pty: tauri::State<'_, PtyClient>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.resize(session_id, cols, rows)).await
+}
+
+#[tauri::command]
+async fn pty_kill(pty: tauri::State<'_, PtyClient>, session_id: String) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.kill(session_id)).await
+}
+
+async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| AppError::Daemon(format!("pty task failed: {error}")))?
+}
+
+#[tauri::command]
+fn project_icon(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Option<ProjectIcon>> {
+    icons::project_icon(&db, project_id)
+}
+
+#[tauri::command]
+fn list_tabs(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Vec<Tab>> {
+    db.list_tabs(&project_id)
+}
+
+#[tauri::command]
+fn create_tab(
+    db: tauri::State<'_, Db>,
+    project_id: String,
+    worktree_id: String,
+    title: Option<String>,
+) -> AppResult<Tab> {
+    db.create_tab(&project_id, &worktree_id, title)
+}
+
+#[tauri::command]
+fn close_tab(db: tauri::State<'_, Db>, tab_id: String) -> AppResult<()> {
+    db.delete_tab(&tab_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -20,14 +121,40 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // Same shared scalar constant the frontend reads (constants.maxParallelAgents).
+            let app_data_dir = app.path().app_data_dir()?;
+            app.manage(Db::open(app_data_dir.join("pragma.db"))?);
+            app.manage(PtyClient::new(app_data_dir));
+            app.manage(GitLocks::default());
+            if cfg!(debug_assertions) {
+                if let Err(error) = dev_bridge::start_bridge(app.handle()).map(|_| ()) {
+                    log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
+                }
+            }
             log::info!(
                 "Pragma supports up to {} parallel agents",
                 CONSTANTS.max_parallel_agents
             );
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_info])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            pty_spawn,
+            pty_attach,
+            pty_write,
+            pty_resize,
+            pty_kill,
+            projects::list_projects,
+            projects::add_project,
+            projects::clone_project,
+            projects::get_projects_directory,
+            worktrees::list_worktrees,
+            worktrees::create_worktree,
+            project_icon,
+            list_tabs,
+            create_tab,
+            close_tab,
+            dev_bridge::__dev_bridge_result
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
