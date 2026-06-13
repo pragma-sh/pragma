@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["apps/pragma/src-tauri", "packages/constants"]
+members = ["apps/pragma/src-tauri", "crates/pragma-daemon", "packages/constants"]
 
 # Shared dependency versions for every crate in the workspace.
 # Crates opt in with `serde = { workspace = true }`.
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 # Consistent lint policy across the whole Rust workspace.
 # Crates opt in with `[lints] workspace = true`.
