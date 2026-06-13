@@ -5,6 +5,7 @@ import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { TerminalHost } from "@/components/terminal/TerminalHost";
 import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { useShortcuts } from "@/hooks/use-shortcuts";
+import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
 export function WorkspaceShell() {
@@ -21,6 +22,11 @@ export function WorkspaceShell() {
       }
     },
     onNewTerminalTab: () => void workspace.createTerminalTab(),
+    onClearTerminal: () => {
+      if (workspace.activeTabId) {
+        terminalManager.clear(workspace.activeTabId);
+      }
+    },
   });
 
   return (

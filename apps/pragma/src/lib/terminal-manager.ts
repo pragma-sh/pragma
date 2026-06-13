@@ -89,13 +89,17 @@ export class TerminalManager {
       if ((event.ctrlKey || event.altKey) && (event.key === "Tab" || /^[1-9]$/.test(event.key))) {
         return false;
       }
-      // Let platform-specific close/new-tab shortcuts bubble to the window listener
-      // instead of being consumed by the terminal.
+      // Let platform-specific close/new-tab/clear shortcuts bubble to the window
+      // listener instead of being consumed by the terminal.
       const isMac = isMacPlatform();
-      if (isMac && event.metaKey && (event.key === "w" || event.key === "t")) {
+      if (isMac && event.metaKey && (event.key === "w" || event.key === "t" || event.key === "k")) {
         return false;
       }
-      if (!isMac && event.ctrlKey && (event.key === "w" || event.key === "t")) {
+      if (
+        !isMac &&
+        event.ctrlKey &&
+        (event.key === "w" || event.key === "t" || event.key === "k")
+      ) {
         return false;
       }
       return true;
@@ -118,6 +122,14 @@ export class TerminalManager {
 
   activate(tabId: string): void {
     window.requestAnimationFrame(() => this.fit(tabId));
+  }
+
+  clear(tabId: string): void {
+    const managed = this.terminals.get(tabId);
+    if (!managed) {
+      return;
+    }
+    managed.terminal.clear();
   }
 
   resize(tabId: string): void {

@@ -11,6 +11,7 @@ interface UseShortcutsOptions {
   onPreviousTab: () => void;
   onCloseTopTab: () => void;
   onNewTerminalTab: () => void;
+  onClearTerminal: () => void;
 }
 
 interface ShortcutState {
@@ -72,6 +73,10 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         case "newTerminalTab":
           event.preventDefault();
           current.onNewTerminalTab();
+          break;
+        case "clearTerminal":
+          event.preventDefault();
+          current.onClearTerminal();
           break;
         default: {
           const workspaceIndex = workspaceIndexForAction(action);

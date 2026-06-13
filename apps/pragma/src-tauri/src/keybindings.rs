@@ -18,14 +18,19 @@ pub fn config_path(home_dir: impl AsRef<Path>) -> PathBuf {
 /// Loads the keybindings config, writing the default file first if it is missing.
 ///
 /// Pragma keeps this file in the user's home directory so it is easy to edit by
-/// hand and survives app reinstalls.
+/// hand and survives app reinstalls. New actions added after the user created
+/// their config are merged in from the defaults so old files stay valid.
 pub fn load_or_ensure(home_dir: impl AsRef<Path>) -> AppResult<KeybindingsConfig> {
     let path = config_path(home_dir);
     if !path.exists() {
         write_defaults(&path)?;
+        let content = std::fs::read_to_string(&path)?;
+        return Ok(serde_json::from_str(&content)?);
     }
     let content = std::fs::read_to_string(&path)?;
-    let config: KeybindingsConfig = serde_json::from_str(&content)?;
+    let user: serde_json::Value = serde_json::from_str(&content)?;
+    let merged = merge_with_defaults(user);
+    let config: KeybindingsConfig = serde_json::from_value(merged)?;
     Ok(config)
 }
 
@@ -47,6 +52,32 @@ fn write_defaults(path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Merges a user config value with the default config so that newly-added
+/// actions get defaults while preserving any customizations the user made.
+fn merge_with_defaults(user: serde_json::Value) -> serde_json::Value {
+    let default = serde_json::to_value(default_config()).expect("default config serializes");
+    merge_json(default, user)
+}
+
+/// Recursively overlays `overlay` onto `base`. Object keys missing in `overlay`
+/// keep their `base` values; other values are taken from `overlay`.
+fn merge_json(base: serde_json::Value, overlay: serde_json::Value) -> serde_json::Value {
+    match (base, overlay) {
+        (serde_json::Value::Object(mut base_map), serde_json::Value::Object(overlay_map)) => {
+            for (key, overlay_value) in overlay_map {
+                let base_value = base_map.remove(&key);
+                let merged = match base_value {
+                    Some(base_value) => merge_json(base_value, overlay_value),
+                    None => overlay_value,
+                };
+                base_map.insert(key, merged);
+            }
+            serde_json::Value::Object(base_map)
+        }
+        (_, overlay) => overlay,
+    }
+}
+
 fn default_config() -> KeybindingsConfig {
     KeybindingsConfig {
         version: NonZeroU64::new(1).expect("1 is non-zero"),
@@ -55,6 +86,7 @@ fn default_config() -> KeybindingsConfig {
             previous_tab: chord("ctrl+shift", "tab", "alt+shift", "tab"),
             close_top_tab: chord("cmd", "w", "ctrl", "w"),
             new_terminal_tab: chord("cmd", "t", "ctrl", "t"),
+            clear_terminal: chord("cmd", "k", "ctrl", "k"),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),
@@ -127,5 +159,24 @@ mod tests {
         save(home, &config).unwrap();
         let loaded = load_or_ensure(home).unwrap();
         assert_eq!(loaded.bindings.new_terminal_tab.mac.key, "n");
+    }
+
+    #[test]
+    fn load_or_ensure_merges_missing_actions_from_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let legacy_json = serde_json::json!({
+            "version": 1,
+            "bindings": {
+                "nextTab": { "mac": { "modifiers": ["ctrl"], "key": "tab" }, "linux": { "modifiers": ["alt"], "key": "tab" } }
+            }
+        });
+        std::fs::create_dir_all(config_path(home).parent().unwrap()).unwrap();
+        std::fs::write(config_path(home), legacy_json.to_string()).unwrap();
+
+        let loaded = load_or_ensure(home).unwrap();
+
+        assert_eq!(loaded.bindings.clear_terminal.mac.key, "k");
+        assert_eq!(loaded.bindings.next_tab.mac.key, "tab");
     }
 }

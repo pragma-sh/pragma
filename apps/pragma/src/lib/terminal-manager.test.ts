@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const terminalDispose = vi.fn();
+const terminalClear = vi.fn();
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
@@ -25,6 +26,7 @@ vi.mock("@xterm/xterm", () => ({
     onData = vi.fn();
     write = vi.fn();
     writeln = vi.fn();
+    clear = terminalClear;
     dispose = terminalDispose;
     open(container: HTMLElement) {
       this.element = container;
@@ -80,6 +82,7 @@ describe("TerminalManager lifecycle", () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
     terminalDispose.mockClear();
+    terminalClear.mockClear();
   });
 
   it("kills the daemon session and disposes the xterm widget on dispose", async () => {
@@ -102,5 +105,25 @@ describe("TerminalManager lifecycle", () => {
     const manager = new TerminalManager();
     manager.dispose("missing");
     expect(invokeMock).not.toHaveBeenCalledWith("pty_kill", expect.anything());
+  });
+
+  it("clears the xterm widget for a mounted tab", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    manager.clear(tab.id);
+
+    expect(terminalClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores clear for an unknown tab", () => {
+    const manager = new TerminalManager();
+    manager.clear("missing");
+    expect(terminalClear).not.toHaveBeenCalled();
   });
 });

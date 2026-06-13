@@ -29,6 +29,10 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "t" },
         linux: { modifiers: ["ctrl"], key: "t" },
       },
+      clearTerminal: {
+        mac: { modifiers: ["cmd"], key: "k" },
+        linux: { modifiers: ["ctrl"], key: "k" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -121,6 +125,11 @@ describe("actionForEvent", () => {
   it("resolves linux new terminal tab", () => {
     const event = new KeyboardEvent("keydown", { ctrlKey: true, key: "t" });
     expect(actionForEvent(event, config(), "linux")).toBe("newTerminalTab");
+  });
+
+  it("resolves mac clear terminal", () => {
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "k" });
+    expect(actionForEvent(event, config(), "mac")).toBe("clearTerminal");
   });
 
   it("resolves mac workspace switch", () => {
