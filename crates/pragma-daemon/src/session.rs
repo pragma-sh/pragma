@@ -25,7 +25,7 @@ mod anyhow_pty {
     pub type Error = anyhow::Error;
 }
 
-type PtyChild = Box<dyn portable_pty::Child + Send + Sync>;
+type PtyChild = Box<dyn portable_pty::Child + Send>;
 
 pub struct Session {
     id: String,

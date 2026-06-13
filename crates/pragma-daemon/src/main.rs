@@ -2,6 +2,7 @@ mod protocol;
 mod registry;
 mod session;
 
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::net::Shutdown;
 #[cfg(unix)]
@@ -13,14 +14,19 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use daemonize::Daemonize;
+
 use protocol::{
     read_frame, write_frame, EventFrame, RequestFrame, RequestKind, ResponseFrame, ServerFrame,
 };
 use registry::Registry;
 
+const DETACH_FLAG: &str = "--detach";
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = daemon_paths();
     fs::create_dir_all(&paths.dir)?;
+    detach_if_requested(&paths, should_detach())?;
     remove_stale_files(&paths.socket, &paths.lock);
     let _lock = acquire_lock(&paths.lock)?;
     if paths.socket.exists() {
@@ -185,6 +191,7 @@ struct DaemonPaths {
     dir: PathBuf,
     socket: PathBuf,
     lock: PathBuf,
+    log: PathBuf,
 }
 
 fn daemon_paths() -> DaemonPaths {
@@ -199,8 +206,34 @@ fn daemon_paths() -> DaemonPaths {
     DaemonPaths {
         socket: dir.join("daemon.sock"),
         lock: dir.join("daemon.lock"),
+        log: dir.join("daemon.log"),
         dir,
     }
+}
+
+fn should_detach() -> bool {
+    std::env::args_os().any(|arg| arg == OsStr::new(DETACH_FLAG))
+}
+
+fn detach_if_requested(
+    paths: &DaemonPaths,
+    should_detach: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !should_detach {
+        return Ok(());
+    }
+
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.log)?;
+    let stderr = stdout.try_clone()?;
+    Daemonize::new()
+        .working_directory(&paths.dir)
+        .stdout(stdout)
+        .stderr(stderr)
+        .start()?;
+    Ok(())
 }
 
 fn default_app_data_dir() -> PathBuf {

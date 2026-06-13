@@ -14,6 +14,8 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
+const DAEMON_DETACH_FLAG: &str = "--detach";
+
 #[derive(Clone)]
 pub struct PtyClient {
     app_data_dir: PathBuf,
@@ -219,11 +221,13 @@ impl PtyClient {
         std::fs::create_dir_all(&self.app_data_dir)?;
         let mut command = if cfg!(debug_assertions) {
             let mut command = Command::new(cargo_executable());
-            command.args(["run", "-p", "pragma-daemon", "--"]);
+            command.args(["run", "-p", "pragma-daemon", "--", DAEMON_DETACH_FLAG]);
             command.current_dir(workspace_root());
             command
         } else {
-            Command::new(daemon_executable())
+            let mut command = Command::new(daemon_executable());
+            command.arg(DAEMON_DETACH_FLAG);
+            command
         };
         command
             .env("PRAGMA_APP_DATA_DIR", &self.app_data_dir)
@@ -239,7 +243,10 @@ impl PtyClient {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
-        command.spawn()?;
+        let mut child = command.spawn()?;
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
         Ok(())
     }
 }
