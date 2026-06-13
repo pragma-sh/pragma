@@ -4,7 +4,7 @@
   "description": "Shared compile-time constants. Single source of truth for both the TypeScript frontend (src) and the Rust backend (src-tauri). Edit values.json; never edit generated code.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["maxParallelAgents", "app", "window", "links"],
+  "required": ["maxParallelAgents", "app", "window", "links", "editorLaunchers"],
   "properties": {
     "maxParallelAgents": {
       "type": "integer",
@@ -13,7 +13,8 @@
     },
     "app": { "$ref": "#/definitions/AppInfo" },
     "window": { "$ref": "#/definitions/WindowDefaults" },
-    "links": { "$ref": "#/definitions/Links" }
+    "links": { "$ref": "#/definitions/Links" },
+    "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" }
   },
   "definitions": {
     "AppInfo": {
@@ -47,6 +48,41 @@
       "properties": {
         "homepage": { "type": "string", "format": "uri" },
         "support": { "type": "string", "format": "uri" }
+      }
+    },
+    "EditorLaunchers": {
+      "title": "EditorLaunchers",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultEditorId", "options"],
+      "properties": {
+        "defaultEditorId": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EditorLauncher" }
+        }
+      }
+    },
+    "EditorLauncher": {
+      "title": "EditorLauncher",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "brandIcon", "brandColor", "cliCommand"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "brandIcon": {
+          "type": "string",
+          "description": "Iconify icon name, preferably from the simple-icons namespace for branded editors."
+        },
+        "brandColor": {
+          "type": "string",
+          "description": "Hex color used to render the monochrome Iconify brand glyph."
+        },
+        "cliCommand": {
+          "type": ["string", "null"],
+          "description": "Executable name used to launch the editor with the worktree path. Null uses the system file explorer."
+        }
       }
     },
     "Project": {

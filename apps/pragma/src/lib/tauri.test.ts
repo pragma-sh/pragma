@@ -17,6 +17,7 @@ import {
   browserScreenshot,
   browserSetBounds,
   createTab,
+  openWorktree,
 } from "./tauri";
 
 describe("browser IPC wrappers", () => {
@@ -85,6 +86,14 @@ describe("browser IPC wrappers", () => {
       y: 2,
       width: 3,
       height: 4,
+    });
+  });
+
+  it("openWorktree passes the worktree path and editor id", () => {
+    void openWorktree("/tmp/project", "vscode");
+    expect(invokeMock).toHaveBeenCalledWith("open_worktree", {
+      path: "/tmp/project",
+      editorId: "vscode",
     });
   });
 });

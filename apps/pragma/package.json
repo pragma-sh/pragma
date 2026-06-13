@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
+    "@iconify/react": "^6.0.2",
     "@pragma/constants": "workspace:*",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/api": "^2",

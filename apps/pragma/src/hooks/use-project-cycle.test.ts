@@ -49,6 +49,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     createBrowserTab: vi.fn(),
     closeTab: vi.fn(),
     renameTerminalTab: vi.fn(),
+    openSelectedWorktree: vi.fn(),
     cycleTab: vi.fn(),
     setActiveTab: vi.fn(),
   } as WorkspaceContextValue;

@@ -21,6 +21,7 @@ import {
   listTabs,
   listWorktrees,
   onBrowserMeta,
+  openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
   setTabUrl as setTabUrlCommand,
@@ -73,6 +74,7 @@ interface WorkspaceContextValue extends WorkspaceState {
   createBrowserTab: (worktreeId?: string) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
+  openSelectedWorktree: (editorId?: string | null) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
 }
@@ -387,6 +389,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const selectedWorktree =
     projectWorktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? null;
 
+  const openSelectedWorktree = useCallback(
+    async (editorId?: string | null) => {
+      if (!selectedWorktree) {
+        return;
+      }
+      try {
+        await openWorktreeCommand(selectedWorktree.path, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [selectedWorktree],
+  );
+
   const visibleTabs = useMemo(
     () => state.tabs.filter((tab) => tab.worktreeId === selectedWorktreeId),
     [state.tabs, selectedWorktreeId],
@@ -436,6 +452,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createBrowserTab,
       closeTab,
       renameTerminalTab,
+      openSelectedWorktree,
       cycleTab,
       setActiveTab,
     }),
@@ -455,6 +472,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createBrowserTab,
       closeTab,
       renameTerminalTab,
+      openSelectedWorktree,
       cycleTab,
       setActiveTab,
     ],
