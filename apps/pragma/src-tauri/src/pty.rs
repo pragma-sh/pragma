@@ -112,6 +112,13 @@ impl PtyClient {
         self.request(RequestFrame::kill(session_id))
     }
 
+    /// Asks the daemon to terminate every shell whose initial cwd is `path`
+    /// (or lives underneath it). Used when deleting a worktree so the user's
+    /// running processes don't keep an open handle to a now-removed directory.
+    pub fn kill_for_cwd(&self, path: String) -> AppResult<()> {
+        self.request(RequestFrame::kill_for_cwd(path))
+    }
+
     fn stream(&self, request: RequestFrame, on_event: Channel<PtyEvent>) -> AppResult<()> {
         let mut stream = self.connect_with_spawn()?;
         write_frame(&mut stream, &request)?;
@@ -291,6 +298,10 @@ impl RequestFrame {
 
     fn kill(session_id: String) -> Self {
         Self::new("kill", Some(session_id), None, None, None, None)
+    }
+
+    fn kill_for_cwd(cwd: String) -> Self {
+        Self::new("killForCwd", None, None, None, None, Some(cwd))
     }
 
     fn new(

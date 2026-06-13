@@ -154,6 +154,10 @@ fn handle_request(
             .kill(&required(request.session_id, "sessionId")?)
             .map(|()| None)
             .map_err(|err| err.to_string()),
+        RequestKind::KillForCwd => registry
+            .kill_for_cwd(&required(request.data, "data")?)
+            .map(|_count| None)
+            .map_err(|err| err.to_string()),
     }
 }
 

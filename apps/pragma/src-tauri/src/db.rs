@@ -46,6 +46,7 @@ impl Db {
                title      TEXT,
                path       TEXT NOT NULL UNIQUE,
                is_main    INTEGER NOT NULL DEFAULT 0,
+               hidden     INTEGER NOT NULL DEFAULT 0,
                created_at TEXT NOT NULL DEFAULT (datetime('now'))
              );
              CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id);
@@ -74,6 +75,26 @@ impl Db {
                  ALTER TABLE tabs ADD COLUMN url TEXT;
                  PRAGMA user_version = 2;",
             )?;
+        }
+        // v3 adds the `hidden` flag to `worktrees` so users can collapse rows
+        // they don't actively use without losing the worktree itself. Default
+        // 0 keeps existing rows visible. The CREATE block above already
+        // includes the column for fresh DBs, so the ALTER is gated on
+        // whether it's actually missing.
+        if version < 3 {
+            let has_hidden: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('worktrees') WHERE name = 'hidden'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)?;
+            if has_hidden == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE worktrees ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 3;")?;
         }
         Ok(())
     }
@@ -130,7 +151,7 @@ impl Db {
     pub fn list_worktrees(&self, project_id: &str) -> AppResult<Vec<Worktree>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, parent_id, branch, title, path, is_main, created_at
+            "SELECT id, project_id, parent_id, branch, title, path, is_main, hidden, created_at
              FROM worktrees WHERE project_id = ?1 ORDER BY is_main DESC, created_at",
         )?;
         let rows = stmt.query_map([project_id], worktree_from_row)?;
@@ -141,7 +162,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, parent_id, branch, title, path, is_main, created_at
+                "SELECT id, project_id, parent_id, branch, title, path, is_main, hidden, created_at
                  FROM worktrees WHERE id = ?1",
                 [worktree_id],
                 worktree_from_row,
@@ -164,6 +185,35 @@ impl Db {
             params![id, project_id, parent_id, branch, title, path],
         )?;
         self.worktree(&id)
+    }
+
+    /// Updates the optional display title. An empty/whitespace string clears it.
+    pub fn rename_worktree(&self, worktree_id: &str, title: Option<&str>) -> AppResult<Worktree> {
+        let normalized = title.map(str::trim).filter(|value| !value.is_empty());
+        self.0.lock()?.execute(
+            "UPDATE worktrees SET title = ?1 WHERE id = ?2",
+            params![normalized, worktree_id],
+        )?;
+        self.worktree(worktree_id)
+    }
+
+    /// Toggles the `hidden` flag — the row stays on disk but disappears from
+    /// the sidebar tree. Persistence matches the rest of the worktree state.
+    pub fn set_worktree_hidden(&self, worktree_id: &str, hidden: bool) -> AppResult<Worktree> {
+        self.0.lock()?.execute(
+            "UPDATE worktrees SET hidden = ?1 WHERE id = ?2",
+            params![i64::from(hidden), worktree_id],
+        )?;
+        self.worktree(worktree_id)
+    }
+
+    /// Hard-deletes a worktree row. `SQLite` cascades to its tabs (via the
+    /// `worktree_id` FK) and to any nested child worktrees.
+    pub fn delete_worktree(&self, worktree_id: &str) -> AppResult<()> {
+        self.0
+            .lock()?
+            .execute("DELETE FROM worktrees WHERE id = ?1", [worktree_id])?;
+        Ok(())
     }
 
     pub fn setting(&self, key: &str) -> AppResult<Option<String>> {
@@ -299,7 +349,8 @@ fn worktree_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Worktree> {
         title: row.get(4)?,
         path: row.get(5)?,
         is_main: row.get::<_, i64>(6)? == 1,
-        created_at: row.get(7)?,
+        hidden: row.get::<_, i64>(7)? == 1,
+        created_at: row.get(8)?,
     })
 }
 
@@ -391,5 +442,105 @@ mod tests {
         let listed = db.list_tabs(&project.id).expect("tabs should list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].kind, TabKind::Browser);
+    }
+
+    #[test]
+    fn worktree_rename_normalises_and_clears_empty_titles() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|w| w.is_main)
+            .expect("main worktree should exist");
+        let worktree = db
+            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .expect("worktree should insert");
+        let renamed = db
+            .rename_worktree(&worktree.id, Some("  My feature  "))
+            .expect("rename should succeed");
+        assert_eq!(renamed.title.as_deref(), Some("My feature"));
+        let cleared = db
+            .rename_worktree(&worktree.id, Some("   "))
+            .expect("rename should succeed");
+        assert!(cleared.title.is_none());
+    }
+
+    #[test]
+    fn worktree_hidden_flag_round_trips() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|w| w.is_main)
+            .expect("main worktree should exist");
+        let worktree = db
+            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .expect("worktree should insert");
+        assert!(!worktree.hidden);
+        let hidden = db
+            .set_worktree_hidden(&worktree.id, true)
+            .expect("hide should succeed");
+        assert!(hidden.hidden);
+        let shown = db
+            .set_worktree_hidden(&worktree.id, false)
+            .expect("show should succeed");
+        assert!(!shown.hidden);
+    }
+
+    #[test]
+    fn delete_worktree_cascades_to_tabs_and_children() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|w| w.is_main)
+            .expect("main worktree should exist");
+        let parent = db
+            .insert_worktree(&project.id, &main.id, "parent", None, "/tmp/repo/parent")
+            .expect("parent worktree should insert");
+        let child = db
+            .insert_worktree(&project.id, &parent.id, "child", None, "/tmp/repo/child")
+            .expect("child worktree should insert");
+        let tab = db
+            .create_tab(&project.id, &parent.id, TabKind::Terminal, None, None)
+            .expect("tab should insert");
+        db.delete_worktree(&parent.id)
+            .expect("delete should succeed");
+        let remaining = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list");
+        // Only the project's main worktree should remain.
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].is_main);
+        assert!(!remaining.iter().any(|w| w.id == child.id));
+        assert!(db
+            .list_tabs(&project.id)
+            .expect("tabs should list")
+            .is_empty());
+        let _ = tab;
     }
 }

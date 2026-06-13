@@ -104,6 +104,65 @@ pub fn create_worktree(parent_path: &Path, branch: &str, path: &Path) -> AppResu
     }
 }
 
+/// True when the worktree has uncommitted changes, staged changes, or untracked
+/// files. `git status --porcelain` is the canonical source — we use the
+/// per-worktree `-C` form so this can be called from anywhere on disk.
+pub fn worktree_is_dirty(path: &Path) -> bool {
+    // `git status --porcelain` is slow on large repos. `--porcelain` with `-uno`
+    // would miss untracked files; we want a *strict* signal here, so we accept
+    // the cost. The check only runs when the user opens the destructive dialog.
+    let output = Command::new("git")
+        .args([
+            "-C",
+            path_string(path).as_str(),
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => !out.stdout.is_empty(),
+        // If git can't even open the worktree, surface it as dirty so the
+        // destructive action is gated behind an explicit "I understand" click.
+        _ => true,
+    }
+}
+
+/// Removes a worktree from disk via `git worktree remove`. Refuses to be lossy
+/// unless `force` is true; in that case `--force` is appended so partially-dirty
+/// worktrees can still be torn down (the UI is expected to warn first).
+pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> AppResult<()> {
+    let mut args: Vec<String> = vec![
+        "-C".to_string(),
+        path_string(repo_path),
+        "worktree".to_string(),
+        "remove".to_string(),
+    ];
+    if force {
+        args.push("--force".to_string());
+    }
+    args.push(path_string(worktree_path));
+    let output = Command::new("git").args(&args).output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(AppError::Git(stderr(output.stderr)))
+    }
+}
+
+/// Hard-deletes a branch ref via `git branch -D <name>`. Must be invoked from
+/// inside a worktree that does *not* currently have `branch` checked out.
+pub fn delete_branch(path: &Path, branch: &str) -> AppResult<()> {
+    let output = Command::new("git")
+        .args(["-C", path_string(path).as_str(), "branch", "-D", branch])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(AppError::Git(stderr(output.stderr)))
+    }
+}
+
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -118,7 +177,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{current_branch, ensure_pragma_excluded, ensure_repo};
+    use super::{current_branch, ensure_pragma_excluded, ensure_repo, worktree_is_dirty};
 
     #[test]
     fn validates_repo_and_branch() {
@@ -151,5 +210,28 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn clean_worktree_is_not_dirty() {
+        let dir = tempdir().expect("tempdir");
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        assert!(!worktree_is_dirty(dir.path()));
+    }
+
+    #[test]
+    fn untracked_files_mark_worktree_dirty() {
+        let dir = tempdir().expect("tempdir");
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        std::fs::write(dir.path().join("scratch.txt"), "todo").expect("write");
+        assert!(worktree_is_dirty(dir.path()));
     }
 }

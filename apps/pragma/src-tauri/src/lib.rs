@@ -105,6 +105,15 @@ async fn pty_kill(pty: tauri::State<'_, PtyClient>, session_id: String) -> AppRe
     run_pty_task(move || client.kill(session_id)).await
 }
 
+/// Asks the daemon to terminate every shell whose initial cwd is `path`.
+/// Used as a safety net when a worktree is deleted from disk so the user's
+/// running processes don't keep an open handle to a now-removed directory.
+#[tauri::command]
+async fn pty_kill_for_path(pty: tauri::State<'_, PtyClient>, path: String) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.kill_for_cwd(path)).await
+}
+
 async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> AppResult<()> {
     tauri::async_runtime::spawn_blocking(task)
         .await
@@ -189,12 +198,17 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_kill,
+            pty_kill_for_path,
             projects::list_projects,
             projects::add_project,
             projects::clone_project,
             projects::get_projects_directory,
             worktrees::list_worktrees,
             worktrees::create_worktree,
+            worktrees::worktree_status,
+            worktrees::rename_worktree,
+            worktrees::hide_worktree,
+            worktrees::delete_worktree,
             editors::open_worktree,
             project_icon,
             list_tabs,
