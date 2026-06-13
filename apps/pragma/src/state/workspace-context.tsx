@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { Project, ProjectIcon, Tab, Worktree } from "@pragma/constants";
+import type { Project, ProjectIcon, Tab, Worktree, WorktreeStatus } from "@pragma/constants";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { terminalManager } from "@/lib/terminal-manager";
@@ -17,6 +17,7 @@ import {
   browserClose,
   closeTab as closeTabCommand,
   createTab as createTabCommand,
+  deleteWorktree as deleteWorktreeCommand,
   listProjects,
   listTabs,
   listWorktrees,
@@ -24,7 +25,10 @@ import {
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
+  renameWorktree as renameWorktreeCommand,
   setTabUrl as setTabUrlCommand,
+  setWorktreeHidden as setWorktreeHiddenCommand,
+  worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
 
 interface WorkspaceState {
@@ -56,6 +60,8 @@ type WorkspaceAction =
   | { type: "rename-tab"; tabId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
+  | { type: "remove-worktree"; worktreeId: string }
+  | { type: "update-worktree"; worktree: Worktree }
   | { type: "clear-error" };
 
 interface WorkspaceContextValue extends WorkspaceState {
@@ -75,8 +81,20 @@ interface WorkspaceContextValue extends WorkspaceState {
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
+  openWorktreeInEditor: (worktreeId: string, editorId?: string | null) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
+  /** Reports whether a worktree has uncommitted, staged, or untracked changes. */
+  getWorktreeStatus: (worktreeId: string) => Promise<WorktreeStatus>;
+  /** Removes a worktree from disk + SQLite, optionally deletes its branch. */
+  deleteWorktree: (
+    worktreeId: string,
+    options: { deleteBranch: boolean; force: boolean },
+  ) => Promise<void>;
+  /** Updates the optional display title; empty string clears it. */
+  renameWorktree: (worktreeId: string, title: string) => Promise<void>;
+  /** Toggles the hidden flag — the row persists, but the sidebar filters it out. */
+  hideWorktree: (worktreeId: string, hidden: boolean) => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -180,6 +198,49 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       };
     case "set-icon":
       return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
+    case "remove-worktree": {
+      // Filter the row out of every project list and drop tabs owned by it
+      // (SQLite cascades, but our local snapshot still has them). The Tauri
+      // side has already terminated the worktree's PTY sessions by the time
+      // we get here, so we just need to keep the in-memory state in sync.
+      const worktrees: Record<string, Worktree[]> = {};
+      const selectedWorktreeByProject: Record<string, string> = {
+        ...state.selectedWorktreeByProject,
+      };
+      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+        const remaining = projectWorktrees.filter((worktree) => worktree.id !== action.worktreeId);
+        if (remaining.length === projectWorktrees.length) {
+          worktrees[projectId] = projectWorktrees;
+          continue;
+        }
+        worktrees[projectId] = remaining;
+        if (selectedWorktreeByProject[projectId] === action.worktreeId) {
+          const fallback =
+            remaining.find((worktree) => worktree.isMain)?.id ??
+            remaining.find((worktree) => worktree.parentId === null)?.id ??
+            remaining[0]?.id;
+          if (fallback) {
+            selectedWorktreeByProject[projectId] = fallback;
+          } else {
+            delete selectedWorktreeByProject[projectId];
+          }
+        }
+      }
+      const tabs = state.tabs.filter((tab) => tab.worktreeId !== action.worktreeId);
+      return { ...state, worktrees, selectedWorktreeByProject, tabs };
+    }
+    case "update-worktree": {
+      // Patch a single worktree row in-place (rename, hide/show). Cascades to
+      // the visible worktrees and the per-worktree active-tab map is
+      // untouched because ids don't change.
+      const worktrees: Record<string, Worktree[]> = {};
+      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+        worktrees[projectId] = projectWorktrees.map((worktree) =>
+          worktree.id === action.worktree.id ? action.worktree : worktree,
+        );
+      }
+      return { ...state, worktrees };
+    }
     case "clear-error":
       return { ...state, error: null };
   }
@@ -403,6 +464,61 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [selectedWorktree],
   );
 
+  const openWorktreeInEditor = useCallback(
+    async (worktreeId: string, editorId?: string | null) => {
+      // Walk every project's worktree list; the user might right-click a
+      // hidden worktree or one in a sibling project. Cost is trivial.
+      const all = Object.values(state.worktrees).flat();
+      const target = all.find((worktree) => worktree.id === worktreeId);
+      if (!target) {
+        return;
+      }
+      try {
+        await openWorktreeCommand(target.path, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.worktrees],
+  );
+
+  const getWorktreeStatus = useCallback(async (worktreeId: string) => {
+    return worktreeStatusCommand(worktreeId);
+  }, []);
+
+  const deleteWorktree = useCallback(
+    async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      try {
+        await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+        // Optimistically drop the row from local state; the cascade also
+        // removes its tabs and any nested child worktrees from SQLite.
+        dispatch({ type: "remove-worktree", worktreeId });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+        throw cause;
+      }
+    },
+    [],
+  );
+
+  const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
+    try {
+      const updated = await renameWorktreeCommand(worktreeId, title);
+      dispatch({ type: "update-worktree", worktree: updated });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
+  const hideWorktree = useCallback(async (worktreeId: string, hidden: boolean) => {
+    try {
+      const updated = await setWorktreeHiddenCommand(worktreeId, hidden);
+      dispatch({ type: "update-worktree", worktree: updated });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
   const visibleTabs = useMemo(
     () => state.tabs.filter((tab) => tab.worktreeId === selectedWorktreeId),
     [state.tabs, selectedWorktreeId],
@@ -453,8 +569,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,
+      openWorktreeInEditor,
       cycleTab,
       setActiveTab,
+      getWorktreeStatus,
+      deleteWorktree,
+      renameWorktree,
+      hideWorktree,
     }),
     [
       state,
@@ -473,8 +594,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,
+      openWorktreeInEditor,
       cycleTab,
       setActiveTab,
+      getWorktreeStatus,
+      deleteWorktree,
+      renameWorktree,
+      hideWorktree,
     ],
   );
 

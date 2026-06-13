@@ -17,7 +17,11 @@ import {
   browserScreenshot,
   browserSetBounds,
   createTab,
+  deleteWorktree,
   openWorktree,
+  renameWorktree,
+  setWorktreeHidden,
+  worktreeStatus,
 } from "./tauri";
 
 describe("browser IPC wrappers", () => {
@@ -94,6 +98,49 @@ describe("browser IPC wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("open_worktree", {
       path: "/tmp/project",
       editorId: "vscode",
+    });
+  });
+});
+
+describe("worktree IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("worktreeStatus forwards the worktree id", () => {
+    void worktreeStatus("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("worktree_status", { worktreeId: "wt-1" });
+  });
+
+  it("renameWorktree trims and nulls an empty title", () => {
+    void renameWorktree("wt-1", "  New title  ");
+    expect(invokeMock).toHaveBeenCalledWith("rename_worktree", {
+      worktreeId: "wt-1",
+      title: "New title",
+    });
+    invokeMock.mockReset();
+    void renameWorktree("wt-1", "   ");
+    expect(invokeMock).toHaveBeenCalledWith("rename_worktree", {
+      worktreeId: "wt-1",
+      title: null,
+    });
+  });
+
+  it("setWorktreeHidden forwards the boolean", () => {
+    void setWorktreeHidden("wt-1", true);
+    expect(invokeMock).toHaveBeenCalledWith("hide_worktree", {
+      worktreeId: "wt-1",
+      hidden: true,
+    });
+  });
+
+  it("deleteWorktree forwards branch and force flags", () => {
+    void deleteWorktree("wt-1", true, false);
+    expect(invokeMock).toHaveBeenCalledWith("delete_worktree", {
+      worktreeId: "wt-1",
+      deleteBranch: true,
+      force: false,
     });
   });
 });

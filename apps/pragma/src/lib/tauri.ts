@@ -6,6 +6,7 @@ import type {
   Tab,
   TabKind,
   Worktree,
+  WorktreeStatus,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -117,6 +118,35 @@ export function createWorktree(
   title?: string,
 ): Promise<Worktree> {
   return invoke<Worktree>("create_worktree", { projectId, parentWorktreeId, branch, title });
+}
+
+/** Reports whether a worktree has uncommitted, staged, or untracked changes. */
+export function worktreeStatus(worktreeId: string): Promise<WorktreeStatus> {
+  return invoke<WorktreeStatus>("worktree_status", { worktreeId });
+}
+
+/** Updates the optional display title for a worktree; an empty string clears it. */
+export function renameWorktree(worktreeId: string, title: string): Promise<Worktree> {
+  return invoke<Worktree>("rename_worktree", { worktreeId, title: title.trim() || null });
+}
+
+/** Toggles the hidden flag on a worktree — the row persists, but the sidebar filters it out. */
+export function setWorktreeHidden(worktreeId: string, hidden: boolean): Promise<Worktree> {
+  return invoke<Worktree>("hide_worktree", { worktreeId, hidden });
+}
+
+/**
+ * Removes a worktree from disk, optionally deletes its branch, terminates every
+ * running shell in it, and deletes the row from SQLite. `force` lets the call
+ * proceed even when the working copy is dirty (the UI is expected to have
+ * surfaced a warning first).
+ */
+export function deleteWorktree(
+  worktreeId: string,
+  deleteBranch: boolean,
+  force: boolean,
+): Promise<void> {
+  return invoke("delete_worktree", { worktreeId, deleteBranch, force });
 }
 
 /** Finds a favicon-like project icon. */

@@ -126,9 +126,20 @@ than no guide.
   size Nerd Font's block / box-drawing glyphs are designed against — at 13px
   macOS WebKit rounds the cell to 15px and the half-block glyphs end up with a
   1px anti-aliased seam running through the middle of every character (visible
-  strikethrough across Claude Code / opencode ASCII art). 14px snaps the cell
-  to a cleaner integer pixel grid. See `TERMINAL_FONT_FAMILY`,
+  strikethrough across Claude Code / opencode ASCII art). See `TERMINAL_FONT_FAMILY`,
   `TERMINAL_FONT_SIZE`, `TERMINAL_LINE_HEIGHT` in `terminal-manager.ts`.
+- **Toasts** use `sonner` (`@/components/ui/sonner.tsx` + a `<Toaster />`
+  mounted once in `main.tsx`). Trigger via `toast.success("Copied worktree
+path")` from inside the action handler — never from inside the reducer.
+  Clipboard reads/writes go through `navigator.clipboard` with a try/catch
+  that surfaces the error via `toast.error(...)`.
+- **Worktree lifecycle.** `Worktree` rows carry a `hidden` boolean
+  (persisted in SQLite via the v3 migration). Hidden rows are filtered out of
+  the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })`
+  and surfaced again through a "Show N hidden" toggle at the bottom of the
+  list. When the user hides the currently-selected worktree, the reducer
+  falls back to the main worktree (or the first remaining root) so the
+  workspace never points at a hidden id.
 
 ## Common commands
 
