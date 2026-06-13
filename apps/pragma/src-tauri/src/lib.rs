@@ -1,6 +1,7 @@
 // Tauri command extraction requires owned IPC arguments and `State<T>` values.
 #![allow(clippy::needless_pass_by_value)]
 
+mod browser;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
 mod dev_bridge;
@@ -12,7 +13,7 @@ mod projects;
 mod pty;
 mod worktrees;
 
-use pragma_constants::{AppInfo, KeybindingsConfig, ProjectIcon, Tab, CONSTANTS};
+use pragma_constants::{AppInfo, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS};
 use tauri::ipc::Channel;
 use tauri::Manager;
 
@@ -124,9 +125,11 @@ fn create_tab(
     db: tauri::State<'_, Db>,
     project_id: String,
     worktree_id: String,
+    kind: TabKind,
     title: Option<String>,
+    url: Option<String>,
 ) -> AppResult<Tab> {
-    db.create_tab(&project_id, &worktree_id, title)
+    db.create_tab(&project_id, &worktree_id, kind, title, url)
 }
 
 #[tauri::command]
@@ -137,6 +140,12 @@ fn close_tab(db: tauri::State<'_, Db>, tab_id: String) -> AppResult<()> {
 #[tauri::command]
 fn rename_tab(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppResult<Tab> {
     db.rename_tab(&tab_id, &title)
+}
+
+/// Persists the current page URL for a browser tab (session restore).
+#[tauri::command]
+fn set_tab_url(db: tauri::State<'_, Db>, tab_id: String, url: String) -> AppResult<Tab> {
+    db.set_tab_url(&tab_id, &url)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -190,6 +199,20 @@ pub fn run() {
             create_tab,
             close_tab,
             rename_tab,
+            set_tab_url,
+            browser::browser_create,
+            browser::browser_frame_height,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_devtools,
+            browser::browser_clear_data,
+            browser::browser_open_external,
+            browser::browser_close,
+            browser::browser_screenshot,
             dev_bridge::__dev_bridge_result
         ])
         .run(tauri::generate_context!())

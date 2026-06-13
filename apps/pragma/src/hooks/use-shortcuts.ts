@@ -11,7 +11,12 @@ interface UseShortcutsOptions {
   onPreviousTab: () => void;
   onCloseTopTab: () => void;
   onNewTerminalTab: () => void;
+  onNewBrowserTab: () => void;
   onClearTerminal: () => void;
+  /** Browser-only actions; the handler decides whether to act on the active tab. */
+  onBrowserReload: () => void;
+  onBrowserDevtools: () => void;
+  onBrowserCopyUrl: () => void;
 }
 
 interface ShortcutState {
@@ -74,9 +79,25 @@ export function useShortcuts(options: UseShortcutsOptions): void {
           event.preventDefault();
           current.onNewTerminalTab();
           break;
+        case "newBrowserTab":
+          event.preventDefault();
+          current.onNewBrowserTab();
+          break;
         case "clearTerminal":
           event.preventDefault();
           current.onClearTerminal();
+          break;
+        case "browserReload":
+          event.preventDefault();
+          current.onBrowserReload();
+          break;
+        case "browserDevtools":
+          event.preventDefault();
+          current.onBrowserDevtools();
+          break;
+        case "browserCopyUrl":
+          event.preventDefault();
+          current.onBrowserCopyUrl();
           break;
         default: {
           const workspaceIndex = workspaceIndexForAction(action);

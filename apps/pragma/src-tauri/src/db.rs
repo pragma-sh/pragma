@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use pragma_constants::{Project, Tab, Worktree};
+use pragma_constants::{Project, Tab, TabKind, Worktree};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
@@ -28,7 +28,8 @@ impl Db {
     }
 
     fn migrate(&self) -> AppResult<()> {
-        self.0.lock()?.execute_batch(
+        let conn = self.0.lock()?;
+        conn.execute_batch(
             "PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS projects (
                id          TEXT PRIMARY KEY,
@@ -60,9 +61,20 @@ impl Db {
                order_index  INTEGER NOT NULL,
                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
              );
-             CREATE INDEX IF NOT EXISTS idx_tabs_project ON tabs(project_id);
-             PRAGMA user_version = 1;",
+             CREATE INDEX IF NOT EXISTS idx_tabs_project ON tabs(project_id);",
         )?;
+
+        // Versioned migrations. v2 adds browser-tab columns to `tabs`. Running the
+        // ALTERs only when `user_version < 2` keeps them out of the idempotent
+        // CREATE block above, so fresh and upgraded DBs converge on one schema.
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version < 2 {
+            conn.execute_batch(
+                "ALTER TABLE tabs ADD COLUMN kind TEXT NOT NULL DEFAULT 'terminal';
+                 ALTER TABLE tabs ADD COLUMN url TEXT;
+                 PRAGMA user_version = 2;",
+            )?;
+        }
         Ok(())
     }
 
@@ -176,7 +188,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, title, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -187,7 +199,9 @@ impl Db {
         &self,
         project_id: &str,
         worktree_id: &str,
+        kind: TabKind,
         title: Option<String>,
+        url: Option<String>,
     ) -> AppResult<Tab> {
         let id = Uuid::new_v4().to_string();
         {
@@ -198,9 +212,17 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, title, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, project_id, worktree_id, title, order_index],
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, order_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    id,
+                    project_id,
+                    worktree_id,
+                    kind_as_str(kind),
+                    title,
+                    url,
+                    order_index
+                ],
             )?;
         }
         self.tab(&id)
@@ -210,6 +232,15 @@ impl Db {
         self.0.lock()?.execute(
             "UPDATE tabs SET title = ?1 WHERE id = ?2",
             params![title, tab_id],
+        )?;
+        self.tab(tab_id)
+    }
+
+    /// Persists the current page URL for a browser tab so the session restores.
+    pub fn set_tab_url(&self, tab_id: &str, url: &str) -> AppResult<Tab> {
+        self.0.lock()?.execute(
+            "UPDATE tabs SET url = ?1 WHERE id = ?2",
+            params![url, tab_id],
         )?;
         self.tab(tab_id)
     }
@@ -225,11 +256,27 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, title, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
             .map_err(AppError::from)
+    }
+}
+
+/// Serializes a tab kind to the lowercase string stored in the `tabs.kind` column.
+fn kind_as_str(kind: TabKind) -> &'static str {
+    match kind {
+        TabKind::Terminal => "terminal",
+        TabKind::Browser => "browser",
+    }
+}
+
+/// Parses the `tabs.kind` column, defaulting unknown values to a terminal.
+fn kind_from_str(value: &str) -> TabKind {
+    match value {
+        "browser" => TabKind::Browser,
+        _ => TabKind::Terminal,
     }
 }
 
@@ -261,15 +308,18 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         id: row.get(0)?,
         project_id: row.get(1)?,
         worktree_id: row.get(2)?,
-        title: row.get(3)?,
-        order_index: row.get::<_, i64>(4)?,
-        created_at: row.get(5)?,
+        kind: kind_from_str(&row.get::<_, String>(3)?),
+        title: row.get(4)?,
+        url: row.get(5)?,
+        order_index: row.get::<_, i64>(6)?,
+        created_at: row.get(7)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::Db;
+    use pragma_constants::TabKind;
 
     #[test]
     fn migrates_and_cruds_projects_worktrees_and_tabs() {
@@ -286,8 +336,16 @@ mod tests {
             .expect("worktrees should list");
         assert_eq!(worktrees.len(), 1);
         let tab = db
-            .create_tab(&project.id, &worktrees[0].id, Some("main".to_string()))
+            .create_tab(
+                &project.id,
+                &worktrees[0].id,
+                TabKind::Terminal,
+                Some("main".to_string()),
+                None,
+            )
             .expect("tab should insert");
+        assert_eq!(tab.kind, TabKind::Terminal);
+        assert_eq!(tab.url, None);
         assert_eq!(
             db.list_tabs(&project.id).expect("tabs should list").len(),
             1
@@ -297,5 +355,41 @@ mod tests {
             .list_tabs(&project.id)
             .expect("tabs should list")
             .is_empty());
+    }
+
+    #[test]
+    fn browser_tabs_round_trip_kind_and_url() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktrees = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list");
+        let tab = db
+            .create_tab(
+                &project.id,
+                &worktrees[0].id,
+                TabKind::Browser,
+                None,
+                Some("https://example.com".to_string()),
+            )
+            .expect("browser tab should insert");
+        assert_eq!(tab.kind, TabKind::Browser);
+        assert_eq!(tab.url.as_deref(), Some("https://example.com"));
+
+        let updated = db
+            .set_tab_url(&tab.id, "https://example.org")
+            .expect("url should update");
+        assert_eq!(updated.url.as_deref(), Some("https://example.org"));
+        assert_eq!(updated.kind, TabKind::Browser);
+
+        let listed = db.list_tabs(&project.id).expect("tabs should list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].kind, TabKind::Browser);
     }
 }

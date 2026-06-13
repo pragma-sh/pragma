@@ -29,9 +29,25 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "t" },
         linux: { modifiers: ["ctrl"], key: "t" },
       },
+      newBrowserTab: {
+        mac: { modifiers: ["cmd"], key: "b" },
+        linux: { modifiers: ["ctrl"], key: "b" },
+      },
       clearTerminal: {
         mac: { modifiers: ["cmd"], key: "k" },
         linux: { modifiers: ["ctrl"], key: "k" },
+      },
+      browserReload: {
+        mac: { modifiers: ["cmd"], key: "r" },
+        linux: { modifiers: ["ctrl"], key: "r" },
+      },
+      browserDevtools: {
+        mac: { modifiers: ["cmd", "shift"], key: "i" },
+        linux: { modifiers: ["ctrl", "shift"], key: "i" },
+      },
+      browserCopyUrl: {
+        mac: { modifiers: ["cmd", "shift"], key: "c" },
+        linux: { modifiers: ["ctrl", "shift"], key: "c" },
       },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
@@ -130,6 +146,16 @@ describe("actionForEvent", () => {
   it("resolves mac clear terminal", () => {
     const event = new KeyboardEvent("keydown", { metaKey: true, key: "k" });
     expect(actionForEvent(event, config(), "mac")).toBe("clearTerminal");
+  });
+
+  it("resolves mac new browser tab", () => {
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "b" });
+    expect(actionForEvent(event, config(), "mac")).toBe("newBrowserTab");
+  });
+
+  it("resolves mac browser devtools", () => {
+    const event = new KeyboardEvent("keydown", { metaKey: true, shiftKey: true, key: "i" });
+    expect(actionForEvent(event, config(), "mac")).toBe("browserDevtools");
   });
 
   it("resolves mac workspace switch", () => {

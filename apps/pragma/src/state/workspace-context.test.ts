@@ -26,7 +26,9 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     id,
     projectId: "project",
     worktreeId,
+    kind: "terminal",
     title: null,
+    url: null,
     orderIndex: 0,
     createdAt: "now",
   };

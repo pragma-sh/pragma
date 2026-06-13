@@ -9,6 +9,7 @@ export type {
   Project,
   Worktree,
   Tab,
+  TabKind,
   ProjectIcon,
   KeybindingChord,
   PlatformChord,

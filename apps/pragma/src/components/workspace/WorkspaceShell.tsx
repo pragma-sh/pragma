@@ -5,11 +5,14 @@ import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { TerminalHost } from "@/components/terminal/TerminalHost";
 import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { useShortcuts } from "@/hooks/use-shortcuts";
+import { browserDevtools, browserReload } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
 export function WorkspaceShell() {
   const workspace = useWorkspace();
+  const activeBrowserTabId =
+    workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
 
   useShortcuts({
     projectCount: workspace.projects.length,
@@ -18,13 +21,30 @@ export function WorkspaceShell() {
     onPreviousTab: () => workspace.cycleTab(-1),
     onCloseTopTab: () => {
       if (workspace.activeTabId) {
-        void workspace.closeTerminalTab(workspace.activeTabId);
+        void workspace.closeTab(workspace.activeTabId);
       }
     },
     onNewTerminalTab: () => void workspace.createTerminalTab(),
+    onNewBrowserTab: () => void workspace.createBrowserTab(),
     onClearTerminal: () => {
       if (workspace.activeTabId) {
         terminalManager.clear(workspace.activeTabId);
+      }
+    },
+    // Browser-only: no-op (and harmless preventDefault upstream) on terminal tabs.
+    onBrowserReload: () => {
+      if (activeBrowserTabId) {
+        void browserReload(activeBrowserTabId);
+      }
+    },
+    onBrowserDevtools: () => {
+      if (activeBrowserTabId) {
+        void browserDevtools(activeBrowserTabId);
+      }
+    },
+    onBrowserCopyUrl: () => {
+      if (workspace.activeTab?.kind === "browser" && workspace.activeTab.url) {
+        void navigator.clipboard.writeText(workspace.activeTab.url);
       }
     },
   });

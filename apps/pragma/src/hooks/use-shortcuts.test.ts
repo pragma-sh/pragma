@@ -33,9 +33,25 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "t" },
         linux: { modifiers: ["ctrl"], key: "t" },
       },
+      newBrowserTab: {
+        mac: { modifiers: ["cmd"], key: "b" },
+        linux: { modifiers: ["ctrl"], key: "b" },
+      },
       clearTerminal: {
         mac: { modifiers: ["cmd"], key: "k" },
         linux: { modifiers: ["ctrl"], key: "k" },
+      },
+      browserReload: {
+        mac: { modifiers: ["cmd"], key: "r" },
+        linux: { modifiers: ["ctrl"], key: "r" },
+      },
+      browserDevtools: {
+        mac: { modifiers: ["cmd", "shift"], key: "i" },
+        linux: { modifiers: ["ctrl", "shift"], key: "i" },
+      },
+      browserCopyUrl: {
+        mac: { modifiers: ["cmd", "shift"], key: "c" },
+        linux: { modifiers: ["ctrl", "shift"], key: "c" },
       },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
@@ -83,28 +99,38 @@ function dispatchKeydown(eventInit: KeyboardEventInit): KeyboardEvent {
   return event;
 }
 
+/** Full set of shortcut handlers, with `overrides` for the ones under test. */
+function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
+  return {
+    projectCount: 1,
+    onProject: vi.fn(),
+    onNextTab: vi.fn(),
+    onPreviousTab: vi.fn(),
+    onCloseTopTab: vi.fn(),
+    onNewTerminalTab: vi.fn(),
+    onNewBrowserTab: vi.fn(),
+    onClearTerminal: vi.fn(),
+    onBrowserReload: vi.fn(),
+    onBrowserDevtools: vi.fn(),
+    onBrowserCopyUrl: vi.fn(),
+    ...overrides,
+  };
+}
+
+async function flushLoad() {
+  await vi.waitFor(() => expect(loadKeybindingsMock).toHaveBeenCalled());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
 describe("useShortcuts", () => {
   it("fires onClearTerminal for cmd+k on mac", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
     const onClearTerminal = vi.fn();
 
-    renderHook(() =>
-      useShortcuts({
-        projectCount: 1,
-        onProject: vi.fn(),
-        onNextTab: vi.fn(),
-        onPreviousTab: vi.fn(),
-        onCloseTopTab: vi.fn(),
-        onNewTerminalTab: vi.fn(),
-        onClearTerminal,
-      }),
-    );
+    renderHook(() => useShortcuts(options({ onClearTerminal })));
 
-    // Wait for the async keybindings load and the resulting state update.
-    await vi.waitFor(() => expect(loadKeybindingsMock).toHaveBeenCalled());
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-
+    await flushLoad();
     const event = dispatchKeydown({ metaKey: true, key: "k" });
 
     expect(onClearTerminal).toHaveBeenCalledTimes(1);
@@ -116,23 +142,52 @@ describe("useShortcuts", () => {
     loadKeybindingsMock.mockResolvedValue(config());
     const onClearTerminal = vi.fn();
 
-    renderHook(() =>
-      useShortcuts({
-        projectCount: 1,
-        onProject: vi.fn(),
-        onNextTab: vi.fn(),
-        onPreviousTab: vi.fn(),
-        onCloseTopTab: vi.fn(),
-        onNewTerminalTab: vi.fn(),
-        onClearTerminal,
-      }),
-    );
+    renderHook(() => useShortcuts(options({ onClearTerminal })));
 
-    await vi.waitFor(() => expect(loadKeybindingsMock).toHaveBeenCalled());
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-
+    await flushLoad();
     dispatchKeydown({ ctrlKey: true, key: "k" });
 
     expect(onClearTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onNewBrowserTab for cmd+b on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onNewBrowserTab = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onNewBrowserTab })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "b" });
+
+    expect(onNewBrowserTab).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onBrowserReload for cmd+r and prevents app reload", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onBrowserReload = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onBrowserReload })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "r" });
+
+    expect(onBrowserReload).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onBrowserDevtools for cmd+shift+i on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onBrowserDevtools = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onBrowserDevtools })));
+
+    await flushLoad();
+    dispatchKeydown({ metaKey: true, shiftKey: true, key: "i" });
+
+    expect(onBrowserDevtools).toHaveBeenCalledTimes(1);
   });
 });

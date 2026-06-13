@@ -11,15 +11,19 @@ import {
 
 import type { Project, ProjectIcon, Tab, Worktree } from "@pragma/constants";
 
+import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
+  browserClose,
   closeTab as closeTabCommand,
   createTab as createTabCommand,
   listProjects,
   listTabs,
   listWorktrees,
+  onBrowserMeta,
   projectIcon,
   renameTab as renameTabCommand,
+  setTabUrl as setTabUrlCommand,
 } from "@/lib/tauri";
 
 interface WorkspaceState {
@@ -49,6 +53,7 @@ type WorkspaceAction =
   | { type: "add-tab"; tab: Tab }
   | { type: "remove-tab"; tabId: string }
   | { type: "rename-tab"; tabId: string; title: string }
+  | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
   | { type: "clear-error" };
 
@@ -65,7 +70,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null) => void;
   createTerminalTab: (worktreeId?: string) => Promise<void>;
-  closeTerminalTab: (tabId: string) => Promise<void>;
+  createBrowserTab: (worktreeId?: string) => Promise<void>;
+  closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
@@ -163,6 +169,13 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           tab.id === action.tabId ? { ...tab, title: action.title } : tab,
         ),
       };
+    case "set-tab-url":
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId ? { ...tab, url: action.url } : tab,
+        ),
+      };
     case "set-icon":
       return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
     case "clear-error":
@@ -234,7 +247,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        const tab = await createTabCommand(projectId, targetWorktreeId, "Shell");
+        const tab = await createTabCommand(projectId, targetWorktreeId, "terminal", "Shell");
         dispatch({ type: "add-tab", tab });
       } catch (cause) {
         dispatch({ type: "load-error", error: messageFor(cause) });
@@ -243,8 +256,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.selectedProjectId, state.selectedWorktreeByProject],
   );
 
-  const closeTerminalTab = useCallback(async (tabId: string) => {
+  const createBrowserTab = useCallback(
+    async (worktreeId?: string) => {
+      const projectId = state.selectedProjectId;
+      const targetWorktreeId =
+        worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
+      if (!projectId || !targetWorktreeId) {
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          targetWorktreeId,
+          "browser",
+          "New tab",
+          BROWSER_START_URL,
+        );
+        dispatch({ type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.selectedProjectId, state.selectedWorktreeByProject],
+  );
+
+  // Tear down both backends regardless of kind: each is a no-op for the other's
+  // tabs, so we don't need to look up the tab's kind on the close path.
+  const closeTab = useCallback(async (tabId: string) => {
     terminalManager.dispose(tabId);
+    void browserClose(tabId);
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });
@@ -315,6 +355,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [state.icons, state.projects]);
 
+  // Browser webviews report their page title/URL natively; mirror those into tab
+  // state (so the tab strip + address bar update) and persist them for restore.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onBrowserMeta((meta) => {
+      if (meta.title !== undefined) {
+        dispatch({ type: "rename-tab", tabId: meta.tabId, title: meta.title });
+        void renameTabCommand(meta.tabId, meta.title).catch(() => undefined);
+      }
+      if (meta.url !== undefined) {
+        dispatch({ type: "set-tab-url", tabId: meta.tabId, url: meta.url });
+        void setTabUrlCommand(meta.tabId, meta.url).catch(() => undefined);
+      }
+    })
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const activeProject =
     state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
   const projectWorktrees = state.selectedProjectId
@@ -372,7 +433,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectProject,
       selectWorktree,
       createTerminalTab,
-      closeTerminalTab,
+      createBrowserTab,
+      closeTab,
       renameTerminalTab,
       cycleTab,
       setActiveTab,
@@ -390,7 +452,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectProject,
       selectWorktree,
       createTerminalTab,
-      closeTerminalTab,
+      createBrowserTab,
+      closeTab,
       renameTerminalTab,
       cycleTab,
       setActiveTab,

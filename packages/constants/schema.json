@@ -78,16 +78,36 @@
         "createdAt": { "type": "string" }
       }
     },
+    "TabKind": {
+      "title": "TabKind",
+      "description": "Discriminates what a tab hosts: a shell terminal or an embedded browser.",
+      "type": "string",
+      "enum": ["terminal", "browser"]
+    },
     "Tab": {
       "title": "Tab",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "projectId", "worktreeId", "title", "orderIndex", "createdAt"],
+      "required": [
+        "id",
+        "projectId",
+        "worktreeId",
+        "kind",
+        "title",
+        "url",
+        "orderIndex",
+        "createdAt"
+      ],
       "properties": {
         "id": { "type": "string" },
         "projectId": { "type": "string" },
         "worktreeId": { "type": "string" },
+        "kind": { "$ref": "#/definitions/TabKind" },
         "title": { "type": ["string", "null"] },
+        "url": {
+          "type": ["string", "null"],
+          "description": "The current page URL for browser tabs; null for terminal tabs."
+        },
         "orderIndex": { "type": "integer" },
         "createdAt": { "type": "string" }
       }
@@ -134,7 +154,11 @@
         "previousTab",
         "closeTopTab",
         "newTerminalTab",
+        "newBrowserTab",
         "clearTerminal",
+        "browserReload",
+        "browserDevtools",
+        "browserCopyUrl",
         "switchToWorkspace1",
         "switchToWorkspace2",
         "switchToWorkspace3",
@@ -150,7 +174,11 @@
         "previousTab": { "$ref": "#/definitions/PlatformChord" },
         "closeTopTab": { "$ref": "#/definitions/PlatformChord" },
         "newTerminalTab": { "$ref": "#/definitions/PlatformChord" },
+        "newBrowserTab": { "$ref": "#/definitions/PlatformChord" },
         "clearTerminal": { "$ref": "#/definitions/PlatformChord" },
+        "browserReload": { "$ref": "#/definitions/PlatformChord" },
+        "browserDevtools": { "$ref": "#/definitions/PlatformChord" },
+        "browserCopyUrl": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace1": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace2": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace3": { "$ref": "#/definitions/PlatformChord" },
