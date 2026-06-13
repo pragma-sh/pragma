@@ -61,6 +61,7 @@ describe("useProjectCycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
+    vi.clearAllTimers();
     mockWorkspace.projects = [project("a"), project("b"), project("c")];
     mockWorkspace.selectedProjectId = "b";
     selectProjectMock.mockClear();
@@ -94,13 +95,72 @@ describe("useProjectCycle", () => {
     expect(selectProjectMock).not.toHaveBeenCalled();
   });
 
-  it("respects the cooldown between switches", () => {
+  it("switches only once per continuous wheel gesture", () => {
+    const { result } = renderHook(() => useProjectCycle());
+
+    result.current.onWheel(wheelEvent(50));
+    result.current.onWheel(wheelEvent(50));
+    result.current.onWheel(wheelEvent(50));
+
+    expect(selectProjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a single flick's decaying momentum (one swipe, one project)", () => {
+    const { result } = renderHook(() => useProjectCycle());
+
+    // A flick: crosses the threshold, peaks, then momentum decays — all within
+    // the quiet window, so it stays one gesture.
+    result.current.onWheel(wheelEvent(50)); // crosses threshold -> switch
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(90)); // peak
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(70)); // decaying
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(40));
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(15));
+
+    expect(selectProjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a new gesture once the wheel goes quiet", () => {
     const { result } = renderHook(() => useProjectCycle());
 
     result.current.onWheel(wheelEvent(100));
+    // Quiet longer than the gesture window: the gesture ends.
+    vi.advanceTimersByTime(200);
     result.current.onWheel(wheelEvent(100));
 
-    expect(selectProjectMock).toHaveBeenCalledTimes(1);
+    expect(selectProjectMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("detects a separate swipe once momentum has decayed, regardless of strength", () => {
+    const { result } = renderHook(() => useProjectCycle());
+
+    // First flick: crosses threshold, peaks, then momentum decays.
+    result.current.onWheel(wheelEvent(50)); // switch 1
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(90)); // peak
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(40)); // decayed below 60% of peak
+    vi.advanceTimersByTime(16);
+    result.current.onWheel(wheelEvent(15)); // momentum nearly gone
+    vi.advanceTimersByTime(16);
+    // A new push rises above the decayed momentum (and stays below 60% of the old
+    // peak) — a separate swipe even though no quiet gap elapsed.
+    result.current.onWheel(wheelEvent(50)); // switch 2
+
+    expect(selectProjectMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reverses immediately on a direction change within a gesture", () => {
+    const { result } = renderHook(() => useProjectCycle());
+
+    result.current.onWheel(wheelEvent(100)); // -> next
+    result.current.onWheel(wheelEvent(-100)); // reverse -> previous, no quiet gap
+
+    expect(selectProjectMock).toHaveBeenCalledTimes(2);
+    expect(selectProjectMock).toHaveBeenLastCalledWith("a");
   });
 
   it("switches to the next project on a left swipe", () => {
@@ -126,6 +186,17 @@ describe("useProjectCycle", () => {
 
     result.current.onTouchStart(touchEvent(0));
     result.current.onTouchEnd(touchEndEvent(30));
+
+    expect(selectProjectMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores multi-touch gestures", () => {
+    const { result } = renderHook(() => useProjectCycle());
+
+    result.current.onTouchStart({
+      touches: [{ clientX: 100 }, { clientX: 110 }],
+    } as unknown as React.TouchEvent);
+    result.current.onTouchEnd(touchEndEvent(20));
 
     expect(selectProjectMock).not.toHaveBeenCalled();
   });

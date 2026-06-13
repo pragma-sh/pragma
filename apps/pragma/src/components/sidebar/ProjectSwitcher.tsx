@@ -6,13 +6,17 @@ export function ProjectSwitcher() {
   const workspace = useWorkspace();
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Project switcher">
+    <div className="flex justify-center gap-2 overflow-x-auto pb-1" aria-label="Project switcher">
       {workspace.projects.map((project, index) => {
         const icon = workspace.icons[project.id];
         const active = project.id === workspace.selectedProjectId;
         return (
           <Button
-            className={cn("size-9 rounded-xl p-0", active && "ring-2 ring-ring")}
+            className={cn(
+              "size-9 rounded-xl p-0",
+              active &&
+                "border-primary ring-2 ring-ring focus-visible:border-primary focus-visible:ring-0 focus-visible:ring-offset-0",
+            )}
             key={project.id}
             title={project.name}
             variant={active ? "default" : "outline"}
