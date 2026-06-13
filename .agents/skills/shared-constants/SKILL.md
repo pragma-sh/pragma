@@ -15,8 +15,8 @@ parses `values.json` at startup and panics if it drifts from the schema — inte
 1. Edit `packages/constants/schema.json` — the shape. Give new object definitions a
    `title` (it becomes the generated type name) and set `additionalProperties: false`.
 2. Edit `packages/constants/values.json` — the value. It must satisfy the schema.
-3. Run `bun run generate` (regenerates TS types into `src/generated/`, git-ignored;
-   Rust regenerates on next `cargo build`).
+3. Run `bun run generate` (regenerates TS types into `src/generated/`, including
+   unreferenced definitions; Rust regenerates on next `cargo build`).
 4. Consume it:
    - **TS:** `import { constants } from "@pragma/constants"` → `constants.app.name`
    - **Rust:** `pragma_constants::CONSTANTS.app.name`

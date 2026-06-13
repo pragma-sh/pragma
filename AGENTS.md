@@ -72,17 +72,25 @@ than no guide.
 ├── apps/
 │   └── pragma/                  # The Tauri desktop app
 │       ├── src/                 # React frontend (TypeScript)
+│       │   ├── components/      # Workspace shell, sidebar, tab strip, dialogs, terminal host
 │       │   ├── components/ui/   # shadcn/ui primitives (generated; avoid hand-edits)
 │       │   ├── lib/             # Reusable, framework-agnostic helpers
 │       │   │   ├── tauri.ts     # Typed bridge to Rust commands — the ONLY place invoke() is called
+│       │   │   ├── terminal-manager.ts # Non-React xterm registry; terminal output bypasses React state
 │       │   │   └── utils.ts     # cn() + small utilities
+│       │   ├── state/           # Workspace context/reducer for projects/worktrees/tabs only
 │       │   ├── test/setup.ts    # Vitest setup
 │       │   ├── App.tsx
 │       │   └── main.tsx
 │       └── src-tauri/           # Rust backend
-│           ├── src/lib.rs       # Commands + app wiring (#[tauri::command])
+│           ├── src/lib.rs       # App wiring, managed state, plugins, command registration
+│           ├── src/db.rs        # SQLite migrations + typed CRUD
+│           ├── src/pty.rs       # Detached daemon client + PTY command proxying
+│           ├── src/git.rs       # Git CLI helpers
 │           ├── src/main.rs      # Thin entrypoint
 │           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
+├── crates/
+│   └── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
 ├── packages/
 │   └── constants/               # Dual TS + Rust package — shared source of truth
 │       ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
@@ -108,6 +116,19 @@ than no guide.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
+- PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
+  the Unix socket and must not own PTYs.
+- Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
+  React state or the workspace reducer.
+- **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,
+  `JetBrainsMono Nerd Font`, `JetBrains Mono`, `SF Mono`, Menlo, Monaco,
+  `ui-monospace`, `monospace`) at **fontSize 14 / lineHeight 1.0**. 14px is the
+  size Nerd Font's block / box-drawing glyphs are designed against — at 13px
+  macOS WebKit rounds the cell to 15px and the half-block glyphs end up with a
+  1px anti-aliased seam running through the middle of every character (visible
+  strikethrough across Claude Code / opencode ASCII art). 14px snaps the cell
+  to a cleaner integer pixel grid. See `TERMINAL_FONT_FAMILY`,
+  `TERMINAL_FONT_SIZE`, `TERMINAL_LINE_HEIGHT` in `terminal-manager.ts`.
 
 ## Common commands
 
@@ -133,6 +154,7 @@ bun run rust:test          # cargo test --workspace
 bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
+cargo run -p pragma-daemon # Run the detached PTY daemon directly for debugging
 ```
 
 ## Code standards (consistent across TypeScript & Rust)
@@ -179,7 +201,8 @@ To add or change a shared value:
 
 1. Edit `packages/constants/schema.json` (the shape/contract).
 2. Edit `packages/constants/values.json` (the value). It must satisfy the schema.
-3. Run `bun run generate` (TS types regenerate; Rust regenerates on next build).
+3. Run `bun run generate` (TS types regenerate, including unreferenced schema
+   definitions; Rust regenerates on next build).
 4. Use it:
    - **TS:** `import { constants } from "@pragma/constants"` → `constants.app.name`
    - **Rust:** `pragma_constants::CONSTANTS.app.name`
