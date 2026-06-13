@@ -1,7 +1,16 @@
 import values from "../values.json";
 import type { Constants } from "./generated/constants";
 
-export type { Constants, AppInfo, WindowDefaults, Links } from "./generated/constants";
+export type {
+  Constants,
+  AppInfo,
+  WindowDefaults,
+  Links,
+  Project,
+  Worktree,
+  Tab,
+  ProjectIcon,
+} from "./generated/constants";
 
 /**
  * Shared application constants.

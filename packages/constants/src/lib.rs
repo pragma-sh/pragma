@@ -13,7 +13,9 @@ mod generated {
     typify::import_types!("schema.json");
 }
 
-pub use generated::{AppInfo, Constants, Links, WindowDefaults};
+pub use generated::{
+    AppInfo, Constants, Links, Project, ProjectIcon, Tab, WindowDefaults, Worktree,
+};
 
 /// The parsed, shared constants.
 ///
