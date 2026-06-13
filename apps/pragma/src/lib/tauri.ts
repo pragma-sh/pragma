@@ -132,6 +132,11 @@ export function closeTab(tabId: string): Promise<void> {
   return invoke("close_tab", { tabId });
 }
 
+/** Renames a persisted terminal tab. */
+export function renameTab(tabId: string, title: string): Promise<Tab> {
+  return invoke<Tab>("rename_tab", { tabId, title });
+}
+
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */
 export async function pickDirectory(defaultPath?: string): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false, defaultPath });

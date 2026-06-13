@@ -134,6 +134,11 @@ fn close_tab(db: tauri::State<'_, Db>, tab_id: String) -> AppResult<()> {
     db.delete_tab(&tab_id)
 }
 
+#[tauri::command]
+fn rename_tab(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppResult<Tab> {
+    db.rename_tab(&tab_id, &title)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -184,6 +189,7 @@ pub fn run() {
             list_tabs,
             create_tab,
             close_tab,
+            rename_tab,
             dev_bridge::__dev_bridge_result
         ])
         .run(tauri::generate_context!())

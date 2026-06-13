@@ -206,6 +206,14 @@ impl Db {
         self.tab(&id)
     }
 
+    pub fn rename_tab(&self, tab_id: &str, title: &str) -> AppResult<Tab> {
+        self.0.lock()?.execute(
+            "UPDATE tabs SET title = ?1 WHERE id = ?2",
+            params![title, tab_id],
+        )?;
+        self.tab(tab_id)
+    }
+
     pub fn delete_tab(&self, tab_id: &str) -> AppResult<()> {
         self.0
             .lock()?

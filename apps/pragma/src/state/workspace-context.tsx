@@ -19,6 +19,7 @@ import {
   listTabs,
   listWorktrees,
   projectIcon,
+  renameTab as renameTabCommand,
 } from "@/lib/tauri";
 
 interface WorkspaceState {
@@ -47,6 +48,7 @@ type WorkspaceAction =
   | { type: "set-active-tab"; worktreeId: string; tabId: string }
   | { type: "add-tab"; tab: Tab }
   | { type: "remove-tab"; tabId: string }
+  | { type: "rename-tab"; tabId: string; title: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
   | { type: "clear-error" };
 
@@ -64,6 +66,7 @@ interface WorkspaceContextValue extends WorkspaceState {
   selectWorktree: (worktreeId: string | null) => void;
   createTerminalTab: (worktreeId?: string) => Promise<void>;
   closeTerminalTab: (tabId: string) => Promise<void>;
+  renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
 }
@@ -153,6 +156,13 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       }
       return { ...state, tabs, activeTabByWorktree };
     }
+    case "rename-tab":
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId ? { ...tab, title: action.title } : tab,
+        ),
+      };
     case "set-icon":
       return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
     case "clear-error":
@@ -238,6 +248,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
+  const renameTerminalTab = useCallback(async (tabId: string, title: string) => {
+    try {
+      await renameTabCommand(tabId, title);
+      dispatch({ type: "rename-tab", tabId, title });
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -354,6 +373,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       closeTerminalTab,
+      renameTerminalTab,
       cycleTab,
       setActiveTab,
     }),
@@ -371,6 +391,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       closeTerminalTab,
+      renameTerminalTab,
       cycleTab,
       setActiveTab,
     ],
