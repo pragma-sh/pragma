@@ -206,6 +206,7 @@ pub fn run() {
             browser::browser_frame_height,
             browser::browser_set_bounds,
             browser::browser_set_visible,
+            browser::browser_focus,
             browser::browser_navigate,
             browser::browser_back,
             browser::browser_forward,

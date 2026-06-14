@@ -196,6 +196,11 @@ export function browserSetVisible(tabId: string, visible: boolean): Promise<void
   return invoke("browser_set_visible", { tabId, visible });
 }
 
+/** Moves keyboard focus to a browser webview when its pane is focused. */
+export function browserFocus(tabId: string): Promise<void> {
+  return invoke("browser_focus", { tabId });
+}
+
 /** Navigates a browser webview to a new URL (address-bar submit). */
 export function browserNavigate(tabId: string, url: string): Promise<void> {
   return invoke("browser_navigate", { tabId, url });
@@ -247,6 +252,18 @@ export function browserScreenshot(bounds: BrowserBounds): Promise<string | null>
 /** Subscribes to per-tab page metadata (title/url) from browser webviews. */
 export function onBrowserMeta(handler: (meta: BrowserMeta) => void): Promise<UnlistenFn> {
   return listen<BrowserMeta>("browser-meta", (event) => handler(event.payload));
+}
+
+/** Payload sent by a browser webview when the user interacts with its content. */
+export interface BrowserFocusRequest {
+  tabId: string;
+}
+
+/** Subscribes to browser webviews requesting split-pane focus on interaction. */
+export function onBrowserFocusRequest(
+  handler: (request: BrowserFocusRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<BrowserFocusRequest>("browser-focus-request", (event) => handler(event.payload));
 }
 
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */
