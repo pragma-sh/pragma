@@ -91,6 +91,8 @@ fn default_config() -> KeybindingsConfig {
             browser_reload: chord("cmd", "r", "ctrl", "r"),
             browser_devtools: chord("cmd+shift", "i", "ctrl+shift", "i"),
             browser_copy_url: chord("cmd+shift", "c", "ctrl+shift", "c"),
+            split_horizontal: chord("cmd", "/", "ctrl", "/"),
+            split_vertical: chord("cmd+shift", "/", "ctrl+shift", "/"),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),

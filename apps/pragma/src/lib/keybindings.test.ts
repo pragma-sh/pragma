@@ -49,6 +49,14 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd", "shift"], key: "c" },
         linux: { modifiers: ["ctrl", "shift"], key: "c" },
       },
+      splitHorizontal: {
+        mac: { modifiers: ["cmd"], key: "/" },
+        linux: { modifiers: ["ctrl"], key: "/" },
+      },
+      splitVertical: {
+        mac: { modifiers: ["cmd", "shift"], key: "/" },
+        linux: { modifiers: ["ctrl", "shift"], key: "/" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -107,6 +115,16 @@ describe("chordMatches", () => {
     ).toBe(false);
   });
 
+  it("matches a shifted slash chord when the key is '?", () => {
+    const chord: KeybindingChord = { modifiers: ["cmd", "shift"], key: "/" };
+    expect(
+      chordMatches(
+        new KeyboardEvent("keydown", { metaKey: true, shiftKey: true, key: "?" }),
+        chord,
+      ),
+    ).toBe(true);
+  });
+
   it("is case-insensitive for letter keys", () => {
     const chord: KeybindingChord = { modifiers: ["cmd"], key: "w" };
     expect(chordMatches(new KeyboardEvent("keydown", { metaKey: true, key: "w" }), chord)).toBe(
@@ -161,6 +179,16 @@ describe("actionForEvent", () => {
   it("resolves mac workspace switch", () => {
     const event = new KeyboardEvent("keydown", { ctrlKey: true, key: "3" });
     expect(actionForEvent(event, config(), "mac")).toBe("switchToWorkspace3");
+  });
+
+  it("resolves mac split horizontal", () => {
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "/" });
+    expect(actionForEvent(event, config(), "mac")).toBe("splitHorizontal");
+  });
+
+  it("resolves mac split vertical from the shifted slash key", () => {
+    const event = new KeyboardEvent("keydown", { metaKey: true, shiftKey: true, key: "?" });
+    expect(actionForEvent(event, config(), "mac")).toBe("splitVertical");
   });
 
   it("returns null for an unmatched chord", () => {

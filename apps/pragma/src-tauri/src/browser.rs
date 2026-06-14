@@ -26,6 +26,24 @@ use crate::error::{AppError, AppResult};
 const MAIN_WINDOW_LABEL: &str = "main";
 /// Event name carrying `{ tabId, title?, url? }` page metadata to the frontend.
 const META_EVENT: &str = "browser-meta";
+/// Event name emitted by a browser webview when the user interacts with its content.
+const FOCUS_REQUEST_EVENT: &str = "browser-focus-request";
+/// URL scheme the injected [`focus_script`] navigates to when its page gains
+/// focus. It is a one-way "this page was focused" ping back to Rust: the
+/// navigation handler recognizes the scheme, reports focus to the frontend, and
+/// cancels the navigation so the page never actually leaves. This reuses the
+/// native navigation hook (like title/URL reporting) instead of exposing the IPC
+/// surface to arbitrary remote pages — `window.__TAURI_INTERNALS__` is not
+/// available on remote origins, so an IPC `emit` would silently no-op there.
+const FOCUS_SENTINEL_SCHEME: &str = "pragma-focus";
+
+/// Page-focus ping reported to the frontend so split-pane focus can follow a
+/// click into a native browser webview's content.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserFocusRequest {
+    tab_id: String,
+}
 
 /// Page metadata reported to the frontend as a browser webview navigates.
 ///
@@ -45,6 +63,34 @@ struct BrowserMeta {
 /// Derives the child-webview label that hosts a given tab's page.
 fn webview_label(tab_id: &str) -> String {
     format!("browser-{tab_id}")
+}
+
+/// Injects a small script into every browser page so that interacting with the
+/// native webview surface is forwarded to the React frontend, which can then move
+/// split-pane focus to the correct pane.
+///
+/// The page signals focus by navigating to the [`FOCUS_SENTINEL_SCHEME`] URL,
+/// which the navigation hook intercepts and cancels — this works on remote pages,
+/// where the Tauri IPC bridge is intentionally absent. The ping fires once per
+/// focus session (reset on blur) so normal clicks and link navigations are
+/// untouched.
+fn focus_script() -> String {
+    format!(
+        r"
+(function() {{
+  let signalled = false;
+  function signal() {{
+    if (signalled) return;
+    signalled = true;
+    // Cancelled navigation used as a focus ping; see FOCUS_SENTINEL_SCHEME (Rust).
+    window.location.href = '{FOCUS_SENTINEL_SCHEME}:focus';
+  }}
+  window.addEventListener('focus', signal, true);
+  window.addEventListener('pointerdown', signal, true);
+  window.addEventListener('blur', function() {{ signalled = false; }}, true);
+}})();
+"
+    )
 }
 
 /// Returns the main window (the multiwebview host for all browser tabs).
@@ -126,6 +172,7 @@ pub fn browser_create(
     let nav_tab = tab_id.clone();
 
     let builder = WebviewBuilder::new(label, WebviewUrl::External(start_url))
+        .initialization_script(focus_script())
         .on_document_title_changed(move |_webview, title| {
             emit_meta(
                 &title_app,
@@ -137,6 +184,16 @@ pub fn browser_create(
             );
         })
         .on_navigation(move |url| {
+            // A focus ping, not a real navigation: report it and cancel the load.
+            if url.scheme() == FOCUS_SENTINEL_SCHEME {
+                let _ = nav_app.emit(
+                    FOCUS_REQUEST_EVENT,
+                    BrowserFocusRequest {
+                        tab_id: nav_tab.clone(),
+                    },
+                );
+                return false;
+            }
             emit_meta(
                 &nav_app,
                 &BrowserMeta {
@@ -185,6 +242,15 @@ pub fn browser_set_visible(app: tauri::AppHandle, tab_id: String, visible: bool)
             webview.hide()?;
         }
     }
+    Ok(())
+}
+
+/// Moves keyboard focus to a browser webview when its pane is focused.
+#[tauri::command]
+pub fn browser_focus(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
+    require_webview(&app, &tab_id)?
+        .set_focus()
+        .map_err(|error| AppError::Browser(format!("failed to focus browser: {error}")))?;
     Ok(())
 }
 

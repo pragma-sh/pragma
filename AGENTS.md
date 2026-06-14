@@ -120,6 +120,31 @@ than no guide.
   the Unix socket and must not own PTYs.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
   React state or the workspace reducer.
+- **HTML5 drag-and-drop requires `"dragDropEnabled": false`** on the window in
+  `tauri.conf.json`. It defaults to `true`, which makes Tauri capture OS drag/drop at the
+  native level and the in-page `dragstart`/`dragover`/`drop` events never fire. Also note
+  WebKit withholds `dataTransfer` payloads until the `drop` event, so the dragged tab id
+  is tracked in shared React state (`components/tabs/tab-drag-context.tsx`), not read back
+  out of `dataTransfer` during `dragover`.
+- Native browser webviews (`BrowserView`) float **above** all HTML, so an HTML overlay
+  can't sit on top of them and drop events never reach a pane showing a browser tab. The
+  shared `isDragging` signal hides the native overlays for the duration of a drag so the
+  drop zones underneath become reachable; drop-zone geometry lives in
+  `components/tabs/tab-drag.ts`.
+- **Split / tab-bar model:** there is one `splitRootByWorktree` layout per worktree. Tabs
+  inside a real split are "split members"; every other tab is a "normal" top-bar tab. The
+  top strip (`TerminalTabs`) shows the normal tabs **plus a single parent tab** that stands
+  in for the whole split, named after its top-left pane (`leadingPane`); the split's own
+  members are hidden from the top strip and live in the per-pane bars (`SplitHost`'s
+  `PaneBar`, shown for every pane). Splitting from the un-split state pulls only the
+  **active** tab into the new group (the rest stay normal); `normalizeRoot` only folds new
+  tabs into a single-pane root, never into a real split. Dropping a tab anywhere on a pane's
+  **content** always splits — the pane is divided into four quadrants by its diagonals and the
+  pointer's quadrant picks the split side (`dropTargetAt`; there is no merge/center zone). To
+  move a tab **into** a pane (stack it) instead, drop it on that pane's **tab bar**. Each `PaneBar` has its
+  own "+" menu that creates a new tab **inside that pane** (`createTabInPane` →
+  `add-tab-to-pane`); the top strip's "+" and the `⌘T`/`⌘B` shortcuts always add **normal
+  top-level** tabs, never split members.
 - **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,
   `JetBrainsMono Nerd Font`, `JetBrains Mono`, `SF Mono`, Menlo, Monaco,
   `ui-monospace`, `monospace`) at **fontSize 14 / lineHeight 1.0**. 14px is the

@@ -53,6 +53,14 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd", "shift"], key: "c" },
         linux: { modifiers: ["ctrl", "shift"], key: "c" },
       },
+      splitHorizontal: {
+        mac: { modifiers: ["cmd"], key: "/" },
+        linux: { modifiers: ["ctrl"], key: "/" },
+      },
+      splitVertical: {
+        mac: { modifiers: ["cmd", "shift"], key: "/" },
+        linux: { modifiers: ["ctrl", "shift"], key: "/" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -113,6 +121,8 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onBrowserReload: vi.fn(),
     onBrowserDevtools: vi.fn(),
     onBrowserCopyUrl: vi.fn(),
+    onSplitHorizontal: vi.fn(),
+    onSplitVertical: vi.fn(),
     ...overrides,
   };
 }
@@ -164,6 +174,20 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it("fires onCloseTopTab for cmd+w on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onCloseTopTab = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onCloseTopTab })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "w" });
+
+    expect(onCloseTopTab).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("fires onBrowserReload for cmd+r and prevents app reload", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
@@ -189,5 +213,33 @@ describe("useShortcuts", () => {
     dispatchKeydown({ metaKey: true, shiftKey: true, key: "i" });
 
     expect(onBrowserDevtools).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onSplitHorizontal for cmd+/ on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onSplitHorizontal = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onSplitHorizontal })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "/" });
+
+    expect(onSplitHorizontal).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onSplitVertical for cmd+shift+/ on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onSplitVertical = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onSplitVertical })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "?" });
+
+    expect(onSplitVertical).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
   });
 });

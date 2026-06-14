@@ -1,6 +1,6 @@
 import type { Project } from "@pragma/constants";
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -33,6 +33,8 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     selectedProjectId: null,
     selectedWorktreeByProject: {},
     activeTabByWorktree: {},
+    splitRootByWorktree: {},
+    focusedPaneByWorktree: {},
     icons: {},
     loading: false,
     error: null,
@@ -41,12 +43,15 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     activeProject: null,
     selectedWorktree: null,
     activeTab: null,
+    splitRoot: null,
+    focusedPaneId: null,
     reload: vi.fn(),
     refreshProject: vi.fn(),
     selectProject,
     selectWorktree: vi.fn(),
     createTerminalTab: vi.fn(),
     createBrowserTab: vi.fn(),
+    createTabInPane: vi.fn(),
     closeTab: vi.fn(),
     renameTerminalTab: vi.fn(),
     openSelectedWorktree: vi.fn(),
@@ -57,6 +62,11 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     deleteWorktree: vi.fn(),
     renameWorktree: vi.fn(),
     hideWorktree: vi.fn(),
+    focusPane: vi.fn(),
+    setPaneActiveTab: vi.fn(),
+    splitActivePane: vi.fn(),
+    splitTabAtPane: vi.fn(),
+    moveTabToPane: vi.fn(),
   } as WorkspaceContextValue;
   return { mockWorkspace: workspace, selectProjectMock: selectProject };
 });

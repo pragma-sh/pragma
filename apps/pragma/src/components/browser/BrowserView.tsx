@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { BROWSER_START_URL, rectToBounds, screenshotBounds } from "@/lib/browser-manager";
 import {
   browserBack,
@@ -50,6 +51,7 @@ interface BrowserViewProps {
  */
 export function BrowserView({ tab, active }: BrowserViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const { isDragging } = useTabDrag();
   const [address, setAddress] = useState(tab.url ?? "");
 
   // Latest `active`, readable from the async create callback without re-creating it.
@@ -133,14 +135,26 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   }, [tab.id]);
 
   // Track visibility + bounds. The overlay is native, so CSS can't hide it — we
-  // explicitly show/hide and follow the placeholder rect while active.
+  // explicitly show/hide and follow the placeholder rect while active. While a
+  // tab drag is in flight the native overlay would float above (and swallow) the
+  // HTML drop zones, so hide it for the duration and restore it on drop.
   useEffect(() => {
     const element = contentRef.current;
     if (!element) {
       return;
     }
-    void browserSetVisible(tab.id, active);
-    if (!active) {
+    const visible = active && !isDragging;
+    void browserSetVisible(tab.id, visible);
+    if (!visible) {
+      // `hide()` alone doesn't reliably stop WebKit from keeping the native
+      // webview as a drop target, so drags over a browser pane's content (its
+      // left, center, and bottom — everything below the HTML toolbar) get
+      // swallowed and never reach the drop overlay. While dragging, also collapse
+      // the webview to zero size so the whole pane is free for the HTML overlay
+      // underneath; the restore branch below re-applies real bounds on drop.
+      if (active && isDragging) {
+        void browserSetBounds(tab.id, { x: 0, y: 0, width: 0, height: 0 });
+      }
       return;
     }
     const update = () => void browserSetBounds(tab.id, boundsFor(element));
@@ -152,7 +166,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [tab.id, active]);
+  }, [tab.id, active, isDragging]);
 
   const submitAddress = useCallback(
     (event: React.FormEvent) => {
@@ -182,7 +196,10 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full w-full flex-col bg-[#0b0d10]">
-        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-white/10 bg-[#11151b] px-2">
+        <div
+          className="flex h-11 shrink-0 items-center gap-1 border-b border-white/10 bg-[#11151b] px-2"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <Button
             aria-label="Back"
             className="text-slate-300 hover:bg-white/10 hover:text-white"
