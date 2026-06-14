@@ -5,6 +5,7 @@ import type { Channel } from "@tauri-apps/api/core";
 
 import type { Tab } from "@pragma/constants";
 
+import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEvent } from "@/lib/tauri";
 
@@ -86,20 +87,11 @@ export class TerminalManager {
     terminal.loadAddon(fit);
     terminal.loadAddon(new WebLinksAddon());
     terminal.attachCustomKeyEventHandler((event) => {
-      if ((event.ctrlKey || event.altKey) && (event.key === "Tab" || /^[1-9]$/.test(event.key))) {
-        return false;
-      }
-      // Let platform-specific close/new-tab/clear shortcuts bubble to the window
-      // listener instead of being consumed by the terminal.
-      const isMac = isMacPlatform();
-      if (isMac && event.metaKey && (event.key === "w" || event.key === "t" || event.key === "k")) {
-        return false;
-      }
-      if (
-        !isMac &&
-        event.ctrlKey &&
-        (event.key === "w" || event.key === "t" || event.key === "k")
-      ) {
+      // Let any configured Pragma shortcut bubble up to the window listener so it
+      // works even when xterm has focus. The current config may be the default or
+      // a user-edited `~/.pragma/keybindings.json`.
+      const platform = isMacPlatform() ? "mac" : "linux";
+      if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
         return false;
       }
       return true;

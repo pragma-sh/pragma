@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { KeybindingPlatform, KeybindingAction } from "@/lib/keybindings";
-import { actionForEvent, workspaceIndexForAction } from "@/lib/keybindings";
+import {
+  actionForEvent,
+  defaultKeybindingsConfig,
+  setLoadedKeybindingsConfig,
+  workspaceIndexForAction,
+} from "@/lib/keybindings";
+import { isMacPlatform } from "@/lib/platform";
 import { getPlatform, loadKeybindings } from "@/lib/tauri";
 
 interface UseShortcutsOptions {
@@ -17,6 +23,8 @@ interface UseShortcutsOptions {
   onBrowserReload: () => void;
   onBrowserDevtools: () => void;
   onBrowserCopyUrl: () => void;
+  onSplitHorizontal: () => void;
+  onSplitVertical: () => void;
 }
 
 interface ShortcutState {
@@ -29,19 +37,30 @@ export function useShortcuts(options: UseShortcutsOptions): void {
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  const [shortcutState, setShortcutState] = useState<ShortcutState | null>(null);
+  const [shortcutState, setShortcutState] = useState<ShortcutState>(() => {
+    const platform = isMacPlatform() ? "mac" : "linux";
+    return {
+      platform,
+      actionForEvent: (event) => actionForEvent(event, defaultKeybindingsConfig, platform),
+    };
+  });
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [platform, config] = await Promise.all([getPlatform(), loadKeybindings()]);
-      if (cancelled) {
-        return;
+      try {
+        const [platform, config] = await Promise.all([getPlatform(), loadKeybindings()]);
+        if (cancelled) {
+          return;
+        }
+        setLoadedKeybindingsConfig(config);
+        setShortcutState({
+          platform,
+          actionForEvent: (event) => actionForEvent(event, config, platform),
+        });
+      } catch {
+        // Keep the built-in shortcuts active if the editable config is unavailable.
       }
-      setShortcutState({
-        platform,
-        actionForEvent: (event) => actionForEvent(event, config, platform),
-      });
     }
     void load();
     return () => {
@@ -50,9 +69,6 @@ export function useShortcuts(options: UseShortcutsOptions): void {
   }, []);
 
   useEffect(() => {
-    if (!shortcutState) {
-      return;
-    }
     const state = shortcutState;
 
     function onKeyDown(event: KeyboardEvent) {
@@ -98,6 +114,14 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         case "browserCopyUrl":
           event.preventDefault();
           current.onBrowserCopyUrl();
+          break;
+        case "splitHorizontal":
+          event.preventDefault();
+          current.onSplitHorizontal();
+          break;
+        case "splitVertical":
+          event.preventDefault();
+          current.onSplitVertical();
           break;
         default: {
           const workspaceIndex = workspaceIndexForAction(action);
