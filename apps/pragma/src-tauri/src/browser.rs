@@ -352,6 +352,27 @@ pub fn browser_screenshot(
     Ok(Some(path.display().to_string()))
 }
 
+/// Captures the page region and returns it as a `data:image/png;base64,...` URL.
+///
+/// Used to paint a still of the live page while an HTML overlay (dropdown,
+/// popover) is open over a browser pane: the native webview composites above all
+/// HTML and so must be hidden for the overlay to show, but swapping in this
+/// snapshot keeps the pane looking unchanged. Coordinates are **physical screen
+/// pixels** of the page area, same as [`browser_screenshot`]. The caller must
+/// capture *before* hiding the webview, while the live page is still on screen.
+#[tauri::command]
+pub fn browser_snapshot(x: f64, y: f64, width: f64, height: f64) -> AppResult<String> {
+    use base64::Engine;
+
+    let image = capture_region(x, y, width, height)?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, xcap::image::ImageFormat::Png)
+        .map_err(|error| AppError::Browser(format!("failed to encode snapshot: {error}")))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(png.into_inner());
+    Ok(format!("data:image/png;base64,{encoded}"))
+}
+
 /// Maps an `xcap` capture error into our application error type.
 fn xcap_err(error: xcap::XCapError) -> AppError {
     AppError::Browser(format!("screen capture failed: {error}"))

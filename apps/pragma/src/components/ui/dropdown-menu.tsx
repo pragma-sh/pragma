@@ -1,10 +1,31 @@
 import * as React from "react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
+import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { cn } from "@/lib/utils";
 
-function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+function DropdownMenu({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  // Track open state so the native browser webviews hide while the menu is open
+  // (they paint above all HTML and would otherwise clip the portaled content).
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false);
+  useSuppressNativeOverlayWhile(open ?? internalOpen);
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={(next) => {
+        setInternalOpen(next);
+        onOpenChange?.(next);
+      }}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuPortal({

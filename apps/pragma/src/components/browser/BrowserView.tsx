@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { BROWSER_START_URL, rectToBounds, screenshotBounds } from "@/lib/browser-manager";
+import { useNativeOverlaySuppressed } from "@/lib/native-overlay";
 import {
   browserBack,
   browserClearData,
@@ -36,6 +37,7 @@ import {
   browserScreenshot,
   browserSetBounds,
   browserSetVisible,
+  browserSnapshot,
 } from "@/lib/tauri";
 
 interface BrowserViewProps {
@@ -52,6 +54,12 @@ interface BrowserViewProps {
 export function BrowserView({ tab, active }: BrowserViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const { isDragging } = useTabDrag();
+  // An open HTML overlay (dropdown/popover) must float above the native webview.
+  const overlaySuppressed = useNativeOverlaySuppressed();
+  // A still of the live page painted in the placeholder while the webview is
+  // hidden behind an overlay, so the pane looks unchanged. `null` when the live
+  // webview is shown (or genuinely hidden, e.g. inactive/dragging).
+  const [snapshot, setSnapshot] = useState<string | null>(null);
   const [address, setAddress] = useState(tab.url ?? "");
 
   // Latest `active`, readable from the async create callback without re-creating it.
@@ -143,18 +151,55 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
     if (!element) {
       return;
     }
-    const visible = active && !isDragging;
-    void browserSetVisible(tab.id, visible);
-    if (!visible) {
-      // `hide()` alone doesn't reliably stop WebKit from keeping the native
-      // webview as a drop target, so drags over a browser pane's content (its
-      // left, center, and bottom — everything below the HTML toolbar) get
-      // swallowed and never reach the drop overlay. While dragging, also collapse
-      // the webview to zero size so the whole pane is free for the HTML overlay
-      // underneath; the restore branch below re-applies real bounds on drop.
-      if (active && isDragging) {
-        void browserSetBounds(tab.id, { x: 0, y: 0, width: 0, height: 0 });
-      }
+
+    // A tab drag needs the whole pane free as an HTML drop target. `hide()` alone
+    // doesn't reliably stop WebKit from keeping the native webview as a drop
+    // target, so collapse it to zero size too; the restore branch re-applies real
+    // bounds on drop. No snapshot — the pane shows drop zones, not the page.
+    if (active && isDragging) {
+      setSnapshot(null);
+      void browserSetVisible(tab.id, false);
+      void browserSetBounds(tab.id, { x: 0, y: 0, width: 0, height: 0 });
+      return;
+    }
+
+    // An HTML overlay (dropdown/popover) is open over this pane. The native
+    // webview composites above all HTML, so it has to hide for the overlay to
+    // show — but capture a still of the live page FIRST (while it's on screen)
+    // and paint it in the placeholder so the pane looks unchanged behind the
+    // overlay. Hide only after the capture resolves (or fails).
+    if (active && overlaySuppressed) {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const still = await browserSnapshot(
+            screenshotBounds(
+              element.getBoundingClientRect(),
+              window.screenX,
+              window.screenY,
+              window.devicePixelRatio,
+            ),
+          );
+          if (!cancelled) {
+            setSnapshot(still);
+          }
+        } catch {
+          // Capture unavailable; fall back to a plain hide (dark placeholder).
+        }
+        if (!cancelled) {
+          void browserSetVisible(tab.id, false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Live and visible (active, no drag, no overlay), or genuinely hidden
+    // (inactive). Either way drop any snapshot; while shown, follow the rect.
+    setSnapshot(null);
+    void browserSetVisible(tab.id, active);
+    if (!active) {
       return;
     }
     const update = () => void browserSetBounds(tab.id, boundsFor(element));
@@ -166,7 +211,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [tab.id, active, isDragging]);
+  }, [tab.id, active, isDragging, overlaySuppressed]);
 
   const submitAddress = useCallback(
     (event: React.FormEvent) => {
@@ -292,7 +337,16 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <div className="min-h-0 flex-1" ref={contentRef} />
+        <div className="relative min-h-0 flex-1" ref={contentRef}>
+          {snapshot ? (
+            <img
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+              src={snapshot}
+            />
+          ) : null}
+        </div>
       </div>
     </TooltipProvider>
   );

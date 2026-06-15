@@ -130,7 +130,19 @@ than no guide.
   can't sit on top of them and drop events never reach a pane showing a browser tab. The
   shared `isDragging` signal hides the native overlays for the duration of a drag so the
   drop zones underneath become reachable; drop-zone geometry lives in
-  `components/tabs/tab-drag.ts`.
+  `components/tabs/tab-drag.ts`. For the same reason, any HTML overlay that opens **over**
+  a browser pane (dropdown menu, popover) would be clipped by the native webview, so the
+  shadcn `DropdownMenu`/`Popover` roots register with the ref-counted suppression store in
+  `lib/native-overlay.ts` while open; `BrowserView` steps its webview aside whenever
+  `useNativeOverlaySuppressed()` is true. Because the OS can't composite HTML over a live
+  child webview in a sub-region, "stepping aside" means hiding it — but for a menu/popover
+  `BrowserView` first captures a still of the live page (`browser_snapshot` → a PNG data
+  URL via the same `xcap` region grab as `browser_screenshot`) and paints it in the
+  placeholder, so the pane looks unchanged behind the overlay; the snapshot is dropped and
+  the live webview restored on close. (A drag instead collapses bounds to zero and shows no
+  snapshot — the pane must be a free HTML drop target, not a frozen page.) New floating UI
+  built on those two primitives gets this for free; anything else that must paint above a
+  browser must wrap its open window in `useSuppressNativeOverlayWhile(open)`.
 - **Split / tab-bar model:** there is one `splitRootByWorktree` layout per worktree. Tabs
   inside a real split are "split members"; every other tab is a "normal" top-bar tab. The
   top strip (`TerminalTabs`) shows the normal tabs **plus a single parent tab** that stands

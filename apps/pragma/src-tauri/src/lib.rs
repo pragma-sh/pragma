@@ -230,6 +230,7 @@ pub fn run() {
             browser::browser_open_external,
             browser::browser_close,
             browser::browser_screenshot,
+            browser::browser_snapshot,
             dev_bridge::__dev_bridge_result
         ])
         .run(tauri::generate_context!())

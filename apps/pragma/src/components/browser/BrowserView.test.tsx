@@ -13,6 +13,7 @@ const tauriMocks = vi.hoisted(() => ({
   browserSetVisible: vi.fn(() => Promise.resolve()),
   browserSetBounds: vi.fn(() => Promise.resolve()),
   browserFrameHeight: vi.fn(() => Promise.resolve(0)),
+  browserSnapshot: vi.fn(() => Promise.resolve("data:image/png;base64,STILL")),
 }));
 
 vi.mock("@/lib/tauri", () => ({
@@ -28,6 +29,7 @@ vi.mock("@/lib/tauri", () => ({
   browserScreenshot: vi.fn(() => Promise.resolve(null)),
   browserSetBounds: tauriMocks.browserSetBounds,
   browserSetVisible: tauriMocks.browserSetVisible,
+  browserSnapshot: tauriMocks.browserSnapshot,
 }));
 
 function browserTab(): Tab {
@@ -83,5 +85,38 @@ describe("BrowserView", () => {
       width: 0,
       height: 0,
     });
+  });
+
+  it("snapshots then hides the native webview while a toolbar dropdown is open", async () => {
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab()} />
+      </TabDragProvider>,
+    );
+
+    await waitFor(() =>
+      expect(tauriMocks.browserSetVisible).toHaveBeenCalledWith("browser-1", true),
+    );
+    tauriMocks.browserSetVisible.mockClear();
+
+    // Opening the "More options" menu must step the native overlay aside (it
+    // paints above all HTML and would otherwise clip the dropdown), but first
+    // capture a still of the page and paint it so the pane looks unchanged.
+    await userEvent.click(screen.getByLabelText("More options"));
+    await waitFor(() => expect(tauriMocks.browserSnapshot).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(tauriMocks.browserSetVisible).toHaveBeenCalledWith("browser-1", false),
+    );
+    await waitFor(() =>
+      expect(document.querySelector("img")).toHaveAttribute("src", "data:image/png;base64,STILL"),
+    );
+
+    // Closing it restores the live page and drops the still.
+    tauriMocks.browserSetVisible.mockClear();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(tauriMocks.browserSetVisible).toHaveBeenCalledWith("browser-1", true),
+    );
+    expect(document.querySelector("img")).toBeNull();
   });
 });

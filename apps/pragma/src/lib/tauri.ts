@@ -279,6 +279,15 @@ export function browserScreenshot(bounds: BrowserBounds): Promise<string | null>
   return invoke<string | null>("browser_screenshot", { ...bounds });
 }
 
+/**
+ * Captures the given physical screen rectangle and resolves with a
+ * `data:image/png;base64,...` URL. Used to paint a still of the live page while
+ * an HTML overlay covers a browser pane; capture before hiding the webview.
+ */
+export function browserSnapshot(bounds: BrowserBounds): Promise<string> {
+  return invoke<string>("browser_snapshot", { ...bounds });
+}
+
 /** Subscribes to per-tab page metadata (title/url) from browser webviews. */
 export function onBrowserMeta(handler: (meta: BrowserMeta) => void): Promise<UnlistenFn> {
   return listen<BrowserMeta>("browser-meta", (event) => handler(event.payload));

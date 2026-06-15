@@ -3,10 +3,31 @@
 import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
+import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { cn } from "@/lib/utils";
 
-function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />;
+function Popover({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  // Hide the native browser webviews while open — they paint above all HTML and
+  // would otherwise clip the portaled popover content.
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false);
+  useSuppressNativeOverlayWhile(open ?? internalOpen);
+  return (
+    <PopoverPrimitive.Root
+      data-slot="popover"
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={(next) => {
+        setInternalOpen(next);
+        onOpenChange?.(next);
+      }}
+      {...props}
+    />
+  );
 }
 
 function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
