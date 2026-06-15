@@ -7,6 +7,7 @@ mod db;
 mod dev_bridge;
 mod editors;
 mod error;
+mod fs;
 mod git;
 mod icons;
 mod keybindings;
@@ -14,7 +15,9 @@ mod projects;
 mod pty;
 mod worktrees;
 
-use pragma_constants::{AppInfo, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS};
+use pragma_constants::{
+    AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
+};
 use tauri::ipc::Channel;
 use tauri::Manager;
 
@@ -130,6 +133,9 @@ fn list_tabs(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Vec<Tab>
     db.list_tabs(&project_id)
 }
 
+// A tab carries enough locating data (kind/title/url/file/diff side) that the
+// create command naturally takes more than clippy's default arg ceiling.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn create_tab(
     db: tauri::State<'_, Db>,
@@ -138,8 +144,18 @@ fn create_tab(
     kind: TabKind,
     title: Option<String>,
     url: Option<String>,
+    file_path: Option<String>,
+    diff_side: Option<DiffSide>,
 ) -> AppResult<Tab> {
-    db.create_tab(&project_id, &worktree_id, kind, title, url)
+    db.create_tab(
+        &project_id,
+        &worktree_id,
+        kind,
+        title,
+        url,
+        file_path,
+        diff_side,
+    )
 }
 
 #[tauri::command]
@@ -241,6 +257,22 @@ pub fn run() {
             list_splits,
             set_split_layout,
             clear_split_layout,
+            fs::list_dir_entries,
+            fs::create_file,
+            fs::create_folder,
+            fs::path_exists,
+            fs::read_file,
+            fs::write_file,
+            git::worktree_changes,
+            git::file_diff,
+            git::discard_unstaged_file,
+            git::discard_all_unstaged,
+            git::stage_file,
+            git::stage_all,
+            git::unstage_file,
+            git::unstage_all,
+            git::commit_staged,
+            git::merge_worktree_to_parent,
             browser::browser_create,
             browser::browser_frame_height,
             browser::browser_set_bounds,

@@ -17,14 +17,27 @@ import {
   browserScreenshot,
   browserSetBounds,
   clearSplitLayout,
+  createFile,
+  createFolder,
   createTab,
   deleteWorktree,
+  fileDiff,
+  listDirEntries,
   listSplits,
+  mergeWorktreeToParent,
   openWorktree,
+  pathExists,
+  readFile,
   renameWorktree,
   setSplitLayout,
   setWorktreeHidden,
+  stageAll,
+  stageFile,
+  unstageAll,
+  unstageFile,
+  worktreeChanges,
   worktreeStatus,
+  writeFile,
 } from "./tauri";
 
 describe("browser IPC wrappers", () => {
@@ -41,6 +54,8 @@ describe("browser IPC wrappers", () => {
       kind: "terminal",
       title: undefined,
       url: undefined,
+      filePath: undefined,
+      diffSide: undefined,
     });
   });
 
@@ -52,6 +67,34 @@ describe("browser IPC wrappers", () => {
       kind: "browser",
       title: "New tab",
       url: "https://example.com",
+      filePath: undefined,
+      diffSide: undefined,
+    });
+  });
+
+  it("createTab forwards editor file path", () => {
+    void createTab("p", "w", "editor", "app.ts", undefined, "src/app.ts", null);
+    expect(invokeMock).toHaveBeenCalledWith("create_tab", {
+      projectId: "p",
+      worktreeId: "w",
+      kind: "editor",
+      title: "app.ts",
+      url: undefined,
+      filePath: "src/app.ts",
+      diffSide: null,
+    });
+  });
+
+  it("createTab forwards diff file path and side", () => {
+    void createTab("p", "w", "diff", "app.ts", undefined, "src/app.ts", "committed");
+    expect(invokeMock).toHaveBeenCalledWith("create_tab", {
+      projectId: "p",
+      worktreeId: "w",
+      kind: "diff",
+      title: "app.ts",
+      url: undefined,
+      filePath: "src/app.ts",
+      diffSide: "committed",
     });
   });
 
@@ -170,5 +213,119 @@ describe("split-layout IPC wrappers", () => {
   it("clearSplitLayout forwards the worktree id", () => {
     void clearSplitLayout("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("clear_split_layout", { worktreeId: "wt-1" });
+  });
+});
+
+describe("filesystem IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("listDirEntries forwards worktree id and path", () => {
+    void listDirEntries("wt-1", "src");
+    expect(invokeMock).toHaveBeenCalledWith("list_dir_entries", {
+      worktreeId: "wt-1",
+      path: "src",
+    });
+  });
+
+  it("createFile forwards worktree id and path", () => {
+    void createFile("wt-1", "src/app.ts");
+    expect(invokeMock).toHaveBeenCalledWith("create_file", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+    });
+  });
+
+  it("createFolder forwards worktree id and path", () => {
+    void createFolder("wt-1", "src/lib");
+    expect(invokeMock).toHaveBeenCalledWith("create_folder", {
+      worktreeId: "wt-1",
+      path: "src/lib",
+    });
+  });
+
+  it("pathExists forwards worktree id and path", () => {
+    void pathExists("wt-1", "src/app.ts");
+    expect(invokeMock).toHaveBeenCalledWith("path_exists", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+    });
+  });
+
+  it("readFile forwards worktree id and path", () => {
+    void readFile("wt-1", "src/app.ts");
+    expect(invokeMock).toHaveBeenCalledWith("read_file", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+    });
+  });
+
+  it("writeFile forwards worktree id, path, and contents", () => {
+    void writeFile("wt-1", "src/app.ts", "const x = 1;");
+    expect(invokeMock).toHaveBeenCalledWith("write_file", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+      contents: "const x = 1;",
+    });
+  });
+});
+
+describe("git changes IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("worktreeChanges forwards the worktree id", () => {
+    void worktreeChanges("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("worktree_changes", { worktreeId: "wt-1" });
+  });
+
+  it("fileDiff forwards worktree id, path, side, and optional old path", () => {
+    void fileDiff("wt-1", "src/app.ts", "committed");
+    expect(invokeMock).toHaveBeenCalledWith("file_diff", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+      side: "committed",
+      oldPath: undefined,
+    });
+    invokeMock.mockReset();
+    void fileDiff("wt-1", "src/new.ts", "unstaged", "src/old.ts");
+    expect(invokeMock).toHaveBeenCalledWith("file_diff", {
+      worktreeId: "wt-1",
+      path: "src/new.ts",
+      side: "unstaged",
+      oldPath: "src/old.ts",
+    });
+  });
+
+  it("stageFile and stageAll forward their ids", () => {
+    void stageFile("wt-1", "src/app.ts");
+    expect(invokeMock).toHaveBeenCalledWith("stage_file", {
+      worktreeId: "wt-1",
+      path: "src/app.ts",
+    });
+    invokeMock.mockReset();
+    void stageAll("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("stage_all", { worktreeId: "wt-1" });
+  });
+
+  it("unstageFile and unstageAll forward their ids", () => {
+    void unstageFile("wt-1", "src/new.ts", "src/old.ts");
+    expect(invokeMock).toHaveBeenCalledWith("unstage_file", {
+      worktreeId: "wt-1",
+      path: "src/new.ts",
+      oldPath: "src/old.ts",
+    });
+    invokeMock.mockReset();
+    void unstageAll("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("unstage_all", { worktreeId: "wt-1" });
+  });
+
+  it("mergeWorktreeToParent forwards the worktree id", () => {
+    void mergeWorktreeToParent("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("merge_worktree_to_parent", { worktreeId: "wt-1" });
   });
 });

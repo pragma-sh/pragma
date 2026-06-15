@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use pragma_constants::{Project, Tab, TabKind, Worktree};
+use pragma_constants::{DiffSide, Project, Tab, TabKind, Worktree};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
@@ -68,6 +68,8 @@ impl Db {
                project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                worktree_id  TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
                title        TEXT,
+               file_path    TEXT,
+               diff_side    TEXT,
                order_index  INTEGER NOT NULL,
                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
              );
@@ -116,6 +118,23 @@ impl Db {
         // keeps upgraded DBs marked consistently.
         if version < 4 {
             conn.execute_batch("PRAGMA user_version = 4;")?;
+        }
+        // v5 adds `file_path` + `diff_side` to `tabs` so editor/diff tabs persist
+        // and restore. The CREATE block above already provisions them for fresh
+        // DBs; the ALTERs are gated on whether the columns are actually missing.
+        if version < 5 {
+            let has_file_path: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'file_path'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_file_path == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE tabs ADD COLUMN file_path TEXT;
+                     ALTER TABLE tabs ADD COLUMN diff_side TEXT;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 5;")?;
         }
         Ok(())
     }
@@ -259,13 +278,16 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
+    // A tab row carries enough locating data that insertion exceeds clippy's
+    // default argument ceiling; the columns are all genuinely independent.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_tab(
         &self,
         project_id: &str,
@@ -273,6 +295,8 @@ impl Db {
         kind: TabKind,
         title: Option<String>,
         url: Option<String>,
+        file_path: Option<String>,
+        diff_side: Option<DiffSide>,
     ) -> AppResult<Tab> {
         let id = Uuid::new_v4().to_string();
         {
@@ -283,8 +307,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     id,
                     project_id,
@@ -292,6 +316,8 @@ impl Db {
                     kind_as_str(kind),
                     title,
                     url,
+                    file_path,
+                    diff_side.map(diff_side_as_str),
                     order_index
                 ],
             )?;
@@ -369,7 +395,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -382,6 +408,8 @@ fn kind_as_str(kind: TabKind) -> &'static str {
     match kind {
         TabKind::Terminal => "terminal",
         TabKind::Browser => "browser",
+        TabKind::Editor => "editor",
+        TabKind::Diff => "diff",
     }
 }
 
@@ -389,7 +417,28 @@ fn kind_as_str(kind: TabKind) -> &'static str {
 fn kind_from_str(value: &str) -> TabKind {
     match value {
         "browser" => TabKind::Browser,
+        "editor" => TabKind::Editor,
+        "diff" => TabKind::Diff,
         _ => TabKind::Terminal,
+    }
+}
+
+/// Serializes a diff side to the string stored in the `tabs.diff_side` column.
+fn diff_side_as_str(side: DiffSide) -> &'static str {
+    match side {
+        DiffSide::Committed => "committed",
+        DiffSide::Staged => "staged",
+        DiffSide::Unstaged => "unstaged",
+    }
+}
+
+/// Parses the optional `tabs.diff_side` column; unknown values are treated as none.
+fn diff_side_from_str(value: Option<String>) -> Option<DiffSide> {
+    match value.as_deref() {
+        Some("committed") => Some(DiffSide::Committed),
+        Some("staged") => Some(DiffSide::Staged),
+        Some("unstaged") => Some(DiffSide::Unstaged),
+        _ => None,
     }
 }
 
@@ -425,8 +474,10 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         kind: kind_from_str(&row.get::<_, String>(3)?),
         title: row.get(4)?,
         url: row.get(5)?,
-        order_index: row.get::<_, i64>(6)?,
-        created_at: row.get(7)?,
+        file_path: row.get(6)?,
+        diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
+        order_index: row.get::<_, i64>(8)?,
+        created_at: row.get(9)?,
     })
 }
 
@@ -455,6 +506,8 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Terminal,
                 Some("main".to_string()),
+                None,
+                None,
                 None,
             )
             .expect("tab should insert");
@@ -491,6 +544,8 @@ mod tests {
                 TabKind::Browser,
                 None,
                 Some("https://example.com".to_string()),
+                None,
+                None,
             )
             .expect("browser tab should insert");
         assert_eq!(tab.kind, TabKind::Browser);
@@ -642,7 +697,15 @@ mod tests {
             .insert_worktree(&project.id, &parent.id, "child", None, "/tmp/repo/child")
             .expect("child worktree should insert");
         let tab = db
-            .create_tab(&project.id, &parent.id, TabKind::Terminal, None, None)
+            .create_tab(
+                &project.id,
+                &parent.id,
+                TabKind::Terminal,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("tab should insert");
         db.delete_worktree(&parent.id)
             .expect("delete should succeed");

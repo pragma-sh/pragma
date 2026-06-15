@@ -1,10 +1,16 @@
 import type {
   AppInfo,
+  ChangeStatus,
+  DiffSide,
+  DirEntry,
+  FileContents,
+  FileDiff,
   KeybindingsConfig,
   Project,
   ProjectIcon,
   Tab,
   TabKind,
+  WorktreeChanges,
   Worktree,
   WorktreeStatus,
 } from "@pragma/constants";
@@ -161,7 +167,9 @@ export function listTabs(projectId: string): Promise<Tab[]> {
 
 /**
  * Creates a persisted tab. For terminal tabs the tab id is also the daemon
- * session id; for browser tabs `url` seeds the initial page.
+ * session id; for browser tabs `url` seeds the initial page; for editor/diff
+ * tabs `filePath` (worktree-relative) and, for diffs, `diffSide` locate the
+ * content.
  */
 export function createTab(
   projectId: string,
@@ -169,8 +177,10 @@ export function createTab(
   kind: TabKind = "terminal",
   title?: string,
   url?: string,
+  filePath?: string | null,
+  diffSide?: DiffSide | null,
 ): Promise<Tab> {
-  return invoke<Tab>("create_tab", { projectId, worktreeId, kind, title, url });
+  return invoke<Tab>("create_tab", { projectId, worktreeId, kind, title, url, filePath, diffSide });
 }
 
 /** Closes a persisted tab. */
@@ -207,6 +217,110 @@ export function setSplitLayout(worktreeId: string, layout: string): Promise<void
 /** Clears a worktree's split-pane layout when it collapses back to a single pane. */
 export function clearSplitLayout(worktreeId: string): Promise<void> {
   return invoke("clear_split_layout", { worktreeId });
+}
+
+/**
+ * Lists the immediate entries of a worktree-relative directory (`""` = root),
+ * sorted directories-first then by name. Hidden `.git` and gitignored entries
+ * are filtered out by the backend.
+ */
+export function listDirEntries(worktreeId: string, path: string): Promise<DirEntry[]> {
+  return invoke<DirEntry[]>("list_dir_entries", { worktreeId, path });
+}
+
+/** Creates an empty file at a worktree-relative path; errors if it already exists. */
+export function createFile(worktreeId: string, path: string): Promise<void> {
+  return invoke("create_file", { worktreeId, path });
+}
+
+/** Creates a directory at a worktree-relative path; errors if it already exists. */
+export function createFolder(worktreeId: string, path: string): Promise<void> {
+  return invoke("create_folder", { worktreeId, path });
+}
+
+/** Reports whether a worktree-relative path exists on disk. */
+export function pathExists(worktreeId: string, path: string): Promise<boolean> {
+  return invoke<boolean>("path_exists", { worktreeId, path });
+}
+
+/** Reads a worktree-relative file, flagging binary/oversized content instead of returning bytes. */
+export function readFile(worktreeId: string, path: string): Promise<FileContents> {
+  return invoke<FileContents>("read_file", { worktreeId, path });
+}
+
+/** Overwrites a worktree-relative file with UTF-8 text (does not create parents). */
+export function writeFile(worktreeId: string, path: string, contents: string): Promise<void> {
+  return invoke("write_file", { worktreeId, path, contents });
+}
+
+/**
+ * Lists committed (base branch → HEAD), staged (HEAD → index), and unstaged
+ * (index → working tree) changes for a worktree.
+ */
+export function worktreeChanges(worktreeId: string): Promise<WorktreeChanges> {
+  return invoke<WorktreeChanges>("worktree_changes", { worktreeId });
+}
+
+/** Loads the old/new text for one changed file on the given diff side. */
+export function fileDiff(
+  worktreeId: string,
+  path: string,
+  side: DiffSide,
+  oldPath?: string | null,
+): Promise<FileDiff> {
+  return invoke<FileDiff>("file_diff", { worktreeId, path, side, oldPath });
+}
+
+/** Discards one unstaged change, reverting the working-tree file to match the index. */
+export function discardUnstagedFile(
+  worktreeId: string,
+  path: string,
+  status: ChangeStatus,
+  oldPath?: string | null,
+): Promise<void> {
+  return invoke("discard_unstaged_file", { worktreeId, path, status, oldPath });
+}
+
+/** Discards every unstaged change in the worktree (restores tracked, removes untracked). */
+export function discardAllUnstaged(worktreeId: string): Promise<void> {
+  return invoke("discard_all_unstaged", { worktreeId });
+}
+
+/** Stages a single worktree-relative change into the index (`git add`). */
+export function stageFile(worktreeId: string, path: string): Promise<void> {
+  return invoke("stage_file", { worktreeId, path });
+}
+
+/** Stages every change in the worktree into the index (`git add -A`). */
+export function stageAll(worktreeId: string): Promise<void> {
+  return invoke("stage_all", { worktreeId });
+}
+
+/** Unstages a single change from the index, leaving the working tree untouched. */
+export function unstageFile(
+  worktreeId: string,
+  path: string,
+  oldPath?: string | null,
+): Promise<void> {
+  return invoke("unstage_file", { worktreeId, path, oldPath });
+}
+
+/** Unstages every staged change in the worktree, resetting the index to HEAD. */
+export function unstageAll(worktreeId: string): Promise<void> {
+  return invoke("unstage_all", { worktreeId });
+}
+
+/**
+ * Creates a commit from the worktree's staged changes using the given message
+ * (`git commit -m <msg>`). The backend trims and rejects empty messages.
+ */
+export function commitStaged(worktreeId: string, message: string): Promise<void> {
+  return invoke("commit_staged", { worktreeId, message });
+}
+
+/** Merges a clean child worktree branch into its clean parent worktree. */
+export function mergeWorktreeToParent(worktreeId: string): Promise<void> {
+  return invoke("merge_worktree_to_parent", { worktreeId });
 }
 
 /** Logical pixel bounds (relative to the window) for a browser webview overlay. */
