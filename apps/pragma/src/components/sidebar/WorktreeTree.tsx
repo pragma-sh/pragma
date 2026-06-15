@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@iconify/react";
 import { constants, type Worktree } from "@pragma/constants";
-import { ChevronRight, Copy, EyeOff, GitBranch, GitBranchPlus, Pencil, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Copy,
+  EyeOff,
+  GitBranch,
+  GitBranchPlus,
+  GitMerge,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -17,11 +26,13 @@ import {
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
+import { worktreeChanges } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/state/workspace-context";
 
 const editorLaunchers = constants.editorLaunchers.options;
+const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
 
 interface WorktreeTreeProps {
   onCreateChild: () => void;
@@ -29,12 +40,56 @@ interface WorktreeTreeProps {
 
 export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const workspace = useWorkspace();
-  const worktrees = workspace.selectedProjectId
-    ? (workspace.worktrees[workspace.selectedProjectId] ?? [])
-    : [];
+  const worktrees = useMemo(
+    () =>
+      workspace.selectedProjectId ? (workspace.worktrees[workspace.selectedProjectId] ?? []) : [],
+    [workspace.selectedProjectId, workspace.worktrees],
+  );
   const tree = buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden });
   const hidden = worktrees.filter((w) => w.hidden);
   const [showHidden, setShowHidden] = useState(false);
+  const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
+    let cancelled = false;
+
+    async function refreshMergedStatus() {
+      const entries = await Promise.all(
+        childWorktrees.map(async (worktree) => {
+          try {
+            const changes = await worktreeChanges(worktree.id);
+            return [
+              worktree.id,
+              changes.committed.length === 0 &&
+                changes.staged.length === 0 &&
+                changes.unstaged.length === 0,
+            ] as const;
+          } catch {
+            return [worktree.id, false] as const;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setMergedByWorktreeId(Object.fromEntries(entries));
+      }
+    }
+
+    if (childWorktrees.length === 0) {
+      setMergedByWorktreeId({});
+      return;
+    }
+
+    void refreshMergedStatus();
+    const interval = setInterval(
+      () => void refreshMergedStatus(),
+      MERGED_STATUS_REFRESH_INTERVAL_MS,
+    );
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [worktrees]);
 
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
@@ -43,7 +98,13 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   return (
     <div className="space-y-1">
       {tree.map((node) => (
-        <WorktreeRow key={node.worktree.id} depth={0} node={node} onCreateChild={onCreateChild} />
+        <WorktreeRow
+          key={node.worktree.id}
+          depth={0}
+          mergedByWorktreeId={mergedByWorktreeId}
+          node={node}
+          onCreateChild={onCreateChild}
+        />
       ))}
       {hidden.length > 0 ? (
         <div className="pt-1">
@@ -58,6 +119,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
             ? hidden.map((worktree) => (
                 <HiddenWorktreeRow
                   key={worktree.id}
+                  merged={mergedByWorktreeId[worktree.id] === true}
                   onUnhide={() => void workspace.hideWorktree(worktree.id, false)}
                   worktree={worktree}
                 />
@@ -73,10 +135,12 @@ function WorktreeRow({
   node,
   depth,
   onCreateChild,
+  mergedByWorktreeId,
 }: {
   node: WorktreeNode;
   depth: number;
   onCreateChild: () => void;
+  mergedByWorktreeId: Record<string, boolean>;
 }) {
   const workspace = useWorkspace();
   const selected = workspace.selectedWorktreeId === node.worktree.id;
@@ -88,6 +152,8 @@ function WorktreeRow({
   const inputRef = useRef<HTMLInputElement>(null);
   const hasChildren = node.children.length > 0;
   const isMain = node.worktree.isMain;
+  const merged = mergedByWorktreeId[node.worktree.id] === true;
+  const WorktreeIcon = merged ? GitMerge : GitBranch;
 
   useEffect(() => {
     if (renaming && inputRef.current) {
@@ -154,7 +220,7 @@ function WorktreeRow({
               onClick={() => workspace.selectWorktree(node.worktree.id)}
               onDoubleClick={isMain ? undefined : startRename}
             >
-              <GitBranch className="size-3.5 shrink-0" />
+              <WorktreeIcon className={cn("size-3.5 shrink-0", merged && "text-emerald-500")} />
               {renaming ? (
                 <input
                   ref={inputRef}
@@ -283,18 +349,28 @@ function WorktreeRow({
             depth={depth + 1}
             node={child}
             onCreateChild={onCreateChild}
+            mergedByWorktreeId={mergedByWorktreeId}
           />
         ))}
     </div>
   );
 }
 
-function HiddenWorktreeRow({ worktree, onUnhide }: { worktree: Worktree; onUnhide: () => void }) {
+function HiddenWorktreeRow({
+  worktree,
+  merged,
+  onUnhide,
+}: {
+  worktree: Worktree;
+  merged: boolean;
+  onUnhide: () => void;
+}) {
   const label = worktree.title ?? worktree.branch;
+  const WorktreeIcon = merged ? GitMerge : GitBranch;
   return (
     <div className="mt-1 flex items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-1.5">
-        <GitBranch className="size-3 shrink-0" />
+        <WorktreeIcon className={cn("size-3 shrink-0", merged && "text-emerald-500")} />
         <span className="truncate">{label}</span>
       </div>
       <Button aria-label={`Show ${label}`} size="icon-xs" variant="ghost" onClick={onUnhide}>
