@@ -227,9 +227,16 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   never in the reducer, never persisted); closing a dirty editor routes through
   `ConfirmCloseProvider` (`components/editor/confirm-close.tsx`). vscode-icons render **offline**
   via `lib/file-icons.ts` (`addCollection` once — never let `@iconify/react` fetch over the
-  network). All filesystem + git work is **worktree-scoped and worktree-relative**: every
-  `fs.rs` / `git.rs` command takes a `worktreeId` + a relative path, and `resolve_in_worktree`
-  rejects `..`/absolute/symlink escapes (`InvalidInput`) — **no absolute path ever crosses IPC**.
+  network). The `lucide:*` / `simple-icons:*` **editor launcher brand icons** are bundled the
+  same way, but from a **curated subset** (`lib/brand-icons.json`, registered by
+  `lib/brand-icons.ts`, imported once in `main.tsx`) — never add the full multi-MB
+  `@iconify-json/{lucide,simple-icons}` packages; when you add a `brandIcon` to
+  `values.json`, add that icon's body to `brand-icons.json` too. All filesystem + git work is
+  **worktree-scoped and worktree-relative**: every `fs.rs` / `git.rs` command takes a
+  `worktreeId` + a relative path, and `resolve_in_worktree` rejects `..`/absolute/symlink
+  escapes (`InvalidInput`) — **no absolute path ever crosses IPC**. `editors::open_worktree`
+  follows the same rule: it takes a `worktreeId` and resolves the absolute path from the DB,
+  never trusting a path from the frontend.
   The file-tree context menu floats over browser panes, so it registers with
   `lib/native-overlay.ts` via `useSuppressNativeOverlayWhile(open)`.
 - **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,

@@ -2,13 +2,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use pragma_constants::{EditorLauncher, CONSTANTS};
+use tauri::State;
 
+use crate::db::Db;
 use crate::error::{AppError, AppResult};
 
 /// Opens a worktree in the requested editor, or the system file explorer by default.
+///
+/// The absolute path is looked up from the DB by `worktree_id` (never trusted
+/// from the frontend), keeping this consistent with the worktree-scoped `fs`/`git`
+/// commands: the IPC surface can only launch an editor on a known worktree, not an
+/// arbitrary directory.
 #[tauri::command]
-pub fn open_worktree(path: String, editor_id: Option<String>) -> AppResult<()> {
-    let worktree_path = PathBuf::from(path);
+pub fn open_worktree(
+    db: State<'_, Db>,
+    worktree_id: String,
+    editor_id: Option<String>,
+) -> AppResult<()> {
+    let worktree_path = PathBuf::from(db.worktree(&worktree_id)?.path);
     if !worktree_path.is_dir() {
         return Err(AppError::InvalidInput(format!(
             "worktree path does not exist: {}",

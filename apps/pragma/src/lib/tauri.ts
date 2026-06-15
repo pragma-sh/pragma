@@ -111,9 +111,9 @@ export function listWorktrees(projectId: string): Promise<Worktree[]> {
   return invoke<Worktree[]>("list_worktrees", { projectId });
 }
 
-/** Opens a worktree path in an editor launcher, or the system file explorer. */
-export function openWorktree(path: string, editorId?: string | null): Promise<void> {
-  return invoke("open_worktree", { path, editorId });
+/** Opens a worktree in an editor launcher, or the system file explorer. */
+export function openWorktree(worktreeId: string, editorId?: string | null): Promise<void> {
+  return invoke("open_worktree", { worktreeId, editorId });
 }
 
 /** Creates a nested git worktree from a selected parent worktree. */

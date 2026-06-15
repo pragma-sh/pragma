@@ -148,9 +148,10 @@ export function FilesTab() {
             await renameFile(worktreeId, path, toPath);
             setRenameMode(null);
             bumpNonce(fromParent);
-            if (toPath !== fromParent) {
+            const toParent = dirname(toPath);
+            if (toParent !== fromParent) {
               // Cross-directory rename: refresh the destination parent too.
-              bumpNonce(dirname(toPath));
+              bumpNonce(toParent);
             }
           } catch (cause) {
             toast.error(messageFor(cause));

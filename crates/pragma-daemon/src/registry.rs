@@ -117,10 +117,15 @@ impl Registry {
             .collect();
         let mut killed = 0;
         for id in &target_ids {
-            if let Some(session) = sessions.remove(id) {
-                if session.kill().is_ok() {
-                    killed += 1;
-                }
+            let Some(session) = sessions.get(id).cloned() else {
+                continue;
+            };
+            // Only stop tracking a session once it is actually dead. Removing it
+            // first and ignoring a kill failure would orphan a still-running
+            // shell in a deleted worktree with no way to reach it again.
+            if session.kill().is_ok() {
+                sessions.remove(id);
+                killed += 1;
             }
         }
         Ok(killed)

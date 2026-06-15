@@ -213,15 +213,10 @@ export function FileTreeNode({
             </ContextMenuItem>
             <ContextMenuItem
               onSelect={() => {
-                if (entry.isDir) {
-                  ctrl.selectDir(entry.path);
-                  ctrl.toggleExpand(entry.path);
-                } else {
-                  ctrl.beginRename(entry.path, renameKind, entry.name);
-                }
+                ctrl.beginRename(entry.path, renameKind, entry.name);
               }}
             >
-              {entry.isDir ? "Rename…" : "Rename"}
+              Rename
             </ContextMenuItem>
             <ContextMenuItem
               className="text-destructive focus:text-destructive"

@@ -1139,7 +1139,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        await openWorktreeCommand(selectedWorktree.path, editorId);
+        await openWorktreeCommand(selectedWorktree.id, editorId);
       } catch (cause) {
         dispatch({ type: "load-error", error: messageFor(cause) });
       }
@@ -1157,7 +1157,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        await openWorktreeCommand(target.path, editorId);
+        await openWorktreeCommand(target.id, editorId);
       } catch (cause) {
         dispatch({ type: "load-error", error: messageFor(cause) });
       }

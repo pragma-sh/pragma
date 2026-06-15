@@ -141,10 +141,10 @@ describe("browser IPC wrappers", () => {
     });
   });
 
-  it("openWorktree passes the worktree path and editor id", () => {
-    void openWorktree("/tmp/project", "vscode");
+  it("openWorktree passes the worktree id and editor id", () => {
+    void openWorktree("wt-1", "vscode");
     expect(invokeMock).toHaveBeenCalledWith("open_worktree", {
-      path: "/tmp/project",
+      worktreeId: "wt-1",
       editorId: "vscode",
     });
   });
