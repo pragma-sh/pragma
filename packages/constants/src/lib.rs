@@ -14,9 +14,10 @@ mod generated {
 }
 
 pub use generated::{
-    AppInfo, Constants, EditorLauncher, EditorLaunchers, KeybindingChord,
-    KeybindingChordModifiersItem, Keybindings, KeybindingsConfig, Links, PlatformChord, Project,
-    ProjectIcon, Tab, TabKind, WindowDefaults, Worktree, WorktreeStatus,
+    AppInfo, ChangeStatus, ChangedFile, Constants, DiffSide, DirEntry, EditorLauncher,
+    EditorLaunchers, FileContents, FileDiff, KeybindingChord, KeybindingChordModifiersItem,
+    Keybindings, KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind,
+    WindowDefaults, Worktree, WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.

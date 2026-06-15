@@ -18,6 +18,8 @@ function tab(id: string): Tab {
     kind: "terminal",
     title: id,
     url: null,
+    filePath: null,
+    diffSide: null,
     orderIndex: 0,
     createdAt: "now",
   };

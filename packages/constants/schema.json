@@ -130,9 +130,9 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal or an embedded browser.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, or a read-only diff.",
       "type": "string",
-      "enum": ["terminal", "browser"]
+      "enum": ["terminal", "browser", "editor", "diff"]
     },
     "Tab": {
       "title": "Tab",
@@ -145,6 +145,8 @@
         "kind",
         "title",
         "url",
+        "filePath",
+        "diffSide",
         "orderIndex",
         "createdAt"
       ],
@@ -158,8 +160,138 @@
           "type": ["string", "null"],
           "description": "The current page URL for browser tabs; null for terminal tabs."
         },
+        "filePath": {
+          "type": ["string", "null"],
+          "description": "Worktree-relative path for editor/diff tabs; null for terminal/browser tabs."
+        },
+        "diffSide": {
+          "description": "Which diff side a diff tab shows; null for non-diff tabs.",
+          "anyOf": [{ "$ref": "#/definitions/DiffSide" }, { "type": "null" }]
+        },
         "orderIndex": { "type": "integer" },
         "createdAt": { "type": "string" }
+      }
+    },
+    "DirEntry": {
+      "title": "DirEntry",
+      "description": "A single entry in a worktree directory listing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "isDir"],
+      "properties": {
+        "name": { "type": "string", "description": "The entry's file name (no directory part)." },
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path (forward slashes) to the entry."
+        },
+        "isDir": { "type": "boolean" }
+      }
+    },
+    "DiffSide": {
+      "title": "DiffSide",
+      "description": "Which axis of change a diff tab shows: committed (base branch → HEAD), staged (HEAD → index), or unstaged (index → working tree).",
+      "type": "string",
+      "enum": ["committed", "staged", "unstaged"]
+    },
+    "ChangeStatus": {
+      "title": "ChangeStatus",
+      "description": "How a file changed relative to the diff base.",
+      "type": "string",
+      "enum": ["added", "modified", "deleted", "renamed", "untracked"]
+    },
+    "ChangedFile": {
+      "title": "ChangedFile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "oldPath", "status", "side", "additions", "deletions"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path of the changed file."
+        },
+        "oldPath": {
+          "type": ["string", "null"],
+          "description": "Previous path for a rename; null otherwise."
+        },
+        "status": { "$ref": "#/definitions/ChangeStatus" },
+        "side": { "$ref": "#/definitions/DiffSide" },
+        "additions": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Lines added in this file's diff on its side. Null for binary files (git reports -/-) and for untracked files whose on-disk line count could not be determined."
+        },
+        "deletions": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Lines removed in this file's diff on its side. Null for binary files and for untracked files. 0 for untracked files (a brand-new file has nothing to remove)."
+        }
+      }
+    },
+    "WorktreeChanges": {
+      "title": "WorktreeChanges",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["committed", "staged", "unstaged"],
+      "properties": {
+        "committed": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ChangedFile" }
+        },
+        "staged": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ChangedFile" }
+        },
+        "unstaged": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ChangedFile" }
+        }
+      }
+    },
+    "FileDiff": {
+      "title": "FileDiff",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "oldText", "newText", "binary"],
+      "properties": {
+        "path": { "type": "string" },
+        "oldText": {
+          "type": "string",
+          "description": "The base-side text; empty when the file was added or is binary."
+        },
+        "newText": {
+          "type": "string",
+          "description": "The new-side text; empty when the file was deleted or is binary."
+        },
+        "binary": {
+          "type": "boolean",
+          "description": "True when git reports the file as binary; old/new text are empty."
+        }
+      }
+    },
+    "FileContents": {
+      "title": "FileContents",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "text", "binary", "truncated", "byteSize"],
+      "properties": {
+        "path": { "type": "string" },
+        "text": {
+          "type": "string",
+          "description": "The decoded UTF-8 text; empty when binary or truncated."
+        },
+        "binary": {
+          "type": "boolean",
+          "description": "True when the bytes are not valid UTF-8."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the file exceeds the read cap and was not read."
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "On-disk size in bytes from the file metadata."
+        }
       }
     },
     "ProjectIcon": {

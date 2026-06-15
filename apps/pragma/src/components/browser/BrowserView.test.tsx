@@ -40,6 +40,8 @@ function browserTab(): Tab {
     kind: "browser",
     title: "Browser",
     url: "https://example.com",
+    filePath: null,
+    diffSide: null,
     orderIndex: 0,
     createdAt: "now",
   };
