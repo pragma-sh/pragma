@@ -9,6 +9,15 @@ use crate::error::{AppError, AppResult};
 
 pub struct Db(pub Mutex<Connection>);
 
+/// A persisted per-worktree split-pane layout. `layout` is opaque JSON owned and
+/// shaped entirely by the frontend; the backend stores and returns it verbatim.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitLayout {
+    pub worktree_id: String,
+    pub layout: String,
+}
+
 impl Db {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         if let Some(parent) = path.as_ref().parent() {
@@ -62,7 +71,12 @@ impl Db {
                order_index  INTEGER NOT NULL,
                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
              );
-             CREATE INDEX IF NOT EXISTS idx_tabs_project ON tabs(project_id);",
+             CREATE INDEX IF NOT EXISTS idx_tabs_project ON tabs(project_id);
+             CREATE TABLE IF NOT EXISTS splits (
+               worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
+               layout      TEXT NOT NULL,
+               updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+             );",
         )?;
 
         // Versioned migrations. v2 adds browser-tab columns to `tabs`. Running the
@@ -95,6 +109,13 @@ impl Db {
                 )?;
             }
             conn.execute_batch("PRAGMA user_version = 3;")?;
+        }
+        // v4 adds the `splits` table, which persists the per-worktree split-pane
+        // layout as an opaque JSON blob (the shape is owned by the frontend). The
+        // CREATE block above already provisions it for fresh DBs; the version bump
+        // keeps upgraded DBs marked consistently.
+        if version < 4 {
+            conn.execute_batch("PRAGMA user_version = 4;")?;
         }
         Ok(())
     }
@@ -302,6 +323,48 @@ impl Db {
         Ok(())
     }
 
+    /// Lists the persisted split-pane layouts for a project's worktrees. The
+    /// `layout` is the opaque JSON blob the frontend serialized — the backend
+    /// never inspects it.
+    pub fn list_splits(&self, project_id: &str) -> AppResult<Vec<SplitLayout>> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT s.worktree_id, s.layout
+             FROM splits s
+             JOIN worktrees w ON w.id = s.worktree_id
+             WHERE w.project_id = ?1",
+        )?;
+        let rows = stmt.query_map([project_id], |row| {
+            Ok(SplitLayout {
+                worktree_id: row.get(0)?,
+                layout: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
+    /// Upserts the split-pane layout JSON for a worktree.
+    pub fn set_split_layout(&self, worktree_id: &str, layout: &str) -> AppResult<()> {
+        self.0.lock()?.execute(
+            "INSERT INTO splits (worktree_id, layout, updated_at)
+             VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(worktree_id) DO UPDATE SET
+               layout = excluded.layout,
+               updated_at = excluded.updated_at",
+            params![worktree_id, layout],
+        )?;
+        Ok(())
+    }
+
+    /// Removes a worktree's persisted split layout (it collapsed back to a single
+    /// pane / no split).
+    pub fn clear_split_layout(&self, worktree_id: &str) -> AppResult<()> {
+        self.0
+            .lock()?
+            .execute("DELETE FROM splits WHERE worktree_id = ?1", [worktree_id])?;
+        Ok(())
+    }
+
     fn tab(&self, tab_id: &str) -> AppResult<Tab> {
         self.0
             .lock()?
@@ -501,6 +564,59 @@ mod tests {
             .set_worktree_hidden(&worktree.id, false)
             .expect("show should succeed");
         assert!(!shown.hidden);
+    }
+
+    #[test]
+    fn split_layouts_round_trip_and_cascade_on_worktree_delete() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|w| w.is_main)
+            .expect("main worktree should exist");
+        let worktree = db
+            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .expect("worktree should insert");
+
+        db.set_split_layout(&worktree.id, "{\"kind\":\"split\"}")
+            .expect("layout should upsert");
+        let listed = db.list_splits(&project.id).expect("splits should list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].worktree_id, worktree.id);
+        assert_eq!(listed[0].layout, "{\"kind\":\"split\"}");
+
+        // Upsert overwrites rather than duplicating.
+        db.set_split_layout(&worktree.id, "{\"kind\":\"pane\"}")
+            .expect("layout should update");
+        let updated = db.list_splits(&project.id).expect("splits should list");
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].layout, "{\"kind\":\"pane\"}");
+
+        // Explicit clear removes the row.
+        db.clear_split_layout(&worktree.id)
+            .expect("layout should clear");
+        assert!(db
+            .list_splits(&project.id)
+            .expect("splits should list")
+            .is_empty());
+
+        // Deleting the worktree cascades to any remaining split row.
+        db.set_split_layout(&worktree.id, "{\"kind\":\"split\"}")
+            .expect("layout should upsert");
+        db.delete_worktree(&worktree.id)
+            .expect("worktree should delete");
+        assert!(db
+            .list_splits(&project.id)
+            .expect("splits should list")
+            .is_empty());
     }
 
     #[test]

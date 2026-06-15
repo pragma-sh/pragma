@@ -15,10 +15,12 @@ import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
   browserClose,
+  clearSplitLayout as clearSplitLayoutCommand,
   closeTab as closeTabCommand,
   createTab as createTabCommand,
   deleteWorktree as deleteWorktreeCommand,
   listProjects,
+  listSplits,
   listTabs,
   listWorktrees,
   onBrowserFocusRequest,
@@ -27,10 +29,12 @@ import {
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
+  setSplitLayout as setSplitLayoutCommand,
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
+import type { SplitLayout } from "@/lib/tauri";
 
 export type SplitDirection = "horizontal" | "vertical";
 export type SplitPlacement = "before" | "after";
@@ -76,6 +80,7 @@ type WorkspaceAction =
   | { type: "set-projects"; projects: Project[] }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
+  | { type: "set-splits"; worktreeRoots: Record<string, SplitLayoutNode> }
   | { type: "select-project"; projectId: string | null }
   | { type: "select-worktree"; projectId: string; worktreeId: string }
   | { type: "set-active-tab"; worktreeId: string; tabId: string }
@@ -168,6 +173,40 @@ let nextSplitNode = 0;
 function splitNodeId(prefix: "pane" | "split"): string {
   nextSplitNode += 1;
   return `${prefix}-${nextSplitNode}`;
+}
+
+/**
+ * Advances the node-id counter past any numeric ids found in a restored layout
+ * so freshly generated pane/split ids never collide with persisted ones after a
+ * restart (the counter otherwise resets to 0 each launch).
+ */
+function reserveSplitNodeIds(node: SplitLayoutNode): void {
+  const match = /-(\d+)$/.exec(node.id);
+  if (match) {
+    nextSplitNode = Math.max(nextSplitNode, Number(match[1]));
+  }
+  if (node.kind === "split") {
+    reserveSplitNodeIds(node.children[0]);
+    reserveSplitNodeIds(node.children[1]);
+  }
+}
+
+/**
+ * Parses persisted split records into a worktree → layout map, reserving their
+ * node ids. Corrupt rows are skipped rather than failing the whole load.
+ */
+function parseStoredSplits(records: SplitLayout[]): Record<string, SplitLayoutNode> {
+  const roots: Record<string, SplitLayoutNode> = {};
+  for (const record of records) {
+    try {
+      const root = JSON.parse(record.layout) as SplitLayoutNode;
+      reserveSplitNodeIds(root);
+      roots[record.worktreeId] = root;
+    } catch {
+      // Skip a corrupt layout blob; the worktree falls back to a single pane.
+    }
+  }
+  return roots;
 }
 
 function defaultPaneId(worktreeId: string): string {
@@ -335,8 +374,17 @@ function rootsForTabs(
   roots: Record<string, SplitLayoutNode>,
   tabs: Tab[],
 ): Record<string, SplitLayoutNode> {
+  // `tabs` is a single project's snapshot, so only reconcile roots for worktrees
+  // it actually covers. Roots for worktrees in *other* projects must be left
+  // untouched — dropping them here is what lost split layouts when switching
+  // projects (and would also trigger the persistence layer to clear them).
+  const worktreeIdsInTabs = new Set(tabs.map((tab) => tab.worktreeId));
   const nextRoots: Record<string, SplitLayoutNode> = {};
   for (const [worktreeId, root] of Object.entries(roots)) {
+    if (!worktreeIdsInTabs.has(worktreeId)) {
+      nextRoots[worktreeId] = root;
+      continue;
+    }
     const normalized = normalizeRoot(root, worktreeId, tabs);
     if (normalized) {
       nextRoots[worktreeId] = normalized;
@@ -385,6 +433,26 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         tabs: action.tabs,
         splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
       };
+    case "set-splits": {
+      // Merge persisted layouts for the loaded project's worktrees over whatever
+      // is in memory, reconciling each against the current tabs (a tab may have
+      // been closed in another window/session). Other worktrees are untouched.
+      const splitRootByWorktree = { ...state.splitRootByWorktree };
+      for (const [worktreeId, root] of Object.entries(action.worktreeRoots)) {
+        const normalized = normalizeRoot(
+          root,
+          worktreeId,
+          state.tabs,
+          state.activeTabByWorktree[worktreeId],
+        );
+        if (normalized) {
+          splitRootByWorktree[worktreeId] = normalized;
+        } else {
+          delete splitRootByWorktree[worktreeId];
+        }
+      }
+      return { ...state, splitRootByWorktree };
+    }
     case "select-project":
       return { ...state, selectedProjectId: action.projectId };
     case "select-worktree":
@@ -713,7 +781,20 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         }
       }
       const tabs = state.tabs.filter((tab) => tab.worktreeId !== action.worktreeId);
-      return { ...state, worktrees, selectedWorktreeByProject, tabs };
+      // Drop the worktree's split layout/focus too (SQLite cascades the `splits`
+      // row via the worktree FK; this keeps the in-memory snapshot in sync).
+      const splitRootByWorktree = { ...state.splitRootByWorktree };
+      delete splitRootByWorktree[action.worktreeId];
+      const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+      delete focusedPaneByWorktree[action.worktreeId];
+      return {
+        ...state,
+        worktrees,
+        selectedWorktreeByProject,
+        tabs,
+        splitRootByWorktree,
+        focusedPaneByWorktree,
+      };
     }
     case "update-worktree": {
       // Patch a single worktree row in-place (rename, hide/show). Cascades to
@@ -760,9 +841,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const [worktrees, tabs] = await Promise.all([
+      const [worktrees, tabs, splits] = await Promise.all([
         listWorktrees(targetProjectId),
         listTabs(targetProjectId),
+        listSplits(targetProjectId),
       ]);
       // `set-tabs` replaces the whole (single-project) tab list, so only apply
       // it if this refresh still targets the selected project — otherwise a
@@ -772,6 +854,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "set-worktrees", projectId: targetProjectId, worktrees });
       dispatch({ type: "set-tabs", tabs });
+      dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -879,13 +962,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     async function loadProjectDetails(projectId: string) {
       try {
-        const [worktrees, tabs] = await Promise.all([
+        const [worktrees, tabs, splits] = await Promise.all([
           listWorktrees(projectId),
           listTabs(projectId),
+          listSplits(projectId),
         ]);
         if (!cancelled) {
           dispatch({ type: "set-worktrees", projectId, worktrees });
           dispatch({ type: "set-tabs", tabs });
+          dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
         }
       } catch (cause) {
         if (!cancelled) {
@@ -943,6 +1028,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unlisten?.();
     };
   }, []);
+
+  // Persist split layouts so they survive project switches and app restarts,
+  // mirroring how tabs persist. Only real splits are stored; a worktree that
+  // collapses back to a single pane clears its row. `persistedSplitsRef` tracks
+  // what we've already written so each actual change issues exactly one command.
+  const persistedSplitsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const seen = persistedSplitsRef.current;
+    const nextSeen: Record<string, string> = {};
+    for (const [worktreeId, root] of Object.entries(state.splitRootByWorktree)) {
+      if (root.kind !== "split") {
+        continue;
+      }
+      const serialized = JSON.stringify(root);
+      nextSeen[worktreeId] = serialized;
+      if (seen[worktreeId] !== serialized) {
+        void setSplitLayoutCommand(worktreeId, serialized).catch(() => undefined);
+      }
+    }
+    for (const worktreeId of Object.keys(seen)) {
+      if (!(worktreeId in nextSeen)) {
+        void clearSplitLayoutCommand(worktreeId).catch(() => undefined);
+      }
+    }
+    persistedSplitsRef.current = nextSeen;
+  }, [state.splitRootByWorktree]);
 
   const activeProject =
     state.projects.find((project) => project.id === state.selectedProjectId) ?? null;

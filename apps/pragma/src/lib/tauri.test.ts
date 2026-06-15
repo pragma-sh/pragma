@@ -16,10 +16,13 @@ import {
   browserNavigate,
   browserScreenshot,
   browserSetBounds,
+  clearSplitLayout,
   createTab,
   deleteWorktree,
+  listSplits,
   openWorktree,
   renameWorktree,
+  setSplitLayout,
   setWorktreeHidden,
   worktreeStatus,
 } from "./tauri";
@@ -142,5 +145,30 @@ describe("worktree IPC wrappers", () => {
       deleteBranch: true,
       force: false,
     });
+  });
+});
+
+describe("split-layout IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("listSplits forwards the project id", () => {
+    void listSplits("p");
+    expect(invokeMock).toHaveBeenCalledWith("list_splits", { projectId: "p" });
+  });
+
+  it("setSplitLayout forwards the worktree id and serialized layout", () => {
+    void setSplitLayout("wt-1", '{"kind":"split"}');
+    expect(invokeMock).toHaveBeenCalledWith("set_split_layout", {
+      worktreeId: "wt-1",
+      layout: '{"kind":"split"}',
+    });
+  });
+
+  it("clearSplitLayout forwards the worktree id", () => {
+    void clearSplitLayout("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("clear_split_layout", { worktreeId: "wt-1" });
   });
 });

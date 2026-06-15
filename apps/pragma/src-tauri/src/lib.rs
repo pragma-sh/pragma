@@ -18,7 +18,7 @@ use pragma_constants::{AppInfo, KeybindingsConfig, ProjectIcon, Tab, TabKind, CO
 use tauri::ipc::Channel;
 use tauri::Manager;
 
-use crate::db::Db;
+use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
 use crate::pty::{PtyClient, PtyEvent};
@@ -158,6 +158,28 @@ fn set_tab_url(db: tauri::State<'_, Db>, tab_id: String, url: String) -> AppResu
     db.set_tab_url(&tab_id, &url)
 }
 
+/// Lists the persisted split-pane layouts for a project's worktrees.
+#[tauri::command]
+fn list_splits(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Vec<SplitLayout>> {
+    db.list_splits(&project_id)
+}
+
+/// Persists a worktree's split-pane layout (opaque, frontend-owned JSON).
+#[tauri::command]
+fn set_split_layout(
+    db: tauri::State<'_, Db>,
+    worktree_id: String,
+    layout: String,
+) -> AppResult<()> {
+    db.set_split_layout(&worktree_id, &layout)
+}
+
+/// Clears a worktree's split-pane layout when it collapses back to a single pane.
+#[tauri::command]
+fn clear_split_layout(db: tauri::State<'_, Db>, worktree_id: String) -> AppResult<()> {
+    db.clear_split_layout(&worktree_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -216,6 +238,9 @@ pub fn run() {
             close_tab,
             rename_tab,
             set_tab_url,
+            list_splits,
+            set_split_layout,
+            clear_split_layout,
             browser::browser_create,
             browser::browser_frame_height,
             browser::browser_set_bounds,

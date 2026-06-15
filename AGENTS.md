@@ -157,6 +157,18 @@ than no guide.
   own "+" menu that creates a new tab **inside that pane** (`createTabInPane` →
   `add-tab-to-pane`); the top strip's "+" and the `⌘T`/`⌘B` shortcuts always add **normal
   top-level** tabs, never split members.
+- **Split layouts persist in SQLite** (the `splits` table, v4 migration — one row per
+  worktree keyed by `worktree_id`, cascade-deleted with the worktree). The layout is an
+  **opaque JSON blob owned entirely by the frontend** (`SplitLayoutNode`); Rust stores and
+  returns the string verbatim via `list_splits` / `set_split_layout` / `clear_split_layout`
+  (no `@pragma/constants` shape — the backend never parses it). On project load the
+  workspace dispatches `set-splits` (after `set-tabs`) to merge stored layouts, reconciled
+  against the current tabs. An effect in `workspace-context.tsx` persists on every change:
+  only **real splits** (`root.kind === "split"`) are written; a worktree that collapses
+  back to a single pane clears its row. `rootsForTabs` must **not** drop roots for worktrees
+  outside the loaded project's tab snapshot — that both lost splits on project switch and
+  would make the persist effect erase them. Restored node ids are passed through
+  `reserveSplitNodeIds` so the regenerated `pane-N`/`split-N` counter never collides.
 - **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,
   `JetBrainsMono Nerd Font`, `JetBrains Mono`, `SF Mono`, Menlo, Monaco,
   `ui-monospace`, `monospace`) at **fontSize 14 / lineHeight 1.0**. 14px is the

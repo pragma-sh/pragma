@@ -329,6 +329,59 @@ describe("workspaceReducer", () => {
     expect(state.activeTabByWorktree.worktree).toBe("three");
   });
 
+  it("keeps split roots for worktrees outside the loaded project's tab snapshot", () => {
+    const otherProjectSplit: SplitLayoutNode = {
+      kind: "split",
+      id: "split-1",
+      direction: "horizontal",
+      children: [
+        { kind: "pane", id: "pane-left", tabIds: ["a"], activeTabId: "a" },
+        { kind: "pane", id: "pane-right", tabIds: ["b"], activeTabId: "b" },
+      ],
+    };
+    const state = workspaceReducer(
+      {
+        ...baseState,
+        // Tabs/splits for a worktree that belongs to a *different* project.
+        splitRootByWorktree: { "wt-other": otherProjectSplit },
+      },
+      // Switching projects replaces the tab list with the new project's tabs.
+      { type: "set-tabs", tabs: [tab("one", "wt-current")] },
+    );
+
+    // The other project's split must survive the project switch in memory.
+    expect(state.splitRootByWorktree["wt-other"]).toEqual(otherProjectSplit);
+  });
+
+  it("restores persisted splits, reconciling against the current tabs", () => {
+    const state = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("one"), tab("two")],
+        activeTabByWorktree: { worktree: "one" },
+      },
+      {
+        type: "set-splits",
+        worktreeRoots: {
+          worktree: {
+            kind: "split",
+            id: "split-1",
+            direction: "vertical",
+            children: [
+              // "gone" was closed in a prior session and must be reconciled out.
+              { kind: "pane", id: "pane-left", tabIds: ["one", "gone"], activeTabId: "one" },
+              { kind: "pane", id: "pane-right", tabIds: ["two"], activeTabId: "two" },
+            ],
+          },
+        },
+      },
+    );
+
+    const root = state.splitRootByWorktree.worktree;
+    expect(root?.kind).toBe("split");
+    expect(tabIdsInLayout(root).toSorted()).toEqual(["one", "two"]);
+  });
+
   it("merges new tabs into a single-pane root when tabs are loaded", () => {
     const state = workspaceReducer(
       {

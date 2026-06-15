@@ -188,6 +188,27 @@ export function setTabUrl(tabId: string, url: string): Promise<Tab> {
   return invoke<Tab>("set_tab_url", { tabId, url });
 }
 
+/** A persisted per-worktree split layout; `layout` is the serialized split tree. */
+export interface SplitLayout {
+  worktreeId: string;
+  layout: string;
+}
+
+/** Lists the persisted split-pane layouts for a project's worktrees. */
+export function listSplits(projectId: string): Promise<SplitLayout[]> {
+  return invoke<SplitLayout[]>("list_splits", { projectId });
+}
+
+/** Persists a worktree's split-pane layout (serialized split tree JSON). */
+export function setSplitLayout(worktreeId: string, layout: string): Promise<void> {
+  return invoke("set_split_layout", { worktreeId, layout });
+}
+
+/** Clears a worktree's split-pane layout when it collapses back to a single pane. */
+export function clearSplitLayout(worktreeId: string): Promise<void> {
+  return invoke("clear_split_layout", { worktreeId });
+}
+
 /** Logical pixel bounds (relative to the window) for a browser webview overlay. */
 export interface BrowserBounds {
   x: number;
