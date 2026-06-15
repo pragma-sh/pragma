@@ -52,6 +52,8 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     createTerminalTab: vi.fn(),
     createBrowserTab: vi.fn(),
     createTabInPane: vi.fn(),
+    openFileTab: vi.fn(),
+    openDiffTab: vi.fn(),
     closeTab: vi.fn(),
     renameTerminalTab: vi.fn(),
     openSelectedWorktree: vi.fn(),

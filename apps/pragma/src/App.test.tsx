@@ -21,6 +21,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
+  TERMINAL_FONT_FAMILY: "monospace",
   terminalManager: {
     activate: vi.fn(),
     dispose: vi.fn(),

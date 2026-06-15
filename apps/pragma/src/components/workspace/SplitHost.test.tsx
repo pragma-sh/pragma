@@ -75,6 +75,8 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       createTerminalTab: vi.fn(),
       createBrowserTab: vi.fn(),
       createTabInPane,
+      openFileTab: vi.fn(),
+      openDiffTab: vi.fn(),
       closeTab: vi.fn(),
       renameTerminalTab: vi.fn(),
       openSelectedWorktree: vi.fn(),
@@ -105,12 +107,17 @@ vi.mock("@/state/workspace-context", () => ({
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
+  TERMINAL_FONT_FAMILY: "monospace",
   terminalManager: {
     mount: vi.fn(),
     activate: vi.fn(),
     resize: vi.fn(),
     dispose: vi.fn(),
   },
+}));
+
+vi.mock("@/components/editor/confirm-close", () => ({
+  useConfirmClose: () => vi.fn(),
 }));
 
 /** Minimal DataTransfer carrying a single tab id, sufficient for the drag handlers. */

@@ -4,6 +4,8 @@ import type { Tab } from "@pragma/constants";
 import { Globe, Plus, SquareTerminal, X } from "lucide-react";
 
 import { BrowserView } from "@/components/browser/BrowserView";
+import { DiffView } from "@/components/editor/DiffView";
+import { EditorView } from "@/components/editor/EditorView";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,9 +15,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { TerminalView } from "@/components/terminal/TerminalView";
+import { useConfirmClose } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { type DropTarget, dropTargetAt, TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
-import { TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { browserFocus } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
@@ -118,6 +121,10 @@ function SplitPane({
         {activeTab ? (
           activeTab.kind === "browser" ? (
             <BrowserView active key={activeTab.id} tab={activeTab} />
+          ) : activeTab.kind === "editor" ? (
+            <EditorView key={activeTab.id} tab={activeTab} />
+          ) : activeTab.kind === "diff" ? (
+            <DiffView key={activeTab.id} tab={activeTab} />
           ) : (
             <TerminalView
               cwd={worktree?.path ?? workspace.selectedWorktree?.path ?? "~"}
@@ -149,6 +156,7 @@ function PaneBar({
   tabs: Tab[];
 }) {
   const workspace = useWorkspace();
+  const requestClose = useConfirmClose();
   const { isDragging, draggingTabId, beginTabDrag, endTabDrag } = useTabDrag();
   const [dropActive, setDropActive] = useState(false);
 
@@ -211,12 +219,13 @@ function PaneBar({
               <TabIcon tab={tab} />
               <span className="min-w-0 flex-1 truncate">{tabTitle(tab)}</span>
             </button>
+            <TabDirtyDot tabId={tab.id} />
             <button
               aria-label="Close tab"
               className="rounded p-0.5 opacity-60 hover:bg-white/10 hover:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
-                void workspace.closeTab(tab.id);
+                requestClose(tab);
               }}
             >
               <X className="size-3" />

@@ -9,9 +9,17 @@ import {
   type ReactNode,
 } from "react";
 
-import type { Project, ProjectIcon, Tab, Worktree, WorktreeStatus } from "@pragma/constants";
+import type {
+  DiffSide,
+  Project,
+  ProjectIcon,
+  Tab,
+  Worktree,
+  WorktreeStatus,
+} from "@pragma/constants";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
+import { basename } from "@/lib/path";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
   browserClose,
@@ -123,6 +131,10 @@ interface WorkspaceContextValue extends WorkspaceState {
   createBrowserTab: (worktreeId?: string) => Promise<void>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  /** Opens (or focuses) an editor tab for a worktree-relative file path. */
+  openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
+  /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
+  openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
@@ -914,6 +926,61 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [createTab],
   );
 
+  // Shared opener for editor/diff tabs. Both dedupe against the active worktree's
+  // existing tabs (a file path is worktree-relative) before creating a new one.
+  const openLocatorTab = useCallback(
+    async (
+      kind: "editor" | "diff",
+      path: string,
+      side: DiffSide | null,
+      paneId: string | undefined,
+    ) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === kind &&
+          tab.worktreeId === worktreeId &&
+          tab.filePath === path &&
+          tab.diffSide === side,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          worktreeId,
+          kind,
+          basename(path),
+          undefined,
+          path,
+          side,
+        );
+        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
+  const openFileTab = useCallback(
+    (path: string, opts?: { paneId?: string }) =>
+      openLocatorTab("editor", path, null, opts?.paneId),
+    [openLocatorTab],
+  );
+
+  const openDiffTab = useCallback(
+    (path: string, side: DiffSide, opts?: { paneId?: string }) =>
+      openLocatorTab("diff", path, side, opts?.paneId),
+    [openLocatorTab],
+  );
+
   // Tear down both backends regardless of kind: each is a no-op for the other's
   // tabs, so we don't need to look up the tab's kind on the close path.
   const closeTab = useCallback(async (tabId: string) => {
@@ -1317,6 +1384,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTerminalTab,
       createBrowserTab,
       createTabInPane,
+      openFileTab,
+      openDiffTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,
@@ -1350,6 +1419,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTerminalTab,
       createBrowserTab,
       createTabInPane,
+      openFileTab,
+      openDiffTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,

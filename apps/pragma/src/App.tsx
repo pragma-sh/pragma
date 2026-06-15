@@ -1,10 +1,13 @@
+import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { WorkspaceProvider } from "@/state/workspace-context";
 
 function App() {
   return (
     <WorkspaceProvider>
-      <WorkspaceShell />
+      <ConfirmCloseProvider>
+        <WorkspaceShell />
+      </ConfirmCloseProvider>
     </WorkspaceProvider>
   );
 }

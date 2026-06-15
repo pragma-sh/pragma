@@ -21,9 +21,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useConfirmClose } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
-import { TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { isMacPlatform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
@@ -148,6 +149,7 @@ function SplitButton({ direction, label, icon: IconComponent }: (typeof splitCon
 
 export function TerminalTabs() {
   const workspace = useWorkspace();
+  const requestClose = useConfirmClose();
   const { beginTabDrag, endTabDrag } = useTabDrag();
   const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
@@ -325,10 +327,11 @@ export function TerminalTabs() {
                           <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
                         </button>
                       )}
+                      <TabDirtyDot tabId={tab.id} />
                       <button
                         aria-label="Close tab"
                         className="rounded p-0.5 opacity-60 hover:bg-white/10 hover:opacity-100"
-                        onClick={() => void workspace.closeTab(tab.id)}
+                        onClick={() => requestClose(tab)}
                       >
                         <X className="size-3" />
                       </button>
@@ -339,7 +342,7 @@ export function TerminalTabs() {
                       <Pencil />
                       Rename
                     </ContextMenuItem>
-                    <ContextMenuItem onSelect={() => void workspace.closeTab(tab.id)}>
+                    <ContextMenuItem onSelect={() => requestClose(tab)}>
                       <X />
                       Close
                     </ContextMenuItem>

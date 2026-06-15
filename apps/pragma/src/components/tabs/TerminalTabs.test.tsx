@@ -69,6 +69,8 @@ const mockWorkspace: WorkspaceContextValue = {
   createTerminalTab: vi.fn(),
   createBrowserTab: vi.fn(),
   createTabInPane: vi.fn(),
+  openFileTab: vi.fn(),
+  openDiffTab: vi.fn(),
   closeTab: vi.fn(),
   renameTerminalTab: vi.fn(),
   openSelectedWorktree: vi.fn(),
@@ -88,6 +90,10 @@ const mockWorkspace: WorkspaceContextValue = {
 
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: (): WorkspaceContextValue => mockWorkspace,
+}));
+
+vi.mock("@/components/editor/confirm-close", () => ({
+  useConfirmClose: () => vi.fn(),
 }));
 
 afterEach(() => {
