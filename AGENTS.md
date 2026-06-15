@@ -175,8 +175,32 @@ than no guide.
   `WorkspaceShell` (so collapsing it reflows the center pane and the `BrowserView`
   ResizeObserver re-applies native bounds for free). Its cosmetic state (collapsed / active
   subtab / width) lives in `state/right-sidebar-context.tsx` and persists to **localStorage**,
-  not SQLite. Two subtabs: **Files** (lazy `FileTree`, inline create) and **Changes**
-  (three git lists — **Staged**, **Unstaged**, **Committed**, in that order). Git has no edit
+  not SQLite. Two subtabs: **Files** (lazy `FileTree`, inline create + inline rename) and
+  **Changes** (three git lists — **Staged**, **Unstaged**, **Committed**, in that order). The
+  **Files** subtab mirrors the worktree-tree rename UX: right-click any row → **Rename** (works
+  for files and folders; replaces the row's label with `<RenameEntryInput>`, which pre-fills
+  the current name, selects the basename — leaving the extension unselected for files — and
+  commits on Enter / cancels on Escape). The input caps at `max-w-[14rem]` and disables
+  `autoCapitalize` / `textTransform` so long names don't push the icon and the typed value
+  isn't transformed. The controller's `renameMode` lives in `FilesTab` alongside `createMode`,
+  and `commitRename` calls `renameFile(worktreeId, from, to)` then bumps the parent's nonce
+  (and the destination parent's nonce for cross-directory moves). On the backend,
+  `fs::rename_file` resolves both paths through `resolve_in_worktree`, refuses to overwrite an
+  existing destination (`InvalidInput`), and uses `std::fs::rename` so it works for files _and_
+  directories and is atomic on the same FS. **Selection + delete**: a single click on a file
+  selects it (a `selectedFile` path on the controller, rendered with an `outline outline-1
+outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active directory"
+  highlight). Right-click any row → **Delete** (red), or press **⌘+Backspace** on macOS /
+  **Ctrl+Delete** on Linux — that binding is registered as `deleteFile` in
+  `packages/constants/schema.json` + the Rust `keybindings::default_config` and surfaces
+  through `useShortcuts` to `WorkspaceShell`, which dispatches a `pragma:request-delete-file`
+  window event the `FilesTab` listens for. The controller's `commitDelete` calls
+  `deleteFile(worktreeId, path)` immediately and bumps the parent's nonce. The worktree is a
+  git checkout, so **delete has no confirmation** — `git checkout -- <path>` / `git clean -fd`
+  from a terminal tab is the recovery path. The backend `fs::delete_file` resolves through
+  `resolve_in_worktree` (same `..`/symlink guard) and refuses to recurse into non-empty
+  directories (`InvalidInput`); use `discard_*` / `clean -fd` from the Changes tab for tracked
+  / untracked multi-file removal. Git has no edit
   notification, so **Changes polls `worktree_changes` every 2s while mounted** (and on window
   focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
   `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
