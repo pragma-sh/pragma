@@ -93,6 +93,7 @@ fn default_config() -> KeybindingsConfig {
             browser_copy_url: chord("cmd+shift", "c", "ctrl+shift", "c"),
             split_horizontal: chord("cmd", "/", "ctrl", "/"),
             split_vertical: chord("cmd+shift", "/", "ctrl+shift", "/"),
+            delete_file: chord("cmd", "backspace", "ctrl", "delete"),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),
@@ -145,6 +146,8 @@ mod tests {
             parsed.bindings.close_top_tab.linux.modifiers,
             [KeybindingChordModifiersItem::Ctrl]
         );
+        assert_eq!(parsed.bindings.delete_file.mac.key, "backspace");
+        assert_eq!(parsed.bindings.delete_file.linux.key, "delete");
     }
 
     #[test]

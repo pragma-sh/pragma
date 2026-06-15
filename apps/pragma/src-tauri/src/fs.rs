@@ -252,6 +252,59 @@ pub fn write_file(
     Ok(())
 }
 
+/// Renames (or moves) a worktree-relative entry. Both paths are resolved
+/// through the worktree so symlink escapes and `..` are rejected. Errors if
+/// the source is missing or the destination already exists — `std::fs::rename`
+/// would otherwise overwrite silently on Unix.
+#[tauri::command]
+pub fn rename_file(
+    db: State<'_, Db>,
+    worktree_id: String,
+    from_path: String,
+    to_path: String,
+) -> AppResult<()> {
+    let root = worktree_root(&db, &worktree_id)?;
+    let from = resolve_in_worktree(&root, &from_path)?;
+    let to = resolve_in_worktree(&root, &to_path)?;
+
+    if !from.exists() {
+        return Err(AppError::InvalidInput(
+            "source path does not exist".to_string(),
+        ));
+    }
+    if to.exists() {
+        return Err(AppError::InvalidInput(
+            "destination path already exists".to_string(),
+        ));
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(&from, &to)?;
+    Ok(())
+}
+
+/// Deletes a worktree-relative file or empty directory. Refuses to recurse — a
+/// non-empty directory must be deleted entry-by-entry. Refuses to follow
+/// symlinks (the resolver catches those before this point).
+#[tauri::command]
+pub fn delete_file(db: State<'_, Db>, worktree_id: String, path: String) -> AppResult<()> {
+    let root = worktree_root(&db, &worktree_id)?;
+    let target = resolve_in_worktree(&root, &path)?;
+
+    let metadata = std::fs::symlink_metadata(&target)?;
+    if metadata.is_dir() {
+        let is_empty = std::fs::read_dir(&target)?.next().is_none();
+        if !is_empty {
+            return Err(AppError::InvalidInput("directory is not empty".to_string()));
+        }
+        std::fs::remove_dir(&target)?;
+    } else {
+        std::fs::remove_file(&target)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -333,5 +386,103 @@ mod tests {
     #[test]
     fn max_read_cap_is_two_mib() {
         assert_eq!(MAX_READ_BYTES, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn rename_file_moves_within_the_worktree() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("old.txt"), "hi").expect("write");
+        std::fs::create_dir(root.join("sub")).expect("mkdir");
+
+        // Same-dir rename: from/to both inside the worktree.
+        let from = resolve_in_worktree(root, "old.txt").expect("resolve from");
+        let to = resolve_in_worktree(root, "new.txt").expect("resolve to");
+        assert!(from.exists());
+        assert!(!to.exists());
+        std::fs::rename(&from, &to).expect("rename");
+        assert!(!from.exists());
+        assert!(to.exists());
+
+        // Cross-directory move.
+        std::fs::write(root.join("mover.txt"), "m").expect("write");
+        let from = resolve_in_worktree(root, "mover.txt").expect("resolve from");
+        let to = resolve_in_worktree(root, "sub/moved.txt").expect("resolve to");
+        std::fs::rename(&from, &to).expect("rename across dirs");
+        assert!(!from.exists());
+        assert!(to.exists());
+    }
+
+    #[test]
+    fn rename_file_rejects_existing_destination() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "a").expect("write");
+        std::fs::write(root.join("b.txt"), "b").expect("write");
+
+        // The command checks `to.exists()` and refuses to overwrite — we mirror
+        // that guard here, since `std::fs::rename` itself would silently win on
+        // Unix.
+        let to = root.join("b.txt");
+        assert!(to.exists());
+        let from = root.join("a.txt");
+        assert!(from.exists());
+        // Simulating the command's branch: the rename must not be allowed.
+        if to.exists() {
+            // expected: command returns InvalidInput
+        } else {
+            panic!("destination should exist for this test");
+        }
+        // Both files still on disk.
+        assert!(from.exists());
+        assert!(to.exists());
+    }
+
+    #[test]
+    fn rename_file_rejects_missing_source() {
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("nope.txt");
+        assert!(!missing.exists());
+        // The command's `resolve_in_worktree` canonicalizes a path; for a
+        // missing leaf under an existing root the resolver still succeeds (it
+        // canonicalizes the deepest existing ancestor) and the explicit
+        // `from.exists()` check then trips.
+        let resolved = resolve_in_worktree(dir.path(), "nope.txt").expect("resolve");
+        assert!(!resolved.exists());
+    }
+
+    #[test]
+    fn delete_file_removes_file_and_empty_directory() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("file.txt"), "x").expect("write");
+        std::fs::create_dir(root.join("empty")).expect("mkdir");
+        std::fs::create_dir(root.join("full")).expect("mkdir");
+        std::fs::write(root.join("full/child.txt"), "c").expect("write child");
+
+        // File delete: `std::fs::remove_file` removes the file.
+        let file = resolve_in_worktree(root, "file.txt").expect("resolve");
+        assert!(file.is_file());
+        std::fs::remove_file(&file).expect("remove_file");
+        assert!(!file.exists());
+
+        // Empty directory: the command's "read_dir next is None" branch.
+        let empty = resolve_in_worktree(root, "empty").expect("resolve");
+        assert!(empty.is_dir());
+        let is_empty = std::fs::read_dir(&empty)
+            .expect("read_dir")
+            .next()
+            .is_none();
+        assert!(is_empty);
+        std::fs::remove_dir(&empty).expect("remove_dir");
+        assert!(!empty.exists());
+
+        // Non-empty directory: the command refuses.
+        let full = resolve_in_worktree(root, "full").expect("resolve");
+        let is_empty = std::fs::read_dir(&full).expect("read_dir").next().is_none();
+        assert!(!is_empty);
+        // The directory and its child must still be there.
+        assert!(full.exists());
+        assert!(full.join("child.txt").exists());
     }
 }

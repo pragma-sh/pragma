@@ -263,6 +263,8 @@ pub fn run() {
             fs::path_exists,
             fs::read_file,
             fs::write_file,
+            fs::rename_file,
+            fs::delete_file,
             git::worktree_changes,
             git::file_diff,
             git::discard_unstaged_file,
