@@ -15,6 +15,8 @@ function controller(overrides: Partial<FileTreeController> = {}): FileTreeContro
     worktreeId: "wt",
     selectedDir: "",
     selectDir: vi.fn(),
+    selectedFile: "",
+    selectFile: vi.fn(),
     isExpanded: () => false,
     toggleExpand: vi.fn(),
     expand: vi.fn(),
@@ -22,6 +24,11 @@ function controller(overrides: Partial<FileTreeController> = {}): FileTreeContro
     beginCreate: vi.fn(),
     cancelCreate: vi.fn(),
     commitCreate: vi.fn(),
+    renameMode: null,
+    beginRename: vi.fn(),
+    cancelRename: vi.fn(),
+    commitRename: vi.fn(),
+    commitDelete: vi.fn(),
     nonceFor: () => 0,
     openFile: vi.fn(),
     ...overrides,
@@ -57,18 +64,36 @@ describe("FileTree", () => {
 });
 
 describe("FileTreeNode", () => {
-  it("opens a file on double-click", () => {
-    const ctrl = controller();
-    render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} />);
-    fireEvent.doubleClick(screen.getByText("app.ts"));
-    expect(ctrl.openFile).toHaveBeenCalledWith("src/app.ts");
+  it("renders the inline rename input when the controller is in rename mode for this row", () => {
+    const ctrl = controller({
+      renameMode: { path: fileEntry.path, kind: "file", name: fileEntry.name },
+    });
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
+    const input = screen.getByLabelText("Rename file") as HTMLInputElement;
+    expect(input.value).toBe("app.ts");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(ctrl.commitRename).toHaveBeenCalledWith("src/app.ts", "file", "app.ts");
   });
 
   it("selects and toggles a directory on click", () => {
     const ctrl = controller();
-    render(<FileTreeNode ctrl={ctrl} depth={0} entry={dirEntry} />);
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={dirEntry} siblings={[dirEntry.name]} />);
     fireEvent.click(screen.getByText("src"));
     expect(ctrl.selectDir).toHaveBeenCalledWith("src");
     expect(ctrl.toggleExpand).toHaveBeenCalledWith("src");
+  });
+
+  it("marks a file as selected on click", () => {
+    const ctrl = controller();
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
+    fireEvent.click(screen.getByText("app.ts"));
+    expect(ctrl.selectFile).toHaveBeenCalledWith("src/app.ts");
+  });
+
+  it("applies a distinct visual to the selected file", () => {
+    const ctrl = controller({ selectedFile: fileEntry.path });
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
+    const button = screen.getByText("app.ts").closest("button");
+    expect(button?.className).toContain("outline-cyan-400/60");
   });
 });

@@ -61,6 +61,10 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd", "shift"], key: "/" },
         linux: { modifiers: ["ctrl", "shift"], key: "/" },
       },
+      deleteFile: {
+        mac: { modifiers: ["cmd"], key: "backspace" },
+        linux: { modifiers: ["ctrl"], key: "delete" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -123,6 +127,7 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onBrowserCopyUrl: vi.fn(),
     onSplitHorizontal: vi.fn(),
     onSplitVertical: vi.fn(),
+    onDeleteSelectedFile: vi.fn(),
     ...overrides,
   };
 }
@@ -240,6 +245,34 @@ describe("useShortcuts", () => {
     const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "?" });
 
     expect(onSplitVertical).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onDeleteSelectedFile for cmd+backspace on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onDeleteSelectedFile = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onDeleteSelectedFile })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "Backspace" });
+
+    expect(onDeleteSelectedFile).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onDeleteSelectedFile for ctrl+delete on linux", async () => {
+    getPlatformMock.mockResolvedValue("linux");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onDeleteSelectedFile = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onDeleteSelectedFile })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ ctrlKey: true, key: "Delete" });
+
+    expect(onDeleteSelectedFile).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
   });
 });

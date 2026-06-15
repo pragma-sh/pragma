@@ -25,6 +25,8 @@ interface UseShortcutsOptions {
   onBrowserCopyUrl: () => void;
   onSplitHorizontal: () => void;
   onSplitVertical: () => void;
+  /** Files tree: opens the delete confirmation for the currently selected file. */
+  onDeleteSelectedFile: () => void;
 }
 
 interface ShortcutState {
@@ -122,6 +124,10 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         case "splitVertical":
           event.preventDefault();
           current.onSplitVertical();
+          break;
+        case "deleteFile":
+          event.preventDefault();
+          current.onDeleteSelectedFile();
           break;
         default: {
           const workspaceIndex = workspaceIndexForAction(action);

@@ -20,6 +20,7 @@ import {
   createFile,
   createFolder,
   createTab,
+  deleteFile,
   deleteWorktree,
   fileDiff,
   listDirEntries,
@@ -28,6 +29,7 @@ import {
   openWorktree,
   pathExists,
   readFile,
+  renameFile,
   renameWorktree,
   setSplitLayout,
   setWorktreeHidden,
@@ -268,6 +270,23 @@ describe("filesystem IPC wrappers", () => {
       worktreeId: "wt-1",
       path: "src/app.ts",
       contents: "const x = 1;",
+    });
+  });
+
+  it("renameFile forwards worktree id, from path, and to path", () => {
+    void renameFile("wt-1", "src/old.ts", "src/new.ts");
+    expect(invokeMock).toHaveBeenCalledWith("rename_file", {
+      worktreeId: "wt-1",
+      fromPath: "src/old.ts",
+      toPath: "src/new.ts",
+    });
+  });
+
+  it("deleteFile forwards worktree id and path", () => {
+    void deleteFile("wt-1", "src/old.ts");
+    expect(invokeMock).toHaveBeenCalledWith("delete_file", {
+      worktreeId: "wt-1",
+      path: "src/old.ts",
     });
   });
 });

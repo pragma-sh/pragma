@@ -62,6 +62,11 @@ export function WorkspaceShell() {
         workspace.splitActivePane(workspace.activeTabId, "vertical");
       }
     },
+    onDeleteSelectedFile: () => {
+      // Bridge to the right-sidebar Files tree, which owns the selected-file
+      // state. The tree listens for this event and opens its delete confirm.
+      window.dispatchEvent(new Event("pragma:request-delete-file"));
+    },
   });
 
   return (

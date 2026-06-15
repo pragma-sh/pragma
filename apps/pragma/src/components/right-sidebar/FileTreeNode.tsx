@@ -5,6 +5,7 @@ import { Icon } from "@iconify/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { NewEntryInput } from "@/components/right-sidebar/NewEntryInput";
+import { RenameEntryInput } from "@/components/right-sidebar/RenameEntryInput";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -24,6 +25,8 @@ export interface FileTreeController {
   worktreeId: string;
   selectedDir: string;
   selectDir: (path: string) => void;
+  selectedFile: string;
+  selectFile: (path: string) => void;
   isExpanded: (path: string) => boolean;
   toggleExpand: (path: string) => void;
   expand: (path: string) => void;
@@ -31,6 +34,11 @@ export interface FileTreeController {
   beginCreate: (dirPath: string, kind: "file" | "folder") => void;
   cancelCreate: () => void;
   commitCreate: (dirPath: string, kind: "file" | "folder", name: string) => void;
+  renameMode: { path: string; kind: "file" | "folder"; name: string } | null;
+  beginRename: (path: string, kind: "file" | "folder", name: string) => void;
+  cancelRename: () => void;
+  commitRename: (path: string, kind: "file" | "folder", name: string) => void;
+  commitDelete: (path: string, name: string) => void;
   nonceFor: (path: string) => number;
   openFile: (path: string) => void;
 }
@@ -102,7 +110,13 @@ export function FileTree({
         <Hint depth={depth}>Empty</Hint>
       ) : (
         state.entries.map((entry) => (
-          <FileTreeNode ctrl={ctrl} depth={depth} entry={entry} key={entry.path} />
+          <FileTreeNode
+            ctrl={ctrl}
+            depth={depth}
+            entry={entry}
+            key={entry.path}
+            siblings={siblings}
+          />
         ))
       )}
     </>
@@ -113,10 +127,12 @@ export function FileTree({
 export function FileTreeNode({
   entry,
   depth,
+  siblings,
   ctrl,
 }: {
   entry: DirEntry;
   depth: number;
+  siblings: string[];
   ctrl: FileTreeController;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -124,67 +140,101 @@ export function FileTreeNode({
 
   const expanded = entry.isDir && ctrl.isExpanded(entry.path);
   const selected = ctrl.selectedDir === entry.path;
+  const fileSelected = !entry.isDir && ctrl.selectedFile === entry.path;
   const targetDir = entry.isDir ? entry.path : dirname(entry.path);
+  const renaming = ctrl.renameMode?.path === entry.path;
+  const renameKind: "file" | "folder" = entry.isDir ? "folder" : "file";
 
   return (
     <>
       <ContextMenu onOpenChange={setMenuOpen}>
         <ContextMenuTrigger asChild>
-          <button
-            className={cn(
-              "flex h-6 w-full items-center gap-1 px-2 text-left text-xs hover:bg-white/5",
-              selected ? "bg-white/10" : null,
-            )}
-            onClick={() => {
-              if (entry.isDir) {
-                ctrl.selectDir(entry.path);
-                ctrl.toggleExpand(entry.path);
-              }
-            }}
-            onDoubleClick={() => {
-              if (!entry.isDir) {
-                ctrl.openFile(entry.path);
-              }
-            }}
-            style={{ paddingLeft: depth * INDENT_PX + 8 }}
-            type="button"
-          >
-            {entry.isDir ? (
-              expanded ? (
-                <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
-              ) : (
-                <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
-              )
-            ) : (
-              <span className="size-3.5 shrink-0" />
-            )}
-            <Icon
-              className="size-4 shrink-0"
-              icon={entry.isDir ? folderIconId(expanded) : fileIconId(entry.name)}
+          {renaming ? (
+            <RenameEntryInput
+              depth={depth}
+              initialName={entry.name}
+              kind={renameKind}
+              onCancel={ctrl.cancelRename}
+              onCommit={(name) => ctrl.commitRename(entry.path, renameKind, name)}
+              siblings={siblings}
             />
-            <span className="min-w-0 flex-1 truncate text-slate-200">{entry.name}</span>
-          </button>
+          ) : (
+            <button
+              className={cn(
+                "flex h-6 w-full items-center gap-1 px-2 text-left text-xs hover:bg-white/5",
+                selected ? "bg-white/10" : null,
+                fileSelected ? "outline outline-1 -outline-offset-1 outline-cyan-400/60" : null,
+              )}
+              onClick={() => {
+                if (entry.isDir) {
+                  ctrl.selectDir(entry.path);
+                  ctrl.toggleExpand(entry.path);
+                } else {
+                  ctrl.selectFile(entry.path);
+                }
+              }}
+              style={{ paddingLeft: depth * INDENT_PX + 8 }}
+              type="button"
+            >
+              {entry.isDir ? (
+                expanded ? (
+                  <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
+                )
+              ) : (
+                <span className="size-3.5 shrink-0" />
+              )}
+              <Icon
+                className="size-4 shrink-0"
+                icon={entry.isDir ? folderIconId(expanded) : fileIconId(entry.name)}
+              />
+              <span className="min-w-0 flex-1 truncate text-slate-200">{entry.name}</span>
+            </button>
+          )}
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem
-            onSelect={() => {
-              ctrl.expand(targetDir);
-              ctrl.beginCreate(targetDir, "file");
-            }}
-          >
-            New File
-          </ContextMenuItem>
-          <ContextMenuItem
-            onSelect={() => {
-              ctrl.expand(targetDir);
-              ctrl.beginCreate(targetDir, "folder");
-            }}
-          >
-            New Folder
-          </ContextMenuItem>
-        </ContextMenuContent>
+        {!renaming ? (
+          <ContextMenuContent>
+            <ContextMenuItem
+              onSelect={() => {
+                ctrl.expand(targetDir);
+                ctrl.beginCreate(targetDir, "file");
+              }}
+            >
+              New File
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                ctrl.expand(targetDir);
+                ctrl.beginCreate(targetDir, "folder");
+              }}
+            >
+              New Folder
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                if (entry.isDir) {
+                  ctrl.selectDir(entry.path);
+                  ctrl.toggleExpand(entry.path);
+                } else {
+                  ctrl.beginRename(entry.path, renameKind, entry.name);
+                }
+              }}
+            >
+              {entry.isDir ? "Rename…" : "Rename"}
+            </ContextMenuItem>
+            <ContextMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => {
+                ctrl.commitDelete(entry.path, entry.name);
+              }}
+            >
+              Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        ) : null}
       </ContextMenu>
-      {expanded ? <FileTree ctrl={ctrl} depth={depth + 1} path={entry.path} /> : null}
+      {expanded && !renaming ? <FileTree ctrl={ctrl} depth={depth + 1} path={entry.path} /> : null}
     </>
   );
 }

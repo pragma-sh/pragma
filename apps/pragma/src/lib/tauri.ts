@@ -254,6 +254,22 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
 }
 
 /**
+ * Renames (or moves) a worktree-relative entry. Both paths are resolved inside
+ * the worktree; the source must exist and the destination must not.
+ */
+export function renameFile(worktreeId: string, fromPath: string, toPath: string): Promise<void> {
+  return invoke("rename_file", { worktreeId, fromPath, toPath });
+}
+
+/**
+ * Deletes a worktree-relative file or empty directory. The backend refuses to
+ * recurse into non-empty directories.
+ */
+export function deleteFile(worktreeId: string, path: string): Promise<void> {
+  return invoke("delete_file", { worktreeId, path });
+}
+
+/**
  * Lists committed (base branch → HEAD), staged (HEAD → index), and unstaged
  * (index → working tree) changes for a worktree.
  */

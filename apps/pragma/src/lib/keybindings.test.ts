@@ -57,6 +57,10 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd", "shift"], key: "/" },
         linux: { modifiers: ["ctrl", "shift"], key: "/" },
       },
+      deleteFile: {
+        mac: { modifiers: ["cmd"], key: "backspace" },
+        linux: { modifiers: ["ctrl"], key: "delete" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },

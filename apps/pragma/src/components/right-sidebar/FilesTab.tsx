@@ -5,8 +5,8 @@ import { toast } from "sonner";
 
 import { FileTree, type FileTreeController } from "@/components/right-sidebar/FileTreeNode";
 import { Button } from "@/components/ui/button";
-import { createFile, createFolder } from "@/lib/tauri";
-import { joinPath } from "@/lib/path";
+import { basename, dirname, joinPath } from "@/lib/path";
+import { createFile, createFolder, deleteFile, renameFile } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
 function messageFor(cause: unknown): string {
@@ -15,38 +15,86 @@ function messageFor(cause: unknown): string {
 
 /**
  * The Files subtab: a lazy VS Code–style tree plus New File / New Folder. Owns
- * the selected directory, the expanded set, per-directory refresh nonces, and
- * the inline create state machine, threading them to the recursive tree through
- * a {@link FileTreeController}.
+ * the selected directory, the selected file (for delete/rename focus), the
+ * expanded set, per-directory refresh nonces, and the inline create / rename
+ * state machines, threading them to the recursive tree through a
+ * {@link FileTreeController}.
  */
 export function FilesTab() {
   const workspace = useWorkspace();
   const worktreeId = workspace.selectedWorktreeId;
 
   const [selectedDir, setSelectedDir] = useState("");
+  const [selectedFile, setSelectedFile] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [nonces, setNonces] = useState<Record<string, number>>({});
   const [createMode, setCreateMode] = useState<{ dirPath: string; kind: "file" | "folder" } | null>(
     null,
   );
+  const [renameMode, setRenameMode] = useState<{
+    path: string;
+    kind: "file" | "folder";
+    name: string;
+  } | null>(null);
 
   // Reset all tree state when the worktree changes.
   useEffect(() => {
     setSelectedDir("");
+    setSelectedFile("");
     setExpanded(new Set());
     setNonces({});
     setCreateMode(null);
+    setRenameMode(null);
   }, [worktreeId]);
 
   const bumpNonce = useCallback((path: string) => {
     setNonces((previous) => ({ ...previous, [path]: (previous[path] ?? 0) + 1 }));
   }, []);
 
+  /**
+   * Deletes a file (or empty directory) immediately. Git tracks the worktree so
+   * recovery is just `git checkout -- <path>` / `git clean -fd` away — no
+   * confirmation dialog.
+   */
+  const commitDelete = useCallback(
+    async (path: string, name: string) => {
+      if (!worktreeId) {
+        return;
+      }
+      try {
+        await deleteFile(worktreeId, path);
+        if (selectedFile === path) {
+          setSelectedFile("");
+        }
+        bumpNonce(dirname(path));
+        toast.success(`Deleted ${name}`);
+      } catch (cause) {
+        toast.error(messageFor(cause));
+      }
+    },
+    [worktreeId, bumpNonce, selectedFile],
+  );
+
+  // Wire the global Cmd/Ctrl+Delete shortcut dispatched by `WorkspaceShell`. The
+  // shortcut only acts if a file is currently selected — a no-op when the user
+  // is focused elsewhere in the app.
+  useEffect(() => {
+    function onRequest() {
+      if (selectedFile) {
+        void commitDelete(selectedFile, basename(selectedFile));
+      }
+    }
+    window.addEventListener("pragma:request-delete-file", onRequest);
+    return () => window.removeEventListener("pragma:request-delete-file", onRequest);
+  }, [selectedFile, commitDelete]);
+
   const ctrl = useMemo<FileTreeController>(
     () => ({
       worktreeId: worktreeId ?? "",
       selectedDir,
       selectDir: setSelectedDir,
+      selectedFile,
+      selectFile: setSelectedFile,
       isExpanded: (path) => expanded.has(path),
       toggleExpand: (path) =>
         setExpanded((previous) => {
@@ -82,10 +130,49 @@ export function FilesTab() {
           }
         })();
       },
+      renameMode,
+      beginRename: (path, kind, name) => setRenameMode({ path, kind, name }),
+      cancelRename: () => setRenameMode(null),
+      commitRename: (path, _kind, name) => {
+        if (!worktreeId) {
+          return;
+        }
+        const fromParent = dirname(path);
+        const toPath = joinPath(fromParent, name);
+        if (toPath === path) {
+          setRenameMode(null);
+          return;
+        }
+        void (async () => {
+          try {
+            await renameFile(worktreeId, path, toPath);
+            setRenameMode(null);
+            bumpNonce(fromParent);
+            if (toPath !== fromParent) {
+              // Cross-directory rename: refresh the destination parent too.
+              bumpNonce(dirname(toPath));
+            }
+          } catch (cause) {
+            toast.error(messageFor(cause));
+          }
+        })();
+      },
+      commitDelete,
       nonceFor: (path) => nonces[path] ?? 0,
       openFile: (path) => void workspace.openFileTab(path),
     }),
-    [worktreeId, selectedDir, expanded, createMode, nonces, bumpNonce, workspace],
+    [
+      worktreeId,
+      selectedDir,
+      selectedFile,
+      expanded,
+      createMode,
+      renameMode,
+      nonces,
+      bumpNonce,
+      commitDelete,
+      workspace,
+    ],
   );
 
   if (!worktreeId) {
