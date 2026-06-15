@@ -86,7 +86,8 @@ than no guide.
 │           ├── src/lib.rs       # App wiring, managed state, plugins, command registration
 │           ├── src/db.rs        # SQLite migrations + typed CRUD
 │           ├── src/pty.rs       # Detached daemon client + PTY command proxying
-│           ├── src/git.rs       # Git CLI helpers
+│           ├── src/git.rs       # Git CLI helpers (worktree_changes / file_diff / stage_* / unstage_* / discard_*)
+│           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
 │           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
 ├── crates/
@@ -169,6 +170,44 @@ than no guide.
   outside the loaded project's tab snapshot — that both lost splits on project switch and
   would make the persist effect erase them. Restored node ids are passed through
   `reserveSplitNodeIds` so the regenerated `pane-N`/`split-N` counter never collides.
+- **Files & Changes right sidebar + editor/diff tabs.** A right sidebar (mirroring the left
+  `ProjectSidebar`) lives in `components/right-sidebar/` and is the last flex child of
+  `WorkspaceShell` (so collapsing it reflows the center pane and the `BrowserView`
+  ResizeObserver re-applies native bounds for free). Its cosmetic state (collapsed / active
+  subtab / width) lives in `state/right-sidebar-context.tsx` and persists to **localStorage**,
+  not SQLite. Two subtabs: **Files** (lazy `FileTree`, inline create) and **Changes**
+  (three git lists — **Staged**, **Unstaged**, **Committed**, in that order). Git has no edit
+  notification, so **Changes polls `worktree_changes` every 2s while mounted** (and on window
+  focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
+  `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
+  `git diff --cached`, `unstaged` = index→working tree plus untracked); `DiffSide` has a matching
+  `staged` variant. `ChangeGroup` is generic over per-row `fileActions` and per-header
+  `headerActions` (icon buttons): the **Unstaged** group gets stage (`stage_file`) + discard, the
+  **Staged** group gets unstage (`unstage_file`); the headers get the stage-all/unstage-all/
+  discard-all variants. Staging is reversible so it runs **without confirmation** (`stage_file` /
+  `stage_all` = `git add`; `unstage_file` / `unstage_all` = `git restore --staged` / `git reset`),
+  whereas discard (`discard_unstaged_file` / `discard_all_unstaged` — `git restore` for tracked,
+  delete / `git clean -fd` for untracked) is **irreversible** and routes through a confirmation
+  `AlertDialog`; every action does an immediate in-place refresh. Once a child worktree has no
+  staged/unstaged changes, the commit controls are replaced by lifecycle actions: committed changes
+  show `merge_worktree_to_parent` (runs `git merge <child-branch>` in the clean parent worktree and
+  leaves conflicts there for IDE / `git merge --continue` or `git merge --abort` resolution), and a
+  fully merged/no-change child shows the same `WorktreeDeleteDialog` used by the left sidebar. The
+  left sidebar polls those same change buckets for child worktrees and swaps the branch glyph to a
+  merge glyph while the merged-but-not-deleted worktree remains in the tree. Files open as two new
+  `TabKind`s — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and `diff` (read-only
+  `@codemirror/merge`) — rendered through the `SplitHost` switch and located by `Tab.filePath`
+  (worktree-relative) + `Tab.diffSide` (v5 migration; the columns persist editor/diff tabs). Open
+  them via `openFileTab`/`openDiffTab` on the workspace context (they dedupe by kind+filePath(+side)).
+  Editor dirty state + latest doc is an **ephemeral** module store (`state/editor-dirty-store.ts`,
+  never in the reducer, never persisted); closing a dirty editor routes through
+  `ConfirmCloseProvider` (`components/editor/confirm-close.tsx`). vscode-icons render **offline**
+  via `lib/file-icons.ts` (`addCollection` once — never let `@iconify/react` fetch over the
+  network). All filesystem + git work is **worktree-scoped and worktree-relative**: every
+  `fs.rs` / `git.rs` command takes a `worktreeId` + a relative path, and `resolve_in_worktree`
+  rejects `..`/absolute/symlink escapes (`InvalidInput`) — **no absolute path ever crosses IPC**.
+  The file-tree context menu floats over browser panes, so it registers with
+  `lib/native-overlay.ts` via `useSuppressNativeOverlayWhile(open)`.
 - **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,
   `JetBrainsMono Nerd Font`, `JetBrains Mono`, `SF Mono`, Menlo, Monaco,
   `ui-monospace`, `monospace`) at **fontSize 14 / lineHeight 1.0**. 14px is the
