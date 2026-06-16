@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isMacPlatform } from "@/lib/platform";
 import { createWorktree } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -16,6 +17,7 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const workspace = useWorkspace();
+  const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
 
   if (!isOpen) {
     return null;
@@ -45,6 +47,18 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
     }
   }
 
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") {
+      return;
+    }
+    const isModEnter = (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
+    if (!isModEnter || !branch.trim()) {
+      return;
+    }
+    event.preventDefault();
+    void submit();
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl border bg-background p-5 shadow-xl">
@@ -58,7 +72,13 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
             Branches from the selected parent worktree HEAD.
           </p>
         </div>
-        <div className="mt-5 space-y-4">
+        <form
+          className="mt-5 space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
           <div className="space-y-2">
             <Label htmlFor="branch">Branch name</Label>
             <Input
@@ -66,9 +86,9 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
-              spellCheck="false"
               value={branch}
-              onChange={(event) => setBranch(event.target.value)}
+              onChange={(event) => setBranch(event.target.value.replace(/\s+/g, "-"))}
+              onKeyDown={handleKeyDown}
             />
           </div>
           <div className="space-y-2">
@@ -78,21 +98,22 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
-              spellCheck="false"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
+              onKeyDown={handleKeyDown}
             />
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={!branch.trim()} onClick={() => void submit()}>
-            Create worktree
-          </Button>
-        </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!branch.trim()}>
+              Create worktree
+              <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
+            </Button>
+          </div>
+        </form>
       </div>
     </div>
   );
