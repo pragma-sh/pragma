@@ -89,7 +89,12 @@ than no guide.
 │           ├── src/git.rs       # Git CLI helpers (worktree_changes / file_diff / stage_* / unstage_* / discard_*)
 │           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
-│           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
+│           ├── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants); bundles pragma-daemon via externalBin
+│           ├── tauri.dev.conf.json # Dev overrides ("Pragma Dev" name/title + icons-dev/) merged via `tauri dev --config`
+│           ├── scripts/         # Build helpers (stage-daemon-sidecar.sh — builds + stages the daemon sidecar)
+│           ├── binaries/        # Staged `pragma-daemon-<triple>` Tauri sidecar (git-ignored; built, never committed)
+│           ├── icons/           # Production app icons
+│           └── icons-dev/       # Dev "Pragma Dev" app icons (generated via `tauri icon`)
 ├── crates/
 │   └── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
 ├── packages/
@@ -131,6 +136,43 @@ than no guide.
   the OSC title parser) so existing daemons are replaced instead of silently serving old
   behavior. The value is read by both the daemon and the app crates from
   `pragma_constants::CONSTANTS.daemon.protocol_version`.
+- **The daemon ships as a Tauri sidecar so prod is self-contained.** A release app
+  launches `pragma-daemon` from **beside its own executable** (`daemon_executable()` in
+  `src-tauri/src/pty.rs` = `current_exe().parent()/pragma-daemon`); a debug app spawns it
+  via `cargo run -p pragma-daemon` instead. The release binary gets there because
+  `tauri.conf.json` declares `bundle.externalBin: ["binaries/pragma-daemon"]`, and the
+  Tauri CLI copies (and code-signs) `src-tauri/binaries/pragma-daemon-<target-triple>` next
+  to the app binary in every bundle. That sidecar is **built, not committed** — staged by
+  `src-tauri/scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-daemon` + copy with
+  the host triple), wired in two places: `tauri:build`'s `beforeBuildCommand` runs it
+  `--release`, and `tauri:dev` runs it (debug) before `tauri dev` so the CLI's sidecar-copy
+  step doesn't fail (dev still uses `cargo run` at runtime — the staged file only satisfies
+  bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
+  plugin, so no `shell:` capability is needed. `binaries/` is git-ignored.
+- **Dev and prod must never share a daemon.** The socket/lock/log live in a
+  **channel-scoped** directory chosen by the build profile: `DAEMON_CHANNEL` =
+  `pragma-dev` under `cfg!(debug_assertions)`, else `pragma`. The constant is defined
+  **in both** `src-tauri/src/pty.rs` (`socket_path` → `daemon_dir`) and
+  `crates/pragma-daemon/src/main.rs` (`daemon_paths`) and they must stay identical, since a
+  debug app spawns a debug daemon and a release app spawns the release sidecar — each pair
+  resolves the same path, but the two channels never collide. (On Linux the dir is
+  `$XDG_RUNTIME_DIR/<channel>`; elsewhere `<app_data_dir>/<channel>`.) NB this isolates the
+  **daemon** only — both builds still share `com.pragma.app`'s app-data dir and `pragma.db`;
+  give the dev build its own `identifier` if you ever need to split those too.
+- **Native menubar + the Troubleshooting menu.** The app menu is built once in
+  `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` (so the OS-standard
+  app/edit/window items survive) **plus** a `Troubleshooting` submenu with **Restart
+  Daemon** and **Open Daemon Logs**. Menu clicks are pure forwarders: `on_menu_event`
+  re-emits the item id as the `pragma:menu` Tauri event (payload = the menu id), and the
+  frontend (`workspace-context`, via `onMenuAction` in `lib/tauri.ts`) runs the action so
+  feedback lives in the UI — **Restart Daemon** calls the `restart_daemon` command
+  (`PtyClient::restart` = kill the running daemon, respawn, confirm reachable; this
+  terminates every shell) with a `sonner` toast, and **Open Daemon Logs** opens the
+  `log` tab. Add a menu action by giving it an id const + item in `install_menu`, a
+  `MenuAction` variant + branch in `handleMenuAction`. The daemon log itself isn't
+  worktree-scoped, so it loads through the dedicated `read_daemon_log` command
+  (`PtyClient::read_log`, reading `log_path()` — the `daemon.log` beside the socket, which
+  on Linux is the XDG runtime dir, **not** app data) rather than the worktree file editor.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
   React state or the workspace reducer.
 - **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
@@ -292,8 +334,8 @@ manager and **turbo** as the task runner.
 bun install                # Install all workspace deps
 
 # App
-bun run dev                # Run the desktop app — native window + Vite (Tauri dev)
-bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+bun run dev                # Run the desktop app — native window + Vite (Tauri dev, "Pragma Dev" branding via tauri.dev.conf.json)
+bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles, production "Pragma" branding)
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo

@@ -19,12 +19,57 @@ use pragma_constants::{
     AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
 };
 use tauri::ipc::Channel;
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::{Emitter, Manager};
 
 use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
 use crate::pty::{PtyClient, PtyEvent};
+
+/// Menu item id for "Restart Daemon" in the Troubleshooting submenu.
+const MENU_RESTART_DAEMON: &str = "troubleshooting.restart-daemon";
+/// Menu item id for "Open Daemon Logs" in the Troubleshooting submenu.
+const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
+/// Tauri event the menu emits to the frontend; payload is one of the menu ids
+/// above. The frontend (`workspace-context`) listens and runs the action so the
+/// resulting toast / tab lives where the rest of the UI does.
+const MENU_EVENT: &str = "pragma:menu";
+
+/// Installs the application menu — the OS default menu plus a Troubleshooting
+/// submenu — and wires the submenu's clicks to the frontend. Used on both macOS
+/// (global menu bar) and Linux (window menu). The handler only forwards the
+/// action via `MENU_EVENT`; the actual restart/log-open runs through the typed
+/// Tauri commands so feedback (toasts, the new tab) is uniform with the rest of
+/// the UI.
+fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let menu = Menu::default(app)?;
+    let restart_daemon = MenuItem::with_id(
+        app,
+        MENU_RESTART_DAEMON,
+        "Restart Daemon",
+        true,
+        None::<&str>,
+    )?;
+    let open_logs = MenuItem::with_id(
+        app,
+        MENU_OPEN_DAEMON_LOGS,
+        "Open Daemon Logs",
+        true,
+        None::<&str>,
+    )?;
+    let troubleshooting =
+        Submenu::with_items(app, "Troubleshooting", true, &[&restart_daemon, &open_logs])?;
+    menu.append(&troubleshooting)?;
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        let action = event.id().as_ref();
+        if action == MENU_RESTART_DAEMON || action == MENU_OPEN_DAEMON_LOGS {
+            let _ = app.emit(MENU_EVENT, action);
+        }
+    });
+    Ok(())
+}
 
 /// Returns the shared application info (name, identifier, version).
 #[tauri::command]
@@ -121,6 +166,21 @@ async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> 
     tauri::async_runtime::spawn_blocking(task)
         .await
         .map_err(|error| AppError::Daemon(format!("pty task failed: {error}")))?
+}
+
+/// Restarts the detached PTY daemon (Troubleshooting menu). Kills the running
+/// daemon and spawns a fresh build, terminating every running shell session.
+#[tauri::command]
+async fn restart_daemon(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.restart()).await
+}
+
+/// Returns the current contents of the daemon log file (empty if not yet
+/// created). Backs the Troubleshooting menu's "Open Daemon Logs" tab.
+#[tauri::command]
+fn read_daemon_log(pty: tauri::State<'_, PtyClient>) -> AppResult<String> {
+    pty.read_log()
 }
 
 #[tauri::command]
@@ -220,6 +280,7 @@ pub fn run() {
             app.manage(Db::open(app_data_dir.join("pragma.db"))?);
             app.manage(PtyClient::new(app_data_dir));
             app.manage(GitLocks::default());
+            install_menu(app.handle())?;
             if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
                 log::warn!("failed to load keybindings config: {error}");
             }
@@ -245,6 +306,8 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_kill_for_path,
+            restart_daemon,
+            read_daemon_log,
             projects::list_projects,
             projects::add_project,
             projects::clone_project,

@@ -26,6 +26,17 @@ use registry::Registry;
 
 const DETACH_FLAG: &str = "--detach";
 
+/// Build channel used to isolate this daemon from a differently-built sibling.
+/// Mirrors `DAEMON_CHANNEL` in the Pragma app (`pty.rs`): a debug daemon
+/// (spawned by `tauri dev` via `cargo run`) and a release daemon (bundled with
+/// `tauri build` as a sidecar) resolve different socket/lock/log paths, so the
+/// two never collide.
+const DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
+    "pragma-dev"
+} else {
+    "pragma"
+};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = daemon_paths();
     fs::create_dir_all(&paths.dir)?;
@@ -220,11 +231,14 @@ struct DaemonPaths {
 fn daemon_paths() -> DaemonPaths {
     let dir = if cfg!(target_os = "linux") {
         std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|dir| PathBuf::from(dir).join("pragma"))
+            .map(PathBuf::from)
             .or_else(|| std::env::var_os("PRAGMA_APP_DATA_DIR").map(PathBuf::from))
             .unwrap_or_else(default_app_data_dir)
+            .join(DAEMON_CHANNEL)
     } else {
-        std::env::var_os("PRAGMA_APP_DATA_DIR").map_or_else(default_app_data_dir, PathBuf::from)
+        std::env::var_os("PRAGMA_APP_DATA_DIR")
+            .map_or_else(default_app_data_dir, PathBuf::from)
+            .join(DAEMON_CHANNEL)
     };
     DaemonPaths {
         socket: dir.join("daemon.sock"),

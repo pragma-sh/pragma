@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { Globe, SquareTerminal } from "lucide-react";
+import { Globe, ScrollText, SquareTerminal } from "lucide-react";
 
 import { fileIconId } from "@/lib/file-icons";
 import { basename } from "@/lib/path";
@@ -45,6 +45,10 @@ export function TabIcon({ tab }: { tab: Tab }) {
 
   if (tab.kind === "editor" || tab.kind === "diff") {
     return <Icon className="size-3.5 shrink-0" icon={fileIconId(basename(tab.filePath ?? ""))} />;
+  }
+
+  if (tab.kind === "log") {
+    return <ScrollText className="size-3.5 shrink-0 text-slate-400" />;
   }
 
   if (tab.kind !== "browser") {

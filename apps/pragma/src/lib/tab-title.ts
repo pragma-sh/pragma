@@ -6,5 +6,11 @@ import type { TabKind } from "@pragma/constants";
  * exit). Keeps a tab from ever showing a blank label.
  */
 export function defaultTabTitle(kind: TabKind): string {
-  return kind === "browser" ? "New tab" : "Shell";
+  if (kind === "browser") {
+    return "New tab";
+  }
+  if (kind === "log") {
+    return "Daemon Logs";
+  }
+  return "Shell";
 }

@@ -145,9 +145,9 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, or a read-only diff.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, or the read-only daemon log viewer.",
       "type": "string",
-      "enum": ["terminal", "browser", "editor", "diff"]
+      "enum": ["terminal", "browser", "editor", "diff", "log"]
     },
     "Tab": {
       "title": "Tab",

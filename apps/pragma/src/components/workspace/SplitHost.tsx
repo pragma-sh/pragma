@@ -6,6 +6,7 @@ import { Globe, Plus, SquareTerminal, X } from "lucide-react";
 import { BrowserView } from "@/components/browser/BrowserView";
 import { DiffView } from "@/components/editor/DiffView";
 import { EditorView } from "@/components/editor/EditorView";
+import { LogView } from "@/components/editor/LogView";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -125,6 +126,8 @@ function SplitPane({
             <EditorView key={activeTab.id} tab={activeTab} />
           ) : activeTab.kind === "diff" ? (
             <DiffView key={activeTab.id} tab={activeTab} />
+          ) : activeTab.kind === "log" ? (
+            <LogView key={activeTab.id} tab={activeTab} />
           ) : (
             <TerminalView
               cwd={worktree?.path ?? workspace.selectedWorktree?.path ?? "~"}

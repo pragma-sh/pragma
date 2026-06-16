@@ -89,6 +89,20 @@ export function ptyKill(sessionId: string): Promise<void> {
   return invoke("pty_kill", { sessionId });
 }
 
+/**
+ * Restarts the detached PTY daemon (Troubleshooting menu). Resolves once a fresh
+ * daemon is reachable. Every running shell session is terminated, so the caller
+ * should expect terminals to report exit.
+ */
+export function restartDaemon(): Promise<void> {
+  return invoke("restart_daemon");
+}
+
+/** Returns the current contents of the daemon log file (empty if not yet created). */
+export function readDaemonLog(): Promise<string> {
+  return invoke<string>("read_daemon_log");
+}
+
 /** Lists persisted projects ordered for the project switcher. */
 export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
@@ -466,6 +480,14 @@ export function onBrowserFocusRequest(
   handler: (request: BrowserFocusRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<BrowserFocusRequest>("browser-focus-request", (event) => handler(event.payload));
+}
+
+/** A Troubleshooting-menu action forwarded from the native menubar. */
+export type MenuAction = "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs";
+
+/** Subscribes to native menubar actions (the Troubleshooting menu). */
+export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
+  return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
 }
 
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */

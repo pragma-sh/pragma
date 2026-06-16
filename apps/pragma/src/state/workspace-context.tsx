@@ -18,6 +18,8 @@ import type {
   WorktreeStatus,
 } from "@pragma/constants";
 
+import { toast } from "sonner";
+
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
@@ -34,10 +36,12 @@ import {
   listWorktrees,
   onBrowserFocusRequest,
   onBrowserMeta,
+  onMenuAction,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
+  restartDaemon as restartDaemonCommand,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
   setTabUrl as setTabUrlCommand,
@@ -138,6 +142,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
   openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  /** Opens (or focuses) the read-only daemon-log tab (Troubleshooting menu). */
+  openDaemonLogTab: () => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
@@ -1003,6 +1009,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [openLocatorTab],
   );
 
+  // Opens (or focuses) the read-only daemon-log tab. The daemon is global, so a
+  // single log tab per project is enough — dedupe by kind, hosting it in the
+  // active worktree (its content is not worktree-scoped).
+  const openDaemonLogTab = useCallback(async () => {
+    const projectId = state.selectedProjectId;
+    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+    if (!projectId || !worktreeId) {
+      return;
+    }
+    const existing = state.tabs.find((tab) => tab.kind === "log");
+    if (existing) {
+      dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
+      return;
+    }
+    try {
+      const tab = await createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log"));
+      dispatch({ type: "add-tab", tab });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+
   // Tear down both backends regardless of kind: each is a no-op for the other's
   // tabs, so we don't need to look up the tab's kind on the close path.
   const closeTab = useCallback(async (tabId: string) => {
@@ -1039,6 +1067,39 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Latest `setActiveTab`, readable from event listeners without re-subscribing.
   const setActiveTabRef = useRef(setActiveTab);
   setActiveTabRef.current = setActiveTab;
+
+  // Runs a Troubleshooting-menu action: restart the daemon (with toast feedback)
+  // or open the daemon-log tab. Kept in a ref so the listener subscribes once.
+  const handleMenuAction = useCallback(
+    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
+      if (action === "troubleshooting.open-daemon-logs") {
+        await openDaemonLogTab();
+        return;
+      }
+      const pending = toast.loading("Restarting daemon…");
+      try {
+        await restartDaemonCommand();
+        toast.success("Daemon restarted", { id: pending });
+      } catch (cause) {
+        toast.error(messageFor(cause), { id: pending });
+      }
+    },
+    [openDaemonLogTab],
+  );
+  const handleMenuActionRef = useRef(handleMenuAction);
+  handleMenuActionRef.current = handleMenuAction;
+
+  // Forward native Troubleshooting-menu clicks to the handler. Subscribe once;
+  // the ref keeps the latest handler so we never re-listen as state changes.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onMenuAction((action) => void handleMenuActionRef.current(action))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     void reload();
@@ -1438,6 +1499,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openDaemonLogTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,
@@ -1473,6 +1535,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openDaemonLogTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,

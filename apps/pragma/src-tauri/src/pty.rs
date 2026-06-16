@@ -144,6 +144,44 @@ impl PtyClient {
         self.request(RequestFrame::kill_for_cwd(path))
     }
 
+    /// Kills the running daemon (if any) and spawns a fresh build, confirming the
+    /// new daemon is reachable before returning. Every running shell session is
+    /// terminated — this is a deliberate troubleshooting action surfaced through
+    /// the menubar, not a routine operation.
+    pub fn restart(&self) -> AppResult<()> {
+        {
+            let _guard = self.launch_lock.lock()?;
+            self.kill_stale_daemon();
+            self.spawn_daemon()?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match self.connect_compatible() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Ok(None) => {
+                    return Err(AppError::Daemon(
+                        "daemon did not become reachable after restart".to_string(),
+                    ))
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    /// Reads the daemon's log file, returning an empty string if it has not been
+    /// created yet. Used by the menubar's "Open Daemon Logs" action; the path is
+    /// derived entirely backend-side and never crosses IPC.
+    pub fn read_log(&self) -> AppResult<String> {
+        match std::fs::read_to_string(self.log_path()) {
+            Ok(contents) => Ok(contents),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+            Err(err) => Err(AppError::from(err)),
+        }
+    }
+
     fn stream(&self, request: RequestFrame, on_event: Channel<PtyEvent>) -> AppResult<()> {
         let mut stream = self.connect_with_spawn()?;
         write_frame(&mut stream, &request)?;
@@ -300,19 +338,40 @@ impl PtyClient {
         self.socket_path().with_file_name("daemon.lock")
     }
 
-    fn socket_path(&self) -> PathBuf {
+    /// The daemon's log file, alongside its socket. Mirrors the path the daemon
+    /// itself writes to after detaching (see `pragma-daemon`'s `daemon_paths`),
+    /// so it stays correct on Linux where the runtime dir differs from app data.
+    fn log_path(&self) -> PathBuf {
+        self.socket_path().with_file_name("daemon.log")
+    }
+
+    /// Directory the daemon owns — its socket, lock, and log all live here. It
+    /// is **channel-scoped** (`DAEMON_CHANNEL`) so a dev build and a production
+    /// build never share a daemon. On Linux it lives under the XDG runtime dir;
+    /// elsewhere, under the app-data dir. Mirrored by `pragma-daemon`'s
+    /// `daemon_paths` so both processes resolve the identical path.
+    fn daemon_dir(&self) -> PathBuf {
         if cfg!(target_os = "linux") {
             std::env::var_os("XDG_RUNTIME_DIR").map_or_else(
-                || self.app_data_dir.join("daemon.sock"),
-                |dir| PathBuf::from(dir).join("pragma/daemon.sock"),
+                || self.app_data_dir.join(DAEMON_CHANNEL),
+                |dir| PathBuf::from(dir).join(DAEMON_CHANNEL),
             )
         } else {
-            self.app_data_dir.join("daemon.sock")
+            self.app_data_dir.join(DAEMON_CHANNEL)
         }
+    }
+
+    fn socket_path(&self) -> PathBuf {
+        self.daemon_dir().join("daemon.sock")
     }
 
     fn spawn_daemon(&self) -> AppResult<()> {
         std::fs::create_dir_all(&self.app_data_dir)?;
+        // The log may live outside app data (the XDG runtime dir on Linux); make
+        // sure its directory exists before redirecting the child's output to it.
+        if let Some(parent) = self.log_path().parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let mut command = if cfg!(debug_assertions) {
             let mut command = Command::new(cargo_executable());
             command.args(["run", "-p", "pragma-daemon", "--", DAEMON_DETACH_FLAG]);
@@ -329,7 +388,7 @@ impl PtyClient {
         if let Ok(log_file) = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.app_data_dir.join("daemon.log"))
+            .open(self.log_path())
         {
             if let Ok(stderr) = log_file.try_clone() {
                 command.stdout(log_file).stderr(stderr);
@@ -411,6 +470,17 @@ impl RequestFrame {
     }
 }
 
+/// Build channel used to isolate the daemon: a dev build (`tauri dev`, debug)
+/// and a production build (`tauri build`, release) must never share a daemon,
+/// socket, lock, or log — otherwise launching "Pragma Dev" would attach to
+/// "Pragma"'s shells, or vice versa. The compile profile *is* the channel, and
+/// the same constant is mirrored in `pragma-daemon` so both sides agree.
+const DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
+    "pragma-dev"
+} else {
+    "pragma"
+};
+
 fn daemon_executable() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -482,4 +552,53 @@ fn write_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> AppResult<()
     writer.write_all(&bytes)?;
     writer.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PtyClient;
+
+    /// The daemon log must live next to the socket so we read exactly where the
+    /// detached daemon writes (the runtime dir on Linux, app data on macOS).
+    #[test]
+    fn log_path_sits_beside_socket() {
+        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"));
+        let socket = client.socket_path();
+        let log = client.log_path();
+        assert_eq!(log.parent(), socket.parent());
+        assert_eq!(log.file_name().and_then(|n| n.to_str()), Some("daemon.log"));
+    }
+
+    /// The daemon's socket/lock/log sit in a channel-scoped directory so a dev
+    /// build and a production build never resolve the same daemon.
+    #[test]
+    fn daemon_paths_are_channel_scoped() {
+        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"));
+        let socket = client.socket_path();
+        let channel_dir = socket.parent().expect("socket has a parent dir");
+        assert_eq!(
+            channel_dir.file_name().and_then(|n| n.to_str()),
+            Some(super::DAEMON_CHANNEL),
+        );
+    }
+
+    /// Reading a daemon log that has never been created reports an empty string
+    /// rather than erroring, so the log tab opens cleanly on a fresh install.
+    #[test]
+    fn read_log_is_empty_when_missing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Force the macOS-style path (socket/log under app data) regardless of the
+        // host so the temp dir fully isolates the test from any real daemon log.
+        let prev = std::env::var_os("XDG_RUNTIME_DIR");
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        let client = PtyClient::new(dir.path().to_path_buf());
+        assert_eq!(client.read_log().expect("read empty log"), "");
+        std::fs::create_dir_all(client.log_path().parent().expect("log dir"))
+            .expect("create channel dir");
+        std::fs::write(client.log_path(), "boot\n").expect("write log");
+        assert_eq!(client.read_log().expect("read log"), "boot\n");
+        if let Some(value) = prev {
+            std::env::set_var("XDG_RUNTIME_DIR", value);
+        }
+    }
 }

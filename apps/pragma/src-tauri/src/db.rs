@@ -444,6 +444,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Browser => "browser",
         TabKind::Editor => "editor",
         TabKind::Diff => "diff",
+        TabKind::Log => "log",
     }
 }
 
@@ -453,6 +454,7 @@ fn kind_from_str(value: &str) -> TabKind {
         "browser" => TabKind::Browser,
         "editor" => TabKind::Editor,
         "diff" => TabKind::Diff,
+        "log" => TabKind::Log,
         _ => TabKind::Terminal,
     }
 }
@@ -595,6 +597,37 @@ mod tests {
         let listed = db.list_tabs(&project.id).expect("tabs should list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].kind, TabKind::Browser);
+    }
+
+    #[test]
+    fn log_tabs_round_trip_kind() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktrees = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list");
+        let tab = db
+            .create_tab(
+                &project.id,
+                &worktrees[0].id,
+                TabKind::Log,
+                Some("Daemon Logs".to_string()),
+                None,
+                None,
+                None,
+            )
+            .expect("log tab should insert");
+        assert_eq!(tab.kind, TabKind::Log);
+
+        let listed = db.list_tabs(&project.id).expect("tabs should list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].kind, TabKind::Log);
     }
 
     #[test]
