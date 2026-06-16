@@ -11,6 +11,8 @@ import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEvent } from
 
 const RESIZE_DEBOUNCE_MS = 75;
 
+export type TitleListener = (title: string) => void;
+
 interface ManagedTerminal {
   terminal: Terminal;
   fit: FitAddon;
@@ -47,6 +49,12 @@ export class TerminalManager {
   static readonly lineHeight = TERMINAL_LINE_HEIGHT;
 
   private terminals = new Map<string, ManagedTerminal>();
+  // Title listeners are keyed by tab id and kept **independent of the terminal's
+  // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
+  // a background tab) and still receive shell-emitted titles once it connects.
+  // Storing them inside ManagedTerminal would silently drop subscriptions made
+  // before mount() or after a re-parent.
+  private titleListeners = new Map<string, Set<TitleListener>>();
 
   mount(tab: Tab, cwd: string, element: HTMLElement): void {
     const existing = this.terminals.get(tab.id);
@@ -169,14 +177,55 @@ export class TerminalManager {
     void ptyResize(tabId, cols, rows);
   }
 
+  /**
+   * Subscribes to shell-emitted title updates (OSC 0/2) for a tab. The
+   * listener is called for every title update the PTY produces; consumers
+   * (typically the workspace reducer) decide whether to apply it to the
+   * tab strip based on whether the user has manually renamed the tab.
+   *
+   * Subscriptions are independent of the terminal's mount lifecycle: it is
+   * valid (and expected) to subscribe before the terminal is mounted, so a
+   * tab that becomes visible later still receives its shell titles.
+   */
+  onTitle(tabId: string, listener: TitleListener): () => void {
+    let listeners = this.titleListeners.get(tabId);
+    if (!listeners) {
+      listeners = new Set();
+      this.titleListeners.set(tabId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const set = this.titleListeners.get(tabId);
+      if (!set) {
+        return;
+      }
+      set.delete(listener);
+      if (set.size === 0) {
+        this.titleListeners.delete(tabId);
+      }
+    };
+  }
+
   private connect(tabId: string, cwd: string, managed: ManagedTerminal): void {
     const onEvent = (event: PtyEvent) => {
-      if (event.event === "output") {
-        managed.terminal.write(event.data);
-      } else {
-        managed.terminal.writeln(
-          `\r\n[process exited${event.code === null ? "" : ` with ${event.code}`}]`,
-        );
+      switch (event.event) {
+        case "output":
+          managed.terminal.write(event.data);
+          break;
+        case "title": {
+          const listeners = this.titleListeners.get(tabId);
+          if (listeners) {
+            for (const listener of listeners) {
+              listener(event.title);
+            }
+          }
+          break;
+        }
+        case "exit":
+          managed.terminal.writeln(
+            `\r\n[process exited${event.code === null ? "" : ` with ${event.code}`}]`,
+          );
+          break;
       }
     };
     const cols = managed.terminal.cols || 80;

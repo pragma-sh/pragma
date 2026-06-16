@@ -119,8 +119,31 @@ than no guide.
   `invoke()` directly from components).
 - PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
   the Unix socket and must not own PTYs.
+- **The daemon is detached and long-lived**, so a rebuild does **not** restart it — a
+  stale daemon keeps serving over the existing socket and your new daemon code never
+  runs. A protocol-version handshake guards against this: the daemon greets every
+  connection with a `ServerFrame::Hello { protocolVersion }` (first frame, always) and
+  records its PID in `daemon.lock`; the app's `connect_compatible` (`src-tauri/src/pty.rs`)
+  reads that hello and, on a version mismatch **or no greeting** (an old pre-handshake
+  daemon), kills the stale process (by lock-file PID, falling back to `pkill`) and respawns
+  a matching one. The version is the shared `@pragma/constants` `daemon.protocolVersion` —
+  **bump it whenever you change the daemon wire protocol or its PTY-stream handling** (e.g.
+  the OSC title parser) so existing daemons are replaced instead of silently serving old
+  behavior. The value is read by both the daemon and the app crates from
+  `pragma_constants::CONSTANTS.daemon.protocol_version`.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
   React state or the workspace reducer.
+- **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
+  out of the raw PTY stream in `crates/pragma-daemon/src/session.rs` and emits a
+  `Title` event. The Tauri proxy in `apps/pragma/src-tauri/src/pty.rs` forwards it
+  as `PtyEvent::Title`, the non-React `TerminalManager` fans it out via
+  `onTitle(tabId, listener)`, and the workspace context dispatches the
+  `set-auto-title` reducer action. `Tab.userRenamed` is the single guard: the user
+  flipping it via double-click/context menu (the existing `rename-tab` action +
+  `rename_tab` Tauri command, which now also sets `user_renamed = 1` server-side)
+  permanently locks the tab's title against any future shell push. The browser-meta
+  pipeline (page `<title>` updates) takes the same `set-auto-title` route so a
+  stray browser title can never flip the flag either.
 - **HTML5 drag-and-drop requires `"dragDropEnabled": false`** on the window in
   `tauri.conf.json`. It defaults to `true`, which makes Tauri capture OS drag/drop at the
   native level and the in-page `dragstart`/`dragover`/`drop` events never fire. Also note

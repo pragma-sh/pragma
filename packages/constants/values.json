@@ -1,5 +1,8 @@
 {
   "maxParallelAgents": 8,
+  "daemon": {
+    "protocolVersion": 1
+  },
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",

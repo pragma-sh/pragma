@@ -3,13 +3,20 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { Tab } from "@pragma/constants";
 
 const invokeMock = vi.fn();
+const channelInstances: Array<{ onmessage: (event: unknown) => void }> = [];
 
-vi.mock("@tauri-apps/api/core", () => ({
-  Channel: class MockChannel<T> {
-    onmessage: (message: T) => void = () => {};
-  },
-  invoke: (...args: unknown[]) => invokeMock(...args),
-}));
+vi.mock("@tauri-apps/api/core", () => {
+  class MockChannel<T> {
+    onmessage: (event: T) => void = () => {};
+    constructor() {
+      channelInstances.push(this as unknown as { onmessage: (event: unknown) => void });
+    }
+  }
+  return {
+    Channel: MockChannel,
+    invoke: (...args: unknown[]) => invokeMock(...args),
+  };
+});
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -207,5 +214,82 @@ describe("TerminalManager key passthrough", () => {
     });
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "h" }))).toBe(false);
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "/" }))).toBe(true);
+  });
+});
+
+describe("TerminalManager.onTitle", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    channelInstances.length = 0;
+  });
+
+  it("forwards shell-emitted titles to subscribed listeners", async () => {
+    type PtyEvt =
+      | { event: "output"; data: string }
+      | { event: "title"; title: string }
+      | { event: "exit"; code: number | null };
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    // Let the manager's async connect (pty_attach) settle and store the
+    // returned Channel in its private map.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const channel = channelInstances.at(-1);
+    expect(channel).toBeDefined();
+    const onEvent = channel!.onmessage;
+
+    const titles: string[] = [];
+    const off = manager.onTitle(tab.id, (title) => titles.push(title));
+
+    onEvent({ event: "title", title: "user@host: ~/repo" } as PtyEvt);
+    onEvent({ event: "title", title: "user@host: ~/repo (main)" } as PtyEvt);
+
+    expect(titles).toEqual(["user@host: ~/repo", "user@host: ~/repo (main)"]);
+
+    off();
+    onEvent({ event: "title", title: "ignored after unsubscribe" } as PtyEvt);
+    expect(titles).toHaveLength(2);
+  });
+
+  it("delivers titles to a listener that subscribed before the terminal mounted", async () => {
+    type PtyEvt =
+      | { event: "output"; data: string }
+      | { event: "title"; title: string }
+      | { event: "exit"; code: number | null };
+
+    const manager = new TerminalManager();
+
+    // Subscribe first — the terminal does not exist in the manager yet. This is
+    // the real-world case of a background tab whose pane has not rendered: the
+    // subscription must survive until the terminal connects.
+    const titles: string[] = [];
+    const off = manager.onTitle(tab.id, (title) => titles.push(title));
+
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const channel = channelInstances.at(-1);
+    expect(channel).toBeDefined();
+    channel!.onmessage({ event: "title", title: "spawned: ~/repo" } as PtyEvt);
+
+    expect(titles).toEqual(["spawned: ~/repo"]);
+
+    off();
+  });
+
+  it("onTitle returns a passive unsubscribe for a tab that never emits", () => {
+    const manager = new TerminalManager();
+    const off = manager.onTitle("missing", () => {
+      throw new Error("listener should not be called");
+    });
+    expect(off()).toBeUndefined();
   });
 });

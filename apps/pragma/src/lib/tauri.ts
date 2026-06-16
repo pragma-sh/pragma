@@ -29,7 +29,10 @@ export function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
-export type PtyEvent = { event: "output"; data: string } | { event: "exit"; code: number | null };
+export type PtyEvent =
+  | { event: "output"; data: string }
+  | { event: "title"; title: string }
+  | { event: "exit"; code: number | null };
 
 export type PtyEventHandler = (event: PtyEvent) => void;
 
@@ -191,6 +194,15 @@ export function closeTab(tabId: string): Promise<void> {
 /** Renames a persisted tab. */
 export function renameTab(tabId: string, title: string): Promise<Tab> {
   return invoke<Tab>("rename_tab", { tabId, title });
+}
+
+/**
+ * Persists a shell-driven tab title (OSC 0/2) without touching the
+ * `userRenamed` flag. The reducer is responsible for refusing to apply
+ * the update when the user has explicitly renamed the tab.
+ */
+export function setTabTitle(tabId: string, title: string): Promise<Tab> {
+  return invoke<Tab>("set_tab_title", { tabId, title });
 }
 
 /** Persists the current page URL for a browser tab (session restore). */

@@ -32,6 +32,7 @@ import {
   renameFile,
   renameWorktree,
   setSplitLayout,
+  setTabTitle,
   setWorktreeHidden,
   stageAll,
   stageFile,
@@ -346,5 +347,20 @@ describe("git changes IPC wrappers", () => {
   it("mergeWorktreeToParent forwards the worktree id", () => {
     void mergeWorktreeToParent("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("merge_worktree_to_parent", { worktreeId: "wt-1" });
+  });
+});
+
+describe("tab title IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("setTabTitle forwards the tab id and shell-emitted title", () => {
+    void setTabTitle("tab-1", "user@host: ~/repo");
+    expect(invokeMock).toHaveBeenCalledWith("set_tab_title", {
+      tabId: "tab-1",
+      title: "user@host: ~/repo",
+    });
   });
 });

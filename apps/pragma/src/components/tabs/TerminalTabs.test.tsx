@@ -18,6 +18,7 @@ function tab(id: string): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
   };
