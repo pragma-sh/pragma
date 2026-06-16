@@ -392,7 +392,10 @@ We target **macOS and Linux only** right now. `tauri.conf.json` bundles
 specifics without updating this guide and CI. Linux builds need the GTK/WebKit system
 libraries — see the `rust`/`build` jobs in CI for the exact `apt` list. Note `xcap`
 (screen capture for browser snapshots) pulls in `libspa-sys`, which needs
-`libpipewire-0.3-dev` on Linux at build time; it's in the CI apt list and must stay there.
+`libpipewire-0.3-dev` on Linux at build time, and its wayland/GL capture path links
+against `gbm`, so `libgbm-dev` is required at link time (otherwise `cargo test` / the
+Tauri build fail with `unable to find library -lgbm`). Both are in the CI apt list (the
+`rust` **and** `build` jobs) and must stay there.
 
 ## Testing
 

@@ -883,6 +883,12 @@ mod tests {
         let main = tempdir().expect("tempdir");
         let main_path = main.path().to_path_buf();
         run(&main_path, &["init", "-b", "main"]);
+        // Persist an identity on the repo so the production commit/merge paths
+        // (which rely on ambient git config, not the `-c` flags `commit_all`
+        // passes) have an author on a clean CI runner with no global identity.
+        // Linked worktrees share this common config.
+        run(&main_path, &["config", "user.email", "test@example.com"]);
+        run(&main_path, &["config", "user.name", "Test"]);
         std::fs::write(main_path.join("base.txt"), "base\n").expect("write base");
         commit_all(&main_path, "base commit");
 

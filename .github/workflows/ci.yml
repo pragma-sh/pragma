@@ -66,6 +66,7 @@ jobs:
             libxdo-dev \
             libgtk-3-dev \
             libpipewire-0.3-dev \
+            libgbm-dev \
             build-essential \
             file
       - uses: dtolnay/rust-toolchain@stable
@@ -102,6 +103,7 @@ jobs:
             libxdo-dev \
             libgtk-3-dev \
             libpipewire-0.3-dev \
+            libgbm-dev \
             build-essential \
             file
       - uses: oven-sh/setup-bun@v2
