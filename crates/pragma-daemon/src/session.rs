@@ -29,6 +29,9 @@ type PtyChild = Box<dyn portable_pty::Child + Send>;
 
 pub struct Session {
     id: String,
+    /// Absolute path the shell was launched from. Used to identify which
+    /// sessions to terminate when their worktree is deleted on disk.
+    cwd: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Option<PtyChild>>,
@@ -46,7 +49,7 @@ impl Session {
         })?;
         let mut command = CommandBuilder::new(shell_path());
         command.arg("-l");
-        command.cwd(cwd);
+        command.cwd(&cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         let child = pair.slave.spawn_command(command)?;
@@ -56,6 +59,7 @@ impl Session {
 
         let session = Arc::new(Self {
             id,
+            cwd,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             child: Mutex::new(Some(child)),
@@ -114,6 +118,11 @@ impl Session {
             child.kill()?;
         }
         Ok(())
+    }
+
+    /// Returns the absolute path the shell was launched from.
+    pub fn cwd(&self) -> &str {
+        &self.cwd
     }
 
     fn start_reader(session: Arc<Self>, mut reader: Box<dyn Read + Send>) {

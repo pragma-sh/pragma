@@ -1,47 +1,145 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { hasWorkspaceModifier } from "@/lib/platform";
+import type { KeybindingPlatform, KeybindingAction } from "@/lib/keybindings";
+import {
+  actionForEvent,
+  defaultKeybindingsConfig,
+  setLoadedKeybindingsConfig,
+  workspaceIndexForAction,
+} from "@/lib/keybindings";
+import { isMacPlatform } from "@/lib/platform";
+import { getPlatform, loadKeybindings } from "@/lib/tauri";
 
 interface UseShortcutsOptions {
   projectCount: number;
   onProject: (index: number) => void;
   onNextTab: () => void;
   onPreviousTab: () => void;
+  onCloseTopTab: () => void;
+  onNewTerminalTab: () => void;
+  onNewBrowserTab: () => void;
+  onClearTerminal: () => void;
+  /** Browser-only actions; the handler decides whether to act on the active tab. */
+  onBrowserReload: () => void;
+  onBrowserDevtools: () => void;
+  onBrowserCopyUrl: () => void;
+  onSplitHorizontal: () => void;
+  onSplitVertical: () => void;
+  /** Files tree: opens the delete confirmation for the currently selected file. */
+  onDeleteSelectedFile: () => void;
 }
 
-/** Registers window-level project and tab shortcuts. */
+interface ShortcutState {
+  platform: KeybindingPlatform;
+  actionForEvent: (event: KeyboardEvent) => KeybindingAction | null;
+}
+
+/** Registers window-level keyboard shortcuts driven by `~/.pragma/keybindings.json`. */
 export function useShortcuts(options: UseShortcutsOptions): void {
-  // Callers pass a fresh `options` object every render; keep it in a ref so the
-  // window listener is registered exactly once instead of churning on every
-  // workspace state change.
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  const [shortcutState, setShortcutState] = useState<ShortcutState>(() => {
+    const platform = isMacPlatform() ? "mac" : "linux";
+    return {
+      platform,
+      actionForEvent: (event) => actionForEvent(event, defaultKeybindingsConfig, platform),
+    };
+  });
+
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!hasWorkspaceModifier(event)) {
-        return;
-      }
-      const current = optionsRef.current;
-      if (/^[1-9]$/.test(event.key)) {
-        const index = Number(event.key) - 1;
-        if (index < current.projectCount) {
-          event.preventDefault();
-          current.onProject(index);
+    let cancelled = false;
+    async function load() {
+      try {
+        const [platform, config] = await Promise.all([getPlatform(), loadKeybindings()]);
+        if (cancelled) {
+          return;
         }
+        setLoadedKeybindingsConfig(config);
+        setShortcutState({
+          platform,
+          actionForEvent: (event) => actionForEvent(event, config, platform),
+        });
+      } catch {
+        // Keep the built-in shortcuts active if the editable config is unavailable.
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const state = shortcutState;
+
+    function onKeyDown(event: KeyboardEvent) {
+      const action = state.actionForEvent(event);
+      if (!action) {
         return;
       }
-      if (event.key === "Tab") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          current.onPreviousTab();
-        } else {
+
+      const current = optionsRef.current;
+      switch (action) {
+        case "nextTab":
+          event.preventDefault();
           current.onNextTab();
+          break;
+        case "previousTab":
+          event.preventDefault();
+          current.onPreviousTab();
+          break;
+        case "closeTopTab":
+          event.preventDefault();
+          current.onCloseTopTab();
+          break;
+        case "newTerminalTab":
+          event.preventDefault();
+          current.onNewTerminalTab();
+          break;
+        case "newBrowserTab":
+          event.preventDefault();
+          current.onNewBrowserTab();
+          break;
+        case "clearTerminal":
+          event.preventDefault();
+          current.onClearTerminal();
+          break;
+        case "browserReload":
+          event.preventDefault();
+          current.onBrowserReload();
+          break;
+        case "browserDevtools":
+          event.preventDefault();
+          current.onBrowserDevtools();
+          break;
+        case "browserCopyUrl":
+          event.preventDefault();
+          current.onBrowserCopyUrl();
+          break;
+        case "splitHorizontal":
+          event.preventDefault();
+          current.onSplitHorizontal();
+          break;
+        case "splitVertical":
+          event.preventDefault();
+          current.onSplitVertical();
+          break;
+        case "deleteFile":
+          event.preventDefault();
+          current.onDeleteSelectedFile();
+          break;
+        default: {
+          const workspaceIndex = workspaceIndexForAction(action);
+          if (workspaceIndex !== null && workspaceIndex <= current.projectCount) {
+            event.preventDefault();
+            current.onProject(workspaceIndex - 1);
+          }
         }
       }
     }
 
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, []);
+  }, [shortcutState]);
 }

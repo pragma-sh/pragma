@@ -14,5 +14,59 @@
   "links": {
     "homepage": "https://pragma.example.com",
     "support": "https://pragma.example.com/support"
+  },
+  "editorLaunchers": {
+    "defaultEditorId": "system",
+    "options": [
+      {
+        "id": "system",
+        "name": "File Explorer",
+        "brandIcon": "lucide:folder-open",
+        "brandColor": "#38bdf8",
+        "cliCommand": null
+      },
+      {
+        "id": "vscode",
+        "name": "VS Code",
+        "brandIcon": "simple-icons:visualstudiocode",
+        "brandColor": "#007acc",
+        "cliCommand": "code"
+      },
+      {
+        "id": "cursor",
+        "name": "Cursor",
+        "brandIcon": "simple-icons:cursor",
+        "brandColor": "#ffffff",
+        "cliCommand": "cursor"
+      },
+      {
+        "id": "windsurf",
+        "name": "Windsurf",
+        "brandIcon": "simple-icons:windsurf",
+        "brandColor": "#00c7be",
+        "cliCommand": "windsurf"
+      },
+      {
+        "id": "zed",
+        "name": "Zed",
+        "brandIcon": "simple-icons:zedindustries",
+        "brandColor": "#084ccf",
+        "cliCommand": "zed"
+      },
+      {
+        "id": "sublime-text",
+        "name": "Sublime Text",
+        "brandIcon": "simple-icons:sublimetext",
+        "brandColor": "#ff9800",
+        "cliCommand": "subl"
+      },
+      {
+        "id": "intellij-idea",
+        "name": "IntelliJ IDEA",
+        "brandIcon": "simple-icons:intellijidea",
+        "brandColor": "#ff2d8f",
+        "cliCommand": "idea"
+      }
+    ]
   }
 }

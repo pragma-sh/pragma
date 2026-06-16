@@ -25,11 +25,13 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 base64 = "0.22"
 log = "0.4"
+opener = "0.7"
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 scopeguard = "1"
-tauri = { version = "2.11.2", features = [] }
+tauri = { version = "2.11.2", features = ["unstable", "devtools"] }
 tauri-plugin-dialog = "2.7.1"
+xcap = { version = "0.6", features = ["image"] }
 tauri-plugin-log = "2"
 tiny_http = "0.12"
 tracing = "0.1"

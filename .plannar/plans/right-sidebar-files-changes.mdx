@@ -1,0 +1,768 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# Right sidebar — Files & Changes
+
+Add a **secondary sidebar on the right edge** of the workspace, mirroring the existing
+left `ProjectSidebar`. A thin strip with a collapse icon, plus two subtabs: **Files**
+(a VS Code–style lazy file tree that creates files/folders and opens them as editor
+tabs) and **Changes** (committed/unstaged git lists that open read-only diff tabs).
+
+Files open in the **main tab bar** as two new tab kinds — `editor` (CodeMirror 6, save
+on ⌘/Ctrl-S, no autosave) and `diff` (read-only `@codemirror/merge`). Filesystem and
+git work lives in Rust behind worktree-scoped Tauri commands; the frontend never sees an
+absolute path.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and what it costs</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **New npm deps:** `@uiw/react-codemirror`, `codemirror`, `@codemirror/state`, `@codemirror/view`, `@codemirror/merge`, `@codemirror/language-data`, `@iconify-json/vscode-icons` (offline icon data — `@iconify/react` is already installed)
+- **New shadcn:** none — `tabs`, `collapsible`, `scroll-area`, `tooltip`, `context-menu`, `input`, `button`, `separator`, `alert-dialog` already exist
+- **2 new `TabKind`s:** `editor` and `diff`, rendered through the existing `SplitPane` switch
+- **8 new Tauri commands:** `list_dir_entries`, `create_file`, `create_folder`, `path_exists`, `read_file`, `write_file` (new `fs.rs`) + `worktree_changes`, `file_diff` (extend `git.rs`/`worktrees.rs`)
+- **Shared constants:** new payload types in `schema.json` (`DirEntry`, `DiffSide`, `ChangeStatus`, `ChangedFile`, `WorktreeChanges`, `FileDiff`, `FileContents`) + `filePath`/`diffSide` on `Tab`
+- **SQLite:** one `v5` migration adding `file_path` + `diff_side` columns to `tabs` so editor/diff tabs persist and restore
+- **Security boundary:** every fs/git command takes a `worktreeId` + a **worktree-relative** path; Rust resolves + canonicalizes against the worktree root and rejects traversal — no absolute paths cross IPC
+
+</CardContent>
+</Card>
+
+## The sidebar, interactively
+
+Toggle the collapse strip, switch Files/Changes, expand directories, and click a New
+File / change row. This is a mock — wiring is described below.
+
+<Playground>
+  <div bind="collapsed:false" className="hidden" />
+  <div bind="sub:'files'" className="hidden" />
+  <div bind="openSrc:true" className="hidden" />
+  <div bind="sel:'src'" className="hidden" />
+  <div bind="creating:false" className="hidden" />
+  <div bind="committed:true" className="hidden" />
+  <div bind="unstaged:true" className="hidden" />
+
+  <div className="flex h-115 overflow-hidden rounded-lg border bg-[#0b0d10] text-sm text-slate-200 shadow-sm">
+
+    {/* ── Center placeholder (the editor / terminal area) ─────────── */}
+    <div className="flex min-w-0 flex-1 flex-col border-r border-white/10">
+      <div className="flex h-8 items-center gap-2 border-b border-white/10 px-3 text-xs text-slate-400">
+        <span className="rounded bg-white/5 px-2 py-0.5 text-slate-200">⌨ shell</span>
+        <span className="rounded px-2 py-0.5">📄 app.ts</span>
+      </div>
+      <div className="flex flex-1 items-center justify-center text-xs text-slate-600">
+        main tab content
+      </div>
+    </div>
+
+    {/* ── Right sidebar ───────────────────────────────────────────── */}
+    {collapsed ? (
+      <div className="flex w-9 shrink-0 flex-col items-center gap-3 py-2">
+        <button
+          title="Expand sidebar"
+          onClick={() => setCollapsed(false)}
+          className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+        >
+          ◧
+        </button>
+      </div>
+    ) : (
+      <div className="flex w-72 shrink-0 flex-col">
+
+        {/* collapse strip + subtabs */}
+        <div className="flex h-8 items-center gap-1 border-b border-white/10 pl-1 pr-2">
+          <button
+            title="Collapse sidebar"
+            onClick={() => setCollapsed(true)}
+            className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+          >
+            ▣
+          </button>
+          {["files", "changes"].map((t) => (
+            <button
+              key={t}
+              onClick={() => setSub(t)}
+              className={`rounded px-2 py-1 text-xs capitalize ${
+                sub === t ? "bg-white/10 text-slate-100" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {sub === "files" ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* New File / New Folder */}
+            <div className="flex items-center justify-between border-b border-white/10 px-2 py-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                {["pragma", "src"].includes(sel) ? `selected: ${sel}/` : "selected: /"}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  title="New File"
+                  onClick={() => setCreating(!creating)}
+                  className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                >
+                  🗎
+                </button>
+                <button
+                  title="New Folder"
+                  className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                >
+                  🗀
+                </button>
+              </div>
+            </div>
+
+            {/* tree */}
+            <div className="flex-1 overflow-auto px-1 py-1 font-mono text-xs leading-6">
+              <button
+                onClick={() => {
+                  setOpenSrc(!openSrc);
+                  setSel("src");
+                }}
+                className={`flex w-full items-center gap-1 rounded px-1 text-left ${
+                  sel === "src" ? "bg-white/10" : "hover:bg-white/5"
+                }`}
+              >
+                <span className="text-slate-500">{openSrc ? "▾" : "▸"}</span>
+                <span>📁</span> src
+              </button>
+
+              {openSrc && (
+                <div className="ml-3 border-l border-white/10 pl-2">
+                  {creating && (
+                    <div className="flex items-center gap-1 px-1">
+                      <span>📄</span>
+                      <input
+                        autoFocus
+                        placeholder="new-file.ts"
+                        className="w-full rounded border border-cyan-400/50 bg-black/40 px-1 text-cyan-100 outline-none"
+                      />
+                    </div>
+                  )}
+                  <div className="px-1 text-slate-300">🟦 app.ts</div>
+                  <div className="px-1 text-slate-300">🟦 main.tsx</div>
+                  <div className="px-1 text-slate-300">🟧 index.css</div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1 rounded px-1 hover:bg-white/5">
+                <span className="text-slate-500">▸</span>
+                <span>📁</span> components
+              </div>
+              <div className="px-1 pl-5 text-slate-300">📦 package.json</div>
+              <div className="px-1 pl-5 text-slate-300">📘 README.md</div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto py-1 text-xs">
+            {/* Committed */}
+            <button
+              onClick={() => setCommitted(!committed)}
+              className="flex w-full items-center gap-1 px-2 py-1 text-left text-slate-300 hover:bg-white/5"
+            >
+              <span className="text-slate-500">{committed ? "▾" : "▸"}</span>
+              Committed changes
+              <span className="ml-auto rounded bg-emerald-500/20 px-1.5 text-emerald-300">2</span>
+            </button>
+            {committed && (
+              <div className="pb-1">
+                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-slate-500">
+                  src
+                </div>
+                <div className="cursor-pointer px-4 py-0.5 hover:bg-white/5">
+                  app.ts <span className="text-amber-400">M</span>
+                </div>
+                <div className="cursor-pointer px-4 py-0.5 hover:bg-white/5">
+                  db.ts <span className="text-emerald-400">A</span>
+                </div>
+              </div>
+            )}
+
+            {/* Unstaged */}
+            <button
+              onClick={() => setUnstaged(!unstaged)}
+              className="flex w-full items-center gap-1 px-2 py-1 text-left text-slate-300 hover:bg-white/5"
+            >
+              <span className="text-slate-500">{unstaged ? "▾" : "▸"}</span>
+              Unstaged changes
+              <span className="ml-auto rounded bg-amber-500/20 px-1.5 text-amber-300">3</span>
+            </button>
+            {unstaged && (
+              <div className="pb-1">
+                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-slate-500">
+                  src/components
+                </div>
+                <div className="cursor-pointer px-4 py-0.5 hover:bg-white/5">
+                  RightSidebar.tsx <span className="text-emerald-400">A</span>
+                </div>
+                <div className="cursor-pointer px-4 py-0.5 hover:bg-white/5">
+                  SplitHost.tsx <span className="text-amber-400">M</span>
+                </div>
+                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-slate-500">
+                  src/lib
+                </div>
+                <div className="cursor-pointer px-4 py-0.5 hover:bg-white/5">
+                  tauri.ts <span className="text-amber-400">M</span>
+                </div>
+              </div>
+            )}
+            <p className="px-3 pt-2 text-[11px] text-slate-600">
+              committed = base branch (A) → HEAD · unstaged = working tree vs index
+            </p>
+          </div>
+        )}
+      </div>
+    )}
+
+  </div>
+</Playground>
+
+## Resolved decisions
+
+The four questions that shaped this design, and what we settled on.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Question</TableHead>
+      <TableHead>Decision</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Changes diff base</TableCell>
+      <TableCell>
+        <strong>Committed</strong> = the <strong>base branch</strong> (parent worktree A /
+        merge-base fork point) → B's <code>HEAD</code> — everything B has committed since it forked
+        from A. <strong>Unstaged</strong> = working-tree changes <strong>not staged</strong> on the
+        current worktree (<code>git diff</code> working-vs-index) plus untracked files.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Tab persistence</TableCell>
+      <TableCell>
+        Persist <strong>both</strong> editor and diff tabs in SQLite (like terminal/browser). Diff
+        content is recomputed live from git on reopen.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Tree contents</TableCell>
+      <TableCell>
+        Hide <code>.gitignore</code>d entries and always hide <code>.git</code>. Lazy per directory.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Tab locator</TableCell>
+      <TableCell>
+        Add explicit <code>filePath</code> + <code>diffSide</code> fields to <code>Tab</code>
+        rather than overloading the browser-only <code>url</code> column. <code>filePath</code> is{" "}
+        <strong>worktree-relative</strong>.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="locator">
+    <AccordionTrigger>Why explicit fields over reusing `url`?</AccordionTrigger>
+    <AccordionContent>
+
+`url` is documented in the schema as _"the current page URL for browser tabs"_. A diff
+tab needs **two** pieces of data (path + which side), which a single string can't hold
+without an opaque `"unstaged:src/app.ts"` encoding. That overloaded-field ambiguity is
+exactly what the repo's _"one source of truth / clean architecture"_ rule warns against.
+
+- **Chosen:** add `filePath: string | null` and `diffSide: DiffSide | null` to `Tab`; keep `url` browser-only. Cost: a `v5` `ALTER TABLE tabs ADD COLUMN file_path TEXT; ADD COLUMN diff_side TEXT;` (the same gated pattern as v2/v3/v4) and two fields on the Rust `Tab` struct.
+- **Rejected alternative:** reuse `url` as a generic locator (no migration). Cheaper, but couples three unrelated tab kinds to one stringly-typed column and forces every consumer to parse it.
+
+The migration is cheap and well-trodden here; clarity wins.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="relative">
+    <AccordionTrigger>Why worktree-relative paths everywhere?</AccordionTrigger>
+    <AccordionContent>
+
+Every fs/git command takes a `worktreeId` and a path **relative to the worktree root**.
+The backend looks up the trusted absolute root from the DB (`worktrees.path`) and
+resolves the relative path against it, canonicalizing and rejecting any `..` / absolute /
+symlink escape. This keeps the IPC surface incapable of reading or writing outside the
+worktree, and means a persisted `filePath` round-trips cleanly even if the worktree is
+later moved on disk.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Architecture
+
+<Tabs defaultValue="frontend" className="my-4">
+  <TabsList>
+    <TabsTrigger value="frontend">Frontend</TabsTrigger>
+    <TabsTrigger value="backend">Backend (Rust)</TabsTrigger>
+    <TabsTrigger value="shared">Shared types & IPC</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="frontend">
+
+New files under `apps/pragma/src/`. The right sidebar is a flex sibling of the center
+`<section>` in `WorkspaceShell.tsx`, so collapsing it reflows the center pane and the
+existing `BrowserView` `ResizeObserver` re-applies native webview bounds automatically —
+no special handling for the browser overlap.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>File</TableHead>
+      <TableHead>Responsibility</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>state/right-sidebar-context.tsx</code>
+      </TableCell>
+      <TableCell>
+        `collapsed`, `activeSubtab` (files/changes), `width`. Cosmetic, persisted to `localStorage`
+        (no backend churn).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>state/editor-dirty-store.ts</code>
+      </TableCell>
+      <TableCell>
+        Module-level dirty-flag store (`native-overlay.ts` pattern + `useSyncExternalStore`).
+        Ephemeral, never persisted, never in the reducer.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/right-sidebar/RightSidebar.tsx</code>
+      </TableCell>
+      <TableCell>
+        Collapse strip (lucide `PanelRightClose`/`Open`) + `Tabs` header + body. `w-9` strip
+        collapsed, fixed/resizable expanded, `shrink-0`.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>.../FilesTab.tsx</code>
+      </TableCell>
+      <TableCell>
+        New File / New Folder buttons + root `FileTree`. Owns `selectedDir` and the inline create
+        state machine.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>.../FileTreeNode.tsx</code>
+      </TableCell>
+      <TableCell>
+        Recursive row (chevron + vscode-icon + name), lazy `listDirEntries` on expand, double-click
+        → `openFileTab`, right-click `context-menu`.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>.../NewEntryInput.tsx</code>
+      </TableCell>
+      <TableCell>
+        Inline create row; Enter commits, Esc cancels, validates against loaded siblings.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>.../ChangesTab.tsx</code> + <code>ChangeGroup.tsx</code>
+      </TableCell>
+      <TableCell>
+        Two default-open `Collapsible`s; flat lists grouped by directory with a relative path label;
+        click → `openDiffTab(path, side)`.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/editor/EditorView.tsx</code>
+      </TableCell>
+      <TableCell>
+        CodeMirror editor for `editor` tabs. `readFile` on mount, ⌘/Ctrl-S save keymap, dirty
+        tracking, lazy language. Keyed on `tab.id`.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/editor/DiffView.tsx</code>
+      </TableCell>
+      <TableCell>
+        Read-only `@codemirror/merge` `MergeView` for `diff` tabs. Loads old/new via `fileDiff`.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/editor/codemirror-theme.ts</code>
+      </TableCell>
+      <TableCell>
+        Custom CM6 theme from app tokens (`#0b0d10` bg, slate text, cyan caret) — no
+        `theme-one-dark` dep.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>lib/file-icons.ts</code>
+      </TableCell>
+      <TableCell>
+        `addCollection(vscode-icons)` once, then filename/ext → `vscode-icons:*` id resolver
+        (offline).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>lib/path.ts</code>
+      </TableCell>
+      <TableCell>
+        Pure `basename`/`dirname`/`joinPath`/`relativeTo` (forward-slash) — no node `path` in the
+        bundle.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+**Edits to existing files**
+
+- `components/workspace/SplitHost.tsx` — extend the `SplitPane` render switch: `browser → BrowserView`, `editor → EditorView`, `diff → DiffView`, else `TerminalView`. The activate effect needs no focus call for editor/diff.
+- `components/tabs/tab-label.tsx` — `tabTitle`/`TabIcon` branches for editor/diff (vscode file icon from `basename(filePath)`; diff title suffix `(Committed)`/`(Working)`). Export a `TabDirtyDot` the strips render next to the close ✕.
+- `components/tabs/TerminalTabs.tsx` + `PaneBar` — render `TabDirtyDot`; route the close ✕ for dirty editor tabs through a `confirmAndCloseTab` (alert-dialog Save / Don't save / Cancel).
+- `state/workspace-context.tsx` — add `openFileTab(path, opts?)` and `openDiffTab(path, side, opts?)` context methods (dedupe by `kind`+`filePath`(+`diffSide`), else `createTab` + `add-tab`/`add-tab-to-pane`). No new reducer actions required.
+- `components/workspace/WorkspaceShell.tsx` — wrap in `RightSidebarProvider`; render `<RightSidebar />` as the last flex child.
+
+<Accordion type="single" collapsible className="mt-3">
+  <AccordionItem value="cm">
+    <AccordionTrigger>CodeMirror: save, theme, languages, diff</AccordionTrigger>
+    <AccordionContent>
+
+- **Save (no autosave):** a `Prec.high` keymap so it beats defaults —
+
+```ts
+Prec.high(
+  keymap.of([
+    {
+      key: "Mod-s",
+      preventDefault: true,
+      run: (view) => {
+        void save(view.state.doc.toString());
+        return true;
+      },
+    },
+  ]),
+);
+```
+
+`save()` → `writeFile(worktreeId, filePath, contents)` → `setTabDirty(tab.id, false)` + update the saved-doc baseline + `toast.success("Saved")`; on failure `toast.error(msg)` and stay dirty. `onChange` sets dirty when `doc !== savedDoc`.
+
+- **Languages:** `LanguageDescription.matchFilename` from `@codemirror/language-data`, lazily `await desc.load()` into a `Compartment` — no bundling every grammar; plain-text fallback.
+- **Diff:** `@codemirror/merge` `MergeView` with both sides `EditorState.readOnly.of(true)` + `EditorView.editable.of(false)`.
+- **Tests:** mock `@uiw/react-codemirror` with a `textarea`-backed stub (CM's DOM measurement is unreliable in jsdom); assert `readFile` on mount and ⌘/Ctrl-S → `writeFile` + dirty cleared.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="icons">
+    <AccordionTrigger>vscode-icons offline (no network in a Tauri app)</AccordionTrigger>
+    <AccordionContent>
+
+`@iconify/react`'s `<Icon>` fetches unknown icons from the Iconify API over the network —
+unacceptable offline and flaky in tests. Add **`@iconify-json/vscode-icons`** and call
+`addCollection(vscodeIcons)` once at module load in `lib/file-icons.ts`; afterwards
+`<Icon icon="vscode-icons:file-type-typescript" />` resolves **synchronously from bundled
+data**. Resolver: directory (`default-folder` / `-opened`) → full-filename map
+(`package.json`, `tsconfig.json`, `Dockerfile`, …) → extension map (`.ts`, `.tsx`, `.rs`,
+`.json`, `.md`, …) → `default-file`. The same id feeds `TabIcon` for editor/diff tabs,
+recomputed from `basename(filePath)` (nothing extra stored on the tab). Tradeoff: the full
+collection is large, but it's a desktop bundle, not a web page.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+  </TabsContent>
+
+  <TabsContent value="backend">
+
+New `apps/pragma/src-tauri/src/fs.rs` (filesystem, worktree-scoped) and extensions to
+`git.rs` (status/diff/base resolution). All commands shell out to the `git` CLI via
+`std::process::Command` (matching the existing `-C <path>` style — no `git2`), return
+`AppResult<T>`, and are registered in the `generate_handler![...]` block in `lib.rs`.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Command</TableHead>
+      <TableHead>Params</TableHead>
+      <TableHead>Returns</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell><code>list_dir_entries</code></TableCell>
+      <TableCell>`worktreeId`, `path` (`""` = root)</TableCell>
+      <TableCell>`Vec<DirEntry>`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>create_file</code></TableCell>
+      <TableCell>`worktreeId`, `path`</TableCell>
+      <TableCell>`()` — errors if exists</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>create_folder</code></TableCell>
+      <TableCell>`worktreeId`, `path`</TableCell>
+      <TableCell>`()` — errors if exists</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>path_exists</code></TableCell>
+      <TableCell>`worktreeId`, `path`</TableCell>
+      <TableCell>`bool`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>read_file</code></TableCell>
+      <TableCell>`worktreeId`, `path`</TableCell>
+      <TableCell>`FileContents` (binary/truncated flags)</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>write_file</code></TableCell>
+      <TableCell>`worktreeId`, `path`, `contents`</TableCell>
+      <TableCell>`()` (overwrites)</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>worktree_changes</code></TableCell>
+      <TableCell>`worktreeId`</TableCell>
+      <TableCell>`WorktreeChanges` (committed + unstaged)</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>file_diff</code></TableCell>
+      <TableCell>`worktreeId`, `path`, `side`, `oldPath?`</TableCell>
+      <TableCell>`FileDiff` (oldText/newText/binary)</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Card className="my-3">
+  <CardHeader>
+    <CardTitle>Path-safety core</CardTitle>
+  </CardHeader>
+  <CardContent className="text-sm">
+
+`resolve_in_worktree(root, relative)` rejects absolute paths and `..` components
+_before_ touching disk, then canonicalizes the target (or its deepest existing ancestor,
+for create/exists) and asserts `starts_with(canonical_root)` to defeat symlink escapes.
+Traversal/absolute → `InvalidInput`; IO failures → `Io`; git non-zero → `Git(stderr)`.
+
+</CardContent>
+</Card>
+
+<Accordion type="single" collapsible className="mt-3">
+  <AccordionItem value="git">
+    <AccordionTrigger>Exact git invocations (status, diff, base)</AccordionTrigger>
+    <AccordionContent>
+
+All run as `git -C <worktree> …` with `-z` (NUL-terminated) for robust parsing.
+
+- **Base / merge-base:** DB lookup of the worktree's `parent_id` → parent's `branch` = `base_ref`; then `git merge-base HEAD <base_ref>` → fork-point SHA (diff against the fork point, not the parent's moved tip). Parentless/main worktree or unrelated histories → no base; the **Committed** group is empty and the UI says so.
+- **Committed list:** `git diff --name-status -z --find-renames <merge_base> HEAD` — everything B has committed since it forked from base A. (No-HEAD repos → empty.)
+- **Unstaged list:** `git diff --name-status -z --find-renames` (working tree vs index — i.e. what is _not staged_) **plus** `git ls-files --others --exclude-standard -z` for untracked.
+- **Committed diff:** old = `git show <merge_base>:<path>` (empty if added in B), new = `git show HEAD:<path>` (empty if deleted in B).
+- **Unstaged diff:** old = `git show :<path>` (the index/staged version; empty for untracked), new = working-tree file via `fs::read_file` (empty if deleted on disk).
+- **Binary:** `git diff --numstat -z` reporting `-`/`-` → `binary: true`, empty texts (never push bytes through IPC). Renames carried via `oldPath`.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="filecontents">
+    <AccordionTrigger>read_file: binary & large files</AccordionTrigger>
+    <AccordionContent>
+
+`byteSize` from metadata. Over a 2 MiB cap → `truncated: true`, no read. Else read bytes
+and try `String::from_utf8`; on failure → `binary: true`, empty text. The editor renders a
+"binary / too large" placeholder instead of garbage; `write_file` overwrites in place and
+does not create missing parents.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="tests">
+    <AccordionTrigger>cargo tests (deterministic, temp git repo)</AccordionTrigger>
+    <AccordionContent>
+
+`fs.rs`: hides `.git` + gitignored, rejects `..`/absolute/symlink escape, create-errors-on-exists, binary/truncated flags, UTF-8 round-trip. `git.rs`: committed list uses the merge-base/fork point (not the parent's moved tip), unstaged list = working-vs-index + untracked, added → empty old, untracked → empty old, deleted → empty new, parentless worktree returns an empty committed list without erroring. Each test `tempfile::tempdir` + `git init` + commits, mirroring existing `git.rs` tests.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+  </TabsContent>
+
+  <TabsContent value="shared">
+
+Anything crossing the IPC boundary lives in `packages/constants/schema.json`, is
+re-exported from both `src/lib.rs` (Rust) and `src/index.ts` (TS), then `bun run generate`
+regenerates types. Wire format is camelCase. No `values.json` change — these are payload
+shapes, not constant values.
+
+**New `definitions`**
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Type</TableHead>
+      <TableHead>Shape</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell><code>DirEntry</code></TableCell>
+      <TableCell>`{ name, path (relative, POSIX), isDir }`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>DiffSide</code></TableCell>
+      <TableCell>enum `"committed" | "unstaged"`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>ChangeStatus</code></TableCell>
+      <TableCell>enum `added | modified | deleted | renamed | untracked`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>ChangedFile</code></TableCell>
+      <TableCell>`{ path, oldPath?, status, side }`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>WorktreeChanges</code></TableCell>
+      <TableCell>`{ committed: ChangedFile[], unstaged: ChangedFile[] }`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>FileDiff</code></TableCell>
+      <TableCell>`{ path, oldText, newText, binary }`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell><code>FileContents</code></TableCell>
+      <TableCell>`{ path, text, binary, truncated, byteSize }`</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+**Changed `definitions`**
+
+- `TabKind` enum → `["terminal", "browser", "editor", "diff"]`.
+- `Tab` gains `filePath: string | null` (worktree-relative; for editor/diff) and `diffSide: DiffSide | null` (diff only). Both added to `required` (the codebase uses fully-required nullable fields, e.g. `url`).
+
+**Coordinated migration** — `db.rs` `v5`: `ALTER TABLE tabs ADD COLUMN file_path TEXT; ADD COLUMN diff_side TEXT;` gated on `pragma_table_info('tabs')` + `PRAGMA user_version = 5` (the v3 pattern). `create_tab` / `tab_from_row` carry the two new fields; the Rust `Tab` struct + the TS `createTab` wrapper + `lib/tauri.test.ts` invoke-arg assertions all extend by the two keys.
+
+  </TabsContent>
+</Tabs>
+
+## Three flows, end to end
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="create">
+    <AccordionTrigger>Create a file from the tree</AccordionTrigger>
+    <AccordionContent>
+
+1. User clicks **New File** → `FilesTab` sets `createMode = { dirPath: selectedDir, kind: "file" }` and ensures `selectedDir` is expanded.
+2. `FileTreeNode` for `selectedDir` renders `NewEntryInput` as its first child; input autofocuses.
+3. On each keystroke, validate against the loaded siblings (case-insensitive) + reject empty / path separators; red border while invalid.
+4. **Enter** → `createFile(worktreeId, joinPath(dirPath, name))`. Backend `File::create_new` fails atomically if it exists (UX validation is a convenience, backend is the guard).
+5. On success → clear create mode, re-`listDirEntries(dirPath)` to refresh, then `openFileTab(joinPath(dirPath, name))` → opens an `editor` tab in the main bar. (Folders: same, minus the open.)
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="edit">
+    <AccordionTrigger>Open & save an editor tab</AccordionTrigger>
+    <AccordionContent>
+
+1. Double-click a file (or open-on-create) → `openFileTab(path)` dedupes by `kind`+`filePath`; if found, activate it, else `createTab(projectId, worktreeId, "editor", basename(path), …, filePath)` + `add-tab`.
+2. `SplitPane` routes `kind === "editor"` → `<EditorView>`, keyed on `tab.id`.
+3. `EditorView` `readFile(worktreeId, filePath)` → initial doc; binary/large → placeholder; missing → inline error + Retry.
+4. Typing fires `onChange` → `setTabDirty(tab.id, doc !== savedDoc)`; the strip shows a dot instead of ✕.
+5. ⌘/Ctrl-S → `writeFile` → clear dirty + new baseline + toast. Closing a dirty tab routes through `confirmAndCloseTab` (Save / Don't save / Cancel).
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="diff">
+    <AccordionTrigger>View a change as a diff</AccordionTrigger>
+    <AccordionContent>
+
+1. `ChangesTab` calls `worktreeChanges(worktreeId)` → two lists; group each by `dirname(path)` with a relative path label.
+2. Click a row → `openDiffTab(path, side)` (dedupe by `kind`+`filePath`+`diffSide`).
+3. `SplitPane` routes `kind === "diff"` → `<DiffView>`.
+4. `DiffView` `fileDiff(worktreeId, path, side, oldPath?)` → `{ oldText, newText, binary }`; renders read-only `MergeView`. Committed → base-branch fork point vs `HEAD`; unstaged → index vs working tree. Recomputed live on reopen (nothing diff-related persisted).
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Risks & edge cases
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- **Base branch unresolvable** (main/parentless worktree, detached HEAD, unrelated histories) → the **Committed** group is empty and labeled "No base branch"; the Unstaged group still works (it doesn't need a base).
+- **File both committed and re-edited** → appears in **both** groups: Committed shows the committed delta vs base A, Unstaged shows the further uncommitted edit. These are different axes, so this overlap is intentional, not a bug.
+- **Two tabs for one file** → `openFileTab`/`openDiffTab` dedupe before creating.
+- **Dirty close / file deleted on disk** → `confirmAndCloseTab` dialog; save errors toast and stay dirty; missing-file tab shows inline error rather than crashing workspace load.
+- **Binary / large files** → backend flags; editor & diff render placeholders, never raw bytes over IPC.
+- **CRLF / autocrlf** → `git show` may normalize EOL vs raw working-tree read; EOL-only diffs possible (cosmetic) — flagged.
+- **Tree context menu over a browser pane** → wrap the `context-menu`'s open state with native-overlay suppression (`native-overlay.ts`), like other floating UI.
+- **CodeMirror in jsdom** → mock `@uiw/react-codemirror`; never mount real `MergeView` in unit tests.
+- **gitignore spawn cost** → one batched `git check-ignore --stdin -z` per directory expansion (not per entry).
+
+</CardContent>
+</Card>
+
+## Build order
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+1. **Constants + migration** — `schema.json` (new types, `TabKind`, `Tab` fields), re-exports, `bun run generate`, Rust `Tab` struct, `db.rs` v5. Unblocks both sides.
+2. **Rust `fs.rs`** — path safety + 6 fs commands + tests. Wire `tauri.ts` wrappers.
+3. **Rust git** — `worktree_changes` + `file_diff` + base resolution + tests. Wire wrappers.
+4. **Editor/diff tab plumbing** — `TabKind` render switch, `tab-label` branches, dirty store, `openFileTab`/`openDiffTab`, `EditorView` + `DiffView` + theme + deps.
+5. **Right sidebar shell** — `RightSidebarProvider`, `RightSidebar`, `WorkspaceShell` wiring, collapse.
+6. **Files tab** — tree, lazy load, icons, inline create state machine.
+7. **Changes tab** — collapsibles, directory grouping, diff open.
+8. **Tests + `bun run check`** — Vitest + cargo, oxlint/oxfmt/clippy/rustfmt, conventional commit.
+
+</CardContent>
+</Card>
+
+## Acceptance
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- [ ] Right sidebar sits opposite the left sidebar; collapse strip toggles it; Files/Changes subtabs switch
+- [ ] Files tab shows a lazy VS Code–style tree with vscode-icons, hiding `.git` + gitignored entries (offline, no network)
+- [ ] New File / New Folder create in the selected directory via inline input with existence validation; a created file opens as an editor tab
+- [ ] Double-clicking a file opens an editor tab; editor uses CodeMirror 6, themed to the app, ⌘/Ctrl-S saves, **no** autosave, dirty indicator shows
+- [ ] Changes tab shows default-open Committed + Unstaged collapsibles, flat lists grouped by relative directory label
+- [ ] Committed = base branch (parent worktree A / fork point) → HEAD; Unstaged = working-tree changes not staged + untracked; clicking a file opens a read-only `@codemirror/merge` diff tab
+- [ ] Editor & diff tabs persist and restore across restart; diff recomputed live
+- [ ] fs/git commands reject paths escaping the worktree; `bun run check` passes (Vitest, cargo test, lint, fmt, clippy)
+
+</CardContent>
+</Card>

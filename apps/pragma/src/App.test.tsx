@@ -12,11 +12,16 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => undefined),
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
+  TERMINAL_FONT_FAMILY: "monospace",
   terminalManager: {
     activate: vi.fn(),
     dispose: vi.fn(),

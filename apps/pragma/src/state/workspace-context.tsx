@@ -9,16 +9,59 @@ import {
   type ReactNode,
 } from "react";
 
-import type { Project, ProjectIcon, Tab, Worktree } from "@pragma/constants";
+import type {
+  DiffSide,
+  Project,
+  ProjectIcon,
+  Tab,
+  Worktree,
+  WorktreeStatus,
+} from "@pragma/constants";
 
+import { BROWSER_START_URL } from "@/lib/browser-manager";
+import { basename } from "@/lib/path";
+import { terminalManager } from "@/lib/terminal-manager";
 import {
+  browserClose,
+  clearSplitLayout as clearSplitLayoutCommand,
   closeTab as closeTabCommand,
   createTab as createTabCommand,
+  deleteWorktree as deleteWorktreeCommand,
   listProjects,
+  listSplits,
   listTabs,
   listWorktrees,
+  onBrowserFocusRequest,
+  onBrowserMeta,
+  openWorktree as openWorktreeCommand,
   projectIcon,
+  renameTab as renameTabCommand,
+  renameWorktree as renameWorktreeCommand,
+  setSplitLayout as setSplitLayoutCommand,
+  setTabUrl as setTabUrlCommand,
+  setWorktreeHidden as setWorktreeHiddenCommand,
+  worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
+import type { SplitLayout } from "@/lib/tauri";
+
+export type SplitDirection = "horizontal" | "vertical";
+export type SplitPlacement = "before" | "after";
+
+export interface SplitPaneNode {
+  kind: "pane";
+  id: string;
+  tabIds: string[];
+  activeTabId: string | null;
+}
+
+export interface SplitGroupNode {
+  kind: "split";
+  id: string;
+  direction: SplitDirection;
+  children: [SplitLayoutNode, SplitLayoutNode];
+}
+
+export type SplitLayoutNode = SplitPaneNode | SplitGroupNode;
 
 interface WorkspaceState {
   projects: Project[];
@@ -30,6 +73,10 @@ interface WorkspaceState {
   selectedWorktreeByProject: Record<string, string>;
   /** Last active tab per worktree, so each worktree keeps its own focused tab. */
   activeTabByWorktree: Record<string, string>;
+  /** Nested, frontend-only split layout per worktree. Panes reference tab IDs. */
+  splitRootByWorktree: Record<string, SplitLayoutNode>;
+  /** Focused split pane per worktree; tab shortcuts apply to this pane. */
+  focusedPaneByWorktree: Record<string, string>;
   icons: Record<string, ProjectIcon | null>;
   loading: boolean;
   error: string | null;
@@ -41,12 +88,29 @@ type WorkspaceAction =
   | { type: "set-projects"; projects: Project[] }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
+  | { type: "set-splits"; worktreeRoots: Record<string, SplitLayoutNode> }
   | { type: "select-project"; projectId: string | null }
   | { type: "select-worktree"; projectId: string; worktreeId: string }
   | { type: "set-active-tab"; worktreeId: string; tabId: string }
+  | { type: "focus-pane"; worktreeId: string; paneId: string }
+  | { type: "set-pane-active-tab"; worktreeId: string; paneId: string; tabId: string }
+  | {
+      type: "split-pane";
+      worktreeId: string;
+      paneId: string | null;
+      tabId: string;
+      direction: SplitDirection;
+      placement: SplitPlacement;
+    }
+  | { type: "move-tab-to-pane"; worktreeId: string; paneId: string; tabId: string }
   | { type: "add-tab"; tab: Tab }
+  | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | { type: "remove-tab"; tabId: string }
+  | { type: "rename-tab"; tabId: string; title: string }
+  | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
+  | { type: "remove-worktree"; worktreeId: string }
+  | { type: "update-worktree"; worktree: Worktree }
   | { type: "clear-error" };
 
 interface WorkspaceContextValue extends WorkspaceState {
@@ -57,14 +121,47 @@ interface WorkspaceContextValue extends WorkspaceState {
   activeProject: Project | null;
   selectedWorktree: Worktree | null;
   activeTab: Tab | null;
+  splitRoot: SplitLayoutNode | null;
+  focusedPaneId: string | null;
   reload: () => Promise<void>;
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null) => void;
   createTerminalTab: (worktreeId?: string) => Promise<void>;
-  closeTerminalTab: (tabId: string) => Promise<void>;
+  createBrowserTab: (worktreeId?: string) => Promise<void>;
+  /** Create a new tab inside a specific split pane (the pane's "+" button). */
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  /** Opens (or focuses) an editor tab for a worktree-relative file path. */
+  openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
+  /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
+  openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  closeTab: (tabId: string) => Promise<void>;
+  renameTerminalTab: (tabId: string, title: string) => Promise<void>;
+  openSelectedWorktree: (editorId?: string | null) => Promise<void>;
+  openWorktreeInEditor: (worktreeId: string, editorId?: string | null) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
+  /** Reports whether a worktree has uncommitted, staged, or untracked changes. */
+  getWorktreeStatus: (worktreeId: string) => Promise<WorktreeStatus>;
+  /** Removes a worktree from disk + SQLite, optionally deletes its branch. */
+  deleteWorktree: (
+    worktreeId: string,
+    options: { deleteBranch: boolean; force: boolean },
+  ) => Promise<void>;
+  /** Updates the optional display title; empty string clears it. */
+  renameWorktree: (worktreeId: string, title: string) => Promise<void>;
+  /** Toggles the hidden flag — the row persists, but the sidebar filters it out. */
+  hideWorktree: (worktreeId: string, hidden: boolean) => Promise<void>;
+  focusPane: (paneId: string) => void;
+  setPaneActiveTab: (paneId: string, tabId: string) => void;
+  splitActivePane: (tabId: string, direction: SplitDirection) => void;
+  splitTabAtPane: (
+    tabId: string,
+    paneId: string,
+    direction: SplitDirection,
+    placement: SplitPlacement,
+  ) => void;
+  moveTabToPane: (tabId: string, paneId: string) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -76,10 +173,244 @@ const initialState: WorkspaceState = {
   selectedProjectId: null,
   selectedWorktreeByProject: {},
   activeTabByWorktree: {},
+  splitRootByWorktree: {},
+  focusedPaneByWorktree: {},
   icons: {},
   loading: true,
   error: null,
 };
+
+let nextSplitNode = 0;
+
+function splitNodeId(prefix: "pane" | "split"): string {
+  nextSplitNode += 1;
+  return `${prefix}-${nextSplitNode}`;
+}
+
+/**
+ * Advances the node-id counter past any numeric ids found in a restored layout
+ * so freshly generated pane/split ids never collide with persisted ones after a
+ * restart (the counter otherwise resets to 0 each launch).
+ */
+function reserveSplitNodeIds(node: SplitLayoutNode): void {
+  const match = /-(\d+)$/.exec(node.id);
+  if (match) {
+    nextSplitNode = Math.max(nextSplitNode, Number(match[1]));
+  }
+  if (node.kind === "split") {
+    reserveSplitNodeIds(node.children[0]);
+    reserveSplitNodeIds(node.children[1]);
+  }
+}
+
+/**
+ * Parses persisted split records into a worktree → layout map, reserving their
+ * node ids. Corrupt rows are skipped rather than failing the whole load.
+ */
+function parseStoredSplits(records: SplitLayout[]): Record<string, SplitLayoutNode> {
+  const roots: Record<string, SplitLayoutNode> = {};
+  for (const record of records) {
+    try {
+      const root = JSON.parse(record.layout) as SplitLayoutNode;
+      reserveSplitNodeIds(root);
+      roots[record.worktreeId] = root;
+    } catch {
+      // Skip a corrupt layout blob; the worktree falls back to a single pane.
+    }
+  }
+  return roots;
+}
+
+function defaultPaneId(worktreeId: string): string {
+  return `pane-default-${worktreeId}`;
+}
+
+function uniqueTabIds(tabIds: string[]): string[] {
+  return [...new Set(tabIds)];
+}
+
+function createPane(tabIds: string[], activeTabId?: string | null, id = splitNodeId("pane")) {
+  const uniqueIds = uniqueTabIds(tabIds);
+  return {
+    kind: "pane" as const,
+    id,
+    tabIds: uniqueIds,
+    activeTabId:
+      activeTabId && uniqueIds.includes(activeTabId) ? activeTabId : (uniqueIds[0] ?? null),
+  };
+}
+
+function initialRootForWorktree(
+  worktreeId: string,
+  tabs: Tab[],
+  activeTabId?: string | null,
+): SplitPaneNode | null {
+  const tabIds = tabs.filter((tab) => tab.worktreeId === worktreeId).map((tab) => tab.id);
+  if (tabIds.length === 0) {
+    return null;
+  }
+  return createPane(tabIds, activeTabId, defaultPaneId(worktreeId));
+}
+
+function findPane(
+  node: SplitLayoutNode | null | undefined,
+  predicate: (pane: SplitPaneNode) => boolean,
+): SplitPaneNode | null {
+  if (!node) {
+    return null;
+  }
+  if (node.kind === "pane") {
+    return predicate(node) ? node : null;
+  }
+  return findPane(node.children[0], predicate) ?? findPane(node.children[1], predicate);
+}
+
+function firstPane(node: SplitLayoutNode | null | undefined): SplitPaneNode | null {
+  return findPane(node, () => true);
+}
+
+function paneContainingTab(
+  node: SplitLayoutNode | null | undefined,
+  tabId: string,
+): SplitPaneNode | null {
+  return findPane(node, (pane) => pane.tabIds.includes(tabId));
+}
+
+function tabIdsInNode(node: SplitLayoutNode | null | undefined): Set<string> {
+  const tabIds = new Set<string>();
+  findPane(node, (pane) => {
+    for (const tabId of pane.tabIds) {
+      tabIds.add(tabId);
+    }
+    return false;
+  });
+  return tabIds;
+}
+
+function paneById(node: SplitLayoutNode | null | undefined, paneId: string): SplitPaneNode | null {
+  return findPane(node, (pane) => pane.id === paneId);
+}
+
+function replacePane(
+  node: SplitLayoutNode,
+  paneId: string,
+  replace: (pane: SplitPaneNode) => SplitLayoutNode,
+): SplitLayoutNode {
+  if (node.kind === "pane") {
+    return node.id === paneId ? replace(node) : node;
+  }
+  return {
+    ...node,
+    children: [
+      replacePane(node.children[0], paneId, replace),
+      replacePane(node.children[1], paneId, replace),
+    ],
+  };
+}
+
+function removeTabFromNode(node: SplitLayoutNode, tabId: string): SplitLayoutNode | null {
+  if (node.kind === "pane") {
+    if (!node.tabIds.includes(tabId)) {
+      return node;
+    }
+    const tabIds = node.tabIds.filter((id) => id !== tabId);
+    if (tabIds.length === 0) {
+      return null;
+    }
+    return createPane(
+      tabIds,
+      node.activeTabId === tabId ? tabIds.at(-1) : node.activeTabId,
+      node.id,
+    );
+  }
+  const first = removeTabFromNode(node.children[0], tabId);
+  const second = removeTabFromNode(node.children[1], tabId);
+  if (first && second) {
+    return { ...node, children: [first, second] };
+  }
+  return first ?? second;
+}
+
+function reconcileNode(node: SplitLayoutNode, validTabIds: Set<string>): SplitLayoutNode | null {
+  if (node.kind === "pane") {
+    const tabIds = node.tabIds.filter((tabId) => validTabIds.has(tabId));
+    if (tabIds.length === 0) {
+      return null;
+    }
+    return createPane(tabIds, node.activeTabId, node.id);
+  }
+  const first = reconcileNode(node.children[0], validTabIds);
+  const second = reconcileNode(node.children[1], validTabIds);
+  if (first && second) {
+    return { ...node, children: [first, second] };
+  }
+  return first ?? second;
+}
+
+function normalizeRoot(
+  root: SplitLayoutNode | undefined,
+  worktreeId: string,
+  tabs: Tab[],
+  activeTabId?: string | null,
+): SplitLayoutNode | null {
+  const tabIds = tabs.filter((tab) => tab.worktreeId === worktreeId).map((tab) => tab.id);
+  if (tabIds.length === 0) {
+    return null;
+  }
+  if (!root) {
+    return initialRootForWorktree(worktreeId, tabs, activeTabId);
+  }
+  const reconciled = reconcileNode(root, new Set(tabIds));
+  if (!reconciled) {
+    return initialRootForWorktree(worktreeId, tabs, activeTabId);
+  }
+  // A single-pane root is the implicit "all tabs share one pane" state, so fold
+  // any newly loaded tabs into it. Tabs missing from a real split intentionally
+  // stay out of the layout — they are normal top-bar tabs, not split members.
+  if (reconciled.kind === "pane") {
+    const existingIds = new Set(reconciled.tabIds);
+    const missingIds = tabIds.filter((id) => !existingIds.has(id));
+    if (missingIds.length > 0) {
+      const mergedIds = [...reconciled.tabIds, ...missingIds];
+      return createPane(
+        mergedIds,
+        activeTabId && mergedIds.includes(activeTabId) ? activeTabId : reconciled.activeTabId,
+        reconciled.id,
+      );
+    }
+  }
+  return reconciled;
+}
+
+function rootsForTabs(
+  roots: Record<string, SplitLayoutNode>,
+  tabs: Tab[],
+): Record<string, SplitLayoutNode> {
+  // `tabs` is a single project's snapshot, so only reconcile roots for worktrees
+  // it actually covers. Roots for worktrees in *other* projects must be left
+  // untouched — dropping them here is what lost split layouts when switching
+  // projects (and would also trigger the persistence layer to clear them).
+  const worktreeIdsInTabs = new Set(tabs.map((tab) => tab.worktreeId));
+  const nextRoots: Record<string, SplitLayoutNode> = {};
+  for (const [worktreeId, root] of Object.entries(roots)) {
+    if (!worktreeIdsInTabs.has(worktreeId)) {
+      nextRoots[worktreeId] = root;
+      continue;
+    }
+    const normalized = normalizeRoot(root, worktreeId, tabs);
+    if (normalized) {
+      nextRoots[worktreeId] = normalized;
+    }
+  }
+  return nextRoots;
+}
+
+function focusForRoot(
+  root: SplitLayoutNode | null | undefined,
+  focusedPaneId?: string | null,
+): SplitPaneNode | null {
+  return (focusedPaneId ? paneById(root, focusedPaneId) : null) ?? firstPane(root);
+}
 
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
@@ -109,7 +440,31 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       };
     }
     case "set-tabs":
-      return { ...state, tabs: action.tabs };
+      return {
+        ...state,
+        tabs: action.tabs,
+        splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
+      };
+    case "set-splits": {
+      // Merge persisted layouts for the loaded project's worktrees over whatever
+      // is in memory, reconciling each against the current tabs (a tab may have
+      // been closed in another window/session). Other worktrees are untouched.
+      const splitRootByWorktree = { ...state.splitRootByWorktree };
+      for (const [worktreeId, root] of Object.entries(action.worktreeRoots)) {
+        const normalized = normalizeRoot(
+          root,
+          worktreeId,
+          state.tabs,
+          state.activeTabByWorktree[worktreeId],
+        );
+        if (normalized) {
+          splitRootByWorktree[worktreeId] = normalized;
+        } else {
+          delete splitRootByWorktree[worktreeId];
+        }
+      }
+      return { ...state, splitRootByWorktree };
+    }
     case "select-project":
       return { ...state, selectedProjectId: action.projectId };
     case "select-worktree":
@@ -120,15 +475,196 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           [action.projectId]: action.worktreeId,
         },
       };
-    case "set-active-tab":
+    case "set-active-tab": {
+      const root = state.splitRootByWorktree[action.worktreeId];
+      const pane = paneContainingTab(root, action.tabId);
       return {
         ...state,
         activeTabByWorktree: {
           ...state.activeTabByWorktree,
           [action.worktreeId]: action.tabId,
         },
+        splitRootByWorktree:
+          root && pane
+            ? {
+                ...state.splitRootByWorktree,
+                [action.worktreeId]: replacePane(root, pane.id, (item) =>
+                  createPane(item.tabIds, action.tabId, item.id),
+                ),
+              }
+            : state.splitRootByWorktree,
+        focusedPaneByWorktree: pane
+          ? { ...state.focusedPaneByWorktree, [action.worktreeId]: pane.id }
+          : Object.fromEntries(
+              Object.entries(state.focusedPaneByWorktree).filter(
+                ([worktreeId]) => worktreeId !== action.worktreeId,
+              ),
+            ),
       };
-    case "add-tab":
+    }
+    case "focus-pane": {
+      const root = normalizeRoot(
+        state.splitRootByWorktree[action.worktreeId],
+        action.worktreeId,
+        state.tabs,
+        state.activeTabByWorktree[action.worktreeId],
+      );
+      const pane = paneById(root, action.paneId);
+      if (!root || !pane) {
+        return state;
+      }
+      return {
+        ...state,
+        activeTabByWorktree: pane.activeTabId
+          ? { ...state.activeTabByWorktree, [action.worktreeId]: pane.activeTabId }
+          : state.activeTabByWorktree,
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [action.worktreeId]: root,
+        },
+        focusedPaneByWorktree: {
+          ...state.focusedPaneByWorktree,
+          [action.worktreeId]: action.paneId,
+        },
+      };
+    }
+    case "set-pane-active-tab": {
+      const root = normalizeRoot(
+        state.splitRootByWorktree[action.worktreeId],
+        action.worktreeId,
+        state.tabs,
+        state.activeTabByWorktree[action.worktreeId],
+      );
+      const pane = paneById(root, action.paneId);
+      if (!root || !pane?.tabIds.includes(action.tabId)) {
+        return state;
+      }
+      return {
+        ...state,
+        activeTabByWorktree: {
+          ...state.activeTabByWorktree,
+          [action.worktreeId]: action.tabId,
+        },
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [action.worktreeId]: replacePane(root, action.paneId, (item) =>
+            createPane(item.tabIds, action.tabId, item.id),
+          ),
+        },
+        focusedPaneByWorktree: {
+          ...state.focusedPaneByWorktree,
+          [action.worktreeId]: action.paneId,
+        },
+      };
+    }
+    case "split-pane": {
+      const root = normalizeRoot(
+        state.splitRootByWorktree[action.worktreeId],
+        action.worktreeId,
+        state.tabs,
+        state.activeTabByWorktree[action.worktreeId],
+      );
+      if (!root) {
+        return state;
+      }
+      const selectedTab = state.tabs.find(
+        (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
+      );
+      if (!selectedTab) {
+        return state;
+      }
+      const sourcePane =
+        (action.paneId ? paneById(root, action.paneId) : null) ??
+        focusForRoot(root, state.focusedPaneByWorktree[action.worktreeId]);
+      if (!sourcePane) {
+        return state;
+      }
+      // When the worktree is not yet split the root is one implicit pane holding
+      // every tab, but only the displayed (active) tab is really "shown" — so the
+      // new split is [activeTab | droppedTab] and the other tabs fall back to
+      // being normal top-bar tabs. Inside a real split the source pane keeps its
+      // own tabs.
+      const implicit = root.kind === "pane";
+      const keepIds = (
+        implicit ? (sourcePane.activeTabId ? [sourcePane.activeTabId] : []) : sourcePane.tabIds
+      ).filter((id) => id !== action.tabId);
+      if (keepIds.length === 0) {
+        return state;
+      }
+      const targetPane = createPane([action.tabId], action.tabId);
+      const currentPane = createPane(
+        keepIds,
+        keepIds.includes(sourcePane.activeTabId ?? "") ? sourcePane.activeTabId : keepIds.at(-1),
+        sourcePane.id,
+      );
+      const splitNode: SplitLayoutNode = {
+        kind: "split",
+        id: splitNodeId("split"),
+        direction: action.direction,
+        children:
+          action.placement === "after" ? [currentPane, targetPane] : [targetPane, currentPane],
+      };
+      const nextRoot = implicit
+        ? splitNode
+        : replacePane(
+            removeTabFromNode(root, action.tabId) ?? root,
+            sourcePane.id,
+            () => splitNode,
+          );
+      return {
+        ...state,
+        activeTabByWorktree: {
+          ...state.activeTabByWorktree,
+          [action.worktreeId]: action.tabId,
+        },
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [action.worktreeId]: nextRoot,
+        },
+        focusedPaneByWorktree: {
+          ...state.focusedPaneByWorktree,
+          [action.worktreeId]: targetPane.id,
+        },
+      };
+    }
+    case "move-tab-to-pane": {
+      const root = normalizeRoot(
+        state.splitRootByWorktree[action.worktreeId],
+        action.worktreeId,
+        state.tabs,
+        state.activeTabByWorktree[action.worktreeId],
+      );
+      const selectedTab = state.tabs.find(
+        (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
+      );
+      if (!root || !selectedTab) {
+        return state;
+      }
+      const withoutMoved = removeTabFromNode(root, action.tabId) ?? root;
+      const targetPane = paneById(withoutMoved, action.paneId) ?? firstPane(withoutMoved);
+      if (!targetPane) {
+        return state;
+      }
+      const nextRoot = replacePane(withoutMoved, targetPane.id, (pane) =>
+        createPane([...pane.tabIds, action.tabId], action.tabId, pane.id),
+      );
+      return {
+        ...state,
+        activeTabByWorktree: {
+          ...state.activeTabByWorktree,
+          [action.worktreeId]: action.tabId,
+        },
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [action.worktreeId]: nextRoot,
+        },
+        focusedPaneByWorktree: {
+          ...state.focusedPaneByWorktree,
+          [action.worktreeId]: targetPane.id,
+        },
+      };
+    }
+    case "add-tab": {
       return {
         ...state,
         tabs: [...state.tabs, action.tab],
@@ -137,12 +673,72 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           [action.tab.worktreeId]: action.tab.id,
         },
       };
+    }
+    case "add-tab-to-pane": {
+      const { tab, paneId } = action;
+      const tabs = [...state.tabs, tab];
+      const activeTabByWorktree = {
+        ...state.activeTabByWorktree,
+        [tab.worktreeId]: tab.id,
+      };
+      const root = state.splitRootByWorktree[tab.worktreeId];
+      const pane = paneById(root, paneId);
+      // If the pane vanished, fall back to a normal top-bar tab.
+      if (!root || !pane) {
+        return { ...state, tabs, activeTabByWorktree };
+      }
+      return {
+        ...state,
+        tabs,
+        activeTabByWorktree,
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [tab.worktreeId]: replacePane(root, paneId, (item) =>
+            createPane([...item.tabIds, tab.id], tab.id, item.id),
+          ),
+        },
+        focusedPaneByWorktree: {
+          ...state.focusedPaneByWorktree,
+          [tab.worktreeId]: paneId,
+        },
+      };
+    }
     case "remove-tab": {
       const removed = state.tabs.find((tab) => tab.id === action.tabId);
       const tabs = state.tabs.filter((tab) => tab.id !== action.tabId);
       let activeTabByWorktree = state.activeTabByWorktree;
+      let splitRootByWorktree = state.splitRootByWorktree;
+      let focusedPaneByWorktree = state.focusedPaneByWorktree;
+      let sourcePane: SplitPaneNode | null = null;
+      let nextRoot: SplitLayoutNode | null = null;
+      if (removed) {
+        const root = state.splitRootByWorktree[removed.worktreeId];
+        if (root) {
+          sourcePane = paneContainingTab(root, action.tabId);
+          nextRoot = removeTabFromNode(root, action.tabId);
+          splitRootByWorktree = { ...splitRootByWorktree };
+          focusedPaneByWorktree = { ...focusedPaneByWorktree };
+          if (nextRoot) {
+            const focusedPane = focusForRoot(nextRoot, focusedPaneByWorktree[removed.worktreeId]);
+            splitRootByWorktree[removed.worktreeId] = nextRoot;
+            if (focusedPane) {
+              focusedPaneByWorktree[removed.worktreeId] = focusedPane.id;
+            }
+          } else {
+            delete splitRootByWorktree[removed.worktreeId];
+            delete focusedPaneByWorktree[removed.worktreeId];
+          }
+        }
+      }
       if (removed && state.activeTabByWorktree[removed.worktreeId] === action.tabId) {
-        const fallback = tabs.findLast((tab) => tab.worktreeId === removed.worktreeId)?.id;
+        const nextPane = sourcePane && nextRoot ? paneById(nextRoot, sourcePane.id) : null;
+        const restoredTabIds = nextRoot ? tabIdsInNode(nextRoot) : new Set<string>();
+        const fallback =
+          nextPane?.activeTabId ??
+          tabs.findLast(
+            (tab) => tab.worktreeId === removed.worktreeId && !restoredTabIds.has(tab.id),
+          )?.id ??
+          tabs.findLast((tab) => tab.worktreeId === removed.worktreeId)?.id;
         activeTabByWorktree = { ...activeTabByWorktree };
         if (fallback) {
           activeTabByWorktree[removed.worktreeId] = fallback;
@@ -150,10 +746,80 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           delete activeTabByWorktree[removed.worktreeId];
         }
       }
-      return { ...state, tabs, activeTabByWorktree };
+      return { ...state, tabs, activeTabByWorktree, splitRootByWorktree, focusedPaneByWorktree };
     }
+    case "rename-tab":
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId ? { ...tab, title: action.title } : tab,
+        ),
+      };
+    case "set-tab-url":
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId ? { ...tab, url: action.url } : tab,
+        ),
+      };
     case "set-icon":
       return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
+    case "remove-worktree": {
+      // Filter the row out of every project list and drop tabs owned by it
+      // (SQLite cascades, but our local snapshot still has them). The Tauri
+      // side has already terminated the worktree's PTY sessions by the time
+      // we get here, so we just need to keep the in-memory state in sync.
+      const worktrees: Record<string, Worktree[]> = {};
+      const selectedWorktreeByProject: Record<string, string> = {
+        ...state.selectedWorktreeByProject,
+      };
+      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+        const remaining = projectWorktrees.filter((worktree) => worktree.id !== action.worktreeId);
+        if (remaining.length === projectWorktrees.length) {
+          worktrees[projectId] = projectWorktrees;
+          continue;
+        }
+        worktrees[projectId] = remaining;
+        if (selectedWorktreeByProject[projectId] === action.worktreeId) {
+          const fallback =
+            remaining.find((worktree) => worktree.isMain)?.id ??
+            remaining.find((worktree) => worktree.parentId === null)?.id ??
+            remaining[0]?.id;
+          if (fallback) {
+            selectedWorktreeByProject[projectId] = fallback;
+          } else {
+            delete selectedWorktreeByProject[projectId];
+          }
+        }
+      }
+      const tabs = state.tabs.filter((tab) => tab.worktreeId !== action.worktreeId);
+      // Drop the worktree's split layout/focus too (SQLite cascades the `splits`
+      // row via the worktree FK; this keeps the in-memory snapshot in sync).
+      const splitRootByWorktree = { ...state.splitRootByWorktree };
+      delete splitRootByWorktree[action.worktreeId];
+      const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+      delete focusedPaneByWorktree[action.worktreeId];
+      return {
+        ...state,
+        worktrees,
+        selectedWorktreeByProject,
+        tabs,
+        splitRootByWorktree,
+        focusedPaneByWorktree,
+      };
+    }
+    case "update-worktree": {
+      // Patch a single worktree row in-place (rename, hide/show). Cascades to
+      // the visible worktrees and the per-worktree active-tab map is
+      // untouched because ids don't change.
+      const worktrees: Record<string, Worktree[]> = {};
+      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+        worktrees[projectId] = projectWorktrees.map((worktree) =>
+          worktree.id === action.worktree.id ? action.worktree : worktree,
+        );
+      }
+      return { ...state, worktrees };
+    }
     case "clear-error":
       return { ...state, error: null };
   }
@@ -187,9 +853,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const [worktrees, tabs] = await Promise.all([
+      const [worktrees, tabs, splits] = await Promise.all([
         listWorktrees(targetProjectId),
         listTabs(targetProjectId),
+        listSplits(targetProjectId),
       ]);
       // `set-tabs` replaces the whole (single-project) tab list, so only apply
       // it if this refresh still targets the selected project — otherwise a
@@ -199,6 +866,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "set-worktrees", projectId: targetProjectId, worktrees });
       dispatch({ type: "set-tabs", tabs });
+      dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -214,8 +882,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.selectedProjectId],
   );
 
-  const createTerminalTab = useCallback(
-    async (worktreeId?: string) => {
+  // Shared tab-creation path. When `paneId` is set the new tab lands inside that
+  // split pane; otherwise it becomes a normal top-bar tab.
+  const createTab = useCallback(
+    async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
       const projectId = state.selectedProjectId;
       const targetWorktreeId =
         worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
@@ -223,8 +893,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        const tab = await createTabCommand(projectId, targetWorktreeId, "Shell");
-        dispatch({ type: "add-tab", tab });
+        const tab =
+          kind === "terminal"
+            ? await createTabCommand(projectId, targetWorktreeId, "terminal", "Shell")
+            : await createTabCommand(
+                projectId,
+                targetWorktreeId,
+                "browser",
+                "New tab",
+                BROWSER_START_URL,
+              );
+        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
       } catch (cause) {
         dispatch({ type: "load-error", error: messageFor(cause) });
       }
@@ -232,10 +911,93 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.selectedProjectId, state.selectedWorktreeByProject],
   );
 
-  const closeTerminalTab = useCallback(async (tabId: string) => {
+  const createTerminalTab = useCallback(
+    (worktreeId?: string) => createTab("terminal", null, worktreeId),
+    [createTab],
+  );
+
+  const createBrowserTab = useCallback(
+    (worktreeId?: string) => createTab("browser", null, worktreeId),
+    [createTab],
+  );
+
+  const createTabInPane = useCallback(
+    (paneId: string, kind: "terminal" | "browser") => createTab(kind, paneId),
+    [createTab],
+  );
+
+  // Shared opener for editor/diff tabs. Both dedupe against the active worktree's
+  // existing tabs (a file path is worktree-relative) before creating a new one.
+  const openLocatorTab = useCallback(
+    async (
+      kind: "editor" | "diff",
+      path: string,
+      side: DiffSide | null,
+      paneId: string | undefined,
+    ) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === kind &&
+          tab.worktreeId === worktreeId &&
+          tab.filePath === path &&
+          tab.diffSide === side,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          worktreeId,
+          kind,
+          basename(path),
+          undefined,
+          path,
+          side,
+        );
+        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
+  const openFileTab = useCallback(
+    (path: string, opts?: { paneId?: string }) =>
+      openLocatorTab("editor", path, null, opts?.paneId),
+    [openLocatorTab],
+  );
+
+  const openDiffTab = useCallback(
+    (path: string, side: DiffSide, opts?: { paneId?: string }) =>
+      openLocatorTab("diff", path, side, opts?.paneId),
+    [openLocatorTab],
+  );
+
+  // Tear down both backends regardless of kind: each is a no-op for the other's
+  // tabs, so we don't need to look up the tab's kind on the close path.
+  const closeTab = useCallback(async (tabId: string) => {
+    terminalManager.dispose(tabId);
+    void browserClose(tabId);
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
+  const renameTerminalTab = useCallback(async (tabId: string, title: string) => {
+    try {
+      await renameTabCommand(tabId, title);
+      dispatch({ type: "rename-tab", tabId, title });
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -252,6 +1014,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.tabs],
   );
 
+  // Latest `setActiveTab`, readable from event listeners without re-subscribing.
+  const setActiveTabRef = useRef(setActiveTab);
+  setActiveTabRef.current = setActiveTab;
+
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -263,13 +1029,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     async function loadProjectDetails(projectId: string) {
       try {
-        const [worktrees, tabs] = await Promise.all([
+        const [worktrees, tabs, splits] = await Promise.all([
           listWorktrees(projectId),
           listTabs(projectId),
+          listSplits(projectId),
         ]);
         if (!cancelled) {
           dispatch({ type: "set-worktrees", projectId, worktrees });
           dispatch({ type: "set-tabs", tabs });
+          dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
         }
       } catch (cause) {
         if (!cancelled) {
@@ -294,6 +1062,66 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [state.icons, state.projects]);
 
+  // Browser webviews report their page title/URL natively; mirror those into tab
+  // state (so the tab strip + address bar update) and persist them for restore.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onBrowserMeta((meta) => {
+      if (meta.title !== undefined) {
+        dispatch({ type: "rename-tab", tabId: meta.tabId, title: meta.title });
+        void renameTabCommand(meta.tabId, meta.title).catch(() => undefined);
+      }
+      if (meta.url !== undefined) {
+        dispatch({ type: "set-tab-url", tabId: meta.tabId, url: meta.url });
+        void setTabUrlCommand(meta.tabId, meta.url).catch(() => undefined);
+      }
+    })
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Browser webviews live as native overlays, so clicks on the page don't reach
+  // React. Listen for focus requests injected into each browser page and move
+  // split-pane focus to the corresponding tab.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onBrowserFocusRequest((request) => setActiveTabRef.current(request.tabId))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Persist split layouts so they survive project switches and app restarts,
+  // mirroring how tabs persist. Only real splits are stored; a worktree that
+  // collapses back to a single pane clears its row. `persistedSplitsRef` tracks
+  // what we've already written so each actual change issues exactly one command.
+  const persistedSplitsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const seen = persistedSplitsRef.current;
+    const nextSeen: Record<string, string> = {};
+    for (const [worktreeId, root] of Object.entries(state.splitRootByWorktree)) {
+      if (root.kind !== "split") {
+        continue;
+      }
+      const serialized = JSON.stringify(root);
+      nextSeen[worktreeId] = serialized;
+      if (seen[worktreeId] !== serialized) {
+        void setSplitLayoutCommand(worktreeId, serialized).catch(() => undefined);
+      }
+    }
+    for (const worktreeId of Object.keys(seen)) {
+      if (!(worktreeId in nextSeen)) {
+        void clearSplitLayoutCommand(worktreeId).catch(() => undefined);
+      }
+    }
+    persistedSplitsRef.current = nextSeen;
+  }, [state.splitRootByWorktree]);
+
   const activeProject =
     state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
   const projectWorktrees = state.selectedProjectId
@@ -305,11 +1133,80 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const selectedWorktree =
     projectWorktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? null;
 
+  const openSelectedWorktree = useCallback(
+    async (editorId?: string | null) => {
+      if (!selectedWorktree) {
+        return;
+      }
+      try {
+        await openWorktreeCommand(selectedWorktree.id, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [selectedWorktree],
+  );
+
+  const openWorktreeInEditor = useCallback(
+    async (worktreeId: string, editorId?: string | null) => {
+      // Walk every project's worktree list; the user might right-click a
+      // hidden worktree or one in a sibling project. Cost is trivial.
+      const all = Object.values(state.worktrees).flat();
+      const target = all.find((worktree) => worktree.id === worktreeId);
+      if (!target) {
+        return;
+      }
+      try {
+        await openWorktreeCommand(target.id, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.worktrees],
+  );
+
+  const getWorktreeStatus = useCallback(async (worktreeId: string) => {
+    return worktreeStatusCommand(worktreeId);
+  }, []);
+
+  const deleteWorktree = useCallback(
+    async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      try {
+        await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+        // Optimistically drop the row from local state; the cascade also
+        // removes its tabs and any nested child worktrees from SQLite.
+        dispatch({ type: "remove-worktree", worktreeId });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+        throw cause;
+      }
+    },
+    [],
+  );
+
+  const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
+    try {
+      const updated = await renameWorktreeCommand(worktreeId, title);
+      dispatch({ type: "update-worktree", worktree: updated });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
+  const hideWorktree = useCallback(async (worktreeId: string, hidden: boolean) => {
+    try {
+      const updated = await setWorktreeHiddenCommand(worktreeId, hidden);
+      dispatch({ type: "update-worktree", worktree: updated });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, []);
+
   const visibleTabs = useMemo(
     () => state.tabs.filter((tab) => tab.worktreeId === selectedWorktreeId),
     [state.tabs, selectedWorktreeId],
   );
-  const activeTabId = (() => {
+  const legacyActiveTabId = (() => {
     if (!selectedWorktreeId) {
       return null;
     }
@@ -319,22 +1216,154 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     return visibleTabs[0]?.id ?? null;
   })();
+  const storedSplitRoot = useMemo(
+    () =>
+      selectedWorktreeId
+        ? normalizeRoot(
+            state.splitRootByWorktree[selectedWorktreeId],
+            selectedWorktreeId,
+            state.tabs,
+            legacyActiveTabId,
+          )
+        : null,
+    [state.splitRootByWorktree, state.tabs, selectedWorktreeId, legacyActiveTabId],
+  );
+  const activeTabInStoredSplit = legacyActiveTabId
+    ? paneContainingTab(storedSplitRoot, legacyActiveTabId)
+    : null;
+  const storedFocusedPane = focusForRoot(
+    storedSplitRoot,
+    selectedWorktreeId ? state.focusedPaneByWorktree[selectedWorktreeId] : null,
+  );
+  const splitRepresentativeTabId =
+    storedSplitRoot?.kind === "split" ? (storedFocusedPane?.activeTabId ?? null) : null;
+  const splitRoot = useMemo(() => {
+    if (!selectedWorktreeId) {
+      return null;
+    }
+    if (storedSplitRoot?.kind === "split") {
+      if (legacyActiveTabId && !activeTabInStoredSplit) {
+        return createPane(
+          [legacyActiveTabId],
+          legacyActiveTabId,
+          `pane-regular-${legacyActiveTabId}`,
+        );
+      }
+      return storedSplitRoot;
+    }
+    return (
+      storedSplitRoot ?? initialRootForWorktree(selectedWorktreeId, state.tabs, legacyActiveTabId)
+    );
+  }, [activeTabInStoredSplit, legacyActiveTabId, selectedWorktreeId, state.tabs, storedSplitRoot]);
+  const focusedPane = focusForRoot(
+    splitRoot,
+    selectedWorktreeId ? state.focusedPaneByWorktree[selectedWorktreeId] : null,
+  );
+  const focusedPaneId = splitRoot?.kind === "split" ? (focusedPane?.id ?? null) : null;
+  const activeTabId = legacyActiveTabId;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
+
+  const focusPane = useCallback(
+    (paneId: string) => {
+      if (!selectedWorktreeId) {
+        return;
+      }
+      dispatch({ type: "focus-pane", worktreeId: selectedWorktreeId, paneId });
+    },
+    [selectedWorktreeId],
+  );
+
+  const setPaneActiveTab = useCallback(
+    (paneId: string, tabId: string) => {
+      if (!selectedWorktreeId) {
+        return;
+      }
+      dispatch({ type: "set-pane-active-tab", worktreeId: selectedWorktreeId, paneId, tabId });
+    },
+    [selectedWorktreeId],
+  );
+
+  const splitTabAtPane = useCallback(
+    (tabId: string, paneId: string, direction: SplitDirection, placement: SplitPlacement) => {
+      if (!selectedWorktreeId) {
+        return;
+      }
+      dispatch({
+        type: "split-pane",
+        worktreeId: selectedWorktreeId,
+        paneId,
+        tabId,
+        direction,
+        placement,
+      });
+    },
+    [selectedWorktreeId],
+  );
+
+  const splitActivePane = useCallback(
+    (tabId: string, direction: SplitDirection) => {
+      if (!selectedWorktreeId) {
+        return;
+      }
+      dispatch({
+        type: "split-pane",
+        worktreeId: selectedWorktreeId,
+        paneId: focusedPaneId,
+        tabId,
+        direction,
+        placement: "after",
+      });
+    },
+    [focusedPaneId, selectedWorktreeId],
+  );
+
+  const moveTabToPane = useCallback(
+    (tabId: string, paneId: string) => {
+      if (!selectedWorktreeId) {
+        return;
+      }
+      dispatch({ type: "move-tab-to-pane", worktreeId: selectedWorktreeId, paneId, tabId });
+    },
+    [selectedWorktreeId],
+  );
 
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
       if (visibleTabs.length === 0 || !activeTabId || !selectedWorktreeId) {
         return;
       }
-      const current = visibleTabs.findIndex((tab) => tab.id === activeTabId);
-      const next = (current + direction + visibleTabs.length) % visibleTabs.length;
-      dispatch({
-        type: "set-active-tab",
-        worktreeId: selectedWorktreeId,
-        tabId: visibleTabs[next]!.id,
-      });
+      const storedSplitTabIds = tabIdsInNode(
+        storedSplitRoot?.kind === "split" ? storedSplitRoot : null,
+      );
+      const activeStoredPane = paneContainingTab(storedSplitRoot, activeTabId);
+      const paneTabIds = activeStoredPane
+        ? activeStoredPane.tabIds
+        : visibleTabs
+            .map((tab) => tab.id)
+            .filter(
+              (tabId) =>
+                !storedSplitTabIds.has(tabId) ||
+                tabId === activeTabId ||
+                tabId === splitRepresentativeTabId,
+            );
+      const current = paneTabIds.findIndex((tabId) => tabId === activeTabId);
+      const next = (current + direction + paneTabIds.length) % paneTabIds.length;
+      const tabId = paneTabIds[next];
+      if (!tabId) {
+        return;
+      }
+      if (activeStoredPane) {
+        dispatch({
+          type: "set-pane-active-tab",
+          worktreeId: selectedWorktreeId,
+          paneId: activeStoredPane.id,
+          tabId,
+        });
+      } else {
+        dispatch({ type: "set-active-tab", worktreeId: selectedWorktreeId, tabId });
+      }
     },
-    [visibleTabs, activeTabId, selectedWorktreeId],
+    [visibleTabs, activeTabId, selectedWorktreeId, storedSplitRoot, splitRepresentativeTabId],
   );
 
   const value = useMemo<WorkspaceContextValue>(
@@ -346,14 +1375,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeProject,
       selectedWorktree,
       activeTab,
+      splitRoot,
+      focusedPaneId,
       reload,
       refreshProject,
       selectProject,
       selectWorktree,
       createTerminalTab,
-      closeTerminalTab,
+      createBrowserTab,
+      createTabInPane,
+      openFileTab,
+      openDiffTab,
+      closeTab,
+      renameTerminalTab,
+      openSelectedWorktree,
+      openWorktreeInEditor,
       cycleTab,
       setActiveTab,
+      getWorktreeStatus,
+      deleteWorktree,
+      renameWorktree,
+      hideWorktree,
+      focusPane,
+      setPaneActiveTab,
+      splitActivePane,
+      splitTabAtPane,
+      moveTabToPane,
     }),
     [
       state,
@@ -363,14 +1410,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeProject,
       selectedWorktree,
       activeTab,
+      splitRoot,
+      focusedPaneId,
       reload,
       refreshProject,
       selectProject,
       selectWorktree,
       createTerminalTab,
-      closeTerminalTab,
+      createBrowserTab,
+      createTabInPane,
+      openFileTab,
+      openDiffTab,
+      closeTab,
+      renameTerminalTab,
+      openSelectedWorktree,
+      openWorktreeInEditor,
       cycleTab,
       setActiveTab,
+      getWorktreeStatus,
+      deleteWorktree,
+      renameWorktree,
+      hideWorktree,
+      focusPane,
+      setPaneActiveTab,
+      splitActivePane,
+      splitTabAtPane,
+      moveTabToPane,
     ],
   );
 

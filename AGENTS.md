@@ -86,7 +86,8 @@ than no guide.
 │           ├── src/lib.rs       # App wiring, managed state, plugins, command registration
 │           ├── src/db.rs        # SQLite migrations + typed CRUD
 │           ├── src/pty.rs       # Detached daemon client + PTY command proxying
-│           ├── src/git.rs       # Git CLI helpers
+│           ├── src/git.rs       # Git CLI helpers (worktree_changes / file_diff / stage_* / unstage_* / discard_*)
+│           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
 │           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
 ├── crates/
@@ -120,15 +121,144 @@ than no guide.
   the Unix socket and must not own PTYs.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
   React state or the workspace reducer.
+- **HTML5 drag-and-drop requires `"dragDropEnabled": false`** on the window in
+  `tauri.conf.json`. It defaults to `true`, which makes Tauri capture OS drag/drop at the
+  native level and the in-page `dragstart`/`dragover`/`drop` events never fire. Also note
+  WebKit withholds `dataTransfer` payloads until the `drop` event, so the dragged tab id
+  is tracked in shared React state (`components/tabs/tab-drag-context.tsx`), not read back
+  out of `dataTransfer` during `dragover`.
+- Native browser webviews (`BrowserView`) float **above** all HTML, so an HTML overlay
+  can't sit on top of them and drop events never reach a pane showing a browser tab. The
+  shared `isDragging` signal hides the native overlays for the duration of a drag so the
+  drop zones underneath become reachable; drop-zone geometry lives in
+  `components/tabs/tab-drag.ts`. For the same reason, any HTML overlay that opens **over**
+  a browser pane (dropdown menu, popover) would be clipped by the native webview, so the
+  shadcn `DropdownMenu`/`Popover` roots register with the ref-counted suppression store in
+  `lib/native-overlay.ts` while open; `BrowserView` steps its webview aside whenever
+  `useNativeOverlaySuppressed()` is true. Because the OS can't composite HTML over a live
+  child webview in a sub-region, "stepping aside" means hiding it — but for a menu/popover
+  `BrowserView` first captures a still of the live page (`browser_snapshot` → a PNG data
+  URL via the same `xcap` region grab as `browser_screenshot`) and paints it in the
+  placeholder, so the pane looks unchanged behind the overlay; the snapshot is dropped and
+  the live webview restored on close. (A drag instead collapses bounds to zero and shows no
+  snapshot — the pane must be a free HTML drop target, not a frozen page.) New floating UI
+  built on those two primitives gets this for free; anything else that must paint above a
+  browser must wrap its open window in `useSuppressNativeOverlayWhile(open)`.
+- **Split / tab-bar model:** there is one `splitRootByWorktree` layout per worktree. Tabs
+  inside a real split are "split members"; every other tab is a "normal" top-bar tab. The
+  top strip (`TerminalTabs`) shows the normal tabs **plus a single parent tab** that stands
+  in for the whole split, named after its top-left pane (`leadingPane`); the split's own
+  members are hidden from the top strip and live in the per-pane bars (`SplitHost`'s
+  `PaneBar`, shown for every pane). Splitting from the un-split state pulls only the
+  **active** tab into the new group (the rest stay normal); `normalizeRoot` only folds new
+  tabs into a single-pane root, never into a real split. Dropping a tab anywhere on a pane's
+  **content** always splits — the pane is divided into four quadrants by its diagonals and the
+  pointer's quadrant picks the split side (`dropTargetAt`; there is no merge/center zone). To
+  move a tab **into** a pane (stack it) instead, drop it on that pane's **tab bar**. Each `PaneBar` has its
+  own "+" menu that creates a new tab **inside that pane** (`createTabInPane` →
+  `add-tab-to-pane`); the top strip's "+" and the `⌘T`/`⌘B` shortcuts always add **normal
+  top-level** tabs, never split members.
+- **Split layouts persist in SQLite** (the `splits` table, v4 migration — one row per
+  worktree keyed by `worktree_id`, cascade-deleted with the worktree). The layout is an
+  **opaque JSON blob owned entirely by the frontend** (`SplitLayoutNode`); Rust stores and
+  returns the string verbatim via `list_splits` / `set_split_layout` / `clear_split_layout`
+  (no `@pragma/constants` shape — the backend never parses it). On project load the
+  workspace dispatches `set-splits` (after `set-tabs`) to merge stored layouts, reconciled
+  against the current tabs. An effect in `workspace-context.tsx` persists on every change:
+  only **real splits** (`root.kind === "split"`) are written; a worktree that collapses
+  back to a single pane clears its row. `rootsForTabs` must **not** drop roots for worktrees
+  outside the loaded project's tab snapshot — that both lost splits on project switch and
+  would make the persist effect erase them. Restored node ids are passed through
+  `reserveSplitNodeIds` so the regenerated `pane-N`/`split-N` counter never collides.
+- **Files & Changes right sidebar + editor/diff tabs.** A right sidebar (mirroring the left
+  `ProjectSidebar`) lives in `components/right-sidebar/` and is the last flex child of
+  `WorkspaceShell` (so collapsing it reflows the center pane and the `BrowserView`
+  ResizeObserver re-applies native bounds for free). Its cosmetic state (collapsed / active
+  subtab / width) lives in `state/right-sidebar-context.tsx` and persists to **localStorage**,
+  not SQLite. Two subtabs: **Files** (lazy `FileTree`, inline create + inline rename) and
+  **Changes** (three git lists — **Staged**, **Unstaged**, **Committed**, in that order). The
+  **Files** subtab mirrors the worktree-tree rename UX: right-click any row → **Rename** (works
+  for files and folders; replaces the row's label with `<RenameEntryInput>`, which pre-fills
+  the current name, selects the basename — leaving the extension unselected for files — and
+  commits on Enter / cancels on Escape). The input caps at `max-w-[14rem]` and disables
+  `autoCapitalize` / `textTransform` so long names don't push the icon and the typed value
+  isn't transformed. The controller's `renameMode` lives in `FilesTab` alongside `createMode`,
+  and `commitRename` calls `renameFile(worktreeId, from, to)` then bumps the parent's nonce
+  (and the destination parent's nonce for cross-directory moves). On the backend,
+  `fs::rename_file` resolves both paths through `resolve_in_worktree`, refuses to overwrite an
+  existing destination (`InvalidInput`), and uses `std::fs::rename` so it works for files _and_
+  directories and is atomic on the same FS. **Selection + delete**: a single click on a file
+  selects it (a `selectedFile` path on the controller, rendered with an `outline outline-1
+outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active directory"
+  highlight). Right-click any row → **Delete** (red), or press **⌘+Backspace** on macOS /
+  **Ctrl+Delete** on Linux — that binding is registered as `deleteFile` in
+  `packages/constants/schema.json` + the Rust `keybindings::default_config` and surfaces
+  through `useShortcuts` to `WorkspaceShell`, which dispatches a `pragma:request-delete-file`
+  window event the `FilesTab` listens for. The controller's `commitDelete` calls
+  `deleteFile(worktreeId, path)` immediately and bumps the parent's nonce. The worktree is a
+  git checkout, so **delete has no confirmation** — `git checkout -- <path>` / `git clean -fd`
+  from a terminal tab is the recovery path. The backend `fs::delete_file` resolves through
+  `resolve_in_worktree` (same `..`/symlink guard) and refuses to recurse into non-empty
+  directories (`InvalidInput`); use `discard_*` / `clean -fd` from the Changes tab for tracked
+  / untracked multi-file removal. Git has no edit
+  notification, so **Changes polls `worktree_changes` every 2s while mounted** (and on window
+  focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
+  `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
+  `git diff --cached`, `unstaged` = index→working tree plus untracked); `DiffSide` has a matching
+  `staged` variant. `ChangeGroup` is generic over per-row `fileActions` and per-header
+  `headerActions` (icon buttons): the **Unstaged** group gets stage (`stage_file`) + discard, the
+  **Staged** group gets unstage (`unstage_file`); the headers get the stage-all/unstage-all/
+  discard-all variants. Staging is reversible so it runs **without confirmation** (`stage_file` /
+  `stage_all` = `git add`; `unstage_file` / `unstage_all` = `git restore --staged` / `git reset`),
+  whereas discard (`discard_unstaged_file` / `discard_all_unstaged` — `git restore` for tracked,
+  delete / `git clean -fd` for untracked) is **irreversible** and routes through a confirmation
+  `AlertDialog`; every action does an immediate in-place refresh. Once a child worktree has no
+  staged/unstaged changes, the commit controls are replaced by lifecycle actions: committed changes
+  show `merge_worktree_to_parent` (runs `git merge <child-branch>` in the clean parent worktree and
+  leaves conflicts there for IDE / `git merge --continue` or `git merge --abort` resolution), and a
+  fully merged/no-change child shows the same `WorktreeDeleteDialog` used by the left sidebar. The
+  left sidebar polls those same change buckets for child worktrees and swaps the branch glyph to a
+  merge glyph while the merged-but-not-deleted worktree remains in the tree. Files open as two new
+  `TabKind`s — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and `diff` (read-only
+  `@codemirror/merge`) — rendered through the `SplitHost` switch and located by `Tab.filePath`
+  (worktree-relative) + `Tab.diffSide` (v5 migration; the columns persist editor/diff tabs). Open
+  them via `openFileTab`/`openDiffTab` on the workspace context (they dedupe by kind+filePath(+side)).
+  Editor dirty state + latest doc is an **ephemeral** module store (`state/editor-dirty-store.ts`,
+  never in the reducer, never persisted); closing a dirty editor routes through
+  `ConfirmCloseProvider` (`components/editor/confirm-close.tsx`). vscode-icons render **offline**
+  via `lib/file-icons.ts` (`addCollection` once — never let `@iconify/react` fetch over the
+  network). The `lucide:*` / `simple-icons:*` **editor launcher brand icons** are bundled the
+  same way, but from a **curated subset** (`lib/brand-icons.json`, registered by
+  `lib/brand-icons.ts`, imported once in `main.tsx`) — never add the full multi-MB
+  `@iconify-json/{lucide,simple-icons}` packages; when you add a `brandIcon` to
+  `values.json`, add that icon's body to `brand-icons.json` too. All filesystem + git work is
+  **worktree-scoped and worktree-relative**: every `fs.rs` / `git.rs` command takes a
+  `worktreeId` + a relative path, and `resolve_in_worktree` rejects `..`/absolute/symlink
+  escapes (`InvalidInput`) — **no absolute path ever crosses IPC**. `editors::open_worktree`
+  follows the same rule: it takes a `worktreeId` and resolves the absolute path from the DB,
+  never trusting a path from the frontend.
+  The file-tree context menu floats over browser panes, so it registers with
+  `lib/native-overlay.ts` via `useSuppressNativeOverlayWhile(open)`.
 - **Terminal font** is a Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`,
   `JetBrainsMono Nerd Font`, `JetBrains Mono`, `SF Mono`, Menlo, Monaco,
   `ui-monospace`, `monospace`) at **fontSize 14 / lineHeight 1.0**. 14px is the
   size Nerd Font's block / box-drawing glyphs are designed against — at 13px
   macOS WebKit rounds the cell to 15px and the half-block glyphs end up with a
   1px anti-aliased seam running through the middle of every character (visible
-  strikethrough across Claude Code / opencode ASCII art). 14px snaps the cell
-  to a cleaner integer pixel grid. See `TERMINAL_FONT_FAMILY`,
+  strikethrough across Claude Code / opencode ASCII art). See `TERMINAL_FONT_FAMILY`,
   `TERMINAL_FONT_SIZE`, `TERMINAL_LINE_HEIGHT` in `terminal-manager.ts`.
+- **Toasts** use `sonner` (`@/components/ui/sonner.tsx` + a `<Toaster />`
+  mounted once in `main.tsx`). Trigger via `toast.success("Copied worktree
+path")` from inside the action handler — never from inside the reducer.
+  Clipboard reads/writes go through `navigator.clipboard` with a try/catch
+  that surfaces the error via `toast.error(...)`.
+- **Worktree lifecycle.** `Worktree` rows carry a `hidden` boolean
+  (persisted in SQLite via the v3 migration). Hidden rows are filtered out of
+  the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })`
+  and surfaced again through a "Show N hidden" toggle at the bottom of the
+  list. When the user hides the currently-selected worktree, the reducer
+  falls back to the main worktree (or the first remaining root) so the
+  workspace never points at a hidden id.
 
 ## Common commands
 
@@ -260,7 +390,12 @@ compile-only Tauri build on macOS **and** Linux.
 We target **macOS and Linux only** right now. `tauri.conf.json` bundles
 `app`/`dmg` (macOS) and `deb`/`rpm`/`appimage` (Linux). Don't add Windows/Android
 specifics without updating this guide and CI. Linux builds need the GTK/WebKit system
-libraries — see the `rust`/`build` jobs in CI for the exact `apt` list.
+libraries — see the `rust`/`build` jobs in CI for the exact `apt` list. Note `xcap`
+(screen capture for browser snapshots) pulls in `libspa-sys`, which needs
+`libpipewire-0.3-dev` on Linux at build time, and its wayland/GL capture path links
+against `gbm`, so `libgbm-dev` is required at link time (otherwise `cargo test` / the
+Tauri build fail with `unable to find library -lgbm`). Both are in the CI apt list (the
+`rust` **and** `build` jobs) and must stay there.
 
 ## Testing
 

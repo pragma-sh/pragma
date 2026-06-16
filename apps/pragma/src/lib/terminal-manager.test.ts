@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { Tab } from "@pragma/constants";
 
@@ -14,9 +14,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const terminalDispose = vi.fn();
+const terminalClear = vi.fn();
 
-vi.mock("@xterm/xterm", () => ({
-  Terminal: class MockTerminal {
+vi.mock("@xterm/xterm", () => {
+  const instances: MockTerminal[] = [];
+  class MockTerminal {
+    static instances = instances;
     cols = 80;
     rows = 24;
     element: HTMLElement | null = null;
@@ -25,12 +28,17 @@ vi.mock("@xterm/xterm", () => ({
     onData = vi.fn();
     write = vi.fn();
     writeln = vi.fn();
+    clear = terminalClear;
     dispose = terminalDispose;
+    constructor() {
+      instances.push(this);
+    }
     open(container: HTMLElement) {
       this.element = container;
     }
-  },
-}));
+  }
+  return { Terminal: MockTerminal };
+});
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class MockFitAddon {
@@ -44,12 +52,15 @@ vi.mock("@xterm/addon-web-links", () => ({
   },
 }));
 
+import { Terminal } from "@xterm/xterm";
+
 import {
   TERMINAL_FONT_FAMILY,
   TERMINAL_FONT_SIZE,
   TERMINAL_LINE_HEIGHT,
   TerminalManager,
 } from "./terminal-manager";
+import { defaultKeybindingsConfig, setLoadedKeybindingsConfig } from "./keybindings";
 
 const tab = { id: "tab-1", worktreeId: "wt-1" } as Tab;
 
@@ -80,6 +91,7 @@ describe("TerminalManager lifecycle", () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
     terminalDispose.mockClear();
+    terminalClear.mockClear();
   });
 
   it("kills the daemon session and disposes the xterm widget on dispose", async () => {
@@ -102,5 +114,98 @@ describe("TerminalManager lifecycle", () => {
     const manager = new TerminalManager();
     manager.dispose("missing");
     expect(invokeMock).not.toHaveBeenCalledWith("pty_kill", expect.anything());
+  });
+
+  it("clears the xterm widget for a mounted tab", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    manager.clear(tab.id);
+
+    expect(terminalClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores clear for an unknown tab", () => {
+    const manager = new TerminalManager();
+    manager.clear("missing");
+    expect(terminalClear).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalManager key passthrough", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    terminalClear.mockClear();
+  });
+
+  it("bubbles configured split shortcuts so they reach the window listener", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const instances = (
+      Terminal as unknown as {
+        instances: Array<{ attachCustomKeyEventHandler: Mock<(...args: unknown[]) => unknown> }>;
+      }
+    ).instances;
+    const handler = instances.at(-1)?.attachCustomKeyEventHandler;
+    expect(handler).toHaveBeenCalled();
+    const passthrough = handler!.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    const horizontal = new KeyboardEvent("keydown", { metaKey: true, key: "/" });
+    expect(passthrough(horizontal)).toBe(false);
+
+    const vertical = new KeyboardEvent("keydown", { metaKey: true, shiftKey: true, key: "?" });
+    expect(passthrough(vertical)).toBe(false);
+  });
+
+  it("uses the loaded user config for passthrough decisions", async () => {
+    setLoadedKeybindingsConfig({
+      version: 1,
+      bindings: {
+        ...defaultKeybindingsConfig.bindings,
+        splitHorizontal: {
+          mac: { modifiers: ["cmd"], key: "h" },
+          linux: { modifiers: ["ctrl"], key: "h" },
+        },
+      },
+    });
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const instances = (
+      Terminal as unknown as {
+        instances: Array<{ attachCustomKeyEventHandler: Mock<(...args: unknown[]) => unknown> }>;
+      }
+    ).instances;
+    const handler = instances.at(-1)?.attachCustomKeyEventHandler;
+    const passthrough = handler!.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "h" }))).toBe(false);
+    expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "/" }))).toBe(true);
   });
 });

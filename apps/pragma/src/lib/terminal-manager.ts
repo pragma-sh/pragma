@@ -5,6 +5,8 @@ import type { Channel } from "@tauri-apps/api/core";
 
 import type { Tab } from "@pragma/constants";
 
+import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
+import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEvent } from "@/lib/tauri";
 
 const RESIZE_DEBOUNCE_MS = 75;
@@ -85,7 +87,11 @@ export class TerminalManager {
     terminal.loadAddon(fit);
     terminal.loadAddon(new WebLinksAddon());
     terminal.attachCustomKeyEventHandler((event) => {
-      if ((event.ctrlKey || event.altKey) && (event.key === "Tab" || /^[1-9]$/.test(event.key))) {
+      // Let any configured Pragma shortcut bubble up to the window listener so it
+      // works even when xterm has focus. The current config may be the default or
+      // a user-edited `~/.pragma/keybindings.json`.
+      const platform = isMacPlatform() ? "mac" : "linux";
+      if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
         return false;
       }
       return true;
@@ -108,6 +114,14 @@ export class TerminalManager {
 
   activate(tabId: string): void {
     window.requestAnimationFrame(() => this.fit(tabId));
+  }
+
+  clear(tabId: string): void {
+    const managed = this.terminals.get(tabId);
+    if (!managed) {
+      return;
+    }
+    managed.terminal.clear();
   }
 
   resize(tabId: string): void {

@@ -14,7 +14,10 @@ mod generated {
 }
 
 pub use generated::{
-    AppInfo, Constants, Links, Project, ProjectIcon, Tab, WindowDefaults, Worktree,
+    AppInfo, ChangeStatus, ChangedFile, Constants, DiffSide, DirEntry, EditorLauncher,
+    EditorLaunchers, FileContents, FileDiff, KeybindingChord, KeybindingChordModifiersItem,
+    Keybindings, KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind,
+    WindowDefaults, Worktree, WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
@@ -47,5 +50,12 @@ mod tests {
         // `minimum: 1` in the schema makes typify generate a `NonZeroU64`, so the
         // Rust side is statically guaranteed non-zero; `.get()` reads the value.
         assert!(CONSTANTS.max_parallel_agents.get() >= 1);
+    }
+
+    #[test]
+    fn default_editor_launcher_exists() {
+        assert!(CONSTANTS.editor_launchers.options.iter().any(|editor| {
+            editor.id.as_str() == CONSTANTS.editor_launchers.default_editor_id.as_str()
+        }));
     }
 }

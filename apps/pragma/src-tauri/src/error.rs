@@ -16,6 +16,8 @@ pub enum AppError {
     Daemon(String),
     #[error("git error: {0}")]
     Git(String),
+    #[error("browser error: {0}")]
+    Browser(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("lock poisoned")]

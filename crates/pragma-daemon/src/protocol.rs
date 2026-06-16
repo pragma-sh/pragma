@@ -33,6 +33,8 @@ pub enum RequestKind {
     Write,
     Resize,
     Kill,
+    /// Terminates every session whose initial cwd matches `data` (a path).
+    KillForCwd,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
