@@ -6,6 +6,7 @@ import { Globe, SquareTerminal } from "lucide-react";
 
 import { fileIconId } from "@/lib/file-icons";
 import { basename } from "@/lib/path";
+import { defaultTabTitle } from "@/lib/tab-title";
 import { useTabDirty } from "@/state/editor-dirty-store";
 
 /** The display title for a tab: file name for editor/diff, else its label. */
@@ -23,7 +24,9 @@ export function tabTitle(tab: Tab): string {
     }
     return name;
   }
-  return tab.title ?? (tab.kind === "browser" ? "New tab" : "Shell");
+  // A blank title (a shell/page that cleared its name) falls back to the
+  // default too, not just a null one.
+  return tab.title?.trim() || defaultTabTitle(tab.kind);
 }
 
 /** Renders a tab kind icon, using the page favicon for browser tabs when available. */
