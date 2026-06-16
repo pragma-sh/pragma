@@ -168,6 +168,14 @@ fn rename_tab(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppRes
     db.rename_tab(&tab_id, &title)
 }
 
+/// Persists a shell-driven tab title (OSC 0/2) without touching the
+/// `user_renamed` flag. The frontend reducer is responsible for refusing
+/// to apply the update when the user has explicitly renamed the tab.
+#[tauri::command]
+fn set_tab_title(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppResult<Tab> {
+    db.set_tab_title(&tab_id, &title)
+}
+
 /// Persists the current page URL for a browser tab (session restore).
 #[tauri::command]
 fn set_tab_url(db: tauri::State<'_, Db>, tab_id: String, url: String) -> AppResult<Tab> {
@@ -253,6 +261,7 @@ pub fn run() {
             create_tab,
             close_tab,
             rename_tab,
+            set_tab_title,
             set_tab_url,
             list_splits,
             set_split_layout,

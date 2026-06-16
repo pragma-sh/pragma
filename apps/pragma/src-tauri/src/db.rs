@@ -70,6 +70,7 @@ impl Db {
                title        TEXT,
                file_path    TEXT,
                diff_side    TEXT,
+               user_renamed INTEGER NOT NULL DEFAULT 0,
                order_index  INTEGER NOT NULL,
                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
              );
@@ -135,6 +136,24 @@ impl Db {
                 )?;
             }
             conn.execute_batch("PRAGMA user_version = 5;")?;
+        }
+        // v6 adds `user_renamed` to `tabs` so terminal tabs can remember whether
+        // the user has manually renamed them, and refuse to be clobbered by
+        // shell-emitted OSC 0/2 title updates on the next launch. Default 0
+        // (not renamed) preserves the previous behavior for every existing row —
+        // shells can immediately take over tab titles again.
+        if version < 6 {
+            let has_user_renamed: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'user_renamed'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_user_renamed == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE tabs ADD COLUMN user_renamed INTEGER NOT NULL DEFAULT 0;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 6;")?;
         }
         Ok(())
     }
@@ -278,7 +297,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, user_renamed, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -325,7 +344,22 @@ impl Db {
         self.tab(&id)
     }
 
+    /// Renames a tab on behalf of the user (terminal double-click/context menu).
+    /// Flips `user_renamed` so subsequent shell-emitted OSC 0/2 title updates are
+    /// ignored on this tab.
     pub fn rename_tab(&self, tab_id: &str, title: &str) -> AppResult<Tab> {
+        self.0.lock()?.execute(
+            "UPDATE tabs SET title = ?1, user_renamed = 1 WHERE id = ?2",
+            params![title, tab_id],
+        )?;
+        self.tab(tab_id)
+    }
+
+    /// Updates a tab's title without touching `user_renamed`. Used by the
+    /// shell-driven auto-title pipeline (OSC 0/2). The reducer is responsible for
+    /// refusing to apply the update when the user has explicitly renamed the
+    /// tab; the SQL layer just stores the value it is given.
+    pub fn set_tab_title(&self, tab_id: &str, title: &str) -> AppResult<Tab> {
         self.0.lock()?.execute(
             "UPDATE tabs SET title = ?1 WHERE id = ?2",
             params![title, tab_id],
@@ -395,7 +429,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -476,8 +510,9 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         url: row.get(5)?,
         file_path: row.get(6)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
-        order_index: row.get::<_, i64>(8)?,
-        created_at: row.get(9)?,
+        user_renamed: row.get::<_, i64>(8)? == 1,
+        order_index: row.get::<_, i64>(9)?,
+        created_at: row.get(10)?,
     })
 }
 
@@ -721,5 +756,52 @@ mod tests {
             .expect("tabs should list")
             .is_empty());
         let _ = tab;
+    }
+
+    #[test]
+    fn terminal_tab_user_renamed_flag_round_trips() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|w| w.is_main)
+            .expect("main worktree should exist");
+        let tab = db
+            .create_tab(
+                &project.id,
+                &main.id,
+                TabKind::Terminal,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("tab should insert");
+        // Fresh tabs are not user-renamed — shells may rename them freely.
+        assert!(!tab.user_renamed);
+
+        // `rename_tab` is the user-typed path: it flips the flag so the
+        // auto-title pipeline (OSC 0/2) cannot clobber the user's choice.
+        let renamed = db
+            .rename_tab(&tab.id, "Build")
+            .expect("rename should succeed");
+        assert!(renamed.user_renamed);
+        assert_eq!(renamed.title.as_deref(), Some("Build"));
+
+        // `set_tab_title` is the shell-driven auto-title path: it updates the
+        // title but explicitly does NOT touch `user_renamed`.
+        let auto = db
+            .set_tab_title(&tab.id, "user@host: ~/repo")
+            .expect("auto-title should succeed");
+        assert_eq!(auto.title.as_deref(), Some("user@host: ~/repo"));
+        assert!(auto.user_renamed);
     }
 }

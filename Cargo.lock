@@ -3818,6 +3818,7 @@ dependencies = [
  "anyhow",
  "daemonize",
  "portable-pty",
+ "pragma-constants",
  "serde",
  "serde_json",
  "tempfile",

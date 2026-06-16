@@ -50,6 +50,7 @@ function makeTab(overrides: Partial<Tab>): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
     ...overrides,

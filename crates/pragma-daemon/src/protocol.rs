@@ -53,6 +53,14 @@ pub enum EventFrame {
         session_id: String,
         data: String,
     },
+    /// Shell-emitted window title (OSC 0 / OSC 2). The frontend decides whether
+    /// to apply it to the tab strip based on whether the user has manually
+    /// renamed that terminal tab.
+    Title {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        title: String,
+    },
     Exit {
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -60,9 +68,19 @@ pub enum EventFrame {
     },
 }
 
+/// Sent by the daemon as the very first frame on every accepted connection so
+/// the app can detect — and replace — a stale long-lived daemon whose protocol
+/// no longer matches the app build.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelloFrame {
+    pub protocol_version: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "frame", rename_all = "camelCase")]
 pub enum ServerFrame {
+    Hello(HelloFrame),
     Response(ResponseFrame),
     Event(EventFrame),
 }
@@ -92,7 +110,9 @@ pub fn write_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_frame, write_frame, EventFrame, RequestFrame, RequestKind, ServerFrame};
+    use super::{
+        read_frame, write_frame, EventFrame, HelloFrame, RequestFrame, RequestKind, ServerFrame,
+    };
 
     #[test]
     fn round_trips_length_prefixed_json() {
@@ -110,6 +130,37 @@ mod tests {
         let decoded: RequestFrame = read_frame(&mut bytes.as_slice()).expect("frame should decode");
         assert_eq!(decoded.request_id, "1");
         assert!(matches!(decoded.kind, RequestKind::Resize));
+    }
+
+    #[test]
+    fn hello_frame_uses_camel_case_and_round_trips() {
+        let json = serde_json::to_string(&ServerFrame::Hello(HelloFrame {
+            protocol_version: 7,
+        }))
+        .expect("hello should encode");
+        assert!(json.contains("\"frame\":\"hello\""));
+        assert!(json.contains("\"protocolVersion\":7"));
+        assert!(!json.contains("protocol_version"));
+
+        let decoded: ServerFrame = read_frame(
+            &mut {
+                let mut bytes = Vec::new();
+                write_frame(
+                    &mut bytes,
+                    &ServerFrame::Hello(HelloFrame {
+                        protocol_version: 7,
+                    }),
+                )
+                .expect("hello should encode");
+                bytes
+            }
+            .as_slice(),
+        )
+        .expect("hello should decode");
+        match decoded {
+            ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 7),
+            _ => panic!("expected a hello frame"),
+        }
     }
 
     #[test]

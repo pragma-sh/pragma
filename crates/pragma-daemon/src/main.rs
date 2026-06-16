@@ -4,6 +4,7 @@ mod session;
 
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::net::Shutdown;
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -15,9 +16,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use daemonize::Daemonize;
+use pragma_constants::CONSTANTS;
 
 use protocol::{
-    read_frame, write_frame, EventFrame, RequestFrame, RequestKind, ResponseFrame, ServerFrame,
+    read_frame, write_frame, EventFrame, HelloFrame, RequestFrame, RequestKind, ResponseFrame,
+    ServerFrame,
 };
 use registry::Registry;
 
@@ -28,7 +31,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
     remove_stale_files(&paths.socket, &paths.lock);
-    let _lock = acquire_lock(&paths.lock)?;
+    let mut lock = acquire_lock(&paths.lock)?;
+    // Record our PID so the app can replace *this* daemon precisely if it ever
+    // turns out to speak an incompatible protocol version (see the hello frame).
+    writeln!(lock, "{}", std::process::id())?;
+    lock.flush()?;
+    let _lock = lock;
     if paths.socket.exists() {
         fs::remove_file(&paths.socket)?;
     }
@@ -79,6 +87,17 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
         Ok(stream) => Arc::new(Mutex::new(stream)),
         Err(_) => return,
     };
+    // Greet the connection so the app can verify it is talking to a daemon that
+    // speaks its protocol version (and replace it otherwise). Must be the first
+    // frame written; the app consumes exactly one hello before any request.
+    if let Ok(mut writer_guard) = writer.lock() {
+        let hello = ServerFrame::Hello(HelloFrame {
+            protocol_version: CONSTANTS.daemon.protocol_version.get(),
+        });
+        if write_frame(&mut *writer_guard, &hello).is_err() {
+            return;
+        }
+    }
     while let Ok(request) = read_frame::<RequestFrame>(&mut stream) {
         let request_id = request.request_id.clone();
         let (response, event_stream) = match handle_request(request, registry) {

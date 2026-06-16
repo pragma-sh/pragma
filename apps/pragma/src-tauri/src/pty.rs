@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use pragma_constants::CONSTANTS;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use uuid::Uuid;
@@ -25,8 +26,18 @@ pub struct PtyClient {
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum PtyEvent {
-    Output { data: String },
-    Exit { code: Option<i32> },
+    Output {
+        data: String,
+    },
+    /// Shell-emitted window title (OSC 0 / OSC 2). Stripped out of `Output`
+    /// by the daemon. The frontend applies it to the tab strip only when the
+    /// user has not manually renamed the tab.
+    Title {
+        title: String,
+    },
+    Exit {
+        code: Option<i32>,
+    },
 }
 
 #[derive(Serialize)]
@@ -44,8 +55,17 @@ struct RequestFrame {
 #[derive(Deserialize)]
 #[serde(tag = "frame", rename_all = "camelCase")]
 enum ServerFrame {
+    Hello(HelloFrame),
     Response(ResponseFrame),
     Event(EventFrame),
+}
+
+/// First frame the daemon sends on every connection. Lets us detect a stale
+/// long-lived daemon whose protocol no longer matches this app build.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HelloFrame {
+    protocol_version: u64,
 }
 
 #[derive(Deserialize)]
@@ -63,6 +83,11 @@ enum EventFrame {
         #[serde(rename = "sessionId")]
         _session_id: String,
         data: String,
+    },
+    Title {
+        #[serde(rename = "sessionId")]
+        _session_id: String,
+        title: String,
     },
     Exit {
         #[serde(rename = "sessionId")]
@@ -136,7 +161,7 @@ impl PtyClient {
                     stream.set_read_timeout(None)?;
                     break;
                 }
-                ServerFrame::Response(_) | ServerFrame::Event(_) => {}
+                ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_) => {}
             }
         }
         thread::spawn(move || {
@@ -151,12 +176,17 @@ impl PtyClient {
                                 break;
                             }
                         }
+                        EventFrame::Title { title, .. } => {
+                            if on_event.send(PtyEvent::Title { title }).is_err() {
+                                break;
+                            }
+                        }
                         EventFrame::Exit { code, .. } => {
                             let _ = on_event.send(PtyEvent::Exit { code });
                             break;
                         }
                     },
-                    ServerFrame::Response(_) => {}
+                    ServerFrame::Hello(_) | ServerFrame::Response(_) => {}
                 }
             }
             let _ = stream.shutdown(Shutdown::Both);
@@ -181,36 +211,93 @@ impl PtyClient {
                         ))
                     };
                 }
-                ServerFrame::Response(_) | ServerFrame::Event(_) => {}
+                ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_) => {}
             }
         }
     }
 
     fn connect_with_spawn(&self) -> AppResult<UnixStream> {
-        if let Ok(stream) = UnixStream::connect(self.socket_path()) {
-            configure_stream(&stream)?;
+        if let Some(stream) = self.connect_compatible()? {
             return Ok(stream);
         }
         let _guard = self.launch_lock.lock()?;
-        if let Ok(stream) = UnixStream::connect(self.socket_path()) {
-            configure_stream(&stream)?;
+        if let Some(stream) = self.connect_compatible()? {
             return Ok(stream);
         }
         self.spawn_daemon()?;
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            match UnixStream::connect(self.socket_path()) {
-                Ok(stream) => {
-                    configure_stream(&stream)?;
-                    return Ok(stream);
-                }
-                Err(err) if Instant::now() < deadline => {
-                    let _ = err;
+            match self.connect_compatible() {
+                Ok(Some(stream)) => return Ok(stream),
+                Ok(None) if Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(100));
                 }
-                Err(err) => return Err(AppError::Io(err)),
+                Ok(None) => {
+                    return Err(AppError::Daemon(
+                        "daemon did not become reachable".to_string(),
+                    ))
+                }
+                Err(err) => return Err(err),
             }
         }
+    }
+
+    /// Connects to a daemon already listening on the socket and verifies it
+    /// speaks our protocol version via its hello frame. Returns the ready stream
+    /// (positioned just after the hello) when compatible, or `Ok(None)` when no
+    /// daemon is reachable. A reachable-but-incompatible daemon — including an
+    /// old build that predates the hello and so never sends one — is killed
+    /// before returning `Ok(None)` so the caller respawns a matching daemon.
+    fn connect_compatible(&self) -> AppResult<Option<UnixStream>> {
+        let Ok(mut stream) = UnixStream::connect(self.socket_path()) else {
+            return Ok(None);
+        };
+        configure_stream(&stream)?;
+        // The hello arrives immediately from a healthy daemon; cap the wait so a
+        // stale daemon that never greets us doesn't stall startup.
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        let expected = CONSTANTS.daemon.protocol_version.get();
+        match read_frame::<ServerFrame>(&mut stream) {
+            Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {
+                configure_stream(&stream)?;
+                Ok(Some(stream))
+            }
+            _ => {
+                self.kill_stale_daemon();
+                Ok(None)
+            }
+        }
+    }
+
+    /// Terminates a daemon whose protocol no longer matches this build. Uses the
+    /// PID the daemon records in its lock file for a precise kill, falling back
+    /// to `pkill` for older daemons that predate the pidfile. Removes the stale
+    /// socket so the next spawn binds cleanly.
+    fn kill_stale_daemon(&self) {
+        let killed_by_pid = std::fs::read_to_string(self.lock_path())
+            .ok()
+            .and_then(|contents| contents.trim().parse::<u32>().ok())
+            .is_some_and(|pid| {
+                Command::new("kill")
+                    .arg("-KILL")
+                    .arg(pid.to_string())
+                    .status()
+                    .is_ok_and(|status| status.success())
+            });
+        if !killed_by_pid {
+            // Pre-handshake daemons left no usable pidfile; match by command line.
+            let _ = Command::new("pkill")
+                .args(["-KILL", "-f", "pragma-daemon"])
+                .status();
+        }
+        // Let the OS reap the process and release the socket before respawning.
+        thread::sleep(Duration::from_millis(200));
+        let _ = std::fs::remove_file(self.socket_path());
+        let _ = std::fs::remove_file(self.lock_path());
+    }
+
+    fn lock_path(&self) -> PathBuf {
+        self.socket_path().with_file_name("daemon.lock")
     }
 
     fn socket_path(&self) -> PathBuf {

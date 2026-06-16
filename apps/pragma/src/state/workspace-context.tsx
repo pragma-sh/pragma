@@ -20,6 +20,7 @@ import type {
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { basename } from "@/lib/path";
+import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
   browserClose,
@@ -38,6 +39,7 @@ import {
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
   setSplitLayout as setSplitLayoutCommand,
+  setTabTitle as setTabTitleCommand,
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
@@ -107,6 +109,7 @@ type WorkspaceAction =
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | { type: "remove-tab"; tabId: string }
   | { type: "rename-tab"; tabId: string; title: string }
+  | { type: "set-auto-title"; tabId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
   | { type: "remove-worktree"; worktreeId: string }
@@ -752,7 +755,21 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return {
         ...state,
         tabs: state.tabs.map((tab) =>
-          tab.id === action.tabId ? { ...tab, title: action.title } : tab,
+          tab.id === action.tabId ? { ...tab, title: action.title, userRenamed: true } : tab,
+        ),
+      };
+    case "set-auto-title":
+      // Shell/browser-emitted title. Respects `userRenamed` so a user-typed
+      // rename can never be silently clobbered by a `precmd`/`PROMPT_COMMAND`
+      // title push or a stray `<title>` update from a browser webview. A blank
+      // push (e.g. opencode clearing the title on exit) falls back to the kind's
+      // default so the tab never goes nameless.
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId && !tab.userRenamed
+            ? { ...tab, title: action.title.trim() || defaultTabTitle(tab.kind) }
+            : tab,
         ),
       };
     case "set-tab-url":
@@ -895,12 +912,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try {
         const tab =
           kind === "terminal"
-            ? await createTabCommand(projectId, targetWorktreeId, "terminal", "Shell")
+            ? await createTabCommand(
+                projectId,
+                targetWorktreeId,
+                "terminal",
+                defaultTabTitle("terminal"),
+              )
             : await createTabCommand(
                 projectId,
                 targetWorktreeId,
                 "browser",
-                "New tab",
+                defaultTabTitle("browser"),
                 BROWSER_START_URL,
               );
         dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
@@ -1064,12 +1086,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Browser webviews report their page title/URL natively; mirror those into tab
   // state (so the tab strip + address bar update) and persist them for restore.
+  // Browser titles are auto-titles (the page is the source of truth) and route
+  // through the `set-auto-title` action so they can never flip `userRenamed`.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     onBrowserMeta((meta) => {
       if (meta.title !== undefined) {
-        dispatch({ type: "rename-tab", tabId: meta.tabId, title: meta.title });
-        void renameTabCommand(meta.tabId, meta.title).catch(() => undefined);
+        const next = meta.title.trim() || defaultTabTitle("browser");
+        dispatch({ type: "set-auto-title", tabId: meta.tabId, title: next });
+        void setTabTitleCommand(meta.tabId, next).catch(() => undefined);
       }
       if (meta.url !== undefined) {
         dispatch({ type: "set-tab-url", tabId: meta.tabId, url: meta.url });
@@ -1095,6 +1120,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unlisten?.();
     };
   }, []);
+
+  // Terminals pipe OSC 0/2 title updates through the non-React
+  // `terminalManager` registry. Subscribe once per terminal tab and route each
+  // update through the `set-auto-title` action so the reducer's
+  // `userRenamed` check decides whether to apply it. Persist via
+  // `setTabTitle` so titles survive restarts.
+  useEffect(() => {
+    const unsubscribes: Array<() => void> = [];
+    for (const tab of state.tabs) {
+      if (tab.kind !== "terminal") {
+        continue;
+      }
+      const off = terminalManager.onTitle(tab.id, (title) => {
+        // Mirror the reducer's blank-title fallback so the persisted title never
+        // goes empty (e.g. opencode clearing the title on exit).
+        const next = title.trim() || defaultTabTitle("terminal");
+        dispatch({ type: "set-auto-title", tabId: tab.id, title: next });
+        void setTabTitleCommand(tab.id, next).catch(() => undefined);
+      });
+      unsubscribes.push(off);
+    }
+    return () => {
+      for (const off of unsubscribes) {
+        off();
+      }
+    };
+  }, [state.tabs]);
 
   // Persist split layouts so they survive project switches and app restarts,
   // mirroring how tabs persist. Only real splits are stored; a worktree that
