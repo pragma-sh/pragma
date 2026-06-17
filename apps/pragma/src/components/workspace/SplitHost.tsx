@@ -31,6 +31,13 @@ export function SplitHost() {
     () => new Map(workspace.tabs.map((tab) => [tab.id, tab])),
     [workspace.tabs],
   );
+  const worktreePathById = useMemo(() => {
+    const paths = new Map<string, string>();
+    for (const worktree of Object.values(workspace.worktrees).flat()) {
+      paths.set(worktree.id, worktree.path);
+    }
+    return paths;
+  }, [workspace.worktrees]);
 
   if (!workspace.splitRoot) {
     return null;
@@ -42,6 +49,7 @@ export function SplitHost() {
         node={workspace.splitRoot}
         showPaneBars={workspace.splitRoot.kind === "split"}
         tabsById={tabsById}
+        worktreePathById={worktreePathById}
       />
     </div>
   );
@@ -51,23 +59,42 @@ function SplitNode({
   node,
   showPaneBars,
   tabsById,
+  worktreePathById,
 }: {
   node: SplitLayoutNode;
   showPaneBars: boolean;
   tabsById: Map<string, Tab>;
+  worktreePathById: Map<string, string>;
 }) {
   if (node.kind === "pane") {
-    return <SplitPane pane={node} showPaneBars={showPaneBars} tabsById={tabsById} />;
+    return (
+      <SplitPane
+        pane={node}
+        showPaneBars={showPaneBars}
+        tabsById={tabsById}
+        worktreePathById={worktreePathById}
+      />
+    );
   }
 
   return (
     <ResizablePanelGroup className="min-h-0" orientation={node.direction}>
       <ResizablePanel minSize={15}>
-        <SplitNode node={node.children[0]} showPaneBars={showPaneBars} tabsById={tabsById} />
+        <SplitNode
+          node={node.children[0]}
+          showPaneBars={showPaneBars}
+          tabsById={tabsById}
+          worktreePathById={worktreePathById}
+        />
       </ResizablePanel>
       <ResizableHandle className="bg-white/10" withHandle />
       <ResizablePanel minSize={15}>
-        <SplitNode node={node.children[1]} showPaneBars={showPaneBars} tabsById={tabsById} />
+        <SplitNode
+          node={node.children[1]}
+          showPaneBars={showPaneBars}
+          tabsById={tabsById}
+          worktreePathById={worktreePathById}
+        />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -77,10 +104,12 @@ function SplitPane({
   pane,
   showPaneBars,
   tabsById,
+  worktreePathById,
 }: {
   pane: SplitPaneNode;
   showPaneBars: boolean;
   tabsById: Map<string, Tab>;
+  worktreePathById: Map<string, string>;
 }) {
   const workspace = useWorkspace();
   const { isDragging, draggingTabId } = useTabDrag();
@@ -93,9 +122,9 @@ function SplitPane({
   // Every pane inside a split is its own group, so each gets its own tab bar.
   const showBar = showPaneBars;
 
-  const worktree = activeTab
-    ? workspace.worktrees[activeTab.projectId]?.find((item) => item.id === activeTab.worktreeId)
-    : undefined;
+  const cwd = activeTab
+    ? (worktreePathById.get(activeTab.worktreeId) ?? workspace.selectedWorktree?.path ?? "~")
+    : "~";
 
   useEffect(() => {
     if (!focused || !activeTab) {
@@ -129,11 +158,7 @@ function SplitPane({
           ) : activeTab.kind === "log" ? (
             <LogView key={activeTab.id} tab={activeTab} />
           ) : (
-            <TerminalView
-              cwd={worktree?.path ?? workspace.selectedWorktree?.path ?? "~"}
-              key={activeTab.id}
-              tab={activeTab}
-            />
+            <TerminalView cwd={cwd} key={activeTab.id} tab={activeTab} />
           )
         ) : null}
         {isDragging ? (

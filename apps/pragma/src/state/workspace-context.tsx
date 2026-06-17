@@ -175,6 +175,9 @@ interface WorkspaceContextValue extends WorkspaceState {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+const TERMINAL_TITLE_FLUSH_MS = 100;
+const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
+
 const initialState: WorkspaceState = {
   projects: [],
   worktrees: {},
@@ -850,6 +853,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
+  const tabsRef = useRef(state.tabs);
+  tabsRef.current = state.tabs;
 
   // Latest selected project, readable from async callbacks without re-creating
   // them on every selection change.
@@ -1101,6 +1106,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const terminalTabIdsKey = useMemo(
+    () =>
+      state.tabs
+        .filter((tab) => tab.kind === "terminal")
+        .map((tab) => tab.id)
+        .join(TERMINAL_TAB_ID_SEPARATOR),
+    [state.tabs],
+  );
+
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -1183,31 +1197,64 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Terminals pipe OSC 0/2 title updates through the non-React
-  // `terminalManager` registry. Subscribe once per terminal tab and route each
-  // update through the `set-auto-title` action so the reducer's
-  // `userRenamed` check decides whether to apply it. Persist via
-  // `setTabTitle` so titles survive restarts.
+  // `terminalManager` registry. Subscribe once per terminal tab id, then
+  // coalesce noisy title streams before touching React state; otherwise TUIs
+  // that emit repeated OSC titles can force the whole workspace/sidebar tree to
+  // re-render during terminal output, which is especially visible in projects
+  // with many worktrees.
   useEffect(() => {
     const unsubscribes: Array<() => void> = [];
-    for (const tab of state.tabs) {
-      if (tab.kind !== "terminal") {
-        continue;
+    const pendingTitles = new Map<string, string>();
+    const flushTimers = new Map<string, number>();
+    const lastAppliedTitles = new Map<string, string>();
+    const tabIds = terminalTabIdsKey ? terminalTabIdsKey.split(TERMINAL_TAB_ID_SEPARATOR) : [];
+    for (const tabId of tabIds) {
+      const tab = tabsRef.current.find((item) => item.id === tabId);
+      if (tab) {
+        lastAppliedTitles.set(tabId, tab.title?.trim() || defaultTabTitle("terminal"));
       }
-      const off = terminalManager.onTitle(tab.id, (title) => {
-        // Mirror the reducer's blank-title fallback so the persisted title never
-        // goes empty (e.g. opencode clearing the title on exit).
+      const off = terminalManager.onTitle(tabId, (title) => {
         const next = title.trim() || defaultTabTitle("terminal");
-        dispatch({ type: "set-auto-title", tabId: tab.id, title: next });
-        void setTabTitleCommand(tab.id, next).catch(() => undefined);
+        if (lastAppliedTitles.get(tabId) === next) {
+          return;
+        }
+        pendingTitles.set(tabId, next);
+        if (flushTimers.has(tabId)) {
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          flushTimers.delete(tabId);
+          const pending = pendingTitles.get(tabId);
+          pendingTitles.delete(tabId);
+          if (!pending || lastAppliedTitles.get(tabId) === pending) {
+            return;
+          }
+          const currentTab = tabsRef.current.find((item) => item.id === tabId);
+          if (!currentTab || currentTab.kind !== "terminal" || currentTab.userRenamed) {
+            return;
+          }
+          const currentTitle = currentTab.title?.trim() || defaultTabTitle("terminal");
+          if (currentTitle === pending) {
+            lastAppliedTitles.set(tabId, pending);
+            return;
+          }
+          lastAppliedTitles.set(tabId, pending);
+          dispatch({ type: "set-auto-title", tabId, title: pending });
+          void setTabTitleCommand(tabId, pending).catch(() => undefined);
+        }, TERMINAL_TITLE_FLUSH_MS);
+        flushTimers.set(tabId, timer);
       });
       unsubscribes.push(off);
     }
     return () => {
+      for (const timer of flushTimers.values()) {
+        window.clearTimeout(timer);
+      }
       for (const off of unsubscribes) {
         off();
       }
     };
-  }, [state.tabs]);
+  }, [terminalTabIdsKey]);
 
   // Persist split layouts so they survive project switches and app restarts,
   // mirroring how tabs persist. Only real splits are stored; a worktree that

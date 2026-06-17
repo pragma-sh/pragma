@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import type { Tab } from "@pragma/constants";
 import "@xterm/xterm/css/xterm.css";
@@ -10,7 +10,7 @@ interface TerminalViewProps {
   cwd: string;
 }
 
-export function TerminalView({ tab, cwd }: TerminalViewProps) {
+function TerminalViewComponent({ tab, cwd }: TerminalViewProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,3 +29,9 @@ export function TerminalView({ tab, cwd }: TerminalViewProps) {
 
   return <div className="h-full w-full p-2 [&_.xterm]:h-full" ref={ref} />;
 }
+
+/** xterm owns its own DOM; tab title updates should not re-render the terminal. */
+export const TerminalView = memo(
+  TerminalViewComponent,
+  (previous, next) => previous.cwd === next.cwd && previous.tab.id === next.tab.id,
+);

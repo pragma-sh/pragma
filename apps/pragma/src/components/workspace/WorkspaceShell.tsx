@@ -72,9 +72,14 @@ export function WorkspaceShell() {
   return (
     <RightSidebarProvider>
       <TabDragProvider>
-        <main className="bg-background flex h-svh overflow-hidden text-foreground">
+        {/* h-full (not h-svh): WKWebView does not recompute viewport units (svh/vh)
+            on live window resize, which froze the whole height chain — and with it
+            the terminal's ResizeObserver — at the launch size. A percentage chain
+            from html/body/#root (all height:100% in index.css) does recalc on
+            resize, so the terminal re-fits. */}
+        <main className="bg-background flex h-full overflow-hidden text-foreground">
           <ProjectSidebar />
-          <section className="flex min-w-0 flex-1 flex-col bg-[#0b0d10]">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0b0d10]">
             <TerminalTabs />
             <AnimatePresence>
               {workspace.error ? (

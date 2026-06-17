@@ -29,12 +29,18 @@ export function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
-export type PtyEvent =
-  | { event: "output"; data: string }
-  | { event: "title"; title: string }
-  | { event: "exit"; code: number | null };
+/**
+ * JSON control events from the daemon. Terminal **output** is not modeled here:
+ * it arrives on the same channel as a raw {@link ArrayBuffer} (the backend sends
+ * it as bytes, never JSON, so escape-heavy redraws aren't inflated and can be
+ * fed straight into xterm). See {@link PtyMessage}.
+ */
+export type PtyEvent = { event: "title"; title: string } | { event: "exit"; code: number | null };
 
-export type PtyEventHandler = (event: PtyEvent) => void;
+/** A message on a PTY channel: raw output bytes, or a JSON control event. */
+export type PtyMessage = ArrayBuffer | PtyEvent;
+
+export type PtyEventHandler = (message: PtyMessage) => void;
 
 /**
  * Spawns a daemon-backed PTY session and streams events through a Tauri channel.
@@ -47,8 +53,8 @@ export function ptySpawn(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyEvent>> {
-  const channel = new Channel<PtyEvent>();
+): Promise<Channel<PtyMessage>> {
+  const channel = new Channel<PtyMessage>();
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("pty_spawn", { sessionId, cwd, cols, rows, onEvent: channel }).then(
@@ -65,8 +71,8 @@ export function ptyAttach(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyEvent>> {
-  const channel = new Channel<PtyEvent>();
+): Promise<Channel<PtyMessage>> {
+  const channel = new Channel<PtyMessage>();
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("pty_attach", { sessionId, cols, rows, onEvent: channel }).then(

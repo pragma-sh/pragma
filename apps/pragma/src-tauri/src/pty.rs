@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::CONSTANTS;
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -53,21 +53,34 @@ struct InputMsg {
     data: String,
 }
 
+/// Control events forwarded to the webview as JSON over the PTY channel.
+///
+/// Terminal **output** does not travel as a `PtyEvent` — it is sent as a raw
+/// `InvokeResponseBody::Raw` (an `ArrayBuffer` on the JS side) so it never gets
+/// JSON-escaped (which would expand each `0x1B` ~6x) and is fed straight into
+/// xterm as bytes. Only the low-volume title/exit events stay JSON.
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum PtyEvent {
-    Output {
-        data: String,
-    },
-    /// Shell-emitted window title (OSC 0 / OSC 2). Stripped out of `Output`
-    /// by the daemon. The frontend applies it to the tab strip only when the
-    /// user has not manually renamed the tab.
+    /// Shell-emitted window title (OSC 0 / OSC 2). Stripped out of the output
+    /// stream by the daemon. The frontend applies it to the tab strip only when
+    /// the user has not manually renamed the tab.
     Title {
         title: String,
     },
     Exit {
         code: Option<i32>,
     },
+}
+
+impl PtyEvent {
+    /// Serializes the event into a JSON channel message. Title/exit are tiny, so
+    /// the JSON cost here is irrelevant compared to the output hot path.
+    fn into_body(self) -> Option<InvokeResponseBody> {
+        serde_json::to_string(&self)
+            .ok()
+            .map(InvokeResponseBody::Json)
+    }
 }
 
 #[derive(Serialize)]
@@ -106,14 +119,11 @@ struct ResponseFrame {
     error: Option<String>,
 }
 
+/// JSON event frames from the daemon. Output is **not** here — it arrives as a
+/// binary frame (see [`Frame::Output`]) — so only title/exit are modeled.
 #[derive(Deserialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 enum EventFrame {
-    Output {
-        #[serde(rename = "sessionId")]
-        _session_id: String,
-        data: String,
-    },
     Title {
         #[serde(rename = "sessionId")]
         _session_id: String,
@@ -146,7 +156,7 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
-        on_event: Channel<PtyEvent>,
+        on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
         self.stream(RequestFrame::spawn(session_id, cwd, cols, rows), on_event)
     }
@@ -156,7 +166,7 @@ impl PtyClient {
         session_id: String,
         cols: u16,
         rows: u16,
-        on_event: Channel<PtyEvent>,
+        on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
         self.stream(RequestFrame::attach(session_id, cols, rows), on_event)
     }
@@ -208,7 +218,7 @@ impl PtyClient {
                         conn = Some(stream);
                     }
                     let Some(stream) = conn.as_mut() else { break };
-                    if write_frame(stream, &frame).is_ok() {
+                    if write_json_frame(stream, &frame).is_ok() {
                         break;
                     }
                     // Transport failed — drop the dead stream and retry once.
@@ -279,12 +289,16 @@ impl PtyClient {
         }
     }
 
-    fn stream(&self, request: RequestFrame, on_event: Channel<PtyEvent>) -> AppResult<()> {
+    fn stream(
+        &self,
+        request: RequestFrame,
+        on_event: Channel<InvokeResponseBody>,
+    ) -> AppResult<()> {
         let mut stream = self.connect_with_spawn()?;
-        write_frame(&mut stream, &request)?;
+        write_json_frame(&mut stream, &request)?;
         let request_id = request.request_id.clone();
         loop {
-            match read_frame::<ServerFrame>(&mut stream)? {
+            match read_json_frame::<ServerFrame>(&mut stream)? {
                 ServerFrame::Response(response) if response.request_id == request_id => {
                     if !response.ok {
                         return Err(AppError::Daemon(
@@ -300,28 +314,30 @@ impl PtyClient {
             }
         }
         thread::spawn(move || {
-            while let Ok(frame) = read_frame::<ServerFrame>(&mut stream) {
+            while let Ok(frame) = read_frame(&mut stream) {
                 match frame {
-                    ServerFrame::Event(event) => match event {
-                        EventFrame::Output { data, .. } => {
-                            // The frontend dropped the channel (window/tab closed);
-                            // stop draining so the socket and daemon-side forwarder
-                            // thread are released instead of blocking forever.
-                            if on_event.send(PtyEvent::Output { data }).is_err() {
-                                break;
-                            }
-                        }
-                        EventFrame::Title { title, .. } => {
-                            if on_event.send(PtyEvent::Title { title }).is_err() {
-                                break;
-                            }
-                        }
-                        EventFrame::Exit { code, .. } => {
-                            let _ = on_event.send(PtyEvent::Exit { code });
+                    // Output is forwarded verbatim as raw bytes (an ArrayBuffer on
+                    // the JS side) — no JSON, no UTF-8 decode, straight into xterm.
+                    // A send error means the frontend dropped the channel (window/
+                    // tab closed); stop draining so the socket and daemon-side
+                    // forwarder thread are released instead of blocking forever.
+                    Frame::Output { data, .. } => {
+                        if on_event.send(InvokeResponseBody::Raw(data)).is_err() {
                             break;
                         }
+                    }
+                    Frame::Json(bytes) => match serde_json::from_slice::<ServerFrame>(&bytes) {
+                        Ok(ServerFrame::Event(EventFrame::Title { title, .. })) => {
+                            if forward_event(&on_event, PtyEvent::Title { title }).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(ServerFrame::Event(EventFrame::Exit { code, .. })) => {
+                            let _ = forward_event(&on_event, PtyEvent::Exit { code });
+                            break;
+                        }
+                        Ok(ServerFrame::Hello(_) | ServerFrame::Response(_)) | Err(_) => {}
                     },
-                    ServerFrame::Hello(_) | ServerFrame::Response(_) => {}
                 }
             }
             let _ = stream.shutdown(Shutdown::Both);
@@ -360,9 +376,9 @@ impl PtyClient {
         stream: &mut UnixStream,
         request: &RequestFrame,
     ) -> Result<AppResult<()>, AppError> {
-        write_frame(stream, request)?;
+        write_json_frame(stream, request)?;
         loop {
-            match read_frame::<ServerFrame>(stream)? {
+            match read_json_frame::<ServerFrame>(stream)? {
                 ServerFrame::Response(response) if response.request_id == request.request_id => {
                     return Ok(if response.ok {
                         Ok(())
@@ -420,7 +436,7 @@ impl PtyClient {
         // stale daemon that never greets us doesn't stall startup.
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         let expected = CONSTANTS.daemon.protocol_version.get();
-        match read_frame::<ServerFrame>(&mut stream) {
+        match read_json_frame::<ServerFrame>(&mut stream) {
             Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {
                 configure_stream(&stream)?;
                 Ok(Some(stream))
@@ -666,29 +682,87 @@ fn configure_stream(stream: &UnixStream) -> AppResult<()> {
 /// need the acknowledgement, but the socket must still be read so its receive
 /// buffer can't fill and back-pressure the daemon's writes.
 fn discard_frames(mut reader: UnixStream) {
-    while read_frame::<ServerFrame>(&mut reader).is_ok() {}
+    while read_frame(&mut reader).is_ok() {}
 }
 
-fn read_frame<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> AppResult<T> {
+/// Forwards a JSON control event (title/exit) to the webview. Returns the
+/// channel's send result so the caller can stop on a dropped channel.
+fn forward_event(channel: &Channel<InvokeResponseBody>, event: PtyEvent) -> tauri::Result<()> {
+    match event.into_body() {
+        Some(body) => channel.send(body),
+        None => Ok(()),
+    }
+}
+
+/// One decoded wire frame. Mirrors `pragma_daemon::protocol::Frame`: control
+/// traffic is JSON, terminal output is a binary frame carrying raw bytes. The
+/// two crates can't share the type (the daemon is a binary), so this definition
+/// must stay byte-compatible with the daemon's.
+enum Frame {
+    Json(Vec<u8>),
+    Output { data: Vec<u8> },
+}
+
+/// Tag byte distinguishing JSON control frames from binary output frames. Must
+/// match the daemon's `FRAME_TAG_JSON` / `FRAME_TAG_OUTPUT`.
+const FRAME_TAG_JSON: u8 = 0;
+const FRAME_TAG_OUTPUT: u8 = 1;
+
+/// Reads one length-prefixed frame and splits it by tag. Output frames yield raw
+/// bytes (the session id is not needed app-side — the channel already routes per
+/// session); control frames yield JSON bytes to deserialize.
+fn read_frame(reader: &mut impl Read) -> AppResult<Frame> {
     let mut len_bytes = [0_u8; 4];
     reader.read_exact(&mut len_bytes)?;
     let len = u32::from_be_bytes(len_bytes) as usize;
     // Bound the allocation so a malformed/oversized length can't OOM the app.
     // Mirrors the 16 MiB cap the daemon enforces in `protocol::read_frame`.
-    if len > 16 * 1024 * 1024 {
+    if len == 0 || len > 16 * 1024 * 1024 {
         return Err(AppError::Daemon("daemon frame is too large".to_string()));
     }
-    let mut bytes = vec![0_u8; len];
-    reader.read_exact(&mut bytes)?;
-    serde_json::from_slice(&bytes).map_err(AppError::from)
+    let mut body = vec![0_u8; len];
+    reader.read_exact(&mut body)?;
+    match body[0] {
+        FRAME_TAG_JSON => Ok(Frame::Json(body.split_off(1))),
+        FRAME_TAG_OUTPUT => {
+            // [tag][2-byte BE session-id length][session id][raw output bytes]
+            if body.len() < 3 {
+                return Err(AppError::Daemon("malformed daemon frame".to_string()));
+            }
+            let sid_len = u16::from_be_bytes([body[1], body[2]]) as usize;
+            let data_start = 3 + sid_len;
+            if body.len() < data_start {
+                return Err(AppError::Daemon("malformed daemon frame".to_string()));
+            }
+            Ok(Frame::Output {
+                data: body.split_off(data_start),
+            })
+        }
+        _ => Err(AppError::Daemon("unknown daemon frame tag".to_string())),
+    }
 }
 
-fn write_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> AppResult<()> {
-    let bytes = serde_json::to_vec(frame)?;
-    let len = u32::try_from(bytes.len())
-        .map_err(|_| AppError::Daemon("frame is too large".to_string()))?;
-    writer.write_all(&len.to_be_bytes())?;
-    writer.write_all(&bytes)?;
+/// Reads one frame and decodes it as JSON `T`, erroring on a binary frame.
+fn read_json_frame<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> AppResult<T> {
+    match read_frame(reader)? {
+        Frame::Json(bytes) => serde_json::from_slice(&bytes).map_err(AppError::from),
+        Frame::Output { .. } => Err(AppError::Daemon(
+            "expected a JSON frame, got binary".to_string(),
+        )),
+    }
+}
+
+/// Writes a JSON control frame (requests; the app never writes output frames).
+fn write_json_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> AppResult<()> {
+    let json = serde_json::to_vec(frame)?;
+    let body_len = 1 + json.len();
+    let len =
+        u32::try_from(body_len).map_err(|_| AppError::Daemon("frame is too large".to_string()))?;
+    let mut buf = Vec::with_capacity(4 + body_len);
+    buf.extend_from_slice(&len.to_be_bytes());
+    buf.push(FRAME_TAG_JSON);
+    buf.extend_from_slice(&json);
+    writer.write_all(&buf)?;
     writer.flush()?;
     Ok(())
 }

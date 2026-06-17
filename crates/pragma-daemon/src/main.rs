@@ -19,8 +19,8 @@ use daemonize::Daemonize;
 use pragma_constants::CONSTANTS;
 
 use protocol::{
-    read_frame, write_frame, EventFrame, HelloFrame, RequestFrame, RequestKind, ResponseFrame,
-    ServerFrame,
+    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, RequestFrame,
+    RequestKind, ResponseFrame, ServerFrame,
 };
 use registry::Registry;
 
@@ -115,11 +115,11 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
         let hello = ServerFrame::Hello(HelloFrame {
             protocol_version: CONSTANTS.daemon.protocol_version.get(),
         });
-        if write_frame(&mut *writer_guard, &hello).is_err() {
+        if write_json_frame(&mut *writer_guard, &hello).is_err() {
             return;
         }
     }
-    while let Ok(request) = read_frame::<RequestFrame>(&mut stream) {
+    while let Ok(request) = read_json_frame::<RequestFrame>(&mut stream) {
         let request_id = request.request_id.clone();
         let (response, event_stream) = match handle_request(request, registry) {
             Ok(event_stream) => (
@@ -140,7 +140,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
             ),
         };
         if let Ok(mut writer_guard) = writer.lock() {
-            if write_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
+            if write_json_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
                 break;
             }
         }
@@ -214,17 +214,26 @@ fn forward_events(
     thread::spawn(move || {
         for event in scrollback {
             if let Ok(mut writer) = writer.lock() {
-                let _ = write_frame(&mut *writer, &ServerFrame::Event(event));
+                let _ = write_event(&mut writer, event);
             }
         }
         for event in rx {
             if let Ok(mut writer) = writer.lock() {
-                if write_frame(&mut *writer, &ServerFrame::Event(event)).is_err() {
+                if write_event(&mut writer, event).is_err() {
                     break;
                 }
             }
         }
     });
+}
+
+/// Writes one event to the client: output goes out as a binary frame (raw bytes,
+/// no JSON escaping), while title/exit stay JSON control frames.
+fn write_event(writer: &mut UnixStream, event: EventFrame) -> Result<(), protocol::ProtocolError> {
+    match event {
+        EventFrame::Output { session_id, data } => write_output_frame(writer, &session_id, &data),
+        other => write_json_frame(writer, &ServerFrame::Event(other)),
+    }
 }
 
 fn required(value: Option<String>, name: &str) -> Result<String, String> {

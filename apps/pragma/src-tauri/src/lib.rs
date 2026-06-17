@@ -18,14 +18,14 @@ mod worktrees;
 use pragma_constants::{
     AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
 };
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
 use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
-use crate::pty::{PtyClient, PtyEvent};
+use crate::pty::PtyClient;
 
 /// Menu item id for "Restart Daemon" in the Troubleshooting submenu.
 const MENU_RESTART_DAEMON: &str = "troubleshooting.restart-daemon";
@@ -108,7 +108,7 @@ async fn pty_spawn(
     cwd: String,
     cols: u16,
     rows: u16,
-    on_event: Channel<PtyEvent>,
+    on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let client = pty.inner().clone();
     run_pty_task(move || client.spawn(session_id, cwd, cols, rows, on_event)).await
@@ -120,7 +120,7 @@ async fn pty_attach(
     session_id: String,
     cols: u16,
     rows: u16,
-    on_event: Channel<PtyEvent>,
+    on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let client = pty.inner().clone();
     run_pty_task(move || client.attach(session_id, cols, rows, on_event)).await

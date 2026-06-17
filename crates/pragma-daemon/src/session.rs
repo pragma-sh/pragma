@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use thiserror::Error;
@@ -10,6 +11,33 @@ use thiserror::Error;
 use crate::protocol::EventFrame;
 
 const SCROLLBACK_LIMIT: usize = 10_000;
+
+/// Size of the buffer used to read raw bytes from the PTY master. A full-screen
+/// redraw from a TUI (e.g. a mouse-tracking app repainting its whole grid on a
+/// scroll report) is tens of KB; reading it in one syscall instead of many small
+/// chunks keeps a single redraw as a single output frame, so it crosses the
+/// socket + IPC boundary and reaches xterm as one write/parse/paint pass instead
+/// of several. Returns diminish sharply past ~64 KB: a PTY master `read` returns
+/// whatever the kernel has buffered *right now* (it never blocks to fill the
+/// buffer), and the kernel's per-PTY buffer rarely holds more than a few tens of
+/// KB, so a larger buffer just sits unused. A bigger buffer also never adds
+/// latency — it only ever caps a single read, never delays one.
+const READ_BUFFER_BYTES: usize = 64 * 1024;
+
+/// Trailing-throttle window for coalescing PTY output into fewer, larger frames.
+/// The first output after an idle period is flushed immediately (zero added
+/// latency — this is the keystroke-echo path); after that, further output is
+/// batched and flushed at most once per interval. During a burst (a scroll flood
+/// repainting the grid, a `cat` of a large file) this collapses many fragmented
+/// reads into one frame per tick, cutting the number of JSON-encoded socket
+/// frames, Tauri IPC messages, and xterm parse/paint passes. Isolated output is
+/// never delayed; only back-to-back output is merged.
+const OUTPUT_COALESCE_INTERVAL: Duration = Duration::from_millis(8);
+
+/// Hard cap on buffered-but-unflushed output. A sustained flood is flushed as
+/// soon as it reaches this size regardless of the interval, bounding memory and
+/// keeping individual frames well under the protocol's 16 MiB frame limit.
+const OUTPUT_COALESCE_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Error)]
 pub enum SessionError {
@@ -26,6 +54,46 @@ mod anyhow_pty {
 }
 
 type PtyChild = Box<dyn portable_pty::Child + Send>;
+
+/// A unit of work handed from the PTY reader thread to the coalescer thread.
+/// `Output` carries raw, OSC-stripped terminal bytes (no UTF-8 decode — output
+/// ships as binary all the way to xterm); `Title` and `Exit` are control events
+/// the coalescer forwards in order (flushing any buffered output first so
+/// ordering is preserved).
+enum OutputMsg {
+    Output(Vec<u8>),
+    Title(String),
+    Exit(Option<i32>),
+}
+
+/// Accumulates consecutive PTY output so a burst can be broadcast as a single
+/// frame. Concatenating output is semantically identical to delivering each
+/// piece separately (it is one byte stream to xterm), but lets a burst cross the
+/// socket/IPC boundary and reach the renderer once instead of once per fragment.
+/// See [`OUTPUT_COALESCE_INTERVAL`].
+#[derive(Default)]
+struct OutputCoalescer {
+    pending: Vec<u8>,
+}
+
+impl OutputCoalescer {
+    fn push(&mut self, data: &[u8]) {
+        self.pending.extend_from_slice(data);
+    }
+
+    fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Takes the buffered output, or `None` when nothing is pending.
+    fn flush(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.pending))
+        }
+    }
+}
 
 pub struct Session {
     id: String,
@@ -126,58 +194,40 @@ impl Session {
     }
 
     fn start_reader(session: Arc<Self>, mut reader: Box<dyn Read + Send>) {
+        // The reader thread only strips OSC titles; a dedicated coalescer thread
+        // batches the resulting output so a redraw burst becomes one broadcast
+        // frame instead of many (see OUTPUT_COALESCE_INTERVAL). Output stays raw
+        // bytes the whole way — no UTF-8 decode — and xterm handles any partial
+        // multi-byte sequence split across frames itself.
+        let (tx, rx) = mpsc::channel::<OutputMsg>();
+        Self::start_coalescer(Arc::clone(&session), rx);
         thread::spawn(move || {
-            let mut decoder = Utf8Carry::default();
             let mut osc = OscParser::default();
-            let mut buf = [0_u8; 8192];
+            let mut buf = vec![0_u8; READ_BUFFER_BYTES].into_boxed_slice();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         for chunk in osc.push(&buf[..n]) {
-                            match chunk {
-                                OscChunk::Output(bytes) => {
-                                    for data in decoder.push(&bytes) {
-                                        session.broadcast(&EventFrame::Output {
-                                            session_id: session.id.clone(),
-                                            data,
-                                        });
-                                    }
-                                }
-                                OscChunk::Title(title) => {
-                                    session.broadcast(&EventFrame::Title {
-                                        session_id: session.id.clone(),
-                                        title,
-                                    });
-                                }
+                            let msg = match chunk {
+                                OscChunk::Output(bytes) => OutputMsg::Output(bytes),
+                                OscChunk::Title(title) => OutputMsg::Title(title),
+                            };
+                            // The coalescer thread is gone (session torn down) —
+                            // stop reading.
+                            if tx.send(msg).is_err() {
+                                return;
                             }
                         }
                     }
                 }
             }
             for chunk in osc.finish() {
-                match chunk {
-                    OscChunk::Output(bytes) => {
-                        for data in decoder.push(&bytes) {
-                            session.broadcast(&EventFrame::Output {
-                                session_id: session.id.clone(),
-                                data,
-                            });
-                        }
-                    }
-                    OscChunk::Title(title) => {
-                        session.broadcast(&EventFrame::Title {
-                            session_id: session.id.clone(),
-                            title,
-                        });
-                    }
-                }
-            }
-            if let Some(data) = decoder.finish() {
-                session.broadcast(&EventFrame::Output {
-                    session_id: session.id.clone(),
-                    data,
-                });
+                let msg = match chunk {
+                    OscChunk::Output(bytes) => OutputMsg::Output(bytes),
+                    OscChunk::Title(title) => OutputMsg::Title(title),
+                };
+                let _ = tx.send(msg);
             }
             let code = session
                 .child
@@ -186,11 +236,94 @@ impl Session {
                 .and_then(|mut child| child.take())
                 .and_then(|mut child| child.wait().ok())
                 .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-            session.broadcast(&EventFrame::Exit {
-                session_id: session.id.clone(),
-                code,
-            });
+            let _ = tx.send(OutputMsg::Exit(code));
         });
+    }
+
+    /// Drains [`OutputMsg`]s from the reader thread and broadcasts them, merging
+    /// consecutive output with a trailing throttle. Output that arrives after an
+    /// idle gap is flushed immediately (no added echo latency); a burst is
+    /// coalesced and flushed at most once per [`OUTPUT_COALESCE_INTERVAL`] (or
+    /// sooner if it reaches [`OUTPUT_COALESCE_MAX_BYTES`]). `Title`/`Exit` flush
+    /// any buffered output first so frame ordering is preserved.
+    fn start_coalescer(session: Arc<Self>, rx: Receiver<OutputMsg>) {
+        thread::spawn(move || {
+            let mut coalescer = OutputCoalescer::default();
+            // Seed `last_flush` in the past so the first output flushes at once.
+            let mut last_flush = Instant::now()
+                .checked_sub(OUTPUT_COALESCE_INTERVAL)
+                .unwrap_or_else(Instant::now);
+            loop {
+                let msg = if coalescer.pending_len() == 0 {
+                    // Nothing buffered — block until there is output to send.
+                    match rx.recv() {
+                        Ok(msg) => msg,
+                        Err(_) => break,
+                    }
+                } else {
+                    let elapsed = last_flush.elapsed();
+                    if elapsed >= OUTPUT_COALESCE_INTERVAL {
+                        session.broadcast_output(coalescer.flush());
+                        last_flush = Instant::now();
+                        continue;
+                    }
+                    // `elapsed < OUTPUT_COALESCE_INTERVAL` here (the `>=` case
+                    // flushed and continued above), so the remaining window is
+                    // positive; fall back to zero defensively if it is not.
+                    let remaining = OUTPUT_COALESCE_INTERVAL
+                        .checked_sub(elapsed)
+                        .unwrap_or(Duration::ZERO);
+                    match rx.recv_timeout(remaining) {
+                        Ok(msg) => msg,
+                        Err(RecvTimeoutError::Timeout) => {
+                            session.broadcast_output(coalescer.flush());
+                            last_flush = Instant::now();
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            session.broadcast_output(coalescer.flush());
+                            break;
+                        }
+                    }
+                };
+                match msg {
+                    OutputMsg::Output(data) => {
+                        coalescer.push(&data);
+                        if coalescer.pending_len() >= OUTPUT_COALESCE_MAX_BYTES {
+                            session.broadcast_output(coalescer.flush());
+                            last_flush = Instant::now();
+                        }
+                    }
+                    OutputMsg::Title(title) => {
+                        session.broadcast_output(coalescer.flush());
+                        last_flush = Instant::now();
+                        session.broadcast(&EventFrame::Title {
+                            session_id: session.id.clone(),
+                            title,
+                        });
+                    }
+                    OutputMsg::Exit(code) => {
+                        session.broadcast_output(coalescer.flush());
+                        session.broadcast(&EventFrame::Exit {
+                            session_id: session.id.clone(),
+                            code,
+                        });
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Broadcasts coalesced output as a single [`EventFrame::Output`], or does
+    /// nothing when there was no buffered output to flush.
+    fn broadcast_output(&self, data: Option<Vec<u8>>) {
+        if let Some(data) = data {
+            self.broadcast(&EventFrame::Output {
+                session_id: self.id.clone(),
+                data,
+            });
+        }
     }
 
     fn broadcast(&self, event: &EventFrame) {
@@ -203,46 +336,10 @@ impl Session {
     }
 }
 
-#[derive(Default)]
-pub struct Utf8Carry {
-    carry: Vec<u8>,
-}
-
-impl Utf8Carry {
-    pub fn push(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.carry.extend_from_slice(bytes);
-        match std::str::from_utf8(&self.carry) {
-            Ok(text) => {
-                let out = text.to_string();
-                self.carry.clear();
-                vec![out]
-            }
-            Err(err) => {
-                let valid = err.valid_up_to();
-                if valid == 0 {
-                    return Vec::new();
-                }
-                let out = String::from_utf8(self.carry[..valid].to_vec()).ok();
-                let rest = self.carry[valid..].to_vec();
-                self.carry = rest;
-                out.into_iter().collect()
-            }
-        }
-    }
-
-    pub fn finish(self) -> Option<String> {
-        if self.carry.is_empty() {
-            None
-        } else {
-            String::from_utf8(self.carry).ok()
-        }
-    }
-}
-
-/// One chunk produced by [`OscParser`]. `Output` bytes are UTF-8-encoded
-/// terminal output (with any OSC 0/2 sequences already stripped out); `Title`
-/// is the extracted tab title for the frontend to apply (or ignore if the user
-/// has manually renamed the tab).
+/// One chunk produced by [`OscParser`]. `Output` is raw terminal output bytes
+/// (with any OSC 0/2 sequences already stripped out); `Title` is the extracted
+/// tab title for the frontend to apply (or ignore if the user has manually
+/// renamed the tab).
 #[derive(Debug, PartialEq, Eq)]
 pub enum OscChunk {
     Output(Vec<u8>),
@@ -482,14 +579,21 @@ fn shell_path() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{OscChunk, OscParser, Scrollback, Utf8Carry};
+    use super::{OscChunk, OscParser, OutputCoalescer, Scrollback};
     use crate::protocol::EventFrame;
 
     #[test]
-    fn preserves_utf8_boundaries() {
-        let mut carry = Utf8Carry::default();
-        assert!(carry.push(&[0xf0, 0x9f]).is_empty());
-        assert_eq!(carry.push(&[0x98, 0x80]), vec!["😀".to_string()]);
+    fn coalescer_merges_consecutive_output() {
+        let mut coalescer = OutputCoalescer::default();
+        // Nothing buffered yet.
+        assert_eq!(coalescer.flush(), None);
+        // Consecutive pushes accumulate and flush as a single concatenated frame.
+        coalescer.push(b"foo");
+        coalescer.push(b"bar");
+        assert_eq!(coalescer.pending_len(), 6);
+        assert_eq!(coalescer.flush(), Some(b"foobar".to_vec()));
+        // A flush drains the buffer.
+        assert_eq!(coalescer.flush(), None);
     }
 
     #[test]
@@ -498,7 +602,7 @@ mod tests {
         for data in ["one", "two", "three"] {
             scrollback.push(EventFrame::Output {
                 session_id: "s".to_string(),
-                data: data.to_string(),
+                data: data.as_bytes().to_vec(),
             });
         }
         assert_eq!(scrollback.frames().len(), 2);

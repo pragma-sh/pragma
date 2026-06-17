@@ -124,6 +124,40 @@ than no guide.
   `invoke()` directly from components).
 - PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
   the Unix socket and must not own PTYs.
+- **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
+  PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
+  arrives as one read instead of many; a dedicated coalescer thread
+  (`Session::start_coalescer` in `crates/pragma-daemon/src/session.rs`) then merges
+  consecutive `Output` into a single broadcast frame on a **trailing throttle**
+  (`OUTPUT_COALESCE_INTERVAL`, 8 ms): the first output after an idle gap flushes
+  immediately (zero added keystroke-echo latency), and only back-to-back output is
+  batched — flushed at most once per interval, or sooner at `OUTPUT_COALESCE_MAX_BYTES`
+  (256 KB). This collapses a scroll/redraw flood into far fewer socket
+  frames, Tauri IPC messages, and xterm parse/paint passes (each redraw is otherwise
+  amplified: tiny scroll input → whole-grid repaint on the return trip). `Title`/`Exit`
+  flush pending output first so ordering is preserved. The reader thread now only
+  strips OSC titles and hands `OutputMsg`s to the coalescer over an mpsc channel. This is
+  PTY-stream handling, so changing the coalescing/buffering still requires bumping
+  `daemon.protocolVersion` (below).
+- **Terminal output is shipped as raw bytes end-to-end — never JSON.** The wire protocol
+  (`crates/pragma-daemon/src/protocol.rs`, mirrored by hand in `apps/pragma/src-tauri/src/pty.rs`
+  since the daemon is a binary the app can't import) is **tag-prefixed**: every frame is
+  `[4-byte BE length][1-byte tag][body]`. Tag 0 = JSON control frame (hello, requests,
+  responses, title/exit events); tag 1 = a binary **output** frame whose body is
+  `[2-byte BE session-id length][session id][raw output bytes]` (`write_output_frame` /
+  `Frame::Output`). Output therefore crosses the socket without JSON escaping (which
+  expands each `0x1B` ~6x) and **without any UTF-8 decode** — `EventFrame::Output` holds
+  `Vec<u8>`, there is no `Utf8Carry`, and xterm reassembles any multi-byte sequence split
+  across frames itself. The app→webview hop is binary too: the PTY `Channel` is
+  `Channel<InvokeResponseBody>`, output is forwarded as `InvokeResponseBody::Raw` (the app
+  never re-encodes it — it relays the daemon's bytes straight through), which the JS
+  `Channel.onmessage` receives as an **`ArrayBuffer`**; title/exit go as
+  `InvokeResponseBody::Json` and arrive as objects. `terminal-manager.ts` branches on
+  `message instanceof ArrayBuffer`, queues `Uint8Array`s in `pendingOutput`, and feeds
+  `terminal.write(Uint8Array)` directly (xterm accepts bytes), so output never becomes a JS
+  string on the hot path. Any change to the frame layout, the tag values, or the channel
+  payload types **must** be applied to both the daemon and the app copy and bump
+  `daemon.protocolVersion` (below).
 - **The daemon is detached and long-lived**, so a rebuild does **not** restart it — a
   stale daemon keeps serving over the existing socket and your new daemon code never
   runs. A protocol-version handshake guards against this: the daemon greets every
@@ -186,9 +220,14 @@ than no guide.
   nodes per frame and is the dominant source of perceived typing latency. Loading is
   wrapped in `try/catch` and `onContextLoss` disposes the addon, so a missing or lost
   WebGL2 context (headless CI, driver reset) transparently falls back to the DOM
-  renderer instead of freezing. **Keystroke input is fire-and-forget and
+  renderer instead of freezing. Frontend output writes are serialized through xterm's
+  write callback (`pendingOutput` / `writeInFlight`) so a burst of daemon chunks coalesces
+  behind the in-flight parser/render pass instead of enqueueing unbounded `terminal.write`
+  calls when rendering slows. The xterm scrollback is bounded to 500 lines
+  (`TERMINAL_SCROLLBACK_LINES`) so long sessions and manual scrollback do not keep growing
+  renderer state. **Keystroke input is fire-and-forget and
   pipelined**: `onData` fires `ptyWrite` without awaiting (JS side), and on the
-  Rust side `pty_write` runs inline (no `spawn_blocking`) and only *enqueues* onto
+  Rust side `pty_write` runs inline (no `spawn_blocking`) and only _enqueues_ onto
   a dedicated writer thread (`input_tx` / `start_input_writer` in
   `src-tauri/src/pty.rs`) that owns its own daemon connection. Writes do **not**
   wait for the daemon's per-write `Response` (a companion `discard_frames` thread
@@ -198,7 +237,26 @@ than no guide.
   request/response connection (`request_conn`). The remaining echo latency is
   structural — every character still crosses two webview↔native IPC boundaries
   plus a socket hop to the detached daemon, where an in-process terminal would
-  echo via direct calls.
+  echo via direct calls. Fitted terminal grids are capped at 240×90 cells
+  (`MAX_TERMINAL_COLS` / `MAX_TERMINAL_ROWS`) before both xterm resize and PTY
+  resize; fullscreen TUIs tend to redraw the entire grid per interaction, so letting
+  huge monitors produce unbounded rows/cols regresses the latency gains above.
+  TUI mouse-report input is forwarded exactly as xterm emits it so mouse-tracking
+  TUIs like opencode can intercept wheel events. Do not batch or rewrite mouse
+  reports, and do not override xterm wheel sensitivity unless the TUI interception
+  path is re-tested. **Wheel reports are rate-limited, not rewritten, while a TUI
+  has mouse tracking on.** xterm emits one mouse report per OS wheel event, and
+  macOS momentum trackpad scrolling fires 100+ events/s; a mouse-tracking TUI
+  redraws its whole grid per report and consumes reports no faster than it can
+  redraw, so the unthrottled flood backs the PTY input up — scrolling keeps going
+  after your finger stops (a laggy, floaty tail) and the render backlog can make it
+  freeze. An `attachCustomWheelEventHandler` in `terminal-manager.ts` drops (returns
+  `false` for) wheel events that arrive within `MOUSE_WHEEL_REPORT_INTERVAL_MS` of
+  the last forwarded one, but **only when `terminal.modes.mouseTrackingMode !==
+"none"`** — with mouse tracking off, xterm scrolls its own viewport locally and is
+  left untouched so normal scrollback stays smooth. This interval is the scroll-feel
+  knob (lower = faster/farther scroll but more redraw load; higher = calmer but a
+  flick scrolls less); tune it rather than removing the throttle or rewriting reports.
 - **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
   out of the raw PTY stream in `crates/pragma-daemon/src/session.rs` and emits a
   `Title` event. The Tauri proxy in `apps/pragma/src-tauri/src/pty.rs` forwards it

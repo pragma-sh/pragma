@@ -8,9 +8,24 @@ import type { Tab } from "@pragma/constants";
 
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import { isMacPlatform } from "@/lib/platform";
-import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEvent } from "@/lib/tauri";
+import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMessage } from "@/lib/tauri";
 
 const RESIZE_DEBOUNCE_MS = 75;
+export const MAX_TERMINAL_COLS = 240;
+export const MAX_TERMINAL_ROWS = 90;
+export const TERMINAL_SCROLLBACK_LINES = 500;
+
+// Minimum gap between wheel-driven mouse reports while a TUI has mouse tracking
+// enabled. xterm emits exactly one mouse report per OS wheel event, and macOS
+// momentum trackpad scrolling fires 100+ events/s. A mouse-tracking TUI (Claude
+// Code, opencode) redraws its whole grid per report, and consumes reports no
+// faster than it can redraw, so an unthrottled flood backs the PTY input up and
+// scrolling keeps going after your finger stops (a laggy, floaty tail). Dropping
+// (never rewriting) excess reports keeps scroll matched to the TUI. This is the
+// knob to tune for scroll feel: lower = faster/farther scroll but more redraw
+// load; higher = calmer but a flick scrolls less. When mouse tracking is off,
+// xterm scrolls its own viewport locally and is left untouched.
+export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 2;
 
 export type TitleListener = (title: string) => void;
 
@@ -20,8 +35,13 @@ interface ManagedTerminal {
   container: HTMLElement;
   cwd: string;
   resizeTimer: number | null;
+  lastResizeCols: number | null;
+  lastResizeRows: number | null;
+  /** Raw output byte-chunks awaiting an xterm write; coalesced on flush. */
+  pendingOutput: Uint8Array[];
+  writeInFlight: boolean;
   /** Live PTY event channel, retained so dispose() can detach its handler. */
-  channel: Channel<PtyEvent> | null;
+  channel: Channel<PtyMessage> | null;
 }
 
 // Nerd Font variants ship full text-presentation glyph coverage for
@@ -85,6 +105,7 @@ export class TerminalManager {
       fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: TERMINAL_FONT_SIZE,
       lineHeight: TERMINAL_LINE_HEIGHT,
+      scrollback: TERMINAL_SCROLLBACK_LINES,
       theme: {
         background: "#0b0d10",
         foreground: "#e5e7eb",
@@ -103,6 +124,22 @@ export class TerminalManager {
       if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
         return false;
       }
+      return true;
+    });
+    // Throttle wheel-driven mouse reports while a TUI is consuming them so a fast
+    // trackpad flick can't flood the PTY input with reports it can't keep up with.
+    // See MOUSE_WHEEL_REPORT_INTERVAL_MS. Returning false drops the event before
+    // xterm turns it into a report; returning true forwards it verbatim.
+    let lastWheelReport = 0;
+    terminal.attachCustomWheelEventHandler(() => {
+      if (terminal.modes.mouseTrackingMode === "none") {
+        return true;
+      }
+      const now = performance.now();
+      if (now - lastWheelReport < MOUSE_WHEEL_REPORT_INTERVAL_MS) {
+        return false;
+      }
+      lastWheelReport = now;
       return true;
     });
     terminal.open(container);
@@ -127,6 +164,10 @@ export class TerminalManager {
       container,
       cwd,
       resizeTimer: null,
+      lastResizeCols: null,
+      lastResizeRows: null,
+      pendingOutput: [],
+      writeInFlight: false,
       channel: null,
     };
     this.terminals.set(tab.id, managed);
@@ -169,6 +210,8 @@ export class TerminalManager {
     if (managed.resizeTimer !== null) {
       window.clearTimeout(managed.resizeTimer);
     }
+    managed.pendingOutput = [];
+    managed.writeInFlight = false;
     // Detach the channel handler so Tauri stops delivering events to a disposed
     // terminal, then tell the daemon to tear down the shell — without this the
     // shell process and its scrollback leak for the lifetime of the daemon.
@@ -187,9 +230,52 @@ export class TerminalManager {
     if (!managed?.terminal.element?.offsetParent) {
       return;
     }
-    managed.fit.fit();
-    const { cols, rows } = managed.terminal;
-    void ptyResize(tabId, cols, rows);
+    const dimensions = managed.fit.proposeDimensions();
+    if (!dimensions) {
+      return;
+    }
+    const cols = Math.max(2, Math.min(dimensions.cols, MAX_TERMINAL_COLS));
+    const rows = Math.max(1, Math.min(dimensions.rows, MAX_TERMINAL_ROWS));
+    if (dimensions.cols === cols && dimensions.rows === rows) {
+      managed.fit.fit();
+    } else if (managed.terminal.cols !== cols || managed.terminal.rows !== rows) {
+      managed.terminal.resize(cols, rows);
+    }
+    const fittedCols = managed.terminal.cols;
+    const fittedRows = managed.terminal.rows;
+    if (managed.lastResizeCols === fittedCols && managed.lastResizeRows === fittedRows) {
+      return;
+    }
+    managed.lastResizeCols = fittedCols;
+    managed.lastResizeRows = fittedRows;
+    void ptyResize(tabId, fittedCols, fittedRows);
+  }
+
+  private enqueueOutput(managed: ManagedTerminal, data: Uint8Array): void {
+    managed.pendingOutput.push(data);
+    if (!managed.writeInFlight) {
+      this.flushOutput(managed);
+    }
+  }
+
+  private flushOutput(managed: ManagedTerminal): void {
+    const chunks = managed.pendingOutput;
+    managed.pendingOutput = [];
+    if (chunks.length === 0) {
+      managed.writeInFlight = false;
+      return;
+    }
+    // Coalesce the queued byte-chunks into a single write so a burst is one
+    // parse/paint pass. xterm.write accepts bytes directly, so output never
+    // becomes a JS string on this hot path.
+    const data = chunks.length === 1 ? chunks[0]! : concatChunks(chunks);
+    managed.writeInFlight = true;
+    managed.terminal.write(data, () => {
+      managed.writeInFlight = false;
+      if (managed.pendingOutput.length > 0) {
+        window.requestAnimationFrame(() => this.flushOutput(managed));
+      }
+    });
   }
 
   /**
@@ -222,23 +308,26 @@ export class TerminalManager {
   }
 
   private connect(tabId: string, cwd: string, managed: ManagedTerminal): void {
-    const onEvent = (event: PtyEvent) => {
-      switch (event.event) {
-        case "output":
-          managed.terminal.write(event.data);
-          break;
+    const onEvent = (message: PtyMessage) => {
+      // Raw terminal output arrives as bytes (ArrayBuffer); control events as
+      // JSON objects.
+      if (message instanceof ArrayBuffer) {
+        this.enqueueOutput(managed, new Uint8Array(message));
+        return;
+      }
+      switch (message.event) {
         case "title": {
           const listeners = this.titleListeners.get(tabId);
           if (listeners) {
             for (const listener of listeners) {
-              listener(event.title);
+              listener(message.title);
             }
           }
           break;
         }
         case "exit":
           managed.terminal.writeln(
-            `\r\n[process exited${event.code === null ? "" : ` with ${event.code}`}]`,
+            `\r\n[process exited${message.code === null ? "" : ` with ${message.code}`}]`,
           );
           break;
       }
@@ -249,16 +338,42 @@ export class TerminalManager {
       .catch(() => ptySpawn(tabId, cwd, cols, rows, onEvent))
       .then((channel) => {
         managed.channel = channel;
-        // Sync the remote PTY to the laid-out size now that the session exists.
+        // The remote session is brand new — either a fresh spawn, or an attach
+        // that fell back to spawn after a daemon reset — and was created with the
+        // pre-fit default size (80x24), because connect() runs before the first
+        // fit(). The synchronous fit() in mount() may already have cached that
+        // real size (and sent a resize to a session that did not exist yet), so
+        // clear the cache to force fit() to re-send the current size now that the
+        // session exists; otherwise it early-returns and the PTY stays at 80x24
+        // while xterm fills the window.
+        managed.lastResizeCols = null;
+        managed.lastResizeRows = null;
         this.fit(tabId);
         return undefined;
       })
       .catch((error: unknown) => {
         managed.terminal.writeln(
-          `\r\n[failed to start terminal: ${error instanceof Error ? error.message : String(error)}]`,
+          `\r\n[failed to start terminal: ${
+            error instanceof Error ? error.message : String(error)
+          }]`,
         );
       });
   }
+}
+
+/** Joins queued output byte-chunks into one contiguous buffer for a single write. */
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const chunk of chunks) {
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 }
 
 export const terminalManager = new TerminalManager();

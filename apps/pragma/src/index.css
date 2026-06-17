@@ -124,8 +124,9 @@
   html,
   body,
   #root {
-    overflow-x: hidden;
-    overscroll-behavior-x: none;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
   }
   body {
     @apply bg-background text-foreground;
