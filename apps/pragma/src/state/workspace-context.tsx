@@ -927,6 +927,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const selectedProjectIdRef = useRef(state.selectedProjectId);
   selectedProjectIdRef.current = state.selectedProjectId;
 
+  // Latest worktree → owning-project map, readable from async callbacks (e.g.
+  // the optimistic delete's failure-restore) without re-creating them on every
+  // state change. Rebuilt each render like `selectedProjectIdRef` above.
+  const worktreeProjectIdRef = useRef<Record<string, string>>({});
+  worktreeProjectIdRef.current = Object.fromEntries(
+    Object.entries(state.worktrees).flatMap(([projectId, worktrees]) =>
+      worktrees.map((worktree) => [worktree.id, projectId]),
+    ),
+  );
+
   // Hydration / persistence bookkeeping for the active selection (last active
   // project + per-project last active worktree). `didHydrateRef` flips true
   // once the mount-time `reload` has rehydrated from SQLite; the persist effect
@@ -1454,17 +1464,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      // Optimistic: drop the row from local state immediately so the sidebar
+      // entry (and the dialog) disappear without waiting on the backend. The
+      // delete runs in the background; if it fails we reload the project from
+      // SQLite — the row was never touched, so it comes back as it was — and
+      // surface a toast. The dialog is already gone by then, so an inline
+      // error is no longer an option (and we never rethrow).
+      const projectId = worktreeProjectIdRef.current[worktreeId];
+      dispatch({ type: "remove-worktree", worktreeId });
       try {
         await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
-        // Optimistically drop the row from local state; the cascade also
-        // removes its tabs and any nested child worktrees from SQLite.
-        dispatch({ type: "remove-worktree", worktreeId });
       } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-        throw cause;
+        if (projectId) {
+          void refreshProject(projectId);
+        }
+        toast.error(`Failed to delete worktree: ${messageFor(cause)}`);
       }
     },
-    [],
+    [refreshProject],
   );
 
   const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
