@@ -77,7 +77,9 @@ than no guide.
 │       │   ├── lib/             # Reusable, framework-agnostic helpers
 │       │   │   ├── tauri.ts     # Typed bridge to Rust commands — the ONLY place invoke() is called
 │       │   │   ├── terminal-manager.ts # Non-React xterm registry; terminal output bypasses React state
+│       │   │   ├── native-editing.ts # OS text-editing chords → readline sequences; text-context detection
 │       │   │   └── utils.ts     # cn() + small utilities
+│       │   ├── hooks/           # React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss)
 │       │   ├── state/           # Workspace context/reducer for projects/worktrees/tabs only
 │       │   ├── test/setup.ts    # Vitest setup
 │       │   ├── App.tsx
@@ -86,10 +88,15 @@ than no guide.
 │           ├── src/lib.rs       # App wiring, managed state, plugins, command registration
 │           ├── src/db.rs        # SQLite migrations + typed CRUD
 │           ├── src/pty.rs       # Detached daemon client + PTY command proxying
-│           ├── src/git.rs       # Git CLI helpers (worktree_changes / file_diff / stage_* / unstage_* / discard_*)
+│           ├── src/git.rs       # Git CLI helpers (worktree_changes / worktrees_merged_status / file_diff / stage_* / discard_*)
 │           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
-│           └── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants)
+│           ├── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants); bundles pragma-daemon via externalBin
+│           ├── tauri.dev.conf.json # Dev overrides ("Pragma Dev" name/title + icons-dev/) merged via `tauri dev --config`
+│           ├── scripts/         # Build helpers (stage-daemon-sidecar.sh — builds + stages the daemon sidecar)
+│           ├── binaries/        # Staged `pragma-daemon-<triple>` Tauri sidecar (git-ignored; built, never committed)
+│           ├── icons/           # Production app icons
+│           └── icons-dev/       # Dev "Pragma Dev" app icons (generated via `tauri icon`)
 ├── crates/
 │   └── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
 ├── packages/
@@ -119,8 +126,165 @@ than no guide.
   `invoke()` directly from components).
 - PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
   the Unix socket and must not own PTYs.
+- **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
+  PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
+  arrives as one read instead of many; a dedicated coalescer thread
+  (`Session::start_coalescer` in `crates/pragma-daemon/src/session.rs`) then merges
+  consecutive `Output` into a single broadcast frame on a **trailing throttle**
+  (`OUTPUT_COALESCE_INTERVAL`, 8 ms): the first output after an idle gap flushes
+  immediately (zero added keystroke-echo latency), and only back-to-back output is
+  batched — flushed at most once per interval, or sooner at `OUTPUT_COALESCE_MAX_BYTES`
+  (256 KB). This collapses a scroll/redraw flood into far fewer socket
+  frames, Tauri IPC messages, and xterm parse/paint passes (each redraw is otherwise
+  amplified: tiny scroll input → whole-grid repaint on the return trip). `Title`/`Exit`
+  flush pending output first so ordering is preserved. The reader thread now only
+  strips OSC titles and hands `OutputMsg`s to the coalescer over an mpsc channel. This is
+  PTY-stream handling, so changing the coalescing/buffering still requires bumping
+  `daemon.protocolVersion` (below).
+- **Terminal output is shipped as raw bytes end-to-end — never JSON.** The wire protocol
+  (`crates/pragma-daemon/src/protocol.rs`, mirrored by hand in `apps/pragma/src-tauri/src/pty.rs`
+  since the daemon is a binary the app can't import) is **tag-prefixed**: every frame is
+  `[4-byte BE length][1-byte tag][body]`. Tag 0 = JSON control frame (hello, requests,
+  responses, title/exit events); tag 1 = a binary **output** frame whose body is
+  `[2-byte BE session-id length][session id][raw output bytes]` (`write_output_frame` /
+  `Frame::Output`). Output therefore crosses the socket without JSON escaping (which
+  expands each `0x1B` ~6x) and **without any UTF-8 decode** — `EventFrame::Output` holds
+  `Vec<u8>`, there is no `Utf8Carry`, and xterm reassembles any multi-byte sequence split
+  across frames itself. The app→webview hop is binary too: the PTY `Channel` is
+  `Channel<InvokeResponseBody>`, output is forwarded as `InvokeResponseBody::Raw` (the app
+  never re-encodes it — it relays the daemon's bytes straight through), which the JS
+  `Channel.onmessage` receives as an **`ArrayBuffer`**; title/exit go as
+  `InvokeResponseBody::Json` and arrive as objects. `terminal-manager.ts` branches on
+  `message instanceof ArrayBuffer`, queues `Uint8Array`s in `pendingOutput`, and feeds
+  `terminal.write(Uint8Array)` directly (xterm accepts bytes), so output never becomes a JS
+  string on the hot path. Any change to the frame layout, the tag values, or the channel
+  payload types **must** be applied to both the daemon and the app copy and bump
+  `daemon.protocolVersion` (below).
+- **The daemon is detached and long-lived**, so a rebuild does **not** restart it — a
+  stale daemon keeps serving over the existing socket and your new daemon code never
+  runs. A protocol-version handshake guards against this: the daemon greets every
+  connection with a `ServerFrame::Hello { protocolVersion }` (first frame, always) and
+  records its PID in `daemon.lock`; the app's `connect_compatible` (`src-tauri/src/pty.rs`)
+  reads that hello and, on a version mismatch **or no greeting** (an old pre-handshake
+  daemon), kills the stale process (by lock-file PID, falling back to `pkill`) and respawns
+  a matching one. The version is the shared `@pragma/constants` `daemon.protocolVersion` —
+  **bump it whenever you change the daemon wire protocol or its PTY-stream handling** (e.g.
+  the OSC title parser) so existing daemons are replaced instead of silently serving old
+  behavior. The value is read by both the daemon and the app crates from
+  `pragma_constants::CONSTANTS.daemon.protocol_version`.
+- **The daemon ships as a Tauri sidecar so prod is self-contained.** A release app
+  launches `pragma-daemon` from **beside its own executable** (`daemon_executable()` in
+  `src-tauri/src/pty.rs` = `current_exe().parent()/pragma-daemon`); a debug app spawns it
+  via `cargo run -p pragma-daemon` instead. The release binary gets there because
+  `tauri.conf.json` declares `bundle.externalBin: ["binaries/pragma-daemon"]`, and the
+  Tauri CLI copies (and code-signs) `src-tauri/binaries/pragma-daemon-<target-triple>` next
+  to the app binary in every bundle. That sidecar is **built, not committed** — staged by
+  `src-tauri/scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-daemon` + copy with
+  the host triple), wired in two places: `tauri:build`'s `beforeBuildCommand` runs it
+  `--release`, and `tauri:dev` runs it (debug) before `tauri dev` so the CLI's sidecar-copy
+  step doesn't fail (dev still uses `cargo run` at runtime — the staged file only satisfies
+  bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
+  plugin, so no `shell:` capability is needed. `binaries/` is git-ignored.
+- **Dev and prod must never share a daemon.** The socket/lock/log live in a
+  **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
+  build's **product identity, not the compile profile**: `daemon_channel_for_product`
+  in `src-tauri/src/pty.rs` maps a `product_name` containing `Dev` ("Pragma Dev", set
+  in `tauri.dev.conf.json`) to `pragma-dev` and everything else ("Pragma") to `pragma`.
+  This is deliberate — a **release-built dev app** (e.g. when profiling terminal latency)
+  is still a dev app and must keep its own daemon, which a `cfg!(debug_assertions)` split
+  would get wrong (both release builds would collapse onto `pragma`). The app derives the
+  channel once at startup from `app.config().product_name` (`lib.rs` → `PtyClient::new`)
+  and hands it to the spawned daemon via the **`PRAGMA_DAEMON_CHANNEL` env** alongside
+  `PRAGMA_APP_DATA_DIR`; `crates/pragma-daemon/src/main.rs` (`daemon_channel` → `daemon_paths`)
+  reads that env, falling back to a `cfg!(debug_assertions)` default only when the daemon is
+  run by hand. So both processes resolve the identical path and the two channels never
+  collide. (On Linux the dir is `$XDG_RUNTIME_DIR/<channel>`; elsewhere `<app_data_dir>/<channel>`.)
+  NB this isolates the **daemon** only — both builds still share `com.pragma.app`'s app-data
+  dir and `pragma.db`; give the dev build its own `identifier` if you ever need to split those too.
+- **Native menubar + the Troubleshooting menu.** The app menu is built once in
+  `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` (so the OS-standard
+  app/edit/window items survive) **plus** a `Troubleshooting` submenu with **Restart
+  Daemon** and **Open Daemon Logs**. Menu clicks are pure forwarders: `on_menu_event`
+  re-emits the item id as the `pragma:menu` Tauri event (payload = the menu id), and the
+  frontend (`workspace-context`, via `onMenuAction` in `lib/tauri.ts`) runs the action so
+  feedback lives in the UI — **Restart Daemon** calls the `restart_daemon` command
+  (`PtyClient::restart` = kill the running daemon, respawn, confirm reachable; this
+  terminates every shell) with a `sonner` toast, and **Open Daemon Logs** opens the
+  `log` tab. Add a menu action by giving it an id const + item in `install_menu`, a
+  `MenuAction` variant + branch in `handleMenuAction`. The daemon log itself isn't
+  worktree-scoped, so it loads through the dedicated `read_daemon_log` command
+  (`PtyClient::read_log`, reading `log_path()` — the `daemon.log` beside the socket, which
+  on Linux is the XDG runtime dir, **not** app data) rather than the worktree file editor.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
-  React state or the workspace reducer.
+  React state or the workspace reducer. Each terminal renders through the **WebGL
+  addon** (`@xterm/addon-webgl`), loaded right after `terminal.open()` (the renderer
+  needs the canvas to exist first) — xterm's default DOM renderer reflows real DOM
+  nodes per frame and is the dominant source of perceived typing latency. Loading is
+  wrapped in `try/catch` and `onContextLoss` disposes the addon, so a missing or lost
+  WebGL2 context (headless CI, driver reset) transparently falls back to the DOM
+  renderer instead of freezing. Frontend output writes are serialized through xterm's
+  write callback (`pendingOutput` / `writeInFlight`) so a burst of daemon chunks coalesces
+  behind the in-flight parser/render pass instead of enqueueing unbounded `terminal.write`
+  calls when rendering slows. The xterm scrollback is bounded to 500 lines
+  (`TERMINAL_SCROLLBACK_LINES`) so long sessions and manual scrollback do not keep growing
+  renderer state. **Keystroke input is fire-and-forget and
+  pipelined**: `onData` fires `ptyWrite` without awaiting (JS side), and on the
+  Rust side `pty_write` runs inline (no `spawn_blocking`) and only _enqueues_ onto
+  a dedicated writer thread (`input_tx` / `start_input_writer` in
+  `src-tauri/src/pty.rs`) that owns its own daemon connection. Writes do **not**
+  wait for the daemon's per-write `Response` (a companion `discard_frames` thread
+  drains them so the socket buffer can't fill), so consecutive keystrokes pipeline
+  instead of each one stalling behind the previous keystroke's full daemon
+  round-trip. `resize`/`kill` keep the separate pooled, handshake-free
+  request/response connection (`request_conn`). **Native OS text-editing chords**
+  (macOS Cmd+Backspace/Left/Right, Option+Left/Right/Backspace; Linux
+  Ctrl+Left/Right/Backspace/Delete) are translated to readline control characters
+  by `nativeEditingSequence` in `lib/native-editing.ts` inside xterm's
+  `attachCustomKeyEventHandler`, checked **before** configured Pragma shortcuts so
+  Cmd+Backspace deletes the line (Ctrl+U) in the terminal instead of bubbling up
+  to `deleteFile`. Shift-modified variants are left alone so xterm's own
+  shift-selection keeps working. **Shift+Enter is rewritten to ESC+CR** in the
+  same `attachCustomKeyEventHandler` (also checked before the keybinding
+  passthrough) so TUI REPLs (Claude Code, opencode, Codex) insert a soft newline
+  instead of submitting. xterm only maps Enter to CR, so a bare Shift+Enter would
+  otherwise be indistinguishable from Enter; swallowing the event and writing
+  `\x1b\r` makes the shift meaningful without affecting plain Enter or
+  Cmd/Ctrl/Alt+Enter (which still fall through to xterm / configured keybindings).
+  For a shell that ignores the ESC, the trailing CR still ends the line — at
+  worst Shift+Enter behaves like Enter. The remaining echo latency is
+  structural — every character still crosses two webview↔native IPC boundaries
+  plus a socket hop to the detached daemon, where an in-process terminal would
+  echo via direct calls. Fitted terminal grids are capped at 240×90 cells
+  (`MAX_TERMINAL_COLS` / `MAX_TERMINAL_ROWS`) before both xterm resize and PTY
+  resize; fullscreen TUIs tend to redraw the entire grid per interaction, so letting
+  huge monitors produce unbounded rows/cols regresses the latency gains above.
+  TUI mouse-report input is forwarded exactly as xterm emits it so mouse-tracking
+  TUIs like opencode can intercept wheel events. Do not batch or rewrite mouse
+  reports, and do not override xterm wheel sensitivity unless the TUI interception
+  path is re-tested. **Wheel reports are rate-limited, not rewritten, while a TUI
+  has mouse tracking on.** xterm emits one mouse report per OS wheel event, and
+  macOS momentum trackpad scrolling fires 100+ events/s; a mouse-tracking TUI
+  redraws its whole grid per report and consumes reports no faster than it can
+  redraw, so the unthrottled flood backs the PTY input up — scrolling keeps going
+  after your finger stops (a laggy, floaty tail) and the render backlog can make it
+  freeze. An `attachCustomWheelEventHandler` in `terminal-manager.ts` drops (returns
+  `false` for) wheel events that arrive within `MOUSE_WHEEL_REPORT_INTERVAL_MS` of
+  the last forwarded one, but **only when `terminal.modes.mouseTrackingMode !==
+"none"`** — with mouse tracking off, xterm scrolls its own viewport locally and is
+  left untouched so normal scrollback stays smooth. This interval is the scroll-feel
+  knob (lower = faster/farther scroll but more redraw load; higher = calmer but a
+  flick scrolls less); tune it rather than removing the throttle or rewriting reports.
+- **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
+  out of the raw PTY stream in `crates/pragma-daemon/src/session.rs` and emits a
+  `Title` event. The Tauri proxy in `apps/pragma/src-tauri/src/pty.rs` forwards it
+  as `PtyEvent::Title`, the non-React `TerminalManager` fans it out via
+  `onTitle(tabId, listener)`, and the workspace context dispatches the
+  `set-auto-title` reducer action. `Tab.userRenamed` is the single guard: the user
+  flipping it via double-click/context menu (the existing `rename-tab` action +
+  `rename_tab` Tauri command, which now also sets `user_renamed = 1` server-side)
+  permanently locks the tab's title against any future shell push. The browser-meta
+  pipeline (page `<title>` updates) takes the same `set-auto-title` route so a
+  stray browser title can never flip the flag either.
 - **HTML5 drag-and-drop requires `"dragDropEnabled": false`** on the window in
   `tauri.conf.json`. It defaults to `true`, which makes Tauri capture OS drag/drop at the
   native level and the in-page `dragstart`/`dragover`/`drop` events never fire. Also note
@@ -194,13 +358,21 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   **Ctrl+Delete** on Linux — that binding is registered as `deleteFile` in
   `packages/constants/schema.json` + the Rust `keybindings::default_config` and surfaces
   through `useShortcuts` to `WorkspaceShell`, which dispatches a `pragma:request-delete-file`
-  window event the `FilesTab` listens for. The controller's `commitDelete` calls
+  window event the `FilesTab` listens for. `deleteFile` is skipped when focus is in a
+  text-editing context (`isTextEditingContext` in `lib/native-editing.ts` — inputs, the
+  terminal, CodeMirror) so the OS-native text-editing behavior takes over instead of
+  deleting a file. The controller's `commitDelete` calls
   `deleteFile(worktreeId, path)` immediately and bumps the parent's nonce. The worktree is a
   git checkout, so **delete has no confirmation** — `git checkout -- <path>` / `git clean -fd`
   from a terminal tab is the recovery path. The backend `fs::delete_file` resolves through
   `resolve_in_worktree` (same `..`/symlink guard) and refuses to recurse into non-empty
   directories (`InvalidInput`); use `discard_*` / `clean -fd` from the Changes tab for tracked
-  / untracked multi-file removal. Git has no edit
+  / untracked multi-file removal. **⌘+End** (mac) / **Ctrl+End** (linux) is registered as
+  `scrollTerminalBottom` and scrolls the active terminal viewport to the live cursor row
+  (`TerminalManager.scrollToBottom` → xterm `scrollToBottom`). **Escape closes any open
+  modal**: radix `Dialog`/`AlertDialog` dismiss on Escape natively, and the hand-rolled
+  `CreateProjectDialog` / `CreateWorktreeDialog` use the `useEscapeToClose` hook
+  (`hooks/use-escape-to-close.ts`) for the same behavior. Git has no edit
   notification, so **Changes polls `worktree_changes` every 2s while mounted** (and on window
   focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
   `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
@@ -217,8 +389,9 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   show `merge_worktree_to_parent` (runs `git merge <child-branch>` in the clean parent worktree and
   leaves conflicts there for IDE / `git merge --continue` or `git merge --abort` resolution), and a
   fully merged/no-change child shows the same `WorktreeDeleteDialog` used by the left sidebar. The
-  left sidebar polls those same change buckets for child worktrees and swaps the branch glyph to a
-  merge glyph while the merged-but-not-deleted worktree remains in the tree. Files open as two new
+  left sidebar polls `worktrees_merged_status` for child worktrees (one compact boolean map, not full
+  file lists) and swaps the branch glyph to a merge glyph while the merged-but-not-deleted worktree
+  remains in the tree. Files open as two new
   `TabKind`s — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and `diff` (read-only
   `@codemirror/merge`) — rendered through the `SplitHost` switch and located by `Tab.filePath`
   (worktree-relative) + `Tab.diffSide` (v5 migration; the columns persist editor/diff tabs). Open
@@ -259,6 +432,21 @@ path")` from inside the action handler — never from inside the reducer.
   list. When the user hides the currently-selected worktree, the reducer
   falls back to the main worktree (or the first remaining root) so the
   workspace never points at a hidden id.
+- **Active selection persists across restarts.** The last active project and
+  each project's last active worktree are saved in the `settings` table under
+  one opaque, frontend-owned JSON key (`activeSelection`) via the
+  `get_active_selection` / `set_active_selection` commands — Rust stores the
+  string verbatim, never parsing it (same pattern as split layouts). The
+  mount-time `reload` rehydrates (`hydrate-selection` seeds
+  `selectedProjectId` + `selectedWorktreeByProject`, then `set-projects`
+  validates the project id against the loaded list and falls back to the
+  first project if it was deleted elsewhere); a persist effect writes on every
+  selection change, gated by `didHydrateRef` so the initial empty state can't
+  clobber a saved selection, and deduped by `lastPersistedRef`. The in-memory
+  `set-worktrees` reducer already honored a remembered worktree when one
+  existed, so this is purely the missing persistence layer — switching away
+  from a project and back (in-session or across restarts) now returns to the
+  worktree the user left off on.
 
 ## Common commands
 
@@ -269,8 +457,8 @@ manager and **turbo** as the task runner.
 bun install                # Install all workspace deps
 
 # App
-bun run dev                # Run the desktop app — native window + Vite (Tauri dev)
-bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+bun run dev                # Run the desktop app — native window + Vite (Tauri dev, "Pragma Dev" branding via tauri.dev.conf.json)
+bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles, production "Pragma" branding)
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo

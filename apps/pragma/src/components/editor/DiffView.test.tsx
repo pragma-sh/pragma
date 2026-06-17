@@ -30,6 +30,7 @@ function diffTab(): Tab {
     url: null,
     filePath: "src/app.ts",
     diffSide: "committed",
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
   };

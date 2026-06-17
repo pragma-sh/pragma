@@ -32,12 +32,14 @@ import {
   renameFile,
   renameWorktree,
   setSplitLayout,
+  setTabTitle,
   setWorktreeHidden,
   stageAll,
   stageFile,
   unstageAll,
   unstageFile,
   worktreeChanges,
+  worktreesMergedStatus,
   worktreeStatus,
   writeFile,
 } from "./tauri";
@@ -302,6 +304,13 @@ describe("git changes IPC wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("worktree_changes", { worktreeId: "wt-1" });
   });
 
+  it("worktreesMergedStatus forwards the worktree ids", () => {
+    void worktreesMergedStatus(["wt-1", "wt-2"]);
+    expect(invokeMock).toHaveBeenCalledWith("worktrees_merged_status", {
+      worktreeIds: ["wt-1", "wt-2"],
+    });
+  });
+
   it("fileDiff forwards worktree id, path, side, and optional old path", () => {
     void fileDiff("wt-1", "src/app.ts", "committed");
     expect(invokeMock).toHaveBeenCalledWith("file_diff", {
@@ -346,5 +355,20 @@ describe("git changes IPC wrappers", () => {
   it("mergeWorktreeToParent forwards the worktree id", () => {
     void mergeWorktreeToParent("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("merge_worktree_to_parent", { worktreeId: "wt-1" });
+  });
+});
+
+describe("tab title IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("setTabTitle forwards the tab id and shell-emitted title", () => {
+    void setTabTitle("tab-1", "user@host: ~/repo");
+    expect(invokeMock).toHaveBeenCalledWith("set_tab_title", {
+      tabId: "tab-1",
+      title: "user@host: ~/repo",
+    });
   });
 });

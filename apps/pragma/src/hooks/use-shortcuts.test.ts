@@ -65,6 +65,10 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "backspace" },
         linux: { modifiers: ["ctrl"], key: "delete" },
       },
+      scrollTerminalBottom: {
+        mac: { modifiers: ["cmd"], key: "end" },
+        linux: { modifiers: ["ctrl"], key: "end" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -128,6 +132,7 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onSplitHorizontal: vi.fn(),
     onSplitVertical: vi.fn(),
     onDeleteSelectedFile: vi.fn(),
+    onScrollTerminalBottom: vi.fn(),
     ...overrides,
   };
 }
@@ -273,6 +278,107 @@ describe("useShortcuts", () => {
     const event = dispatchKeydown({ ctrlKey: true, key: "Delete" });
 
     expect(onDeleteSelectedFile).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("does not fire onDeleteSelectedFile when a text input is focused (mac)", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onDeleteSelectedFile = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onDeleteSelectedFile })));
+
+    await flushLoad();
+
+    const input = document.createElement("input");
+    input.type = "text";
+    document.body.append(input);
+    input.focus();
+
+    try {
+      const event = dispatchKeydown({ metaKey: true, key: "Backspace" });
+      expect(onDeleteSelectedFile).not.toHaveBeenCalled();
+      // Native macOS text editing is left to WebKit — no preventDefault.
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      input.remove();
+    }
+  });
+
+  it("does not fire onDeleteSelectedFile when a textarea is focused (linux)", async () => {
+    getPlatformMock.mockResolvedValue("linux");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onDeleteSelectedFile = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onDeleteSelectedFile })));
+
+    await flushLoad();
+
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    try {
+      const event = dispatchKeydown({ ctrlKey: true, key: "Delete" });
+      expect(onDeleteSelectedFile).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      textarea.remove();
+    }
+  });
+
+  it("does not fire onDeleteSelectedFile inside an xterm terminal", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onDeleteSelectedFile = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onDeleteSelectedFile })));
+
+    await flushLoad();
+
+    // xterm.js focuses a hidden <textarea> inside `.xterm` for IME / mobile
+    // keyboard input.
+    const xterm = document.createElement("div");
+    xterm.className = "xterm";
+    const helperTextarea = document.createElement("textarea");
+    xterm.appendChild(helperTextarea);
+    document.body.append(xterm);
+    helperTextarea.focus();
+
+    try {
+      const event = dispatchKeydown({ metaKey: true, key: "Backspace" });
+      expect(onDeleteSelectedFile).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      xterm.remove();
+    }
+  });
+
+  it("fires onScrollTerminalBottom for cmd+end on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onScrollTerminalBottom = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onScrollTerminalBottom })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "End" });
+
+    expect(onScrollTerminalBottom).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("fires onScrollTerminalBottom for ctrl+end on linux", async () => {
+    getPlatformMock.mockResolvedValue("linux");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onScrollTerminalBottom = vi.fn();
+
+    renderHook(() => useShortcuts(options({ onScrollTerminalBottom })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ ctrlKey: true, key: "End" });
+
+    expect(onScrollTerminalBottom).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
   });
 });

@@ -7,6 +7,7 @@ import {
   setLoadedKeybindingsConfig,
   workspaceIndexForAction,
 } from "@/lib/keybindings";
+import { isTextEditingContext } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { getPlatform, loadKeybindings } from "@/lib/tauri";
 
@@ -27,6 +28,8 @@ interface UseShortcutsOptions {
   onSplitVertical: () => void;
   /** Files tree: opens the delete confirmation for the currently selected file. */
   onDeleteSelectedFile: () => void;
+  /** Scrolls the active terminal viewport to the bottom (live cursor row). */
+  onScrollTerminalBottom: () => void;
 }
 
 interface ShortcutState {
@@ -126,8 +129,21 @@ export function useShortcuts(options: UseShortcutsOptions): void {
           current.onSplitVertical();
           break;
         case "deleteFile":
+          // Cmd/Ctrl+Delete is a native OS text-editing shortcut (delete to
+          // beginning of line) in inputs, the terminal, and the editor. Only
+          // treat it as "delete the selected file" when focus is outside a
+          // text-editing context (e.g. the file tree). Letting the event
+          // continue without preventDefault lets WebKit / xterm do the native
+          // thing.
+          if (isTextEditingContext(document.activeElement)) {
+            return;
+          }
           event.preventDefault();
           current.onDeleteSelectedFile();
+          break;
+        case "scrollTerminalBottom":
+          event.preventDefault();
+          current.onScrollTerminalBottom();
           break;
         default: {
           const workspaceIndex = workspaceIndexForAction(action);

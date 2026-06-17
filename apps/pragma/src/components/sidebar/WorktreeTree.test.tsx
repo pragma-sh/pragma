@@ -1,14 +1,8 @@
-import type {
-  ChangedFile,
-  ChangeStatus,
-  DiffSide,
-  Worktree,
-  WorktreeChanges,
-} from "@pragma/constants";
+import type { Worktree } from "@pragma/constants";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const worktreeChangesMock = vi.fn();
+const worktreesMergedStatusMock = vi.fn();
 const hideWorktreeMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const renameWorktreeMock = vi.fn();
@@ -48,7 +42,7 @@ let workspaceMock = {
 };
 
 vi.mock("@/lib/tauri", () => ({
-  worktreeChanges: (...args: unknown[]) => worktreeChangesMock(...args),
+  worktreesMergedStatus: (...args: unknown[]) => worktreesMergedStatusMock(...args),
 }));
 
 vi.mock("@/state/workspace-context", () => ({
@@ -57,18 +51,10 @@ vi.mock("@/state/workspace-context", () => ({
 
 import { WorktreeTree } from "./WorktreeTree";
 
-function changes(overrides: Partial<WorktreeChanges> = {}): WorktreeChanges {
-  return { committed: [], staged: [], unstaged: [], ...overrides };
-}
-
-function change(path: string, status: ChangeStatus, side: DiffSide): ChangedFile {
-  return { path, oldPath: null, status, side, additions: null, deletions: null };
-}
-
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  worktreeChangesMock.mockReset();
+  worktreesMergedStatusMock.mockReset();
   hideWorktreeMock.mockReset();
   openWorktreeInEditorMock.mockReset();
   renameWorktreeMock.mockReset();
@@ -86,26 +72,22 @@ afterEach(() => {
 
 describe("WorktreeTree", () => {
   it("uses the merged icon for a child worktree with no remaining changes", async () => {
-    worktreeChangesMock.mockResolvedValue(changes());
+    worktreesMergedStatusMock.mockResolvedValue({ child: true });
 
     const { container } = render(<WorktreeTree onCreateChild={vi.fn()} />);
 
     await screen.findByText("feature");
-    await vi.waitFor(() => expect(worktreeChangesMock).toHaveBeenCalledWith("child"));
-    expect(container.querySelector(".lucide-git-merge")).toBeTruthy();
+    await vi.waitFor(() => expect(worktreesMergedStatusMock).toHaveBeenCalledWith(["child"]));
+    await vi.waitFor(() => expect(container.querySelector(".lucide-git-merge")).toBeTruthy());
   });
 
-  it("keeps the branch icon for a child worktree with committed changes", async () => {
-    worktreeChangesMock.mockResolvedValue(
-      changes({
-        committed: [change("src/app.ts", "modified", "committed")],
-      }),
-    );
+  it("keeps the branch icon for a child worktree with remaining changes", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
 
     const { container } = render(<WorktreeTree onCreateChild={vi.fn()} />);
 
     await screen.findByText("feature");
-    await vi.waitFor(() => expect(worktreeChangesMock).toHaveBeenCalledWith("child"));
+    await vi.waitFor(() => expect(worktreesMergedStatusMock).toHaveBeenCalledWith(["child"]));
     expect(container.querySelector(".lucide-git-merge")).toBeNull();
   });
 });

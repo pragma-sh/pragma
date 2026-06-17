@@ -14,6 +14,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `components/ui/` — shadcn/ui primitives (generated; don't hand-edit).
   - `lib/tauri.ts` — the ONLY place `invoke()` is called; typed wrappers per command.
   - `lib/terminal-manager.ts` — non-React xterm registry; terminal output bypasses React state.
+  - `lib/native-editing.ts` — OS text-editing chords → readline sequences; text-context detection.
+  - `hooks/` — React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss).
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
 - `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, icons).

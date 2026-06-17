@@ -61,6 +61,10 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "backspace" },
         linux: { modifiers: ["ctrl"], key: "delete" },
       },
+      scrollTerminalBottom: {
+        mac: { modifiers: ["cmd"], key: "end" },
+        linux: { modifiers: ["ctrl"], key: "end" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },

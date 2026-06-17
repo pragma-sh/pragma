@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { Globe, SquareTerminal } from "lucide-react";
+import { Globe, ScrollText, SquareTerminal } from "lucide-react";
 
 import { fileIconId } from "@/lib/file-icons";
 import { basename } from "@/lib/path";
+import { defaultTabTitle } from "@/lib/tab-title";
 import { useTabDirty } from "@/state/editor-dirty-store";
 
 /** The display title for a tab: file name for editor/diff, else its label. */
@@ -23,7 +24,9 @@ export function tabTitle(tab: Tab): string {
     }
     return name;
   }
-  return tab.title ?? (tab.kind === "browser" ? "New tab" : "Shell");
+  // A blank title (a shell/page that cleared its name) falls back to the
+  // default too, not just a null one.
+  return tab.title?.trim() || defaultTabTitle(tab.kind);
 }
 
 /** Renders a tab kind icon, using the page favicon for browser tabs when available. */
@@ -42,6 +45,10 @@ export function TabIcon({ tab }: { tab: Tab }) {
 
   if (tab.kind === "editor" || tab.kind === "diff") {
     return <Icon className="size-3.5 shrink-0" icon={fileIconId(basename(tab.filePath ?? ""))} />;
+  }
+
+  if (tab.kind === "log") {
+    return <ScrollText className="size-3.5 shrink-0 text-slate-400" />;
   }
 
   if (tab.kind !== "browser") {

@@ -29,9 +29,18 @@ export function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
-export type PtyEvent = { event: "output"; data: string } | { event: "exit"; code: number | null };
+/**
+ * JSON control events from the daemon. Terminal **output** is not modeled here:
+ * it arrives on the same channel as a raw {@link ArrayBuffer} (the backend sends
+ * it as bytes, never JSON, so escape-heavy redraws aren't inflated and can be
+ * fed straight into xterm). See {@link PtyMessage}.
+ */
+export type PtyEvent = { event: "title"; title: string } | { event: "exit"; code: number | null };
 
-export type PtyEventHandler = (event: PtyEvent) => void;
+/** A message on a PTY channel: raw output bytes, or a JSON control event. */
+export type PtyMessage = ArrayBuffer | PtyEvent;
+
+export type PtyEventHandler = (message: PtyMessage) => void;
 
 /**
  * Spawns a daemon-backed PTY session and streams events through a Tauri channel.
@@ -44,8 +53,8 @@ export function ptySpawn(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyEvent>> {
-  const channel = new Channel<PtyEvent>();
+): Promise<Channel<PtyMessage>> {
+  const channel = new Channel<PtyMessage>();
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("pty_spawn", { sessionId, cwd, cols, rows, onEvent: channel }).then(
@@ -62,8 +71,8 @@ export function ptyAttach(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyEvent>> {
-  const channel = new Channel<PtyEvent>();
+): Promise<Channel<PtyMessage>> {
+  const channel = new Channel<PtyMessage>();
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("pty_attach", { sessionId, cols, rows, onEvent: channel }).then(
@@ -86,6 +95,20 @@ export function ptyKill(sessionId: string): Promise<void> {
   return invoke("pty_kill", { sessionId });
 }
 
+/**
+ * Restarts the detached PTY daemon (Troubleshooting menu). Resolves once a fresh
+ * daemon is reachable. Every running shell session is terminated, so the caller
+ * should expect terminals to report exit.
+ */
+export function restartDaemon(): Promise<void> {
+  return invoke("restart_daemon");
+}
+
+/** Returns the current contents of the daemon log file (empty if not yet created). */
+export function readDaemonLog(): Promise<string> {
+  return invoke<string>("read_daemon_log");
+}
+
 /** Lists persisted projects ordered for the project switcher. */
 export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
@@ -104,6 +127,20 @@ export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<
 /** Returns the default directory for native project pickers. */
 export function getProjectsDirectory(): Promise<string> {
   return invoke<string>("get_projects_directory");
+}
+
+/**
+ * Returns the persisted active selection (last active project + per-project
+ * last active worktree) as opaque, frontend-owned JSON, or null on first
+ * launch. The shape is owned by the frontend; Rust stores the string verbatim.
+ */
+export function getActiveSelection(): Promise<string | null> {
+  return invoke<string | null>("get_active_selection");
+}
+
+/** Persists the active selection (opaque, frontend-owned JSON). */
+export function setActiveSelection(value: string): Promise<void> {
+  return invoke<void>("set_active_selection", { value });
 }
 
 /** Lists worktrees for a project. */
@@ -193,6 +230,15 @@ export function renameTab(tabId: string, title: string): Promise<Tab> {
   return invoke<Tab>("rename_tab", { tabId, title });
 }
 
+/**
+ * Persists a shell-driven tab title (OSC 0/2) without touching the
+ * `userRenamed` flag. The reducer is responsible for refusing to apply
+ * the update when the user has explicitly renamed the tab.
+ */
+export function setTabTitle(tabId: string, title: string): Promise<Tab> {
+  return invoke<Tab>("set_tab_title", { tabId, title });
+}
+
 /** Persists the current page URL for a browser tab (session restore). */
 export function setTabUrl(tabId: string, url: string): Promise<Tab> {
   return invoke<Tab>("set_tab_url", { tabId, url });
@@ -275,6 +321,17 @@ export function deleteFile(worktreeId: string, path: string): Promise<void> {
  */
 export function worktreeChanges(worktreeId: string): Promise<WorktreeChanges> {
   return invoke<WorktreeChanges>("worktree_changes", { worktreeId });
+}
+
+/**
+ * Reports, per worktree, whether it is fully merged & clean (HEAD already
+ * contained by the parent branch, nothing staged/unstaged/untracked). A cheap, compact
+ * alternative to {@link worktreeChanges} for the sidebar's merge-status poll: one
+ * IPC call returns a `{ [worktreeId]: merged }` map instead of full file lists
+ * per worktree, so polling many worktrees doesn't flood the UI thread.
+ */
+export function worktreesMergedStatus(worktreeIds: string[]): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("worktrees_merged_status", { worktreeIds });
 }
 
 /** Loads the old/new text for one changed file on the given diff side. */
@@ -454,6 +511,14 @@ export function onBrowserFocusRequest(
   handler: (request: BrowserFocusRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<BrowserFocusRequest>("browser-focus-request", (event) => handler(event.payload));
+}
+
+/** A Troubleshooting-menu action forwarded from the native menubar. */
+export type MenuAction = "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs";
+
+/** Subscribes to native menubar actions (the Troubleshooting menu). */
+export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
+  return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
 }
 
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */

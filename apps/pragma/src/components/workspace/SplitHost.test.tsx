@@ -20,6 +20,7 @@ function tab(id: string): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
   };
@@ -77,6 +78,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       createTabInPane,
       openFileTab: vi.fn(),
       openDiffTab: vi.fn(),
+      openDaemonLogTab: vi.fn(),
       closeTab: vi.fn(),
       renameTerminalTab: vi.fn(),
       openSelectedWorktree: vi.fn(),

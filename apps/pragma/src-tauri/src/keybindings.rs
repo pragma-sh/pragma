@@ -94,6 +94,7 @@ fn default_config() -> KeybindingsConfig {
             split_horizontal: chord("cmd", "/", "ctrl", "/"),
             split_vertical: chord("cmd+shift", "/", "ctrl+shift", "/"),
             delete_file: chord("cmd", "backspace", "ctrl", "delete"),
+            scroll_terminal_bottom: chord("cmd", "end", "ctrl", "end"),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),
@@ -148,6 +149,8 @@ mod tests {
         );
         assert_eq!(parsed.bindings.delete_file.mac.key, "backspace");
         assert_eq!(parsed.bindings.delete_file.linux.key, "delete");
+        assert_eq!(parsed.bindings.scroll_terminal_bottom.mac.key, "end");
+        assert_eq!(parsed.bindings.scroll_terminal_bottom.linux.key, "end");
     }
 
     #[test]

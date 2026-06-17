@@ -4,6 +4,7 @@ mod session;
 
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::net::Shutdown;
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -15,20 +16,48 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use daemonize::Daemonize;
+use pragma_constants::CONSTANTS;
 
 use protocol::{
-    read_frame, write_frame, EventFrame, RequestFrame, RequestKind, ResponseFrame, ServerFrame,
+    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, RequestFrame,
+    RequestKind, ResponseFrame, ServerFrame,
 };
 use registry::Registry;
 
 const DETACH_FLAG: &str = "--detach";
+
+/// Build channel used to isolate this daemon from a differently-built sibling.
+/// The Pragma app picks the channel from its product identity (see
+/// `daemon_channel_for_product` in `pty.rs`) and hands it to us via
+/// `PRAGMA_DAEMON_CHANNEL` when it spawns us, so a dev daemon and a prod daemon
+/// resolve different socket/lock/log paths regardless of compile profile. This
+/// compile-profile default only applies when the daemon is run by hand.
+const DEFAULT_DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
+    "pragma-dev"
+} else {
+    "pragma"
+};
+
+/// The channel the app handed us, falling back to the compile-profile default
+/// when the daemon is launched directly (e.g. `cargo run -p pragma-daemon`).
+fn daemon_channel() -> String {
+    std::env::var("PRAGMA_DAEMON_CHANNEL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_DAEMON_CHANNEL.to_string())
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = daemon_paths();
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
     remove_stale_files(&paths.socket, &paths.lock);
-    let _lock = acquire_lock(&paths.lock)?;
+    let mut lock = acquire_lock(&paths.lock)?;
+    // Record our PID so the app can replace *this* daemon precisely if it ever
+    // turns out to speak an incompatible protocol version (see the hello frame).
+    writeln!(lock, "{}", std::process::id())?;
+    lock.flush()?;
+    let _lock = lock;
     if paths.socket.exists() {
         fs::remove_file(&paths.socket)?;
     }
@@ -79,7 +108,18 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
         Ok(stream) => Arc::new(Mutex::new(stream)),
         Err(_) => return,
     };
-    while let Ok(request) = read_frame::<RequestFrame>(&mut stream) {
+    // Greet the connection so the app can verify it is talking to a daemon that
+    // speaks its protocol version (and replace it otherwise). Must be the first
+    // frame written; the app consumes exactly one hello before any request.
+    if let Ok(mut writer_guard) = writer.lock() {
+        let hello = ServerFrame::Hello(HelloFrame {
+            protocol_version: CONSTANTS.daemon.protocol_version.get(),
+        });
+        if write_json_frame(&mut *writer_guard, &hello).is_err() {
+            return;
+        }
+    }
+    while let Ok(request) = read_json_frame::<RequestFrame>(&mut stream) {
         let request_id = request.request_id.clone();
         let (response, event_stream) = match handle_request(request, registry) {
             Ok(event_stream) => (
@@ -100,7 +140,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
             ),
         };
         if let Ok(mut writer_guard) = writer.lock() {
-            if write_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
+            if write_json_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
                 break;
             }
         }
@@ -174,17 +214,26 @@ fn forward_events(
     thread::spawn(move || {
         for event in scrollback {
             if let Ok(mut writer) = writer.lock() {
-                let _ = write_frame(&mut *writer, &ServerFrame::Event(event));
+                let _ = write_event(&mut writer, event);
             }
         }
         for event in rx {
             if let Ok(mut writer) = writer.lock() {
-                if write_frame(&mut *writer, &ServerFrame::Event(event)).is_err() {
+                if write_event(&mut writer, event).is_err() {
                     break;
                 }
             }
         }
     });
+}
+
+/// Writes one event to the client: output goes out as a binary frame (raw bytes,
+/// no JSON escaping), while title/exit stay JSON control frames.
+fn write_event(writer: &mut UnixStream, event: EventFrame) -> Result<(), protocol::ProtocolError> {
+    match event {
+        EventFrame::Output { session_id, data } => write_output_frame(writer, &session_id, &data),
+        other => write_json_frame(writer, &ServerFrame::Event(other)),
+    }
 }
 
 fn required(value: Option<String>, name: &str) -> Result<String, String> {
@@ -199,13 +248,17 @@ struct DaemonPaths {
 }
 
 fn daemon_paths() -> DaemonPaths {
+    let channel = daemon_channel();
     let dir = if cfg!(target_os = "linux") {
         std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|dir| PathBuf::from(dir).join("pragma"))
+            .map(PathBuf::from)
             .or_else(|| std::env::var_os("PRAGMA_APP_DATA_DIR").map(PathBuf::from))
             .unwrap_or_else(default_app_data_dir)
+            .join(&channel)
     } else {
-        std::env::var_os("PRAGMA_APP_DATA_DIR").map_or_else(default_app_data_dir, PathBuf::from)
+        std::env::var_os("PRAGMA_APP_DATA_DIR")
+            .map_or_else(default_app_data_dir, PathBuf::from)
+            .join(&channel)
     };
     DaemonPaths {
         socket: dir.join("daemon.sock"),

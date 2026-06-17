@@ -33,6 +33,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
   };
@@ -53,6 +54,32 @@ describe("workspaceReducer", () => {
     const state = workspaceReducer(baseState, { type: "set-projects", projects: [project("one")] });
     expect(state.selectedProjectId).toBe("one");
     expect(state.loading).toBe(false);
+  });
+
+  it("keeps the persisted project when it still exists on load", () => {
+    const state = workspaceReducer(
+      { ...baseState, selectedProjectId: "two" },
+      { type: "set-projects", projects: [project("one"), project("two")] },
+    );
+    expect(state.selectedProjectId).toBe("two");
+  });
+
+  it("falls back to the first project when the persisted one is gone", () => {
+    const state = workspaceReducer(
+      { ...baseState, selectedProjectId: "gone" },
+      { type: "set-projects", projects: [project("one"), project("two")] },
+    );
+    expect(state.selectedProjectId).toBe("one");
+  });
+
+  it("hydrates the persisted project and per-project worktree selection", () => {
+    const state = workspaceReducer(baseState, {
+      type: "hydrate-selection",
+      projectId: "p-2",
+      worktreeByProject: { "p-2": "wt-9", "p-3": "wt-7" },
+    });
+    expect(state.selectedProjectId).toBe("p-2");
+    expect(state.selectedWorktreeByProject).toEqual({ "p-2": "wt-9", "p-3": "wt-7" });
   });
 
   it("activates new tabs and selects a fallback when one closes", () => {
@@ -408,5 +435,53 @@ describe("workspaceReducer", () => {
     if (root?.kind === "pane") {
       expect(root.tabIds).toEqual(["one", "two", "three"]);
     }
+  });
+
+  it("rename-tab sets userRenamed so the shell can no longer override the title", () => {
+    const state = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "rename-tab", tabId: "one", title: "My build" },
+    );
+    expect(state.tabs[0]?.title).toBe("My build");
+    expect(state.tabs[0]?.userRenamed).toBe(true);
+  });
+
+  it("set-auto-title applies shell/browser titles when the user has not renamed the tab", () => {
+    const state = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "set-auto-title", tabId: "one", title: "user@host: ~/repo (main)" },
+    );
+    expect(state.tabs[0]?.title).toBe("user@host: ~/repo (main)");
+    expect(state.tabs[0]?.userRenamed).toBe(false);
+  });
+
+  it("set-auto-title falls back to the default name when the shell clears the title", () => {
+    // A process like opencode emits an empty OSC 0/2 title on exit; the tab
+    // must show its default name rather than going blank.
+    const state = workspaceReducer(
+      { ...baseState, tabs: [{ ...tab("one"), title: "opencode" }] },
+      { type: "set-auto-title", tabId: "one", title: "  " },
+    );
+    expect(state.tabs[0]?.title).toBe("Shell");
+    expect(state.tabs[0]?.userRenamed).toBe(false);
+  });
+
+  it("set-auto-title is a no-op once the user has renamed the tab", () => {
+    // User explicitly renames the tab to "Build" — shells are now locked out.
+    const renamed = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "rename-tab", tabId: "one", title: "Build" },
+    );
+    expect(renamed.tabs[0]?.userRenamed).toBe(true);
+
+    // A subsequent OSC 0/2 from the shell (or a stray browser <title>) must
+    // not clobber the user's choice.
+    const afterAuto = workspaceReducer(renamed, {
+      type: "set-auto-title",
+      tabId: "one",
+      title: "shell wants this",
+    });
+    expect(afterAuto.tabs[0]?.title).toBe("Build");
+    expect(afterAuto.tabs[0]?.userRenamed).toBe(true);
   });
 });

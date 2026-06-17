@@ -18,8 +18,11 @@ import type {
   WorktreeStatus,
 } from "@pragma/constants";
 
+import { toast } from "sonner";
+
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { basename } from "@/lib/path";
+import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
   browserClose,
@@ -27,17 +30,22 @@ import {
   closeTab as closeTabCommand,
   createTab as createTabCommand,
   deleteWorktree as deleteWorktreeCommand,
+  getActiveSelection,
   listProjects,
   listSplits,
   listTabs,
   listWorktrees,
   onBrowserFocusRequest,
   onBrowserMeta,
+  onMenuAction,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
+  restartDaemon as restartDaemonCommand,
+  setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
+  setTabTitle as setTabTitleCommand,
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
@@ -86,6 +94,11 @@ type WorkspaceAction =
   | { type: "load-start" }
   | { type: "load-error"; error: string }
   | { type: "set-projects"; projects: Project[] }
+  | {
+      type: "hydrate-selection";
+      projectId: string | null;
+      worktreeByProject: Record<string, string>;
+    }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
   | { type: "set-splits"; worktreeRoots: Record<string, SplitLayoutNode> }
@@ -107,6 +120,7 @@ type WorkspaceAction =
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | { type: "remove-tab"; tabId: string }
   | { type: "rename-tab"; tabId: string; title: string }
+  | { type: "set-auto-title"; tabId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
   | { type: "remove-worktree"; worktreeId: string }
@@ -135,6 +149,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
   openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  /** Opens (or focuses) the read-only daemon-log tab (Troubleshooting menu). */
+  openDaemonLogTab: () => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
@@ -165,6 +181,9 @@ interface WorkspaceContextValue extends WorkspaceState {
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+
+const TERMINAL_TITLE_FLUSH_MS = 100;
+const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
 
 const initialState: WorkspaceState = {
   projects: [],
@@ -219,6 +238,48 @@ function parseStoredSplits(records: SplitLayout[]): Record<string, SplitLayoutNo
     }
   }
   return roots;
+}
+
+/**
+ * Persisted active-selection shape, owned by the frontend (Rust stores the JSON
+ * verbatim). `projectId` is the last active project; `worktreeByProject` maps a
+ * project id to its last active worktree so switching away and back — even
+ * across restarts — returns to the worktree the user left off on.
+ */
+interface PersistedSelection {
+  projectId: string | null;
+  worktreeByProject: Record<string, string>;
+}
+
+function serializeSelection(
+  projectId: string | null,
+  worktreeByProject: Record<string, string>,
+): string {
+  return JSON.stringify({ projectId, worktreeByProject });
+}
+
+/** Parses a persisted selection blob; returns null on a corrupt/missing one. */
+function parseSelection(raw: string | null): PersistedSelection | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedSelection>;
+    const projectId = typeof parsed.projectId === "string" ? parsed.projectId : null;
+    const worktreeByProject: Record<string, string> = {};
+    if (parsed.worktreeByProject && typeof parsed.worktreeByProject === "object") {
+      for (const [key, value] of Object.entries(parsed.worktreeByProject)) {
+        if (typeof value === "string") {
+          worktreeByProject[key] = value;
+        }
+      }
+    }
+    return { projectId, worktreeByProject };
+  } catch {
+    // A corrupt blob is treated as no selection; the user lands on the first
+    // project's main worktree, the same as a first launch.
+    return null;
+  }
 }
 
 function defaultPaneId(worktreeId: string): string {
@@ -419,9 +480,26 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case "load-error":
       return { ...state, loading: false, error: action.error };
     case "set-projects": {
-      const selectedProjectId = state.selectedProjectId ?? action.projects[0]?.id ?? null;
+      // Keep the already-selected (hydrated or user-chosen) project when it is
+      // still in the loaded list; otherwise fall back to the first project. The
+      // guard is what makes a persisted selection survive a restart while still
+      // recovering if that project was deleted in another session.
+      const persisted = state.selectedProjectId;
+      const selectedProjectId =
+        persisted && action.projects.some((project) => project.id === persisted)
+          ? persisted
+          : (action.projects[0]?.id ?? null);
       return { ...state, projects: action.projects, selectedProjectId, loading: false };
     }
+    case "hydrate-selection":
+      // Seeds the active project + per-project worktree map from the persisted
+      // selection before `set-projects` runs, so the project-load effect lands
+      // on the remembered project/worktree instead of the first/main one.
+      return {
+        ...state,
+        selectedProjectId: action.projectId,
+        selectedWorktreeByProject: { ...action.worktreeByProject },
+      };
     case "set-worktrees": {
       // Keep the remembered worktree if it still exists; otherwise fall back to main.
       const remembered = state.selectedWorktreeByProject[action.projectId];
@@ -752,7 +830,21 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return {
         ...state,
         tabs: state.tabs.map((tab) =>
-          tab.id === action.tabId ? { ...tab, title: action.title } : tab,
+          tab.id === action.tabId ? { ...tab, title: action.title, userRenamed: true } : tab,
+        ),
+      };
+    case "set-auto-title":
+      // Shell/browser-emitted title. Respects `userRenamed` so a user-typed
+      // rename can never be silently clobbered by a `precmd`/`PROMPT_COMMAND`
+      // title push or a stray `<title>` update from a browser webview. A blank
+      // push (e.g. opencode clearing the title on exit) falls back to the kind's
+      // default so the tab never goes nameless.
+      return {
+        ...state,
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.tabId && !tab.userRenamed
+            ? { ...tab, title: action.title.trim() || defaultTabTitle(tab.kind) }
+            : tab,
         ),
       };
     case "set-tab-url":
@@ -827,17 +919,65 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
+  const tabsRef = useRef(state.tabs);
+  tabsRef.current = state.tabs;
 
   // Latest selected project, readable from async callbacks without re-creating
   // them on every selection change.
   const selectedProjectIdRef = useRef(state.selectedProjectId);
   selectedProjectIdRef.current = state.selectedProjectId;
 
+  // Latest worktree → owning-project map, readable from async callbacks (e.g.
+  // the optimistic delete's failure-restore) without re-creating them on every
+  // state change. Rebuilt each render like `selectedProjectIdRef` above.
+  const worktreeProjectIdRef = useRef<Record<string, string>>({});
+  worktreeProjectIdRef.current = Object.fromEntries(
+    Object.entries(state.worktrees).flatMap(([projectId, worktrees]) =>
+      worktrees.map((worktree) => [worktree.id, projectId]),
+    ),
+  );
+
+  // Hydration / persistence bookkeeping for the active selection (last active
+  // project + per-project last active worktree). `didHydrateRef` flips true
+  // once the mount-time `reload` has rehydrated from SQLite; the persist effect
+  // stays inert until then so the initial empty state isn't written back over a
+  // saved selection. `lastPersistedRef` holds the last JSON string written so
+  // the effect can skip a no-op write (and so the first post-hydration run,
+  // which reproduces the just-loaded value, doesn't re-write it).
+  const didHydrateRef = useRef(false);
+  const lastPersistedRef = useRef<string | null>(null);
+
   const reload = useCallback(async () => {
     dispatch({ type: "load-start" });
     try {
-      const projects = await listProjects();
+      // Only the mount-time reload rehydrates the selection. Subsequent
+      // reloads (after add/clone) just refresh the project list — the
+      // in-memory selection is already authoritative, and re-reading stale
+      // backend state could race an in-flight persist write.
+      if (didHydrateRef.current) {
+        const projects = await listProjects();
+        dispatch({ type: "set-projects", projects });
+        return;
+      }
+      const [projects, rawSelection] = await Promise.all([listProjects(), getActiveSelection()]);
+      const selection = parseSelection(rawSelection);
+      if (selection) {
+        dispatch({
+          type: "hydrate-selection",
+          projectId: selection.projectId,
+          worktreeByProject: selection.worktreeByProject,
+        });
+        lastPersistedRef.current = serializeSelection(
+          selection.projectId,
+          selection.worktreeByProject,
+        );
+      } else {
+        lastPersistedRef.current = null;
+      }
+      // `set-projects` validates the hydrated project id against the loaded
+      // list and falls back to the first project if it was deleted elsewhere.
       dispatch({ type: "set-projects", projects });
+      didHydrateRef.current = true;
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -895,12 +1035,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try {
         const tab =
           kind === "terminal"
-            ? await createTabCommand(projectId, targetWorktreeId, "terminal", "Shell")
+            ? await createTabCommand(
+                projectId,
+                targetWorktreeId,
+                "terminal",
+                defaultTabTitle("terminal"),
+              )
             : await createTabCommand(
                 projectId,
                 targetWorktreeId,
                 "browser",
-                "New tab",
+                defaultTabTitle("browser"),
                 BROWSER_START_URL,
               );
         dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
@@ -981,6 +1126,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [openLocatorTab],
   );
 
+  // Opens (or focuses) the read-only daemon-log tab. The daemon is global, so a
+  // single log tab per project is enough — dedupe by kind, hosting it in the
+  // active worktree (its content is not worktree-scoped).
+  const openDaemonLogTab = useCallback(async () => {
+    const projectId = state.selectedProjectId;
+    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+    if (!projectId || !worktreeId) {
+      return;
+    }
+    const existing = state.tabs.find((tab) => tab.kind === "log");
+    if (existing) {
+      dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
+      return;
+    }
+    try {
+      const tab = await createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log"));
+      dispatch({ type: "add-tab", tab });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: messageFor(cause) });
+    }
+  }, [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+
   // Tear down both backends regardless of kind: each is a no-op for the other's
   // tabs, so we don't need to look up the tab's kind on the close path.
   const closeTab = useCallback(async (tabId: string) => {
@@ -1017,6 +1184,48 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Latest `setActiveTab`, readable from event listeners without re-subscribing.
   const setActiveTabRef = useRef(setActiveTab);
   setActiveTabRef.current = setActiveTab;
+
+  // Runs a Troubleshooting-menu action: restart the daemon (with toast feedback)
+  // or open the daemon-log tab. Kept in a ref so the listener subscribes once.
+  const handleMenuAction = useCallback(
+    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
+      if (action === "troubleshooting.open-daemon-logs") {
+        await openDaemonLogTab();
+        return;
+      }
+      const pending = toast.loading("Restarting daemon…");
+      try {
+        await restartDaemonCommand();
+        toast.success("Daemon restarted", { id: pending });
+      } catch (cause) {
+        toast.error(messageFor(cause), { id: pending });
+      }
+    },
+    [openDaemonLogTab],
+  );
+  const handleMenuActionRef = useRef(handleMenuAction);
+  handleMenuActionRef.current = handleMenuAction;
+
+  // Forward native Troubleshooting-menu clicks to the handler. Subscribe once;
+  // the ref keeps the latest handler so we never re-listen as state changes.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onMenuAction((action) => void handleMenuActionRef.current(action))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  const terminalTabIdsKey = useMemo(
+    () =>
+      state.tabs
+        .filter((tab) => tab.kind === "terminal")
+        .map((tab) => tab.id)
+        .join(TERMINAL_TAB_ID_SEPARATOR),
+    [state.tabs],
+  );
 
   useEffect(() => {
     void reload();
@@ -1064,12 +1273,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Browser webviews report their page title/URL natively; mirror those into tab
   // state (so the tab strip + address bar update) and persist them for restore.
+  // Browser titles are auto-titles (the page is the source of truth) and route
+  // through the `set-auto-title` action so they can never flip `userRenamed`.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     onBrowserMeta((meta) => {
       if (meta.title !== undefined) {
-        dispatch({ type: "rename-tab", tabId: meta.tabId, title: meta.title });
-        void renameTabCommand(meta.tabId, meta.title).catch(() => undefined);
+        const next = meta.title.trim() || defaultTabTitle("browser");
+        dispatch({ type: "set-auto-title", tabId: meta.tabId, title: next });
+        void setTabTitleCommand(meta.tabId, next).catch(() => undefined);
       }
       if (meta.url !== undefined) {
         dispatch({ type: "set-tab-url", tabId: meta.tabId, url: meta.url });
@@ -1096,6 +1308,66 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Terminals pipe OSC 0/2 title updates through the non-React
+  // `terminalManager` registry. Subscribe once per terminal tab id, then
+  // coalesce noisy title streams before touching React state; otherwise TUIs
+  // that emit repeated OSC titles can force the whole workspace/sidebar tree to
+  // re-render during terminal output, which is especially visible in projects
+  // with many worktrees.
+  useEffect(() => {
+    const unsubscribes: Array<() => void> = [];
+    const pendingTitles = new Map<string, string>();
+    const flushTimers = new Map<string, number>();
+    const lastAppliedTitles = new Map<string, string>();
+    const tabIds = terminalTabIdsKey ? terminalTabIdsKey.split(TERMINAL_TAB_ID_SEPARATOR) : [];
+    for (const tabId of tabIds) {
+      const tab = tabsRef.current.find((item) => item.id === tabId);
+      if (tab) {
+        lastAppliedTitles.set(tabId, tab.title?.trim() || defaultTabTitle("terminal"));
+      }
+      const off = terminalManager.onTitle(tabId, (title) => {
+        const next = title.trim() || defaultTabTitle("terminal");
+        if (lastAppliedTitles.get(tabId) === next) {
+          return;
+        }
+        pendingTitles.set(tabId, next);
+        if (flushTimers.has(tabId)) {
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          flushTimers.delete(tabId);
+          const pending = pendingTitles.get(tabId);
+          pendingTitles.delete(tabId);
+          if (!pending || lastAppliedTitles.get(tabId) === pending) {
+            return;
+          }
+          const currentTab = tabsRef.current.find((item) => item.id === tabId);
+          if (!currentTab || currentTab.kind !== "terminal" || currentTab.userRenamed) {
+            return;
+          }
+          const currentTitle = currentTab.title?.trim() || defaultTabTitle("terminal");
+          if (currentTitle === pending) {
+            lastAppliedTitles.set(tabId, pending);
+            return;
+          }
+          lastAppliedTitles.set(tabId, pending);
+          dispatch({ type: "set-auto-title", tabId, title: pending });
+          void setTabTitleCommand(tabId, pending).catch(() => undefined);
+        }, TERMINAL_TITLE_FLUSH_MS);
+        flushTimers.set(tabId, timer);
+      });
+      unsubscribes.push(off);
+    }
+    return () => {
+      for (const timer of flushTimers.values()) {
+        window.clearTimeout(timer);
+      }
+      for (const off of unsubscribes) {
+        off();
+      }
+    };
+  }, [terminalTabIdsKey]);
+
   // Persist split layouts so they survive project switches and app restarts,
   // mirroring how tabs persist. Only real splits are stored; a worktree that
   // collapses back to a single pane clears its row. `persistedSplitsRef` tracks
@@ -1121,6 +1393,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     persistedSplitsRef.current = nextSeen;
   }, [state.splitRootByWorktree]);
+
+  // Persist the active selection (last active project + per-project last active
+  // worktree) so switching away from a project and coming back — even across
+  // app restarts — returns to the worktree the user left off on. Inert until
+  // the mount-time `reload` has rehydrated, so the initial empty state can't
+  // clobber a saved selection; `lastPersistedRef` skips a no-op rewrite of the
+  // value that was just loaded (and self-heals when `set-projects` had to fall
+  // back because the persisted project was deleted elsewhere).
+  useEffect(() => {
+    if (!didHydrateRef.current) {
+      return;
+    }
+    const json = serializeSelection(state.selectedProjectId, state.selectedWorktreeByProject);
+    if (json === lastPersistedRef.current) {
+      return;
+    }
+    lastPersistedRef.current = json;
+    void setActiveSelection(json).catch((cause) => {
+      toast.error(`Failed to save active selection: ${messageFor(cause)}`);
+    });
+  }, [state.selectedProjectId, state.selectedWorktreeByProject]);
 
   const activeProject =
     state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
@@ -1171,17 +1464,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      // Optimistic: drop the row from local state immediately so the sidebar
+      // entry (and the dialog) disappear without waiting on the backend. The
+      // delete runs in the background; if it fails we reload the project from
+      // SQLite — the row was never touched, so it comes back as it was — and
+      // surface a toast. The dialog is already gone by then, so an inline
+      // error is no longer an option (and we never rethrow).
+      const projectId = worktreeProjectIdRef.current[worktreeId];
+      dispatch({ type: "remove-worktree", worktreeId });
       try {
         await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
-        // Optimistically drop the row from local state; the cascade also
-        // removes its tabs and any nested child worktrees from SQLite.
-        dispatch({ type: "remove-worktree", worktreeId });
       } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-        throw cause;
+        if (projectId) {
+          void refreshProject(projectId);
+        }
+        toast.error(`Failed to delete worktree: ${messageFor(cause)}`);
       }
     },
-    [],
+    [refreshProject],
   );
 
   const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
@@ -1386,6 +1686,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openDaemonLogTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,
@@ -1421,6 +1722,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openDaemonLogTab,
       closeTab,
       renameTerminalTab,
       openSelectedWorktree,

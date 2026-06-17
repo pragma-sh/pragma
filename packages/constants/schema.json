@@ -4,7 +4,7 @@
   "description": "Shared compile-time constants. Single source of truth for both the TypeScript frontend (src) and the Rust backend (src-tauri). Edit values.json; never edit generated code.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["maxParallelAgents", "app", "window", "links", "editorLaunchers"],
+  "required": ["maxParallelAgents", "app", "window", "links", "editorLaunchers", "daemon"],
   "properties": {
     "maxParallelAgents": {
       "type": "integer",
@@ -14,9 +14,24 @@
     "app": { "$ref": "#/definitions/AppInfo" },
     "window": { "$ref": "#/definitions/WindowDefaults" },
     "links": { "$ref": "#/definitions/Links" },
-    "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" }
+    "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
+    "daemon": { "$ref": "#/definitions/Daemon" }
   },
   "definitions": {
+    "Daemon": {
+      "title": "Daemon",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion"],
+      "description": "Contract between the Pragma app and the detached PTY daemon.",
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Wire-protocol version negotiated between the app and the detached PTY daemon. The daemon greets every connection with this version; the app replaces a daemon whose version does not match (or that sends no greeting). Bump it whenever the daemon protocol or its PTY-stream handling changes so a stale long-lived daemon is restarted instead of silently serving old behavior."
+        }
+      }
+    },
     "AppInfo": {
       "title": "AppInfo",
       "type": "object",
@@ -130,9 +145,9 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, or a read-only diff.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, or the read-only daemon log viewer.",
       "type": "string",
-      "enum": ["terminal", "browser", "editor", "diff"]
+      "enum": ["terminal", "browser", "editor", "diff", "log"]
     },
     "Tab": {
       "title": "Tab",
@@ -147,6 +162,7 @@
         "url",
         "filePath",
         "diffSide",
+        "userRenamed",
         "orderIndex",
         "createdAt"
       ],
@@ -167,6 +183,10 @@
         "diffSide": {
           "description": "Which diff side a diff tab shows; null for non-diff tabs.",
           "anyOf": [{ "$ref": "#/definitions/DiffSide" }, { "type": "null" }]
+        },
+        "userRenamed": {
+          "type": "boolean",
+          "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) are ignored while this is true. Always false for non-terminal tabs."
         },
         "orderIndex": { "type": "integer" },
         "createdAt": { "type": "string" }
@@ -357,6 +377,7 @@
         "splitHorizontal",
         "splitVertical",
         "deleteFile",
+        "scrollTerminalBottom",
         "switchToWorkspace1",
         "switchToWorkspace2",
         "switchToWorkspace3",
@@ -380,6 +401,7 @@
         "splitHorizontal": { "$ref": "#/definitions/PlatformChord" },
         "splitVertical": { "$ref": "#/definitions/PlatformChord" },
         "deleteFile": { "$ref": "#/definitions/PlatformChord" },
+        "scrollTerminalBottom": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace1": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace2": { "$ref": "#/definitions/PlatformChord" },
         "switchToWorkspace3": { "$ref": "#/definitions/PlatformChord" },

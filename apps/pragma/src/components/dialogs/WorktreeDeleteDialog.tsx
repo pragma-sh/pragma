@@ -36,8 +36,9 @@ interface WorktreeDeleteDialogProps {
  *  2. Optionally, the user checking the "Also delete the branch" box.
  *
  * We use a plain `Button` (not `AlertDialogAction`) for the confirm action so
- * we can decide ourselves whether to close on success vs keep the dialog open
- * on error — `AlertDialogAction` auto-closes on click and would swallow errors.
+ * the click handler keeps full control: it fires the optimistic delete and
+ * closes the modal itself, rather than relying on `AlertDialogAction`'s
+ * auto-close.
  */
 export function WorktreeDeleteDialog({
   worktreeId,
@@ -62,7 +63,6 @@ export function WorktreeDeleteDialog({
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [dirty, setDirty] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -90,25 +90,17 @@ export function WorktreeDeleteDialog({
     };
   }, [open, worktreeId, workspace]);
 
-  async function confirm() {
-    if (submitting) {
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      // When the worktree is dirty we have to pass `force: true` so git will
-      // tear it down anyway; the warning text above is the user's only safety net.
-      await workspace.deleteWorktree(worktreeId, {
-        deleteBranch,
-        force: dirty === true,
-      });
-      setOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSubmitting(false);
-    }
+  function confirm() {
+    // Optimistic: the context drops the worktree from local state (and thus
+    // the sidebar) synchronously — before the first await inside
+    // `deleteWorktree` — so we close the modal immediately. The backend delete
+    // continues in the background and surfaces a toast on failure; there's no
+    // inline error to show anymore (the dialog is already gone).
+    void workspace.deleteWorktree(worktreeId, {
+      deleteBranch,
+      force: dirty === true,
+    });
+    setOpen(false);
   }
 
   return (
@@ -144,16 +136,9 @@ export function WorktreeDeleteDialog({
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button
-            disabled={submitting}
-            onClick={() => {
-              void confirm();
-            }}
-            size="default"
-            variant="destructive"
-          >
+          <Button onClick={() => confirm()} size="default" variant="destructive">
             <Trash2 data-icon="inline-start" />
-            {submitting ? "Deleting…" : "Delete anyway"}
+            Delete anyway
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

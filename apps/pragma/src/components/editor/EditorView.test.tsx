@@ -38,6 +38,7 @@ function editorTab(): Tab {
     url: null,
     filePath: "src/app.ts",
     diffSide: null,
+    userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
   };
