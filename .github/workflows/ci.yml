@@ -73,6 +73,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Stage daemon sidecar
+        # tauri-build validates that the externalBin resource exists, so the
+        # pragma crate won't even compile (clippy/test) without the staged
+        # binary. The build job gets this via beforeBuildCommand; the rust job
+        # must stage it explicitly.
+        run: bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
       - name: Format check (rustfmt)
         run: cargo fmt --all -- --check
       - name: Lint (clippy)
