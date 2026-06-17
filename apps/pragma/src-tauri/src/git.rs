@@ -135,7 +135,22 @@ pub fn worktree_is_dirty(path: &Path) -> bool {
 /// Removes a worktree from disk via `git worktree remove`. Refuses to be lossy
 /// unless `force` is true; in that case `--force` is appended so partially-dirty
 /// worktrees can still be torn down (the UI is expected to warn first).
+///
+/// If git no longer recognizes the path as a worktree (the directory was
+/// already removed, the admin files were pruned/corrupted, or the `.git` file
+/// is missing), `git worktree remove` fails with "is not a working tree". The
+/// worktree is effectively unmanaged at that point, so we prune stale admin
+/// entries, delete any orphaned directory, and return `Ok` — without this, a
+/// worktree whose admin state drifted would be stuck in the sidebar forever:
+/// the delete command would error out before reaching the DB-row deletion.
 pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> AppResult<()> {
+    // If the worktree directory is already gone, `git worktree remove` would
+    // fail with "is not a working tree" — but the user's intent is already
+    // satisfied on disk. Prune stale admin entries and return.
+    if !worktree_path.exists() {
+        prune_worktrees(repo_path)?;
+        return Ok(());
+    }
     let mut args: Vec<String> = vec![
         "-C".to_string(),
         path_string(repo_path),
@@ -147,6 +162,41 @@ pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> A
     }
     args.push(path_string(worktree_path));
     let output = Command::new("git").args(&args).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // "is not a working tree" / "not a git worktree" means git no longer
+    // manages this path as a worktree. Prune the stale admin entry, remove the
+    // orphaned directory, and succeed so the caller can delete the DB row.
+    // Other failures (e.g. dirty worktree without `--force`) are propagated.
+    if stderr.contains("not a working tree") || stderr.contains("not a git worktree") {
+        prune_worktrees(repo_path)?;
+        if worktree_path.exists() {
+            // Best-effort: the directory is no longer git-managed but still on
+            // disk. PTY sessions were already killed by the caller, so the
+            // directory should be removable. If it isn't (permissions, open
+            // handles), log and continue so the DB row is still removed and
+            // the worktree disappears from the sidebar.
+            if let Err(error) = std::fs::remove_dir_all(worktree_path) {
+                log::warn!(
+                    "failed to remove orphaned worktree directory {}: {error}",
+                    worktree_path.display()
+                );
+            }
+        }
+        return Ok(());
+    }
+    Err(AppError::Git(stderr.trim().to_string()))
+}
+
+/// Prunes stale worktree administrative entries (`git worktree prune`). Used by
+/// [`remove_worktree`] to clean up after a worktree whose directory was already
+/// removed or whose admin state drifted.
+fn prune_worktrees(repo_path: &Path) -> AppResult<()> {
+    let output = Command::new("git")
+        .args(["-C", path_string(repo_path).as_str(), "worktree", "prune"])
+        .output()?;
     if output.status.success() {
         Ok(())
     } else {
@@ -260,8 +310,18 @@ pub fn worktrees_merged_status(
         .collect()
 }
 
-/// True when a worktree has no committed delta vs its parent branch and a clean
-/// working tree. See [`worktrees_merged_status`].
+/// True when a worktree's work has been merged into its parent branch and its
+/// working tree is clean — i.e. the sidebar can offer the delete action without
+/// losing uncommitted work. See [`worktrees_merged_status`].
+///
+/// A freshly-created child (no commits, clean tree) is **not** merged even
+/// though `HEAD` is trivially an ancestor of the parent branch: there is no
+/// work to merge yet, so showing a merge glyph would be misleading. We detect
+/// "no commits" via the branch reflog — a branch with only its creation entry
+/// has never had a commit made on it. The reflog is the only signal that
+/// survives a fast-forward merge, which collapses `HEAD` and the parent branch
+/// onto the same SHA and would otherwise be indistinguishable from a fresh
+/// child by SHA comparison alone.
 fn worktree_is_merged(db: &Db, worktree_id: &str) -> AppResult<bool> {
     let worktree = db.worktree(worktree_id)?;
     let root = PathBuf::from(&worktree.path);
@@ -270,12 +330,16 @@ fn worktree_is_merged(db: &Db, worktree_id: &str) -> AppResult<bool> {
     if worktree_is_dirty(&root) {
         return Ok(false);
     }
-    // Parentless/main worktrees have no committed delta, so a clean one is
-    // trivially merged. Child worktrees are merged once their HEAD is contained
-    // by the parent branch (fresh child, fast-forward merge, or merge commit).
+    // Parentless/main worktrees have no parent to merge into, and the sidebar
+    // never offers a delete action for them — report not-merged so the icon
+    // stays a branch glyph instead of a misleading merge glyph.
     let Some(parent_id) = worktree.parent_id.as_deref() else {
-        return Ok(true);
+        return Ok(false);
     };
+    // A branch with no commits beyond its creation is fresh, not merged.
+    if !branch_has_commits(&root, &worktree.branch)? {
+        return Ok(false);
+    }
     let parent = db.worktree(parent_id)?;
     let output = Command::new("git")
         .args([
@@ -292,6 +356,32 @@ fn worktree_is_merged(db: &Db, worktree_id: &str) -> AppResult<bool> {
         Some(1) => Ok(false),
         _ => Err(AppError::Git(command_output(output.stdout, output.stderr))),
     }
+}
+
+/// True when the branch has at least one commit beyond its creation entry.
+/// Uses the branch reflog: a branch with only its "Created from …" entry was
+/// never committed to. Falls back to `true` when the reflog is unavailable
+/// (pruned, disabled, etc.) so a legitimate merged indicator isn't suppressed
+/// for a worktree whose history we can't inspect.
+fn branch_has_commits(root: &Path, branch: &str) -> AppResult<bool> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            path_string(root).as_str(),
+            "reflog",
+            "show",
+            "--format=%H",
+            branch,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(true);
+    }
+    let count = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .count();
+    Ok(count > 1)
 }
 
 /// Loads the old/new text for a single changed file on the given diff side.
@@ -905,10 +995,11 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        commit_staged_impl, current_branch, discard_all_unstaged_impl, discard_unstaged_file_impl,
-        ensure_pragma_excluded, ensure_repo, file_diff_impl, merge_worktree_to_parent_impl,
-        stage_all_impl, stage_file_impl, unstage_all_impl, unstage_file_impl,
-        worktree_changes_impl, worktree_is_dirty, worktree_is_merged,
+        branch_has_commits, commit_staged_impl, current_branch, discard_all_unstaged_impl,
+        discard_unstaged_file_impl, ensure_pragma_excluded, ensure_repo, file_diff_impl,
+        merge_worktree_to_parent_impl, remove_worktree, stage_all_impl, stage_file_impl,
+        unstage_all_impl, unstage_file_impl, worktree_changes_impl, worktree_is_dirty,
+        worktree_is_merged,
     };
     use crate::db::Db;
 
@@ -1120,24 +1211,74 @@ mod tests {
     #[test]
     fn merged_status_tracks_commits_and_working_tree() {
         let (db, child_id, child_path, _main_path) = project_with_child();
-        // Fresh child: forked from main, no commits, clean tree → merged.
-        assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
+        // Fresh child: forked from main, no commits on the branch, clean tree
+        // → NOT merged. There's no work to merge yet, so showing a merge glyph
+        // would be misleading (the sidebar should show a branch icon instead).
+        assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
+        // The branch reflog has only the creation entry.
+        assert!(!branch_has_commits(&child_path, "feature").expect("reflog check"));
 
         // An untracked file dirties the working tree → not merged.
         std::fs::write(child_path.join("scratch.txt"), "x\n").expect("write scratch");
         assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
         std::fs::remove_file(child_path.join("scratch.txt")).expect("remove scratch");
-        assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
+        // Back to fresh — still not merged (no commits on the branch).
+        assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
 
-        // A commit since the fork point is a committed delta → not merged.
+        // A commit since the fork point is a committed delta → not merged, but
+        // the branch now has commits so the reflog check passes.
         std::fs::write(child_path.join("feature.txt"), "feature\n").expect("write feature");
         commit_all(&child_path, "feature commit");
         assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
+        assert!(branch_has_commits(&child_path, "feature").expect("reflog check"));
 
         // Once that child HEAD is merged into the parent branch, the clean child
-        // has no remaining delta from the sidebar's perspective.
+        // has no remaining delta from the sidebar's perspective — the branch
+        // still has its commits (reflog), and they're now in the parent.
         merge_worktree_to_parent_impl(&db, &child_id).expect("merge");
         assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
+    }
+
+    #[test]
+    fn fresh_child_with_no_commits_is_not_merged() {
+        let (db, child_id, child_path, _main_path) = project_with_child();
+        // A just-created child worktree with a clean tree and no commits must
+        // not be reported as merged — this is the regression that caused
+        // every fresh worktree to show a merge glyph in the sidebar.
+        assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
+        // The branch reflog has only the creation entry → no commits yet.
+        assert!(!branch_has_commits(&child_path, "feature").expect("reflog check"));
+    }
+
+    #[test]
+    fn remove_worktree_succeeds_when_directory_already_gone() {
+        let (db, child_id, child_path, main_path) = project_with_child();
+        // Simulate the drifted state: the worktree directory was already
+        // removed (e.g. by a prior failed delete or manual `rm -rf`), but the
+        // DB row and git admin entry are still around. `git worktree remove`
+        // would fail with "is not a working tree" — the fix prunes the stale
+        // admin entry and returns Ok so the DB row can be deleted.
+        std::fs::remove_dir_all(&child_path).expect("remove child dir");
+        remove_worktree(&main_path, &child_path, false).expect("remove should succeed");
+        db.delete_worktree(&child_id).expect("db delete");
+        // The worktree should be gone from the DB.
+        let remaining = db
+            .list_worktrees(&db.list_projects().expect("projects")[0].id)
+            .expect("list");
+        assert!(!remaining.iter().any(|w| w.id == child_id));
+    }
+
+    #[test]
+    fn remove_worktree_succeeds_when_admin_state_drifted() {
+        let (_db, _child_id, child_path, main_path) = project_with_child();
+        // Simulate a corrupted worktree: the directory still exists but git's
+        // admin entry was pruned, so `git worktree remove` fails with "is not a
+        // working tree". The fix prunes, removes the orphaned directory, and
+        // returns Ok.
+        run(&main_path, &["worktree", "prune"]);
+        assert!(child_path.exists(), "child dir should still be on disk");
+        remove_worktree(&main_path, &child_path, false).expect("remove should succeed");
+        assert!(!child_path.exists(), "orphaned dir should be removed");
     }
 
     #[test]
