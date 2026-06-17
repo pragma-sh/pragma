@@ -4,6 +4,7 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,7 +21,36 @@ const DAEMON_DETACH_FLAG: &str = "--detach";
 #[derive(Clone)]
 pub struct PtyClient {
     app_data_dir: PathBuf,
+    /// Channel-scoped subdirectory name (`pragma` / `pragma-dev`) that isolates
+    /// this build's daemon from a differently-built sibling. Chosen from the
+    /// build's product identity (see `daemon_channel_for_product`) — **not** the
+    /// compile profile — so a release-built dev app still never attaches to the
+    /// production daemon. Passed to the spawned daemon via `PRAGMA_DAEMON_CHANNEL`
+    /// so both processes resolve the identical path.
+    channel: String,
     launch_lock: Arc<Mutex<()>>,
+    /// Long-lived connection reused for request/response calls (resize, kill).
+    /// Opening a fresh socket and replaying the protocol handshake per call would
+    /// add a full connect + hello round-trip of latency, so these reuse one
+    /// pooled stream. The connection only ever carries `Response` frames
+    /// (request-type calls never return an event stream), so a single
+    /// mutex-guarded stream safely serializes all of them.
+    request_conn: Arc<Mutex<Option<UnixStream>>>,
+    /// Dedicated fire-and-forget sender for keystroke input. Every keystroke is a
+    /// `write`, which is the latency-critical hot path: the user must see the
+    /// echo as fast as possible. Writes are *fire-and-forget* — we don't need the
+    /// daemon's acknowledgement — so they get their own connection and a writer
+    /// thread, kept off both the blocking-pool scheduler and the request
+    /// connection. This means consecutive keystrokes pipeline instead of each one
+    /// waiting for the previous keystroke's full daemon round-trip (which, on the
+    /// shared request connection, serialized typing behind a response read).
+    input_tx: Arc<Mutex<Option<Sender<InputMsg>>>>,
+}
+
+/// A single queued keystroke payload for the dedicated input writer thread.
+struct InputMsg {
+    session_id: String,
+    data: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -97,10 +127,16 @@ enum EventFrame {
 }
 
 impl PtyClient {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    /// Builds a client whose daemon is isolated by the build's product identity
+    /// (`product_name`): "Pragma Dev" → the `pragma-dev` channel, otherwise
+    /// `pragma`. See `daemon_channel_for_product`.
+    pub fn new(app_data_dir: PathBuf, product_name: Option<&str>) -> Self {
         Self {
             app_data_dir,
+            channel: daemon_channel_for_product(product_name),
             launch_lock: Arc::new(Mutex::new(())),
+            request_conn: Arc::new(Mutex::new(None)),
+            input_tx: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -125,8 +161,62 @@ impl PtyClient {
         self.stream(RequestFrame::attach(session_id, cols, rows), on_event)
     }
 
+    /// Enqueues keystroke input for the dedicated writer thread and returns
+    /// immediately — input is fire-and-forget, so this never touches the socket
+    /// or blocks on a daemon round-trip. The writer thread (lazily spawned on the
+    /// first keystroke) owns its own connection and pipelines writes.
     pub fn write(&self, session_id: String, data: String) -> AppResult<()> {
-        self.request(RequestFrame::write(session_id, data))
+        let mut guard = self.input_tx.lock()?;
+        if guard.is_none() {
+            *guard = Some(self.start_input_writer());
+        }
+        let msg = InputMsg { session_id, data };
+        if let Err(err) = guard.as_ref().expect("input writer present").send(msg) {
+            // The writer thread is gone (it only exits if it panics); restart it
+            // and re-enqueue the keystroke that failed to send.
+            let tx = self.start_input_writer();
+            let _ = tx.send(err.0);
+            *guard = Some(tx);
+        }
+        Ok(())
+    }
+
+    /// Spawns the dedicated input writer thread. It owns a single connection to
+    /// the daemon, reconnecting (and respawning the daemon) on transport failure,
+    /// and writes each queued keystroke frame fire-and-forget. A companion thread
+    /// drains the daemon's per-write `Response` acknowledgements so the socket's
+    /// receive buffer can't fill and back-pressure the daemon.
+    fn start_input_writer(&self) -> Sender<InputMsg> {
+        let (tx, rx) = mpsc::channel::<InputMsg>();
+        let client = self.clone();
+        thread::spawn(move || {
+            let mut conn: Option<UnixStream> = None;
+            for msg in rx {
+                let frame = RequestFrame::write(msg.session_id, msg.data);
+                // Deliver the frame, reconnecting once if the socket is dead.
+                for _ in 0..2 {
+                    if conn.is_none() {
+                        let Ok(stream) = client.connect_with_spawn() else {
+                            break;
+                        };
+                        // The writer never reads, so drop the read timeout and let
+                        // the discard thread block on the daemon's responses.
+                        let _ = stream.set_read_timeout(None);
+                        if let Ok(reader) = stream.try_clone() {
+                            thread::spawn(move || discard_frames(reader));
+                        }
+                        conn = Some(stream);
+                    }
+                    let Some(stream) = conn.as_mut() else { break };
+                    if write_frame(stream, &frame).is_ok() {
+                        break;
+                    }
+                    // Transport failed — drop the dead stream and retry once.
+                    conn = None;
+                }
+            }
+        });
+        tx
     }
 
     pub fn resize(&self, session_id: String, cols: u16, rows: u16) -> AppResult<()> {
@@ -149,6 +239,13 @@ impl PtyClient {
     /// terminated — this is a deliberate troubleshooting action surfaced through
     /// the menubar, not a routine operation.
     pub fn restart(&self) -> AppResult<()> {
+        // Drop the pooled connections up front (in their own scope so the locks
+        // are released before we take `launch_lock`); they point at the daemon
+        // we're about to kill. A later request()/write() lazily reconnects to the
+        // fresh one. Dropping the input sender ends its writer thread, which
+        // releases the stale input connection.
+        *self.request_conn.lock()? = None;
+        *self.input_tx.lock()? = None;
         {
             let _guard = self.launch_lock.lock()?;
             self.kill_stale_daemon();
@@ -233,13 +330,41 @@ impl PtyClient {
     }
 
     fn request(&self, request: RequestFrame) -> AppResult<()> {
-        let request_id = request.request_id.clone();
-        let mut stream = self.connect_with_spawn()?;
-        write_frame(&mut stream, &request)?;
+        let mut guard = self.request_conn.lock()?;
+        // Reuse the pooled connection. A transport failure means the daemon went
+        // away (restarted or idle-exited), so drop the dead stream and retry once
+        // with a freshly spawned one; a daemon-level error response is returned
+        // as-is without reconnecting.
+        let mut last_err: Option<AppError> = None;
+        for _ in 0..2 {
+            if guard.is_none() {
+                *guard = Some(self.connect_with_spawn()?);
+            }
+            let stream = guard.as_mut().expect("connection just established");
+            match Self::request_on(stream, &request) {
+                Ok(result) => return result,
+                Err(transport_err) => {
+                    *guard = None;
+                    last_err = Some(transport_err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| AppError::Daemon("daemon request failed".to_string())))
+    }
+
+    /// Sends `request` on an already-connected stream and waits for its matching
+    /// response. The outer `Err` signals a transport failure (the caller should
+    /// drop the connection and reconnect); the inner `AppResult` carries the
+    /// daemon's own success/error for the request.
+    fn request_on(
+        stream: &mut UnixStream,
+        request: &RequestFrame,
+    ) -> Result<AppResult<()>, AppError> {
+        write_frame(stream, request)?;
         loop {
-            match read_frame::<ServerFrame>(&mut stream)? {
-                ServerFrame::Response(response) if response.request_id == request_id => {
-                    return if response.ok {
+            match read_frame::<ServerFrame>(stream)? {
+                ServerFrame::Response(response) if response.request_id == request.request_id => {
+                    return Ok(if response.ok {
                         Ok(())
                     } else {
                         Err(AppError::Daemon(
@@ -247,7 +372,7 @@ impl PtyClient {
                                 .error
                                 .unwrap_or_else(|| "daemon request failed".to_string()),
                         ))
-                    };
+                    });
                 }
                 ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_) => {}
             }
@@ -353,11 +478,11 @@ impl PtyClient {
     fn daemon_dir(&self) -> PathBuf {
         if cfg!(target_os = "linux") {
             std::env::var_os("XDG_RUNTIME_DIR").map_or_else(
-                || self.app_data_dir.join(DAEMON_CHANNEL),
-                |dir| PathBuf::from(dir).join(DAEMON_CHANNEL),
+                || self.app_data_dir.join(&self.channel),
+                |dir| PathBuf::from(dir).join(&self.channel),
             )
         } else {
-            self.app_data_dir.join(DAEMON_CHANNEL)
+            self.app_data_dir.join(&self.channel)
         }
     }
 
@@ -384,6 +509,7 @@ impl PtyClient {
         };
         command
             .env("PRAGMA_APP_DATA_DIR", &self.app_data_dir)
+            .env("PRAGMA_DAEMON_CHANNEL", &self.channel)
             .stdin(Stdio::null());
         if let Ok(log_file) = OpenOptions::new()
             .create(true)
@@ -470,16 +596,21 @@ impl RequestFrame {
     }
 }
 
-/// Build channel used to isolate the daemon: a dev build (`tauri dev`, debug)
-/// and a production build (`tauri build`, release) must never share a daemon,
-/// socket, lock, or log — otherwise launching "Pragma Dev" would attach to
-/// "Pragma"'s shells, or vice versa. The compile profile *is* the channel, and
-/// the same constant is mirrored in `pragma-daemon` so both sides agree.
-const DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
-    "pragma-dev"
-} else {
-    "pragma"
-};
+/// Maps the build's product name to the daemon channel that isolates it from a
+/// differently-built sibling: a dev build ("Pragma Dev") and a production build
+/// ("Pragma") must never share a daemon, socket, lock, or log — otherwise
+/// launching "Pragma Dev" would attach to "Pragma"'s shells, or vice versa.
+///
+/// Keying off the **product identity** rather than the compile profile is
+/// deliberate: a release-built dev app (e.g. when profiling terminal latency)
+/// is still a dev app and must keep its own daemon. The chosen channel is passed
+/// to `pragma-daemon` via `PRAGMA_DAEMON_CHANNEL` so both processes agree.
+fn daemon_channel_for_product(product_name: Option<&str>) -> String {
+    match product_name {
+        Some(name) if name.contains("Dev") => "pragma-dev".to_string(),
+        _ => "pragma".to_string(),
+    }
+}
 
 fn daemon_executable() -> PathBuf {
     std::env::current_exe()
@@ -530,6 +661,14 @@ fn configure_stream(stream: &UnixStream) -> AppResult<()> {
     Ok(())
 }
 
+/// Drains and discards every frame from the input connection until it closes.
+/// The daemon answers each fire-and-forget `write` with a `Response`; we don't
+/// need the acknowledgement, but the socket must still be read so its receive
+/// buffer can't fill and back-pressure the daemon's writes.
+fn discard_frames(mut reader: UnixStream) {
+    while read_frame::<ServerFrame>(&mut reader).is_ok() {}
+}
+
 fn read_frame<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> AppResult<T> {
     let mut len_bytes = [0_u8; 4];
     reader.read_exact(&mut len_bytes)?;
@@ -556,13 +695,13 @@ fn write_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> AppResult<()
 
 #[cfg(test)]
 mod tests {
-    use super::PtyClient;
+    use super::{daemon_channel_for_product, PtyClient};
 
     /// The daemon log must live next to the socket so we read exactly where the
     /// detached daemon writes (the runtime dir on Linux, app data on macOS).
     #[test]
     fn log_path_sits_beside_socket() {
-        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"));
+        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"), Some("Pragma"));
         let socket = client.socket_path();
         let log = client.log_path();
         assert_eq!(log.parent(), socket.parent());
@@ -573,13 +712,25 @@ mod tests {
     /// build and a production build never resolve the same daemon.
     #[test]
     fn daemon_paths_are_channel_scoped() {
-        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"));
+        let client = PtyClient::new(
+            std::path::PathBuf::from("/tmp/pragma-test"),
+            Some("Pragma Dev"),
+        );
         let socket = client.socket_path();
         let channel_dir = socket.parent().expect("socket has a parent dir");
         assert_eq!(
             channel_dir.file_name().and_then(|n| n.to_str()),
-            Some(super::DAEMON_CHANNEL),
+            Some("pragma-dev"),
         );
+    }
+
+    /// The channel is chosen from the build's product identity — not the compile
+    /// profile — so a release-built dev app keeps its own daemon.
+    #[test]
+    fn channel_follows_product_identity() {
+        assert_eq!(daemon_channel_for_product(Some("Pragma Dev")), "pragma-dev");
+        assert_eq!(daemon_channel_for_product(Some("Pragma")), "pragma");
+        assert_eq!(daemon_channel_for_product(None), "pragma");
     }
 
     /// Reading a daemon log that has never been created reports an empty string
@@ -591,7 +742,7 @@ mod tests {
         // host so the temp dir fully isolates the test from any real daemon log.
         let prev = std::env::var_os("XDG_RUNTIME_DIR");
         std::env::remove_var("XDG_RUNTIME_DIR");
-        let client = PtyClient::new(dir.path().to_path_buf());
+        let client = PtyClient::new(dir.path().to_path_buf(), Some("Pragma"));
         assert_eq!(client.read_log().expect("read empty log"), "");
         std::fs::create_dir_all(client.log_path().parent().expect("log dir"))
             .expect("create channel dir");

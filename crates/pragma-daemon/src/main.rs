@@ -27,15 +27,25 @@ use registry::Registry;
 const DETACH_FLAG: &str = "--detach";
 
 /// Build channel used to isolate this daemon from a differently-built sibling.
-/// Mirrors `DAEMON_CHANNEL` in the Pragma app (`pty.rs`): a debug daemon
-/// (spawned by `tauri dev` via `cargo run`) and a release daemon (bundled with
-/// `tauri build` as a sidecar) resolve different socket/lock/log paths, so the
-/// two never collide.
-const DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
+/// The Pragma app picks the channel from its product identity (see
+/// `daemon_channel_for_product` in `pty.rs`) and hands it to us via
+/// `PRAGMA_DAEMON_CHANNEL` when it spawns us, so a dev daemon and a prod daemon
+/// resolve different socket/lock/log paths regardless of compile profile. This
+/// compile-profile default only applies when the daemon is run by hand.
+const DEFAULT_DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
     "pragma-dev"
 } else {
     "pragma"
 };
+
+/// The channel the app handed us, falling back to the compile-profile default
+/// when the daemon is launched directly (e.g. `cargo run -p pragma-daemon`).
+fn daemon_channel() -> String {
+    std::env::var("PRAGMA_DAEMON_CHANNEL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_DAEMON_CHANNEL.to_string())
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = daemon_paths();
@@ -229,16 +239,17 @@ struct DaemonPaths {
 }
 
 fn daemon_paths() -> DaemonPaths {
+    let channel = daemon_channel();
     let dir = if cfg!(target_os = "linux") {
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("PRAGMA_APP_DATA_DIR").map(PathBuf::from))
             .unwrap_or_else(default_app_data_dir)
-            .join(DAEMON_CHANNEL)
+            .join(&channel)
     } else {
         std::env::var_os("PRAGMA_APP_DATA_DIR")
             .map_or_else(default_app_data_dir, PathBuf::from)
-            .join(DAEMON_CHANNEL)
+            .join(&channel)
     };
     DaemonPaths {
         socket: dir.join("daemon.sock"),

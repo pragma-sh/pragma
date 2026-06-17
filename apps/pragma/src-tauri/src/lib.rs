@@ -132,8 +132,11 @@ async fn pty_write(
     session_id: String,
     data: String,
 ) -> AppResult<()> {
-    let client = pty.inner().clone();
-    run_pty_task(move || client.write(session_id, data)).await
+    // Keystroke input is the latency-critical path. `write` only enqueues onto
+    // the dedicated writer thread (no socket I/O, no daemon round-trip), so there
+    // is nothing to offload — running it inline keeps every keystroke off the
+    // blocking-pool scheduler entirely.
+    pty.write(session_id, data)
 }
 
 #[tauri::command]
@@ -264,37 +267,46 @@ fn clear_split_layout(db: tauri::State<'_, Db>, worktree_id: String) -> AppResul
     db.clear_split_layout(&worktree_id)
 }
 
+/// Wires the app's managed state, menu, and dev-only plugins during Tauri setup.
+/// Extracted from `run` so the builder chain stays readable (and within the
+/// per-function line budget).
+fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    if cfg!(debug_assertions) {
+        app.handle().plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )?;
+    }
+    let app_data_dir = app.path().app_data_dir()?;
+    app.manage(Db::open(app_data_dir.join("pragma.db"))?);
+    // Isolate the dev daemon from prod by product identity (see `PtyClient::new`).
+    app.manage(PtyClient::new(
+        app_data_dir,
+        app.config().product_name.as_deref(),
+    ));
+    app.manage(GitLocks::default());
+    install_menu(app.handle())?;
+    if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
+        log::warn!("failed to load keybindings config: {error}");
+    }
+    if cfg!(debug_assertions) {
+        if let Err(error) = dev_bridge::start_bridge(app.handle()).map(|_| ()) {
+            log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
+        }
+    }
+    log::info!(
+        "Pragma supports up to {} parallel agents",
+        CONSTANTS.max_parallel_agents
+    );
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
-            let app_data_dir = app.path().app_data_dir()?;
-            app.manage(Db::open(app_data_dir.join("pragma.db"))?);
-            app.manage(PtyClient::new(app_data_dir));
-            app.manage(GitLocks::default());
-            install_menu(app.handle())?;
-            if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
-                log::warn!("failed to load keybindings config: {error}");
-            }
-            if cfg!(debug_assertions) {
-                if let Err(error) = dev_bridge::start_bridge(app.handle()).map(|_| ()) {
-                    log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
-                }
-            }
-            log::info!(
-                "Pragma supports up to {} parallel agents",
-                CONSTANTS.max_parallel_agents
-            );
-            Ok(())
-        })
+        .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             app_info,
             platform_name,
@@ -338,6 +350,7 @@ pub fn run() {
             fs::rename_file,
             fs::delete_file,
             git::worktree_changes,
+            git::worktrees_merged_status,
             git::file_diff,
             git::discard_unstaged_file,
             git::discard_all_unstaged,

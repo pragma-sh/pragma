@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
-import { worktreeChanges } from "@/lib/tauri";
+import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/state/workspace-context";
@@ -55,23 +55,15 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     let cancelled = false;
 
     async function refreshMergedStatus() {
-      const entries = await Promise.all(
-        childWorktrees.map(async (worktree) => {
-          try {
-            const changes = await worktreeChanges(worktree.id);
-            return [
-              worktree.id,
-              changes.committed.length === 0 &&
-                changes.staged.length === 0 &&
-                changes.unstaged.length === 0,
-            ] as const;
-          } catch {
-            return [worktree.id, false] as const;
-          }
-        }),
-      );
-      if (!cancelled) {
-        setMergedByWorktreeId(Object.fromEntries(entries));
+      try {
+        const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
+        if (!cancelled) {
+          setMergedByWorktreeId(merged);
+        }
+      } catch {
+        if (!cancelled) {
+          setMergedByWorktreeId({});
+        }
       }
     }
 

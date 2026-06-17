@@ -86,7 +86,7 @@ than no guide.
 │           ├── src/lib.rs       # App wiring, managed state, plugins, command registration
 │           ├── src/db.rs        # SQLite migrations + typed CRUD
 │           ├── src/pty.rs       # Detached daemon client + PTY command proxying
-│           ├── src/git.rs       # Git CLI helpers (worktree_changes / file_diff / stage_* / unstage_* / discard_*)
+│           ├── src/git.rs       # Git CLI helpers (worktree_changes / worktrees_merged_status / file_diff / stage_* / discard_*)
 │           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
 │           ├── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants); bundles pragma-daemon via externalBin
@@ -150,15 +150,21 @@ than no guide.
   bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
   plugin, so no `shell:` capability is needed. `binaries/` is git-ignored.
 - **Dev and prod must never share a daemon.** The socket/lock/log live in a
-  **channel-scoped** directory chosen by the build profile: `DAEMON_CHANNEL` =
-  `pragma-dev` under `cfg!(debug_assertions)`, else `pragma`. The constant is defined
-  **in both** `src-tauri/src/pty.rs` (`socket_path` → `daemon_dir`) and
-  `crates/pragma-daemon/src/main.rs` (`daemon_paths`) and they must stay identical, since a
-  debug app spawns a debug daemon and a release app spawns the release sidecar — each pair
-  resolves the same path, but the two channels never collide. (On Linux the dir is
-  `$XDG_RUNTIME_DIR/<channel>`; elsewhere `<app_data_dir>/<channel>`.) NB this isolates the
-  **daemon** only — both builds still share `com.pragma.app`'s app-data dir and `pragma.db`;
-  give the dev build its own `identifier` if you ever need to split those too.
+  **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
+  build's **product identity, not the compile profile**: `daemon_channel_for_product`
+  in `src-tauri/src/pty.rs` maps a `product_name` containing `Dev` ("Pragma Dev", set
+  in `tauri.dev.conf.json`) to `pragma-dev` and everything else ("Pragma") to `pragma`.
+  This is deliberate — a **release-built dev app** (e.g. when profiling terminal latency)
+  is still a dev app and must keep its own daemon, which a `cfg!(debug_assertions)` split
+  would get wrong (both release builds would collapse onto `pragma`). The app derives the
+  channel once at startup from `app.config().product_name` (`lib.rs` → `PtyClient::new`)
+  and hands it to the spawned daemon via the **`PRAGMA_DAEMON_CHANNEL` env** alongside
+  `PRAGMA_APP_DATA_DIR`; `crates/pragma-daemon/src/main.rs` (`daemon_channel` → `daemon_paths`)
+  reads that env, falling back to a `cfg!(debug_assertions)` default only when the daemon is
+  run by hand. So both processes resolve the identical path and the two channels never
+  collide. (On Linux the dir is `$XDG_RUNTIME_DIR/<channel>`; elsewhere `<app_data_dir>/<channel>`.)
+  NB this isolates the **daemon** only — both builds still share `com.pragma.app`'s app-data
+  dir and `pragma.db`; give the dev build its own `identifier` if you ever need to split those too.
 - **Native menubar + the Troubleshooting menu.** The app menu is built once in
   `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` (so the OS-standard
   app/edit/window items survive) **plus** a `Troubleshooting` submenu with **Restart
@@ -174,7 +180,25 @@ than no guide.
   (`PtyClient::read_log`, reading `log_path()` — the `daemon.log` beside the socket, which
   on Linux is the XDG runtime dir, **not** app data) rather than the worktree file editor.
 - Terminal output → xterm in `src/lib/terminal-manager.ts`; never route it through
-  React state or the workspace reducer.
+  React state or the workspace reducer. Each terminal renders through the **WebGL
+  addon** (`@xterm/addon-webgl`), loaded right after `terminal.open()` (the renderer
+  needs the canvas to exist first) — xterm's default DOM renderer reflows real DOM
+  nodes per frame and is the dominant source of perceived typing latency. Loading is
+  wrapped in `try/catch` and `onContextLoss` disposes the addon, so a missing or lost
+  WebGL2 context (headless CI, driver reset) transparently falls back to the DOM
+  renderer instead of freezing. **Keystroke input is fire-and-forget and
+  pipelined**: `onData` fires `ptyWrite` without awaiting (JS side), and on the
+  Rust side `pty_write` runs inline (no `spawn_blocking`) and only *enqueues* onto
+  a dedicated writer thread (`input_tx` / `start_input_writer` in
+  `src-tauri/src/pty.rs`) that owns its own daemon connection. Writes do **not**
+  wait for the daemon's per-write `Response` (a companion `discard_frames` thread
+  drains them so the socket buffer can't fill), so consecutive keystrokes pipeline
+  instead of each one stalling behind the previous keystroke's full daemon
+  round-trip. `resize`/`kill` keep the separate pooled, handshake-free
+  request/response connection (`request_conn`). The remaining echo latency is
+  structural — every character still crosses two webview↔native IPC boundaries
+  plus a socket hop to the detached daemon, where an in-process terminal would
+  echo via direct calls.
 - **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
   out of the raw PTY stream in `crates/pragma-daemon/src/session.rs` and emits a
   `Title` event. The Tauri proxy in `apps/pragma/src-tauri/src/pty.rs` forwards it
@@ -282,8 +306,9 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   show `merge_worktree_to_parent` (runs `git merge <child-branch>` in the clean parent worktree and
   leaves conflicts there for IDE / `git merge --continue` or `git merge --abort` resolution), and a
   fully merged/no-change child shows the same `WorktreeDeleteDialog` used by the left sidebar. The
-  left sidebar polls those same change buckets for child worktrees and swaps the branch glyph to a
-  merge glyph while the merged-but-not-deleted worktree remains in the tree. Files open as two new
+  left sidebar polls `worktrees_merged_status` for child worktrees (one compact boolean map, not full
+  file lists) and swaps the branch glyph to a merge glyph while the merged-but-not-deleted worktree
+  remains in the tree. Files open as two new
   `TabKind`s — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and `diff` (read-only
   `@codemirror/merge`) — rendered through the `SplitHost` switch and located by `Tab.filePath`
   (worktree-relative) + `Tab.diffSide` (v5 migration; the columns persist editor/diff tabs). Open

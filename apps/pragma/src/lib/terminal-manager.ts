@@ -1,5 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { Channel } from "@tauri-apps/api/core";
 
@@ -105,6 +106,20 @@ export class TerminalManager {
       return true;
     });
     terminal.open(container);
+    // GPU-accelerated rendering. xterm's default DOM renderer reflows real DOM
+    // nodes on every frame, which is the dominant source of perceived typing
+    // latency; the WebGL renderer paints cells to a canvas via the GPU and must
+    // be loaded *after* open() so the canvas exists. If the WebGL context is
+    // lost (driver reset, tab backgrounded too long) or unavailable (headless),
+    // we dispose the addon and xterm transparently falls back to the DOM
+    // renderer rather than freezing on a dead context.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      terminal.loadAddon(webgl);
+    } catch {
+      // WebGL unavailable (e.g. headless CI); keep the DOM renderer.
+    }
 
     const managed: ManagedTerminal = {
       terminal,

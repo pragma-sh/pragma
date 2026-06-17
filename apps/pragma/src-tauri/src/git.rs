@@ -232,6 +232,68 @@ fn worktree_changes_impl(db: &Db, worktree_id: &str) -> AppResult<WorktreeChange
     })
 }
 
+/// Reports, for each requested worktree, whether it is fully **merged & clean** —
+/// i.e. all three `worktree_changes` axes would be empty (its HEAD is already
+/// contained by the parent branch, and it has nothing staged, unstaged, or
+/// untracked).
+///
+/// This is the cheap equivalent of calling `worktree_changes` purely to test
+/// `committed/staged/unstaged.is_empty()`. The sidebar polls merge status for
+/// *every* child worktree on an interval; doing it via `worktree_changes` ran
+/// 7+ git subprocesses per worktree and shipped full file lists across IPC just
+/// to read three lengths, which flooded the UI thread (visible as terminal lag
+/// and slow project switches when a project has many worktrees). This runs at
+/// most two cheap git commands per worktree and returns a compact boolean map in
+/// a single IPC call. A worktree that errors is reported as not-merged so a
+/// single bad checkout never fails the whole batch.
+#[tauri::command]
+pub fn worktrees_merged_status(
+    db: State<'_, Db>,
+    worktree_ids: Vec<String>,
+) -> HashMap<String, bool> {
+    worktree_ids
+        .into_iter()
+        .map(|id| {
+            let merged = worktree_is_merged(&db, &id).unwrap_or(false);
+            (id, merged)
+        })
+        .collect()
+}
+
+/// True when a worktree has no committed delta vs its parent branch and a clean
+/// working tree. See [`worktrees_merged_status`].
+fn worktree_is_merged(db: &Db, worktree_id: &str) -> AppResult<bool> {
+    let worktree = db.worktree(worktree_id)?;
+    let root = PathBuf::from(&worktree.path);
+    // Any staged, unstaged, or untracked change makes it not-merged (strict
+    // porcelain check, untracked included).
+    if worktree_is_dirty(&root) {
+        return Ok(false);
+    }
+    // Parentless/main worktrees have no committed delta, so a clean one is
+    // trivially merged. Child worktrees are merged once their HEAD is contained
+    // by the parent branch (fresh child, fast-forward merge, or merge commit).
+    let Some(parent_id) = worktree.parent_id.as_deref() else {
+        return Ok(true);
+    };
+    let parent = db.worktree(parent_id)?;
+    let output = Command::new("git")
+        .args([
+            "-C",
+            path_string(&root).as_str(),
+            "merge-base",
+            "--is-ancestor",
+            "HEAD",
+            &parent.branch,
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(AppError::Git(command_output(output.stdout, output.stderr))),
+    }
+}
+
 /// Loads the old/new text for a single changed file on the given diff side.
 /// Binary files report `binary: true` with empty texts (bytes never cross IPC).
 #[tauri::command]
@@ -846,7 +908,7 @@ mod tests {
         commit_staged_impl, current_branch, discard_all_unstaged_impl, discard_unstaged_file_impl,
         ensure_pragma_excluded, ensure_repo, file_diff_impl, merge_worktree_to_parent_impl,
         stage_all_impl, stage_file_impl, unstage_all_impl, unstage_file_impl,
-        worktree_changes_impl, worktree_is_dirty,
+        worktree_changes_impl, worktree_is_dirty, worktree_is_merged,
     };
     use crate::db::Db;
 
@@ -1053,6 +1115,29 @@ mod tests {
             .expect("main worktree");
         let changes = worktree_changes_impl(&db, &main.id).expect("changes");
         assert!(changes.committed.is_empty());
+    }
+
+    #[test]
+    fn merged_status_tracks_commits_and_working_tree() {
+        let (db, child_id, child_path, _main_path) = project_with_child();
+        // Fresh child: forked from main, no commits, clean tree → merged.
+        assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
+
+        // An untracked file dirties the working tree → not merged.
+        std::fs::write(child_path.join("scratch.txt"), "x\n").expect("write scratch");
+        assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
+        std::fs::remove_file(child_path.join("scratch.txt")).expect("remove scratch");
+        assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
+
+        // A commit since the fork point is a committed delta → not merged.
+        std::fs::write(child_path.join("feature.txt"), "feature\n").expect("write feature");
+        commit_all(&child_path, "feature commit");
+        assert!(!worktree_is_merged(&db, &child_id).expect("merged check"));
+
+        // Once that child HEAD is merged into the parent branch, the clean child
+        // has no remaining delta from the sidebar's perspective.
+        merge_worktree_to_parent_impl(&db, &child_id).expect("merge");
+        assert!(worktree_is_merged(&db, &child_id).expect("merged check"));
     }
 
     #[test]

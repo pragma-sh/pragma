@@ -303,6 +303,17 @@ export function worktreeChanges(worktreeId: string): Promise<WorktreeChanges> {
   return invoke<WorktreeChanges>("worktree_changes", { worktreeId });
 }
 
+/**
+ * Reports, per worktree, whether it is fully merged & clean (HEAD already
+ * contained by the parent branch, nothing staged/unstaged/untracked). A cheap, compact
+ * alternative to {@link worktreeChanges} for the sidebar's merge-status poll: one
+ * IPC call returns a `{ [worktreeId]: merged }` map instead of full file lists
+ * per worktree, so polling many worktrees doesn't flood the UI thread.
+ */
+export function worktreesMergedStatus(worktreeIds: string[]): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("worktrees_merged_status", { worktreeIds });
+}
+
 /** Loads the old/new text for one changed file on the given diff side. */
 export function fileDiff(
   worktreeId: string,

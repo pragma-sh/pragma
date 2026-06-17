@@ -39,6 +39,7 @@ import {
   unstageAll,
   unstageFile,
   worktreeChanges,
+  worktreesMergedStatus,
   worktreeStatus,
   writeFile,
 } from "./tauri";
@@ -301,6 +302,13 @@ describe("git changes IPC wrappers", () => {
   it("worktreeChanges forwards the worktree id", () => {
     void worktreeChanges("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("worktree_changes", { worktreeId: "wt-1" });
+  });
+
+  it("worktreesMergedStatus forwards the worktree ids", () => {
+    void worktreesMergedStatus(["wt-1", "wt-2"]);
+    expect(invokeMock).toHaveBeenCalledWith("worktrees_merged_status", {
+      worktreeIds: ["wt-1", "wt-2"],
+    });
   });
 
   it("fileDiff forwards worktree id, path, side, and optional old path", () => {
