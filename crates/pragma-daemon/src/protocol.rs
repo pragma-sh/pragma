@@ -135,8 +135,12 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
     let mut len_bytes = [0_u8; 4];
     reader.read_exact(&mut len_bytes)?;
     let len = u32::from_be_bytes(len_bytes) as usize;
-    // The body always carries at least the 1-byte tag.
-    if len == 0 || len > MAX_FRAME_LEN {
+    // The body always carries at least the 1-byte tag, so a zero length is a
+    // malformed frame (no tag byte at all), not merely an oversized one.
+    if len == 0 {
+        return Err(ProtocolError::Malformed);
+    }
+    if len > MAX_FRAME_LEN {
         return Err(ProtocolError::FrameTooLarge);
     }
     let mut body = vec![0_u8; len];
@@ -219,7 +223,7 @@ pub fn write_output_frame(
 mod tests {
     use super::{
         read_frame, read_json_frame, write_json_frame, write_output_frame, EventFrame, Frame,
-        HelloFrame, RequestFrame, RequestKind, ServerFrame,
+        HelloFrame, ProtocolError, RequestFrame, RequestKind, ServerFrame,
     };
 
     #[test]
@@ -294,6 +298,19 @@ mod tests {
                 assert_eq!(data, payload);
             }
             Frame::Json(_) => panic!("expected a binary output frame"),
+        }
+    }
+
+    #[test]
+    fn zero_length_frame_is_malformed_not_too_large() {
+        // A zero-length body has no tag byte at all — that's a malformed frame,
+        // not an oversized one. The distinction matters for diagnosing protocol
+        // corruption vs. a peer sending legitimate-but-huge frames.
+        let bytes = [0_u8, 0, 0, 0];
+        match read_frame(&mut bytes.as_slice()) {
+            Err(ProtocolError::Malformed) => {}
+            Err(other) => panic!("expected Malformed, got {other:?}"),
+            Ok(_) => panic!("zero-length frame should not decode"),
         }
     }
 }
