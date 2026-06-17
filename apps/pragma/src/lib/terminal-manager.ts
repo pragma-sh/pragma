@@ -160,7 +160,10 @@ export class TerminalManager {
     // trackpad flick can't flood the PTY input with reports it can't keep up with.
     // See MOUSE_WHEEL_REPORT_INTERVAL_MS. Returning false drops the event before
     // xterm turns it into a report; returning true forwards it verbatim.
-    let lastWheelReport = 0;
+    // Initialize to -Infinity so the first event after startup is always
+    // forwarded when mouse tracking is on (performance.now() can still be < the
+    // interval early in page life).
+    let lastWheelReport = -Infinity;
     terminal.attachCustomWheelEventHandler(() => {
       if (terminal.modes.mouseTrackingMode === "none") {
         return true;
