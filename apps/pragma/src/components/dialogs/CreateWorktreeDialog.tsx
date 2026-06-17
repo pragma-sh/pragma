@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { isMacPlatform } from "@/lib/platform";
 import { createWorktree } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
@@ -18,6 +19,7 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
   const [error, setError] = useState<string | null>(null);
   const workspace = useWorkspace();
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
+  useEscapeToClose(isOpen, () => onOpenChange(false));
 
   if (!isOpen) {
     return null;

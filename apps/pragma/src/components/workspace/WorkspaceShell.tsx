@@ -67,6 +67,11 @@ export function WorkspaceShell() {
       // state. The tree listens for this event and opens its delete confirm.
       window.dispatchEvent(new Event("pragma:request-delete-file"));
     },
+    onScrollTerminalBottom: () => {
+      if (workspace.activeTabId) {
+        terminalManager.scrollToBottom(workspace.activeTabId);
+      }
+    },
   });
 
   return (

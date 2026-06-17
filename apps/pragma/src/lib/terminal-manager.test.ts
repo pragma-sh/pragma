@@ -22,6 +22,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const terminalDispose = vi.fn();
 const terminalClear = vi.fn();
+const terminalScrollToBottom = vi.fn();
 
 vi.mock("@xterm/xterm", () => {
   const instances: MockTerminal[] = [];
@@ -43,6 +44,7 @@ vi.mock("@xterm/xterm", () => {
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
     writeln = vi.fn();
     clear = terminalClear;
+    scrollToBottom = terminalScrollToBottom;
     dispose = terminalDispose;
     constructor(options: unknown) {
       this.options = options;
@@ -226,6 +228,28 @@ describe("TerminalManager lifecycle", () => {
     const manager = new TerminalManager();
     manager.clear("missing");
     expect(terminalClear).not.toHaveBeenCalled();
+  });
+
+  it("scrolls the xterm widget to the bottom for a mounted tab", async () => {
+    terminalScrollToBottom.mockClear();
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    manager.scrollToBottom(tab.id);
+
+    expect(terminalScrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores scrollToBottom for an unknown tab", () => {
+    terminalScrollToBottom.mockClear();
+    const manager = new TerminalManager();
+    manager.scrollToBottom("missing");
+    expect(terminalScrollToBottom).not.toHaveBeenCalled();
   });
 
   it("loads the WebGL renderer addon so xterm does not use the DOM renderer", async () => {
@@ -464,6 +488,129 @@ describe("TerminalManager key passthrough", () => {
     });
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "h" }))).toBe(false);
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "/" }))).toBe(true);
+  });
+});
+
+describe("TerminalManager native OS text editing", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    setLoadedKeybindingsConfig(defaultKeybindingsConfig);
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+  });
+
+  async function passthroughHandler() {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const instances = (
+      Terminal as unknown as {
+        instances: Array<{ attachCustomKeyEventHandler: Mock<(...args: unknown[]) => unknown> }>;
+      }
+    ).instances;
+    const handler = instances.at(-1)?.attachCustomKeyEventHandler;
+    return handler!.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+  }
+
+  it("writes Ctrl+U for Cmd+Backspace on mac and stops xterm processing", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "Backspace" });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    expect(passthrough(event)).toBe(false);
+    expect(preventDefault).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x15",
+    });
+  });
+
+  it("writes ESC+B for Option+Left on mac", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { altKey: true, key: "ArrowLeft" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x1bb",
+    });
+  });
+
+  it("writes ESC+F for Option+Right on mac", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { altKey: true, key: "ArrowRight" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x1bf",
+    });
+  });
+
+  it("writes Ctrl+A for Cmd+Left on mac", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "ArrowLeft" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x01",
+    });
+  });
+
+  it("writes Ctrl+E for Cmd+Right on mac", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "ArrowRight" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x05",
+    });
+  });
+
+  it("takes precedence over the configured deleteFile shortcut (Cmd+Backspace)", async () => {
+    // Cmd+Backspace is configured as deleteFile in the default keybindings, but
+    // in the terminal it must delete the line (Ctrl+U), not bubble up to the
+    // delete-file action.
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { metaKey: true, key: "Backspace" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x15",
+    });
+  });
+
+  it("writes ESC+B for Ctrl+Left on linux", async () => {
+    Object.defineProperty(window.navigator, "platform", {
+      value: "Linux x86_64",
+      configurable: true,
+    });
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { ctrlKey: true, key: "ArrowLeft" });
+
+    expect(passthrough(event)).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x1bb",
+    });
+  });
+
+  it("still bubbles configured app shortcuts that are not native editing chords", async () => {
+    const passthrough = await passthroughHandler();
+    // Cmd+/ is splitHorizontal, not a native editing chord → bubbles up.
+    expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "/" }))).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
   });
 });
 

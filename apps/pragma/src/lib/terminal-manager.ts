@@ -7,6 +7,7 @@ import type { Channel } from "@tauri-apps/api/core";
 import type { Tab } from "@pragma/constants";
 
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
+import { nativeEditingSequence } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMessage } from "@/lib/tauri";
 
@@ -117,10 +118,21 @@ export class TerminalManager {
     terminal.loadAddon(fit);
     terminal.loadAddon(new WebLinksAddon());
     terminal.attachCustomKeyEventHandler((event) => {
-      // Let any configured Pragma shortcut bubble up to the window listener so it
-      // works even when xterm has focus. The current config may be the default or
-      // a user-edited `~/.pragma/keybindings.json`.
       const platform = isMacPlatform() ? "mac" : "linux";
+      // Native OS text-editing chords (Cmd+Delete, Option+arrows, etc.) map to
+      // readline control characters so the shell does what the OS keybinding
+      // promises. Handle these before app shortcuts so Cmd+Backspace in the
+      // terminal deletes the line (Ctrl+U) instead of bubbling up to the
+      // delete-file action.
+      const sequence = nativeEditingSequence(event, platform);
+      if (sequence !== null) {
+        event.preventDefault();
+        void ptyWrite(tab.id, sequence);
+        return false;
+      }
+      // Let any configured Pragma shortcut bubble up to the window listener so
+      // it works even when xterm has focus. The current config may be the
+      // default or a user-edited `~/.pragma/keybindings.json`.
       if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
         return false;
       }
@@ -186,6 +198,15 @@ export class TerminalManager {
       return;
     }
     managed.terminal.clear();
+  }
+
+  /** Scrolls the terminal viewport to the bottom (the live cursor row). */
+  scrollToBottom(tabId: string): void {
+    const managed = this.terminals.get(tabId);
+    if (!managed) {
+      return;
+    }
+    managed.terminal.scrollToBottom();
   }
 
   resize(tabId: string): void {

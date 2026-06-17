@@ -77,7 +77,9 @@ than no guide.
 │       │   ├── lib/             # Reusable, framework-agnostic helpers
 │       │   │   ├── tauri.ts     # Typed bridge to Rust commands — the ONLY place invoke() is called
 │       │   │   ├── terminal-manager.ts # Non-React xterm registry; terminal output bypasses React state
+│       │   │   ├── native-editing.ts # OS text-editing chords → readline sequences; text-context detection
 │       │   │   └── utils.ts     # cn() + small utilities
+│       │   ├── hooks/           # React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss)
 │       │   ├── state/           # Workspace context/reducer for projects/worktrees/tabs only
 │       │   ├── test/setup.ts    # Vitest setup
 │       │   ├── App.tsx
@@ -234,7 +236,14 @@ than no guide.
   drains them so the socket buffer can't fill), so consecutive keystrokes pipeline
   instead of each one stalling behind the previous keystroke's full daemon
   round-trip. `resize`/`kill` keep the separate pooled, handshake-free
-  request/response connection (`request_conn`). The remaining echo latency is
+  request/response connection (`request_conn`). **Native OS text-editing chords**
+  (macOS Cmd+Backspace/Left/Right, Option+Left/Right/Backspace; Linux
+  Ctrl+Left/Right/Backspace/Delete) are translated to readline control characters
+  by `nativeEditingSequence` in `lib/native-editing.ts` inside xterm's
+  `attachCustomKeyEventHandler`, checked **before** configured Pragma shortcuts so
+  Cmd+Backspace deletes the line (Ctrl+U) in the terminal instead of bubbling up
+  to `deleteFile`. Shift-modified variants are left alone so xterm's own
+  shift-selection keeps working. The remaining echo latency is
   structural — every character still crosses two webview↔native IPC boundaries
   plus a socket hop to the detached daemon, where an in-process terminal would
   echo via direct calls. Fitted terminal grids are capped at 240×90 cells
@@ -341,13 +350,21 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   **Ctrl+Delete** on Linux — that binding is registered as `deleteFile` in
   `packages/constants/schema.json` + the Rust `keybindings::default_config` and surfaces
   through `useShortcuts` to `WorkspaceShell`, which dispatches a `pragma:request-delete-file`
-  window event the `FilesTab` listens for. The controller's `commitDelete` calls
+  window event the `FilesTab` listens for. `deleteFile` is skipped when focus is in a
+  text-editing context (`isTextEditingContext` in `lib/native-editing.ts` — inputs, the
+  terminal, CodeMirror) so the OS-native text-editing behavior takes over instead of
+  deleting a file. The controller's `commitDelete` calls
   `deleteFile(worktreeId, path)` immediately and bumps the parent's nonce. The worktree is a
   git checkout, so **delete has no confirmation** — `git checkout -- <path>` / `git clean -fd`
   from a terminal tab is the recovery path. The backend `fs::delete_file` resolves through
   `resolve_in_worktree` (same `..`/symlink guard) and refuses to recurse into non-empty
   directories (`InvalidInput`); use `discard_*` / `clean -fd` from the Changes tab for tracked
-  / untracked multi-file removal. Git has no edit
+  / untracked multi-file removal. **⌘+End** (mac) / **Ctrl+End** (linux) is registered as
+  `scrollTerminalBottom` and scrolls the active terminal viewport to the live cursor row
+  (`TerminalManager.scrollToBottom` → xterm `scrollToBottom`). **Escape closes any open
+  modal**: radix `Dialog`/`AlertDialog` dismiss on Escape natively, and the hand-rolled
+  `CreateProjectDialog` / `CreateWorktreeDialog` use the `useEscapeToClose` hook
+  (`hooks/use-escape-to-close.ts`) for the same behavior. Git has no edit
   notification, so **Changes polls `worktree_changes` every 2s while mounted** (and on window
   focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
   `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
