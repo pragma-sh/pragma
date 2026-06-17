@@ -56,6 +56,32 @@ describe("workspaceReducer", () => {
     expect(state.loading).toBe(false);
   });
 
+  it("keeps the persisted project when it still exists on load", () => {
+    const state = workspaceReducer(
+      { ...baseState, selectedProjectId: "two" },
+      { type: "set-projects", projects: [project("one"), project("two")] },
+    );
+    expect(state.selectedProjectId).toBe("two");
+  });
+
+  it("falls back to the first project when the persisted one is gone", () => {
+    const state = workspaceReducer(
+      { ...baseState, selectedProjectId: "gone" },
+      { type: "set-projects", projects: [project("one"), project("two")] },
+    );
+    expect(state.selectedProjectId).toBe("one");
+  });
+
+  it("hydrates the persisted project and per-project worktree selection", () => {
+    const state = workspaceReducer(baseState, {
+      type: "hydrate-selection",
+      projectId: "p-2",
+      worktreeByProject: { "p-2": "wt-9", "p-3": "wt-7" },
+    });
+    expect(state.selectedProjectId).toBe("p-2");
+    expect(state.selectedWorktreeByProject).toEqual({ "p-2": "wt-9", "p-3": "wt-7" });
+  });
+
   it("activates new tabs and selects a fallback when one closes", () => {
     const withTabs = workspaceReducer(
       { ...baseState, tabs: [tab("one")], activeTabByWorktree: { worktree: "one" } },

@@ -267,6 +267,25 @@ fn clear_split_layout(db: tauri::State<'_, Db>, worktree_id: String) -> AppResul
     db.clear_split_layout(&worktree_id)
 }
 
+/// Settings key holding the persisted active selection (last active project +
+/// per-project last active worktree) as opaque, frontend-owned JSON. Rust never
+/// parses the value — it stores and returns the string verbatim, mirroring the
+/// split-layout persistence.
+const ACTIVE_SELECTION_KEY: &str = "activeSelection";
+
+/// Returns the persisted active selection as opaque, frontend-owned JSON, or
+/// `None` on first launch. The frontend parses the shape; Rust is uninvolved.
+#[tauri::command]
+fn get_active_selection(db: tauri::State<'_, Db>) -> AppResult<Option<String>> {
+    db.setting(ACTIVE_SELECTION_KEY)
+}
+
+/// Persists the active selection as opaque, frontend-owned JSON.
+#[tauri::command]
+fn set_active_selection(db: tauri::State<'_, Db>, value: String) -> AppResult<()> {
+    db.set_setting(ACTIVE_SELECTION_KEY, &value)
+}
+
 /// Wires the app's managed state, menu, and dev-only plugins during Tauri setup.
 /// Extracted from `run` so the builder chain stays readable (and within the
 /// per-function line budget).
@@ -341,6 +360,8 @@ pub fn run() {
             list_splits,
             set_split_layout,
             clear_split_layout,
+            get_active_selection,
+            set_active_selection,
             fs::list_dir_entries,
             fs::create_file,
             fs::create_folder,

@@ -30,6 +30,7 @@ import {
   closeTab as closeTabCommand,
   createTab as createTabCommand,
   deleteWorktree as deleteWorktreeCommand,
+  getActiveSelection,
   listProjects,
   listSplits,
   listTabs,
@@ -42,6 +43,7 @@ import {
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
   restartDaemon as restartDaemonCommand,
+  setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
   setTabUrl as setTabUrlCommand,
@@ -92,6 +94,11 @@ type WorkspaceAction =
   | { type: "load-start" }
   | { type: "load-error"; error: string }
   | { type: "set-projects"; projects: Project[] }
+  | {
+      type: "hydrate-selection";
+      projectId: string | null;
+      worktreeByProject: Record<string, string>;
+    }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
   | { type: "set-splits"; worktreeRoots: Record<string, SplitLayoutNode> }
@@ -231,6 +238,48 @@ function parseStoredSplits(records: SplitLayout[]): Record<string, SplitLayoutNo
     }
   }
   return roots;
+}
+
+/**
+ * Persisted active-selection shape, owned by the frontend (Rust stores the JSON
+ * verbatim). `projectId` is the last active project; `worktreeByProject` maps a
+ * project id to its last active worktree so switching away and back — even
+ * across restarts — returns to the worktree the user left off on.
+ */
+interface PersistedSelection {
+  projectId: string | null;
+  worktreeByProject: Record<string, string>;
+}
+
+function serializeSelection(
+  projectId: string | null,
+  worktreeByProject: Record<string, string>,
+): string {
+  return JSON.stringify({ projectId, worktreeByProject });
+}
+
+/** Parses a persisted selection blob; returns null on a corrupt/missing one. */
+function parseSelection(raw: string | null): PersistedSelection | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedSelection>;
+    const projectId = typeof parsed.projectId === "string" ? parsed.projectId : null;
+    const worktreeByProject: Record<string, string> = {};
+    if (parsed.worktreeByProject && typeof parsed.worktreeByProject === "object") {
+      for (const [key, value] of Object.entries(parsed.worktreeByProject)) {
+        if (typeof value === "string") {
+          worktreeByProject[key] = value;
+        }
+      }
+    }
+    return { projectId, worktreeByProject };
+  } catch {
+    // A corrupt blob is treated as no selection; the user lands on the first
+    // project's main worktree, the same as a first launch.
+    return null;
+  }
 }
 
 function defaultPaneId(worktreeId: string): string {
@@ -431,9 +480,26 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case "load-error":
       return { ...state, loading: false, error: action.error };
     case "set-projects": {
-      const selectedProjectId = state.selectedProjectId ?? action.projects[0]?.id ?? null;
+      // Keep the already-selected (hydrated or user-chosen) project when it is
+      // still in the loaded list; otherwise fall back to the first project. The
+      // guard is what makes a persisted selection survive a restart while still
+      // recovering if that project was deleted in another session.
+      const persisted = state.selectedProjectId;
+      const selectedProjectId =
+        persisted && action.projects.some((project) => project.id === persisted)
+          ? persisted
+          : (action.projects[0]?.id ?? null);
       return { ...state, projects: action.projects, selectedProjectId, loading: false };
     }
+    case "hydrate-selection":
+      // Seeds the active project + per-project worktree map from the persisted
+      // selection before `set-projects` runs, so the project-load effect lands
+      // on the remembered project/worktree instead of the first/main one.
+      return {
+        ...state,
+        selectedProjectId: action.projectId,
+        selectedWorktreeByProject: { ...action.worktreeByProject },
+      };
     case "set-worktrees": {
       // Keep the remembered worktree if it still exists; otherwise fall back to main.
       const remembered = state.selectedWorktreeByProject[action.projectId];
@@ -861,11 +927,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const selectedProjectIdRef = useRef(state.selectedProjectId);
   selectedProjectIdRef.current = state.selectedProjectId;
 
+  // Hydration / persistence bookkeeping for the active selection (last active
+  // project + per-project last active worktree). `didHydrateRef` flips true
+  // once the mount-time `reload` has rehydrated from SQLite; the persist effect
+  // stays inert until then so the initial empty state isn't written back over a
+  // saved selection. `lastPersistedRef` holds the last JSON string written so
+  // the effect can skip a no-op write (and so the first post-hydration run,
+  // which reproduces the just-loaded value, doesn't re-write it).
+  const didHydrateRef = useRef(false);
+  const lastPersistedRef = useRef<string | null>(null);
+
   const reload = useCallback(async () => {
     dispatch({ type: "load-start" });
     try {
-      const projects = await listProjects();
+      // Only the mount-time reload rehydrates the selection. Subsequent
+      // reloads (after add/clone) just refresh the project list — the
+      // in-memory selection is already authoritative, and re-reading stale
+      // backend state could race an in-flight persist write.
+      if (didHydrateRef.current) {
+        const projects = await listProjects();
+        dispatch({ type: "set-projects", projects });
+        return;
+      }
+      const [projects, rawSelection] = await Promise.all([listProjects(), getActiveSelection()]);
+      const selection = parseSelection(rawSelection);
+      if (selection) {
+        dispatch({
+          type: "hydrate-selection",
+          projectId: selection.projectId,
+          worktreeByProject: selection.worktreeByProject,
+        });
+        lastPersistedRef.current = serializeSelection(
+          selection.projectId,
+          selection.worktreeByProject,
+        );
+      } else {
+        lastPersistedRef.current = null;
+      }
+      // `set-projects` validates the hydrated project id against the loaded
+      // list and falls back to the first project if it was deleted elsewhere.
       dispatch({ type: "set-projects", projects });
+      didHydrateRef.current = true;
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -1281,6 +1383,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     persistedSplitsRef.current = nextSeen;
   }, [state.splitRootByWorktree]);
+
+  // Persist the active selection (last active project + per-project last active
+  // worktree) so switching away from a project and coming back — even across
+  // app restarts — returns to the worktree the user left off on. Inert until
+  // the mount-time `reload` has rehydrated, so the initial empty state can't
+  // clobber a saved selection; `lastPersistedRef` skips a no-op rewrite of the
+  // value that was just loaded (and self-heals when `set-projects` had to fall
+  // back because the persisted project was deleted elsewhere).
+  useEffect(() => {
+    if (!didHydrateRef.current) {
+      return;
+    }
+    const json = serializeSelection(state.selectedProjectId, state.selectedWorktreeByProject);
+    if (json === lastPersistedRef.current) {
+      return;
+    }
+    lastPersistedRef.current = json;
+    void setActiveSelection(json).catch((cause) => {
+      toast.error(`Failed to save active selection: ${messageFor(cause)}`);
+    });
+  }, [state.selectedProjectId, state.selectedWorktreeByProject]);
 
   const activeProject =
     state.projects.find((project) => project.id === state.selectedProjectId) ?? null;

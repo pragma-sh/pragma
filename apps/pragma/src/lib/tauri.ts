@@ -129,6 +129,20 @@ export function getProjectsDirectory(): Promise<string> {
   return invoke<string>("get_projects_directory");
 }
 
+/**
+ * Returns the persisted active selection (last active project + per-project
+ * last active worktree) as opaque, frontend-owned JSON, or null on first
+ * launch. The shape is owned by the frontend; Rust stores the string verbatim.
+ */
+export function getActiveSelection(): Promise<string | null> {
+  return invoke<string | null>("get_active_selection");
+}
+
+/** Persists the active selection (opaque, frontend-owned JSON). */
+export function setActiveSelection(value: string): Promise<void> {
+  return invoke<void>("set_active_selection", { value });
+}
+
 /** Lists worktrees for a project. */
 export function listWorktrees(projectId: string): Promise<Worktree[]> {
   return invoke<Worktree[]>("list_worktrees", { projectId });

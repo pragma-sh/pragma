@@ -407,6 +407,21 @@ path")` from inside the action handler — never from inside the reducer.
   list. When the user hides the currently-selected worktree, the reducer
   falls back to the main worktree (or the first remaining root) so the
   workspace never points at a hidden id.
+- **Active selection persists across restarts.** The last active project and
+  each project's last active worktree are saved in the `settings` table under
+  one opaque, frontend-owned JSON key (`activeSelection`) via the
+  `get_active_selection` / `set_active_selection` commands — Rust stores the
+  string verbatim, never parsing it (same pattern as split layouts). The
+  mount-time `reload` rehydrates (`hydrate-selection` seeds
+  `selectedProjectId` + `selectedWorktreeByProject`, then `set-projects`
+  validates the project id against the loaded list and falls back to the
+  first project if it was deleted elsewhere); a persist effect writes on every
+  selection change, gated by `didHydrateRef` so the initial empty state can't
+  clobber a saved selection, and deduped by `lastPersistedRef`. The in-memory
+  `set-worktrees` reducer already honored a remembered worktree when one
+  existed, so this is purely the missing persistence layer — switching away
+  from a project and back (in-session or across restarts) now returns to the
+  worktree the user left off on.
 
 ## Common commands
 
