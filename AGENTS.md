@@ -243,7 +243,15 @@ than no guide.
   `attachCustomKeyEventHandler`, checked **before** configured Pragma shortcuts so
   Cmd+Backspace deletes the line (Ctrl+U) in the terminal instead of bubbling up
   to `deleteFile`. Shift-modified variants are left alone so xterm's own
-  shift-selection keeps working. The remaining echo latency is
+  shift-selection keeps working. **Shift+Enter is rewritten to ESC+CR** in the
+  same `attachCustomKeyEventHandler` (also checked before the keybinding
+  passthrough) so TUI REPLs (Claude Code, opencode, Codex) insert a soft newline
+  instead of submitting. xterm only maps Enter to CR, so a bare Shift+Enter would
+  otherwise be indistinguishable from Enter; swallowing the event and writing
+  `\x1b\r` makes the shift meaningful without affecting plain Enter or
+  Cmd/Ctrl/Alt+Enter (which still fall through to xterm / configured keybindings).
+  For a shell that ignores the ESC, the trailing CR still ends the line — at
+  worst Shift+Enter behaves like Enter. The remaining echo latency is
   structural — every character still crosses two webview↔native IPC boundaries
   plus a socket hop to the detached daemon, where an in-process terminal would
   echo via direct calls. Fitted terminal grids are capped at 240×90 cells

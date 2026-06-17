@@ -119,6 +119,24 @@ export class TerminalManager {
     terminal.loadAddon(new WebLinksAddon());
     terminal.attachCustomKeyEventHandler((event) => {
       const platform = isMacPlatform() ? "mac" : "linux";
+      // Shift+Enter is a soft newline: a literal LF that does not submit the
+      // line. xterm maps Enter to CR, so a bare Shift+Enter would submit just
+      // like Enter; we rewrite it to ESC+CR, which TUI REPLs (Claude Code,
+      // opencode, Codex) interpret as a multi-line continuation. For a plain
+      // shell that ignores the ESC, the CR still ends the line — at worst the
+      // shift key behaves like Enter. We swallow the event so xterm's own CR
+      // send doesn't fire on top of ours.
+      if (
+        event.key === "Enter" &&
+        event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        void ptyWrite(tab.id, "\x1b\r");
+        return false;
+      }
       // Native OS text-editing chords (Cmd+Delete, Option+arrows, etc.) map to
       // readline control characters so the shell does what the OS keybinding
       // promises. Handle these before app shortcuts so Cmd+Backspace in the

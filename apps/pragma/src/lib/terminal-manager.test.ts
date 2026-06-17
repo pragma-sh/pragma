@@ -614,6 +614,69 @@ describe("TerminalManager native OS text editing", () => {
   });
 });
 
+describe("TerminalManager Shift+Enter", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    setLoadedKeybindingsConfig(defaultKeybindingsConfig);
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+  });
+
+  async function passthroughHandler() {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const instances = (
+      Terminal as unknown as {
+        instances: Array<{ attachCustomKeyEventHandler: Mock<(...args: unknown[]) => unknown> }>;
+      }
+    ).instances;
+    const handler = instances.at(-1)?.attachCustomKeyEventHandler;
+    return handler!.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+  }
+
+  it("writes ESC+CR for Shift+Enter so TUI REPLs insert a soft newline", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { shiftKey: true, key: "Enter" });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    expect(passthrough(event)).toBe(false);
+    expect(preventDefault).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", {
+      sessionId: tab.id,
+      data: "\x1b\r",
+    });
+  });
+
+  it("lets a plain Enter fall through to xterm so the shell still receives a CR", async () => {
+    const passthrough = await passthroughHandler();
+    const event = new KeyboardEvent("keydown", { key: "Enter" });
+
+    expect(passthrough(event)).toBe(true);
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+
+  it("does not rewrite Cmd/Ctrl/Alt+Enter so the original keybinding reaches xterm", async () => {
+    const passthrough = await passthroughHandler();
+    for (const event of [
+      new KeyboardEvent("keydown", { metaKey: true, key: "Enter" }),
+      new KeyboardEvent("keydown", { ctrlKey: true, key: "Enter" }),
+      new KeyboardEvent("keydown", { altKey: true, key: "Enter" }),
+    ]) {
+      expect(passthrough(event)).toBe(true);
+    }
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+});
+
 describe("TerminalManager mouse input", () => {
   beforeEach(() => {
     invokeMock.mockReset();
