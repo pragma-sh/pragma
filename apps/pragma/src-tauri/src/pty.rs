@@ -1,5 +1,4 @@
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -10,7 +9,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::CONSTANTS;
-use serde::{Deserialize, Serialize};
+use pragma_protocol::{
+    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, RequestFrame, RequestKind,
+    ServerFrame,
+};
+use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use uuid::Uuid;
 
@@ -83,59 +86,6 @@ impl PtyEvent {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RequestFrame {
-    request_id: String,
-    kind: String,
-    session_id: Option<String>,
-    cwd: Option<String>,
-    cols: Option<u16>,
-    rows: Option<u16>,
-    data: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "frame", rename_all = "camelCase")]
-enum ServerFrame {
-    Hello(HelloFrame),
-    Response(ResponseFrame),
-    Event(EventFrame),
-}
-
-/// First frame the daemon sends on every connection. Lets us detect a stale
-/// long-lived daemon whose protocol no longer matches this app build.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HelloFrame {
-    protocol_version: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResponseFrame {
-    request_id: String,
-    ok: bool,
-    error: Option<String>,
-}
-
-/// JSON event frames from the daemon. Output is **not** here — it arrives as a
-/// binary frame (see [`Frame::Output`]) — so only title/exit are modeled.
-#[derive(Deserialize)]
-#[serde(tag = "event", rename_all = "camelCase")]
-enum EventFrame {
-    Title {
-        #[serde(rename = "sessionId")]
-        _session_id: String,
-        title: String,
-    },
-    Exit {
-        #[serde(rename = "sessionId")]
-        _session_id: String,
-        code: Option<i32>,
-    },
-}
-
 impl PtyClient {
     /// Builds a client whose daemon is isolated by the build's product identity
     /// (`product_name`): "Pragma Dev" → the `pragma-dev` channel, otherwise
@@ -153,12 +103,16 @@ impl PtyClient {
     pub fn spawn(
         &self,
         session_id: String,
+        worktree_id: String,
         cwd: String,
         cols: u16,
         rows: u16,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
-        self.stream(RequestFrame::spawn(session_id, cwd, cols, rows), on_event)
+        self.stream(
+            request_spawn(session_id, worktree_id, cwd, cols, rows),
+            on_event,
+        )
     }
 
     pub fn attach(
@@ -168,7 +122,7 @@ impl PtyClient {
         rows: u16,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
-        self.stream(RequestFrame::attach(session_id, cols, rows), on_event)
+        self.stream(request_attach(session_id, cols, rows), on_event)
     }
 
     /// Enqueues keystroke input for the dedicated writer thread and returns
@@ -202,7 +156,7 @@ impl PtyClient {
         thread::spawn(move || {
             let mut conn: Option<UnixStream> = None;
             for msg in rx {
-                let frame = RequestFrame::write(msg.session_id, msg.data);
+                let frame = request_write(msg.session_id, msg.data);
                 // Deliver the frame, reconnecting once if the socket is dead.
                 for _ in 0..2 {
                     if conn.is_none() {
@@ -230,18 +184,18 @@ impl PtyClient {
     }
 
     pub fn resize(&self, session_id: String, cols: u16, rows: u16) -> AppResult<()> {
-        self.request(RequestFrame::resize(session_id, cols, rows))
+        self.request(request_resize(session_id, cols, rows))
     }
 
     pub fn kill(&self, session_id: String) -> AppResult<()> {
-        self.request(RequestFrame::kill(session_id))
+        self.request(request_kill(session_id))
     }
 
     /// Asks the daemon to terminate every shell whose initial cwd is `path`
     /// (or lives underneath it). Used when deleting a worktree so the user's
     /// running processes don't keep an open handle to a now-removed directory.
     pub fn kill_for_cwd(&self, path: String) -> AppResult<()> {
-        self.request(RequestFrame::kill_for_cwd(path))
+        self.request(request_kill_for_cwd(path))
     }
 
     /// Kills the running daemon (if any) and spawns a fresh build, confirming the
@@ -336,7 +290,14 @@ impl PtyClient {
                             let _ = forward_event(&on_event, PtyEvent::Exit { code });
                             break;
                         }
-                        Ok(ServerFrame::Hello(_) | ServerFrame::Response(_)) | Err(_) => {}
+                        Ok(
+                            ServerFrame::Hello(_)
+                            | ServerFrame::Response(_)
+                            | ServerFrame::Event(
+                                EventFrame::Output { .. } | EventFrame::Agent { .. },
+                            ),
+                        )
+                        | Err(_) => {}
                     },
                 }
             }
@@ -395,7 +356,7 @@ impl PtyClient {
         }
     }
 
-    fn connect_with_spawn(&self) -> AppResult<UnixStream> {
+    pub(crate) fn connect_with_spawn(&self) -> AppResult<UnixStream> {
         if let Some(stream) = self.connect_compatible()? {
             return Ok(stream);
         }
@@ -546,69 +507,102 @@ impl PtyClient {
     }
 }
 
-impl RequestFrame {
-    fn spawn(session_id: String, cwd: String, cols: u16, rows: u16) -> Self {
-        Self::new(
-            "spawn",
-            Some(session_id),
-            Some(cwd),
-            Some(cols),
-            Some(rows),
-            None,
-        )
-    }
+fn request_spawn(
+    session_id: String,
+    worktree_id: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> RequestFrame {
+    request_frame(
+        RequestKind::Spawn,
+        Some(session_id),
+        Some(worktree_id),
+        Some(cwd),
+        Some(cols),
+        Some(rows),
+        None,
+    )
+}
 
-    fn attach(session_id: String, cols: u16, rows: u16) -> Self {
-        Self::new(
-            "attach",
-            Some(session_id),
-            None,
-            Some(cols),
-            Some(rows),
-            None,
-        )
-    }
+fn request_attach(session_id: String, cols: u16, rows: u16) -> RequestFrame {
+    request_frame(
+        RequestKind::Attach,
+        Some(session_id),
+        None,
+        None,
+        Some(cols),
+        Some(rows),
+        None,
+    )
+}
 
-    fn write(session_id: String, data: String) -> Self {
-        Self::new("write", Some(session_id), None, None, None, Some(data))
-    }
+fn request_write(session_id: String, data: String) -> RequestFrame {
+    request_frame(
+        RequestKind::Write,
+        Some(session_id),
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    )
+}
 
-    fn resize(session_id: String, cols: u16, rows: u16) -> Self {
-        Self::new(
-            "resize",
-            Some(session_id),
-            None,
-            Some(cols),
-            Some(rows),
-            None,
-        )
-    }
+fn request_resize(session_id: String, cols: u16, rows: u16) -> RequestFrame {
+    request_frame(
+        RequestKind::Resize,
+        Some(session_id),
+        None,
+        None,
+        Some(cols),
+        Some(rows),
+        None,
+    )
+}
 
-    fn kill(session_id: String) -> Self {
-        Self::new("kill", Some(session_id), None, None, None, None)
-    }
+fn request_kill(session_id: String) -> RequestFrame {
+    request_frame(
+        RequestKind::Kill,
+        Some(session_id),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
 
-    fn kill_for_cwd(cwd: String) -> Self {
-        Self::new("killForCwd", None, None, None, None, Some(cwd))
-    }
+fn request_kill_for_cwd(cwd: String) -> RequestFrame {
+    request_frame(
+        RequestKind::KillForCwd,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(cwd),
+    )
+}
 
-    fn new(
-        kind: &str,
-        session_id: Option<String>,
-        cwd: Option<String>,
-        cols: Option<u16>,
-        rows: Option<u16>,
-        data: Option<String>,
-    ) -> Self {
-        Self {
-            request_id: Uuid::new_v4().to_string(),
-            kind: kind.to_string(),
-            session_id,
-            cwd,
-            cols,
-            rows,
-            data,
-        }
+fn request_frame(
+    kind: RequestKind,
+    session_id: Option<String>,
+    worktree_id: Option<String>,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    data: Option<String>,
+) -> RequestFrame {
+    RequestFrame {
+        request_id: Uuid::new_v4().to_string(),
+        kind,
+        session_id,
+        worktree_id,
+        cwd,
+        cols,
+        rows,
+        data,
     }
 }
 
@@ -638,7 +632,14 @@ fn daemon_executable() -> PathBuf {
         )
 }
 
-fn cargo_executable() -> PathBuf {
+pub(crate) fn sidecar_executable(name: &str) -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .map_or_else(|| PathBuf::from(name), |dir| dir.join(name))
+}
+
+pub(crate) fn cargo_executable() -> PathBuf {
     if let Some(cargo) = option_env!("CARGO") {
         return PathBuf::from(cargo);
     }
@@ -661,7 +662,7 @@ fn cargo_executable() -> PathBuf {
     PathBuf::from("cargo")
 }
 
-fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is `<root>/apps/pragma/src-tauri`; the workspace root is
     // three ancestors up (src-tauri -> pragma -> apps -> <root>).
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -692,79 +693,6 @@ fn forward_event(channel: &Channel<InvokeResponseBody>, event: PtyEvent) -> taur
         Some(body) => channel.send(body),
         None => Ok(()),
     }
-}
-
-/// One decoded wire frame. Mirrors `pragma_daemon::protocol::Frame`: control
-/// traffic is JSON, terminal output is a binary frame carrying raw bytes. The
-/// two crates can't share the type (the daemon is a binary), so this definition
-/// must stay byte-compatible with the daemon's.
-enum Frame {
-    Json(Vec<u8>),
-    Output { data: Vec<u8> },
-}
-
-/// Tag byte distinguishing JSON control frames from binary output frames. Must
-/// match the daemon's `FRAME_TAG_JSON` / `FRAME_TAG_OUTPUT`.
-const FRAME_TAG_JSON: u8 = 0;
-const FRAME_TAG_OUTPUT: u8 = 1;
-
-/// Reads one length-prefixed frame and splits it by tag. Output frames yield raw
-/// bytes (the session id is not needed app-side — the channel already routes per
-/// session); control frames yield JSON bytes to deserialize.
-fn read_frame(reader: &mut impl Read) -> AppResult<Frame> {
-    let mut len_bytes = [0_u8; 4];
-    reader.read_exact(&mut len_bytes)?;
-    let len = u32::from_be_bytes(len_bytes) as usize;
-    // Bound the allocation so a malformed/oversized length can't OOM the app.
-    // Mirrors the 16 MiB cap the daemon enforces in `protocol::read_frame`.
-    if len == 0 || len > 16 * 1024 * 1024 {
-        return Err(AppError::Daemon("daemon frame is too large".to_string()));
-    }
-    let mut body = vec![0_u8; len];
-    reader.read_exact(&mut body)?;
-    match body[0] {
-        FRAME_TAG_JSON => Ok(Frame::Json(body.split_off(1))),
-        FRAME_TAG_OUTPUT => {
-            // [tag][2-byte BE session-id length][session id][raw output bytes]
-            if body.len() < 3 {
-                return Err(AppError::Daemon("malformed daemon frame".to_string()));
-            }
-            let sid_len = u16::from_be_bytes([body[1], body[2]]) as usize;
-            let data_start = 3 + sid_len;
-            if body.len() < data_start {
-                return Err(AppError::Daemon("malformed daemon frame".to_string()));
-            }
-            Ok(Frame::Output {
-                data: body.split_off(data_start),
-            })
-        }
-        _ => Err(AppError::Daemon("unknown daemon frame tag".to_string())),
-    }
-}
-
-/// Reads one frame and decodes it as JSON `T`, erroring on a binary frame.
-fn read_json_frame<T: for<'de> Deserialize<'de>>(reader: &mut impl Read) -> AppResult<T> {
-    match read_frame(reader)? {
-        Frame::Json(bytes) => serde_json::from_slice(&bytes).map_err(AppError::from),
-        Frame::Output { .. } => Err(AppError::Daemon(
-            "expected a JSON frame, got binary".to_string(),
-        )),
-    }
-}
-
-/// Writes a JSON control frame (requests; the app never writes output frames).
-fn write_json_frame<T: Serialize>(writer: &mut impl Write, frame: &T) -> AppResult<()> {
-    let json = serde_json::to_vec(frame)?;
-    let body_len = 1 + json.len();
-    let len =
-        u32::try_from(body_len).map_err(|_| AppError::Daemon("frame is too large".to_string()))?;
-    let mut buf = Vec::with_capacity(4 + body_len);
-    buf.extend_from_slice(&len.to_be_bytes());
-    buf.push(FRAME_TAG_JSON);
-    buf.extend_from_slice(&json);
-    writer.write_all(&buf)?;
-    writer.flush()?;
-    Ok(())
 }
 
 #[cfg(test)]

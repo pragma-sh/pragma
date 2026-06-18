@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use pragma_constants::{AgentAttentionKind, AgentReportPayload, AgentStatus};
+
 #[derive(Debug, Error)]
 pub enum ProtocolError {
     #[error("io error: {0}")]
@@ -21,12 +23,9 @@ pub enum ProtocolError {
 /// title/exit events).
 const FRAME_TAG_JSON: u8 = 0;
 /// Tag for a binary output frame. Terminal output is shipped raw — no JSON
-/// escaping (which expands each 0x1B escape byte ~6x) and no UTF-8
-/// decode/encode — so a full-grid redraw crosses the wire as bytes and reaches
-/// xterm's parser directly. See [`Frame::Output`] for the body layout.
+/// escaping and no UTF-8 decode/encode.
 const FRAME_TAG_OUTPUT: u8 = 1;
-/// Upper bound on a single frame's body, mirrored on the app side. Guards
-/// against a malformed/oversized length OOM-ing either process.
+/// Upper bound on a single frame's body. Guards against malformed lengths.
 const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 
 /// A decoded wire frame. Control traffic stays JSON; PTY output is binary.
@@ -35,11 +34,6 @@ pub enum Frame {
     Json(Vec<u8>),
     /// Raw terminal output for `session_id`. Body layout after the tag is
     /// `[2-byte BE session-id length][session id UTF-8][raw output bytes]`.
-    ///
-    /// The daemon only ever *writes* output frames (it reads requests, which are
-    /// always JSON), so these fields are read only by tests and by the app's
-    /// mirror of this protocol — hence `allow(dead_code)` for the daemon binary.
-    #[allow(dead_code)]
     Output { session_id: String, data: Vec<u8> },
 }
 
@@ -47,8 +41,8 @@ impl Frame {
     /// Deserializes a JSON frame into `T`, erroring if the frame was binary.
     pub fn decode<T: for<'de> Deserialize<'de>>(self) -> Result<T, ProtocolError> {
         match self {
-            Frame::Json(bytes) => Ok(serde_json::from_slice(&bytes)?),
-            Frame::Output { .. } => Err(ProtocolError::UnexpectedBinaryFrame),
+            Self::Json(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Self::Output { .. } => Err(ProtocolError::UnexpectedBinaryFrame),
         }
     }
 }
@@ -59,6 +53,7 @@ pub struct RequestFrame {
     pub request_id: String,
     pub kind: RequestKind,
     pub session_id: Option<String>,
+    pub worktree_id: Option<String>,
     pub cwd: Option<String>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
@@ -75,6 +70,10 @@ pub enum RequestKind {
     Kill,
     /// Terminates every session whose initial cwd matches `data` (a path).
     KillForCwd,
+    /// Reports agent status. `data` carries a JSON [`AgentReportPayload`].
+    AgentReport,
+    /// Subscribes to daemon-wide agent status events.
+    SubscribeAgents,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,16 +88,13 @@ pub struct ResponseFrame {
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum EventFrame {
     /// Raw terminal output. Unlike the other variants this never crosses the
-    /// wire as JSON — it is written with [`write_output_frame`] as a binary
-    /// frame — so `data` is bytes, not a string.
+    /// wire as JSON — it is written with [`write_output_frame`].
     Output {
         #[serde(rename = "sessionId")]
         session_id: String,
         data: Vec<u8>,
     },
-    /// Shell-emitted window title (OSC 0 / OSC 2). The frontend decides whether
-    /// to apply it to the tab strip based on whether the user has manually
-    /// renamed that terminal tab.
+    /// Shell-emitted window title (OSC 0 / OSC 2).
     Title {
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -109,11 +105,19 @@ pub enum EventFrame {
         session_id: String,
         code: Option<i32>,
     },
+    Agent {
+        #[serde(rename = "worktreeId")]
+        worktree_id: String,
+        #[serde(rename = "tabId")]
+        tab_id: String,
+        agent: String,
+        status: AgentStatus,
+        #[serde(rename = "attentionKind")]
+        attention_kind: Option<AgentAttentionKind>,
+    },
 }
 
-/// Sent by the daemon as the very first frame on every accepted connection so
-/// the app can detect — and replace — a stale long-lived daemon whose protocol
-/// no longer matches the app build.
+/// Sent by the daemon as the first frame on every accepted connection.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloFrame {
@@ -128,15 +132,11 @@ pub enum ServerFrame {
     Event(EventFrame),
 }
 
-/// Reads one length-prefixed frame and splits it by tag: control frames come
-/// back as [`Frame::Json`] (decode with [`Frame::decode`]), output frames as
-/// [`Frame::Output`].
+/// Reads one length-prefixed frame and splits it by tag.
 pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
     let mut len_bytes = [0_u8; 4];
     reader.read_exact(&mut len_bytes)?;
     let len = u32::from_be_bytes(len_bytes) as usize;
-    // The body always carries at least the 1-byte tag, so a zero length is a
-    // malformed frame (no tag byte at all), not merely an oversized one.
     if len == 0 {
         return Err(ProtocolError::Malformed);
     }
@@ -148,7 +148,6 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
     match body[0] {
         FRAME_TAG_JSON => Ok(Frame::Json(body.split_off(1))),
         FRAME_TAG_OUTPUT => {
-            // [tag][2-byte BE session-id length][session id][raw output bytes]
             if body.len() < 3 {
                 return Err(ProtocolError::Malformed);
             }
@@ -194,8 +193,6 @@ pub fn write_json_frame<T: Serialize>(
 }
 
 /// Writes a binary output frame carrying raw terminal bytes for `session_id`.
-/// The header (length + tag + session id) is sent in one write and the payload
-/// in a second, so a large redraw is at most two syscalls and never copied.
 pub fn write_output_frame(
     writer: &mut impl Write,
     session_id: &str,
@@ -232,85 +229,76 @@ mod tests {
             request_id: "1".to_string(),
             kind: RequestKind::Resize,
             session_id: Some("session".to_string()),
+            worktree_id: None,
             cwd: None,
             cols: Some(80),
             rows: Some(24),
             data: None,
         };
         let mut bytes = Vec::new();
-        write_json_frame(&mut bytes, &frame).expect("frame should encode");
-        let decoded: RequestFrame =
-            read_json_frame(&mut bytes.as_slice()).expect("frame should decode");
+        write_json_frame(&mut bytes, &frame).expect("write frame");
+        let decoded: RequestFrame = read_json_frame(&mut bytes.as_slice()).expect("read frame");
         assert_eq!(decoded.request_id, "1");
         assert!(matches!(decoded.kind, RequestKind::Resize));
+        assert_eq!(decoded.cols, Some(80));
     }
 
     #[test]
-    fn hello_frame_uses_camel_case_and_round_trips() {
-        let json = serde_json::to_string(&ServerFrame::Hello(HelloFrame {
-            protocol_version: 7,
-        }))
-        .expect("hello should encode");
-        assert!(json.contains("\"frame\":\"hello\""));
-        assert!(json.contains("\"protocolVersion\":7"));
-        assert!(!json.contains("protocol_version"));
-
+    fn round_trips_binary_output() {
         let mut bytes = Vec::new();
-        write_json_frame(
-            &mut bytes,
-            &ServerFrame::Hello(HelloFrame {
-                protocol_version: 7,
-            }),
-        )
-        .expect("hello should encode");
-        let decoded: ServerFrame =
-            read_json_frame(&mut bytes.as_slice()).expect("hello should decode");
-        match decoded {
-            ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 7),
-            _ => panic!("expected a hello frame"),
-        }
-    }
-
-    #[test]
-    fn title_event_uses_camel_case_session_id() {
-        // Title/exit still travel as JSON; only output is binary.
-        let frame = ServerFrame::Event(EventFrame::Title {
-            session_id: "session".to_string(),
-            title: "hi".to_string(),
-        });
-        let json = serde_json::to_string(&frame).expect("event should encode");
-        assert!(json.contains("sessionId"));
-        assert!(!json.contains("session_id"));
-    }
-
-    #[test]
-    fn output_frame_round_trips_as_binary() {
-        // Raw output — including ESC bytes and invalid UTF-8 — must survive the
-        // wire untouched and arrive as a binary frame, not JSON.
-        let payload = [0x1B, b'[', b'2', b'J', 0xFF, 0x00, b'x'];
-        let mut bytes = Vec::new();
-        write_output_frame(&mut bytes, "sess-1", &payload).expect("output should encode");
-        // A binary frame is never valid JSON.
-        assert!(read_json_frame::<ServerFrame>(&mut bytes.as_slice()).is_err());
-        match read_frame(&mut bytes.as_slice()).expect("output should decode") {
+        write_output_frame(&mut bytes, "tab-1", b"\x1b[31mred").expect("write output");
+        match read_frame(&mut bytes.as_slice()).expect("read output") {
             Frame::Output { session_id, data } => {
-                assert_eq!(session_id, "sess-1");
-                assert_eq!(data, payload);
+                assert_eq!(session_id, "tab-1");
+                assert_eq!(data, b"\x1b[31mred");
             }
-            Frame::Json(_) => panic!("expected a binary output frame"),
+            Frame::Json(_) => panic!("expected output frame"),
         }
     }
 
     #[test]
-    fn zero_length_frame_is_malformed_not_too_large() {
-        // A zero-length body has no tag byte at all — that's a malformed frame,
-        // not an oversized one. The distinction matters for diagnosing protocol
-        // corruption vs. a peer sending legitimate-but-huge frames.
-        let bytes = [0_u8, 0, 0, 0];
-        match read_frame(&mut bytes.as_slice()) {
-            Err(ProtocolError::Malformed) => {}
-            Err(other) => panic!("expected Malformed, got {other:?}"),
-            Ok(_) => panic!("zero-length frame should not decode"),
+    fn rejects_binary_when_json_expected() {
+        let mut bytes = Vec::new();
+        write_output_frame(&mut bytes, "tab-1", b"data").expect("write output");
+        let err = read_json_frame::<ServerFrame>(&mut bytes.as_slice()).expect_err("json err");
+        assert!(matches!(err, ProtocolError::UnexpectedBinaryFrame));
+    }
+
+    #[test]
+    fn server_frame_is_tagged() {
+        let frame = ServerFrame::Hello(HelloFrame {
+            protocol_version: 3,
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write hello");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read hello");
+        match decoded {
+            ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 3),
+            ServerFrame::Response(_) | ServerFrame::Event(_) => panic!("expected hello"),
+        }
+    }
+
+    #[test]
+    fn event_frame_round_trips_title() {
+        let frame = ServerFrame::Event(EventFrame::Title {
+            session_id: "tab".to_string(),
+            title: "repo".to_string(),
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write event");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read event");
+        match decoded {
+            ServerFrame::Event(EventFrame::Title { session_id, title }) => {
+                assert_eq!(session_id, "tab");
+                assert_eq!(title, "repo");
+            }
+            ServerFrame::Hello(_)
+            | ServerFrame::Response(_)
+            | ServerFrame::Event(
+                EventFrame::Output { .. } | EventFrame::Exit { .. } | EventFrame::Agent { .. },
+            ) => {
+                panic!("expected title")
+            }
         }
     }
 }

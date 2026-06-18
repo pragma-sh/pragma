@@ -24,6 +24,12 @@ pub enum AppError {
     LockPoisoned,
 }
 
+impl From<pragma_protocol::ProtocolError> for AppError {
+    fn from(error: pragma_protocol::ProtocolError) -> Self {
+        Self::Daemon(error.to_string())
+    }
+}
+
 impl<T> From<PoisonError<T>> for AppError {
     fn from(_: PoisonError<T>) -> Self {
         Self::LockPoisoned

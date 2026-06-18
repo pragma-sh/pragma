@@ -1,22 +1,15 @@
 [package]
-name = "pragma-daemon"
+name = "pragma-protocol"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "Detached PTY daemon for Pragma terminal sessions."
+description = "Shared wire protocol for Pragma daemon clients."
 
 [lints]
 workspace = true
 
 [dependencies]
-anyhow = "1"
-daemonize = "0.5"
-portable-pty = "0.8"
 pragma-constants = { path = "../../packages/constants" }
-pragma-protocol = { path = "../pragma-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3"

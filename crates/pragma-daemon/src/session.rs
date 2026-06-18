@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use thiserror::Error;
 
-use crate::protocol::EventFrame;
+use pragma_protocol::EventFrame;
 
 const SCROLLBACK_LIMIT: usize = 10_000;
 
@@ -108,7 +108,14 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn spawn(id: String, cwd: String, cols: u16, rows: u16) -> Result<Arc<Self>, SessionError> {
+    pub fn spawn(
+        id: String,
+        worktree_id: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+        daemon_socket: String,
+    ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
             rows,
             cols,
@@ -120,6 +127,9 @@ impl Session {
         command.cwd(&cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        command.env("PRAGMA_TAB_ID", &id);
+        command.env("PRAGMA_WORKTREE_ID", worktree_id);
+        command.env("PRAGMA_DAEMON_SOCKET", daemon_socket);
         let child = pair.slave.spawn_command(command)?;
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
@@ -580,7 +590,7 @@ fn shell_path() -> String {
 #[cfg(test)]
 mod tests {
     use super::{OscChunk, OscParser, OutputCoalescer, Scrollback};
-    use crate::protocol::EventFrame;
+    use pragma_protocol::EventFrame;
 
     #[test]
     fn coalescer_merges_consecutive_output() {

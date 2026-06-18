@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::sync::mpsc::Receiver;
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use pragma_protocol::{AgentReportPayload, EventFrame};
 use thiserror::Error;
 
-use crate::protocol::EventFrame;
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Error)]
@@ -22,12 +23,27 @@ pub enum RegistryError {
 #[derive(Default)]
 pub struct Registry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
+    socket_path: PathBuf,
+    agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
+    agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
 }
 
+type AgentKey = (String, String, String);
+
 impl Registry {
+    pub fn new(socket_path: PathBuf) -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            socket_path,
+            agent_statuses: Mutex::new(HashMap::new()),
+            agent_subscribers: Mutex::new(Vec::new()),
+        }
+    }
+
     pub fn spawn(
         &self,
         session_id: String,
+        worktree_id: String,
         cwd: String,
         cols: u16,
         rows: u16,
@@ -43,7 +59,14 @@ impl Registry {
         {
             return Err(RegistryError::AlreadyExists(session_id));
         }
-        let session = Session::spawn(session_id.clone(), cwd, cols, rows)?;
+        let session = Session::spawn(
+            session_id.clone(),
+            worktree_id,
+            cwd,
+            cols,
+            rows,
+            self.socket_path.to_string_lossy().into_owned(),
+        )?;
         let attach = session.attach()?;
         let mut sessions = self
             .sessions
@@ -93,6 +116,7 @@ impl Registry {
             .remove(session_id)
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))?;
         session.kill()?;
+        self.clear_agents_for_tab(session_id);
         Ok(())
     }
 
@@ -125,10 +149,47 @@ impl Registry {
             // shell in a deleted worktree with no way to reach it again.
             if session.kill().is_ok() {
                 sessions.remove(id);
+                self.clear_agents_for_tab(id);
                 killed += 1;
             }
         }
         Ok(killed)
+    }
+
+    pub fn report_agent(&self, payload: AgentReportPayload) -> Result<(), RegistryError> {
+        let event = agent_event(&payload);
+        let key = (
+            payload.worktree_id.clone(),
+            payload.tab_id.clone(),
+            payload.agent.clone(),
+        );
+        self.agent_statuses
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .insert(key, payload);
+        self.broadcast_agent(&event);
+        Ok(())
+    }
+
+    pub fn subscribe_agents(
+        &self,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        let statuses = self
+            .agent_statuses
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let (tx, rx) = mpsc::channel();
+        self.agent_subscribers
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .push(tx);
+        Ok((statuses.values().map(agent_event).collect(), rx))
+    }
+
+    pub fn clear_agents_for_tab(&self, tab_id: &str) {
+        if let Ok(mut statuses) = self.agent_statuses.lock() {
+            statuses.retain(|(_, status_tab_id, _), _| status_tab_id != tab_id);
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -144,6 +205,22 @@ impl Registry {
             .get(session_id)
             .cloned()
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))
+    }
+
+    fn broadcast_agent(&self, event: &EventFrame) {
+        if let Ok(mut subscribers) = self.agent_subscribers.lock() {
+            subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+        }
+    }
+}
+
+fn agent_event(payload: &AgentReportPayload) -> EventFrame {
+    EventFrame::Agent {
+        worktree_id: payload.worktree_id.clone(),
+        tab_id: payload.tab_id.clone(),
+        agent: payload.agent.clone(),
+        status: payload.status,
+        attention_kind: payload.attention_kind,
     }
 }
 
@@ -167,7 +244,7 @@ mod tests {
         let id = "session-1".to_string();
         let cwd = dir.path().to_string_lossy().into_owned();
         let (_scrollback, _rx) = registry
-            .spawn(id.clone(), cwd, 80, 24)
+            .spawn(id.clone(), "worktree-1".to_string(), cwd, 80, 24)
             .expect("session should spawn");
         (registry, id, dir)
     }
