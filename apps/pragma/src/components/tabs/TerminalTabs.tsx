@@ -2,9 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@iconify/react";
 import { constants, type EditorLauncher } from "@pragma/constants";
-import { ChevronDown, Columns2, Globe, Pencil, Plus, Rows2, SquareTerminal, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Columns2,
+  Globe,
+  Pencil,
+  Plus,
+  Rows2,
+  SquareTerminal,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -27,6 +39,7 @@ import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { isMacPlatform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { useTabAgentStatus } from "@/state/agent-status-store";
 import {
   type SplitDirection,
   type SplitLayoutNode,
@@ -209,52 +222,68 @@ export function TerminalTabs() {
   return (
     <TooltipProvider delayDuration={300}>
       <header className="flex shrink-0 flex-col border-b border-white/10 bg-[#11151b] text-slate-300">
-        <div className="flex h-9 items-center justify-end border-b border-white/5 bg-[#151b24] px-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
-          <DropdownMenu>
-            <div className="flex shrink-0 items-center">
+        <div className="flex h-9 items-center justify-between gap-2 border-b border-white/5 bg-[#151b24] px-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
+          <div className="flex min-w-0 items-center gap-1">
+            <AgentsMenu />
+            {workspace.agentBackAvailable ? (
               <Button
-                className="max-w-44 rounded-r-none border border-cyan-400/25 bg-cyan-400/12 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
-                disabled={!workspace.selectedWorktree}
-                onClick={() => openEditor(selectedEditor)}
+                className="text-slate-200 hover:bg-white/10 hover:text-white"
                 size="sm"
                 variant="ghost"
-                aria-label={`Open worktree in ${selectedEditor.name}`}
+                onClick={() => void workspace.goBackFromAgent?.()}
               >
-                <Icon
-                  className="size-3.5 shrink-0"
-                  icon={selectedEditor.brandIcon}
-                  style={{ color: selectedEditor.brandColor }}
-                />
-                <span className="hidden truncate sm:inline">{selectedEditor.name}</span>
+                <ArrowLeft className="size-3.5" />
+                <span className="hidden sm:inline">Go back</span>
               </Button>
-              <DropdownMenuTrigger asChild>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center justify-end">
+            <DropdownMenu>
+              <div className="flex shrink-0 items-center">
                 <Button
-                  className="rounded-l-none border border-l-0 border-cyan-400/25 bg-cyan-400/12 px-1 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
+                  className="max-w-44 rounded-r-none border border-cyan-400/25 bg-cyan-400/12 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
                   disabled={!workspace.selectedWorktree}
-                  size="icon-sm"
+                  onClick={() => openEditor(selectedEditor)}
+                  size="sm"
                   variant="ghost"
-                  aria-label="Choose editor"
+                  aria-label={`Open worktree in ${selectedEditor.name}`}
                 >
-                  <ChevronDown className="size-3 opacity-70" />
-                </Button>
-              </DropdownMenuTrigger>
-            </div>
-            <DropdownMenuContent align="end" className="min-w-48">
-              {editorLaunchers.map((editor) => (
-                <DropdownMenuItem key={editor.id} onSelect={() => openEditor(editor)}>
                   <Icon
-                    className="size-4"
-                    icon={editor.brandIcon}
-                    style={{ color: editor.brandColor }}
+                    className="size-3.5 shrink-0"
+                    icon={selectedEditor.brandIcon}
+                    style={{ color: selectedEditor.brandColor }}
                   />
-                  {editor.name}
-                  {editor.id === selectedEditor.id ? (
-                    <DropdownMenuShortcut>Default</DropdownMenuShortcut>
-                  ) : null}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <span className="hidden truncate sm:inline">{selectedEditor.name}</span>
+                </Button>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="rounded-l-none border border-l-0 border-cyan-400/25 bg-cyan-400/12 px-1 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
+                    disabled={!workspace.selectedWorktree}
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Choose editor"
+                  >
+                    <ChevronDown className="size-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </div>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {editorLaunchers.map((editor) => (
+                  <DropdownMenuItem key={editor.id} onSelect={() => openEditor(editor)}>
+                    <Icon
+                      className="size-4"
+                      icon={editor.brandIcon}
+                      style={{ color: editor.brandColor }}
+                    />
+                    {editor.name}
+                    {editor.id === selectedEditor.id ? (
+                      <DropdownMenuShortcut>Default</DropdownMenuShortcut>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
         <div className="flex h-11 items-center">
           <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
@@ -275,6 +304,7 @@ export function TerminalTabs() {
                     title={`Split: ${displayTitle}`}
                   >
                     <ParentIcon className="size-3.5 shrink-0 text-cyan-300" />
+                    <TabAgentDot tabId={tab.id} />
                     <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
                   </button>
                 );
@@ -324,6 +354,7 @@ export function TerminalTabs() {
                           onDoubleClick={() => startRename(tab.id, displayTitle)}
                         >
                           <TabIcon tab={tab} />
+                          <TabAgentDot tabId={tab.id} />
                           <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
                         </button>
                       )}
@@ -385,4 +416,8 @@ export function TerminalTabs() {
       </header>
     </TooltipProvider>
   );
+}
+
+function TabAgentDot({ tabId }: { tabId: string }) {
+  return <AgentStatusDot status={useTabAgentStatus(tabId)} />;
 }

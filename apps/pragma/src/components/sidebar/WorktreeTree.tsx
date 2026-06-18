@@ -25,10 +25,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
+import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { cn } from "@/lib/utils";
+import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { useWorkspace } from "@/state/workspace-context";
 
 const editorLaunchers = constants.editorLaunchers.options;
@@ -146,6 +148,7 @@ function WorktreeRow({
   const isMain = node.worktree.isMain;
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const WorktreeIcon = merged ? GitMerge : GitBranch;
+  const agentStatus = useWorktreeAgentStatus(node.worktree.id);
 
   useEffect(() => {
     if (renaming && inputRef.current) {
@@ -235,6 +238,7 @@ function WorktreeRow({
               ) : (
                 <span className="truncate">{label}</span>
               )}
+              <AgentStatusDot status={agentStatus} />
             </button>
             {isMain ? null : (
               <Button
