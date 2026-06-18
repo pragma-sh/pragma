@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the detached PTY daemon (`pragma-daemon`) and stage it as a Tauri
-# sidecar so the bundle is self-contained. The release app launches the daemon
+# Build the detached PTY daemon (`pragma-daemon`) and agent reporter
+# (`pragma-agent`) and stage them as Tauri sidecars so the bundle is self-contained. The release app launches the daemon
 # from beside its own executable (see `daemon_executable()` in
 # `src-tauri/src/pty.rs`), and the Tauri CLI only copies it there if a
-# `pragma-daemon-<target-triple>` binary exists under `src-tauri/binaries/`.
+# `pragma-daemon-<target-triple>` binary exists under `src-tauri/binaries/`;
+# the app installs `pragma-agent` from its sibling sidecar on startup.
 #
 # Pass `--release` for production builds (`tauri build`). The default debug
 # build keeps `tauri dev` fast: dev runs the daemon via `cargo run`, so the
@@ -29,12 +30,17 @@ fi
 
 if [[ "$profile" == "release" ]]; then
   cargo build -p pragma-daemon --release
+  cargo build -p pragma-agent-cli --release
 else
   cargo build -p pragma-daemon
+  cargo build -p pragma-agent-cli
 fi
 
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-daemon" \
   "$src_tauri_dir/binaries/pragma-daemon-$triple"
+cp "$repo_root/target/$profile/pragma-agent" \
+  "$src_tauri_dir/binaries/pragma-agent-$triple"
 
 echo "staged pragma-daemon ($profile) -> src-tauri/binaries/pragma-daemon-$triple"
+echo "staged pragma-agent ($profile) -> src-tauri/binaries/pragma-agent-$triple"
