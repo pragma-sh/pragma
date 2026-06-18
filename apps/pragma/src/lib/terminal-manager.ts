@@ -205,7 +205,7 @@ export class TerminalManager {
     };
     this.terminals.set(tab.id, managed);
     terminal.onData((data) => void ptyWrite(tab.id, data));
-    this.connect(tab.id, cwd, managed);
+    this.connect(tab, cwd, managed);
     this.fit(tab.id);
   }
 
@@ -349,7 +349,8 @@ export class TerminalManager {
     };
   }
 
-  private connect(tabId: string, cwd: string, managed: ManagedTerminal): void {
+  private connect(tab: Tab, cwd: string, managed: ManagedTerminal): void {
+    const tabId = tab.id;
     const onEvent = (message: PtyMessage) => {
       // Raw terminal output arrives as bytes (ArrayBuffer); control events as
       // JSON objects.
@@ -377,7 +378,7 @@ export class TerminalManager {
     const cols = managed.terminal.cols || 80;
     const rows = managed.terminal.rows || 24;
     ptyAttach(tabId, cols, rows, onEvent)
-      .catch(() => ptySpawn(tabId, cwd, cols, rows, onEvent))
+      .catch(() => ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent))
       .then((channel) => {
         managed.channel = channel;
         // The remote session is brand new — either a fresh spawn, or an attach
