@@ -149,6 +149,40 @@
       "type": "string",
       "enum": ["terminal", "browser", "editor", "diff", "log"]
     },
+    "AgentStatus": {
+      "title": "AgentStatus",
+      "description": "Runtime status an external agent reports for a terminal tab.",
+      "type": "string",
+      "enum": ["running", "attention", "done"]
+    },
+    "AgentReportKind": {
+      "title": "AgentReportKind",
+      "description": "CLI report command names; each maps to an AgentStatus.",
+      "type": "string",
+      "enum": ["started", "stopped", "attention"]
+    },
+    "AgentAttentionKind": {
+      "title": "AgentAttentionKind",
+      "description": "Reason an agent needs the user's attention.",
+      "type": "string",
+      "enum": ["question", "command"]
+    },
+    "AgentReportPayload": {
+      "title": "AgentReportPayload",
+      "description": "Status report sent by pragma-agent through the daemon to the app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "status"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "status": { "$ref": "#/definitions/AgentStatus" },
+        "attentionKind": {
+          "anyOf": [{ "$ref": "#/definitions/AgentAttentionKind" }, { "type": "null" }]
+        }
+      }
+    },
     "Tab": {
       "title": "Tab",
       "type": "object",
