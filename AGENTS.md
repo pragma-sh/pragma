@@ -56,6 +56,7 @@ than no guide.
 | Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) |
 | Backend          | Rust (Tauri commands)                                                           |
 | Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)          |
+| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`            |
 | Lint (TS)        | [oxlint](https://oxc.rs)                                                        |
 | Format (TS)      | [oxfmt](https://oxc.rs)                                                         |
 | Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                      |
@@ -98,14 +99,17 @@ than no guide.
 │           ├── icons/           # Production app icons
 │           └── icons-dev/       # Dev "Pragma Dev" app icons (generated via `tauri icon`)
 ├── crates/
-│   └── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
+│   ├── pragma-agent-cli/        # `pragma-agent` helper CLI for external agents to report runtime status
+│   ├── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
+│   └── pragma-protocol/         # Shared daemon wire frames/framing used by daemon, app, and CLI
 ├── packages/
-│   └── constants/               # Dual TS + Rust package — shared source of truth
-│       ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
-│       ├── values.json          # The actual values. EDIT THIS to change values.
-│       ├── src/index.ts         # Typed TS export
-│       ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
-│       └── src/generated/       # Generated TS types (git-ignored; never edit)
+│   ├── constants/               # Dual TS + Rust package — shared source of truth
+│   │   ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
+│   │   ├── values.json          # The actual values. EDIT THIS to change values.
+│   │   ├── src/index.ts         # Typed TS export
+│   │   ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
+│   │   └── src/generated/       # Generated TS types (git-ignored; never edit)
+│   └── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -121,11 +125,29 @@ than no guide.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
+- A typed JS wrapper over the bundled agent CLI → `packages/sdk` (`@pragma/sdk`).
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
-- PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
+- PTY/session business logic → `crates/pragma-daemon`; shared wire framing/types →
+  `crates/pragma-protocol`; agent status CLI → `crates/pragma-agent-cli`. The Tauri app only proxies over
   the Unix socket and must not own PTYs.
+- **Agent connector.** External agents running inside a Pragma terminal report status by
+  calling `pragma-agent --agent <id> report started|stopped|attention`. Terminal spawns inject
+  `PRAGMA_TAB_ID` (same value as the daemon session id / tab id), `PRAGMA_WORKTREE_ID`, and
+  `PRAGMA_DAEMON_SOCKET`; the CLI uses only those env vars to connect to the existing daemon
+  socket, read the `Hello`, write one `AgentReport` frame, and exit without waiting for an ack.
+  The daemon keeps runtime-only status in memory keyed by `(worktreeId, tabId, agent)`, supports a
+  long-lived `SubscribeAgents` request for the app, emits `EventFrame::Agent` snapshots/events, and
+  clears a tab's snapshot entries when the session exits. Status is never persisted to SQLite; the
+  frontend stores it in `state/agent-status-store.ts` via `useSyncExternalStore`, while agent pins
+  are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **4** for
+  this protocol. Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields
+  `id`, `name`, `icon`, and `start` (string or argv array); icons must resolve inside that agent
+  directory. The app installs/updates the bundled `pragma-agent` into `~/.local/bin` on startup and
+  emits a UI warning if that directory is not on `$PATH`. JS/TS consumers should use
+  `@pragma/sdk` (`packages/sdk`) instead of hand-building `pragma-agent` argv; it shells out to the
+  installed CLI with typed options and is bundled by Bunup as ESM, CJS, and `.d.ts`.
 - **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
   PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
   arrives as one read instead of many; a dedicated coalescer thread
@@ -142,8 +164,8 @@ than no guide.
   PTY-stream handling, so changing the coalescing/buffering still requires bumping
   `daemon.protocolVersion` (below).
 - **Terminal output is shipped as raw bytes end-to-end — never JSON.** The wire protocol
-  (`crates/pragma-daemon/src/protocol.rs`, mirrored by hand in `apps/pragma/src-tauri/src/pty.rs`
-  since the daemon is a binary the app can't import) is **tag-prefixed**: every frame is
+  (`crates/pragma-protocol`, consumed by the daemon, Tauri app, and `pragma-agent`) is
+  **tag-prefixed**: every frame is
   `[4-byte BE length][1-byte tag][body]`. Tag 0 = JSON control frame (hello, requests,
   responses, title/exit events); tag 1 = a binary **output** frame whose body is
   `[2-byte BE session-id length][session id][raw output bytes]` (`write_output_frame` /
@@ -184,7 +206,8 @@ than no guide.
   `--release`, and `tauri:dev` runs it (debug) before `tauri dev` so the CLI's sidecar-copy
   step doesn't fail (dev still uses `cargo run` at runtime — the staged file only satisfies
   bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
-  plugin, so no `shell:` capability is needed. `binaries/` is git-ignored.
+  plugin, so no `shell:` capability is needed. `pragma-agent` is staged by the same script and
+  bundled as `binaries/pragma-agent`. `binaries/` is git-ignored.
 - **Dev and prod must never share a daemon.** The socket/lock/log live in a
   **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
   build's **product identity, not the compile profile**: `daemon_channel_for_product`
@@ -473,6 +496,7 @@ bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-daemon # Run the detached PTY daemon directly for debugging
+cargo run -p pragma-agent-cli -- --agent mock report started # Manually send an agent report (inside a Pragma terminal env)
 ```
 
 ## Code standards (consistent across TypeScript & Rust)
