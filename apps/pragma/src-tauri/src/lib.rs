@@ -1,6 +1,9 @@
 // Tauri command extraction requires owned IPC arguments and `State<T>` values.
 #![allow(clippy::needless_pass_by_value)]
 
+mod agent_cli;
+mod agent_events;
+mod agents;
 mod browser;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
@@ -105,13 +108,14 @@ fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> 
 async fn pty_spawn(
     pty: tauri::State<'_, PtyClient>,
     session_id: String,
+    worktree_id: String,
     cwd: String,
     cols: u16,
     rows: u16,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let client = pty.inner().clone();
-    run_pty_task(move || client.spawn(session_id, cwd, cols, rows, on_event)).await
+    run_pty_task(move || client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)).await
 }
 
 #[tauri::command]
@@ -300,12 +304,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_data_dir = app.path().app_data_dir()?;
     app.manage(Db::open(app_data_dir.join("pragma.db"))?);
     // Isolate the dev daemon from prod by product identity (see `PtyClient::new`).
-    app.manage(PtyClient::new(
-        app_data_dir,
-        app.config().product_name.as_deref(),
-    ));
+    let pty = PtyClient::new(app_data_dir, app.config().product_name.as_deref());
+    app.manage(pty.clone());
     app.manage(GitLocks::default());
     install_menu(app.handle())?;
+    if let Err(error) = agent_cli::ensure_installed(app.handle()) {
+        log::warn!("failed to install pragma-agent CLI: {error}");
+    }
+    agent_events::start(app.handle().clone(), pty);
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
         log::warn!("failed to load keybindings config: {error}");
     }
@@ -325,6 +331,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -350,6 +357,7 @@ pub fn run() {
             worktrees::hide_worktree,
             worktrees::delete_worktree,
             editors::open_worktree,
+            agents::list_agents,
             project_icon,
             list_tabs,
             create_tab,

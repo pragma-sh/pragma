@@ -13,6 +13,7 @@ import type {
   WorktreeChanges,
   Worktree,
   WorktreeStatus,
+  AgentReportPayload,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -42,6 +43,29 @@ export type PtyMessage = ArrayBuffer | PtyEvent;
 
 export type PtyEventHandler = (message: PtyMessage) => void;
 
+/** Agent launcher config loaded from each `~/.pragma/agents/<id>/config.json`. */
+export interface AgentConfig {
+  id: string;
+  name: string;
+  iconDataUrl: string | null;
+  start: string[];
+}
+
+/** Lists configured external agents. */
+export function listAgents(): Promise<AgentConfig[]> {
+  return invoke<AgentConfig[]>("list_agents");
+}
+
+/** Subscribes to daemon-forwarded agent status reports. */
+export function onAgentReport(handler: (payload: AgentReportPayload) => void): Promise<UnlistenFn> {
+  return listen<AgentReportPayload>("pragma:agent-report", (event) => handler(event.payload));
+}
+
+/** Warns once when `~/.local/bin` is not on PATH after installing `pragma-agent`. */
+export function onAgentCliPathWarning(handler: (path: string) => void): Promise<UnlistenFn> {
+  return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
+}
+
 /**
  * Spawns a daemon-backed PTY session and streams events through a Tauri channel.
  * Resolves with the channel so callers can detach (`channel.onmessage = noop`)
@@ -49,6 +73,7 @@ export type PtyEventHandler = (message: PtyMessage) => void;
  */
 export function ptySpawn(
   sessionId: string,
+  worktreeId: string,
   cwd: string,
   cols: number,
   rows: number,
@@ -57,9 +82,14 @@ export function ptySpawn(
   const channel = new Channel<PtyMessage>();
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
-  return invoke<void>("pty_spawn", { sessionId, cwd, cols, rows, onEvent: channel }).then(
-    () => channel,
-  );
+  return invoke<void>("pty_spawn", {
+    sessionId,
+    worktreeId,
+    cwd,
+    cols,
+    rows,
+    onEvent: channel,
+  }).then(() => channel);
 }
 
 /**
