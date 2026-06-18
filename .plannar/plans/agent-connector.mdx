@@ -1,0 +1,738 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# Agent Connector
+
+Let **external agents report status into Pragma**, and let **Pragma spawn agents from the
+UI**. An agent running inside a Pragma terminal calls a new `pragma-agent` CLI to report
+`started` / `stopped` / `attention`; the report rides the **existing `pragma-daemon`
+socket**, the app fans it out to React, and the UI lights up per-tab and per-worktree
+status dots, plays a chime, raises a sonner (or a system notification when unfocused),
+and offers cross-project "go to / go back" navigation. The agents dropdown spawns an
+agent into a **new terminal tab** by running its configured `start` command.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and what it costs</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **2 new Rust crates:** `pragma-protocol` (extract the wire protocol from the daemon, **remove the `pty.rs` hand-mirror**) and `pragma-agent-cli` (the `pragma-agent` binary, shipped as a Tauri sidecar)
+- **Daemon wire change:** new `AgentReport` + `SubscribeAgents` request frames, an `EventFrame::Agent` broadcast, a registry status map with a snapshot-on-subscribe, and `PRAGMA_*` env injection in `Session::spawn` — **bump `daemon.protocolVersion` 3 → 4**
+- **Shared constants:** `AgentStatus`, `AgentReportKind`, `AgentReportPayload` in `packages/constants`
+- **App backend:** an agent-subscription bridge emitting a `pragma:agent-report` event, a CLI installer (`agent_cli.rs`), and an agent-config loader (`agents.rs` + `list_agents`) reading `~/.pragma/agents/<name>/config.json`
+- **Frontend:** an ephemeral `agent-status-store`, status dots in the sidebar + tabs, chime + sonner + system notification, cross-project `navigateToAgentLocation`, a 10-minute "Go back" top-bar button, and an agents dropdown with pinning
+- **Tooling:** a mock agent under `tools/mock-agent` + a `~/.pragma/agents/mock` config for manual end-to-end testing
+- **No SQLite migration** — agent status is runtime-only; pin state is `localStorage`
+
+</CardContent>
+</Card>
+
+## Resolved decisions
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Question</TableHead>
+      <TableHead>Decision</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Transport</TableCell>
+      <TableCell>
+        <strong>
+          Extend the existing <code>pragma-daemon</code> socket
+        </strong>{" "}
+        — one daemon. It already owns channel isolation (dev/prod), length-prefixed framing, the
+        stale-daemon handshake, and an app fan-out path. A second daemon would re-implement all of
+        it.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Report delivery</TableCell>
+      <TableCell>
+        <strong>Fire-and-forget.</strong> The CLI connects, reads the <code>Hello</code>, writes one
+        report frame, and exits — it does not wait for a response. Reports are rare, tiny JSON
+        control frames (tag 0), never on the PTY byte hot path.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">CLI install</TableCell>
+      <TableCell>
+        <strong>Bundle as a Tauri sidecar</strong>, copy to{" "}
+        <code>{"~"}/.local/bin/pragma-agent</code> on startup if absent/outdated. No{" "}
+        <code>sudo</code>, no <code>cargo</code> at runtime; warn once if{" "}
+        <code>{"~"}/.local/bin</code> is not on <code>$PATH</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Agent launch</TableCell>
+      <TableCell>
+        Clicking an agent opens a <strong>new terminal tab</strong> in the active worktree and runs
+        its <code>start</code> command there. <code>PRAGMA_TAB_ID</code> maps cleanly to the new
+        tab.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Status model</TableCell>
+      <TableCell>
+        Tracked per <code>(worktree, tab, agent)</code>. A tab dot reflects that tab's agent; the
+        worktree dot <strong>aggregates</strong> its tabs by priority{" "}
+        <strong>attention &gt; running &gt; done</strong>.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Card className="my-4">
+  <CardContent className="text-sm pt-6">
+
+Two facts verified in the code make this clean:
+
+- **`session_id == tabId`** — `terminal-manager.ts` spawns with the tab id as the daemon session id (`ptySpawn(tabId, …)`), so `PRAGMA_TAB_ID` is free at spawn time.
+- **The daemon already injects shell env** in `Session::spawn` (`crates/pragma-daemon/src/session.rs:118` sets `TERM`/`COLORTERM`) — we extend that with the three `PRAGMA_*` vars.
+
+</CardContent>
+</Card>
+
+## Status indicators, interactively
+
+Each color means the same on a tab and on a worktree. A tab dot shows **its own** agent;
+the worktree dot is the **priority aggregate** of its tabs. Change the two tab states and
+watch the worktree dot and the alert copy follow.
+
+<Playground>
+  <div className="flex flex-col gap-3 rounded-lg border bg-[#0b0d10] p-4 text-sm text-slate-200 shadow-sm">
+
+    <div className="flex flex-wrap items-end gap-4">
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        Tab 1 · agent “Claude”
+        <select bind="tabA:'running'" className="rounded border border-white/15 bg-black/40 px-2 py-1 text-slate-100">
+          <option value="running">running</option>
+          <option value="attention">attention</option>
+          <option value="done">done</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        Tab 2 · agent “opencode”
+        <select bind="tabB:'running'" className="rounded border border-white/15 bg-black/40 px-2 py-1 text-slate-100">
+          <option value="running">running</option>
+          <option value="attention">attention</option>
+          <option value="done">done</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        attention kind
+        <select bind="kind:'question'" className="rounded border border-white/15 bg-black/40 px-2 py-1 text-slate-100">
+          <option value="question">question</option>
+          <option value="command">command</option>
+        </select>
+      </label>
+    </div>
+
+    <div className="h-px bg-white/10" />
+
+    <div className="grid grid-cols-2 gap-4">
+
+      {/* Sidebar mock — worktree row with aggregated dot */}
+      <div className="rounded border border-white/10 p-2">
+        <div className="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Sidebar</div>
+        <div className="flex items-center gap-2 rounded px-2 py-1 hover:bg-white/5">
+          <span className="text-slate-500">⌥</span>
+          <span>feature/agents</span>
+          <span
+            className={`ml-auto inline-block h-2.5 w-2.5 rounded-full ${
+              [tabA, tabB].includes("attention")
+                ? "bg-red-500 animate-pulse"
+                : [tabA, tabB].includes("running")
+                  ? "bg-yellow-400 animate-pulse"
+                  : "bg-green-500"
+            }`}
+          />
+        </div>
+        <p className="mt-2 text-[11px] text-slate-600">
+          aggregate ={" "}
+          {[tabA, tabB].includes("attention")
+            ? "attention (red, blink)"
+            : [tabA, tabB].includes("running")
+              ? "running (yellow, slow blink)"
+              : "done (green, solid)"}
+        </p>
+      </div>
+
+      {/* Tab strip mock — per-tab dots */}
+      <div className="rounded border border-white/10 p-2">
+        <div className="mb-2 text-[11px] uppercase tracking-wide text-slate-500">Tab strip</div>
+        <div className="flex gap-1">
+          {[["Claude", tabA], ["opencode", tabB]].map(([name, s]) => (
+            <div key={name} className="flex items-center gap-1.5 rounded bg-white/5 px-2 py-1 text-xs">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  s === "attention"
+                    ? "bg-red-500 animate-pulse"
+                    : s === "running"
+                      ? "bg-yellow-400 animate-pulse"
+                      : "bg-green-500"
+                }`}
+              />
+              {name}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    {/* Alert / sonner copy mock */}
+    <div className="rounded border border-white/10 bg-black/30 p-3">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
+        Alert (chime + sonner / system notification)
+      </div>
+      {[tabA, tabB].includes("attention") ? (
+        <div className="flex items-center gap-3">
+          <span>
+            🔔 <strong>{tabA === "attention" ? "Claude" : "opencode"}</strong>{" "}
+            {kind === "question" ? "has a question" : "wants to run a command"}
+          </span>
+          <button className="ml-auto rounded bg-cyan-500/20 px-2 py-1 text-xs text-cyan-200">
+            Go to worktree →
+          </button>
+        </div>
+      ) : [tabA, tabB].includes("done") ? (
+        <div className="flex items-center gap-3">
+          <span>
+            ✅ <strong>{tabA === "done" ? "Claude" : "opencode"}</strong> has finished
+          </span>
+          <button className="ml-auto rounded bg-cyan-500/20 px-2 py-1 text-xs text-cyan-200">
+            Go to worktree →
+          </button>
+        </div>
+      ) : (
+        <span className="text-slate-500">No alert — all agents running.</span>
+      )}
+    </div>
+
+  </div>
+</Playground>
+
+## Agents dropdown & pinning, interactively
+
+Pinned agents render as chips to the **left** of the Agents button (horizontal-scroll on
+overflow). Toggle pins in the menu; click an agent name to "launch" it (mock).
+
+<Playground>
+  <div bind="open:false" className="hidden" />
+  <div bind="pinClaude:true" className="hidden" />
+  <div bind="pinOpencode:false" className="hidden" />
+  <div bind="pinCodex:false" className="hidden" />
+  <div bind="launched:''" className="hidden" />
+
+  <div className="rounded-lg border bg-[#0b0d10] p-3 text-sm text-slate-200">
+
+    <div className="flex items-center gap-2">
+      {/* pinned chips, scrollable */}
+      <div className="flex max-w-60 gap-1 overflow-x-auto">
+        {pinClaude && <span className="shrink-0 rounded bg-white/5 px-2 py-1 text-xs">🟣 Claude</span>}
+        {pinOpencode && <span className="shrink-0 rounded bg-white/5 px-2 py-1 text-xs">🟠 opencode</span>}
+        {pinCodex && <span className="shrink-0 rounded bg-white/5 px-2 py-1 text-xs">⬢ Codex</span>}
+        {!pinClaude && !pinOpencode && !pinCodex && (
+          <span className="px-1 text-xs text-slate-600">no pins</span>
+        )}
+      </div>
+
+      <button
+        onClick={() => setOpen(!open)}
+        className="ml-auto rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
+      >
+        Agents ▾
+      </button>
+    </div>
+
+    {open && (
+      <div className="mt-2 w-64 rounded border border-white/10 bg-[#11151a] p-1 shadow-lg">
+        {[
+          ["Claude", pinClaude, () => setPinClaude(!pinClaude)],
+          ["opencode", pinOpencode, () => setPinOpencode(!pinOpencode)],
+          ["Codex", pinCodex, () => setPinCodex(!pinCodex)],
+        ].map(([name, pinned, toggle]) => (
+          <div key={name} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-white/5">
+            <button onClick={() => setLaunched(name)} className="flex-1 text-left">
+              {name}
+            </button>
+            <button
+              title="Pin"
+              onClick={toggle}
+              className={pinned ? "text-amber-300" : "text-slate-600 hover:text-slate-300"}
+            >
+              ★
+            </button>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {launched && (
+      <p className="mt-2 text-[11px] text-emerald-300">
+        → opened new terminal tab in active worktree, ran <code>{launched}</code> start command
+      </p>
+    )}
+
+  </div>
+</Playground>
+
+## Architecture
+
+<Tabs defaultValue="protocol" className="my-4">
+  <TabsList>
+    <TabsTrigger value="protocol">Crates & protocol</TabsTrigger>
+    <TabsTrigger value="daemon">Daemon</TabsTrigger>
+    <TabsTrigger value="backend">App backend</TabsTrigger>
+    <TabsTrigger value="cli">CLI & config</TabsTrigger>
+    <TabsTrigger value="frontend">Frontend</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="protocol">
+
+Today the wire protocol lives in `crates/pragma-daemon/src/protocol.rs` and is
+**hand-mirrored** in `apps/pragma/src-tauri/src/pty.rs` (the comment there explains the
+daemon is a binary the app can't import). Adding a CLI that _also_ needs the framing makes
+that a 3-way duplication. Fix it at the root.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Crate</TableHead>
+      <TableHead>Kind</TableHead>
+      <TableHead>Responsibility</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>crates/pragma-protocol</code>
+      </TableCell>
+      <TableCell>
+        <span className="rounded bg-white/10 px-1.5 py-0.5 text-xs">new lib</span>
+      </TableCell>
+      <TableCell>
+        The wire framing + frame types moved out of the daemon. Depended on by{" "}
+        <code>pragma-daemon</code>, <code>pragma-agent-cli</code>, <strong>and</strong>{" "}
+        <code>apps/pragma/src-tauri</code> — which lets us delete the <code>pty.rs</code> mirror.
+        Reads <code>protocol_version</code> from <code>pragma_constants</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>crates/pragma-agent-cli</code>
+      </TableCell>
+      <TableCell>
+        <span className="rounded bg-white/10 px-1.5 py-0.5 text-xs">new bin</span>
+      </TableCell>
+      <TableCell>
+        The <code>pragma-agent</code> binary. Depends on <code>pragma-protocol</code> +{" "}
+        <code>pragma_constants</code>. Parses args (clap), reads env, connects, sends one frame,
+        exits.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Alert className="my-3">
+  <AlertTitle>Highest-blast-radius edit</AlertTitle>
+  <AlertDescription>
+
+Removing the `pty.rs` mirror touches the app's IPC core. Gate it behind step 1 with a
+fully green build. If we want to de-risk, the CLI/daemon can share `pragma-protocol` while
+`pty.rs` keeps its mirror as a follow-up — but doing both now is the architecturally
+correct move and serves the repo's "one source of truth" north star.
+
+  </AlertDescription>
+</Alert>
+
+**Constants (`packages/constants`)** — edit `schema.json` (shape) + `values.json`
+(`protocolVersion: 4`), then `bun run generate`:
+
+- `AgentStatus` — the enum `running` / `attention` / `done` (shared Rust + TS; drives every dot).
+- `AgentReportKind` — the `report` subcommand mapping: `started` to running, `stopped` to done, `attention` to attention.
+- `AgentReportPayload` — fields `agent`, `worktreeId`, `tabId`, `status`, optional `attentionKind` (camelCase wire). `attentionKind` is `question` or `command`, driving the sonner/notification copy.
+
+</TabsContent>
+
+  <TabsContent value="daemon">
+
+All changes in `crates/pragma-daemon`, against the extracted `pragma-protocol`. **Bump
+`daemon.protocolVersion` to 4** so `connect_compatible` replaces any stale daemon.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Element</TableHead>
+      <TableHead>Detail</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>RequestKind::AgentReport</code>
+      </TableCell>
+      <TableCell>
+        Sent by the CLI. Carries <code>AgentReportPayload</code> as JSON in the existing flat{" "}
+        <code>data</code> field (keeps <code>RequestFrame</code> stable). Daemon updates state +
+        fans out; no required ack (fire-and-forget).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>RequestKind::SubscribeAgents</code>
+      </TableCell>
+      <TableCell>
+        Sent once by the <strong>app</strong> on a dedicated long-lived connection. Daemon registers
+        it as an agent-event subscriber and immediately replies with a <strong>snapshot</strong> of
+        all current statuses, then streams events.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>EventFrame::Agent</code>
+      </TableCell>
+      <TableCell>
+        <code>
+          {"{"} worktreeId, tabId, agent, status, attentionKind? {"}"}
+        </code>{" "}
+        — broadcast to every subscriber connection. Distinct from the per-session{" "}
+        <code>Output/Title/Exit</code> events.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Registry state</TableCell>
+      <TableCell>
+        A daemon-wide subscriber list + a{" "}
+        <code>HashMap&lt;(worktree,tab,agent), AgentStatus&gt;</code> for snapshots. On an{" "}
+        <code>Exit</code> event, clear that tab's agent entries (a closed tab stops showing a dot).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Env injection</TableCell>
+      <TableCell>
+        Extend <code>Spawn</code> to carry <code>worktreeId</code>. In <code>Session::spawn</code>{" "}
+        set on the <code>CommandBuilder</code>: <code>PRAGMA_TAB_ID</code> (= session id),{" "}
+        <code>PRAGMA_WORKTREE_ID</code>, <code>PRAGMA_DAEMON_SOCKET</code> (the daemon's own socket
+        path, so the CLI discovers it without re-deriving channel logic).
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+  </TabsContent>
+
+  <TabsContent value="backend">
+
+New work in `apps/pragma/src-tauri/src/`. Follow the `tauri-command` skill (Rust command +
+matching `tauri.ts` wrapper + tests).
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>File</TableHead>
+      <TableHead>Responsibility</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>pty.rs</code> (or new <code>agent_events.rs</code>)
+      </TableCell>
+      <TableCell>
+        <strong>Agent-subscription bridge.</strong> On startup, open one persistent,
+        handshake-checked connection, send <code>SubscribeAgents</code>, then loop reading{" "}
+        <code>EventFrame::Agent</code> and <code>app.emit("pragma:agent-report", payload)</code> to
+        the webview. Reconnect on drop / after a daemon restart. The only always-on non-session
+        connection.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>agent_cli.rs</code>
+      </TableCell>
+      <TableCell>
+        <strong>CLI installer.</strong> If <code>pragma-agent</code> is absent/outdated, copy the
+        bundled sidecar (<code>binaries/pragma-agent-&lt;triple&gt;</code>, staged like the daemon)
+        into <code>{"~"}/.local/bin</code>. Create the dir if missing; toast once if it is not on{" "}
+        <code>$PATH</code>. Debug builds resolve via <code>cargo</code> like the daemon.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>agents.rs</code>
+      </TableCell>
+      <TableCell>
+        <strong>Agent-config loader.</strong> <code>list_agents()</code> reads every{" "}
+        <code>{"~"}/.pragma/agents/*/config.json</code>, validates, normalizes <code>id</code> to
+        kebab-case, and reads the icon bytes → base64 data URL (mirrors <code>project_icon</code>).
+        Resolves the icon only within that agent dir (reject <code>..</code>/symlink escape).
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+**Wiring** — `pty.rs` `RequestFrame::spawn` and the `ptySpawn` wrapper gain a `worktreeId`
+arg (threaded from `terminal-manager.ts`, which already knows each terminal's worktree).
+`tauri.conf.json` adds `binaries/pragma-agent` to `bundle.externalBin`; extend
+`scripts/stage-daemon-sidecar.sh` to stage the CLI too.
+
+  </TabsContent>
+
+  <TabsContent value="cli">
+
+**`pragma-agent`** — agent-facing surface. `--agent <id>` is required and global;
+`PRAGMA_TAB_ID` / `PRAGMA_WORKTREE_ID` come from env (no flags).
+
+```text
+pragma-agent --agent <id> report started
+pragma-agent --agent <id> report stopped [--worktree-id <id>]
+pragma-agent --agent <id> report attention [--kind question|command]
+```
+
+- `stopped --worktree-id` **overrides** `PRAGMA_WORKTREE_ID` so a user can mark a worktree's agent done from outside that worktree's shell (manual abort). Defaults to the env var.
+- Behavior: read `PRAGMA_DAEMON_SOCKET` → connect → read `Hello` → write one `AgentReport` frame → exit 0. Connect failure exits non-zero with a short stderr line but never blocks the agent. **Never waits for a response.**
+
+**Agent config** — global config root is `~/.pragma` (same root as `keybindings.json`).
+Each agent: `~/.pragma/agents/<agent-name>/config.json` + an icon file beside it.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Field</TableHead>
+      <TableHead>Meaning</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>id</code>
+      </TableCell>
+      <TableCell>Plugin name, normalized kebab-case.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>name</code>
+      </TableCell>
+      <TableCell>Display name in the CLI's own casing.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>icon</code>
+      </TableCell>
+      <TableCell>
+        Filename resolved only within <code>./</code> (the agent dir).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>start</code>
+      </TableCell>
+      <TableCell>
+        Command to launch the TUI — a <code>string</code> <strong>or</strong> an array of args.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+  </TabsContent>
+
+  <TabsContent value="frontend">
+
+New work under `apps/pragma/src/`.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>File</TableHead>
+      <TableHead>Responsibility</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>state/agent-status-store.ts</code>
+      </TableCell>
+      <TableCell>
+        Ephemeral module store (the <code>editor-dirty-store</code> /{" "}
+        <code>useSyncExternalStore</code> pattern; never persisted, never in the reducer). Shape:{" "}
+        <code>Map&lt;worktreeId, Map&lt;tabId, Map&lt;agentId, status&gt;&gt;&gt;</code>. Selectors:{" "}
+        <code>tabStatus(tabId)</code> and <code>worktreeStatus(worktreeId)</code> (priority
+        aggregate). Fed by one <code>onAgentReport</code> listener; detects the transition into{" "}
+        <code>attention</code>/<code>done</code> to fire alerts once.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/AgentStatusDot.tsx</code>
+      </TableCell>
+      <TableCell>
+        Shared dot: <strong>attention</strong> red blink, <strong>running</strong> yellow slow
+        blink, <strong>done</strong> green solid. Blink keyframes in <code>index.css</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/agents/AgentsMenu.tsx</code>
+      </TableCell>
+      <TableCell>
+        Dropdown mirroring the editor launcher in <code>TerminalTabs.tsx</code>: agent rows (icon +
+        name + pin toggle), pinned chips scrollable to the left. Registers with{" "}
+        <code>native-overlay.ts</code> (<code>useSuppressNativeOverlayWhile</code>) so it isn't
+        clipped over browser panes. Click → new tab + run <code>start</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>state/agent-pins.ts</code>
+      </TableCell>
+      <TableCell>
+        Frontend-owned pin set persisted to <code>localStorage</code> (the right-sidebar pattern).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>lib/agent-alert.ts</code>
+      </TableCell>
+      <TableCell>
+        Chime (bundled audio asset, debounced) + sonner vs. system notification (
+        <code>@tauri-apps/plugin-notification</code>) chosen by window focus. Copy varies by{" "}
+        <code>attentionKind</code> (“has a question” / “wants to run a command” / “has finished”).
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+**Edits** — `WorktreeTree.tsx` renders the aggregated dot right of the worktree name;
+`TerminalTabs.tsx` + `PaneBar` render the per-tab dot and host the `AgentsMenu` + the
+**Go back** button next to the editor launcher. `workspace-context.tsx` gains
+`navigateToAgentLocation(projectId, worktreeId, tabId)` (switches project if needed via the
+existing project-switch/`reload` path, then `selectWorktree`, then `set-active-tab` /
+`set-pane-active-tab`) and records the previous location for **Go back** (persists 10 min,
+a frontend-only constant in `lib/`). Reports must carry/resolve a `projectId` so navigation
+works across projects — the app maps `worktreeId → projectId` from loaded data with a
+fallback lookup.
+
+  </TabsContent>
+</Tabs>
+
+## End-to-end flows
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="report">
+    <AccordionTrigger>An agent reports attention</AccordionTrigger>
+    <AccordionContent>
+
+1. Agent in a tab shell runs `pragma-agent --agent claude report attention --kind question`.
+2. CLI reads `PRAGMA_TAB_ID` / `PRAGMA_WORKTREE_ID` / `PRAGMA_DAEMON_SOCKET`, connects, reads `Hello`, writes one `AgentReport` frame, exits.
+3. Daemon updates its status map and fans out `EventFrame::Agent` to every subscriber.
+4. The app's subscription bridge receives it and emits `pragma:agent-report`.
+5. `agent-status-store` updates `(worktree, tab, agent) → attention`; the tab dot goes red-blink, the worktree dot aggregates to attention.
+6. The transition fires `lib/agent-alert`: chime + (focused) a sonner "Claude has a question" with **Go to worktree →**, or (unfocused) the same as a system notification.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="navigate">
+    <AccordionTrigger>Go to worktree, then go back (cross-project)</AccordionTrigger>
+    <AccordionContent>
+
+1. Click **Go to worktree** (sonner) or the system notification → focus window + `navigateToAgentLocation(projectId, worktreeId, tabId)`.
+2. If `projectId` differs from the loaded project, switch project first (existing `reload`/per-project active-worktree restore), then select the worktree, then activate the tab (handling split members).
+3. The navigation records the **previous** `{ projectId, worktreeId, tabId }` + a timestamp.
+4. A **Go back to &lt;worktree&gt;** button appears in the top bar next to the editor launcher; it navigates back and **persists for 10 minutes**, then hides.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="launch">
+    <AccordionTrigger>Launch an agent from the dropdown</AccordionTrigger>
+    <AccordionContent>
+
+1. `list_agents` populates the menu (icons as data URLs). Pinned agents show as chips left of the trigger; the row overflows with horizontal scroll.
+2. Click an agent → `createTerminalTab(activeWorktreeId)` → a new tab spawns with `PRAGMA_TAB_ID`/`PRAGMA_WORKTREE_ID` set.
+3. Resolve `start` (string as-is; array joined for the shell) and `ptyWrite(newTabId, command + "\n")` once the session is up.
+4. The agent's own `pragma-agent report` calls then light up that tab's dot.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Risks & edge cases
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- **`pty.rs` mirror removal** is the riskiest edit — gate behind a green step 1, or defer and keep the mirror while the CLI/daemon still share `pragma-protocol`.
+- **`~/.local/bin` not on `$PATH`** on some Linux setups — the installer must detect and advise, never silently fail.
+- **System notifications** need the notification plugin + capability + OS permission; first run may prompt. Click-to-navigate plumbing differs slightly mac vs Linux.
+- **App restart mid-session** — the snapshot on `SubscribeAgents` rehydrates dots for shells the daemon still knows; without it statuses are lost until the next report.
+- **Multiple agents per tab** — the model supports it (per-tab aggregate), but confirm the common one-agent-per-tab case stays visually unambiguous.
+- **Headless webview can't paint xterm/UI** (per project memory) — automated coverage lives in the daemon socket + store logic; the mock agent carries the visual/audio/notification confirmation.
+- **Chime asset licensing** — pick a freely-licensed or self-made sound.
+
+</CardContent>
+</Card>
+
+## Mock agent (manual testing)
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- `tools/mock-agent/mock-agent.sh` — on launch calls `pragma-agent --agent mock report started`, then prints a menu loop to fire `attention --kind question`, `attention --kind command`, and `stopped`. It uses only the injected env, exercising the real path.
+- `tools/mock-agent/install.sh` — writes `~/.pragma/agents/mock/config.json` (`id: "mock"`, `name: "Mock Agent"`, `icon: "icon.png"`, `start: ["bash", ".../mock-agent.sh"]`) + an `icon.png`, so the agent appears in the dropdown.
+- Validates the full loop: dropdown spawn → yellow dot → attention (red + chime + sonner/notification) → Go to (incl. cross-project) → Go back button → stopped (green).
+
+</CardContent>
+</Card>
+
+## Build order
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+1. **`pragma-protocol` crate** — extract framing; wire `pragma-daemon` + `src-tauri` to it (remove the `pty.rs` mirror). Green build + existing tests first.
+2. **Constants** — `AgentStatus`, `AgentReportKind`, `AgentReportPayload`; bump `protocolVersion` 3 → 4; `bun run generate`.
+3. **Daemon** — `AgentReport` + `SubscribeAgents`, `EventFrame::Agent`, registry map + snapshot, env injection. Integration tests over the socket.
+4. **`pragma-agent-cli` crate** — sidecar staging + `externalBin`. CLI tests.
+5. **App backend** — installer (`agent_cli.rs`), config loader (`agents.rs` + `list_agents`), subscription bridge, thread `worktreeId` through spawn.
+6. **Frontend state** — `agent-status-store` + `onAgentReport` listener + transition detection.
+7. **Frontend UI** — status dots (sidebar + tabs), agents dropdown + pinning, chime, sonner, system notification, go-to / go-back navigation.
+8. **Mock agent** + `~/.pragma/agents/mock`; full manual pass.
+9. **Quality gates** — `bun run check` (`code-quality` skill) + update `CLAUDE.md` and the relevant `.agents/skills/*` for the new daemon frames, env vars, CLI install, and agent config.
+
+</CardContent>
+</Card>
+
+## Acceptance
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- [ ] `pragma-agent` installs into the PATH on first launch; `report started/stopped/attention` reach the daemon over its socket using only injected env
+- [ ] `daemon.protocolVersion` bumped; a stale pre-4 daemon is replaced automatically
+- [ ] Worktree dot aggregates its tabs (attention &gt; running &gt; done); tab dot reflects only that tab's agent, with matching colors/blink
+- [ ] Attention/finish plays a chime; focused → sonner with a **Go to worktree** button (copy varies for question/command/finished); unfocused → matching system notification
+- [ ] Go-to navigates to the exact worktree + tab **across projects**; a **Go back** button appears in the top bar and persists 10 minutes
+- [ ] Agents dropdown lists configured agents with icons; agents pin/unpin (persisted) and show as scrollable chips; clicking opens a new terminal tab running `start`
+- [ ] Mock agent + `~/.pragma/agents/mock` drive the full loop manually; `bun run check` passes (Vitest, cargo test, lint, fmt, clippy)
+
+</CardContent>
+</Card>
