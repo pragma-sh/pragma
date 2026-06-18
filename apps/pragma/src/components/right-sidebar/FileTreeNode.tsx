@@ -173,6 +173,11 @@ export function FileTreeNode({
                   ctrl.selectFile(entry.path);
                 }
               }}
+              onDoubleClick={() => {
+                if (!entry.isDir) {
+                  ctrl.openFile(entry.path);
+                }
+              }}
               style={{ paddingLeft: depth * INDENT_PX + 8 }}
               type="button"
             >
