@@ -61,6 +61,11 @@ export function onAgentReport(handler: (payload: AgentReportPayload) => void): P
   return listen<AgentReportPayload>("pragma:agent-report", (event) => handler(event.payload));
 }
 
+/** Fires before the daemon replays its current agent-status snapshot. */
+export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
+  return listen<void>("pragma:agent-status-reset", () => handler());
+}
+
 /** Warns once when `~/.local/bin` is not on PATH after installing `pragma-agent`. */
 export function onAgentCliPathWarning(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));

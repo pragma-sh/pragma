@@ -9,13 +9,18 @@ describe("AgentStatusDot", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders nothing for an idle (done) agent", () => {
+  it("renders a green indicator for a done agent", () => {
     const { container } = render(<AgentStatusDot status="done" />);
-    expect(container.firstChild).toBeNull();
+    expect(container.firstChild).not.toBeNull();
+    expect(container.firstChild).toHaveClass("bg-green-500");
   });
 
-  it("renders an indicator for running and attention", () => {
-    expect(render(<AgentStatusDot status="running" />).container.firstChild).not.toBeNull();
-    expect(render(<AgentStatusDot status="attention" />).container.firstChild).not.toBeNull();
+  it("renders yellow and red indicators for running and attention", () => {
+    expect(render(<AgentStatusDot status="running" />).container.firstChild).toHaveClass(
+      "bg-yellow-400",
+    );
+    expect(render(<AgentStatusDot status="attention" />).container.firstChild).toHaveClass(
+      "bg-red-500",
+    );
   });
 });

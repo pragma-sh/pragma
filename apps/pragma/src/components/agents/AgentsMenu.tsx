@@ -8,7 +8,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -121,10 +120,6 @@ export function AgentsMenu() {
               </DropdownMenuItem>
             ))
           )}
-          <DropdownMenuSeparator />
-          <p className="px-2 py-1 text-xs text-muted-foreground">
-            Configs live in ~/.pragma/agents.
-          </p>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

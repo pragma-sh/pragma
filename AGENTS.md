@@ -109,7 +109,8 @@ than no guide.
 │   │   ├── src/index.ts         # Typed TS export
 │   │   ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
 │   │   └── src/generated/       # Generated TS types (git-ignored; never edit)
-│   └── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -140,14 +141,45 @@ than no guide.
   The daemon keeps runtime-only status in memory keyed by `(worktreeId, tabId, agent)`, supports a
   long-lived `SubscribeAgents` request for the app, emits `EventFrame::Agent` snapshots/events, and
   clears a tab's snapshot entries when the session exits. Status is never persisted to SQLite; the
-  frontend stores it in `state/agent-status-store.ts` via `useSyncExternalStore`, while agent pins
-  are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **4** for
+  frontend stores it in `state/agent-status-store.ts` via `useSyncExternalStore`, renders the current
+  runtime state in tab/sidebar dots (`done` = green, `running` = yellow, `attention` = red) with
+  precedence **red > yellow > green** when aggregating a tab's agents or a worktree's tabs. Green is a
+  "finished, go look" notification: `running`/`attention` persist through a focus, but viewing a tab
+  clears only its `done` entries (`clearDoneStatusForTab`) — both when the tab becomes the on-screen
+  tab and when a `done` report arrives for an already-visible tab — so the worktree dot stops being
+  green once every finished tab in it has been seen. Closing a tab drops all of its status
+  (`removeAgentStatusForTab`).
+  Agent pins are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **4** for
   this protocol. Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields
   `id`, `name`, `icon`, and `start` (string or argv array); icons must resolve inside that agent
-  directory. The app installs/updates the bundled `pragma-agent` into `~/.local/bin` on startup and
-  emits a UI warning if that directory is not on `$PATH`. JS/TS consumers should use
-  `@pragma/sdk` (`packages/sdk`) instead of hand-building `pragma-agent` argv; it shells out to the
-  installed CLI with typed options and is bundled by Bunup as ESM, CJS, and `.d.ts`.
+  directory. Bundled/default agent configs live in package-owned `pragma/agents/*/config.json`
+  folders (currently `packages/opencode-plugin/pragma/agents/opencode/config.json`), are staged to
+  `apps/pragma/src-tauri/resources/pragma/agents` by `src-tauri/scripts/stage-daemon-sidecar.sh`,
+  bundled as Tauri resources, and installed/updated into `~/.pragma/agents` on app startup. The app
+  installs/updates the bundled `pragma-agent` into `~/.local/bin` on startup and emits a UI warning
+  if that directory is not on `$PATH`. JS/TS consumers should use `@pragma/sdk` (`packages/sdk`)
+  instead of hand-building `pragma-agent` argv; it shells out to the installed CLI with typed
+  options and is bundled by Bunup as ESM, CJS, and `.d.ts`. opencode integration lives in
+  `@pragma/opencode-plugin` (`packages/opencode-plugin`): an ESM-only Bunup package that imports
+  opencode plugin types from `@opencode-ai/plugin`, reacts to opencode hooks/events, and reports
+  `started` / `stopped` / `attention` through `@pragma/sdk` without asking the LLM to call any CLI.
+  `hooks.ts` is a **two-flag state machine** (`busy`, `attention`) rather than a per-event mapping:
+  the reported status is _derived_ (`attention` > `busy` > idle) and emitted only on change, so a
+  trailing `message.*` stream event can't clobber green back to yellow and a pending question/permission
+  pins red even while opencode reports the session idle. `busy` is set by `chat.message`,
+  `command.execute.before`, non-question `tool.execute.before`, and `session.status` busy/retry;
+  cleared by `session.idle` / `session.status` idle / `session.error` / `session.deleted`. `attention`
+  is raised by `permission.ask` / `permission.updated` (command) and the `question` tool (via
+  `tool.execute.before` or a pending `message.part.updated` part), and cleared by `permission.replied`
+  or the question part completing/erroring. Only these real opencode events are handled — do **not**
+  re-add the speculative `session.next.*` events (they don't exist in the SDK and were the source of the
+  stuck-yellow bug). The SDK reporter in `index.ts` no longer dedups; it only guards on the Pragma env
+  and shells out.
+  The plugin build is staged as `resources/pragma/plugins/opencode.mjs`, installed on startup to
+  `~/.pragma/plugins/opencode.mjs`, and wired into `~/.config/opencode/opencode.json` as a
+  `file://` plugin entry. Do not point opencode at the bare package name
+  `@pragma/opencode-plugin`: opencode treats that as an npm dependency and tries to install it from
+  the public registry, where it does not exist.
 - **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
   PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
   arrives as one read instead of many; a dedicated coalescer thread
@@ -206,8 +238,9 @@ than no guide.
   `--release`, and `tauri:dev` runs it (debug) before `tauri dev` so the CLI's sidecar-copy
   step doesn't fail (dev still uses `cargo run` at runtime — the staged file only satisfies
   bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
-  plugin, so no `shell:` capability is needed. `pragma-agent` is staged by the same script and
-  bundled as `binaries/pragma-agent`. `binaries/` is git-ignored.
+  plugin, so no `shell:` capability is needed. `pragma-agent` and the opencode plugin dist are
+  staged by the same script and bundled as `binaries/pragma-agent` plus
+  `resources/pragma/plugins/opencode.mjs`. `binaries/` is git-ignored.
 - **Dev and prod must never share a daemon.** The socket/lock/log live in a
   **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
   build's **product identity, not the compile profile**: `daemon_channel_for_product`
@@ -496,7 +529,7 @@ bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-daemon # Run the detached PTY daemon directly for debugging
-cargo run -p pragma-agent-cli -- --agent mock report started # Manually send an agent report (inside a Pragma terminal env)
+cargo run -p pragma-agent-cli -- --agent dev report started # Manually send an agent report (inside a Pragma terminal env)
 ```
 
 ## Code standards (consistent across TypeScript & Rust)

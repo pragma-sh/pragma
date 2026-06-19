@@ -41,6 +41,7 @@ import {
   onBrowserMeta,
   onAgentCliPathWarning,
   onAgentReport,
+  onAgentStatusReset,
   onMenuAction,
   openWorktree as openWorktreeCommand,
   projectIcon,
@@ -57,7 +58,8 @@ import {
 import type { SplitLayout } from "@/lib/tauri";
 import {
   applyAgentReport,
-  clearAgentStatusForTab,
+  clearAllAgentStatuses,
+  clearDoneStatusForTab,
   removeAgentStatusForTab,
 } from "@/state/agent-status-store";
 
@@ -366,6 +368,18 @@ function tabIdsInNode(node: SplitLayoutNode | null | undefined): Set<string> {
     return false;
   });
   return tabIds;
+}
+
+/** Collects the active (on-screen) tab of every pane in a split layout. */
+function activeTabIdsInNode(node: SplitLayoutNode | null | undefined): string[] {
+  const activeTabIds: string[] = [];
+  findPane(node, (pane) => {
+    if (pane.activeTabId) {
+      activeTabIds.push(pane.activeTabId);
+    }
+    return false;
+  });
+  return activeTabIds;
 }
 
 function paneById(node: SplitLayoutNode | null | undefined, paneId: string): SplitPaneNode | null {
@@ -979,8 +993,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         current.selectedWorktreeByProject[current.selectedProjectId]
       ) {
         const currentWorktreeId = current.selectedWorktreeByProject[current.selectedProjectId];
+        // `activeTabByWorktree` is only written by an explicit tab switch, so fall
+        // back to the worktree's first tab (matching `isTabCurrentlyViewed`) —
+        // otherwise a jump from a worktree the user never re-tabbed records no
+        // back location and the "Go back" button never appears.
         const currentTabId = currentWorktreeId
-          ? current.activeTabByWorktree[currentWorktreeId]
+          ? (current.activeTabByWorktree[currentWorktreeId] ??
+            current.tabs.find((tab) => tab.worktreeId === currentWorktreeId)?.id ??
+            null)
           : null;
         if (currentWorktreeId && currentTabId) {
           setAgentBackLocation({
@@ -1069,9 +1089,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let unlistenReport: (() => void) | null = null;
+    let unlistenReset: (() => void) | null = null;
     let unlistenPath: (() => void) | null = null;
+    void onAgentStatusReset(() => {
+      clearAllAgentStatuses();
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenReset = unlisten;
+      return undefined;
+    });
     void onAgentReport((payload) => {
       const previous = applyAgentReport(payload);
+      // A tab that finishes while already on screen is considered seen: drop its
+      // green immediately instead of flashing it. Running/attention still show.
+      if (payload.status === "done" && visibleTabIdsRef.current.has(payload.tabId)) {
+        clearDoneStatusForTab(payload.tabId);
+      }
       if (
         !isTabCurrentlyViewed(payload.tabId) &&
         (payload.status === "attention" || payload.status === "done") &&
@@ -1109,6 +1145,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       unlistenReport?.();
+      unlistenReset?.();
       unlistenPath?.();
     };
   }, [isTabCurrentlyViewed, navigateToAgentLocation, resolveProjectForWorktree]);
@@ -1150,6 +1187,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectProject = useCallback(async (projectId: string | null) => {
+    // Navigating manually retires the agent "go back" affordance — it only
+    // makes sense right after a notification jumped you somewhere.
+    setAgentBackLocation(null);
     dispatch({ type: "select-project", projectId });
   }, []);
 
@@ -1183,6 +1223,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!state.selectedProjectId || !worktreeId) {
         return;
       }
+      // Navigating manually retires the agent "go back" affordance — it only
+      // makes sense right after a notification jumped you somewhere.
+      setAgentBackLocation(null);
       dispatch({ type: "select-worktree", projectId: state.selectedProjectId, worktreeId });
     },
     [state.selectedProjectId],
@@ -1734,11 +1777,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const activeTabId = legacyActiveTabId;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
 
-  useEffect(() => {
+  // Every tab currently on screen for the selected worktree: the active tab,
+  // plus each pane's active tab when a real split is shown. Viewing a tab clears
+  // its resolved (green) agent indicator — running/attention persist — so the
+  // worktree dot also stops being green once all its finished tabs are seen.
+  const visibleTabIds = useMemo(() => {
+    const ids = new Set<string>();
     if (activeTabId) {
-      clearAgentStatusForTab(activeTabId);
+      ids.add(activeTabId);
     }
-  }, [activeTabId]);
+    if (splitRoot?.kind === "split") {
+      for (const tabId of activeTabIdsInNode(splitRoot)) {
+        ids.add(tabId);
+      }
+    }
+    return ids;
+  }, [activeTabId, splitRoot]);
+  const visibleTabIdsRef = useRef(visibleTabIds);
+  visibleTabIdsRef.current = visibleTabIds;
+
+  useEffect(() => {
+    for (const tabId of visibleTabIds) {
+      clearDoneStatusForTab(tabId);
+    }
+  }, [visibleTabIds]);
 
   const focusPane = useCallback(
     (paneId: string) => {

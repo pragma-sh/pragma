@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the detached PTY daemon (`pragma-daemon`) and agent reporter
-# (`pragma-agent`) and stage them as Tauri sidecars so the bundle is self-contained. The release app launches the daemon
+# Build the detached PTY daemon (`pragma-daemon`), agent reporter
+# (`pragma-agent`), and opencode plugin, then stage sidecars/resources so the bundle is self-contained. The release app launches the daemon
 # from beside its own executable (see `daemon_executable()` in
 # `src-tauri/src/pty.rs`), and the Tauri CLI only copies it there if a
 # `pragma-daemon-<target-triple>` binary exists under `src-tauri/binaries/`;
@@ -36,11 +36,24 @@ else
   cargo build -p pragma-agent-cli
 fi
 
+# Build the opencode plugin dist so it can be staged as a resource and
+# installed into the user's opencode config on app startup.
+bun --filter @pragma/opencode-plugin build
+
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-daemon" \
   "$src_tauri_dir/binaries/pragma-daemon-$triple"
 cp "$repo_root/target/$profile/pragma-agent" \
   "$src_tauri_dir/binaries/pragma-agent-$triple"
 
+rm -rf "$src_tauri_dir/resources/pragma/agents"
+mkdir -p "$src_tauri_dir/resources/pragma/plugins"
+cp -R "$repo_root/packages/opencode-plugin/pragma/agents" \
+  "$src_tauri_dir/resources/pragma/agents"
+cp "$repo_root/packages/opencode-plugin/dist/index.mjs" \
+  "$src_tauri_dir/resources/pragma/plugins/opencode.mjs"
+
 echo "staged pragma-daemon ($profile) -> src-tauri/binaries/pragma-daemon-$triple"
 echo "staged pragma-agent ($profile) -> src-tauri/binaries/pragma-agent-$triple"
+echo "staged bundled agent configs -> src-tauri/resources/pragma/agents"
+echo "staged opencode plugin -> src-tauri/resources/pragma/plugins/opencode.mjs"

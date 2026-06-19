@@ -33,14 +33,18 @@ export function applyAgentReport(payload: AgentReportPayload): AgentStatus | nul
   return previous;
 }
 
-/** Clears resolved/actionable indicators for a tab once the user views it. */
-export function clearAgentStatusForTab(tabId: string): void {
+/**
+ * Clears only resolved (`done`/green) indicators for a tab once the user views
+ * it. `running` (yellow) and `attention` (red) persist through a focus so the
+ * indicator only drops once the agent is actually finished and seen.
+ */
+export function clearDoneStatusForTab(tabId: string): void {
   let changed = false;
   for (const [worktreeId, tabs] of statuses) {
     const agents = tabs.get(tabId);
     if (agents) {
       for (const [agentId, status] of agents) {
-        if (status !== "running") {
+        if (status === "done") {
           agents.delete(agentId);
           changed = true;
         }
@@ -72,6 +76,15 @@ export function removeAgentStatusForTab(tabId: string): void {
   if (changed) {
     emit();
   }
+}
+
+/** Clears every cached agent status so the UI can mirror a fresh daemon snapshot. */
+export function clearAllAgentStatuses(): void {
+  if (statuses.size === 0) {
+    return;
+  }
+  statuses.clear();
+  emit();
 }
 
 /** Returns the highest-priority agent status for a tab. */

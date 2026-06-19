@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyAgentReport,
+  clearAllAgentStatuses,
+  clearDoneStatusForTab,
   removeAgentStatusForTab,
   tabStatus,
   worktreeStatus,
@@ -23,7 +25,17 @@ afterEach(() => {
   removeAgentStatusForTab("tab-b");
 });
 
-describe("removeAgentStatusForTab", () => {
+describe("agent status store", () => {
+  it("updates a tab status when a new report arrives for the same agent", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
+    expect(tabStatus("tab-a")).toBe("running");
+
+    applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
+
+    expect(tabStatus("tab-a")).toBe("done");
+    expect(worktreeStatus("wt-1")).toBe("done");
+  });
+
   it("clears the worktree indicator when the closed tab held the only agent", () => {
     applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
     expect(worktreeStatus("wt-1")).toBe("running");
@@ -50,5 +62,49 @@ describe("removeAgentStatusForTab", () => {
     removeAgentStatusForTab("tab-a");
 
     expect(tabStatus("tab-a")).toBeNull();
+  });
+
+  it("clears a done indicator when the tab is viewed", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
+    expect(worktreeStatus("wt-1")).toBe("done");
+
+    clearDoneStatusForTab("tab-a");
+
+    expect(tabStatus("tab-a")).toBeNull();
+    expect(worktreeStatus("wt-1")).toBeNull();
+  });
+
+  it("keeps running and attention indicators through a view-clear", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
+    applyAgentReport(report("wt-1", "tab-b", "codex", "attention"));
+
+    clearDoneStatusForTab("tab-a");
+    clearDoneStatusForTab("tab-b");
+
+    expect(tabStatus("tab-a")).toBe("running");
+    expect(tabStatus("tab-b")).toBe("attention");
+  });
+
+  it("drops worktree green only once every finished tab is viewed", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
+    applyAgentReport(report("wt-1", "tab-b", "codex", "done"));
+    expect(worktreeStatus("wt-1")).toBe("done");
+
+    clearDoneStatusForTab("tab-a");
+    expect(worktreeStatus("wt-1")).toBe("done");
+
+    clearDoneStatusForTab("tab-b");
+    expect(worktreeStatus("wt-1")).toBeNull();
+  });
+
+  it("clears all cached statuses for a fresh daemon snapshot", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
+    applyAgentReport(report("wt-1", "tab-b", "codex", "attention"));
+
+    clearAllAgentStatuses();
+
+    expect(tabStatus("tab-a")).toBeNull();
+    expect(tabStatus("tab-b")).toBeNull();
+    expect(worktreeStatus("wt-1")).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ mod fs;
 mod git;
 mod icons;
 mod keybindings;
+mod opencode_plugin;
 mod projects;
 mod pty;
 mod worktrees;
@@ -310,6 +311,12 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     install_menu(app.handle())?;
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
         log::warn!("failed to install pragma-agent CLI: {error}");
+    }
+    if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
+        log::warn!("failed to install bundled agent configs: {error}");
+    }
+    if let Err(error) = opencode_plugin::ensure_installed(app.handle()) {
+        log::warn!("failed to install opencode plugin: {error}");
     }
     agent_events::start(app.handle().clone(), pty);
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {

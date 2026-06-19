@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::pty::PtyClient;
 
 const AGENT_REPORT_EVENT: &str = "pragma:agent-report";
+const AGENT_STATUS_RESET_EVENT: &str = "pragma:agent-status-reset";
 
 /// Starts the long-lived daemon subscription that forwards agent status events to React.
 pub fn start(app: AppHandle, pty: PtyClient) {
@@ -48,6 +49,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                             .error
                             .unwrap_or_else(|| "agent subscription rejected".to_string()));
                     }
+                    let _ = app.emit(AGENT_STATUS_RESET_EVENT, ());
                 }
                 Ok(ServerFrame::Event(EventFrame::Agent {
                     worktree_id,
