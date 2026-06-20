@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
-import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
 import { type Extension, Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { toast } from "sonner";
 
-import { pragmaEditorTheme } from "@/components/editor/codemirror-theme";
+import { loadLanguageExtension } from "@/components/editor/codemirror-language";
+import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 import { Button } from "@/components/ui/button";
-import { basename } from "@/lib/path";
 import { readFile, writeFile } from "@/lib/tauri";
 import { disposeTab, setTabDirty, setTabDoc } from "@/state/editor-dirty-store";
 
@@ -81,21 +79,11 @@ export function EditorView({ tab }: { tab: Tab }) {
       return;
     }
     let cancelled = false;
-    const description = LanguageDescription.matchFilename(languages, basename(filePath));
-    if (!description) {
-      setLanguageExtension(null);
-      return;
-    }
+    setLanguageExtension(null);
     void (async () => {
-      try {
-        const support = await description.load();
-        if (!cancelled) {
-          setLanguageExtension(support);
-        }
-      } catch {
-        if (!cancelled) {
-          setLanguageExtension(null);
-        }
+      const extension = await loadLanguageExtension(filePath);
+      if (!cancelled) {
+        setLanguageExtension(extension);
       }
     })();
     return () => {
@@ -150,13 +138,10 @@ export function EditorView({ tab }: { tab: Tab }) {
     [save],
   );
 
-  const extensions = useMemo(
-    () =>
-      languageExtension
-        ? [pragmaEditorTheme, saveKeymap, languageExtension]
-        : [pragmaEditorTheme, saveKeymap],
-    [saveKeymap, languageExtension],
-  );
+  const extensions = useMemo(() => {
+    const base = [pragmaEditorTheme, pragmaSyntaxHighlighting, saveKeymap];
+    return languageExtension ? [...base, languageExtension] : base;
+  }, [saveKeymap, languageExtension]);
 
   if (state.kind === "loading") {
     return <Placeholder>Loading…</Placeholder>;

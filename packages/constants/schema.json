@@ -355,9 +355,9 @@
     },
     "DiffSide": {
       "title": "DiffSide",
-      "description": "Which axis of change a diff tab shows: committed (base branch → HEAD), staged (HEAD → index), or unstaged (index → working tree).",
+      "description": "Which axis of change a diff/listing record refers to. committed (base branch → HEAD), staged (HEAD → index), and unstaged (index → working tree) are the three listing axes. worktree (base branch → working tree) is the unified review side every Changes-sidebar click opens — it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
       "type": "string",
-      "enum": ["committed", "staged", "unstaged"]
+      "enum": ["committed", "staged", "unstaged", "worktree"]
     },
     "ChangeStatus": {
       "title": "ChangeStatus",

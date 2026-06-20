@@ -58,8 +58,11 @@ function messageFor(cause: unknown): string {
 /**
  * The Changes subtab: top lifecycle controls, then staged (HEAD → index),
  * unstaged (index → working tree), and committed (base branch → HEAD) change
- * lists, each a default-open collapsible (in that order). Clicking a file opens
- * a read-only diff tab for the corresponding side. Unstaged files can be staged
+ * lists, each a default-open collapsible (in that order). Clicking a file in any
+ * list opens a single read-only diff tab comparing its current working-tree
+ * content against what used to be on the worktree at its fork point (the
+ * `worktree` diff side), folding committed + staged + unstaged changes into one
+ * review view. Unstaged files can be staged
  * or discarded; staged files can be unstaged or committed. Once a child
  * worktree has only committed changes, the top controls switch to merge, then
  * to the shared delete-worktree dialog after the committed diff is gone.
@@ -326,7 +329,7 @@ export function ChangesTab() {
         fileActions={stagedActions.fileActions}
         files={state.changes.staged}
         headerActions={stagedActions.headerActions}
-        onOpen={(file) => void workspace.openDiffTab(file.path, file.side)}
+        onOpen={(file) => void workspace.openDiffTab(file.path, "worktree")}
         title="Staged changes"
       />
       <ChangeGroup
@@ -334,13 +337,13 @@ export function ChangesTab() {
         fileActions={unstagedActions.fileActions}
         files={state.changes.unstaged}
         headerActions={unstagedActions.headerActions}
-        onOpen={(file) => void workspace.openDiffTab(file.path, file.side)}
+        onOpen={(file) => void workspace.openDiffTab(file.path, "worktree")}
         title="Unstaged changes"
       />
       <ChangeGroup
         emptyLabel="No committed changes"
         files={state.changes.committed}
-        onOpen={(file) => void workspace.openDiffTab(file.path, file.side)}
+        onOpen={(file) => void workspace.openDiffTab(file.path, "worktree")}
         title="Committed changes"
       />
       <AlertDialog onOpenChange={(open) => !open && setPending(null)} open={pending !== null}>

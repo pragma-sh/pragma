@@ -18,7 +18,8 @@ function messageFor(cause: unknown): string {
 /**
  * Read-only side-by-side diff for `diff` tabs, backed by `@codemirror/merge`.
  * Loads the old/new text via the worktree-scoped `file_diff` command (keyed on
- * the tab id) and recomputes it live each time the tab opens.
+ * the tab id) and recomputes it live each time the tab opens. The file's
+ * language grammar is resolved lazily so both panes get syntax highlighting.
  */
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;

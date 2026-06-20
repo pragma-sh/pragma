@@ -17,11 +17,8 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 
-import {
-  detectLanguage,
-  pragmaEditorTheme,
-  pragmaSyntaxHighlighting,
-} from "@/components/editor/codemirror-theme";
+import { loadLanguageExtension } from "@/components/editor/codemirror-language";
+import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 
 /**
  * An inline review comment anchored to a 1-based line in the new (right-hand)
@@ -214,23 +211,15 @@ export function MergeDiff({
     }
 
     let cancelled = false;
-    const language = detectLanguage(fileName);
-    if (language) {
-      // A missing/failed grammar must not break the diff — fall back to no
-      // highlighting. `view.a`/`view.b` exist on a real MergeView (guarded for
-      // mocks in tests).
-      void (async () => {
-        try {
-          const support = await language.load();
-          if (!cancelled && view.a && view.b) {
-            view.a.dispatch({ effects: languageA.reconfigure(support) });
-            view.b.dispatch({ effects: languageB.reconfigure(support) });
-          }
-        } catch {
-          // ignore — leave the diff unhighlighted
-        }
-      })();
-    }
+    // A missing/failed grammar must not break the diff; plain text still gets
+    // the shared syntax palette for token styles a grammar can emit later.
+    void (async () => {
+      const languageExtension = fileName ? await loadLanguageExtension(fileName) : null;
+      if (!cancelled && languageExtension && view.a && view.b) {
+        view.a.dispatch({ effects: languageA.reconfigure(languageExtension) });
+        view.b.dispatch({ effects: languageB.reconfigure(languageExtension) });
+      }
+    })();
 
     return () => {
       cancelled = true;
