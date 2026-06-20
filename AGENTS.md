@@ -709,8 +709,10 @@ libraries — see the `rust`/`build` jobs in CI for the exact `apt` list. Note `
 (screen capture for browser snapshots) pulls in `libspa-sys`, which needs
 `libpipewire-0.3-dev` on Linux at build time, and its wayland/GL capture path links
 against `gbm`, so `libgbm-dev` is required at link time (otherwise `cargo test` / the
-Tauri build fail with `unable to find library -lgbm`). Both are in the CI apt list (the
-`rust` **and** `build` jobs) and must stay there.
+Tauri build fail with `unable to find library -lgbm`). `libspa-sys` uses bindgen, so
+`libclang-dev` is also installed explicitly; GitHub-hosted runners may already have it, but
+`act` images do not. These packages are in the CI apt list (the `rust` **and** `build` jobs)
+and must stay there.
 
 ## Testing
 
