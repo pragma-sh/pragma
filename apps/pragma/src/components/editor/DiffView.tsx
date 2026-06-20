@@ -1,12 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
-import { MergeView } from "@codemirror/merge";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
 
-import { loadLanguageExtension } from "@/components/editor/codemirror-language";
-import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
+import { MergeDiff } from "@/components/editor/MergeDiff";
 import { fileDiff } from "@/lib/tauri";
 
 type LoadState =
@@ -20,18 +16,6 @@ function messageFor(cause: unknown): string {
 }
 
 /**
- * Read-only base extensions shared by both diff panes: not editable, the app
- * theme, and the syntax-highlight palette. The per-file language grammar is
- * appended once it resolves so both sides are colorized identically.
- */
-const READ_ONLY: Extension[] = [
-  EditorState.readOnly.of(true),
-  EditorView.editable.of(false),
-  pragmaEditorTheme,
-  pragmaSyntaxHighlighting,
-];
-
-/**
  * Read-only side-by-side diff for `diff` tabs, backed by `@codemirror/merge`.
  * Loads the old/new text via the worktree-scoped `file_diff` command (keyed on
  * the tab id) and recomputes it live each time the tab opens. The file's
@@ -40,8 +24,6 @@ const READ_ONLY: Extension[] = [
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!filePath || !diffSide) {
@@ -74,41 +56,6 @@ export function DiffView({ tab }: { tab: Tab }) {
     };
   }, [tabId, worktreeId, filePath, diffSide]);
 
-  // Resolve the language grammar lazily by filename; plain text on no match.
-  useEffect(() => {
-    if (!filePath) {
-      return;
-    }
-    let cancelled = false;
-    setLanguageExtension(null);
-    void (async () => {
-      const extension = await loadLanguageExtension(filePath);
-      if (!cancelled) {
-        setLanguageExtension(extension);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tabId, filePath]);
-
-  useEffect(() => {
-    if (state.kind !== "ready") {
-      return;
-    }
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-    const extensions = languageExtension ? [...READ_ONLY, languageExtension] : READ_ONLY;
-    const view = new MergeView({
-      a: { doc: state.oldText, extensions },
-      b: { doc: state.newText, extensions },
-      parent: container,
-    });
-    return () => view.destroy();
-  }, [state, languageExtension]);
-
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;
   }
@@ -119,7 +66,9 @@ export function DiffView({ tab }: { tab: Tab }) {
     return <Placeholder>Loading diff…</Placeholder>;
   }
 
-  return <div className="h-full min-h-0 overflow-auto bg-[#0b0d10]" ref={containerRef} />;
+  return (
+    <MergeDiff fileName={filePath ?? undefined} newText={state.newText} oldText={state.oldText} />
+  );
 }
 
 function Placeholder({ children }: { children: React.ReactNode }) {

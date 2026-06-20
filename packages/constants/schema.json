@@ -4,7 +4,15 @@
   "description": "Shared compile-time constants. Single source of truth for both the TypeScript frontend (src) and the Rust backend (src-tauri). Edit values.json; never edit generated code.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["maxParallelAgents", "app", "window", "links", "editorLaunchers", "daemon"],
+  "required": [
+    "maxParallelAgents",
+    "app",
+    "window",
+    "links",
+    "editorLaunchers",
+    "daemon",
+    "github"
+  ],
   "properties": {
     "maxParallelAgents": {
       "type": "integer",
@@ -15,9 +23,142 @@
     "window": { "$ref": "#/definitions/WindowDefaults" },
     "links": { "$ref": "#/definitions/Links" },
     "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
-    "daemon": { "$ref": "#/definitions/Daemon" }
+    "daemon": { "$ref": "#/definitions/Daemon" },
+    "github": { "$ref": "#/definitions/GitHub" }
   },
   "definitions": {
+    "GitHub": {
+      "title": "GitHub",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GitHub integration contract: the secret-free OAuth Device Flow client id, scopes, and the endpoint URLs shared by the Rust backend (device flow + token exchange) and the frontend Octokit client.",
+      "required": [
+        "oauthClientId",
+        "scopes",
+        "deviceCodeUrl",
+        "deviceVerifyUrl",
+        "accessTokenUrl",
+        "apiBaseUrl"
+      ],
+      "properties": {
+        "oauthClientId": {
+          "type": "string",
+          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret — a distributed desktop app can't keep one secret."
+        },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "OAuth scopes requested during the device flow (e.g. `repo`)."
+        },
+        "deviceCodeUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint that issues a device + user code (`POST https://github.com/login/device/code`)."
+        },
+        "deviceVerifyUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Page the user opens to enter the user code (`https://github.com/login/device`)."
+        },
+        "accessTokenUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint polled to exchange an authorized device code for an access token."
+        },
+        "apiBaseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL for the GitHub REST/GraphQL API (Octokit `baseUrl`)."
+        }
+      }
+    },
+    "GitHubUser": {
+      "title": "GitHubUser",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The authenticated GitHub user, as surfaced to the UI.",
+      "required": ["login", "name", "avatarUrl"],
+      "properties": {
+        "login": { "type": "string", "description": "GitHub username (login)." },
+        "name": {
+          "type": ["string", "null"],
+          "description": "Display name; null when the user has not set one."
+        },
+        "avatarUrl": { "type": "string", "description": "Avatar image URL." }
+      }
+    },
+    "GitHubAuthStatus": {
+      "title": "GitHubAuthStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Drives the setup modal and the Pull Request subtab: whether a token is stored, whether the gh CLI is an option, the signed-in user, and whether setup was skipped.",
+      "required": ["authenticated", "ghAvailable", "user", "setupDismissed"],
+      "properties": {
+        "authenticated": {
+          "type": "boolean",
+          "description": "True when a usable GitHub token is stored in the backend's 0600 plaintext token file under the app data dir (not the OS keychain; see src-tauri/src/github.rs)."
+        },
+        "ghAvailable": {
+          "type": "boolean",
+          "description": "True when the `gh` CLI is installed and authenticated, so the CLI login option can be shown."
+        },
+        "user": {
+          "description": "The authenticated user, or null when not authenticated.",
+          "anyOf": [{ "$ref": "#/definitions/GitHubUser" }, { "type": "null" }]
+        },
+        "setupDismissed": {
+          "type": "boolean",
+          "description": "True once the user has skipped the setup modal; the modal never returns while true."
+        }
+      }
+    },
+    "BranchSyncStatus": {
+      "title": "BranchSyncStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch — the create-PR pre-flight.",
+      "required": ["branch", "ahead", "behind", "hasUpstream"],
+      "properties": {
+        "branch": { "type": "string", "description": "The worktree's current branch." },
+        "ahead": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits the local branch is ahead of its upstream."
+        },
+        "behind": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits the local branch is behind its upstream. Non-zero blocks PR creation."
+        },
+        "hasUpstream": {
+          "type": "boolean",
+          "description": "True when the branch already tracks a remote upstream; false means it must be pushed first."
+        }
+      }
+    },
+    "GitHubRepoRef": {
+      "title": "GitHubRepoRef",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Owner/repo plus branch context parsed from a worktree's `origin` remote, used to address the GitHub API.",
+      "required": ["owner", "repo", "defaultBranch", "headBranch", "parentBranch"],
+      "properties": {
+        "owner": { "type": "string", "description": "Repository owner (user or org)." },
+        "repo": { "type": "string", "description": "Repository name (no `.git`)." },
+        "defaultBranch": {
+          "type": "string",
+          "description": "The repo's default branch (PR base)."
+        },
+        "headBranch": {
+          "type": "string",
+          "description": "The worktree's current branch (PR head)."
+        },
+        "parentBranch": {
+          "type": ["string", "null"],
+          "description": "The branch of the worktree's parent worktree — the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
+        }
+      }
+    },
     "Daemon": {
       "title": "Daemon",
       "type": "object",
@@ -145,9 +286,9 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, or the read-only daemon log viewer.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, the read-only daemon log viewer, or a pull-request review.",
       "type": "string",
-      "enum": ["terminal", "browser", "editor", "diff", "log"]
+      "enum": ["terminal", "browser", "editor", "diff", "log", "pr-review"]
     },
     "Tab": {
       "title": "Tab",
@@ -162,6 +303,7 @@
         "url",
         "filePath",
         "diffSide",
+        "prNumber",
         "userRenamed",
         "orderIndex",
         "createdAt"
@@ -183,6 +325,10 @@
         "diffSide": {
           "description": "Which diff side a diff tab shows; null for non-diff tabs.",
           "anyOf": [{ "$ref": "#/definitions/DiffSide" }, { "type": "null" }]
+        },
+        "prNumber": {
+          "type": ["integer", "null"],
+          "description": "Pull-request number a pr-review tab reviews; null for non-PR tabs."
         },
         "userRenamed": {
           "type": "boolean",

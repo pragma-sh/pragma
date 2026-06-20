@@ -1,0 +1,621 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+
+# GitHub Integration
+
+A comprehensive GitHub integration for Pragma: **authorization** (OAuth or `gh` CLI),
+a **full-screen setup modal**, and a third **Pull Request** subtab in the right sidebar
+that creates, views, and reviews PRs. GitHub API calls use the **Octokit SDK**; secrets,
+git, and OS work stay in Rust behind typed Tauri commands.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and what it costs</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **New frontend deps:** `octokit`; TipTap (`@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`, `@tiptap/extension-code-block-lowlight` + `lowlight`, `@tiptap/extension-link`, `@tiptap/extension-placeholder`, `tiptap-markdown`); `react-markdown` + `remark-gfm`
+- **New backend deps:** `keyring` (OS keychain token store), `reqwest` (`rustls-tls`, device-flow HTTP)
+- **New Rust module:** `src-tauri/src/github.rs` — auth, device flow, `gh` detection, repo-ref + fetch/ahead-behind + push + remote-branch delete (11 commands)
+- **New frontend service:** `src/lib/github.ts` — the **single** Octokit entry point (mirrors the `lib/tauri.ts` "only place `invoke()` is called" rule)
+- **One new `TabKind`:** `pr-review`, rendered through the existing `SplitHost` switch
+- **Shared constants:** new `github` block (`oauthClientId`, scopes, endpoint URLs) + payload types (`GitHubAuthStatus`, `BranchSyncStatus`, `GitHubRepoRef`)
+- **SQLite:** `v7` migration — `pr_number` column on `tabs`; skip flag persisted in `settings` (`github.setupDismissed`). **Token never in SQLite** — OS keychain only
+- **New shadcn:** `dialog`, `checkbox`, `avatar` (added to `apps/pragma`); plan-render set already has what it needs
+
+</CardContent>
+</Card>
+
+## The flows, interactively
+
+Switch between the four UI states this plan introduces. Mock only — wiring is below.
+
+<Playground>
+  <div bind="view:'setup'" className="hidden" />
+
+<div className="flex flex-wrap gap-1">
+  {[
+    ["setup", "Setup modal"],
+    ["loggedout", "PR · logged out"],
+    ["create", "PR · create"],
+    ["viewpr", "PR · view"],
+  ].map(([value, label]) => (
+    <button
+      key={value}
+      onClick={() => setView(value)}
+      className={
+        view === value
+          ? "rounded-md bg-cyan-500 px-3 py-1 text-xs font-medium text-black"
+          : "rounded-md border border-white/15 px-3 py-1 text-xs text-slate-300 hover:bg-white/10"
+      }
+    >
+      {label}
+    </button>
+  ))}
+</div>
+
+  <div className="mt-3 rounded-lg border bg-[#0b0d10] p-4 text-sm text-slate-200">
+
+    {view === "setup" ? (
+      <div className="flex flex-col items-center gap-4 py-6 text-center">
+        <div className="text-base font-semibold text-slate-100">Connect Pragma to GitHub</div>
+        <div className="max-w-md text-xs text-slate-400">
+          Manage pull requests, reviews, and merges without leaving your worktree.
+        </div>
+        <button className="mt-2 w-72 rounded-md bg-cyan-500 px-4 py-2 font-medium text-black hover:bg-cyan-400">
+          Continue with GitHub
+          <span className="ml-2 rounded bg-black/20 px-1.5 py-0.5 text-[10px]">Recommended</span>
+        </button>
+        <button className="w-72 rounded-md border border-white/15 px-4 py-2 text-slate-200 hover:bg-white/5">
+          Use GitHub CLI login
+          <span className="ml-2 text-[10px] text-slate-500">(gh detected)</span>
+        </button>
+        <button className="mt-1 text-xs text-slate-500 underline hover:text-slate-300">
+          Skip for now
+        </button>
+      </div>
+    ) : view === "loggedout" ? (
+      <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <div className="text-xs text-slate-400">Sign in to GitHub to manage pull requests.</div>
+        <button className="w-56 rounded-md bg-cyan-500 px-4 py-2 text-xs font-medium text-black">
+          Continue with GitHub
+        </button>
+        <button className="w-56 rounded-md border border-white/15 px-4 py-2 text-xs text-slate-200">
+          Use GitHub CLI login
+        </button>
+      </div>
+    ) : view === "create" ? (
+      <div className="flex flex-col gap-3">
+        <div className="text-xs uppercase tracking-wide text-slate-500">Create pull request</div>
+        <input
+          className="rounded-md border border-white/15 bg-black/30 px-3 py-2 text-sm text-slate-100"
+          defaultValue="feat(github): add PR subtab"
+        />
+        <div className="min-h-28 rounded-md border border-white/15 bg-black/30 p-3 text-xs text-slate-400">
+          <span className="text-slate-300">## Summary</span>
+          <br />
+          TipTap editor — bold / code / fenced blocks — output is <em>markdown</em>.
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white">
+            Create pull request
+          </button>
+          <button className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-200">
+            Create draft
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-slate-100">Add PR subtab</span>
+          <span className="text-slate-500">#42</span>
+          <span className="rounded bg-green-700/40 px-1.5 py-0.5 text-[10px] text-green-300">open</span>
+          <a className="ml-auto text-[11px] text-cyan-400 underline">Open on GitHub ↗</a>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-400">
+          PR body rendered as markdown · read-only conversation comments below
+        </div>
+        <div className="text-[11px] uppercase tracking-wide text-slate-500">Files changed</div>
+        <div className="rounded-md border border-white/10">
+          <div className="flex items-center justify-between border-b border-white/5 px-2 py-1 text-xs">
+            <span className="text-slate-200">src/lib/github.ts</span>
+            <span className="text-green-400">+128</span>
+          </div>
+          <div className="flex items-center justify-between px-2 py-1 text-xs">
+            <span className="text-slate-200">PullRequestTab.tsx</span>
+            <span className="text-green-400">+96</span>
+          </div>
+        </div>
+        <div className="mt-1 rounded-md border border-white/10 bg-black/20 p-2 text-xs">
+          <div className="text-green-400">✓ All checks passed</div>
+          <button className="mt-2 w-full rounded-md bg-purple-600 px-3 py-1.5 font-medium text-white">
+            Merge pull request
+          </button>
+        </div>
+      </div>
+    )}
+
+  </div>
+</Playground>
+
+## Architecture decisions
+
+<Tabs defaultValue="octokit" className="w-full">
+  <TabsList>
+    <TabsTrigger value="octokit">Octokit placement</TabsTrigger>
+    <TabsTrigger value="oauth">OAuth flow</TabsTrigger>
+    <TabsTrigger value="diffs">Review data source</TabsTrigger>
+  </TabsList>
+
+<TabsContent value="octokit">
+
+The repo rule is "all backend calls go through `lib/tauri.ts`," but Octokit is a
+**JS-only SDK** and the user requires it. We honor both:
+
+- **GitHub REST/GraphQL → Octokit in one module** `src/lib/github.ts`, the single place
+  `new Octokit()` happens — the same discipline as the `invoke()` rule. Components call
+  typed helpers, never construct a client.
+- **Secrets, OS, git → Rust.** Token storage, device-flow polling, `gh` detection,
+  `git fetch`/ahead-behind/push, browser-open. The token lives in the **OS keychain**
+  (never plaintext SQLite); the frontend pulls it via `github_token` to build the client.
+
+</TabsContent>
+
+<TabsContent value="oauth">
+
+Use the **OAuth Device Flow** as the recommended path:
+
+- **No client secret** — mandatory for a distributed desktop app (an embedded secret
+  can't stay secret; GitHub doesn't support PKCE for OAuth apps).
+- Matches "open the browser to the login flow": request a device code, open
+  `https://github.com/login/device` (showing the `user_code`), poll for the token.
+- Driven from Rust so the secret-free `client_id`/scopes come from `@pragma/constants`
+  and the token lands in the keychain without round-tripping through JS.
+
+`gh` CLI path: detect with `gh auth status`; read token via `gh auth token`. The CLI
+button is **hidden** unless `gh` is authenticated.
+
+</TabsContent>
+
+<TabsContent value="diffs">
+
+- **File list + patches** → Octokit `pulls.listFiles`.
+- **Side-by-side review diffs** → produced **locally** (`git diff` of `base...HEAD` per
+  file) so the existing `@codemirror/merge` `DiffView` gets real before/after text.
+- **Review comments + resolved state** → Octokit. **Resolving a thread needs GraphQL**
+  (`resolveReviewThread`) — REST can't resolve; Octokit's `.graphql()` covers it.
+
+</TabsContent>
+</Tabs>
+
+## Authorization
+
+<Alert className="my-3">
+  <AlertTitle>Gate</AlertTitle>
+  <AlertDescription className="text-sm">
+
+The setup modal shows when `github_auth_status().authenticated === false` **and**
+`github.setupDismissed !== "true"`. Skipping sets the flag and the modal never returns.
+
+  </AlertDescription>
+</Alert>
+
+The modal (`components/github/GitHubSetupModal.tsx`) is a **full-screen, non-dismissible**
+shadcn `Dialog` mounted in `App.tsx`. A reusable `<GitHubAuthOptions />` renders the two
+buttons so the **logged-out PR subtab** shows the identical options (DRY).
+
+<Table className="my-3">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Path</TableHead>
+      <TableHead>Trigger</TableHead>
+      <TableHead>Backend</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>OAuth (emphasized)</TableCell>
+      <TableCell>Opens browser, shows user code, polls</TableCell>
+      <TableCell>
+        <code>github_start_device_flow</code> → <code>github_poll_device_flow</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>GitHub CLI</TableCell>
+      <TableCell>
+        Shown only if <code>gh</code> logged in
+      </TableCell>
+      <TableCell>
+        <code>github_use_cli_token</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Skip</TableCell>
+      <TableCell>Footer link, persists choice</TableCell>
+      <TableCell>
+        <code>set_github_setup_dismissed(true)</code>
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Backend — `src-tauri/src/github.rs`
+
+Register `mod github;` in `lib.rs`, add each to `generate_handler!`, mirror with a typed
+wrapper in `lib/tauri.ts`. All return `AppResult<T>`; git commands are worktree-scoped and
+reuse `resolve_in_worktree` (no absolute path crosses IPC).
+
+<Table className="my-3">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Command</TableHead>
+      <TableHead>Purpose</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>github_auth_status</code>
+      </TableCell>
+      <TableCell>
+        authenticated? gh available? user? + setupDismissed — drives modal & subtab
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_start_device_flow</code> / <code>github_poll_device_flow</code>
+      </TableCell>
+      <TableCell>
+        device code + browser open; poll until authorized, store token, return user
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_use_cli_token</code>
+      </TableCell>
+      <TableCell>
+        adopt <code>gh auth token</code> into the keychain
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_token</code>
+      </TableCell>
+      <TableCell>in-memory token for the frontend Octokit client</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_sign_out</code>
+      </TableCell>
+      <TableCell>clear keychain slot</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>set_github_setup_dismissed</code>
+      </TableCell>
+      <TableCell>
+        persist skip in <code>settings</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_repo_ref</code>
+      </TableCell>
+      <TableCell>
+        parse <code>origin</code> → owner/repo + default/head branch
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_fetch_and_sync</code>
+      </TableCell>
+      <TableCell>
+        <code>git fetch</code> + ahead/behind → <code>BranchSyncStatus</code> (create pre-flight)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_push_branch</code>
+      </TableCell>
+      <TableCell>
+        <code>git push -u origin &lt;branch&gt;</code> before opening a PR
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_pr_file_diff</code>
+      </TableCell>
+      <TableCell>
+        local <code>base...HEAD</code> diff for the review tab
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>github_delete_remote_branch</code>
+      </TableCell>
+      <TableCell>
+        post-merge remote cleanup (<code>git push origin --delete</code>)
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Frontend — `src/lib/github.ts` (Octokit)
+
+The single Octokit entry point. Lazily builds the client from `github_token()`
+(rebuilt on sign-in/out). Every export gets a JSDoc line; errors thrown typed and
+surfaced via `toast.error` at the call site.
+
+<Table className="my-3">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Helper</TableHead>
+      <TableHead>Octokit call</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>findPullRequestForBranch</code>
+      </TableCell>
+      <TableCell>
+        <code>{'pulls.list({ head: "owner:branch", state: "open" })'}</code> → null ⇒ create state
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>createPullRequest</code>
+      </TableCell>
+      <TableCell>
+        <code>{"pulls.create({ draft })"}</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>getPullRequest</code>
+      </TableCell>
+      <TableCell>
+        <code>pulls.get</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>listIssueComments</code>
+      </TableCell>
+      <TableCell>
+        <code>issues.listComments</code> (read-only conversation)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>listReviewComments</code>
+      </TableCell>
+      <TableCell>
+        <code>pulls.listReviewComments</code> grouped by path+line
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>listPullFiles</code>
+      </TableCell>
+      <TableCell>
+        <code>pulls.listFiles</code> (review file list)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>getChecksStatus</code>
+      </TableCell>
+      <TableCell>
+        <code>checks.listForRef</code> + combined status (merge card)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>mergePullRequest</code>
+      </TableCell>
+      <TableCell>
+        <code>pulls.merge</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>resolveReviewThread</code>
+      </TableCell>
+      <TableCell>
+        GraphQL <code>resolveReviewThread</code>
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## The Pull Request subtab
+
+Add `"pullRequest"` to `RightSidebarSubtab` (`state/right-sidebar-context.tsx`, plus the
+`SUBTAB_KEY` parse) and a third `TabsTrigger` in `RightSidebar.tsx`. The controller
+`components/right-sidebar/PullRequestTab.tsx` resolves state and polls like `ChangesTab`.
+
+<Tabs defaultValue="create" className="w-full">
+  <TabsList>
+    <TabsTrigger value="create">Create state</TabsTrigger>
+    <TabsTrigger value="view">View state</TabsTrigger>
+    <TabsTrigger value="review">Review tab</TabsTrigger>
+  </TabsList>
+
+<TabsContent value="create">
+
+`components/github/CreatePullRequestView.tsx` — top→bottom: shadcn `Input` title
+(defaulted to last commit subject), TipTap markdown editor, then `Create pull request`
+(primary) + `Create draft`.
+
+**Pre-flight on submit** (`github_fetch_and_sync` first):
+
+- `behind > 0` → **block** with an error `AlertDialog` (pull/rebase first).
+- staged/unstaged uncommitted changes → **warn, not block**: confirm `AlertDialog`
+  ("changes won't be part of this PR — create anyway?").
+- if `!hasUpstream` → `github_push_branch`, then `createPullRequest`. On success the
+  controller re-resolves into the **view** state.
+
+`components/github/MarkdownEditor.tsx` — TipTap `StarterKit` (its plain code block
+disabled) + `CodeBlockLowlight` + `Link` + `Placeholder` + the `tiptap-markdown`
+extension. Seed with `setContent(markdown)`; read with
+`editor.storage.markdown.getMarkdown()` so **I/O is markdown**.
+
+</TabsContent>
+
+<TabsContent value="view">
+
+`components/github/ViewPullRequestView.tsx`, sections top→bottom:
+
+1. **Header card** — title, `#number` with **open-in-browser** link (`html_url`), state
+   badge, `base ← head` chips, body rendered as markdown (`react-markdown` + `remark-gfm`).
+2. **Conversation** — `listIssueComments`, **read-only** (excludes review comments).
+3. **Files changed** — reuse **`ChangeGroup`** (same formatting as Changes) fed by
+   `listPullFiles`; `onOpen` → `openReviewTab(prNumber, path)`; per-file unresolved-comment badge.
+4. **Merge card** — `getChecksStatus` summary line + **Merge** button. Confirm dialog →
+   `mergePullRequest` → **branch-cleanup dialog**: a `Checkbox` for "also delete the
+   remote branch", reuse `deleteWorktree(deleteBranch: true)` for worktree + local branch,
+   `github_delete_remote_branch` for the remote.
+
+</TabsContent>
+
+<TabsContent value="review">
+
+New `TabKind: "pr-review"` (constants enum + `v7` `pr_number` column; `createTab`/`list_tabs`
+carry it; `openReviewTab` on the workspace context dedupes by kind+prNumber; `SplitHost`
+renders it).
+
+`components/github/ReviewTab.tsx` — a scrollable list of files. Each file:
+
+- Sticky header + a **"Done reviewing" checkmark** (ephemeral module store keyed by
+  `prNumber:path`, like `editor-dirty-store.ts`; collapses the diff when checked).
+- **Side-by-side diff** via the existing `@codemirror/merge` `DiffView`, fed by
+  `github_pr_file_diff`.
+- **Inline review comments** anchored to the file — compact card with the body +
+  a **Resolve** button (`resolveReviewThread`); resolved threads dim/collapse.
+
+</TabsContent>
+</Tabs>
+
+## Shared constants, DB & deps
+
+<Card className="my-3">
+  <CardContent className="text-sm space-y-2 pt-5">
+
+- **`packages/constants`** — new `github` block in `schema.json` + `values.json`
+  (`oauthClientId`, `scopes`, `deviceCodeUrl`, `deviceVerifyUrl`, `accessTokenUrl`,
+  `apiBaseUrl`) + payload types `GitHubAuthStatus`, `GitHubUser`, `BranchSyncStatus`,
+  `GitHubRepoRef`; `pr-review` added to the `TabKind` enum. Run `bun run generate`.
+- **`db.rs` v7** — add nullable `pr_number INTEGER` to `tabs`; bump `PRAGMA user_version = 7`.
+  Skip flag in `settings` (`github.setupDismissed`). **Token in OS keychain only.**
+- **New shadcn in `apps/pragma`** — `dialog`, `checkbox`, `avatar`.
+
+</CardContent>
+</Card>
+
+## Build order
+
+<Table className="my-3">
+  <TableHeader>
+    <TableRow>
+      <TableHead>#</TableHead>
+      <TableHead>Phase</TableHead>
+      <TableHead>Ships</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>1</TableCell>
+      <TableCell>Constants + auth backend</TableCell>
+      <TableCell>
+        <code>github</code> constants, <code>github.rs</code> auth/keychain/<code>gh</code>,{" "}
+        <code>github_auth_status</code>, wrappers, auth context
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>2</TableCell>
+      <TableCell>Setup modal</TableCell>
+      <TableCell>
+        full-screen modal, <code>&lt;GitHubAuthOptions /&gt;</code>, device flow, skip persistence
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>3</TableCell>
+      <TableCell>Subtab scaffolding</TableCell>
+      <TableCell>
+        context/RightSidebar wiring, logged-out state, <code>lib/github.ts</code> client +
+        repo-ref/sync
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>4</TableCell>
+      <TableCell>Create view</TableCell>
+      <TableCell>
+        TipTap editor, pre-flight (behind block / dirty warn), push + create/draft
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>5</TableCell>
+      <TableCell>View view</TableCell>
+      <TableCell>header, comments, checks + merge card, branch-cleanup flow</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>6</TableCell>
+      <TableCell>Review tab</TableCell>
+      <TableCell>
+        <code>pr-review</code> kind + v7, file list → review tab, diffs, done-toggle, resolve
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Testing & open questions
+
+<Accordion type="single" collapsible className="my-3">
+  <AccordionItem value="testing">
+    <AccordionTrigger>Testing</AccordionTrigger>
+    <AccordionContent>
+
+- **TS (Vitest):** mock `@tauri-apps/api/core` and Octokit. Cover modal auth-gating, skip
+  persistence, create pre-flight branching (behind→block; dirty→warn-then-create),
+  TipTap markdown round-trip, view sections, merge→cleanup flow, review done-toggle + resolve.
+- **Rust:** remote-URL→owner/repo parsing, ahead/behind parsing, device-flow response
+  parsing (mock HTTP), `gh` detection. Mock/guard keychain so CI stays deterministic.
+- Headless CI can't paint CodeMirror diffs — test the data/IPC layer, not pixels.
+- Run `bun run check` before pushing.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="questions">
+    <AccordionTrigger>Open questions / decisions</AccordionTrigger>
+    <AccordionContent>
+
+1. **OAuth App `client_id`** — need a registered Pragma GitHub OAuth App (device flow
+   enabled). Confirm scopes (`repo` broad vs `public_repo`).
+2. **Token storage** — confirm OS keychain (`keyring`) is acceptable.
+3. **Merge method** — expose merge/squash/rebase, or default to one?
+4. **Review comment authoring** — brief covers _view + resolve_; author-new is out of v1 unless wanted.
+5. **Fork PRs** — v1 assumes same-repo PRs against a pushable `origin`.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>

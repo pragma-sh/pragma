@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fileDiffMock = vi.fn();
 const mergeViewMock = vi.fn();
 const loadLanguageExtensionMock = vi.fn();
+const dispatchMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   fileDiff: (...args: unknown[]) => fileDiffMock(...args),
@@ -15,6 +16,8 @@ vi.mock("@/components/editor/codemirror-language", () => ({
 }));
 vi.mock("@codemirror/merge", () => ({
   MergeView: class {
+    a = { dispatch: dispatchMock };
+    b = { dispatch: dispatchMock };
     constructor(config: unknown) {
       mergeViewMock(config);
     }
@@ -34,6 +37,7 @@ function diffTab(): Tab {
     url: null,
     filePath: "src/app.ts",
     diffSide: "committed",
+    prNumber: null,
     userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
@@ -45,6 +49,7 @@ beforeEach(() => {
   fileDiffMock.mockReset();
   mergeViewMock.mockReset();
   loadLanguageExtensionMock.mockReset();
+  dispatchMock.mockReset();
   loadLanguageExtensionMock.mockResolvedValue(null);
 });
 
@@ -61,7 +66,7 @@ describe("DiffView", () => {
     await waitFor(() => expect(mergeViewMock).toHaveBeenCalled());
   });
 
-  it("applies the resolved language grammar to both diff panes", async () => {
+  it("loads the file language grammar through the shared diff renderer", async () => {
     fileDiffMock.mockResolvedValue({
       path: "src/app.ts",
       oldText: "a",
@@ -73,15 +78,8 @@ describe("DiffView", () => {
 
     render(<DiffView tab={diffTab()} />);
 
-    await waitFor(() => {
-      const lastCall = mergeViewMock.mock.lastCall?.[0] as {
-        a: { extensions: unknown[] };
-        b: { extensions: unknown[] };
-      };
-      expect(lastCall?.a.extensions).toContain(languageExtension);
-      expect(lastCall?.b.extensions).toContain(languageExtension);
-    });
-    expect(loadLanguageExtensionMock).toHaveBeenCalledWith("src/app.ts");
+    await waitFor(() => expect(loadLanguageExtensionMock).toHaveBeenCalledWith("src/app.ts"));
+    await waitFor(() => expect(dispatchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
   });
 
   it("renders a placeholder for binary diffs without a MergeView", async () => {

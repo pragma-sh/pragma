@@ -7,6 +7,7 @@ import { BrowserView } from "@/components/browser/BrowserView";
 import { DiffView } from "@/components/editor/DiffView";
 import { EditorView } from "@/components/editor/EditorView";
 import { LogView } from "@/components/editor/LogView";
+import { ReviewTab } from "@/components/github/ReviewTab";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -157,6 +158,8 @@ function SplitPane({
             <DiffView key={activeTab.id} tab={activeTab} />
           ) : activeTab.kind === "log" ? (
             <LogView key={activeTab.id} tab={activeTab} />
+          ) : activeTab.kind === "pr-review" ? (
+            <ReviewTab key={activeTab.id} tab={activeTab} />
           ) : (
             <TerminalView cwd={cwd} key={activeTab.id} tab={activeTab} />
           )

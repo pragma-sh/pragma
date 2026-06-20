@@ -36,6 +36,10 @@ impl Db {
         Ok(db)
     }
 
+    // The schema and every versioned migration live inline here, in order, so
+    // the full history reads top-to-bottom in one place; that intentionally
+    // pushes it past clippy's per-function line budget.
+    #[allow(clippy::too_many_lines)]
     fn migrate(&self) -> AppResult<()> {
         let conn = self.0.lock()?;
         conn.execute_batch(
@@ -70,6 +74,7 @@ impl Db {
                title        TEXT,
                file_path    TEXT,
                diff_side    TEXT,
+               pr_number    INTEGER,
                user_renamed INTEGER NOT NULL DEFAULT 0,
                order_index  INTEGER NOT NULL,
                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -154,6 +159,21 @@ impl Db {
                 )?;
             }
             conn.execute_batch("PRAGMA user_version = 6;")?;
+        }
+        // v7 adds a nullable `pr_number` to `tabs` so pull-request review tabs
+        // (`kind = 'pr-review'`) persist which PR they review. Default NULL leaves
+        // every existing row untouched. The CREATE block above already provisions
+        // the column for fresh DBs, so the ALTER is gated on whether it's missing.
+        if version < 7 {
+            let has_pr_number: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'pr_number'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_pr_number == 0 {
+                conn.execute_batch("ALTER TABLE tabs ADD COLUMN pr_number INTEGER;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 7;")?;
         }
         Ok(())
     }
@@ -297,7 +317,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -316,6 +336,7 @@ impl Db {
         url: Option<String>,
         file_path: Option<String>,
         diff_side: Option<DiffSide>,
+        pr_number: Option<i64>,
     ) -> AppResult<Tab> {
         let id = Uuid::new_v4().to_string();
         {
@@ -326,8 +347,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, order_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     id,
                     project_id,
@@ -337,6 +358,7 @@ impl Db {
                     url,
                     file_path,
                     diff_side.map(diff_side_as_str),
+                    pr_number,
                     order_index
                 ],
             )?;
@@ -429,7 +451,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -445,6 +467,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Editor => "editor",
         TabKind::Diff => "diff",
         TabKind::Log => "log",
+        TabKind::PrReview => "pr-review",
     }
 }
 
@@ -455,6 +478,7 @@ fn kind_from_str(value: &str) -> TabKind {
         "editor" => TabKind::Editor,
         "diff" => TabKind::Diff,
         "log" => TabKind::Log,
+        "pr-review" => TabKind::PrReview,
         _ => TabKind::Terminal,
     }
 }
@@ -514,9 +538,10 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         url: row.get(5)?,
         file_path: row.get(6)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
-        user_renamed: row.get::<_, i64>(8)? == 1,
-        order_index: row.get::<_, i64>(9)?,
-        created_at: row.get(10)?,
+        pr_number: row.get::<_, Option<i64>>(8)?,
+        user_renamed: row.get::<_, i64>(9)? == 1,
+        order_index: row.get::<_, i64>(10)?,
+        created_at: row.get(11)?,
     })
 }
 
@@ -545,6 +570,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Terminal,
                 Some("main".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -585,6 +611,7 @@ mod tests {
                 Some("https://example.com".to_string()),
                 None,
                 None,
+                None,
             )
             .expect("browser tab should insert");
         assert_eq!(tab.kind, TabKind::Browser);
@@ -620,6 +647,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Log,
                 Some("Daemon Logs".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -775,6 +803,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("tab should insert");
         db.delete_worktree(&parent.id)
@@ -814,6 +843,7 @@ mod tests {
                 &project.id,
                 &main.id,
                 TabKind::Terminal,
+                None,
                 None,
                 None,
                 None,
