@@ -19,7 +19,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "bunup src/index.ts --format esm,cjs --target node",
+    "build": "bunup src/index.ts --format esm,cjs --target node --dts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "oxlint ."

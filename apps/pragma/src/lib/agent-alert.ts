@@ -239,15 +239,41 @@ function playChime(): void {
   if (!AudioContextCtor) {
     return;
   }
-  const context = new AudioContextCtor();
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.frequency.value = 880;
-  gain.gain.value = 0.03;
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start();
-  oscillator.stop(context.currentTime + 0.12);
+  let context: AudioContext | undefined;
+  try {
+    context = new AudioContextCtor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    let didClose = false;
+    const close = () => {
+      if (didClose || !context) {
+        return;
+      }
+      didClose = true;
+      closeAudioContext(context);
+    };
+
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.03;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.addEventListener("ended", close, { once: true });
+    window.setTimeout(close, 500);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.12);
+  } catch {
+    if (context) {
+      closeAudioContext(context);
+    }
+  }
+}
+
+function closeAudioContext(context: AudioContext): void {
+  try {
+    void context.close().catch(() => {});
+  } catch {
+    // Audio alerts are best-effort; cleanup failures should not break reporting.
+  }
 }
 
 function titleFor(payload: AgentReportPayload, agentName: string): string {
