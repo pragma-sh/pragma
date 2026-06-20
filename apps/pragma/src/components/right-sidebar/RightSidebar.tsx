@@ -4,6 +4,7 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react";
 
 import { ChangesTab } from "@/components/right-sidebar/ChangesTab";
 import { FilesTab } from "@/components/right-sidebar/FilesTab";
+import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
@@ -63,11 +64,20 @@ export function RightSidebar() {
             <TabsTrigger className="text-xs" value="changes">
               Changes
             </TabsTrigger>
+            <TabsTrigger className="text-xs" value="pullRequest">
+              Pull Request
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeSubtab === "files" ? <FilesTab /> : <ChangesTab />}
+        {activeSubtab === "files" ? (
+          <FilesTab />
+        ) : activeSubtab === "changes" ? (
+          <ChangesTab />
+        ) : (
+          <PullRequestTab />
+        )}
       </div>
     </div>
   );

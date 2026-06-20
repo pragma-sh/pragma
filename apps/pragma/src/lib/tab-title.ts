@@ -12,5 +12,8 @@ export function defaultTabTitle(kind: TabKind): string {
   if (kind === "log") {
     return "Daemon Logs";
   }
+  if (kind === "pr-review") {
+    return "PR Review";
+  }
   return "Shell";
 }

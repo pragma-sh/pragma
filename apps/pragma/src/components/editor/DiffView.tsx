@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
-import { MergeView } from "@codemirror/merge";
-import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
 
-import { pragmaEditorTheme } from "@/components/editor/codemirror-theme";
+import { MergeDiff } from "@/components/editor/MergeDiff";
 import { fileDiff } from "@/lib/tauri";
 
 type LoadState =
@@ -18,8 +15,6 @@ function messageFor(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false), pragmaEditorTheme];
-
 /**
  * Read-only side-by-side diff for `diff` tabs, backed by `@codemirror/merge`.
  * Loads the old/new text via the worktree-scoped `file_diff` command (keyed on
@@ -28,7 +23,6 @@ const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false),
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!filePath || !diffSide) {
@@ -61,22 +55,6 @@ export function DiffView({ tab }: { tab: Tab }) {
     };
   }, [tabId, worktreeId, filePath, diffSide]);
 
-  useEffect(() => {
-    if (state.kind !== "ready") {
-      return;
-    }
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-    const view = new MergeView({
-      a: { doc: state.oldText, extensions: READ_ONLY },
-      b: { doc: state.newText, extensions: READ_ONLY },
-      parent: container,
-    });
-    return () => view.destroy();
-  }, [state]);
-
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;
   }
@@ -87,7 +65,9 @@ export function DiffView({ tab }: { tab: Tab }) {
     return <Placeholder>Loading diff…</Placeholder>;
   }
 
-  return <div className="h-full min-h-0 overflow-auto bg-[#0b0d10]" ref={containerRef} />;
+  return (
+    <MergeDiff fileName={filePath ?? undefined} newText={state.newText} oldText={state.oldText} />
+  );
 }
 
 function Placeholder({ children }: { children: React.ReactNode }) {

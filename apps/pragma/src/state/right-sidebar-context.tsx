@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
-export type RightSidebarSubtab = "files" | "changes";
+export type RightSidebarSubtab = "files" | "changes" | "pullRequest";
 
 interface RightSidebarContextValue {
   collapsed: boolean;
@@ -21,6 +21,11 @@ const WIDTH_KEY = "pragma.rightSidebar.width";
 const DEFAULT_WIDTH = 288;
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 560;
+
+/** Narrows a stored string to a known subtab, or null for the default fallback. */
+function parseSubtab(raw: string): RightSidebarSubtab | null {
+  return raw === "changes" || raw === "pullRequest" ? raw : raw === "files" ? "files" : null;
+}
 
 function readStored<T>(key: string, parse: (raw: string) => T | null, fallback: T): T {
   try {
@@ -52,7 +57,7 @@ export function RightSidebarProvider({ children }: { children: ReactNode }) {
     readStored(COLLAPSED_KEY, (raw) => raw === "true", false),
   );
   const [activeSubtab, setActiveSubtabState] = useState<RightSidebarSubtab>(() =>
-    readStored(SUBTAB_KEY, (raw) => (raw === "changes" ? "changes" : "files"), "files"),
+    readStored(SUBTAB_KEY, parseSubtab, "files"),
   );
   const [width, setWidthState] = useState(() =>
     readStored(
