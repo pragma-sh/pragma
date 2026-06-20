@@ -66,11 +66,13 @@ describe("github-context", () => {
     expect(result.current.needsSetup).toBe(false);
   });
 
-  it("falls back to logged-out when the backend is unreachable", async () => {
+  it("does not gate the app when the backend is unreachable", async () => {
+    // Both sign-in and dismissSetup rely on the backend, so opening the
+    // non-dismissible setup modal here would be an unrecoverable blocker.
     githubAuthStatus.mockRejectedValue(new Error("backend down"));
     const { result } = renderHook(() => useGitHub(), { wrapper: GitHubProvider });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.authenticated).toBe(false);
-    expect(result.current.needsSetup).toBe(true);
+    expect(result.current.needsSetup).toBe(false);
   });
 });

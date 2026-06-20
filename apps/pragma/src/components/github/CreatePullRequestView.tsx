@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { GitHubRepoRef } from "@pragma/constants";
+import type { BranchSyncStatus, GitHubRepoRef } from "@pragma/constants";
 import { ArrowLeft, ChevronDown, GitPullRequestCreate, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -48,8 +48,15 @@ function messageFor(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-/** A submit blocked or waiting on confirmation by the pre-flight checks. */
-type Preflight = { kind: "behind"; behind: number } | { kind: "dirty"; draft: boolean } | null;
+/**
+ * A submit blocked or waiting on confirmation by the pre-flight checks. The dirty
+ * variant carries the already-fetched {@link BranchSyncStatus} so confirming past
+ * the warning doesn't re-run `github_fetch_and_sync`.
+ */
+type Preflight =
+  | { kind: "behind"; behind: number }
+  | { kind: "dirty"; draft: boolean; sync: BranchSyncStatus }
+  | null;
 
 /**
  * The create-PR form: a title (seeded with the branch's last commit subject), a
@@ -162,15 +169,15 @@ export function CreatePullRequestView({
   }, [repo, selectBaseRepo]);
 
   // Opens the PR after the pre-flight has passed (or the user confirmed past a
-  // dirty-tree warning). Pushes the branch first when it has no upstream.
+  // dirty-tree warning). Reuses the pre-flight's `sync` result instead of
+  // re-fetching, and pushes the branch first when it has no upstream.
   const open = useCallback(
-    async (draft: boolean) => {
+    async (draft: boolean, sync: BranchSyncStatus) => {
       if (!baseRepo || !baseBranch) {
         return;
       }
       setSubmitting(true);
       try {
-        const sync = await githubFetchAndSync(worktreeId);
         if (!sync.hasUpstream) {
           await githubPushBranch(worktreeId);
         }
@@ -198,17 +205,19 @@ export function CreatePullRequestView({
         return;
       }
       setSubmitting(true);
+      let sync: BranchSyncStatus;
       try {
-        const [sync, changes] = await Promise.all([
+        const [synced, changes] = await Promise.all([
           githubFetchAndSync(worktreeId),
           worktreeChanges(worktreeId),
         ]);
+        sync = synced;
         if (sync.behind > 0) {
           setPreflight({ kind: "behind", behind: sync.behind });
           return;
         }
         if (changes.staged.length > 0 || changes.unstaged.length > 0) {
-          setPreflight({ kind: "dirty", draft });
+          setPreflight({ kind: "dirty", draft, sync });
           return;
         }
       } catch (cause) {
@@ -217,7 +226,7 @@ export function CreatePullRequestView({
       } finally {
         setSubmitting(false);
       }
-      await open(draft);
+      await open(draft, sync);
     },
     [submitting, title, worktreeId, open],
   );
@@ -362,9 +371,11 @@ export function CreatePullRequestView({
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
-                    const draft = preflight?.kind === "dirty" ? preflight.draft : false;
+                    const confirmed = preflight?.kind === "dirty" ? preflight : null;
                     setPreflight(null);
-                    void open(draft);
+                    if (confirmed) {
+                      void open(confirmed.draft, confirmed.sync);
+                    }
                   }}
                 >
                   Create anyway

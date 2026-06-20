@@ -39,7 +39,8 @@ const GitHubContext = createContext<GitHubContextValue | null>(null);
  * status is the single gate for the setup modal (`needsSetup`) and the Pull
  * Request subtab's logged-out state (`authenticated`). All GitHub REST/GraphQL
  * work happens through the Octokit client in `lib/github.ts`; this context only
- * tracks auth/keychain state surfaced by the Rust backend.
+ * tracks the auth state surfaced by the Rust backend (token stored in its on-disk
+ * 0600 token file).
  */
 export function GitHubProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<GitHubAuthStatus | null>(null);
@@ -50,9 +51,13 @@ export function GitHubProvider({ children }: { children: ReactNode }) {
       const next = await githubAuthStatus();
       setStatus(next);
     } catch {
-      // Treat an unreachable backend as "not authenticated, not dismissed" so
-      // the UI degrades to the logged-out / setup state rather than throwing.
-      setStatus({ authenticated: false, ghAvailable: false, user: null, setupDismissed: false });
+      // An unreachable backend (or unavailable Tauri IPC) means both sign-in and
+      // dismissSetup would also fail — so gating on the full-screen, non-dismissible
+      // setup modal would be an unrecoverable blocker. Degrade to "don't gate":
+      // mark setup dismissed so `needsSetup` stays false while still reporting
+      // not-authenticated (the PR subtab shows its logged-out state). A later
+      // successful refresh replaces this with the real status.
+      setStatus({ authenticated: false, ghAvailable: false, user: null, setupDismissed: true });
     } finally {
       setLoading(false);
     }

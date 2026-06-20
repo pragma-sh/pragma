@@ -96,7 +96,7 @@
       "properties": {
         "authenticated": {
           "type": "boolean",
-          "description": "True when a usable GitHub token is stored in the OS keychain."
+          "description": "True when a usable GitHub token is stored in the backend's 0600 plaintext token file under the app data dir (not the OS keychain; see src-tauri/src/github.rs)."
         },
         "ghAvailable": {
           "type": "boolean",

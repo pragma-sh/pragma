@@ -381,8 +381,12 @@ function ReviewThreadCard({
       </Button>
       {collapsed ? null : (
         <div className="mt-2 flex flex-col gap-2">
-          {thread.comments.map((comment) => (
-            <div className="flex gap-2" key={comment.id}>
+          {thread.comments.map((comment, index) => (
+            // `comment.id` falls back to 0 when GitHub omits `databaseId`, so it can
+            // collide within a thread; the position disambiguates. Comments in a thread
+            // are append-only and never reorder, so the index is stable.
+            // oxlint-disable-next-line no-array-index-key -- composite key needs the index for uniqueness when databaseId is missing
+            <div className="flex gap-2" key={`${thread.id}:${comment.id}:${index}`}>
               <ActorAvatar actor={comment.user} />
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] text-slate-400">{comment.user?.login ?? "ghost"}</p>

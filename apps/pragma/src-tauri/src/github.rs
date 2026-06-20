@@ -243,7 +243,8 @@ fn gh_token() -> AppResult<String> {
     Ok(token)
 }
 
-/// Adopts the `gh` CLI's token into the OS keychain and returns the user.
+/// Adopts the `gh` CLI's token into the on-disk [`TokenStore`] (the `0600` token
+/// file) and returns the user.
 #[tauri::command]
 pub async fn github_use_cli_token(tokens: State<'_, TokenStore>) -> AppResult<GitHubUser> {
     let store = (*tokens).clone();
@@ -356,7 +357,8 @@ fn parse_token_response(body: &str) -> PollOutcome {
 }
 
 /// Polls the token endpoint until the user authorizes (or the flow fails),
-/// stores the token in the keychain, and returns the authenticated user.
+/// stores the token in the on-disk [`TokenStore`] (the `0600` token file), and
+/// returns the authenticated user.
 #[tauri::command]
 pub async fn github_poll_device_flow(
     tokens: State<'_, TokenStore>,

@@ -8,8 +8,9 @@ import { githubToken } from "@/lib/tauri";
  * The **single** Octokit entry point — the only place `new Octokit()` happens,
  * mirroring the "only `lib/tauri.ts` calls `invoke()`" rule. Components call the
  * typed helpers below; they never construct a client. The token comes from the
- * OS keychain via {@link githubToken} (the Rust backend owns the secret); the
- * client is rebuilt whenever the token changes (sign-in / sign-out).
+ * Rust backend's on-disk `0600` token file via {@link githubToken} (the backend
+ * owns the secret — see `src-tauri/src/github.rs`); the client is rebuilt
+ * whenever the token changes (sign-in / sign-out).
  *
  * GitHub REST/GraphQL is JS-only (the Octokit SDK), so it lives here rather than
  * behind a Tauri command. Secrets, git, and OS work stay in Rust.
@@ -164,22 +165,24 @@ function toSummary(pr: PullLike): PullRequestSummary {
 }
 
 /**
- * Finds the open PR whose head is this worktree's branch, or null when none
- * exists yet (→ the create state).
+ * Searches one repository for the open PR whose head is this worktree's branch.
  *
  * The `head`-filtered list is GitHub's documented path but is **eventually
  * consistent** — a just-opened PR can be missing from it for several seconds.
  * So when the filter comes back empty we fall back to scanning the open PRs and
  * matching `head.ref` locally, guaranteeing we surface an existing PR instead of
- * dropping back to the create view.
+ * dropping back to the create view. The head filter is always qualified with the
+ * origin owner (`owner:branch`), GitHub's cross-fork head syntax, so this works
+ * whether `target` is the origin repo or its upstream parent.
  */
-export async function findPullRequestForBranch(
+async function findPullInRepo(
+  octokit: Octokit,
   repo: GitHubRepoRef,
+  target: { owner: string; repo: string },
 ): Promise<PullRequestSummary | null> {
-  const octokit = await client();
   const { data } = await octokit.rest.pulls.list({
-    owner: repo.owner,
-    repo: repo.repo,
+    owner: target.owner,
+    repo: target.repo,
     head: `${repo.owner}:${repo.headBranch}`,
     state: "open",
   });
@@ -188,13 +191,38 @@ export async function findPullRequestForBranch(
     return toSummary(filtered);
   }
   const open = await octokit.paginate(octokit.rest.pulls.list, {
-    owner: repo.owner,
-    repo: repo.repo,
+    owner: target.owner,
+    repo: target.repo,
     state: "open",
     per_page: 100,
   });
   const match = open.find((pr) => pr.head.ref === repo.headBranch);
   return match ? toSummary(match) : null;
+}
+
+/**
+ * Finds the open PR whose head is this worktree's branch, or null when none
+ * exists yet (→ the create state).
+ *
+ * The PR lives in the `origin` repo for an ordinary branch, but in `origin`'s
+ * upstream parent when `origin` is a fork and the PR targets that parent — the
+ * cross-fork flow that {@link listBaseRepoOptions}/{@link createPullRequest}
+ * support. We try `origin` first (the common, cheap path), then fall back to the
+ * upstream parent so a cross-fork PR doesn't drop the sidebar back to the create
+ * view on refresh/poll.
+ */
+export async function findPullRequestForBranch(
+  repo: GitHubRepoRef,
+): Promise<PullRequestSummary | null> {
+  const octokit = await client();
+  const fromOrigin = await findPullInRepo(octokit, repo, { owner: repo.owner, repo: repo.repo });
+  if (fromOrigin) {
+    return fromOrigin;
+  }
+  const upstream = (await listBaseRepoOptions(repo)).find((target) => target.isUpstream);
+  return upstream
+    ? findPullInRepo(octokit, repo, { owner: upstream.owner, repo: upstream.repo })
+    : null;
 }
 
 /** A repository a pull request can be opened against (the base-repository selector). */

@@ -55,6 +55,14 @@ describe("client auth", () => {
 });
 
 describe("findPullRequestForBranch", () => {
+  beforeEach(() => {
+    // The upstream fallback discovers base repos via `repos.get`; default to a
+    // non-fork so only the origin repo is searched.
+    octokit.rest.repos.get.mockResolvedValue({
+      data: { default_branch: "main", fork: false, parent: null },
+    });
+  });
+
   it("returns null when no open PR matches the branch", async () => {
     octokit.rest.pulls.list.mockResolvedValue({ data: [] });
     octokit.paginate.mockResolvedValue([]);
@@ -98,6 +106,39 @@ describe("findPullRequestForBranch", () => {
     octokit.rest.pulls.list.mockResolvedValue({ data: [] });
     octokit.paginate.mockResolvedValue([]);
     expect(await findPullRequestForBranch(repo)).toBeNull();
+  });
+
+  it("finds a PR opened against the upstream parent when origin is a fork", async () => {
+    // Origin is a fork; its parent is `upstream/widget`.
+    octokit.rest.repos.get.mockResolvedValue({
+      data: {
+        default_branch: "dev",
+        fork: true,
+        parent: { owner: { login: "upstream" }, name: "widget", default_branch: "main" },
+      },
+    });
+    // Origin has no matching PR (filter + scan empty); the upstream parent does.
+    octokit.rest.pulls.list.mockResolvedValueOnce({ data: [] }).mockResolvedValueOnce({
+      data: [
+        {
+          number: 5,
+          title: "Cross-fork",
+          body: "",
+          state: "open",
+          html_url: "https://github.com/upstream/widget/pull/5",
+          head: { ref: "feature", sha: "abc" },
+          base: { ref: "main" },
+          user: null,
+        },
+      ],
+    });
+    octokit.paginate.mockResolvedValue([]);
+    const pr = await findPullRequestForBranch(repo);
+    expect(pr).toMatchObject({ number: 5, headRef: "feature" });
+    expect(octokit.rest.pulls.list).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ owner: "upstream", repo: "widget", head: "acme:feature" }),
+    );
   });
 
   it("maps the first matching PR to a summary", async () => {

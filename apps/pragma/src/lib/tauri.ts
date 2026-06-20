@@ -230,7 +230,9 @@ export function createTab(
     url,
     filePath,
     diffSide,
-    prNumber,
+    // Only send `prNumber` for PR tabs; omitting it keeps the IPC arg shape
+    // stable for the common non-PR case (an explicit null is still forwarded).
+    ...(prNumber !== undefined && { prNumber }),
   });
 }
 
@@ -434,7 +436,7 @@ export function setGithubSetupDismissed(dismissed: boolean): Promise<void> {
   return invoke("set_github_setup_dismissed", { dismissed });
 }
 
-/** Adopts the `gh` CLI's token into the OS keychain and returns the user. */
+/** Adopts the `gh` CLI's token into the backend's on-disk 0600 token file and returns the user. */
 export function githubUseCliToken(): Promise<GitHubUser> {
   return invoke<GitHubUser>("github_use_cli_token");
 }
@@ -458,8 +460,8 @@ export function githubStartDeviceFlow(): Promise<DeviceFlowStart> {
 
 /**
  * Polls the token endpoint until the user authorizes the device code, stores the
- * token in the keychain, and resolves with the authenticated user. Rejects if
- * the flow is denied, expires, or times out.
+ * token in the backend's on-disk 0600 token file, and resolves with the
+ * authenticated user. Rejects if the flow is denied, expires, or times out.
  */
 export function githubPollDeviceFlow(deviceCode: string, interval: number): Promise<GitHubUser> {
   return invoke<GitHubUser>("github_poll_device_flow", { deviceCode, interval });
