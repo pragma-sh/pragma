@@ -24,12 +24,14 @@ const DAEMON_DETACH_FLAG: &str = "--detach";
 #[derive(Clone)]
 pub struct PtyClient {
     app_data_dir: PathBuf,
-    /// Channel-scoped subdirectory name (`pragma` / `pragma-dev`) that isolates
-    /// this build's daemon from a differently-built sibling. Chosen from the
-    /// build's product identity (see `daemon_channel_for_product`) — **not** the
-    /// compile profile — so a release-built dev app still never attaches to the
-    /// production daemon. Passed to the spawned daemon via `PRAGMA_DAEMON_CHANNEL`
-    /// so both processes resolve the identical path.
+    /// Channel-scoped subdirectory name that isolates this build's daemon from a
+    /// differently-built sibling. Production is the stable `pragma`; every dev
+    /// build gets a `pragma-dev-<hash>` unique to the worktree it was compiled in
+    /// (see [`instance_channel`]), so two worktrees — and prod — never share a
+    /// daemon. Chosen from the build's product identity, **not** the compile
+    /// profile, so a release-built dev app still never attaches to the production
+    /// daemon. Passed to the spawned daemon via `PRAGMA_DAEMON_CHANNEL` so both
+    /// processes resolve the identical path.
     channel: String,
     launch_lock: Arc<Mutex<()>>,
     /// Long-lived connection reused for request/response calls (resize, kill).
@@ -87,13 +89,14 @@ impl PtyEvent {
 }
 
 impl PtyClient {
-    /// Builds a client whose daemon is isolated by the build's product identity
-    /// (`product_name`): "Pragma Dev" → the `pragma-dev` channel, otherwise
-    /// `pragma`. See `daemon_channel_for_product`.
-    pub fn new(app_data_dir: PathBuf, product_name: Option<&str>) -> Self {
+    /// Builds a client for an already-resolved instance `channel` (see
+    /// [`instance_channel`]). `app_data_dir` is the build's base app-data dir;
+    /// the daemon's own socket/lock/log live in the channel subdirectory under it
+    /// (or the XDG runtime dir on Linux).
+    pub fn new(app_data_dir: PathBuf, channel: String) -> Self {
         Self {
             app_data_dir,
-            channel: daemon_channel_for_product(product_name),
+            channel,
             launch_lock: Arc::new(Mutex::new(())),
             request_conn: Arc::new(Mutex::new(None)),
             input_tx: Arc::new(Mutex::new(None)),
@@ -626,19 +629,41 @@ fn request_frame(
     }
 }
 
-/// Maps the build's product name to the daemon channel that isolates it from a
-/// differently-built sibling: a dev build ("Pragma Dev") and a production build
-/// ("Pragma") must never share a daemon, socket, lock, or log — otherwise
-/// launching "Pragma Dev" would attach to "Pragma"'s shells, or vice versa.
+/// Resolves the isolation channel for this build from its product name.
+///
+/// A production build ("Pragma") shares the stable `pragma` channel; every dev
+/// build ("Pragma Dev") gets a `pragma-dev-<hash>` unique to the worktree it was
+/// compiled in (see [`pragma_protocol::dev_channel`]). This is what keeps two
+/// worktree dev builds — and the production build the user runs for real work —
+/// from ever sharing a daemon, socket, or database.
 ///
 /// Keying off the **product identity** rather than the compile profile is
-/// deliberate: a release-built dev app (e.g. when profiling terminal latency)
-/// is still a dev app and must keep its own daemon. The chosen channel is passed
-/// to `pragma-daemon` via `PRAGMA_DAEMON_CHANNEL` so both processes agree.
-fn daemon_channel_for_product(product_name: Option<&str>) -> String {
-    match product_name {
-        Some(name) if name.contains("Dev") => "pragma-dev".to_string(),
-        _ => "pragma".to_string(),
+/// deliberate: a release-built dev app (e.g. when profiling terminal latency) is
+/// still a dev app and must keep its own per-worktree instance. The chosen
+/// channel is passed to `pragma-daemon` via `PRAGMA_DAEMON_CHANNEL` so both
+/// processes agree.
+pub fn instance_channel(product_name: Option<&str>) -> String {
+    if product_name.is_some_and(|name| name.contains("Dev")) {
+        pragma_protocol::dev_channel(&workspace_root())
+    } else {
+        pragma_protocol::PROD_CHANNEL.to_string()
+    }
+}
+
+/// Resolves the per-instance data directory (`SQLite` DB, GitHub token) for a
+/// `channel`.
+///
+/// Production keeps the legacy app-data root verbatim so an existing install's
+/// `pragma.db` and stored GitHub token are never relocated. A dev build is
+/// isolated under its channel subdirectory so it can never read or corrupt the
+/// production database — or another worktree's — and starts from its own clean
+/// store. The daemon's socket already lives in this same dev directory, so a
+/// worktree's terminal sessions and its persisted tabs stay together.
+pub fn instance_data_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
+    if channel == pragma_protocol::PROD_CHANNEL {
+        app_data_dir.to_path_buf()
+    } else {
+        app_data_dir.join(channel)
     }
 }
 
@@ -717,13 +742,18 @@ fn forward_event(channel: &Channel<InvokeResponseBody>, event: PtyEvent) -> taur
 
 #[cfg(test)]
 mod tests {
-    use super::{daemon_channel_for_product, PtyClient};
+    use std::path::Path;
+
+    use super::{instance_channel, instance_data_dir, PtyClient};
 
     /// The daemon log must live next to the socket so we read exactly where the
     /// detached daemon writes (the runtime dir on Linux, app data on macOS).
     #[test]
     fn log_path_sits_beside_socket() {
-        let client = PtyClient::new(std::path::PathBuf::from("/tmp/pragma-test"), Some("Pragma"));
+        let client = PtyClient::new(
+            std::path::PathBuf::from("/tmp/pragma-test"),
+            "pragma".to_string(),
+        );
         let socket = client.socket_path();
         let log = client.log_path();
         assert_eq!(log.parent(), socket.parent());
@@ -736,23 +766,40 @@ mod tests {
     fn daemon_paths_are_channel_scoped() {
         let client = PtyClient::new(
             std::path::PathBuf::from("/tmp/pragma-test"),
-            Some("Pragma Dev"),
+            "pragma-dev-abc123".to_string(),
         );
         let socket = client.socket_path();
         let channel_dir = socket.parent().expect("socket has a parent dir");
         assert_eq!(
             channel_dir.file_name().and_then(|n| n.to_str()),
-            Some("pragma-dev"),
+            Some("pragma-dev-abc123"),
         );
     }
 
-    /// The channel is chosen from the build's product identity — not the compile
-    /// profile — so a release-built dev app keeps its own daemon.
+    /// A dev build resolves a per-worktree `pragma-dev-<hash>` channel, while a
+    /// production build stays on the stable `pragma` channel — so two worktrees,
+    /// and prod, never share a daemon or database.
     #[test]
     fn channel_follows_product_identity() {
-        assert_eq!(daemon_channel_for_product(Some("Pragma Dev")), "pragma-dev");
-        assert_eq!(daemon_channel_for_product(Some("Pragma")), "pragma");
-        assert_eq!(daemon_channel_for_product(None), "pragma");
+        assert_eq!(instance_channel(Some("Pragma")), "pragma");
+        assert_eq!(instance_channel(None), "pragma");
+        let dev = instance_channel(Some("Pragma Dev"));
+        assert!(dev.starts_with("pragma-dev-"), "got {dev}");
+        // Stable across calls for the same compiled-in workspace root.
+        assert_eq!(dev, instance_channel(Some("Pragma Dev")));
+    }
+
+    /// Production keeps the legacy app-data root verbatim (so an existing
+    /// install's DB/token are never moved); a dev build is isolated under its
+    /// channel subdirectory.
+    #[test]
+    fn data_dir_isolates_dev_but_preserves_prod() {
+        let base = Path::new("/tmp/pragma-test");
+        assert_eq!(instance_data_dir(base, "pragma"), base);
+        assert_eq!(
+            instance_data_dir(base, "pragma-dev-abc123"),
+            base.join("pragma-dev-abc123"),
+        );
     }
 
     /// Reading a daemon log that has never been created reports an empty string
@@ -764,7 +811,7 @@ mod tests {
         // host so the temp dir fully isolates the test from any real daemon log.
         let prev = std::env::var_os("XDG_RUNTIME_DIR");
         std::env::remove_var("XDG_RUNTIME_DIR");
-        let client = PtyClient::new(dir.path().to_path_buf(), Some("Pragma"));
+        let client = PtyClient::new(dir.path().to_path_buf(), "pragma".to_string());
         assert_eq!(client.read_log().expect("read empty log"), "");
         std::fs::create_dir_all(client.log_path().parent().expect("log dir"))
             .expect("create channel dir");

@@ -1,9 +1,35 @@
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use pragma_constants::{AgentAttentionKind, AgentReportPayload, AgentStatus};
+
+/// Channel name shared by every production build. It is stable so an installed
+/// app always resolves the same daemon socket and the same database, and so the
+/// production data dir is never relocated out from under an existing install.
+pub const PROD_CHANNEL: &str = "pragma";
+
+/// Derives the per-worktree development channel (`pragma-dev-<hash>`) from the
+/// absolute workspace root the binary was compiled in.
+///
+/// Two worktree checkouts live at different paths, so they hash to different
+/// channels and never share a daemon, socket, lock, log, or database — and a dev
+/// build never collides with production (`pragma`). The same worktree hashes
+/// identically across rebuilds, so its daemon and data dir persist. The app and
+/// the daemon compute this the same way (same `std` hasher over the same path),
+/// so a hand-run `cargo run -p pragma-daemon` in a worktree resolves the same
+/// channel as that worktree's app even without the `PRAGMA_DAEMON_CHANNEL` env.
+#[must_use]
+pub fn dev_channel(workspace_root: &Path) -> String {
+    // `DefaultHasher::new` uses fixed keys, so this is deterministic across
+    // processes and rebuilds — unlike `RandomState`.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    workspace_root.hash(&mut hasher);
+    format!("pragma-dev-{:016x}", hasher.finish())
+}
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {

@@ -567,7 +567,7 @@ pub async fn github_delete_remote_branch(db: State<'_, Db>, worktree_id: String)
 /// Runs `git -C <root> <args>` and returns trimmed stdout, mapping failures to a
 /// `GitHub` error so the UI surfaces them with the rest of the GitHub flow.
 fn git_stdout(root: &Path, args: &[&str]) -> AppResult<String> {
-    let output = Command::new("git")
+    let output = crate::process_env::command("git")
         .arg("-C")
         .arg(root)
         .args(args)

@@ -17,6 +17,7 @@ mod github;
 mod icons;
 mod keybindings;
 mod opencode_plugin;
+mod process_env;
 mod projects;
 mod pty;
 mod worktrees;
@@ -316,10 +317,18 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
     let app_data_dir = app.path().app_data_dir()?;
-    app.manage(Db::open(app_data_dir.join("pragma.db"))?);
-    app.manage(github::TokenStore::new(&app_data_dir));
-    // Isolate the dev daemon from prod by product identity (see `PtyClient::new`).
-    let pty = PtyClient::new(app_data_dir, app.config().product_name.as_deref());
+    // Resolve this build's isolation channel once: production shares the stable
+    // `pragma` channel; every dev build gets a `pragma-dev-<hash>` unique to the
+    // worktree it was compiled in. The channel scopes BOTH the per-instance data
+    // dir (`SQLite` DB + GitHub token) and the daemon, so a dev build can never read
+    // or corrupt the production store — or another worktree's — and never attaches
+    // to the wrong daemon.
+    let channel = pty::instance_channel(app.config().product_name.as_deref());
+    let data_dir = pty::instance_data_dir(&app_data_dir, &channel);
+    std::fs::create_dir_all(&data_dir)?;
+    app.manage(Db::open(data_dir.join("pragma.db"))?);
+    app.manage(github::TokenStore::new(&data_dir));
+    let pty = PtyClient::new(app_data_dir, channel);
     app.manage(pty.clone());
     app.manage(GitLocks::default());
     install_menu(app.handle())?;
