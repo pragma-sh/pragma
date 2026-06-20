@@ -48,22 +48,23 @@ than no guide.
 
 ## Tech stack
 
-| Concern          | Choice                                                                          |
-| ---------------- | ------------------------------------------------------------------------------- |
-| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces             |
-| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)              |
-| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript           |
-| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) |
-| Backend          | Rust (Tauri commands)                                                           |
-| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)          |
-| Lint (TS)        | [oxlint](https://oxc.rs)                                                        |
-| Format (TS)      | [oxfmt](https://oxc.rs)                                                         |
-| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                      |
-| Format (Rust)    | rustfmt                                                                         |
-| Tests            | Vitest (TS) + `cargo test` (Rust)                                               |
-| Commits          | Conventional Commits (commitlint)                                               |
-| Git hooks        | Husky + lint-staged                                                             |
-| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                     |
+| Concern          | Choice                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                     |
+| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                      |
+| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                   |
+| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)   |
+| Backend          | Rust (Tauri commands)                                                                                                   |
+| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies |
+| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                  |
+| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                |
+| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                 |
+| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                              |
+| Format (Rust)    | rustfmt                                                                                                                 |
+| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                       |
+| Commits          | Conventional Commits (commitlint)                                                                                       |
+| Git hooks        | Husky + lint-staged                                                                                                     |
+| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                             |
 
 ## Repository structure
 
@@ -89,6 +90,7 @@ than no guide.
 │           ├── src/db.rs        # SQLite migrations + typed CRUD
 │           ├── src/pty.rs       # Detached daemon client + PTY command proxying
 │           ├── src/git.rs       # Git CLI helpers (worktree_changes / worktrees_merged_status / file_diff / stage_* / discard_*)
+│           ├── src/github.rs    # GitHub auth (0600 token file, OAuth device flow, gh CLI) + worktree-scoped git for PRs
 │           ├── src/fs.rs        # Worktree-scoped, path-safe filesystem commands
 │           ├── src/main.rs      # Thin entrypoint
 │           ├── tauri.conf.json  # Window/bundle config (mirror values from @pragma/constants); bundles pragma-daemon via externalBin
@@ -124,6 +126,50 @@ than no guide.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
+- **GitHub REST/GraphQL → `apps/pragma/src/lib/github.ts`, the ONLY place `new
+Octokit()` happens** — the exact same discipline as the `invoke()` rule, because
+  Octokit is a JS-only SDK we can't push into Rust. Components import the typed
+  helpers (`findPullRequestForBranch`, `createPullRequest`, `getChecksStatus`,
+  `listReviewThreads`/`resolveReviewThread`/`unresolveReviewThread` via `.graphql()`, …); they never build a
+  client. The client is lazily built from the stored token (`githubToken()`) and
+  cached by token, so sign-in/out rebuilds it (`resetGitHubClient`). Everything
+  **secret/OS/git** stays in Rust (`src-tauri/src/github.rs`): the token is stored in
+  a **`0600` plaintext file** under the app data dir (`github-token`, owned by the
+  managed `TokenStore`) — the same model the `gh` CLI uses, and **never SQLite**. The
+  OS keychain is deliberately **not** used: keychain items are scoped to the app's
+  code signature, so unsigned/dev builds (a fresh ad-hoc signature on every rebuild)
+  re-prompt for keychain access on every launch. The plaintext file has no
+  signature check, so there is no prompt. Also in Rust:
+  OAuth **Device Flow** polling (`reqwest` blocking, no client secret/PKCE), `gh` CLI
+  detection/adoption, `origin`→`owner/repo`, fetch+ahead/behind, push, the local
+  `base...HEAD` PR file diff, and remote-branch delete. The `oauthClientId`, scopes,
+  and endpoint URLs are in `@pragma/constants` (`github` block); the setup-skip flag
+  persists in the `settings` table (`github.setupDismissed`). Auth state is held by
+  `state/github-context.tsx` (`useGitHub`) and gates both the full-screen
+  `GitHubSetupModal` and the **Pull Request** right-sidebar subtab; the two share one
+  reusable `<GitHubAuthOptions />` (DRY). The PR subtab (`right-sidebar/PullRequestTab`)
+  resolves logged-out → create (`CreatePullRequestView`, TipTap markdown editor +
+  behind-blocks / dirty-warns pre-flight) → view (`ViewPullRequestView`, header +
+  read-only comments + files-changed reusing `ChangeGroup` + merge→branch-cleanup).
+  A PR review opens a `pr-review` `TabKind` (v7 `pr_number` column) rendered through
+  `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
+  `state/review-done-store.ts`, like `editor-dirty-store`), side-by-side diff via the
+  shared `editor/MergeDiff` (extracted from `DiffView`, fed by `github_pr_file_diff`),
+  and inline thread resolve/unresolve. The resolve/unresolve toggle is
+  **optimistic**: `ReviewThreadCard` flips the thread in `ReviewTab`'s state in place
+  (via a `setThreadResolved` updater that clones only the affected path's bucket) and
+  fires the GraphQL mutation in the background, reverting + toasting **only on
+  failure** — it never refetches the whole tab (that flashed the diff panes).
+  `MergeDiff` gives both panes a **line-number gutter** and
+  **syntax highlighting** (custom dark `pragmaHighlightStyle` in
+  `editor/codemirror-theme.ts` over `@lezer/highlight` tags; the grammar is detected
+  from the file name via `@codemirror/language-data` and loaded lazily into a
+  `Compartment`). It also takes an optional `comments: DiffComment[]` and mounts each as
+  a **block widget beneath its anchor line on the new (right) side** via a React portal —
+  so `ReviewTab` renders line-anchored review threads inline next to the code (line-less
+  file-level threads still list beneath the diff). Markdown is rendered read-only via `react-markdown` +
+  `remark-gfm` (`github/GitHubMarkdown`). The `simple-icons:github` glyph is bundled
+  offline through `brand-icons.json` (lucide-react dropped its brand `Github` export).
 - PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
   the Unix socket and must not own PTYs.
 - **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
