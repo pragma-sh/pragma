@@ -463,6 +463,43 @@ fn file_diff_impl(
     }
 }
 
+/// Loads the old/new text for a single file in a **PR-style** diff: the
+/// three-dot range `base...HEAD` (i.e. the merge-base of `base` and `HEAD`, to
+/// `HEAD`). Feeds the GitHub review tab's `CodeMirror` merge view real
+/// before/after text produced locally rather than from API patches. Binary files
+/// report `binary: true` with empty texts. `base` is any ref (e.g. `origin/main`).
+pub fn pr_file_diff(root: &Path, base: &str, path: &str, old_path: Option<&str>) -> FileDiff {
+    let merge_base = merge_base(root, base, "HEAD").unwrap_or_else(|| base.to_string());
+    if diff_is_binary(root, &[&merge_base, "HEAD"], path) {
+        return binary_diff(path.to_string());
+    }
+    let old_ref_path = old_path.unwrap_or(path);
+    let old_text = git_show(root, &format!("{merge_base}:{old_ref_path}")).unwrap_or_default();
+    let new_text = git_show(root, &format!("HEAD:{path}")).unwrap_or_default();
+    FileDiff {
+        path: path.to_string(),
+        old_text,
+        new_text,
+        binary: false,
+    }
+}
+
+/// Resolves the merge-base (common ancestor) of two refs, or `None` when git
+/// can't (unrelated histories, a missing ref).
+fn merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path_string(root))
+        .args(["merge-base", a, b])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!sha.is_empty()).then_some(sha)
+}
+
 /// Discards a single **unstaged** change, reverting the working-tree file to
 /// match the index. Tracked modifications/deletions are restored with
 /// `git restore`; an untracked file is deleted; a working-tree rename restores
