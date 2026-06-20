@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["apps/pragma/src-tauri", "crates/pragma-daemon", "packages/constants"]
+members = [
+  "apps/pragma/src-tauri",
+  "crates/pragma-agent-cli",
+  "crates/pragma-daemon",
+  "crates/pragma-protocol",
+  "packages/constants",
+]
 
 # Shared dependency versions for every crate in the workspace.
 # Crates opt in with `serde = { workspace = true }`.

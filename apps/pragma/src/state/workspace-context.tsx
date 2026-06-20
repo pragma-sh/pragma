@@ -6,6 +6,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 
@@ -21,6 +22,13 @@ import type {
 import { toast } from "sonner";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
+import {
+  alertAgent,
+  latchAlertedStatus,
+  releaseAlertLatch,
+  releaseAlertLatchForTab,
+  shouldAlertForStatus,
+} from "@/lib/agent-alert";
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
@@ -35,8 +43,13 @@ import {
   listSplits,
   listTabs,
   listWorktrees,
+  markAgentsSeen,
   onBrowserFocusRequest,
   onBrowserMeta,
+  onAgentCliPathWarning,
+  onAgentNotificationClick,
+  onAgentReport,
+  onAgentStatusReset,
   onMenuAction,
   openWorktree as openWorktreeCommand,
   projectIcon,
@@ -51,6 +64,13 @@ import {
   worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
 import type { SplitLayout } from "@/lib/tauri";
+import {
+  agentStatusesForTab,
+  applyAgentReport,
+  clearAllAgentStatuses,
+  clearDoneStatusForTab,
+  removeAgentStatusForTab,
+} from "@/state/agent-status-store";
 
 export type SplitDirection = "horizontal" | "vertical";
 export type SplitPlacement = "before" | "after";
@@ -141,8 +161,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null) => void;
-  createTerminalTab: (worktreeId?: string) => Promise<void>;
-  createBrowserTab: (worktreeId?: string) => Promise<void>;
+  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
@@ -180,12 +200,23 @@ interface WorkspaceContextValue extends WorkspaceState {
     placement: SplitPlacement,
   ) => void;
   moveTabToPane: (tabId: string, paneId: string) => void;
+  agentBackAvailable?: boolean;
+  navigateToAgentLocation?: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
+  goBackFromAgent?: () => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 const TERMINAL_TITLE_FLUSH_MS = 100;
 const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
+const AGENT_BACK_TTL_MS = 10 * 60 * 1000;
+
+interface AgentBackLocation {
+  projectId: string;
+  worktreeId: string;
+  tabId: string;
+  expiresAt: number;
+}
 
 const initialState: WorkspaceState = {
   projects: [],
@@ -348,6 +379,18 @@ function tabIdsInNode(node: SplitLayoutNode | null | undefined): Set<string> {
     return false;
   });
   return tabIds;
+}
+
+/** Collects the active (on-screen) tab of every pane in a split layout. */
+function activeTabIdsInNode(node: SplitLayoutNode | null | undefined): string[] {
+  const activeTabIds: string[] = [];
+  findPane(node, (pane) => {
+    if (pane.activeTabId) {
+      activeTabIds.push(pane.activeTabId);
+    }
+    return false;
+  });
+  return activeTabIds;
 }
 
 function paneById(node: SplitLayoutNode | null | undefined, paneId: string): SplitPaneNode | null {
@@ -921,6 +964,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
+  const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const tabsRef = useRef(state.tabs);
   tabsRef.current = state.tabs;
 
@@ -948,6 +994,209 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // which reproduces the just-loaded value, doesn't re-write it).
   const didHydrateRef = useRef(false);
   const lastPersistedRef = useRef<string | null>(null);
+
+  const activateLocation = useCallback(
+    async (projectId: string, worktreeId: string, tabId: string, recordBack: boolean) => {
+      const current = stateRef.current;
+      if (
+        recordBack &&
+        current.selectedProjectId &&
+        current.selectedWorktreeByProject[current.selectedProjectId]
+      ) {
+        const currentWorktreeId = current.selectedWorktreeByProject[current.selectedProjectId];
+        // `activeTabByWorktree` is only written by an explicit tab switch, so fall
+        // back to the worktree's first tab (matching `isTabCurrentlyViewed`) —
+        // otherwise a jump from a worktree the user never re-tabbed records no
+        // back location and the "Go back" button never appears.
+        const currentTabId = currentWorktreeId
+          ? (current.activeTabByWorktree[currentWorktreeId] ??
+            current.tabs.find((tab) => tab.worktreeId === currentWorktreeId)?.id ??
+            null)
+          : null;
+        if (currentWorktreeId && currentTabId) {
+          setAgentBackLocation({
+            projectId: current.selectedProjectId,
+            worktreeId: currentWorktreeId,
+            tabId: currentTabId,
+            expiresAt: Date.now() + AGENT_BACK_TTL_MS,
+          });
+        }
+      }
+      if (stateRef.current.selectedProjectId !== projectId) {
+        dispatch({ type: "select-project", projectId });
+        const [worktrees, tabs, splits] = await Promise.all([
+          listWorktrees(projectId),
+          listTabs(projectId),
+          listSplits(projectId),
+        ]);
+        dispatch({ type: "set-worktrees", projectId, worktrees });
+        dispatch({ type: "set-tabs", tabs });
+        dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+      }
+      dispatch({ type: "select-worktree", projectId, worktreeId });
+      dispatch({ type: "set-active-tab", worktreeId, tabId });
+    },
+    [],
+  );
+
+  const navigateToAgentLocation = useCallback(
+    (projectId: string, worktreeId: string, tabId: string) =>
+      activateLocation(projectId, worktreeId, tabId, true),
+    [activateLocation],
+  );
+
+  const resolveProjectForWorktree = useCallback(async (worktreeId: string) => {
+    const known = worktreeProjectIdRef.current[worktreeId];
+    if (known) {
+      return known;
+    }
+    const projects = await listProjects();
+    dispatch({ type: "set-projects", projects });
+    const projectWorktrees = await Promise.all(
+      projects.map(async (project) => ({ project, worktrees: await listWorktrees(project.id) })),
+    );
+    for (const { project, worktrees } of projectWorktrees) {
+      dispatch({ type: "set-worktrees", projectId: project.id, worktrees });
+      if (worktrees.some((worktree) => worktree.id === worktreeId)) {
+        return project.id;
+      }
+    }
+    return null;
+  }, []);
+
+  const isTabCurrentlyViewed = useCallback((tabId: string) => {
+    const current = stateRef.current;
+    const projectId = current.selectedProjectId;
+    const worktreeId = projectId ? current.selectedWorktreeByProject[projectId] : null;
+    if (!worktreeId) {
+      return false;
+    }
+    const activeTabId =
+      current.activeTabByWorktree[worktreeId] ??
+      current.tabs.find((tab) => tab.worktreeId === worktreeId)?.id ??
+      null;
+    return activeTabId === tabId;
+  }, []);
+
+  const goBackFromAgent = useCallback(async () => {
+    const location = agentBackLocation;
+    if (!location || location.expiresAt < Date.now()) {
+      setAgentBackLocation(null);
+      return;
+    }
+    setAgentBackLocation(null);
+    await activateLocation(location.projectId, location.worktreeId, location.tabId, false);
+  }, [activateLocation, agentBackLocation]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setAgentBackLocation((location) =>
+        location && location.expiresAt < Date.now() ? null : location,
+      );
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenReport: (() => void) | null = null;
+    let unlistenReset: (() => void) | null = null;
+    let unlistenPath: (() => void) | null = null;
+    let unlistenNotificationClick: (() => void) | null = null;
+    void onAgentStatusReset(() => {
+      clearAllAgentStatuses();
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenReset = unlisten;
+      return undefined;
+    });
+    void onAgentReport((payload) => {
+      applyAgentReport(payload);
+      // The agent genuinely moved on (started a new turn, or its process exited),
+      // so release the alert latch: its next completion/attention is a new event,
+      // not a snapshot replay, and should notify again.
+      if (payload.status === "running" || payload.status === "cleared") {
+        releaseAlertLatch(payload);
+      }
+      // A tab that finishes or needs attention while already on screen is
+      // considered seen: latch it so a later daemon snapshot replay (on
+      // reconnect) doesn't re-fire a notification the user already looked at.
+      // For `done` also drop the green dot immediately instead of flashing it;
+      // `attention` (red) keeps showing until the agent moves on.
+      if (
+        (payload.status === "done" || payload.status === "attention") &&
+        visibleTabIdsRef.current.has(payload.tabId)
+      ) {
+        if (payload.status === "done") {
+          clearDoneStatusForTab(payload.tabId);
+          // Tell the daemon this completion was seen so its stored `done` is
+          // dropped — otherwise a later reconnect would replay it and the green
+          // dot (and notification) would come back.
+          void markAgentsSeen(payload.tabId);
+        }
+        latchAlertedStatus(payload);
+      }
+      // Alert at most once per status occurrence. The latch (not the dot store,
+      // which viewing clears) gates this, so the daemon's snapshot replay on
+      // every reconnect restores the dots without re-firing notifications the
+      // user already saw.
+      if (
+        !isTabCurrentlyViewed(payload.tabId) &&
+        (payload.status === "attention" || payload.status === "done") &&
+        shouldAlertForStatus(payload)
+      ) {
+        latchAlertedStatus(payload);
+        void resolveProjectForWorktree(payload.worktreeId).then((projectId) => {
+          void alertAgent(payload, {
+            projectId: projectId ?? undefined,
+            onGoTo: projectId
+              ? () => void navigateToAgentLocation(projectId, payload.worktreeId, payload.tabId)
+              : undefined,
+          });
+          return undefined;
+        });
+      }
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenReport = unlisten;
+      return undefined;
+    });
+    void onAgentCliPathWarning((path) => {
+      toast.warning("pragma-agent installed, but its directory is not on PATH", {
+        description: `Add ${path} to PATH so agents can call pragma-agent.`,
+      });
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenPath = unlisten;
+      return undefined;
+    });
+    void onAgentNotificationClick((payload) => {
+      void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenNotificationClick = unlisten;
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+      unlistenReport?.();
+      unlistenReset?.();
+      unlistenPath?.();
+      unlistenNotificationClick?.();
+    };
+  }, [isTabCurrentlyViewed, navigateToAgentLocation, resolveProjectForWorktree]);
 
   const reload = useCallback(async () => {
     dispatch({ type: "load-start" });
@@ -986,6 +1235,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectProject = useCallback(async (projectId: string | null) => {
+    // Navigating manually retires the agent "go back" affordance — it only
+    // makes sense right after a notification jumped you somewhere.
+    setAgentBackLocation(null);
     dispatch({ type: "select-project", projectId });
   }, []);
 
@@ -1019,6 +1271,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!state.selectedProjectId || !worktreeId) {
         return;
       }
+      // Navigating manually retires the agent "go back" affordance — it only
+      // makes sense right after a notification jumped you somewhere.
+      setAgentBackLocation(null);
       dispatch({ type: "select-worktree", projectId: state.selectedProjectId, worktreeId });
     },
     [state.selectedProjectId],
@@ -1032,7 +1287,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const targetWorktreeId =
         worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
       if (!projectId || !targetWorktreeId) {
-        return;
+        return null;
       }
       try {
         const tab =
@@ -1051,8 +1306,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 BROWSER_START_URL,
               );
         dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+        return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: messageFor(cause) });
+        return null;
       }
     },
     [state.selectedProjectId, state.selectedWorktreeByProject],
@@ -1069,7 +1326,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const createTabInPane = useCallback(
-    (paneId: string, kind: "terminal" | "browser") => createTab(kind, paneId),
+    async (paneId: string, kind: "terminal" | "browser") => {
+      await createTab(kind, paneId);
+    },
     [createTab],
   );
 
@@ -1191,6 +1450,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // tabs, so we don't need to look up the tab's kind on the close path.
   const closeTab = useCallback(async (tabId: string) => {
     terminalManager.dispose(tabId);
+    removeAgentStatusForTab(tabId);
+    releaseAlertLatchForTab(tabId);
     void browserClose(tabId);
     try {
       await closeTabCommand(tabId);
@@ -1215,6 +1476,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!tabId || !worktreeId) {
         return;
       }
+      clearDoneStatusForTab(tabId);
       dispatch({ type: "set-active-tab", worktreeId, tabId });
     },
     [state.tabs],
@@ -1602,14 +1864,67 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const activeTabId = legacyActiveTabId;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
 
+  // Every tab currently on screen for the selected worktree: the active tab,
+  // plus each pane's active tab when a real split is shown. Viewing a tab clears
+  // its resolved (green) agent indicator — running/attention persist — so the
+  // worktree dot also stops being green once all its finished tabs are seen.
+  const visibleTabIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (activeTabId) {
+      ids.add(activeTabId);
+    }
+    if (splitRoot?.kind === "split") {
+      for (const tabId of activeTabIdsInNode(splitRoot)) {
+        ids.add(tabId);
+      }
+    }
+    return ids;
+  }, [activeTabId, splitRoot]);
+  const visibleTabIdsRef = useRef(visibleTabIds);
+  visibleTabIdsRef.current = visibleTabIds;
+
+  useEffect(() => {
+    for (const tabId of visibleTabIds) {
+      // Mark the agent statuses the user is now seeing as alerted, so a later
+      // daemon snapshot replay (on reconnect) doesn't re-fire a notification for
+      // a pending prompt or completion the user has already looked at. Do this
+      // before clearing the green dots so the `done` entries are still readable.
+      let hasDone = false;
+      for (const entry of agentStatusesForTab(tabId)) {
+        if (entry.status === "attention" || entry.status === "done") {
+          latchAlertedStatus({
+            worktreeId: entry.worktreeId,
+            tabId,
+            agent: entry.agent,
+            status: entry.status,
+          });
+        }
+        if (entry.status === "done") {
+          hasDone = true;
+        }
+      }
+      clearDoneStatusForTab(tabId);
+      if (hasDone) {
+        // Tell the daemon these completions were seen so its stored `done` is
+        // dropped — clearing the dot locally alone would let a later reconnect
+        // replay it and resurrect the green dot.
+        void markAgentsSeen(tabId);
+      }
+    }
+  }, [visibleTabIds]);
+
   const focusPane = useCallback(
     (paneId: string) => {
       if (!selectedWorktreeId) {
         return;
       }
+      const pane = paneById(splitRoot, paneId);
+      if (pane?.activeTabId) {
+        clearDoneStatusForTab(pane.activeTabId);
+      }
       dispatch({ type: "focus-pane", worktreeId: selectedWorktreeId, paneId });
     },
-    [selectedWorktreeId],
+    [selectedWorktreeId, splitRoot],
   );
 
   const setPaneActiveTab = useCallback(
@@ -1617,6 +1932,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!selectedWorktreeId) {
         return;
       }
+      clearDoneStatusForTab(tabId);
       dispatch({ type: "set-pane-active-tab", worktreeId: selectedWorktreeId, paneId, tabId });
     },
     [selectedWorktreeId],
@@ -1742,6 +2058,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitActivePane,
       splitTabAtPane,
       moveTabToPane,
+      agentBackAvailable: !!agentBackLocation && agentBackLocation.expiresAt >= Date.now(),
+      navigateToAgentLocation,
+      goBackFromAgent,
     }),
     [
       state,
@@ -1779,6 +2098,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitActivePane,
       splitTabAtPane,
       moveTabToPane,
+      agentBackLocation,
+      navigateToAgentLocation,
+      goBackFromAgent,
     ],
   );
 

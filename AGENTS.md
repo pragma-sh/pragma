@@ -57,6 +57,7 @@ than no guide.
 | Backend          | Rust (Tauri commands)                                                                                                   |
 | GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies |
 | Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                  |
+| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                    |
 | Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                |
 | Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                 |
 | Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                              |
@@ -100,14 +101,18 @@ than no guide.
 │           ├── icons/           # Production app icons
 │           └── icons-dev/       # Dev "Pragma Dev" app icons (generated via `tauri icon`)
 ├── crates/
-│   └── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
+│   ├── pragma-agent-cli/        # `pragma-agent` helper CLI for external agents to report runtime status
+│   ├── pragma-daemon/           # Detached Unix-socket PTY daemon; owns shell sessions + scrollback
+│   └── pragma-protocol/         # Shared daemon wire frames/framing used by daemon, app, and CLI
 ├── packages/
-│   └── constants/               # Dual TS + Rust package — shared source of truth
-│       ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
-│       ├── values.json          # The actual values. EDIT THIS to change values.
-│       ├── src/index.ts         # Typed TS export
-│       ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
-│       └── src/generated/       # Generated TS types (git-ignored; never edit)
+│   ├── constants/               # Dual TS + Rust package — shared source of truth
+│   │   ├── schema.json          # JSON Schema (the contract). EDIT THIS to change shape.
+│   │   ├── values.json          # The actual values. EDIT THIS to change values.
+│   │   ├── src/index.ts         # Typed TS export
+│   │   ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
+│   │   └── src/generated/       # Generated TS types (git-ignored; never edit)
+│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -123,6 +128,7 @@ than no guide.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
+- A typed JS wrapper over the bundled agent CLI → `packages/sdk` (`@pragma/sdk`).
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
@@ -170,8 +176,126 @@ Octokit()` happens** — the exact same discipline as the `invoke()` rule, becau
   file-level threads still list beneath the diff). Markdown is rendered read-only via `react-markdown` +
   `remark-gfm` (`github/GitHubMarkdown`). The `simple-icons:github` glyph is bundled
   offline through `brand-icons.json` (lucide-react dropped its brand `Github` export).
-- PTY/session business logic → `crates/pragma-daemon`; the Tauri app only proxies over
+- PTY/session business logic → `crates/pragma-daemon`; shared wire framing/types →
+  `crates/pragma-protocol`; agent status CLI → `crates/pragma-agent-cli`. The Tauri app only proxies over
   the Unix socket and must not own PTYs.
+- **Agent connector.** External agents running inside a Pragma terminal report status by
+  calling `pragma-agent --agent <id> report started|stopped|attention|cleared`. `started` →
+  `running` (yellow), `stopped` → `done` (green, "finished, go look"), `attention` → red, and
+  `cleared` **removes** the tab's indicator entirely (used when the agent process exits, so a quit
+  agent leaves no leftover green dot — distinct from `done`). Terminal spawns inject
+  `PRAGMA_TAB_ID` (same value as the daemon session id / tab id), `PRAGMA_WORKTREE_ID`, and
+  `PRAGMA_DAEMON_SOCKET`; the CLI uses only those env vars to connect to the existing daemon
+  socket, read the `Hello`, write one `AgentReport` frame, and exit without waiting for an ack.
+  The daemon keeps runtime-only status in memory keyed by `(worktreeId, tabId, agent)`, supports a
+  long-lived `SubscribeAgents` request for the app, emits `EventFrame::Agent` snapshots/events, and
+  clears a tab's snapshot entries when the session exits. It also supports a `MarkAgentsSeen` request
+  (`mark_agents_seen_for_tab`) that drops a tab's **`done`** entries (leaving `running`/`attention`)
+  once the user has viewed the tab — see below. Status is never persisted to SQLite; the
+  frontend stores it in `state/agent-status-store.ts` via `useSyncExternalStore`, renders the current
+  runtime state in tab/sidebar dots (`done` = green, `running` = yellow, `attention` = red) with
+  precedence **red > yellow > green** when aggregating a tab's agents or a worktree's tabs. Green is a
+  "finished, go look" notification: `running`/`attention` persist through a focus, but viewing a tab
+  clears its `done` entries from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the
+  stored `done`** (`markAgentsSeen`, the `MarkAgentsSeen` request) — both when the tab becomes the
+  on-screen tab (`visibleTabIds` effect) and when a `done` report arrives for an already-visible tab —
+  so the worktree dot stops being green once every finished tab in it has been seen, **and a later
+  daemon reconnect/snapshot replay can no longer resurrect that green dot or re-fire its
+  notification** (the daemon no longer stores the seen `done`). Closing a tab drops all of its status
+  (`removeAgentStatusForTab`).
+  **Alerts (chime + system notification) are gated by a latch separate from the dot store, not by the
+  store's previous value.** The daemon keeps a `done`/`attention` until the agent moves on (or, for
+  `done`, until the app marks it seen) and **replays its whole status snapshot on every reconnect**
+  (`agent_events.rs` re-subscribes on any disconnect, re-emitting `pragma:agent-status-reset` + the
+  full snapshot). Viewing a tab drops the daemon's stored **`done`** via `markAgentsSeen` (so a
+  reconnect won't replay a finished-and-seen completion), but **`attention` is never marked seen** — it
+  stays in the daemon until the agent resolves it — and a `done`/`attention` can also be alerted-but-
+  not-yet-viewed when a reconnect lands first. So gating "is this a new alert?" on the store's previous
+  status would re-fire on every reconnect (the reset wipes the store, making each replayed status look
+  new). Instead `lib/agent-alert.ts` keeps an `alertedStatusByKey` latch keyed by worktree+tab+agent:
+  a `done`/`attention` alerts at most once (`shouldAlertForStatus` + `latchAlertedStatus`), the latch
+  is **released only when the agent genuinely moves on** — a `running` or `cleared` report
+  (`releaseAlertLatch`) — and dropped on tab close (`releaseAlertLatchForTab`). A snapshot replay thus
+  restores the dots without re-notifying. **Viewing a tab latches every `done`/`attention` status it
+  currently shows as seen**, so a later replay never re-fires for it: the report handler latches a
+  `done`/`attention` that arrives while the tab is already visible, and the `visibleTabIds` effect
+  reads `agentStatusesForTab` and latches them (before `clearDoneStatusForTab`) when a tab comes on
+  screen. Without this an `attention` (pending permission) that arrived while you were watching the tab
+  was never latched, so leaving the tab and a later reconnect re-fired the "needs attention"
+  notification the user had already seen.
+  Agent pins are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **6** for
+  this protocol (the `MarkAgentsSeen` request is the latest wire change; the `cleared` `AgentStatus`
+  was an earlier one). On the daemon a `cleared` report
+  **removes** the `(worktreeId, tabId, agent)` entry from its in-memory map and broadcasts the cleared
+  event so live subscribers drop the indicator and a reconnecting subscriber's snapshot omits it;
+  the frontend store (`applyAgentReport`) deletes the agent entry on `cleared` rather than storing it. Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields
+  `id`, `name`, `icon`, and `start` (string or argv array); icons must resolve inside that agent
+  directory. Bundled/default agent configs live in package-owned `pragma/agents/*/config.json`
+  folders (currently `packages/opencode-plugin/pragma/agents/opencode/config.json`), are staged to
+  `apps/pragma/src-tauri/resources/pragma/agents` by `src-tauri/scripts/stage-daemon-sidecar.sh`,
+  bundled as Tauri resources, and installed/updated into `~/.pragma/agents` on app startup. The app
+  installs/updates the bundled `pragma-agent` into `~/.local/bin` on startup and emits a UI warning
+  if that directory is not on `$PATH`. JS/TS consumers should use `@pragma/sdk` (`packages/sdk`)
+  instead of hand-building `pragma-agent` argv; it shells out to the installed CLI with typed
+  options and is bundled by Bunup as ESM, CJS, and `.d.ts`. opencode integration lives in
+  `@pragma/opencode-plugin` (`packages/opencode-plugin`): an ESM-only Bunup package that imports
+  opencode plugin types from `@opencode-ai/plugin`, reacts to opencode hooks/events, and reports
+  `started` / `stopped` / `attention` / `cleared` through `@pragma/sdk` without asking the LLM to call any CLI.
+  `hooks.ts` is a **two-flag state machine** (`busy`, `attention`) rather than a per-event mapping:
+  the reported status is _derived_ (`attention` > `busy` > idle) and emitted only on change, so a
+  trailing `message.*` stream event can't clobber green back to yellow and a pending question/permission
+  pins red even while opencode reports the session idle. `busy` is set by `chat.message`,
+  `command.execute.before`, non-question `tool.execute.before`, and `session.status` busy/retry;
+  cleared by `session.idle` / `session.status` idle / a non-abort `session.error` / `session.deleted`.
+  **`stopped` (the green "finished, go look" `done`) is only emitted after a `started`** — a bare
+  `session.idle`, or the idle that may trail an aborted/cleared turn, must not resurrect a phantom
+  "finished" dot/notification. **An aborted turn (esc-esc / `session.abort`) surfaces as a
+  `session.error` carrying `MessageAbortedError` and reports `cleared`, not `stopped`** (there is no
+  result to look at, so the indicator resets). **`server.instance.disposed` also reports `cleared`** —
+  opencode quitting clears the dot even when the `dispose` plugin hook doesn't run (an abrupt
+  shutdown). `attention`
+  is raised by the **`permission.asked`** event (command) and the `question` tool (via
+  `tool.execute.before` or a pending `message.part.updated` part), and cleared by `permission.replied`
+  or the question part completing/erroring. **Permission events — verified empirically against the
+  opencode binary, because the published `@opencode-ai/sdk` types are wrong here:** the runtime emits
+  `permission.asked` / `permission.replied` (NOT the `permission.updated` the TS `Event` union
+  declares), and it **never calls the `permission.ask` plugin hook** (the hook key is absent from the
+  binary). The plugin `event` hook does receive `permission.asked` (confirmed by running opencode with
+  a logging plugin), which is why event-based detection works and the dead `permission.ask` hook does
+  not. The legacy `permission.ask` hook + `permission.updated` event are kept only as harmless
+  cross-version fallbacks; the live path is `permission.asked`. Only real opencode events are handled —
+  do **not** re-add the speculative `session.next.*` events (opencode does emit
+  `session.next.agent.switched` / `session.next.model.switched`, but they carry no status meaning and
+  the default branch ignores them; mapping them was the source of the stuck-yellow bug). **`dispose`
+  (the agent process exiting) reports `cleared`, not `stopped`** — quitting opencode removes the
+  indicator instead of leaving a green "done" dot; finishing a turn (`session.idle`) still reports
+  `done`. **On load (`PragmaOpencodePlugin` in `index.ts`) the plugin fires one `cleared` up front** so
+  opening opencode never inherits a stale indicator from a previous run in the same tab that exited
+  without cleanup: `dispose` only runs on a graceful quit, so a SIGINT/crash leaves the last
+  `running`/`done`/`attention` lingering in the long-lived daemon, and the next open would otherwise
+  show it. Clearing on init wipes that; genuine activity re-raises status via the hooks (verified
+  empirically: a bare TUI open emits no busy/idle/chat events, so after the init `cleared` the tab
+  shows nothing until the first `chat.message`). The SDK reporter in `index.ts` no longer dedups; it
+  only guards on the Pragma env and shells out.
+  The plugin build is staged as `resources/pragma/plugins/opencode.mjs`; on startup the app
+  (`src-tauri/src/opencode_plugin.rs`) copies it to `~/.config/opencode/plugins/opencode.mjs` **and
+  registers that absolute path in the `plugin` array of `~/.config/opencode/opencode.json`**.
+  **opencode does NOT auto-load plugins from any directory** — verified empirically against opencode
+  1.17.8, a file dropped in `~/.config/opencode/plugins/` (or a project `.opencode/plugin/`) is never
+  loaded; the only mechanism that loads a plugin is a `plugin`-array entry. A **file path / `file://`
+  URL** entry loads fine and is **not** npm-resolved; only the **bare package name**
+  `@pragma/opencode-plugin` is treated as an npm dependency (opencode tries to install it from the
+  public registry, where it does not exist), so never register it by name. The directory under
+  `plugins/` is therefore just Pragma's storage location, not an opencode scan dir. `ensure_installed`
+  is idempotent and removes stale Pragma entries (the bare npm name, or any prior `opencode.mjs` path /
+  `file://` URL pointing elsewhere) before re-adding the current absolute path; an unparseable config
+  is backed up to `opencode.json.pragma-bak` and left untouched.
+  macOS agent system notifications are clickable: the frontend calls the macOS-only
+  `show_agent_notification` Tauri command instead of the generic notification plugin (which exposes no
+  desktop click event), and Rust emits `pragma:agent-notification-clicked` with `{ projectId,
+worktreeId, tabId }`; `workspace-context` routes that through `navigateToAgentLocation` so clicking
+  the notification opens the correct worktree/tab. Non-macOS falls back to the regular plugin
+  notification.
 - **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
   PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
   arrives as one read instead of many; a dedicated coalescer thread
@@ -188,8 +312,8 @@ Octokit()` happens** — the exact same discipline as the `invoke()` rule, becau
   PTY-stream handling, so changing the coalescing/buffering still requires bumping
   `daemon.protocolVersion` (below).
 - **Terminal output is shipped as raw bytes end-to-end — never JSON.** The wire protocol
-  (`crates/pragma-daemon/src/protocol.rs`, mirrored by hand in `apps/pragma/src-tauri/src/pty.rs`
-  since the daemon is a binary the app can't import) is **tag-prefixed**: every frame is
+  (`crates/pragma-protocol`, consumed by the daemon, Tauri app, and `pragma-agent`) is
+  **tag-prefixed**: every frame is
   `[4-byte BE length][1-byte tag][body]`. Tag 0 = JSON control frame (hello, requests,
   responses, title/exit events); tag 1 = a binary **output** frame whose body is
   `[2-byte BE session-id length][session id][raw output bytes]` (`write_output_frame` /
@@ -230,7 +354,9 @@ Octokit()` happens** — the exact same discipline as the `invoke()` rule, becau
   `--release`, and `tauri:dev` runs it (debug) before `tauri dev` so the CLI's sidecar-copy
   step doesn't fail (dev still uses `cargo run` at runtime — the staged file only satisfies
   bundling). The daemon is spawned directly with `std::process::Command`, **not** the shell
-  plugin, so no `shell:` capability is needed. `binaries/` is git-ignored.
+  plugin, so no `shell:` capability is needed. `pragma-agent` and the opencode plugin dist are
+  staged by the same script and bundled as `binaries/pragma-agent` plus
+  `resources/pragma/plugins/opencode.mjs`. `binaries/` is git-ignored.
 - **Dev and prod must never share a daemon.** The socket/lock/log live in a
   **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
   build's **product identity, not the compile profile**: `daemon_channel_for_product`
@@ -531,6 +657,7 @@ bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-daemon # Run the detached PTY daemon directly for debugging
+cargo run -p pragma-agent-cli -- --agent dev report started # Manually send an agent report (inside a Pragma terminal env)
 ```
 
 ## Code standards (consistent across TypeScript & Rust)
@@ -640,8 +767,10 @@ libraries — see the `rust`/`build` jobs in CI for the exact `apt` list. Note `
 (screen capture for browser snapshots) pulls in `libspa-sys`, which needs
 `libpipewire-0.3-dev` on Linux at build time, and its wayland/GL capture path links
 against `gbm`, so `libgbm-dev` is required at link time (otherwise `cargo test` / the
-Tauri build fail with `unable to find library -lgbm`). Both are in the CI apt list (the
-`rust` **and** `build` jobs) and must stay there.
+Tauri build fail with `unable to find library -lgbm`). `libspa-sys` uses bindgen, so
+`libclang-dev` is also installed explicitly; GitHub-hosted runners may already have it, but
+`act` images do not. These packages are in the CI apt list (the `rust` **and** `build` jobs)
+and must stay there.
 
 ## Testing
 

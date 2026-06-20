@@ -14,7 +14,8 @@ mod generated {
 }
 
 pub use generated::{
-    AppInfo, BranchSyncStatus, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry,
+    AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, AppInfo,
+    BranchSyncStatus, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry,
     EditorLauncher, EditorLaunchers, FileContents, FileDiff, GitHub, GitHubAuthStatus,
     GitHubRepoRef, GitHubUser, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
     KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind, WindowDefaults,

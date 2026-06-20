@@ -1,4 +1,3 @@
-mod protocol;
 mod registry;
 mod session;
 
@@ -18,9 +17,9 @@ use std::time::{Duration, Instant};
 use daemonize::Daemonize;
 use pragma_constants::CONSTANTS;
 
-use protocol::{
-    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, RequestFrame,
-    RequestKind, ResponseFrame, ServerFrame,
+use pragma_protocol::{
+    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, ProtocolError,
+    RequestFrame, RequestKind, ResponseFrame, ServerFrame,
 };
 use registry::Registry;
 
@@ -64,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = UnixListener::bind(&paths.socket)?;
     listener.set_nonblocking(true)?;
 
-    let registry = Arc::new(Registry::default());
+    let registry = Arc::new(Registry::new(paths.socket.clone()));
     let clients = Arc::new(AtomicUsize::new(0));
 
     let mut idle_since: Option<Instant> = None;
@@ -103,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn handle_client(mut stream: UnixStream, registry: &Registry) {
+fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>) {
     let writer = match stream.try_clone() {
         Ok(stream) => Arc::new(Mutex::new(stream)),
         Err(_) => return,
@@ -145,7 +144,12 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) {
             }
         }
         if let Some(stream) = event_stream {
-            forward_events(stream.scrollback, stream.rx, Arc::clone(&writer));
+            forward_events(
+                stream.scrollback,
+                stream.rx,
+                Arc::clone(&writer),
+                Arc::clone(registry),
+            );
         }
     }
     let _ = stream.shutdown(Shutdown::Both);
@@ -158,11 +162,12 @@ fn handle_request(
     match request.kind {
         RequestKind::Spawn => {
             let session_id = required(request.session_id, "sessionId")?;
+            let worktree_id = required(request.worktree_id, "worktreeId")?;
             let cwd = required(request.cwd, "cwd")?;
             let cols = request.cols.unwrap_or(80);
             let rows = request.rows.unwrap_or(24);
             let (scrollback, rx) = registry
-                .spawn(session_id, cwd, cols, rows)
+                .spawn(session_id, worktree_id, cwd, cols, rows)
                 .map_err(|err| err.to_string())?;
             Ok(Some(EventStream { scrollback, rx }))
         }
@@ -198,6 +203,22 @@ fn handle_request(
             .kill_for_cwd(&required(request.data, "data")?)
             .map(|_count| None)
             .map_err(|err| err.to_string()),
+        RequestKind::AgentReport => {
+            let payload = serde_json::from_str(&required(request.data, "data")?)
+                .map_err(|err| err.to_string())?;
+            registry
+                .report_agent(payload)
+                .map(|()| None)
+                .map_err(|err| err.to_string())
+        }
+        RequestKind::SubscribeAgents => {
+            let (scrollback, rx) = registry.subscribe_agents().map_err(|err| err.to_string())?;
+            Ok(Some(EventStream { scrollback, rx }))
+        }
+        RequestKind::MarkAgentsSeen => {
+            registry.mark_agents_seen_for_tab(&required(request.session_id, "sessionId")?);
+            Ok(None)
+        }
     }
 }
 
@@ -210,6 +231,7 @@ fn forward_events(
     scrollback: Vec<EventFrame>,
     rx: Receiver<EventFrame>,
     writer: Arc<Mutex<UnixStream>>,
+    registry: Arc<Registry>,
 ) {
     thread::spawn(move || {
         for event in scrollback {
@@ -218,6 +240,9 @@ fn forward_events(
             }
         }
         for event in rx {
+            if let EventFrame::Exit { session_id, .. } = &event {
+                registry.clear_agents_for_tab(session_id);
+            }
             if let Ok(mut writer) = writer.lock() {
                 if write_event(&mut writer, event).is_err() {
                     break;
@@ -229,7 +254,7 @@ fn forward_events(
 
 /// Writes one event to the client: output goes out as a binary frame (raw bytes,
 /// no JSON escaping), while title/exit stay JSON control frames.
-fn write_event(writer: &mut UnixStream, event: EventFrame) -> Result<(), protocol::ProtocolError> {
+fn write_event(writer: &mut UnixStream, event: EventFrame) -> Result<(), ProtocolError> {
     match event {
         EventFrame::Output { session_id, data } => write_output_frame(writer, &session_id, &data),
         other => write_json_frame(writer, &ServerFrame::Event(other)),

@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 3
+    "protocolVersion": 6
   },
   "github": {
     "oauthClientId": "Ov23li1WfY05SeQNp5tk",

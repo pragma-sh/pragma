@@ -1,0 +1,15 @@
+[package]
+name = "pragma-protocol"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Shared wire protocol for Pragma daemon clients."
+
+[lints]
+workspace = true
+
+[dependencies]
+pragma-constants = { path = "../../packages/constants" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

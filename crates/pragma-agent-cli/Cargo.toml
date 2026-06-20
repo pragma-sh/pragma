@@ -1,0 +1,19 @@
+[package]
+name = "pragma-agent-cli"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "CLI for external agents to report status into Pragma."
+
+[[bin]]
+name = "pragma-agent"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+pragma-constants = { path = "../../packages/constants" }
+pragma-protocol = { path = "../pragma-protocol" }
+serde_json = { workspace = true }

@@ -5,3 +5,7 @@
 
 # Staged Tauri sidecar binaries (built by scripts/stage-daemon-sidecar.sh)
 /binaries/
+
+# Staged bundled agent configs and plugins (sources live in packages/*)
+/resources/pragma/agents/
+/resources/pragma/plugins/

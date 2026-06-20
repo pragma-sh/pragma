@@ -1,0 +1,33 @@
+{
+  "name": "@pragma/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Typed TypeScript wrapper SDK for the Pragma CLI.",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "bunup src/index.ts --format esm,cjs --target node --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "bunup": "^0.16.32",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

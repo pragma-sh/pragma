@@ -9,6 +9,7 @@ import { EditorView } from "@/components/editor/EditorView";
 import { LogView } from "@/components/editor/LogView";
 import { ReviewTab } from "@/components/github/ReviewTab";
 import { Button } from "@/components/ui/button";
+import { AgentStatusDot } from "@/components/AgentStatusDot";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,7 @@ import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { browserFocus } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
+import { useTabAgentStatus } from "@/state/agent-status-store";
 import { type SplitLayoutNode, type SplitPaneNode, useWorkspace } from "@/state/workspace-context";
 
 export function SplitHost() {
@@ -248,6 +250,7 @@ function PaneBar({
               }}
             >
               <TabIcon tab={tab} />
+              <TabAgentDot tabId={tab.id} />
               <span className="min-w-0 flex-1 truncate">{tabTitle(tab)}</span>
             </button>
             <TabDirtyDot tabId={tab.id} />
@@ -288,6 +291,10 @@ function PaneBar({
       </DropdownMenu>
     </div>
   );
+}
+
+function TabAgentDot({ tabId }: { tabId: string }) {
+  return <AgentStatusDot status={useTabAgentStatus(tabId)} />;
 }
 
 /**

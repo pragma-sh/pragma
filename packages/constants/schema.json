@@ -290,6 +290,40 @@
       "type": "string",
       "enum": ["terminal", "browser", "editor", "diff", "log", "pr-review"]
     },
+    "AgentStatus": {
+      "title": "AgentStatus",
+      "description": "Runtime status an external agent reports for a terminal tab. `cleared` is a transient signal that removes the agent's indicator entirely (used when the agent process exits), as opposed to `done`, which leaves a green \"finished, go look\" dot.",
+      "type": "string",
+      "enum": ["running", "attention", "done", "cleared"]
+    },
+    "AgentReportKind": {
+      "title": "AgentReportKind",
+      "description": "CLI report command names; each maps to an AgentStatus.",
+      "type": "string",
+      "enum": ["started", "stopped", "attention", "cleared"]
+    },
+    "AgentAttentionKind": {
+      "title": "AgentAttentionKind",
+      "description": "Reason an agent needs the user's attention.",
+      "type": "string",
+      "enum": ["question", "command"]
+    },
+    "AgentReportPayload": {
+      "title": "AgentReportPayload",
+      "description": "Status report sent by pragma-agent through the daemon to the app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "status"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "status": { "$ref": "#/definitions/AgentStatus" },
+        "attentionKind": {
+          "anyOf": [{ "$ref": "#/definitions/AgentAttentionKind" }, { "type": "null" }]
+        }
+      }
+    },
     "Tab": {
       "title": "Tab",
       "type": "object",
