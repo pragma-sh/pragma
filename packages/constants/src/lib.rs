@@ -14,10 +14,11 @@ mod generated {
 }
 
 pub use generated::{
-    AppInfo, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry, EditorLauncher,
-    EditorLaunchers, FileContents, FileDiff, KeybindingChord, KeybindingChordModifiersItem,
-    Keybindings, KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind,
-    WindowDefaults, Worktree, WorktreeChanges, WorktreeStatus,
+    AppInfo, BranchSyncStatus, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry,
+    EditorLauncher, EditorLaunchers, FileContents, FileDiff, GitHub, GitHubAuthStatus,
+    GitHubRepoRef, GitHubUser, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
+    KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind, WindowDefaults,
+    Worktree, WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
