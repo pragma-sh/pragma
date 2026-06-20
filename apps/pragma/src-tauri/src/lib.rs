@@ -17,6 +17,7 @@ mod github;
 mod icons;
 mod keybindings;
 mod opencode_plugin;
+mod process_env;
 mod projects;
 mod pty;
 mod worktrees;

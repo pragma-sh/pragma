@@ -1003,7 +1003,7 @@ fn git_show(root: &Path, spec: &str) -> Option<String> {
 
 /// Runs an arbitrary `git -C <root> …` command, returning stdout or a `Git` error.
 fn run_git(root: &Path, args: &[&str]) -> AppResult<Vec<u8>> {
-    let output = Command::new("git")
+    let output = crate::process_env::command("git")
         .arg("-C")
         .arg(path_string(root))
         .args(args)
