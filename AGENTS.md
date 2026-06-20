@@ -385,9 +385,9 @@ worktreeId, tabId }`; `workspace-context` routes that through `navigateToAgentLo
     (the same `dev_channel(workspace_root)` for a debug build, `PROD_CHANNEL` for release) only
     when the daemon is run by hand — so a manual `cargo run -p pragma-daemon` in a worktree
     serves that worktree's app.
-  NB this isolates Pragma's **own** state (daemon + DB + token). Both builds still share the
-  Tauri `identifier` (`com.pragma.app`) and user config under `~/.pragma` / `~/.config/opencode`;
-  give the dev build its own `identifier` only if you need to split the OS-level app-data root too.
+    NB this isolates Pragma's **own** state (daemon + DB + token). Both builds still share the
+    Tauri `identifier` (`com.pragma.app`) and user config under `~/.pragma` / `~/.config/opencode`;
+    give the dev build its own `identifier` only if you need to split the OS-level app-data root too.
 - **Native menubar + the Troubleshooting menu.** The app menu is built once in
   `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` (so the OS-standard
   app/edit/window items survive) **plus** a `Troubleshooting` submenu with **Restart
