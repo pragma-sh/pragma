@@ -465,6 +465,7 @@ fn diff_side_as_str(side: DiffSide) -> &'static str {
         DiffSide::Committed => "committed",
         DiffSide::Staged => "staged",
         DiffSide::Unstaged => "unstaged",
+        DiffSide::Worktree => "worktree",
     }
 }
 
@@ -474,6 +475,7 @@ fn diff_side_from_str(value: Option<String>) -> Option<DiffSide> {
         Some("committed") => Some(DiffSide::Committed),
         Some("staged") => Some(DiffSide::Staged),
         Some("unstaged") => Some(DiffSide::Unstaged),
+        Some("worktree") => Some(DiffSide::Worktree),
         _ => None,
     }
 }

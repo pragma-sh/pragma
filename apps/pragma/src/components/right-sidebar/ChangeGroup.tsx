@@ -61,7 +61,9 @@ function groupByDirectory(files: ChangedFile[]): Array<[string, ChangedFile[]]> 
 /**
  * One default-open collapsible change group (Staged, Unstaged, or Committed).
  * Files are flat-listed, grouped under a relative-directory label, and open a
- * read-only diff tab when clicked. `fileActions` adds per-row icon buttons
+ * read-only diff tab when clicked (the caller decides which diff side; the
+ * Changes subtab opens the worktree-base diff for every list). `fileActions`
+ * adds per-row icon buttons
  * (stage / unstage / discard) and `headerActions` adds matching group-wide icon
  * buttons to the header (shown only when the group is non-empty).
  */

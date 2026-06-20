@@ -377,7 +377,12 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   focus), updating the lists in place without re-flashing the loading state (`ChangesTab`).
   `worktree_changes` returns all three axes (`committed` = base→HEAD, `staged` = HEAD→index via
   `git diff --cached`, `unstaged` = index→working tree plus untracked); `DiffSide` has a matching
-  `staged` variant. `ChangeGroup` is generic over per-row `fileActions` and per-header
+  variant for each. **Clicking a file in any of the three lists opens one unified diff** on the
+  fourth `DiffSide`, `worktree` (base merge-base → working tree): `file_diff`'s `Worktree` arm
+  diffs the file's current on-disk content against what it was at the worktree's fork point,
+  folding committed + staged + unstaged edits into a single review view (parentless/main worktrees
+  fall back to HEAD as the base). The per-axis `committed`/`staged`/`unstaged` sides remain for the
+  listing records but are no longer used as the click target. `ChangeGroup` is generic over per-row `fileActions` and per-header
   `headerActions` (icon buttons): the **Unstaged** group gets stage (`stage_file`) + discard, the
   **Staged** group gets unstage (`unstage_file`); the headers get the stage-all/unstage-all/
   discard-all variants. Staging is reversible so it runs **without confirmation** (`stage_file` /
@@ -396,6 +401,13 @@ outline-cyan-400/60` ring so it's distinguishable from the `bg-white/10` "active
   `@codemirror/merge`) — rendered through the `SplitHost` switch and located by `Tab.filePath`
   (worktree-relative) + `Tab.diffSide` (v5 migration; the columns persist editor/diff tabs). Open
   them via `openFileTab`/`openDiffTab` on the workspace context (they dedupe by kind+filePath(+side)).
+  **Both views are syntax-highlighted.** The grammar is resolved lazily by filename through the
+  shared `loadLanguageExtension` helper (`components/editor/codemirror-language.ts`, backed by
+  `@codemirror/language-data`) so editor and diff pick the same grammar; the colors come from the
+  shared dark `pragmaHighlightStyle` / `pragmaSyntaxHighlighting` in `codemirror-theme.ts` (keyed to
+  `@lezer/highlight` tags, tuned for the `#0b0d10` background). `DiffView` applies both the grammar
+  and the highlight extension to **both** `@codemirror/merge` panes (rebuilding the `MergeView` once
+  the grammar loads); `EditorView` adds the same extensions alongside its save keymap.
   Editor dirty state + latest doc is an **ephemeral** module store (`state/editor-dirty-store.ts`,
   never in the reducer, never persisted); closing a dirty editor routes through
   `ConfirmCloseProvider` (`components/editor/confirm-close.tsx`). vscode-icons render **offline**

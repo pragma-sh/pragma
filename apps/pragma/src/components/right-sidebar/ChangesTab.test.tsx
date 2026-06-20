@@ -176,6 +176,26 @@ describe("ChangesTab", () => {
     expect(discardUnstagedFileMock).not.toHaveBeenCalled();
   });
 
+  it("opens a worktree-base diff when a file is clicked, regardless of its list", async () => {
+    worktreeChangesMock.mockResolvedValue(
+      changes({
+        committed: [change("src/committed.ts", "modified", "committed")],
+        staged: [change("src/staged.ts", "modified", "staged")],
+        unstaged: [change("src/unstaged.ts", "modified", "unstaged")],
+      }),
+    );
+    render(<ChangesTab />);
+    await screen.findByText("committed.ts");
+
+    fireEvent.click(screen.getByText("committed.ts"));
+    fireEvent.click(screen.getByText("staged.ts"));
+    fireEvent.click(screen.getByText("unstaged.ts"));
+
+    expect(openDiffTabMock).toHaveBeenCalledWith("src/committed.ts", "worktree");
+    expect(openDiffTabMock).toHaveBeenCalledWith("src/staged.ts", "worktree");
+    expect(openDiffTabMock).toHaveBeenCalledWith("src/unstaged.ts", "worktree");
+  });
+
   it("stages a single unstaged file without confirmation", async () => {
     worktreeChangesMock.mockResolvedValue(
       changes({

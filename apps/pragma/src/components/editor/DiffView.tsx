@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { MergeView } from "@codemirror/merge";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import { pragmaEditorTheme } from "@/components/editor/codemirror-theme";
+import { loadLanguageExtension } from "@/components/editor/codemirror-language";
+import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 import { fileDiff } from "@/lib/tauri";
 
 type LoadState =
@@ -18,16 +19,28 @@ function messageFor(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false), pragmaEditorTheme];
+/**
+ * Read-only base extensions shared by both diff panes: not editable, the app
+ * theme, and the syntax-highlight palette. The per-file language grammar is
+ * appended once it resolves so both sides are colorized identically.
+ */
+const READ_ONLY: Extension[] = [
+  EditorState.readOnly.of(true),
+  EditorView.editable.of(false),
+  pragmaEditorTheme,
+  pragmaSyntaxHighlighting,
+];
 
 /**
  * Read-only side-by-side diff for `diff` tabs, backed by `@codemirror/merge`.
  * Loads the old/new text via the worktree-scoped `file_diff` command (keyed on
- * the tab id) and recomputes it live each time the tab opens.
+ * the tab id) and recomputes it live each time the tab opens. The file's
+ * language grammar is resolved lazily so both panes get syntax highlighting.
  */
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,6 +74,24 @@ export function DiffView({ tab }: { tab: Tab }) {
     };
   }, [tabId, worktreeId, filePath, diffSide]);
 
+  // Resolve the language grammar lazily by filename; plain text on no match.
+  useEffect(() => {
+    if (!filePath) {
+      return;
+    }
+    let cancelled = false;
+    setLanguageExtension(null);
+    void (async () => {
+      const extension = await loadLanguageExtension(filePath);
+      if (!cancelled) {
+        setLanguageExtension(extension);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tabId, filePath]);
+
   useEffect(() => {
     if (state.kind !== "ready") {
       return;
@@ -69,13 +100,14 @@ export function DiffView({ tab }: { tab: Tab }) {
     if (!container) {
       return;
     }
+    const extensions = languageExtension ? [...READ_ONLY, languageExtension] : READ_ONLY;
     const view = new MergeView({
-      a: { doc: state.oldText, extensions: READ_ONLY },
-      b: { doc: state.newText, extensions: READ_ONLY },
+      a: { doc: state.oldText, extensions },
+      b: { doc: state.newText, extensions },
       parent: container,
     });
     return () => view.destroy();
-  }, [state]);
+  }, [state, languageExtension]);
 
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;
