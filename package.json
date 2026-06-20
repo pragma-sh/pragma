@@ -27,11 +27,13 @@
   "devDependencies": {
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
+    "@tailwindcss/typography": "^0.5.20",
     "husky": "^9.1.7",
     "json-schema-to-typescript": "^15.0.4",
     "lint-staged": "^17.0.7",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
+    "pragma": "workspace:*",
     "turbo": "^2.9.18",
     "typescript": "^6.0.3"
   },

@@ -1,10 +1,14 @@
 import type {
   AppInfo,
+  BranchSyncStatus,
   ChangeStatus,
   DiffSide,
   DirEntry,
   FileContents,
   FileDiff,
+  GitHubAuthStatus,
+  GitHubRepoRef,
+  GitHubUser,
   KeybindingsConfig,
   Project,
   ProjectIcon,
@@ -287,8 +291,20 @@ export function createTab(
   url?: string,
   filePath?: string | null,
   diffSide?: DiffSide | null,
+  prNumber?: number | null,
 ): Promise<Tab> {
-  return invoke<Tab>("create_tab", { projectId, worktreeId, kind, title, url, filePath, diffSide });
+  return invoke<Tab>("create_tab", {
+    projectId,
+    worktreeId,
+    kind,
+    title,
+    url,
+    filePath,
+    diffSide,
+    // Only send `prNumber` for PR tabs; omitting it keeps the IPC arg shape
+    // stable for the common non-PR case (an explicit null is still forwarded).
+    ...(prNumber !== undefined && { prNumber }),
+  });
 }
 
 /** Closes a persisted tab. */
@@ -465,6 +481,96 @@ export function commitStaged(worktreeId: string, message: string): Promise<void>
 /** Merges a clean child worktree branch into its clean parent worktree. */
 export function mergeWorktreeToParent(worktreeId: string): Promise<void> {
   return invoke("merge_worktree_to_parent", { worktreeId });
+}
+
+/**
+ * Reports GitHub auth state: whether a token is stored, whether the `gh` CLI is
+ * an option, the signed-in user (best-effort), and whether setup was skipped.
+ * Drives the setup-modal gate and the Pull Request subtab's logged-out state.
+ */
+export function githubAuthStatus(): Promise<GitHubAuthStatus> {
+  return invoke<GitHubAuthStatus>("github_auth_status");
+}
+
+/** Returns the stored GitHub token for the Octokit client, or null. */
+export function githubToken(): Promise<string | null> {
+  return invoke<string | null>("github_token");
+}
+
+/** Clears the stored GitHub token (sign out). */
+export function githubSignOut(): Promise<void> {
+  return invoke("github_sign_out");
+}
+
+/** Persists the "user skipped GitHub setup" flag so the modal never returns. */
+export function setGithubSetupDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_github_setup_dismissed", { dismissed });
+}
+
+/** Adopts the `gh` CLI's token into the backend's on-disk 0600 token file and returns the user. */
+export function githubUseCliToken(): Promise<GitHubUser> {
+  return invoke<GitHubUser>("github_use_cli_token");
+}
+
+/** The codes the device-flow UI shows the user, plus the opaque `deviceCode` to poll on. */
+export interface DeviceFlowStart {
+  userCode: string;
+  verificationUri: string;
+  deviceCode: string;
+  interval: number;
+  expiresIn: number;
+}
+
+/**
+ * Starts the OAuth Device Flow: requests a device + user code and opens the
+ * verification page in the browser. Resolves with the codes to display and poll.
+ */
+export function githubStartDeviceFlow(): Promise<DeviceFlowStart> {
+  return invoke<DeviceFlowStart>("github_start_device_flow");
+}
+
+/**
+ * Polls the token endpoint until the user authorizes the device code, stores the
+ * token in the backend's on-disk 0600 token file, and resolves with the
+ * authenticated user. Rejects if the flow is denied, expires, or times out.
+ */
+export function githubPollDeviceFlow(deviceCode: string, interval: number): Promise<GitHubUser> {
+  return invoke<GitHubUser>("github_poll_device_flow", { deviceCode, interval });
+}
+
+/** Parses a worktree's `origin` remote into owner/repo + default/head branch. */
+export function githubRepoRef(worktreeId: string): Promise<GitHubRepoRef> {
+  return invoke<GitHubRepoRef>("github_repo_ref", { worktreeId });
+}
+
+/** The default PR title for a worktree (its branch's last commit subject). */
+export function githubDefaultPrTitle(worktreeId: string): Promise<string> {
+  return invoke<string>("github_default_pr_title", { worktreeId });
+}
+
+/** Fetches `origin` and returns the branch's ahead/behind vs upstream (create pre-flight). */
+export function githubFetchAndSync(worktreeId: string): Promise<BranchSyncStatus> {
+  return invoke<BranchSyncStatus>("github_fetch_and_sync", { worktreeId });
+}
+
+/** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */
+export function githubPushBranch(worktreeId: string): Promise<void> {
+  return invoke("github_push_branch", { worktreeId });
+}
+
+/** Loads the local `base...HEAD` diff for one PR file (review tab). */
+export function githubPrFileDiff(
+  worktreeId: string,
+  base: string,
+  path: string,
+  oldPath?: string | null,
+): Promise<FileDiff> {
+  return invoke<FileDiff>("github_pr_file_diff", { worktreeId, base, path, oldPath });
+}
+
+/** Deletes the worktree's branch on `origin` (post-merge cleanup). */
+export function githubDeleteRemoteBranch(worktreeId: string): Promise<void> {
+  return invoke("github_delete_remote_branch", { worktreeId });
 }
 
 /** Logical pixel bounds (relative to the window) for a browser webview overlay. */

@@ -3,6 +3,14 @@
   "daemon": {
     "protocolVersion": 6
   },
+  "github": {
+    "oauthClientId": "Ov23li1WfY05SeQNp5tk",
+    "scopes": ["repo"],
+    "deviceCodeUrl": "https://github.com/login/device/code",
+    "deviceVerifyUrl": "https://github.com/login/device",
+    "accessTokenUrl": "https://github.com/login/oauth/access_token",
+    "apiBaseUrl": "https://api.github.com"
+  },
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",

@@ -460,7 +460,70 @@ fn file_diff_impl(
                 binary: false,
             })
         }
+        DiffSide::Worktree => {
+            // The unified review diff every Changes-sidebar click opens: compare
+            // the file's current on-disk content against what used to be on the
+            // worktree at its fork point (the merge-base with the parent branch),
+            // folding committed + staged + unstaged changes into one diff. A
+            // parentless/main worktree has no fork point, so we fall back to HEAD
+            // (its last commit is "what used to be").
+            let base_ref = base_merge_base(db, &worktree)?.unwrap_or_else(|| "HEAD".to_string());
+            if diff_is_binary(&root, &[&base_ref], &path) {
+                return Ok(binary_diff(path));
+            }
+            // Old side is the base version (empty for a file added since the fork
+            // point); new side is the working-tree file (empty if deleted on disk).
+            let old_ref_path = old_path.as_deref().unwrap_or(&path);
+            let old_text =
+                git_show(&root, &format!("{base_ref}:{old_ref_path}")).unwrap_or_default();
+            let new_text = std::fs::read(root.join(&path))
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_default();
+            Ok(FileDiff {
+                path,
+                old_text,
+                new_text,
+                binary: false,
+            })
+        }
     }
+}
+
+/// Loads the old/new text for a single file in a **PR-style** diff: the
+/// three-dot range `base...HEAD` (i.e. the merge-base of `base` and `HEAD`, to
+/// `HEAD`). Feeds the GitHub review tab's `CodeMirror` merge view real
+/// before/after text produced locally rather than from API patches. Binary files
+/// report `binary: true` with empty texts. `base` is any ref (e.g. `origin/main`).
+pub fn pr_file_diff(root: &Path, base: &str, path: &str, old_path: Option<&str>) -> FileDiff {
+    let merge_base = merge_base(root, base, "HEAD").unwrap_or_else(|| base.to_string());
+    if diff_is_binary(root, &[&merge_base, "HEAD"], path) {
+        return binary_diff(path.to_string());
+    }
+    let old_ref_path = old_path.unwrap_or(path);
+    let old_text = git_show(root, &format!("{merge_base}:{old_ref_path}")).unwrap_or_default();
+    let new_text = git_show(root, &format!("HEAD:{path}")).unwrap_or_default();
+    FileDiff {
+        path: path.to_string(),
+        old_text,
+        new_text,
+        binary: false,
+    }
+}
+
+/// Resolves the merge-base (common ancestor) of two refs, or `None` when git
+/// can't (unrelated histories, a missing ref).
+fn merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path_string(root))
+        .args(["merge-base", a, b])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!sha.is_empty()).then_some(sha)
 }
 
 /// Discards a single **unstaged** change, reverting the working-tree file to
@@ -1331,6 +1394,49 @@ mod tests {
         .expect("diff");
         assert_eq!(diff.old_text, "base\n");
         assert_eq!(diff.new_text, "");
+    }
+
+    #[test]
+    fn worktree_diff_of_existing_file_uses_fork_point_as_old() {
+        let (db, child_id, child_path, _main_path) = project_with_child();
+        // base.txt was committed with "base\n" at the fork point; edit it.
+        std::fs::write(child_path.join("base.txt"), "changed\n").expect("modify base");
+
+        let diff = file_diff_impl(
+            &db,
+            &child_id,
+            "base.txt".to_string(),
+            DiffSide::Worktree,
+            None,
+        )
+        .expect("diff");
+        assert_eq!(diff.old_text, "base\n");
+        assert_eq!(diff.new_text, "changed\n");
+    }
+
+    #[test]
+    fn worktree_diff_folds_committed_and_unstaged_against_fork_point() {
+        let (db, child_id, child_path, _main_path) = project_with_child();
+        // Add + commit a new file on the child (a committed delta vs the fork
+        // point)…
+        std::fs::write(child_path.join("feature.txt"), "committed\n").expect("write feature");
+        commit_all(&child_path, "feature commit");
+        // …then keep editing it in the working tree without staging.
+        std::fs::write(child_path.join("feature.txt"), "committed\nworking\n")
+            .expect("edit feature");
+
+        let diff = file_diff_impl(
+            &db,
+            &child_id,
+            "feature.txt".to_string(),
+            DiffSide::Worktree,
+            None,
+        )
+        .expect("diff");
+        // Old side is the fork point, where feature.txt did not exist.
+        assert_eq!(diff.old_text, "");
+        // New side is the current working tree — committed + unstaged folded in.
+        assert_eq!(diff.new_text, "committed\nworking\n");
     }
 
     #[test]

@@ -42,6 +42,7 @@ function browserTab(): Tab {
     url: "https://example.com",
     filePath: null,
     diffSide: null,
+    prNumber: null,
     userRenamed: false,
     orderIndex: 0,
     createdAt: "now",

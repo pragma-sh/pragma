@@ -169,6 +169,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
   openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  /** Opens (or focuses) the PR review tab for a pull request number. */
+  openReviewTab: (prNumber: number, title: string) => Promise<void>;
   /** Opens (or focuses) the read-only daemon-log tab (Troubleshooting menu). */
   openDaemonLogTab: () => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
@@ -1385,6 +1387,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [openLocatorTab],
   );
 
+  // Opens (or focuses) the PR review tab for a pull request. Deduped by
+  // kind+prNumber within the active worktree (the review is scoped to the
+  // worktree's branch); a single review tab per PR is enough.
+  const openReviewTab = useCallback(
+    async (prNumber: number, title: string) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          worktreeId,
+          "pr-review",
+          title,
+          undefined,
+          null,
+          null,
+          prNumber,
+        );
+        dispatch({ type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
   // Opens (or focuses) the read-only daemon-log tab. The daemon is global, so a
   // single log tab per project is enough — dedupe by kind, hosting it in the
   // active worktree (its content is not worktree-scoped).
@@ -2002,6 +2041,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openReviewTab,
       openDaemonLogTab,
       closeTab,
       renameTerminalTab,
@@ -2041,6 +2081,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createTabInPane,
       openFileTab,
       openDiffTab,
+      openReviewTab,
       openDaemonLogTab,
       closeTab,
       renameTerminalTab,

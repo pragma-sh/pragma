@@ -13,6 +13,7 @@ mod editors;
 mod error;
 mod fs;
 mod git;
+mod github;
 mod icons;
 mod keybindings;
 mod opencode_plugin;
@@ -224,6 +225,7 @@ fn create_tab(
     url: Option<String>,
     file_path: Option<String>,
     diff_side: Option<DiffSide>,
+    pr_number: Option<i64>,
 ) -> AppResult<Tab> {
     db.create_tab(
         &project_id,
@@ -233,6 +235,7 @@ fn create_tab(
         url,
         file_path,
         diff_side,
+        pr_number,
     )
 }
 
@@ -314,6 +317,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let app_data_dir = app.path().app_data_dir()?;
     app.manage(Db::open(app_data_dir.join("pragma.db"))?);
+    app.manage(github::TokenStore::new(&app_data_dir));
     // Isolate the dev daemon from prod by product identity (see `PtyClient::new`).
     let pty = PtyClient::new(app_data_dir, app.config().product_name.as_deref());
     app.manage(pty.clone());
@@ -408,6 +412,19 @@ pub fn run() {
             git::unstage_all,
             git::commit_staged,
             git::merge_worktree_to_parent,
+            github::github_auth_status,
+            github::github_token,
+            github::github_sign_out,
+            github::set_github_setup_dismissed,
+            github::github_use_cli_token,
+            github::github_start_device_flow,
+            github::github_poll_device_flow,
+            github::github_repo_ref,
+            github::github_default_pr_title,
+            github::github_fetch_and_sync,
+            github::github_push_branch,
+            github::github_pr_file_diff,
+            github::github_delete_remote_branch,
             browser::browser_create,
             browser::browser_frame_height,
             browser::browser_set_bounds,

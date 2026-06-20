@@ -1,4 +1,4 @@
-import { type ComponentType, useMemo, useState } from "react";
+import { type ComponentType, type ReactNode, useMemo, useState } from "react";
 
 import type { ChangedFile, ChangeStatus } from "@pragma/constants";
 import { Icon } from "@iconify/react";
@@ -61,7 +61,9 @@ function groupByDirectory(files: ChangedFile[]): Array<[string, ChangedFile[]]> 
 /**
  * One default-open collapsible change group (Staged, Unstaged, or Committed).
  * Files are flat-listed, grouped under a relative-directory label, and open a
- * read-only diff tab when clicked. `fileActions` adds per-row icon buttons
+ * read-only diff tab when clicked (the caller decides which diff side; the
+ * Changes subtab opens the worktree-base diff for every list). `fileActions`
+ * adds per-row icon buttons
  * (stage / unstage / discard) and `headerActions` adds matching group-wide icon
  * buttons to the header (shown only when the group is non-empty).
  */
@@ -72,6 +74,7 @@ export function ChangeGroup({
   onOpen,
   fileActions = NO_FILE_ACTIONS,
   headerActions = NO_HEADER_ACTIONS,
+  fileBadge,
 }: {
   title: string;
   files: ChangedFile[];
@@ -79,6 +82,8 @@ export function ChangeGroup({
   onOpen: (file: ChangedFile) => void;
   fileActions?: ChangeFileAction[];
   headerActions?: ChangeGroupAction[];
+  /** Optional trailing badge per row (e.g. a PR's unresolved-comment count). */
+  fileBadge?: (file: ChangedFile) => ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   const groups = useMemo(() => groupByDirectory(files), [files]);
@@ -151,6 +156,7 @@ export function ChangeGroup({
                         <action.icon className="size-3.5" />
                       </button>
                     ))}
+                    {fileBadge?.(file)}
                     <span
                       aria-label={
                         file.additions === null

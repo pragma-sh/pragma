@@ -90,6 +90,20 @@ describe("FileTreeNode", () => {
     expect(ctrl.selectFile).toHaveBeenCalledWith("src/app.ts");
   });
 
+  it("opens a file on double-click", () => {
+    const ctrl = controller();
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
+    fireEvent.doubleClick(screen.getByText("app.ts"));
+    expect(ctrl.openFile).toHaveBeenCalledWith("src/app.ts");
+  });
+
+  it("does not open a directory on double-click", () => {
+    const ctrl = controller();
+    render(<FileTreeNode ctrl={ctrl} depth={0} entry={dirEntry} siblings={[dirEntry.name]} />);
+    fireEvent.doubleClick(screen.getByText("src"));
+    expect(ctrl.openFile).not.toHaveBeenCalled();
+  });
+
   it("applies a distinct visual to the selected file", () => {
     const ctrl = controller({ selectedFile: fileEntry.path });
     render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
