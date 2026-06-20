@@ -25,25 +25,44 @@ use registry::Registry;
 
 const DETACH_FLAG: &str = "--detach";
 
-/// Build channel used to isolate this daemon from a differently-built sibling.
-/// The Pragma app picks the channel from its product identity (see
-/// `daemon_channel_for_product` in `pty.rs`) and hands it to us via
-/// `PRAGMA_DAEMON_CHANNEL` when it spawns us, so a dev daemon and a prod daemon
-/// resolve different socket/lock/log paths regardless of compile profile. This
-/// compile-profile default only applies when the daemon is run by hand.
-const DEFAULT_DAEMON_CHANNEL: &str = if cfg!(debug_assertions) {
-    "pragma-dev"
-} else {
-    "pragma"
-};
-
-/// The channel the app handed us, falling back to the compile-profile default
-/// when the daemon is launched directly (e.g. `cargo run -p pragma-daemon`).
+/// The channel that isolates this daemon from a differently-built sibling.
+///
+/// The Pragma app picks the channel (see `instance_channel` in `pty.rs`) and
+/// hands it to us via `PRAGMA_DAEMON_CHANNEL` when it spawns us, so a dev daemon
+/// and a prod daemon — and two dev worktrees' daemons — resolve different
+/// socket/lock/log paths regardless of compile profile. The fallback only
+/// applies when the daemon is launched directly (e.g. `cargo run -p
+/// pragma-daemon`): a debug build derives the same per-worktree
+/// `pragma-dev-<hash>` the app would, so a hand-run daemon in a worktree serves
+/// that worktree's app; a release build falls back to the production channel.
 fn daemon_channel() -> String {
     std::env::var("PRAGMA_DAEMON_CHANNEL")
         .ok()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_DAEMON_CHANNEL.to_string())
+        .unwrap_or_else(default_daemon_channel)
+}
+
+/// Compile-profile fallback channel, matching the app's `instance_channel`: a
+/// debug build resolves the per-worktree dev channel from its own workspace
+/// root, a release build the stable production channel.
+fn default_daemon_channel() -> String {
+    if cfg!(debug_assertions) {
+        pragma_protocol::dev_channel(&workspace_root())
+    } else {
+        pragma_protocol::PROD_CHANNEL.to_string()
+    }
+}
+
+/// Absolute workspace root this daemon was compiled in, derived from
+/// `CARGO_MANIFEST_DIR` (`<root>/crates/pragma-daemon`, two ancestors up). It
+/// resolves to the same path the app derives from its own manifest, so both
+/// hash to the same `pragma-dev-<hash>` channel for a given worktree.
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+        .to_path_buf()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

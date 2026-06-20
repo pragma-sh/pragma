@@ -357,22 +357,37 @@ worktreeId, tabId }`; `workspace-context` routes that through `navigateToAgentLo
   plugin, so no `shell:` capability is needed. `pragma-agent` and the opencode plugin dist are
   staged by the same script and bundled as `binaries/pragma-agent` plus
   `resources/pragma/plugins/opencode.mjs`. `binaries/` is git-ignored.
-- **Dev and prod must never share a daemon.** The socket/lock/log live in a
-  **channel-scoped** directory whose name (`pragma` / `pragma-dev`) is chosen from the
-  build's **product identity, not the compile profile**: `daemon_channel_for_product`
-  in `src-tauri/src/pty.rs` maps a `product_name` containing `Dev` ("Pragma Dev", set
-  in `tauri.dev.conf.json`) to `pragma-dev` and everything else ("Pragma") to `pragma`.
-  This is deliberate — a **release-built dev app** (e.g. when profiling terminal latency)
-  is still a dev app and must keep its own daemon, which a `cfg!(debug_assertions)` split
-  would get wrong (both release builds would collapse onto `pragma`). The app derives the
-  channel once at startup from `app.config().product_name` (`lib.rs` → `PtyClient::new`)
-  and hands it to the spawned daemon via the **`PRAGMA_DAEMON_CHANNEL` env** alongside
-  `PRAGMA_APP_DATA_DIR`; `crates/pragma-daemon/src/main.rs` (`daemon_channel` → `daemon_paths`)
-  reads that env, falling back to a `cfg!(debug_assertions)` default only when the daemon is
-  run by hand. So both processes resolve the identical path and the two channels never
-  collide. (On Linux the dir is `$XDG_RUNTIME_DIR/<channel>`; elsewhere `<app_data_dir>/<channel>`.)
-  NB this isolates the **daemon** only — both builds still share `com.pragma.app`'s app-data
-  dir and `pragma.db`; give the dev build its own `identifier` if you ever need to split those too.
+- **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
+  One channel scopes **both** the daemon (socket/lock/log) **and** the per-instance data
+  dir (`pragma.db` + the GitHub token file), so a dev build can never attach to prod's
+  daemon nor read/corrupt prod's database — and **two worktree dev builds never collide
+  with each other**, which was the source of the dev-stability/version-conflict problems.
+  The channel is chosen from the build's **product identity, not the compile profile**:
+  `instance_channel` in `src-tauri/src/pty.rs` returns the stable `pragma` for a production
+  build ("Pragma"), and `pragma-dev-<hash>` for a dev build ("Pragma Dev", set in
+  `tauri.dev.conf.json`) where `<hash>` is `pragma_protocol::dev_channel(workspace_root)` —
+  a deterministic hash of the **absolute workspace root the binary was compiled in**. Two
+  worktree checkouts sit at different paths, so they hash to different channels; the same
+  worktree is stable across rebuilds. Product identity (not `cfg!(debug_assertions)`) is
+  deliberate — a **release-built dev app** (e.g. when profiling terminal latency) is still a
+  dev app and must keep its own per-worktree instance. `PROD_CHANNEL` + `dev_channel` live in
+  `pragma-protocol` (the one crate both the app and daemon share) so both compute identical
+  channels.
+  - **Data dir:** `instance_data_dir(app_data_dir, channel)` returns the legacy app-data root
+    **verbatim for prod** (so an existing install's `pragma.db`/token are never relocated) and
+    `app_data_dir/<channel>` for a dev build. `lib.rs` `setup_app` resolves the channel once,
+    opens the DB and `TokenStore` under that dir, and passes the channel to `PtyClient::new`.
+  - **Daemon dir:** the same channel; on Linux it's `$XDG_RUNTIME_DIR/<channel>`, elsewhere
+    `<app_data_dir>/<channel>` (so in dev the daemon socket sits right next to that worktree's
+    `pragma.db`). The app hands the channel to the spawned daemon via the **`PRAGMA_DAEMON_CHANNEL`
+    env** alongside `PRAGMA_APP_DATA_DIR`; `crates/pragma-daemon/src/main.rs`
+    (`daemon_channel` → `daemon_paths`) reads that env, falling back to `default_daemon_channel`
+    (the same `dev_channel(workspace_root)` for a debug build, `PROD_CHANNEL` for release) only
+    when the daemon is run by hand — so a manual `cargo run -p pragma-daemon` in a worktree
+    serves that worktree's app.
+  NB this isolates Pragma's **own** state (daemon + DB + token). Both builds still share the
+  Tauri `identifier` (`com.pragma.app`) and user config under `~/.pragma` / `~/.config/opencode`;
+  give the dev build its own `identifier` only if you need to split the OS-level app-data root too.
 - **Native menubar + the Troubleshooting menu.** The app menu is built once in
   `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` (so the OS-standard
   app/edit/window items survive) **plus** a `Troubleshooting` submenu with **Restart
