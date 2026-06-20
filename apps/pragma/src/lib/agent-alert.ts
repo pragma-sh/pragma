@@ -1,4 +1,4 @@
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentReportPayload, AgentStatus } from "@pragma/constants";
 import {
   isPermissionGranted,
   requestPermission,
@@ -8,14 +8,64 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createElement } from "react";
 import { toast } from "sonner";
 
+import { listAgents, showAgentNotification } from "@/lib/tauri";
+
 let lastChime = 0;
 const CHIME_DEBOUNCE_MS = 750;
 const RECENT_ALERT_DEDUPE_MS = 2_000;
 const activeToastByKey = new Map<string, string | number>();
 const recentAlertAtByKey = new Map<string, number>();
 let permissionPromise: Promise<boolean> | null = null;
+let agentNameByIdPromise: Promise<Map<string, string>> | null = null;
+
+// The status (`done`/`attention`) each agent has already been alerted for — or
+// has already been seen on screen. Keyed by worktree+tab+agent. This is the
+// alert "latch": it is intentionally separate from the dot store (which viewing
+// a tab clears), so that re-deliveries of the *same* status never re-notify.
+// The daemon replays its full status snapshot on every reconnect, and keeps a
+// `done` until the agent moves on, so without this latch a reconnect would
+// re-fire "finished" notifications the user already saw.
+const alertedStatusByKey = new Map<string, AgentStatus>();
+
+function statusLatchKey(payload: AgentReportPayload): string {
+  return [payload.worktreeId, payload.tabId, payload.agent].join("\u0000");
+}
+
+/**
+ * Whether `payload.status` warrants a *new* alert — true only if the agent has
+ * not already been alerted for (or shown) this exact status since it last moved
+ * on. Use {@link latchAlertedStatus} to record an alert and
+ * {@link releaseAlertLatch} when the agent starts running or is cleared.
+ */
+export function shouldAlertForStatus(payload: AgentReportPayload): boolean {
+  return alertedStatusByKey.get(statusLatchKey(payload)) !== payload.status;
+}
+
+/** Records that `payload.status` has been surfaced (alerted or seen on screen). */
+export function latchAlertedStatus(payload: AgentReportPayload): void {
+  alertedStatusByKey.set(statusLatchKey(payload), payload.status);
+}
+
+/**
+ * Releases the latch so the agent's next `done`/`attention` notifies again.
+ * Call when an agent starts running or is cleared — i.e. it genuinely moved on,
+ * so a subsequent completion is a new event rather than a replay.
+ */
+export function releaseAlertLatch(payload: AgentReportPayload): void {
+  alertedStatusByKey.delete(statusLatchKey(payload));
+}
+
+/** Drops every latch for a tab once it is closed, so its session id can't leak. */
+export function releaseAlertLatchForTab(tabId: string): void {
+  for (const key of alertedStatusByKey.keys()) {
+    if (key.split("\u0000")[1] === tabId) {
+      alertedStatusByKey.delete(key);
+    }
+  }
+}
 
 export interface AgentAlertOptions {
+  projectId?: string;
   onGoTo?: () => void;
 }
 
@@ -29,7 +79,8 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   }
   recentAlertAtByKey.set(key, now);
   playChime();
-  const title = titleFor(payload);
+  const agentName = await displayNameForAgent(payload.agent);
+  const title = titleFor(payload, agentName);
   const description = descriptionFor(payload);
   if (await isAppFocused()) {
     const id = toast.custom((toastId) => agentToast(toastId, title, description, options, key), {
@@ -41,10 +92,40 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   }
   try {
     if (await ensureNotificationPermission()) {
+      let nativeShown = false;
+      if (options.projectId) {
+        try {
+          nativeShown = await showAgentNotification(
+            title,
+            description,
+            options.projectId,
+            payload.worktreeId,
+            payload.tabId,
+          );
+        } catch {
+          nativeShown = false;
+        }
+      }
+      if (nativeShown) {
+        return;
+      }
       sendNotification({ title, body: description });
     }
   } catch {
     // System notification support is best-effort; the chime has already played.
+  }
+}
+
+async function displayNameForAgent(agentId: string): Promise<string> {
+  try {
+    agentNameByIdPromise ??= listAgents().then(
+      (agents) => new Map(agents.map((agent) => [agent.id, agent.name])),
+    );
+    const names = await agentNameByIdPromise;
+    return names.get(agentId) ?? agentId;
+  } catch {
+    agentNameByIdPromise = null;
+    return agentId;
   }
 }
 
@@ -105,7 +186,7 @@ function agentToast(
     {
       type: "button",
       className:
-        "flex w-full max-w-sm flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
+        "flex w-[var(--width)] flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
       onClick: dismiss,
     },
     createElement("span", { className: "text-sm font-medium" }, title),
@@ -169,14 +250,14 @@ function playChime(): void {
   oscillator.stop(context.currentTime + 0.12);
 }
 
-function titleFor(payload: AgentReportPayload): string {
+function titleFor(payload: AgentReportPayload, agentName: string): string {
   if (payload.status === "done") {
-    return `${payload.agent} finished`;
+    return `${agentName} finished`;
   }
   if (payload.attentionKind === "command") {
-    return `${payload.agent} wants to run a command`;
+    return `${agentName} wants to run a command`;
   }
-  return `${payload.agent} needs attention`;
+  return `${agentName} needs attention`;
 }
 
 function descriptionFor(payload: AgentReportPayload): string {

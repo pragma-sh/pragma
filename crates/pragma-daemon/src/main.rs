@@ -215,6 +215,10 @@ fn handle_request(
             let (scrollback, rx) = registry.subscribe_agents().map_err(|err| err.to_string())?;
             Ok(Some(EventStream { scrollback, rx }))
         }
+        RequestKind::MarkAgentsSeen => {
+            registry.mark_agents_seen_for_tab(&required(request.session_id, "sessionId")?);
+            Ok(None)
+        }
     }
 }
 

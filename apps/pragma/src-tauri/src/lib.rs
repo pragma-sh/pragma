@@ -3,6 +3,7 @@
 
 mod agent_cli;
 mod agent_events;
+mod agent_notifications;
 mod agents;
 mod browser;
 mod db;
@@ -168,6 +169,15 @@ async fn pty_kill(pty: tauri::State<'_, PtyClient>, session_id: String) -> AppRe
 async fn pty_kill_for_path(pty: tauri::State<'_, PtyClient>, path: String) -> AppResult<()> {
     let client = pty.inner().clone();
     run_pty_task(move || client.kill_for_cwd(path)).await
+}
+
+/// Marks a tab's resolved (`done`) agent indicators as seen once the user views
+/// the tab, so the daemon drops them and a later subscriber reconnect doesn't
+/// replay (and re-notify) a completion the user already looked at.
+#[tauri::command]
+async fn mark_agents_seen(pty: tauri::State<'_, PtyClient>, tab_id: String) -> AppResult<()> {
+    let client = pty.inner().clone();
+    run_pty_task(move || client.mark_agents_seen(tab_id)).await
 }
 
 async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> AppResult<()> {
@@ -351,6 +361,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_kill_for_path,
+            mark_agents_seen,
             restart_daemon,
             read_daemon_log,
             projects::list_projects,
@@ -365,6 +376,7 @@ pub fn run() {
             worktrees::delete_worktree,
             editors::open_worktree,
             agents::list_agents,
+            agent_notifications::show_agent_notification,
             project_icon,
             list_tabs,
             create_tab,

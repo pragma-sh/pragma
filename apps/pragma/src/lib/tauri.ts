@@ -71,6 +71,42 @@ export function onAgentCliPathWarning(handler: (path: string) => void): Promise<
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
 
+/** Destination emitted when the user clicks a native agent notification. */
+export interface AgentNotificationClick {
+  projectId: string;
+  worktreeId: string;
+  tabId: string;
+}
+
+/** Shows a clickable native notification when supported by the current platform. */
+export function showAgentNotification(
+  title: string,
+  body: string,
+  projectId: string,
+  worktreeId: string,
+  tabId: string,
+): Promise<boolean> {
+  return invoke<boolean>("show_agent_notification", { title, body, projectId, worktreeId, tabId });
+}
+
+/** Subscribes to native agent notification clicks. */
+export function onAgentNotificationClick(
+  handler: (payload: AgentNotificationClick) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentNotificationClick>("pragma:agent-notification-clicked", (event) =>
+    handler(event.payload),
+  );
+}
+
+/**
+ * Tells the daemon a tab's finished (`done`) agent indicators have been seen, so
+ * it drops them and a later snapshot replay (on reconnect) doesn't resurrect the
+ * green dot or re-fire its "finished" notification. `running`/`attention` persist.
+ */
+export function markAgentsSeen(tabId: string): Promise<void> {
+  return invoke("mark_agents_seen", { tabId });
+}
+
 /**
  * Spawns a daemon-backed PTY session and streams events through a Tauri channel.
  * Resolves with the channel so callers can detach (`channel.onmessage = noop`)

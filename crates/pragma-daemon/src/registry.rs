@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use pragma_protocol::{AgentReportPayload, EventFrame};
+use pragma_protocol::{AgentReportPayload, AgentStatus, EventFrame};
 use thiserror::Error;
 
 use crate::session::{Session, SessionError};
@@ -163,10 +163,19 @@ impl Registry {
             payload.tab_id.clone(),
             payload.agent.clone(),
         );
-        self.agent_statuses
+        let mut statuses = self
+            .agent_statuses
             .lock()
-            .map_err(|_| RegistryError::LockPoisoned)?
-            .insert(key, payload);
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        // `cleared` is a transient removal signal, not a stored state: drop the
+        // entry so a reconnecting subscriber's snapshot omits it, then broadcast
+        // the cleared event so live subscribers remove their indicator.
+        if matches!(payload.status, AgentStatus::Cleared) {
+            statuses.remove(&key);
+        } else {
+            statuses.insert(key, payload);
+        }
+        drop(statuses);
         self.broadcast_agent(&event);
         Ok(())
     }
@@ -189,6 +198,20 @@ impl Registry {
     pub fn clear_agents_for_tab(&self, tab_id: &str) {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
             statuses.retain(|(_, status_tab_id, _), _| status_tab_id != tab_id);
+        }
+    }
+
+    /// Drops a tab's resolved (`done`) agent statuses once the user has viewed
+    /// the tab, so the daemon stops replaying them on the next subscriber
+    /// reconnect. `running`/`attention` are kept — they persist until the agent
+    /// itself moves on. Unlike a `cleared` report this does **not** broadcast: the
+    /// viewing client has already dropped the green dot locally, so the sole
+    /// purpose here is to keep a *seen* `done` out of future snapshots.
+    pub fn mark_agents_seen_for_tab(&self, tab_id: &str) {
+        if let Ok(mut statuses) = self.agent_statuses.lock() {
+            statuses.retain(|(_, status_tab_id, _), payload| {
+                status_tab_id != tab_id || !matches!(payload.status, AgentStatus::Done)
+            });
         }
     }
 
@@ -228,9 +251,80 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
 mod tests {
     use std::process::Command;
 
+    use pragma_protocol::{AgentReportPayload, AgentStatus};
     use tempfile::tempdir;
 
     use super::Registry;
+
+    fn agent_payload(status: AgentStatus) -> AgentReportPayload {
+        AgentReportPayload {
+            agent: "opencode".to_string(),
+            worktree_id: "worktree-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            status,
+            attention_kind: None,
+        }
+    }
+
+    #[test]
+    fn cleared_report_removes_the_stored_status() {
+        let registry = Registry::default();
+        registry
+            .report_agent(agent_payload(AgentStatus::Running))
+            .expect("running report should store");
+        let (before, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert_eq!(before.len(), 1, "running status should be in the snapshot");
+
+        registry
+            .report_agent(agent_payload(AgentStatus::Cleared))
+            .expect("cleared report should remove");
+        let (after, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            after.is_empty(),
+            "cleared status must not linger in the snapshot"
+        );
+    }
+
+    #[test]
+    fn mark_seen_drops_only_done_statuses_for_the_tab() {
+        let registry = Registry::default();
+        let payload = |tab: &str, agent: &str, status| AgentReportPayload {
+            agent: agent.to_string(),
+            worktree_id: "worktree-1".to_string(),
+            tab_id: tab.to_string(),
+            status,
+            attention_kind: None,
+        };
+        registry
+            .report_agent(payload("tab-1", "opencode", AgentStatus::Done))
+            .expect("done report should store");
+        registry
+            .report_agent(payload("tab-1", "codex", AgentStatus::Running))
+            .expect("running report should store");
+        registry
+            .report_agent(payload("tab-2", "opencode", AgentStatus::Done))
+            .expect("other tab done should store");
+
+        registry.mark_agents_seen_for_tab("tab-1");
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        let mut remaining: Vec<(String, AgentStatus)> = snapshot
+            .into_iter()
+            .filter_map(|event| match event {
+                pragma_protocol::EventFrame::Agent { tab_id, status, .. } => Some((tab_id, status)),
+                _ => None,
+            })
+            .collect();
+        remaining.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            remaining,
+            vec![
+                ("tab-1".to_string(), AgentStatus::Running),
+                ("tab-2".to_string(), AgentStatus::Done),
+            ],
+            "only tab-1's done is dropped; its running and other tabs survive"
+        );
+    }
 
     /// Spawns a fresh PTY session in a real temp directory and returns the
     /// registry, the session id, and the tempdir (so its cwd stays alive for

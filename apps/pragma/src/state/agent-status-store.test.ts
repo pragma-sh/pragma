@@ -2,6 +2,7 @@ import type { AgentReportPayload, AgentStatus } from "@pragma/constants";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  agentStatusesForTab,
   applyAgentReport,
   clearAllAgentStatuses,
   clearDoneStatusForTab,
@@ -95,6 +96,39 @@ describe("agent status store", () => {
 
     clearDoneStatusForTab("tab-b");
     expect(worktreeStatus("wt-1")).toBeNull();
+  });
+
+  it("removes an agent entirely on a cleared report, unlike done", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
+    expect(tabStatus("tab-a")).toBe("running");
+
+    const previous = applyAgentReport(report("wt-1", "tab-a", "claude", "cleared"));
+
+    expect(previous).toBe("running");
+    expect(tabStatus("tab-a")).toBeNull();
+    expect(worktreeStatus("wt-1")).toBeNull();
+  });
+
+  it("clears only the reporting agent, leaving other agents on the tab", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
+    applyAgentReport(report("wt-1", "tab-a", "codex", "attention"));
+
+    applyAgentReport(report("wt-1", "tab-a", "claude", "cleared"));
+
+    expect(tabStatus("tab-a")).toBe("attention");
+  });
+
+  it("lists every stored agent entry for a tab so views can latch them", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "attention"));
+    applyAgentReport(report("wt-1", "tab-a", "codex", "done"));
+
+    expect(agentStatusesForTab("tab-a")).toEqual(
+      expect.arrayContaining([
+        { worktreeId: "wt-1", agent: "claude", status: "attention" },
+        { worktreeId: "wt-1", agent: "codex", status: "done" },
+      ]),
+    );
+    expect(agentStatusesForTab("tab-b")).toEqual([]);
   });
 
   it("clears all cached statuses for a fresh daemon snapshot", () => {

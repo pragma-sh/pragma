@@ -27,7 +27,9 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-agent`.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
   status via `@pragma/sdk`, owns its bundled Pragma launcher config under `pragma/agents/`, and is
-  staged/installed as a local `file://` plugin because the package is not published to npm.
+  staged + registered in opencode's `plugin` config array on app startup (opencode does **not**
+  auto-load plugins from a directory; a file-path array entry is the only thing that loads, and the
+  bare unpublished package name must never be registered). See `src-tauri/src/opencode_plugin.rs`.
 
 ## Where does it go?
 

@@ -25,6 +25,7 @@ import {
   fileDiff,
   listDirEntries,
   listSplits,
+  markAgentsSeen,
   mergeWorktreeToParent,
   openWorktree,
   pathExists,
@@ -192,6 +193,18 @@ describe("worktree IPC wrappers", () => {
       deleteBranch: true,
       force: false,
     });
+  });
+});
+
+describe("agent IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("markAgentsSeen forwards the tab id", () => {
+    void markAgentsSeen("tab-1");
+    expect(invokeMock).toHaveBeenCalledWith("mark_agents_seen", { tabId: "tab-1" });
   });
 });
 

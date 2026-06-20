@@ -9,7 +9,7 @@ interface AgentStatusDotProps {
 
 /** Small aggregate status indicator for agent runtime state. */
 export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
-  if (!status) {
+  if (!status || status === "cleared") {
     return null;
   }
   return (

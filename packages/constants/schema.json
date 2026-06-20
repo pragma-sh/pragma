@@ -151,15 +151,15 @@
     },
     "AgentStatus": {
       "title": "AgentStatus",
-      "description": "Runtime status an external agent reports for a terminal tab.",
+      "description": "Runtime status an external agent reports for a terminal tab. `cleared` is a transient signal that removes the agent's indicator entirely (used when the agent process exits), as opposed to `done`, which leaves a green \"finished, go look\" dot.",
       "type": "string",
-      "enum": ["running", "attention", "done"]
+      "enum": ["running", "attention", "done", "cleared"]
     },
     "AgentReportKind": {
       "title": "AgentReportKind",
       "description": "CLI report command names; each maps to an AgentStatus.",
       "type": "string",
-      "enum": ["started", "stopped", "attention"]
+      "enum": ["started", "stopped", "attention", "cleared"]
     },
     "AgentAttentionKind": {
       "title": "AgentAttentionKind",

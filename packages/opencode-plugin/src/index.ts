@@ -1,6 +1,7 @@
 import type { Plugin, PluginInput, PluginOptions } from "@opencode-ai/plugin";
 import {
   reportAttention,
+  reportCleared,
   reportStarted,
   reportStopped,
   type AttentionKind,
@@ -32,7 +33,14 @@ export interface PragmaOpencodePluginOptions extends PluginOptions {
 
 /** Pragma opencode plugin — reports agent status to Pragma. */
 export const PragmaOpencodePlugin: Plugin = async (input: PluginInput, options?: PluginOptions) => {
-  return createPragmaOpencodeHooks(createSdkReporter(input, parseOptions(options)));
+  const reporter = createSdkReporter(input, parseOptions(options));
+  // Opening opencode must not inherit a stale indicator from a previous run in
+  // this same Pragma tab that exited without cleanup — e.g. killed with SIGINT
+  // or crashed, where the `dispose` hook never runs to report `cleared`, so its
+  // last `running`/`done`/`attention` status lingers in the long-lived daemon.
+  // Clear it up front on load; genuine activity re-raises status via the hooks.
+  void reporter.cleared();
+  return createPragmaOpencodeHooks(reporter);
 };
 
 export default PragmaOpencodePlugin;
@@ -62,6 +70,7 @@ function createSdkReporter(
     stopped: () => report(() => reportStopped({ ...spawnOptions, agent })),
     attention: (kind: AttentionKind) =>
       report(() => reportAttention({ ...spawnOptions, agent, kind })),
+    cleared: () => report(() => reportCleared({ ...spawnOptions, agent })),
   };
 
   async function report(run: () => Promise<unknown>): Promise<void> {

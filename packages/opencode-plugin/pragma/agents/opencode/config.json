@@ -1,6 +1,6 @@
 {
   "id": "opencode",
-  "name": "opencode",
+  "name": "OpenCode",
   "icon": "icon.svg",
   "start": ["opencode"]
 }

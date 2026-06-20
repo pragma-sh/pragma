@@ -134,23 +134,55 @@ than no guide.
   `crates/pragma-protocol`; agent status CLI → `crates/pragma-agent-cli`. The Tauri app only proxies over
   the Unix socket and must not own PTYs.
 - **Agent connector.** External agents running inside a Pragma terminal report status by
-  calling `pragma-agent --agent <id> report started|stopped|attention`. Terminal spawns inject
+  calling `pragma-agent --agent <id> report started|stopped|attention|cleared`. `started` →
+  `running` (yellow), `stopped` → `done` (green, "finished, go look"), `attention` → red, and
+  `cleared` **removes** the tab's indicator entirely (used when the agent process exits, so a quit
+  agent leaves no leftover green dot — distinct from `done`). Terminal spawns inject
   `PRAGMA_TAB_ID` (same value as the daemon session id / tab id), `PRAGMA_WORKTREE_ID`, and
   `PRAGMA_DAEMON_SOCKET`; the CLI uses only those env vars to connect to the existing daemon
   socket, read the `Hello`, write one `AgentReport` frame, and exit without waiting for an ack.
   The daemon keeps runtime-only status in memory keyed by `(worktreeId, tabId, agent)`, supports a
   long-lived `SubscribeAgents` request for the app, emits `EventFrame::Agent` snapshots/events, and
-  clears a tab's snapshot entries when the session exits. Status is never persisted to SQLite; the
+  clears a tab's snapshot entries when the session exits. It also supports a `MarkAgentsSeen` request
+  (`mark_agents_seen_for_tab`) that drops a tab's **`done`** entries (leaving `running`/`attention`)
+  once the user has viewed the tab — see below. Status is never persisted to SQLite; the
   frontend stores it in `state/agent-status-store.ts` via `useSyncExternalStore`, renders the current
   runtime state in tab/sidebar dots (`done` = green, `running` = yellow, `attention` = red) with
   precedence **red > yellow > green** when aggregating a tab's agents or a worktree's tabs. Green is a
   "finished, go look" notification: `running`/`attention` persist through a focus, but viewing a tab
-  clears only its `done` entries (`clearDoneStatusForTab`) — both when the tab becomes the on-screen
-  tab and when a `done` report arrives for an already-visible tab — so the worktree dot stops being
-  green once every finished tab in it has been seen. Closing a tab drops all of its status
+  clears its `done` entries from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the
+  stored `done`** (`markAgentsSeen`, the `MarkAgentsSeen` request) — both when the tab becomes the
+  on-screen tab (`visibleTabIds` effect) and when a `done` report arrives for an already-visible tab —
+  so the worktree dot stops being green once every finished tab in it has been seen, **and a later
+  daemon reconnect/snapshot replay can no longer resurrect that green dot or re-fire its
+  notification** (the daemon no longer stores the seen `done`). Closing a tab drops all of its status
   (`removeAgentStatusForTab`).
-  Agent pins are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **4** for
-  this protocol. Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields
+  **Alerts (chime + system notification) are gated by a latch separate from the dot store, not by the
+  store's previous value.** The daemon keeps a `done`/`attention` until the agent moves on (or, for
+  `done`, until the app marks it seen) and **replays its whole status snapshot on every reconnect**
+  (`agent_events.rs` re-subscribes on any disconnect, re-emitting `pragma:agent-status-reset` + the
+  full snapshot). Viewing a tab drops the daemon's stored **`done`** via `markAgentsSeen` (so a
+  reconnect won't replay a finished-and-seen completion), but **`attention` is never marked seen** — it
+  stays in the daemon until the agent resolves it — and a `done`/`attention` can also be alerted-but-
+  not-yet-viewed when a reconnect lands first. So gating "is this a new alert?" on the store's previous
+  status would re-fire on every reconnect (the reset wipes the store, making each replayed status look
+  new). Instead `lib/agent-alert.ts` keeps an `alertedStatusByKey` latch keyed by worktree+tab+agent:
+  a `done`/`attention` alerts at most once (`shouldAlertForStatus` + `latchAlertedStatus`), the latch
+  is **released only when the agent genuinely moves on** — a `running` or `cleared` report
+  (`releaseAlertLatch`) — and dropped on tab close (`releaseAlertLatchForTab`). A snapshot replay thus
+  restores the dots without re-notifying. **Viewing a tab latches every `done`/`attention` status it
+  currently shows as seen**, so a later replay never re-fires for it: the report handler latches a
+  `done`/`attention` that arrives while the tab is already visible, and the `visibleTabIds` effect
+  reads `agentStatusesForTab` and latches them (before `clearDoneStatusForTab`) when a tab comes on
+  screen. Without this an `attention` (pending permission) that arrived while you were watching the tab
+  was never latched, so leaving the tab and a later reconnect re-fired the "needs attention"
+  notification the user had already seen.
+  Agent pins are cosmetic localStorage state in `state/agent-pins.ts`. `daemon.protocolVersion` is **6** for
+  this protocol (the `MarkAgentsSeen` request is the latest wire change; the `cleared` `AgentStatus`
+  was an earlier one). On the daemon a `cleared` report
+  **removes** the `(worktreeId, tabId, agent)` entry from its in-memory map and broadcasts the cleared
+  event so live subscribers drop the indicator and a reconnecting subscriber's snapshot omits it;
+  the frontend store (`applyAgentReport`) deletes the agent entry on `cleared` rather than storing it. Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields
   `id`, `name`, `icon`, and `start` (string or argv array); icons must resolve inside that agent
   directory. Bundled/default agent configs live in package-owned `pragma/agents/*/config.json`
   folders (currently `packages/opencode-plugin/pragma/agents/opencode/config.json`), are staged to
@@ -162,24 +194,62 @@ than no guide.
   options and is bundled by Bunup as ESM, CJS, and `.d.ts`. opencode integration lives in
   `@pragma/opencode-plugin` (`packages/opencode-plugin`): an ESM-only Bunup package that imports
   opencode plugin types from `@opencode-ai/plugin`, reacts to opencode hooks/events, and reports
-  `started` / `stopped` / `attention` through `@pragma/sdk` without asking the LLM to call any CLI.
+  `started` / `stopped` / `attention` / `cleared` through `@pragma/sdk` without asking the LLM to call any CLI.
   `hooks.ts` is a **two-flag state machine** (`busy`, `attention`) rather than a per-event mapping:
   the reported status is _derived_ (`attention` > `busy` > idle) and emitted only on change, so a
   trailing `message.*` stream event can't clobber green back to yellow and a pending question/permission
   pins red even while opencode reports the session idle. `busy` is set by `chat.message`,
   `command.execute.before`, non-question `tool.execute.before`, and `session.status` busy/retry;
-  cleared by `session.idle` / `session.status` idle / `session.error` / `session.deleted`. `attention`
-  is raised by `permission.ask` / `permission.updated` (command) and the `question` tool (via
+  cleared by `session.idle` / `session.status` idle / a non-abort `session.error` / `session.deleted`.
+  **`stopped` (the green "finished, go look" `done`) is only emitted after a `started`** — a bare
+  `session.idle`, or the idle that may trail an aborted/cleared turn, must not resurrect a phantom
+  "finished" dot/notification. **An aborted turn (esc-esc / `session.abort`) surfaces as a
+  `session.error` carrying `MessageAbortedError` and reports `cleared`, not `stopped`** (there is no
+  result to look at, so the indicator resets). **`server.instance.disposed` also reports `cleared`** —
+  opencode quitting clears the dot even when the `dispose` plugin hook doesn't run (an abrupt
+  shutdown). `attention`
+  is raised by the **`permission.asked`** event (command) and the `question` tool (via
   `tool.execute.before` or a pending `message.part.updated` part), and cleared by `permission.replied`
-  or the question part completing/erroring. Only these real opencode events are handled — do **not**
-  re-add the speculative `session.next.*` events (they don't exist in the SDK and were the source of the
-  stuck-yellow bug). The SDK reporter in `index.ts` no longer dedups; it only guards on the Pragma env
-  and shells out.
-  The plugin build is staged as `resources/pragma/plugins/opencode.mjs`, installed on startup to
-  `~/.pragma/plugins/opencode.mjs`, and wired into `~/.config/opencode/opencode.json` as a
-  `file://` plugin entry. Do not point opencode at the bare package name
-  `@pragma/opencode-plugin`: opencode treats that as an npm dependency and tries to install it from
-  the public registry, where it does not exist.
+  or the question part completing/erroring. **Permission events — verified empirically against the
+  opencode binary, because the published `@opencode-ai/sdk` types are wrong here:** the runtime emits
+  `permission.asked` / `permission.replied` (NOT the `permission.updated` the TS `Event` union
+  declares), and it **never calls the `permission.ask` plugin hook** (the hook key is absent from the
+  binary). The plugin `event` hook does receive `permission.asked` (confirmed by running opencode with
+  a logging plugin), which is why event-based detection works and the dead `permission.ask` hook does
+  not. The legacy `permission.ask` hook + `permission.updated` event are kept only as harmless
+  cross-version fallbacks; the live path is `permission.asked`. Only real opencode events are handled —
+  do **not** re-add the speculative `session.next.*` events (opencode does emit
+  `session.next.agent.switched` / `session.next.model.switched`, but they carry no status meaning and
+  the default branch ignores them; mapping them was the source of the stuck-yellow bug). **`dispose`
+  (the agent process exiting) reports `cleared`, not `stopped`** — quitting opencode removes the
+  indicator instead of leaving a green "done" dot; finishing a turn (`session.idle`) still reports
+  `done`. **On load (`PragmaOpencodePlugin` in `index.ts`) the plugin fires one `cleared` up front** so
+  opening opencode never inherits a stale indicator from a previous run in the same tab that exited
+  without cleanup: `dispose` only runs on a graceful quit, so a SIGINT/crash leaves the last
+  `running`/`done`/`attention` lingering in the long-lived daemon, and the next open would otherwise
+  show it. Clearing on init wipes that; genuine activity re-raises status via the hooks (verified
+  empirically: a bare TUI open emits no busy/idle/chat events, so after the init `cleared` the tab
+  shows nothing until the first `chat.message`). The SDK reporter in `index.ts` no longer dedups; it
+  only guards on the Pragma env and shells out.
+  The plugin build is staged as `resources/pragma/plugins/opencode.mjs`; on startup the app
+  (`src-tauri/src/opencode_plugin.rs`) copies it to `~/.config/opencode/plugins/opencode.mjs` **and
+  registers that absolute path in the `plugin` array of `~/.config/opencode/opencode.json`**.
+  **opencode does NOT auto-load plugins from any directory** — verified empirically against opencode
+  1.17.8, a file dropped in `~/.config/opencode/plugins/` (or a project `.opencode/plugin/`) is never
+  loaded; the only mechanism that loads a plugin is a `plugin`-array entry. A **file path / `file://`
+  URL** entry loads fine and is **not** npm-resolved; only the **bare package name**
+  `@pragma/opencode-plugin` is treated as an npm dependency (opencode tries to install it from the
+  public registry, where it does not exist), so never register it by name. The directory under
+  `plugins/` is therefore just Pragma's storage location, not an opencode scan dir. `ensure_installed`
+  is idempotent and removes stale Pragma entries (the bare npm name, or any prior `opencode.mjs` path /
+  `file://` URL pointing elsewhere) before re-adding the current absolute path; an unparseable config
+  is backed up to `opencode.json.pragma-bak` and left untouched.
+  macOS agent system notifications are clickable: the frontend calls the macOS-only
+  `show_agent_notification` Tauri command instead of the generic notification plugin (which exposes no
+  desktop click event), and Rust emits `pragma:agent-notification-clicked` with `{ projectId,
+worktreeId, tabId }`; `workspace-context` routes that through `navigateToAgentLocation` so clicking
+  the notification opens the correct worktree/tab. Non-macOS falls back to the regular plugin
+  notification.
 - **The daemon coalesces PTY output to cut the per-frame transport/render cost.** The
   PTY master is read in 64 KB chunks (`READ_BUFFER_BYTES`) so a full-grid TUI redraw
   arrives as one read instead of many; a dedicated coalescer thread

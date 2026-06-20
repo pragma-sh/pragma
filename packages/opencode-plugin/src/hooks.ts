@@ -1,10 +1,13 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import { type AttentionKind } from "@pragma/sdk";
 
-type ReportKey = "started" | "stopped" | `attention:${AttentionKind}`;
+type ReportKey = "started" | "stopped" | "cleared" | `attention:${AttentionKind}`;
 type Environment = Record<string, string | undefined>;
 type OpencodeEvent = Parameters<NonNullable<Hooks["event"]>>[0]["event"];
 type RuntimeEvent = OpencodeEvent | { type: string; properties?: Record<string, unknown> };
+
+/** What a runtime event asks the reporter to do: re-derive status, reset, or nothing. */
+type EventAction = "sync" | "clear" | "none";
 
 export const PRAGMA_ENV_KEYS = [
   "PRAGMA_DAEMON_SOCKET",
@@ -17,6 +20,8 @@ export interface PragmaReporter {
   started(): Promise<void>;
   stopped(): Promise<void>;
   attention(kind: AttentionKind): Promise<void>;
+  /** Removes the tab's indicator entirely (agent process exited), not a green "done". */
+  cleared(): Promise<void>;
 }
 
 /**
@@ -38,7 +43,10 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   return {
     event: async ({ event }) => {
-      if (applyEvent(event as RuntimeEvent)) {
+      const action = applyEvent(event as RuntimeEvent);
+      if (action === "clear") {
+        await clear();
+      } else if (action === "sync") {
         await sync();
       }
     },
@@ -71,15 +79,30 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       }
     },
     dispose: async () => {
-      busy = false;
-      attention = false;
-      await sync();
+      // The agent process is exiting, not just finishing a turn: clear the
+      // indicator outright rather than leaving a green "done" dot behind.
+      await clear();
     },
   };
 
   function raiseAttention(kind: AttentionKind): void {
     attention = true;
     attentionKind = kind;
+  }
+
+  /**
+   * Resets all status and removes the tab's indicator entirely (the agent quit
+   * or its turn was aborted — there is no result to "go look" at). Distinct from
+   * `stopped`/`done`, which leaves a green dot.
+   */
+  async function clear(): Promise<void> {
+    busy = false;
+    attention = false;
+    if (lastReported === "cleared") {
+      return;
+    }
+    lastReported = "cleared";
+    await reporter.cleared();
   }
 
   function currentReport(): ReportKey {
@@ -97,6 +120,13 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     if (next === lastReported) {
       return;
     }
+    // `stopped` is the green "finished, go look" signal — only meaningful once
+    // the agent has actually been running. Suppressing it otherwise stops a bare
+    // idle, or the idle that may trail an aborted/cleared turn, from resurrecting
+    // a phantom "finished" dot and notification.
+    if (next === "stopped" && lastReported !== "started") {
+      return;
+    }
     lastReported = next;
     if (next === "started") {
       await reporter.started();
@@ -107,32 +137,53 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     }
   }
 
-  /** Updates the flags for a runtime event; returns whether the event was handled. */
-  function applyEvent(event: RuntimeEvent): boolean {
+  /** Updates the flags for a runtime event and returns the action to take. */
+  function applyEvent(event: RuntimeEvent): EventAction {
     switch (event.type) {
       case "session.status":
         applySessionStatus(event);
-        return true;
+        return "sync";
       case "session.idle":
         busy = false;
-        return true;
+        return "sync";
       case "session.error":
+        // An aborted turn (esc-esc / `session.abort`) surfaces as a session
+        // error carrying `MessageAbortedError`. There is no result to look at,
+        // so reset the indicator instead of leaving a green "finished" dot.
+        if (isAbortError(event)) {
+          return "clear";
+        }
+        busy = false;
+        attention = false;
+        return "sync";
       case "session.deleted":
         busy = false;
         attention = false;
-        return true;
+        return "sync";
+      case "server.instance.disposed":
+        // opencode's server is shutting down (the agent is quitting): clear the
+        // indicator rather than leaving a stale dot, even when the `dispose`
+        // plugin hook doesn't run (e.g. an abrupt shutdown).
+        return "clear";
+      case "permission.asked":
       case "permission.updated":
         raiseAttention("command");
-        return true;
+        return "sync";
       case "permission.replied":
         attention = false;
         busy = true;
-        return true;
+        return "sync";
       case "message.part.updated":
-        return applyMessagePart(event);
+        return applyMessagePart(event) ? "sync" : "none";
       default:
-        return false;
+        return "none";
     }
+  }
+
+  /** Whether a `session.error` event carries opencode's abort error. */
+  function isAbortError(event: RuntimeEvent): boolean {
+    const error = (event.properties as Record<string, unknown> | undefined)?.error;
+    return isRecord(error) && error.name === "MessageAbortedError";
   }
 
   function applySessionStatus(event: RuntimeEvent): void {

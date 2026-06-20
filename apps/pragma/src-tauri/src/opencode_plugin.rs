@@ -5,30 +5,37 @@ use tauri::{AppHandle, Manager};
 use crate::error::{AppError, AppResult};
 use crate::pty::workspace_root;
 
-/// The plugin file name inside `~/.pragma/plugins/`.
+/// The file name we install the plugin dist under, inside Pragma's storage dir.
 const PLUGIN_FILE_NAME: &str = "opencode.mjs";
 
-/// The `file://` URL prefix that opencode's plugin loader expects.
-const FILE_URL_PREFIX: &str = "file://";
+/// The bare npm package name older installs put in the config `plugin` array.
+/// opencode tries to npm-install array entries that look like package names, and
+/// this package is not published, so it must never be registered by name.
 const NPM_PLUGIN_ENTRY: &str = "@pragma/opencode-plugin";
 
-/// Ensures the `@pragma/opencode-plugin` dist is installed at
-/// `~/.pragma/plugins/opencode.mjs` and referenced by a `file://` path in
-/// `~/.config/opencode/opencode.json`'s `plugin` array.
+/// Ensures the `@pragma/opencode-plugin` dist is installed and registered with
+/// opencode.
 ///
-/// opencode's plugin loader treats bare package names as npm dependencies and
-/// tries to `npm install` them, which 404s for this local package. A `file://`
-/// path bypasses npm entirely and loads the dist directly.
+/// opencode loads plugins **only** from the `plugin` array in
+/// `~/.config/opencode/opencode.json` — it does *not* auto-scan any plugin
+/// directory (verified empirically against opencode 1.17.8: a file dropped in
+/// `~/.config/opencode/plugins/` or a project `.opencode/plugin/` is never
+/// loaded; only an array entry is). A **file path** entry loads fine and is
+/// *not* npm-resolved — only the bare package name [`NPM_PLUGIN_ENTRY`] is.
+///
+/// So we stage the dist to a stable path and register that absolute path in the
+/// config array, removing any stale Pragma entries (the bare npm name, or an old
+/// path pointing elsewhere) first.
 pub fn ensure_installed(app: &AppHandle) -> AppResult<()> {
     let home = app.path().home_dir()?;
-    let plugins_dir = home.join(".pragma/plugins");
+    let plugins_dir = opencode_plugins_dir(&home);
     std::fs::create_dir_all(&plugins_dir)?;
     let destination = plugins_dir.join(PLUGIN_FILE_NAME);
     let source = plugin_source(app)?;
     copy_if_changed(&source, &destination)?;
 
     let config_path = opencode_config_path(&home);
-    ensure_plugin_entry(&config_path, &destination)?;
+    ensure_config_plugin_entry(&config_path, &destination)?;
     Ok(())
 }
 
@@ -57,53 +64,70 @@ fn opencode_config_path(home: &Path) -> PathBuf {
     home.join(".config/opencode/opencode.json")
 }
 
-/// Reads the opencode config JSON, ensures the `plugin` array contains a
-/// `file://` entry pointing at our installed plugin, and writes it back.
-/// Other config keys are preserved untouched. Creates a minimal config if
-/// none exists.
-fn ensure_plugin_entry(config_path: &Path, plugin_path: &Path) -> AppResult<()> {
-    let file_url = format!("{FILE_URL_PREFIX}{}", plugin_path.display());
+fn opencode_plugins_dir(home: &Path) -> PathBuf {
+    home.join(".config/opencode/plugins")
+}
 
-    let mut config: serde_json::Value = if config_path.is_file() {
+/// Registers `destination` in opencode's `plugin` config array, removing any
+/// stale Pragma entries first. Other config keys and entries are preserved.
+///
+/// A previous install may have left the bare npm name (which opencode tries to
+/// fetch from the registry and fails on) or a path pointing at an old location
+/// (e.g. before the home dir moved); both — and any prior `opencode.mjs` entry,
+/// whether a plain path or a `file://` URL — are dropped before the current
+/// absolute path is added. Creates the config file if it does not exist.
+fn ensure_config_plugin_entry(config_path: &Path, destination: &Path) -> AppResult<()> {
+    let entry = destination.to_string_lossy().into_owned();
+
+    let mut config = if config_path.is_file() {
         let content = std::fs::read_to_string(config_path)?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            // Preserve a malformed config before replacing it with a minimal one.
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
+            value
+        } else {
+            // Don't clobber an unparseable config; opencode would reject it too.
+            // Preserve it as a backup and leave the original in place.
             let backup = config_path.with_extension("json.pragma-bak");
             let _ = std::fs::copy(config_path, &backup);
-            serde_json::json!({})
-        })
-    } else {
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            return Ok(());
         }
-        serde_json::json!({})
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
     };
 
-    let plugins = config
-        .as_object_mut()
-        .ok_or_else(|| AppError::InvalidInput("opencode config is not a JSON object".to_string()))?
-        .entry("plugin")
-        .or_insert_with(|| serde_json::json!([]));
+    let object = config.as_object_mut().ok_or_else(|| {
+        AppError::InvalidInput("opencode config is not a JSON object".to_string())
+    })?;
 
+    let plugins = object
+        .entry("plugin")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
     let plugins_arr = plugins.as_array_mut().ok_or_else(|| {
         AppError::InvalidInput("opencode config `plugin` is not an array".to_string())
     })?;
 
-    // Remove the npm-package entry that 404s, plus any previous file path to our plugin.
-    plugins_arr.retain(|entry| match entry {
-        serde_json::Value::String(s) => {
-            s != NPM_PLUGIN_ENTRY
-                && (!s.starts_with(FILE_URL_PREFIX) || !s.ends_with(PLUGIN_FILE_NAME))
-        }
+    let before = plugins_arr.clone();
+    plugins_arr.retain(|item| match item {
+        serde_json::Value::String(s) => s != NPM_PLUGIN_ENTRY && !is_pragma_plugin_path(s),
         _ => true,
     });
+    plugins_arr.push(serde_json::Value::String(entry));
 
-    // Add the `file://` entry for our installed plugin.
-    plugins_arr.push(serde_json::json!(file_url));
+    if plugins_arr.as_slice() == before.as_slice() {
+        return Ok(());
+    }
 
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let json = serde_json::to_string_pretty(&config)?;
     std::fs::write(config_path, json)?;
     Ok(())
+}
+
+/// Whether `entry` is a (possibly stale) reference to Pragma's installed plugin
+/// file — a plain path or a `file://` URL ending in the plugin file name.
+fn is_pragma_plugin_path(entry: &str) -> bool {
+    entry.ends_with(PLUGIN_FILE_NAME) && (entry.contains('/') || entry.contains('\\'))
 }
 
 fn copy_if_changed(source: &Path, destination: &Path) -> AppResult<()> {
@@ -117,16 +141,22 @@ fn copy_if_changed(source: &Path, destination: &Path) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use serde_json::Value;
     use tempfile::tempdir;
 
-    use super::ensure_plugin_entry;
+    use super::ensure_config_plugin_entry;
+
+    fn read(config_path: &Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(config_path).expect("read config"))
+            .expect("parse config")
+    }
 
     #[test]
-    fn ensure_plugin_entry_replaces_npm_entry_with_file_url() {
+    fn registers_plugin_path_and_drops_stale_pragma_entries() {
         let dir = tempdir().expect("tempdir");
         let config_path = dir.path().join("opencode.json");
-        let plugin_path = dir.path().join("opencode.mjs");
         std::fs::write(
             &config_path,
             r#"{
@@ -135,33 +165,58 @@ mod tests {
 }"#,
         )
         .expect("write config");
+        let destination = dir.path().join("plugins/opencode.mjs");
 
-        ensure_plugin_entry(&config_path, &plugin_path).expect("ensure plugin entry");
+        ensure_config_plugin_entry(&config_path, &destination).expect("register plugin");
 
-        let updated: Value =
-            serde_json::from_str(&std::fs::read_to_string(&config_path).expect("read config"))
-                .expect("parse config");
+        let updated = read(&config_path);
         assert_eq!(updated["lsp"], true);
         assert_eq!(
             updated["plugin"],
-            serde_json::json!(["other-plugin", format!("file://{}", plugin_path.display())])
+            serde_json::json!(["other-plugin", destination.to_string_lossy()])
         );
     }
 
     #[test]
-    fn ensure_plugin_entry_creates_missing_config() {
+    fn creates_config_when_missing() {
         let dir = tempdir().expect("tempdir");
         let config_path = dir.path().join("nested/opencode.json");
-        let plugin_path = dir.path().join("opencode.mjs");
+        let destination = dir.path().join("plugins/opencode.mjs");
 
-        ensure_plugin_entry(&config_path, &plugin_path).expect("ensure plugin entry");
+        ensure_config_plugin_entry(&config_path, &destination).expect("register plugin");
 
-        let updated: Value =
-            serde_json::from_str(&std::fs::read_to_string(&config_path).expect("read config"))
-                .expect("parse config");
+        let updated = read(&config_path);
         assert_eq!(
             updated["plugin"],
-            serde_json::json!([format!("file://{}", plugin_path.display())])
+            serde_json::json!([destination.to_string_lossy()])
         );
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let dir = tempdir().expect("tempdir");
+        let config_path = dir.path().join("opencode.json");
+        let destination = dir.path().join("plugins/opencode.mjs");
+
+        ensure_config_plugin_entry(&config_path, &destination).expect("register plugin once");
+        ensure_config_plugin_entry(&config_path, &destination).expect("register plugin twice");
+
+        let updated = read(&config_path);
+        assert_eq!(
+            updated["plugin"],
+            serde_json::json!([destination.to_string_lossy()])
+        );
+    }
+
+    #[test]
+    fn preserves_unparseable_config_as_backup() {
+        let dir = tempdir().expect("tempdir");
+        let config_path = dir.path().join("opencode.json");
+        std::fs::write(&config_path, "{ not json").expect("write config");
+        let destination = dir.path().join("plugins/opencode.mjs");
+
+        ensure_config_plugin_entry(&config_path, &destination).expect("handle bad config");
+
+        assert!(config_path.with_extension("json.pragma-bak").exists());
     }
 }

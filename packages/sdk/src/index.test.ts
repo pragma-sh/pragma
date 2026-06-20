@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { reportAttention, reportStarted, reportStopped } from "./index";
+import { reportAttention, reportCleared, reportStarted, reportStopped } from "./index";
 import type { PragmaCliError } from "./index";
 
 const tempDirs: string[] = [];
@@ -65,6 +65,26 @@ describe("pragma-agent sdk", () => {
       "attention",
       "--kind",
       "question",
+    ]);
+  });
+
+  it("runs report cleared with the optional worktree id flag", async () => {
+    const { argsFile, executable } = await createArgCaptureExecutable();
+
+    await reportCleared({
+      agent: "mock",
+      executable,
+      env: { PRAGMA_SDK_ARGS_FILE: argsFile },
+      worktreeId: "worktree-1",
+    });
+
+    await expect(readArgs(argsFile)).resolves.toEqual([
+      "--agent",
+      "mock",
+      "report",
+      "cleared",
+      "--worktree-id",
+      "worktree-1",
     ]);
   });
 

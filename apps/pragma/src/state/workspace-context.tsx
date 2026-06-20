@@ -22,7 +22,13 @@ import type {
 import { toast } from "sonner";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
-import { alertAgent } from "@/lib/agent-alert";
+import {
+  alertAgent,
+  latchAlertedStatus,
+  releaseAlertLatch,
+  releaseAlertLatchForTab,
+  shouldAlertForStatus,
+} from "@/lib/agent-alert";
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
@@ -37,9 +43,11 @@ import {
   listSplits,
   listTabs,
   listWorktrees,
+  markAgentsSeen,
   onBrowserFocusRequest,
   onBrowserMeta,
   onAgentCliPathWarning,
+  onAgentNotificationClick,
   onAgentReport,
   onAgentStatusReset,
   onMenuAction,
@@ -57,6 +65,7 @@ import {
 } from "@/lib/tauri";
 import type { SplitLayout } from "@/lib/tauri";
 import {
+  agentStatusesForTab,
   applyAgentReport,
   clearAllAgentStatuses,
   clearDoneStatusForTab,
@@ -1091,6 +1100,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let unlistenReport: (() => void) | null = null;
     let unlistenReset: (() => void) | null = null;
     let unlistenPath: (() => void) | null = null;
+    let unlistenNotificationClick: (() => void) | null = null;
     void onAgentStatusReset(() => {
       clearAllAgentStatuses();
     }).then((unlisten) => {
@@ -1102,19 +1112,44 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return undefined;
     });
     void onAgentReport((payload) => {
-      const previous = applyAgentReport(payload);
-      // A tab that finishes while already on screen is considered seen: drop its
-      // green immediately instead of flashing it. Running/attention still show.
-      if (payload.status === "done" && visibleTabIdsRef.current.has(payload.tabId)) {
-        clearDoneStatusForTab(payload.tabId);
+      applyAgentReport(payload);
+      // The agent genuinely moved on (started a new turn, or its process exited),
+      // so release the alert latch: its next completion/attention is a new event,
+      // not a snapshot replay, and should notify again.
+      if (payload.status === "running" || payload.status === "cleared") {
+        releaseAlertLatch(payload);
       }
+      // A tab that finishes or needs attention while already on screen is
+      // considered seen: latch it so a later daemon snapshot replay (on
+      // reconnect) doesn't re-fire a notification the user already looked at.
+      // For `done` also drop the green dot immediately instead of flashing it;
+      // `attention` (red) keeps showing until the agent moves on.
+      if (
+        (payload.status === "done" || payload.status === "attention") &&
+        visibleTabIdsRef.current.has(payload.tabId)
+      ) {
+        if (payload.status === "done") {
+          clearDoneStatusForTab(payload.tabId);
+          // Tell the daemon this completion was seen so its stored `done` is
+          // dropped — otherwise a later reconnect would replay it and the green
+          // dot (and notification) would come back.
+          void markAgentsSeen(payload.tabId);
+        }
+        latchAlertedStatus(payload);
+      }
+      // Alert at most once per status occurrence. The latch (not the dot store,
+      // which viewing clears) gates this, so the daemon's snapshot replay on
+      // every reconnect restores the dots without re-firing notifications the
+      // user already saw.
       if (
         !isTabCurrentlyViewed(payload.tabId) &&
         (payload.status === "attention" || payload.status === "done") &&
-        previous !== payload.status
+        shouldAlertForStatus(payload)
       ) {
+        latchAlertedStatus(payload);
         void resolveProjectForWorktree(payload.worktreeId).then((projectId) => {
           void alertAgent(payload, {
+            projectId: projectId ?? undefined,
             onGoTo: projectId
               ? () => void navigateToAgentLocation(projectId, payload.worktreeId, payload.tabId)
               : undefined,
@@ -1142,11 +1177,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unlistenPath = unlisten;
       return undefined;
     });
+    void onAgentNotificationClick((payload) => {
+      void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenNotificationClick = unlisten;
+      return undefined;
+    });
     return () => {
       cancelled = true;
       unlistenReport?.();
       unlistenReset?.();
       unlistenPath?.();
+      unlistenNotificationClick?.();
     };
   }, [isTabCurrentlyViewed, navigateToAgentLocation, resolveProjectForWorktree]);
 
@@ -1366,6 +1412,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const closeTab = useCallback(async (tabId: string) => {
     terminalManager.dispose(tabId);
     removeAgentStatusForTab(tabId);
+    releaseAlertLatchForTab(tabId);
     void browserClose(tabId);
     try {
       await closeTabCommand(tabId);
@@ -1390,6 +1437,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!tabId || !worktreeId) {
         return;
       }
+      clearDoneStatusForTab(tabId);
       dispatch({ type: "set-active-tab", worktreeId, tabId });
     },
     [state.tabs],
@@ -1798,7 +1846,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     for (const tabId of visibleTabIds) {
+      // Mark the agent statuses the user is now seeing as alerted, so a later
+      // daemon snapshot replay (on reconnect) doesn't re-fire a notification for
+      // a pending prompt or completion the user has already looked at. Do this
+      // before clearing the green dots so the `done` entries are still readable.
+      let hasDone = false;
+      for (const entry of agentStatusesForTab(tabId)) {
+        if (entry.status === "attention" || entry.status === "done") {
+          latchAlertedStatus({
+            worktreeId: entry.worktreeId,
+            tabId,
+            agent: entry.agent,
+            status: entry.status,
+          });
+        }
+        if (entry.status === "done") {
+          hasDone = true;
+        }
+      }
       clearDoneStatusForTab(tabId);
+      if (hasDone) {
+        // Tell the daemon these completions were seen so its stored `done` is
+        // dropped — clearing the dot locally alone would let a later reconnect
+        // replay it and resurrect the green dot.
+        void markAgentsSeen(tabId);
+      }
     }
   }, [visibleTabIds]);
 
@@ -1807,9 +1879,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!selectedWorktreeId) {
         return;
       }
+      const pane = paneById(splitRoot, paneId);
+      if (pane?.activeTabId) {
+        clearDoneStatusForTab(pane.activeTabId);
+      }
       dispatch({ type: "focus-pane", worktreeId: selectedWorktreeId, paneId });
     },
-    [selectedWorktreeId],
+    [selectedWorktreeId, splitRoot],
   );
 
   const setPaneActiveTab = useCallback(
@@ -1817,6 +1893,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!selectedWorktreeId) {
         return;
       }
+      clearDoneStatusForTab(tabId);
       dispatch({ type: "set-pane-active-tab", worktreeId: selectedWorktreeId, paneId, tabId });
     },
     [selectedWorktreeId],

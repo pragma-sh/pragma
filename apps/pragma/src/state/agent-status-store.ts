@@ -10,13 +10,23 @@ const listeners = new Set<() => void>();
 const statuses: WorktreeMap = new Map();
 
 const priority: Record<AgentStatus, number> = {
+  cleared: 0,
   done: 1,
   running: 2,
   attention: 3,
 };
 
-/** Stores one daemon agent report and returns the previous status for that agent. */
+/**
+ * Stores one daemon agent report and returns the previous status for that agent.
+ *
+ * A `cleared` report is a removal signal (the agent process exited): it deletes
+ * the agent's entry entirely instead of leaving a stored status, so no indicator
+ * lingers — distinct from `done`, which keeps a green "finished, go look" dot.
+ */
 export function applyAgentReport(payload: AgentReportPayload): AgentStatus | null {
+  if (payload.status === "cleared") {
+    return removeAgent(payload.worktreeId, payload.tabId, payload.agent);
+  }
   let tabs = statuses.get(payload.worktreeId);
   if (!tabs) {
     tabs = new Map();
@@ -30,6 +40,23 @@ export function applyAgentReport(payload: AgentReportPayload): AgentStatus | nul
   const previous = agents.get(payload.agent) ?? null;
   agents.set(payload.agent, payload.status);
   emit();
+  return previous;
+}
+
+/** Drops a single agent's entry, pruning empty tab/worktree maps. Returns its previous status. */
+function removeAgent(worktreeId: string, tabId: string, agent: string): AgentStatus | null {
+  const tabs = statuses.get(worktreeId);
+  const agents = tabs?.get(tabId);
+  const previous = agents?.get(agent) ?? null;
+  if (agents?.delete(agent)) {
+    if (agents.size === 0) {
+      tabs?.delete(tabId);
+    }
+    if (tabs && tabs.size === 0) {
+      statuses.delete(worktreeId);
+    }
+    emit();
+  }
   return previous;
 }
 
@@ -85,6 +112,27 @@ export function clearAllAgentStatuses(): void {
   }
   statuses.clear();
   emit();
+}
+
+/**
+ * Returns every stored agent entry for a tab. Used to latch the statuses the
+ * user is now seeing as "alerted" when a tab comes on screen, so a later daemon
+ * snapshot replay doesn't re-fire a notification the user already looked at.
+ */
+export function agentStatusesForTab(
+  tabId: string,
+): Array<{ worktreeId: string; agent: string; status: AgentStatus }> {
+  const entries: Array<{ worktreeId: string; agent: string; status: AgentStatus }> = [];
+  for (const [worktreeId, tabs] of statuses) {
+    const agents = tabs.get(tabId);
+    if (!agents) {
+      continue;
+    }
+    for (const [agent, status] of agents) {
+      entries.push({ worktreeId, agent, status });
+    }
+  }
+  return entries;
 }
 
 /** Returns the highest-priority agent status for a tab. */

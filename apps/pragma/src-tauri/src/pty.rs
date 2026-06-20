@@ -198,6 +198,14 @@ impl PtyClient {
         self.request(request_kill_for_cwd(path))
     }
 
+    /// Tells the daemon a tab's resolved (`done`) agent indicators have been
+    /// seen, so it drops them from its in-memory map and a later subscriber
+    /// reconnect doesn't replay (and re-notify) a completion the user already
+    /// looked at. `running`/`attention` are left intact.
+    pub fn mark_agents_seen(&self, tab_id: String) -> AppResult<()> {
+        self.request(request_mark_agents_seen(tab_id))
+    }
+
     /// Kills the running daemon (if any) and spawns a fresh build, confirming the
     /// new daemon is reachable before returning. Every running shell session is
     /// terminated — this is a deliberate troubleshooting action surfaced through
@@ -582,6 +590,18 @@ fn request_kill_for_cwd(cwd: String) -> RequestFrame {
         None,
         None,
         Some(cwd),
+    )
+}
+
+fn request_mark_agents_seen(tab_id: String) -> RequestFrame {
+    request_frame(
+        RequestKind::MarkAgentsSeen,
+        Some(tab_id),
+        None,
+        None,
+        None,
+        None,
+        None,
     )
 }
 

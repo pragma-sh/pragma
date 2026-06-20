@@ -74,6 +74,10 @@ pub enum RequestKind {
     AgentReport,
     /// Subscribes to daemon-wide agent status events.
     SubscribeAgents,
+    /// Marks a tab's resolved (`done`) agent statuses as seen so the daemon
+    /// stops replaying them on the next subscriber reconnect. `sessionId` is the
+    /// tab id; `running`/`attention` statuses are left untouched.
+    MarkAgentsSeen,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

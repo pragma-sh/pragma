@@ -39,6 +39,12 @@ export interface ReportAttentionOptions extends PragmaAgentCommandOptions {
   kind: AttentionKind;
 }
 
+/** Options for `pragma-agent report cleared`. */
+export interface ReportClearedOptions extends PragmaAgentCommandOptions {
+  /** Override for `PRAGMA_WORKTREE_ID`. Maps to `--worktree-id`. */
+  worktreeId?: string;
+}
+
 /** Result returned after a CLI command exits successfully. */
 export interface PragmaCliResult {
   /** Executable used for the spawned CLI process. */
@@ -138,6 +144,27 @@ export function reportAttention(options: ReportAttentionOptions): Promise<Pragma
       "attention",
       "--kind",
       options.kind,
+    ],
+    options,
+  );
+}
+
+/**
+ * Runs `pragma-agent report cleared` for the current Pragma terminal tab.
+ *
+ * Unlike {@link reportStopped} (which leaves a green "done" indicator), this
+ * removes the agent's indicator entirely. Use it when the agent process exits
+ * rather than when it finishes a turn. Pass `worktreeId` to emit
+ * `--worktree-id`; otherwise the CLI falls back to `PRAGMA_WORKTREE_ID`.
+ */
+export function reportCleared(options: ReportClearedOptions): Promise<PragmaCliResult> {
+  return runPragmaAgent(
+    [
+      "--agent",
+      requiredFlag("agent", options.agent),
+      "report",
+      "cleared",
+      ...optionalFlag("--worktree-id", options.worktreeId),
     ],
     options,
   );

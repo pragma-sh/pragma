@@ -42,6 +42,13 @@ enum ReportCommand {
         #[arg(long)]
         kind: AttentionKind,
     },
+    /// Clears the tab's indicator entirely instead of leaving a `done`/green dot.
+    /// Use when the agent process exits rather than finishing a turn.
+    Cleared {
+        /// Overrides `PRAGMA_WORKTREE_ID`, useful when clearing final status from a parent process.
+        #[arg(long)]
+        worktree_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -75,6 +82,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 }),
                 None,
             ),
+            ReportCommand::Cleared { worktree_id } => ("cleared", None, worktree_id),
         },
     };
     let worktree_id = worktree_override.unwrap_or(env_required("PRAGMA_WORKTREE_ID")?);
@@ -157,6 +165,28 @@ mod tests {
         ])
         .expect("attention with a kind should parse");
         assert_eq!(cli.agent, "mock");
+    }
+
+    #[test]
+    fn cleared_accepts_optional_worktree_override() {
+        let cli = Cli::try_parse_from([
+            "pragma-agent",
+            "--agent",
+            "mock",
+            "report",
+            "cleared",
+            "--worktree-id",
+            "wt-1",
+        ])
+        .expect("cleared with a worktree override should parse");
+        assert!(matches!(
+            cli.command,
+            Command::Report {
+                report: ReportCommand::Cleared {
+                    worktree_id: Some(ref id)
+                }
+            } if id == "wt-1"
+        ));
     }
 
     #[test]

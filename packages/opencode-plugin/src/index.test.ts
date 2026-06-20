@@ -1,8 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const reportClearedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
+const reportStartedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
+const reportStoppedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
+const reportAttentionMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
+
+vi.mock("@pragma/sdk", () => ({
+  reportCleared: (...args: unknown[]) => reportClearedMock(...args),
+  reportStarted: (...args: unknown[]) => reportStartedMock(...args),
+  reportStopped: (...args: unknown[]) => reportStoppedMock(...args),
+  reportAttention: (...args: unknown[]) => reportAttentionMock(...args),
+}));
 
 import { createPragmaOpencodeHooks } from "./hooks";
+import PragmaOpencodePlugin from "./index";
 
-type Report = "started" | "stopped" | `attention:${string}`;
+type Report = "started" | "stopped" | "cleared" | `attention:${string}`;
 
 function testHooks() {
   const reports: Report[] = [];
@@ -20,6 +33,9 @@ function testHooks() {
     },
     async attention(kind) {
       reports.push(`attention:${kind}`);
+    },
+    async cleared() {
+      reports.push("cleared");
     },
   });
   return { hooks, reports };
@@ -83,24 +99,85 @@ describe("Pragma opencode plugin", () => {
     expect(reports).toEqual(["started"]);
   });
 
-  it("reports stopped on session idle, deleted, and error", async () => {
-    const { hooks: idleHooks, reports: idleReports } = testHooks();
-    await idleHooks.event?.({
+  async function expectStoppedAfter(terminal: { type: string; properties: unknown }) {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.({ event: terminal as never });
+    expect(reports).toEqual(["started", "stopped"]);
+  }
+
+  it("reports stopped after a running turn idles", async () => {
+    await expectStoppedAfter({ type: "session.idle", properties: { sessionID: "s1" } });
+  });
+
+  it("reports stopped after a running turn is deleted", async () => {
+    await expectStoppedAfter({ type: "session.deleted", properties: { info: { id: "s1" } } });
+  });
+
+  it("reports stopped after a running turn errors (non-abort)", async () => {
+    await expectStoppedAfter({ type: "session.error", properties: { sessionID: "s1" } });
+  });
+
+  it("does not report a phantom stopped for a bare idle with no prior activity", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks.event?.({
       event: { type: "session.idle", properties: { sessionID: "s1" } } as never,
     });
-    expect(idleReports).toEqual(["stopped"]);
 
-    const { hooks: deletedHooks, reports: deletedReports } = testHooks();
-    await deletedHooks.event?.({
-      event: { type: "session.deleted", properties: { sessionID: "s1" } } as never,
-    });
-    expect(deletedReports).toEqual(["stopped"]);
+    expect(reports).toEqual([]);
+  });
 
-    const { hooks: errorHooks, reports: errorReports } = testHooks();
-    await errorHooks.event?.({
-      event: { type: "session.error", properties: { sessionID: "s1" } } as never,
+  it("clears (resets) on an aborted turn instead of reporting finished", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "s1",
+          error: { name: "MessageAbortedError", data: { message: "aborted" } },
+        },
+      } as never,
     });
-    expect(errorReports).toEqual(["stopped"]);
+
+    expect(reports).toEqual(["started", "cleared"]);
+  });
+
+  it("does not resurrect a finished dot from the idle that trails an abort", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "s1",
+          error: { name: "MessageAbortedError", data: { message: "aborted" } },
+        },
+      } as never,
+    });
+    // opencode may emit a trailing idle after the abort; it must stay cleared.
+    await hooks.event?.({
+      event: { type: "session.idle", properties: { sessionID: "s1" } } as never,
+    });
+
+    expect(reports).toEqual(["started", "cleared"]);
+  });
+
+  it("clears on server instance disposal even without the dispose hook", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.({
+      event: {
+        type: "server.instance.disposed",
+        properties: { directory: "/tmp/project" },
+      } as never,
+    });
+
+    expect(reports).toEqual(["started", "cleared"]);
   });
 
   it("coalesces repeated busy events into a single started report", async () => {
@@ -167,12 +244,12 @@ describe("Pragma opencode plugin", () => {
     expect(reports).toEqual(["started"]);
   });
 
-  it("reports permission attention then resumes when replied", async () => {
+  it("reports permission attention for documented asked event then resumes when replied", async () => {
     const { hooks, reports } = testHooks();
 
     await hooks.event?.({
       event: {
-        type: "permission.updated",
+        type: "permission.asked",
         properties: {
           id: "perm-1",
           type: "bash",
@@ -194,6 +271,27 @@ describe("Pragma opencode plugin", () => {
     expect(reports).toEqual(["attention:command", "started"]);
   });
 
+  it("keeps supporting the older typed permission updated event", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks.event?.({
+      event: {
+        type: "permission.updated",
+        properties: {
+          id: "perm-1",
+          type: "bash",
+          sessionID: "s1",
+          messageID: "m1",
+          title: "Run command",
+          metadata: {},
+          time: { created: 0 },
+        },
+      } as never,
+    });
+
+    expect(reports).toEqual(["attention:command"]);
+  });
+
   it("forwards pragma env vars to opencode shell commands", async () => {
     const { hooks } = testHooks();
     const output = { env: {} };
@@ -207,12 +305,21 @@ describe("Pragma opencode plugin", () => {
     });
   });
 
-  it("reports stopped on dispose", async () => {
+  it("clears (not stopped/done) on dispose so a quit agent leaves no indicator", async () => {
     const { hooks, reports } = testHooks();
 
     await hooks.dispose?.();
 
-    expect(reports).toEqual(["stopped"]);
+    expect(reports).toEqual(["cleared"]);
+  });
+
+  it("clears a running agent on dispose instead of leaving it yellow or green", async () => {
+    const { hooks, reports } = testHooks();
+
+    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+    await hooks.dispose?.();
+
+    expect(reports).toEqual(["started", "cleared"]);
   });
 
   it("reports attention for the question tool via tool.execute.before", async () => {
@@ -254,5 +361,37 @@ describe("Pragma opencode plugin", () => {
     );
 
     expect(reports).toEqual(["attention:command"]);
+  });
+});
+
+describe("PragmaOpencodePlugin initialization", () => {
+  const pragmaEnv = {
+    PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
+    PRAGMA_TAB_ID: "tab-1",
+    PRAGMA_WORKTREE_ID: "worktree-1",
+  };
+  const input = { directory: "/tmp/project" } as never;
+
+  beforeEach(() => {
+    reportClearedMock.mockClear();
+  });
+
+  it("clears any stale status when opencode opens, so a fresh open shows nothing", async () => {
+    await PragmaOpencodePlugin(input, { env: pragmaEnv });
+
+    expect(reportClearedMock).toHaveBeenCalledTimes(1);
+    expect(reportClearedMock).toHaveBeenCalledWith(expect.objectContaining({ agent: "opencode" }));
+  });
+
+  it("does not report on init outside a Pragma terminal", async () => {
+    await PragmaOpencodePlugin(input, {
+      env: {
+        PRAGMA_DAEMON_SOCKET: undefined,
+        PRAGMA_TAB_ID: undefined,
+        PRAGMA_WORKTREE_ID: undefined,
+      },
+    });
+
+    expect(reportClearedMock).not.toHaveBeenCalled();
   });
 });
