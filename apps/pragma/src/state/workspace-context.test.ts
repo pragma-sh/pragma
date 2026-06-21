@@ -213,6 +213,44 @@ describe("workspaceReducer", () => {
     expect(state.tabs.some((item) => item.id === "link")).toBe(true);
   });
 
+  it("falls back to a normal tab when open-in-new-split source is missing or wrong worktree", () => {
+    const missingSource = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("term")],
+        activeTabByWorktree: { worktree: "term" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link"),
+        sourceTabId: "gone",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+    expect(missingSource.tabs.map((item) => item.id)).toEqual(["term", "link"]);
+    expect(missingSource.activeTabByWorktree.worktree).toBe("link");
+    expect(missingSource.splitRootByWorktree.worktree).toBeUndefined();
+
+    const otherWorktree = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("term", "worktree-a"), tab("other", "worktree-a")],
+        activeTabByWorktree: { "worktree-a": "term" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link", "worktree-b"),
+        sourceTabId: "term",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+    expect(otherWorktree.tabs.some((item) => item.id === "link")).toBe(true);
+    expect(otherWorktree.activeTabByWorktree["worktree-b"]).toBe("link");
+    expect(otherWorktree.splitRootByWorktree["worktree-b"]).toBeUndefined();
+  });
+
   it("opens a new tab beside the source pane inside an existing split", () => {
     const state = workspaceReducer(
       {

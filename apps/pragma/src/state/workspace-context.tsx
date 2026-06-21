@@ -845,6 +845,12 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       const worktreeId = tab.worktreeId;
       const tabs = [...state.tabs, tab];
       const activeTabByWorktree = { ...state.activeTabByWorktree, [worktreeId]: tab.id };
+      const sourceTab = state.tabs.find((item) => item.id === sourceTabId);
+      // Stale or cross-worktree source ids must not enter keepIds — fall back to
+      // a normal top-bar tab (same as add-tab) instead of corrupting split state.
+      if (!sourceTab || sourceTab.worktreeId !== worktreeId) {
+        return { ...state, tabs, activeTabByWorktree };
+      }
       // Normalize anchored on the source tab so the implicit single-pane root
       // keeps the source (not the just-added tab) as its active tab.
       const root = normalizeRoot(

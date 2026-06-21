@@ -166,6 +166,24 @@ export function createFileLinkProvider(
   worktreeId: string,
   cwd: string,
 ) {
+  // xterm may call provideLinks often while scrolling; cache per path so duplicate
+  // checks (same line repainted, repeated tokens) share one IPC round-trip.
+  const pathExistsCache = new Map<string, Promise<boolean>>();
+
+  function cachedPathExists(path: string): Promise<boolean> {
+    const cached = pathExistsCache.get(path);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const handler = getTerminalLinkHandler();
+    if (!handler) {
+      return Promise.resolve(false);
+    }
+    const pending = handler.pathExists(worktreeId, path).catch(() => false);
+    pathExistsCache.set(path, pending);
+    return pending;
+  }
+
   async function resolveLinks(bufferLineNumber: number): Promise<ILink[] | undefined> {
     const handler = getTerminalLinkHandler();
     if (!handler) {
@@ -187,7 +205,7 @@ export function createFileLinkProvider(
         if (startColumn === undefined || endColumn === undefined) {
           return null;
         }
-        if (!(await handler.pathExists(worktreeId, relative))) {
+        if (!(await cachedPathExists(relative))) {
           return null;
         }
         return {

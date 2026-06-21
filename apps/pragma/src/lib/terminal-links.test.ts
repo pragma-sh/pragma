@@ -1,6 +1,51 @@
-import { describe, expect, it } from "vitest";
+import type { Terminal } from "@xterm/xterm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { findFilePathCandidates, toWorktreeRelativePath } from "@/lib/terminal-links";
+import {
+  createFileLinkProvider,
+  findFilePathCandidates,
+  setTerminalLinkHandler,
+  toWorktreeRelativePath,
+} from "@/lib/terminal-links";
+
+function mockTerminalWithLine(text: string): Terminal {
+  const cells = [...text].map((char) => ({
+    getWidth: () => 1,
+    getChars: () => char,
+  }));
+  const line = {
+    length: cells.length,
+    getCell(column: number, cell: { getWidth: () => number; getChars: () => string }) {
+      const data = cells[column];
+      if (data) {
+        cell.getWidth = data.getWidth;
+        cell.getChars = data.getChars;
+      }
+    },
+  };
+  const nullCell = { getWidth: () => 1, getChars: () => " " };
+  return {
+    buffer: {
+      active: {
+        getLine: (index: number) => (index === 0 ? line : null),
+        getNullCell: () => ({ ...nullCell }),
+      },
+    },
+  } as unknown as Terminal;
+}
+
+async function provideLinksForLine(
+  provider: ReturnType<typeof createFileLinkProvider>,
+  lineNumber: number,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    provider.provideLinks(lineNumber, () => resolve());
+  });
+}
+
+afterEach(() => {
+  setTerminalLinkHandler(null);
+});
 
 describe("findFilePathCandidates", () => {
   it("matches paths with a separator and bare filenames with an extension", () => {
@@ -57,5 +102,27 @@ describe("toWorktreeRelativePath", () => {
     expect(toWorktreeRelativePath("/Users/me/project", cwd)).toBeNull();
     expect(toWorktreeRelativePath("../escape.ts", cwd)).toBeNull();
     expect(toWorktreeRelativePath("a/../../escape.ts", cwd)).toBeNull();
+  });
+});
+
+describe("createFileLinkProvider", () => {
+  const cwd = "/Users/me/project";
+
+  it("dedupes pathExists checks for the same path within and across provideLinks calls", async () => {
+    const pathExists = vi.fn().mockResolvedValue(true);
+    setTerminalLinkHandler({
+      openUrl: vi.fn(),
+      openFile: vi.fn(),
+      pathExists,
+    });
+
+    const terminal = mockTerminalWithLine("see src/foo.ts and src/foo.ts again");
+    const provider = createFileLinkProvider(terminal, "tab-1", "wt-1", cwd);
+
+    await provideLinksForLine(provider, 1);
+    await provideLinksForLine(provider, 1);
+
+    expect(pathExists).toHaveBeenCalledTimes(1);
+    expect(pathExists).toHaveBeenCalledWith("wt-1", "src/foo.ts");
   });
 });
