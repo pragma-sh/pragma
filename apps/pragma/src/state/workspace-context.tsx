@@ -117,10 +117,15 @@ interface WorkspaceState {
   error: string | null;
 }
 
+/** Prior split layout saved before run scripts temporarily replace it. */
+export type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
+
 export type RunScriptsState = {
   worktreeId: string;
   tabIds: string[];
   stopping: boolean;
+  /** Non-null when run scripts applied a split layout that overwrote the worktree root. */
+  splitSnapshot: RunScriptsSplitSnapshot | null;
 } | null;
 
 type WorkspaceAction =
@@ -150,6 +155,7 @@ type WorkspaceAction =
     }
   | { type: "move-tab-to-pane"; worktreeId: string; paneId: string; tabId: string }
   | { type: "set-split-root"; worktreeId: string; root: SplitLayoutNode }
+  | { type: "clear-split-root"; worktreeId: string }
   | { type: "add-tab"; tab: Tab }
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | { type: "remove-tab"; tabId: string }
@@ -215,6 +221,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   ) => void;
   moveTabToPane: (tabId: string, paneId: string) => void;
   runScriptsAvailable: boolean;
+  /** Set when `.pragma/scripts.json` fails to load or parse; null when valid or not yet loaded. */
+  runScriptsConfigError: string | null;
   runScriptsState: RunScriptsState;
   runScripts: () => Promise<void>;
   stopRunScripts: () => Promise<void>;
@@ -350,6 +358,18 @@ function createPane(tabIds: string[], activeTabId?: string | null, id = splitNod
     activeTabId:
       activeTabId && uniqueIds.includes(activeTabId) ? activeTabId : (uniqueIds[0] ?? null),
   };
+}
+
+function restoreRunScriptsSplitSnapshot(
+  dispatch: React.Dispatch<WorkspaceAction>,
+  worktreeId: string,
+  snapshot: RunScriptsSplitSnapshot,
+) {
+  if (snapshot.root) {
+    dispatch({ type: "set-split-root", worktreeId, root: snapshot.root });
+  } else {
+    dispatch({ type: "clear-split-root", worktreeId });
+  }
 }
 
 function materializeRunScriptLayout(
@@ -852,6 +872,13 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           : state.focusedPaneByWorktree,
       };
     }
+    case "clear-split-root": {
+      const splitRootByWorktree = { ...state.splitRootByWorktree };
+      delete splitRootByWorktree[action.worktreeId];
+      const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+      delete focusedPaneByWorktree[action.worktreeId];
+      return { ...state, splitRootByWorktree, focusedPaneByWorktree };
+    }
     case "add-tab": {
       return {
         ...state,
@@ -1032,6 +1059,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
   const [runScriptsState, setRunScriptsState] = useState<RunScriptsState>(null);
   const [runScriptsConfig, setRunScriptsConfig] = useState<ProjectScriptsConfig | null>(null);
+  const [runScriptsConfigError, setRunScriptsConfigError] = useState<string | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const tabsRef = useRef(state.tabs);
@@ -1336,6 +1364,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const projectId = state.selectedProjectId;
     setRunScriptsConfig(null);
+    setRunScriptsConfigError(null);
     if (!projectId) {
       return;
     }
@@ -1344,12 +1373,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       .then((config) => {
         if (!cancelled) {
           setRunScriptsConfig(config);
+          setRunScriptsConfigError(null);
         }
         return undefined;
       })
-      .catch(() => {
+      .catch((cause) => {
         if (!cancelled) {
           setRunScriptsConfig(null);
+          setRunScriptsConfigError(messageFor(cause));
         }
         return undefined;
       });
@@ -1864,14 +1895,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
-      try {
-        await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
-        dispatch({ type: "remove-worktree", worktreeId });
-        setRunScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
-      } catch (cause) {
-        toast.error(`Failed to delete worktree: ${messageFor(cause)}`);
-        throw cause;
-      }
+      await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+      dispatch({ type: "remove-worktree", worktreeId });
+      setRunScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
     },
     [],
   );
@@ -1963,9 +1989,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
     const startedTabIds: string[] = [];
+    let splitSnapshot: RunScriptsSplitSnapshot | null = null;
     try {
       const config = await loadProjectScripts(projectId);
       setRunScriptsConfig(config);
+      setRunScriptsConfigError(null);
       const entries = config.run ?? [];
       if (entries.length === 0) {
         toast.info("No run scripts configured for this project");
@@ -1985,9 +2013,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           startedTabIds.push(tab.id);
           tabIdsByCommand[commandIndex] = tab.id;
           dispatch({ type: "add-tab", tab });
-          setRunScriptsState({ worktreeId, tabIds: [...startedTabIds], stopping: false });
+          setRunScriptsState({
+            worktreeId,
+            tabIds: [...startedTabIds],
+            stopping: false,
+            splitSnapshot,
+          });
         }
         if (item.layout) {
+          if (splitSnapshot === null) {
+            splitSnapshot = {
+              root:
+                worktreeId in state.splitRootByWorktree
+                  ? (state.splitRootByWorktree[worktreeId] ?? null)
+                  : null,
+            };
+          }
           dispatch({
             type: "set-split-root",
             worktreeId,
@@ -2006,10 +2047,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
     } catch (cause) {
       setRunScriptsState(null);
+      if (splitSnapshot) {
+        restoreRunScriptsSplitSnapshot(dispatch, worktreeId, splitSnapshot);
+      }
       await Promise.all(startedTabIds.map((tabId) => closeTab(tabId)));
       toast.error(`Failed to run project scripts: ${messageFor(cause)}`);
     }
-  }, [closeTab, runScriptsState, state.selectedProjectId, state.selectedWorktreeByProject]);
+  }, [
+    closeTab,
+    dispatch,
+    runScriptsState,
+    state.selectedProjectId,
+    state.selectedWorktreeByProject,
+    state.splitRootByWorktree,
+  ]);
 
   const stopRunScripts = useCallback(async () => {
     if (!runScriptsState) {
@@ -2017,9 +2068,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     const current = runScriptsState;
     setRunScriptsState({ ...current, stopping: true });
+    if (current.splitSnapshot) {
+      restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
+    }
     await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
     setRunScriptsState(null);
-  }, [closeTab, runScriptsState]);
+  }, [closeTab, dispatch, runScriptsState]);
 
   // Every tab currently on screen for the selected worktree: the active tab,
   // plus each pane's active tab when a real split is shown. Viewing a tab clears
@@ -2216,6 +2270,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitTabAtPane,
       moveTabToPane,
       runScriptsAvailable,
+      runScriptsConfigError,
       runScriptsState,
       runScripts,
       stopRunScripts,
@@ -2260,6 +2315,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitTabAtPane,
       moveTabToPane,
       runScriptsAvailable,
+      runScriptsConfigError,
       runScriptsState,
       runScripts,
       stopRunScripts,

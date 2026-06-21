@@ -233,30 +233,34 @@ export function TerminalTabs() {
             <AgentsMenu />
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  className={cn(
-                    "border shadow-sm hover:text-white",
-                    runState
-                      ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
-                      : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
-                  )}
-                  disabled={runDisabled}
-                  onClick={() =>
-                    void (runState ? workspace.stopRunScripts() : workspace.runScripts())
-                  }
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={runState ? "Stop project scripts" : "Run project scripts"}
-                >
-                  {runState ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
-                </Button>
+                <span className="inline-flex">
+                  <Button
+                    className={cn(
+                      "border shadow-sm hover:text-white",
+                      runState
+                        ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
+                        : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
+                    )}
+                    disabled={runDisabled}
+                    onClick={() =>
+                      void (runState ? workspace.stopRunScripts() : workspace.runScripts())
+                    }
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={runState ? "Stop project scripts" : "Run project scripts"}
+                  >
+                    {runState ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
+                  </Button>
+                </span>
               </TooltipTrigger>
               <TooltipContent>
                 {runState
                   ? "Stop project scripts"
-                  : workspace.runScriptsAvailable
-                    ? "Run project scripts"
-                    : "No project run scripts"}
+                  : workspace.runScriptsConfigError
+                    ? workspace.runScriptsConfigError
+                    : workspace.runScriptsAvailable
+                      ? "Run project scripts"
+                      : "No project run scripts"}
               </TooltipContent>
             </Tooltip>
             {workspace.agentBackAvailable ? (

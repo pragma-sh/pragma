@@ -204,6 +204,34 @@ describe("TerminalManager lifecycle", () => {
     expect(invokeMock).toHaveBeenCalledWith("pty_kill", { sessionId: tab.id });
   });
 
+  it("does not flush queued input when the tab is disposed before attach completes", async () => {
+    let resolveAttach: ((channel: unknown) => void) | undefined;
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return new Promise((resolve) => {
+          resolveAttach = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    manager.writeWhenReady(tab.id, "echo hi\r");
+    manager.dispose(tab.id);
+
+    resolveAttach!({});
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+    expect(invokeMock).toHaveBeenCalledWith("pty_kill", { sessionId: tab.id });
+  });
+
   it("ignores dispose for an unknown tab without calling the backend", () => {
     const manager = new TerminalManager();
     manager.dispose("missing");

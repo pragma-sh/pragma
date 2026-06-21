@@ -394,7 +394,14 @@ export class TerminalManager {
     ptyAttach(tabId, cols, rows, onEvent)
       .catch(() => ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent))
       .then((channel) => {
-        managed.channel = channel;
+        const live = this.terminals.get(tabId);
+        if (!live || live !== managed) {
+          // Tab closed while attach/spawn was in flight — drop the session rather
+          // than wiring input/output to a disposed terminal.
+          void ptyKill(tabId);
+          return undefined;
+        }
+        live.channel = channel;
         const pending = this.pendingInput.get(tabId);
         if (pending) {
           this.pendingInput.delete(tabId);
@@ -410,8 +417,8 @@ export class TerminalManager {
         // clear the cache to force fit() to re-send the current size now that the
         // session exists; otherwise it early-returns and the PTY stays at 80x24
         // while xterm fills the window.
-        managed.lastResizeCols = null;
-        managed.lastResizeRows = null;
+        live.lastResizeCols = null;
+        live.lastResizeRows = null;
         this.fit(tabId);
         return undefined;
       })

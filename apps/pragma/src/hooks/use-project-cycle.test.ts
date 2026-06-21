@@ -72,6 +72,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     splitTabAtPane: vi.fn(),
     moveTabToPane: vi.fn(),
     runScriptsAvailable: false,
+    runScriptsConfigError: null,
     runScriptsState: null,
     runScripts: vi.fn(),
     stopRunScripts: vi.fn(),

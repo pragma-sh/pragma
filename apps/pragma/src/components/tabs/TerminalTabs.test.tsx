@@ -91,6 +91,7 @@ const mockWorkspace: WorkspaceContextValue = {
   splitTabAtPane: vi.fn(),
   moveTabToPane: vi.fn(),
   runScriptsAvailable: false,
+  runScriptsConfigError: null,
   runScriptsState: null,
   runScripts: vi.fn(),
   stopRunScripts: vi.fn(),
@@ -157,7 +158,12 @@ describe("TerminalTabs", () => {
   });
 
   it("stops managed project scripts while running", async () => {
-    mockWorkspace.runScriptsState = { worktreeId: "worktree", tabIds: ["one"], stopping: false };
+    mockWorkspace.runScriptsState = {
+      worktreeId: "worktree",
+      tabIds: ["one"],
+      stopping: false,
+      splitSnapshot: null,
+    };
     render(<TerminalTabs />);
 
     await userEvent.click(screen.getByLabelText("Stop project scripts"));
