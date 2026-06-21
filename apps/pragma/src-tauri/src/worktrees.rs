@@ -7,6 +7,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::pty::PtyClient;
+use crate::scripts;
 
 #[tauri::command]
 pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Worktree>> {
@@ -35,13 +36,17 @@ pub fn create_worktree(
         .join(".pragma/worktrees")
         .join(&worktree_id);
     git::create_worktree(PathBuf::from(&parent.path).as_path(), branch.trim(), &path)?;
-    db.insert_worktree(
+    let worktree = db.insert_worktree(
         &project_id,
         &parent_worktree_id,
         branch.trim(),
         title.filter(|value| !value.trim().is_empty()),
         &path.to_string_lossy(),
-    )
+    )?;
+    let config =
+        scripts::load_project_scripts_from_project_path(PathBuf::from(&project.path).as_path())?;
+    scripts::run_headless_commands(&project, &worktree, "setup", config.setup.as_slice())?;
+    Ok(worktree)
 }
 
 /// True when the worktree has uncommitted, staged, or untracked changes.
@@ -96,6 +101,10 @@ pub fn delete_worktree(
     let project = db.project(&worktree.project_id)?;
     let lock = locks.lock_for(&worktree.project_id)?;
     let _guard = lock.lock()?;
+
+    let config =
+        scripts::load_project_scripts_from_project_path(PathBuf::from(&project.path).as_path())?;
+    scripts::run_headless_commands(&project, &worktree, "teardown", config.teardown.as_slice())?;
 
     // Terminate any PTY sessions in this worktree so they don't keep an open
     // fd on the directory we're about to remove. Best-effort: a daemon hiccup

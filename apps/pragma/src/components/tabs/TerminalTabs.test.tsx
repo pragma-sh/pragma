@@ -90,6 +90,10 @@ const mockWorkspace: WorkspaceContextValue = {
   splitActivePane: vi.fn(),
   splitTabAtPane: vi.fn(),
   moveTabToPane: vi.fn(),
+  runScriptsAvailable: false,
+  runScriptsState: null,
+  runScripts: vi.fn(),
+  stopRunScripts: vi.fn(),
 };
 
 vi.mock("@/state/workspace-context", () => ({
@@ -103,6 +107,10 @@ vi.mock("@/components/editor/confirm-close", () => ({
 afterEach(() => {
   cleanup();
   mockWorkspace.splitRootByWorktree = {};
+  mockWorkspace.selectedWorktree = null;
+  mockWorkspace.runScriptsAvailable = false;
+  mockWorkspace.runScriptsState = null;
+  vi.clearAllMocks();
 });
 
 describe("TerminalTabs", () => {
@@ -126,5 +134,34 @@ describe("TerminalTabs", () => {
     expect(screen.getByTitle("Split: one")).toBeInTheDocument();
     expect(screen.queryByText("two")).not.toBeInTheDocument();
     expect(screen.queryByText("three")).not.toBeInTheDocument();
+  });
+
+  it("runs project scripts from the header play button", async () => {
+    mockWorkspace.selectedWorktree = {
+      id: "worktree",
+      projectId: "project",
+      parentId: null,
+      branch: "main",
+      title: null,
+      path: "/tmp/project",
+      isMain: true,
+      hidden: false,
+      createdAt: "now",
+    };
+    mockWorkspace.runScriptsAvailable = true;
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("Run project scripts"));
+
+    expect(mockWorkspace.runScripts).toHaveBeenCalled();
+  });
+
+  it("stops managed project scripts while running", async () => {
+    mockWorkspace.runScriptsState = { worktreeId: "worktree", tabIds: ["one"], stopping: false };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("Stop project scripts"));
+
+    expect(mockWorkspace.stopRunScripts).toHaveBeenCalled();
   });
 });

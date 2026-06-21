@@ -616,6 +616,30 @@ path")` from inside the action handler — never from inside the reducer.
   list. When the user hides the currently-selected worktree, the reducer
   falls back to the main worktree (or the first remaining root) so the
   workspace never points at a hidden id.
+- **Project scripts.** A project may define trusted lifecycle scripts in
+  `<project>/.pragma/scripts.json`; the file is project-owned and never stored
+  in SQLite. Pragma only adds `.pragma/worktrees/` to the project's
+  `.git/info/exclude` (and migrates its old broad `.pragma/` entry), so
+  `.pragma/scripts.json` remains commit-ready. Rust derives the path from
+  `Db::project(project_id).path` — IPC never accepts an arbitrary script path. Shape lives in `@pragma/constants`
+  (`ProjectScriptsConfig`, `RunScriptEntry` / `RunScriptNode`) and supports
+  `setup: string[]`, `teardown: string[]`, and `run: Array<string | split>`
+  where split objects use exactly one axis (`left`/`right` = horizontal,
+  `top`/`bottom` = vertical) and may nest. `setup` runs headlessly after a new
+  worktree row exists; failures leave the worktree on disk/SQLite and return a
+  structured error with stdout/stderr. `teardown` runs headlessly before PTYs
+  are killed and before git removes the worktree; any failure blocks deletion,
+  so the frontend delete dialog must wait for backend success before removing
+  the row. Headless commands run from the worktree root through `$SHELL -lc`,
+  inherit the user's environment, and receive `PRAGMA_WORKTREE_PATH`,
+  `PRAGMA_PROJECT_PATH`, and `PRAGMA_WORKTREE_ID` (no `PRAGMA_TAB_ID` because
+  there is no visible terminal). They run concurrently up to
+  `constants.scripts.maxConcurrentCommands`. Interactive `run` scripts are
+  frontend-owned: `workspace-context` loads the config via `load_project_scripts`,
+  creates normal terminal tabs and/or existing split layouts, and injects
+  commands through `terminalManager.writeWhenReady(tabId, command + "\r")` so no
+  daemon protocol change is required. The header play/stop button in
+  `TerminalTabs` tracks the run-managed tab ids; stop closes exactly those tabs.
 - **Active selection persists across restarts.** The last active project and
   each project's last active worktree are saved in the `settings` table under
   one opaque, frontend-owned JSON key (`activeSelection`) via the

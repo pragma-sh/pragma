@@ -14,6 +14,7 @@ import type {
   DiffSide,
   Project,
   ProjectIcon,
+  ProjectScriptsConfig,
   Tab,
   Worktree,
   WorktreeStatus,
@@ -30,6 +31,11 @@ import {
   shouldAlertForStatus,
 } from "@/lib/agent-alert";
 import { basename } from "@/lib/path";
+import {
+  planRunScripts,
+  type RunScriptLayoutTemplate,
+  type PlannedRunScripts,
+} from "@/lib/scripts";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
 import {
@@ -40,6 +46,7 @@ import {
   deleteWorktree as deleteWorktreeCommand,
   getActiveSelection,
   listProjects,
+  loadProjectScripts,
   listSplits,
   listTabs,
   listWorktrees,
@@ -110,6 +117,12 @@ interface WorkspaceState {
   error: string | null;
 }
 
+export type RunScriptsState = {
+  worktreeId: string;
+  tabIds: string[];
+  stopping: boolean;
+} | null;
+
 type WorkspaceAction =
   | { type: "load-start" }
   | { type: "load-error"; error: string }
@@ -136,6 +149,7 @@ type WorkspaceAction =
       placement: SplitPlacement;
     }
   | { type: "move-tab-to-pane"; worktreeId: string; paneId: string; tabId: string }
+  | { type: "set-split-root"; worktreeId: string; root: SplitLayoutNode }
   | { type: "add-tab"; tab: Tab }
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | { type: "remove-tab"; tabId: string }
@@ -200,6 +214,10 @@ interface WorkspaceContextValue extends WorkspaceState {
     placement: SplitPlacement,
   ) => void;
   moveTabToPane: (tabId: string, paneId: string) => void;
+  runScriptsAvailable: boolean;
+  runScriptsState: RunScriptsState;
+  runScripts: () => Promise<void>;
+  stopRunScripts: () => Promise<void>;
   agentBackAvailable?: boolean;
   navigateToAgentLocation?: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
   goBackFromAgent?: () => Promise<void>;
@@ -332,6 +350,37 @@ function createPane(tabIds: string[], activeTabId?: string | null, id = splitNod
     activeTabId:
       activeTabId && uniqueIds.includes(activeTabId) ? activeTabId : (uniqueIds[0] ?? null),
   };
+}
+
+function materializeRunScriptLayout(
+  template: RunScriptLayoutTemplate,
+  tabIdsByCommand: string[],
+): SplitLayoutNode {
+  if (template.kind === "pane") {
+    const tabId = tabIdsByCommand[template.commandIndex];
+    if (!tabId) {
+      throw new Error(`missing terminal tab for run command ${template.commandIndex}`);
+    }
+    return createPane([tabId], tabId);
+  }
+  return {
+    kind: "split",
+    id: splitNodeId("split"),
+    direction: template.direction,
+    children: [
+      materializeRunScriptLayout(template.children[0], tabIdsByCommand),
+      materializeRunScriptLayout(template.children[1], tabIdsByCommand),
+    ],
+  };
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    const frame =
+      window.requestAnimationFrame ??
+      ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
+    frame(() => resolve());
+  });
 }
 
 function initialRootForWorktree(
@@ -787,6 +836,22 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         },
       };
     }
+    case "set-split-root": {
+      const first = firstPane(action.root);
+      return {
+        ...state,
+        activeTabByWorktree: first?.activeTabId
+          ? { ...state.activeTabByWorktree, [action.worktreeId]: first.activeTabId }
+          : state.activeTabByWorktree,
+        splitRootByWorktree: {
+          ...state.splitRootByWorktree,
+          [action.worktreeId]: action.root,
+        },
+        focusedPaneByWorktree: first
+          ? { ...state.focusedPaneByWorktree, [action.worktreeId]: first.id }
+          : state.focusedPaneByWorktree,
+      };
+    }
     case "add-tab": {
       return {
         ...state,
@@ -965,6 +1030,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
   const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
+  const [runScriptsState, setRunScriptsState] = useState<RunScriptsState>(null);
+  const [runScriptsConfig, setRunScriptsConfig] = useState<ProjectScriptsConfig | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const tabsRef = useRef(state.tabs);
@@ -1266,6 +1333,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    const projectId = state.selectedProjectId;
+    setRunScriptsConfig(null);
+    if (!projectId) {
+      return;
+    }
+    let cancelled = false;
+    loadProjectScripts(projectId)
+      .then((config) => {
+        if (!cancelled) {
+          setRunScriptsConfig(config);
+        }
+        return undefined;
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRunScriptsConfig(null);
+        }
+        return undefined;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.selectedProjectId]);
+
   const selectWorktree = useCallback(
     (worktreeId: string | null) => {
       if (!state.selectedProjectId || !worktreeId) {
@@ -1456,6 +1548,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });
+      setRunScriptsState((current) => {
+        if (!current?.tabIds.includes(tabId)) {
+          return current;
+        }
+        const tabIds = current.tabIds.filter((id) => id !== tabId);
+        return tabIds.length === 0 ? null : { ...current, tabIds };
+      });
     } catch (cause) {
       dispatch({ type: "load-error", error: messageFor(cause) });
     }
@@ -1765,24 +1864,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
-      // Optimistic: drop the row from local state immediately so the sidebar
-      // entry (and the dialog) disappear without waiting on the backend. The
-      // delete runs in the background; if it fails we reload the project from
-      // SQLite — the row was never touched, so it comes back as it was — and
-      // surface a toast. The dialog is already gone by then, so an inline
-      // error is no longer an option (and we never rethrow).
-      const projectId = worktreeProjectIdRef.current[worktreeId];
-      dispatch({ type: "remove-worktree", worktreeId });
       try {
         await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+        dispatch({ type: "remove-worktree", worktreeId });
+        setRunScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
       } catch (cause) {
-        if (projectId) {
-          void refreshProject(projectId);
-        }
         toast.error(`Failed to delete worktree: ${messageFor(cause)}`);
+        throw cause;
       }
     },
-    [refreshProject],
+    [],
   );
 
   const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
@@ -1863,6 +1954,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const focusedPaneId = splitRoot?.kind === "split" ? (focusedPane?.id ?? null) : null;
   const activeTabId = legacyActiveTabId;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
+  const runScriptsAvailable = (runScriptsConfig?.run?.length ?? 0) > 0;
+
+  const runScripts = useCallback(async () => {
+    const projectId = state.selectedProjectId;
+    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+    if (!projectId || !worktreeId || runScriptsState) {
+      return;
+    }
+    const startedTabIds: string[] = [];
+    try {
+      const config = await loadProjectScripts(projectId);
+      setRunScriptsConfig(config);
+      const entries = config.run ?? [];
+      if (entries.length === 0) {
+        toast.info("No run scripts configured for this project");
+        return;
+      }
+      const plan: PlannedRunScripts = planRunScripts(entries);
+      const tabIdsByCommand: string[] = [];
+      for (const item of plan.items) {
+        for (const commandIndex of item.commandIndexes) {
+          // oxlint-disable-next-line no-await-in-loop -- Create run tabs in display order so each top-level tab can mount before command injection.
+          const tab = await createTabCommand(
+            projectId,
+            worktreeId,
+            "terminal",
+            defaultTabTitle("terminal"),
+          );
+          startedTabIds.push(tab.id);
+          tabIdsByCommand[commandIndex] = tab.id;
+          dispatch({ type: "add-tab", tab });
+          setRunScriptsState({ worktreeId, tabIds: [...startedTabIds], stopping: false });
+        }
+        if (item.layout) {
+          dispatch({
+            type: "set-split-root",
+            worktreeId,
+            root: materializeRunScriptLayout(item.layout, tabIdsByCommand),
+          });
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Each run entry needs one paint after its tabs/split are in state before queued terminal input flushes.
+        await nextAnimationFrame();
+        for (const commandIndex of item.commandIndexes) {
+          const tabId = tabIdsByCommand[commandIndex];
+          const command = plan.commands[commandIndex];
+          if (tabId && command) {
+            terminalManager.writeWhenReady(tabId, `${command}\r`);
+          }
+        }
+      }
+    } catch (cause) {
+      setRunScriptsState(null);
+      await Promise.all(startedTabIds.map((tabId) => closeTab(tabId)));
+      toast.error(`Failed to run project scripts: ${messageFor(cause)}`);
+    }
+  }, [closeTab, runScriptsState, state.selectedProjectId, state.selectedWorktreeByProject]);
+
+  const stopRunScripts = useCallback(async () => {
+    if (!runScriptsState) {
+      return;
+    }
+    const current = runScriptsState;
+    setRunScriptsState({ ...current, stopping: true });
+    await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
+    setRunScriptsState(null);
+  }, [closeTab, runScriptsState]);
 
   // Every tab currently on screen for the selected worktree: the active tab,
   // plus each pane's active tab when a real split is shown. Viewing a tab clears
@@ -2058,6 +2215,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitActivePane,
       splitTabAtPane,
       moveTabToPane,
+      runScriptsAvailable,
+      runScriptsState,
+      runScripts,
+      stopRunScripts,
       agentBackAvailable: !!agentBackLocation && agentBackLocation.expiresAt >= Date.now(),
       navigateToAgentLocation,
       goBackFromAgent,
@@ -2098,6 +2259,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitActivePane,
       splitTabAtPane,
       moveTabToPane,
+      runScriptsAvailable,
+      runScriptsState,
+      runScripts,
+      stopRunScripts,
       agentBackLocation,
       navigateToAgentLocation,
       goBackFromAgent,
