@@ -32,8 +32,11 @@ import {
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { terminalManager } from "@/lib/terminal-manager";
+import { setTerminalLinkHandler } from "@/lib/terminal-links";
 import {
   browserClose,
+  browserOpenExternal,
+  pathExists,
   clearSplitLayout as clearSplitLayoutCommand,
   closeTab as closeTabCommand,
   createTab as createTabCommand,
@@ -138,6 +141,13 @@ type WorkspaceAction =
   | { type: "move-tab-to-pane"; worktreeId: string; paneId: string; tabId: string }
   | { type: "add-tab"; tab: Tab }
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
+  | {
+      type: "open-in-new-split";
+      tab: Tab;
+      sourceTabId: string;
+      direction: SplitDirection;
+      placement: SplitPlacement;
+    }
   | { type: "remove-tab"; tabId: string }
   | { type: "rename-tab"; tabId: string; title: string }
   | { type: "set-auto-title"; tabId: string; title: string }
@@ -826,6 +836,55 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         },
       };
     }
+    case "open-in-new-split": {
+      // Add a freshly-created tab and split it into a new pane next to the
+      // source tab (the terminal the link was clicked in). Mirrors `split-pane`,
+      // but the new tab is the one pulled into the new pane and the source tab
+      // stays put — used by terminal-link "open to the right" actions.
+      const { tab, sourceTabId, direction, placement } = action;
+      const worktreeId = tab.worktreeId;
+      const tabs = [...state.tabs, tab];
+      const activeTabByWorktree = { ...state.activeTabByWorktree, [worktreeId]: tab.id };
+      // Normalize anchored on the source tab so the implicit single-pane root
+      // keeps the source (not the just-added tab) as its active tab.
+      const root = normalizeRoot(
+        state.splitRootByWorktree[worktreeId],
+        worktreeId,
+        tabs,
+        sourceTabId,
+      );
+      const sourcePane = paneContainingTab(root, sourceTabId) ?? firstPane(root);
+      if (!root || !sourcePane) {
+        return { ...state, tabs, activeTabByWorktree };
+      }
+      // When un-split the root is one implicit pane holding every tab, but only
+      // the source tab should follow into the split; the rest fall back to
+      // normal top-bar tabs (matching drag-to-split). Inside a real split the
+      // source pane keeps its own tabs.
+      const implicit = root.kind === "pane";
+      const keepIds = (implicit ? [sourceTabId] : sourcePane.tabIds).filter((id) => id !== tab.id);
+      if (keepIds.length === 0) {
+        return { ...state, tabs, activeTabByWorktree };
+      }
+      const targetPane = createPane([tab.id], tab.id);
+      const stayingPane = createPane(keepIds, sourceTabId, sourcePane.id);
+      const splitNode: SplitLayoutNode = {
+        kind: "split",
+        id: splitNodeId("split"),
+        direction,
+        children: placement === "after" ? [stayingPane, targetPane] : [targetPane, stayingPane],
+      };
+      const nextRoot = implicit
+        ? splitNode
+        : replacePane(removeTabFromNode(root, tab.id) ?? root, sourcePane.id, () => splitNode);
+      return {
+        ...state,
+        tabs,
+        activeTabByWorktree,
+        splitRootByWorktree: { ...state.splitRootByWorktree, [worktreeId]: nextRoot },
+        focusedPaneByWorktree: { ...state.focusedPaneByWorktree, [worktreeId]: targetPane.id },
+      };
+    }
     case "remove-tab": {
       const removed = state.tabs.find((tab) => tab.id === action.tabId);
       const tabs = state.tabs.filter((tab) => tab.id !== action.tabId);
@@ -1331,6 +1390,85 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [createTab],
   );
+
+  // Opens a terminal-link target in a split to the right of the clicked
+  // terminal. A browser URL becomes a browser tab; a worktree-relative path
+  // becomes an editor tab. If the same resource is already open in the worktree
+  // we just focus it instead of stacking duplicate panes. Reads live state via
+  // refs so the handler registered with `setTerminalLinkHandler` stays stable.
+  const openFromTerminalLink = useCallback(
+    async (
+      sourceTabId: string,
+      worktreeId: string,
+      spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
+    ) => {
+      const projectId = worktreeProjectIdRef.current[worktreeId] ?? selectedProjectIdRef.current;
+      if (!projectId) {
+        return;
+      }
+      const existing = tabsRef.current.find((tab) =>
+        spec.kind === "browser"
+          ? tab.kind === "browser" && tab.worktreeId === worktreeId && tab.url === spec.url
+          : tab.kind === "editor" &&
+            tab.worktreeId === worktreeId &&
+            tab.filePath === spec.path &&
+            tab.diffSide === null,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab =
+          spec.kind === "browser"
+            ? await createTabCommand(
+                projectId,
+                worktreeId,
+                "browser",
+                defaultTabTitle("browser"),
+                spec.url,
+              )
+            : await createTabCommand(
+                projectId,
+                worktreeId,
+                "editor",
+                basename(spec.path),
+                undefined,
+                spec.path,
+                null,
+              );
+        dispatch({
+          type: "open-in-new-split",
+          tab,
+          sourceTabId,
+          direction: "horizontal",
+          placement: "after",
+        });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: messageFor(cause) });
+      }
+    },
+    [],
+  );
+
+  // Wire the non-React terminal link providers to workspace actions. Registered
+  // once (the callback is ref-backed and stable); cleared on unmount.
+  useEffect(() => {
+    setTerminalLinkHandler({
+      openUrl: ({ tabId, worktreeId, url, external }) => {
+        if (external) {
+          void browserOpenExternal(url).catch((cause) => toast.error(messageFor(cause)));
+          return;
+        }
+        void openFromTerminalLink(tabId, worktreeId, { kind: "browser", url });
+      },
+      openFile: ({ tabId, worktreeId, path }) => {
+        void openFromTerminalLink(tabId, worktreeId, { kind: "editor", path });
+      },
+      pathExists: (worktreeId, path) => pathExists(worktreeId, path).catch(() => false),
+    });
+    return () => setTerminalLinkHandler(null);
+  }, [openFromTerminalLink]);
 
   // Shared opener for editor/diff tabs. Both dedupe against the active worktree's
   // existing tabs (a file path is worktree-relative) before creating a new one.

@@ -35,6 +35,7 @@ vi.mock("@xterm/xterm", () => {
     loadAddon = vi.fn();
     attachCustomKeyEventHandler = vi.fn();
     attachCustomWheelEventHandler = vi.fn();
+    registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }));
     modes = { mouseTrackingMode: "none" as "none" | "x10" | "vt200" | "drag" | "any" };
     onData = vi.fn();
     resize = vi.fn((cols: number, rows: number) => {
