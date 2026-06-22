@@ -12,6 +12,7 @@ import type {
   KeybindingsConfig,
   Project,
   ProjectIcon,
+  ProjectScriptsConfig,
   Tab,
   TabKind,
   WorktreeChanges,
@@ -202,6 +203,11 @@ export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<
 /** Returns the default directory for native project pickers. */
 export function getProjectsDirectory(): Promise<string> {
   return invoke<string>("get_projects_directory");
+}
+
+/** Loads optional `.pragma/scripts.json` for a project from its persisted root path. */
+export function loadProjectScripts(projectId: string): Promise<ProjectScriptsConfig> {
+  return invoke<ProjectScriptsConfig>("load_project_scripts", { projectId });
 }
 
 /**

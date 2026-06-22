@@ -14,11 +14,12 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `components/ui/` — shadcn/ui primitives (generated; don't hand-edit).
   - `lib/tauri.ts` — the ONLY place `invoke()` is called; typed wrappers per command.
   - `lib/terminal-manager.ts` — non-React xterm registry; terminal output bypasses React state.
+  - `lib/scripts.ts` — pure planner for project `run` scripts and split templates.
   - `lib/native-editing.ts` — OS text-editing chords → readline sequences; text-context detection.
   - `hooks/` — React hooks (use-shortcuts: keybindings; use-escape-to-close: modal dismiss).
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
-- `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, icons).
+- `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons).
 - `crates/pragma-agent-cli/` — `pragma-agent` helper CLI that external agents call from terminals.
 - `crates/pragma-daemon/` — detached Unix-socket PTY daemon; owns shell sessions, scrollback, and runtime agent status fanout.
 - `crates/pragma-protocol/` — shared daemon wire frames/framing used by daemon, Tauri app, and CLI.
@@ -47,6 +48,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Daemon wire frame types/framing                  | `crates/pragma-protocol`                       |
 | External agent report CLI                        | `crates/pragma-agent-cli`                      |
 | Terminal rendering/output flow                   | `apps/pragma/src/lib/terminal-manager.ts`      |
+| Project script config/headless lifecycle         | `apps/pragma/src-tauri/src/scripts.rs`         |
+| Interactive run-script planning                  | `apps/pragma/src/lib/scripts.ts`               |
 
 ## Decision rules
 

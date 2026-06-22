@@ -71,6 +71,7 @@ export class TerminalManager {
   static readonly lineHeight = TERMINAL_LINE_HEIGHT;
 
   private terminals = new Map<string, ManagedTerminal>();
+  private pendingInput = new Map<string, string[]>();
   // Title listeners are keyed by tab id and kept **independent of the terminal's
   // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
   // a background tab) and still receive shell-emitted titles once it connects.
@@ -221,6 +222,18 @@ export class TerminalManager {
     managed.terminal.clear();
   }
 
+  /** Writes input once a tab's daemon PTY connection exists. */
+  writeWhenReady(tabId: string, data: string): void {
+    const managed = this.terminals.get(tabId);
+    if (managed?.channel) {
+      void ptyWrite(tabId, data);
+      return;
+    }
+    const pending = this.pendingInput.get(tabId) ?? [];
+    pending.push(data);
+    this.pendingInput.set(tabId, pending);
+  }
+
   /** Scrolls the terminal viewport to the bottom (the live cursor row). */
   scrollToBottom(tabId: string): void {
     const managed = this.terminals.get(tabId);
@@ -264,6 +277,7 @@ export class TerminalManager {
     managed.terminal.dispose();
     managed.container.remove();
     this.terminals.delete(tabId);
+    this.pendingInput.delete(tabId);
     void ptyKill(tabId);
   }
 
@@ -380,7 +394,21 @@ export class TerminalManager {
     ptyAttach(tabId, cols, rows, onEvent)
       .catch(() => ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent))
       .then((channel) => {
-        managed.channel = channel;
+        const live = this.terminals.get(tabId);
+        if (!live || live !== managed) {
+          // Tab closed while attach/spawn was in flight — drop the session rather
+          // than wiring input/output to a disposed terminal.
+          void ptyKill(tabId);
+          return undefined;
+        }
+        live.channel = channel;
+        const pending = this.pendingInput.get(tabId);
+        if (pending) {
+          this.pendingInput.delete(tabId);
+          for (const data of pending) {
+            void ptyWrite(tabId, data);
+          }
+        }
         // The remote session is brand new — either a fresh spawn, or an attach
         // that fell back to spawn after a daemon reset — and was created with the
         // pre-fit default size (80x24), because connect() runs before the first
@@ -389,8 +417,8 @@ export class TerminalManager {
         // clear the cache to force fit() to re-send the current size now that the
         // session exists; otherwise it early-returns and the PTY stays at 80x24
         // while xterm fills the window.
-        managed.lastResizeCols = null;
-        managed.lastResizeRows = null;
+        live.lastResizeCols = null;
+        live.lastResizeRows = null;
         this.fit(tabId);
         return undefined;
       })

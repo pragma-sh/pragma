@@ -10,6 +10,7 @@
     "window",
     "links",
     "editorLaunchers",
+    "scripts",
     "daemon",
     "github"
   ],
@@ -23,6 +24,7 @@
     "window": { "$ref": "#/definitions/WindowDefaults" },
     "links": { "$ref": "#/definitions/Links" },
     "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
+    "scripts": { "$ref": "#/definitions/Scripts" },
     "daemon": { "$ref": "#/definitions/Daemon" },
     "github": { "$ref": "#/definitions/GitHub" }
   },
@@ -240,6 +242,87 @@
           "description": "Executable name used to launch the editor with the worktree path. Null uses the system file explorer."
         }
       }
+    },
+    "Scripts": {
+      "title": "Scripts",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared script execution limits used by project lifecycle scripts.",
+      "required": ["maxConcurrentCommands"],
+      "properties": {
+        "maxConcurrentCommands": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of headless project script commands Pragma runs at once. Interactive run scripts create terminal tabs and are not limited by this value."
+        }
+      }
+    },
+    "ProjectScriptsConfig": {
+      "title": "ProjectScriptsConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-owned `.pragma/scripts.json` lifecycle scripts. The file is optional; omitted keys behave as empty arrays.",
+      "properties": {
+        "setup": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Headless commands run after a worktree is created, from the new worktree root."
+        },
+        "run": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/RunScriptEntry" },
+          "description": "Interactive commands opened from the workspace header as terminal tabs and optional split layouts."
+        },
+        "teardown": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Headless commands run before a worktree is deleted, from the target worktree root. Failures block deletion."
+        }
+      }
+    },
+    "RunScriptEntry": {
+      "title": "RunScriptEntry",
+      "description": "One interactive run-script entry: either a single command string or a split layout tree.",
+      "anyOf": [{ "type": "string" }, { "$ref": "#/definitions/RunScriptSplit" }]
+    },
+    "RunScriptNode": {
+      "title": "RunScriptNode",
+      "description": "A command string leaf or a nested split layout node.",
+      "anyOf": [{ "type": "string" }, { "$ref": "#/definitions/RunScriptSplit" }]
+    },
+    "RunScriptSplit": {
+      "title": "RunScriptSplit",
+      "description": "A binary split node. Use exactly one axis: left/right for horizontal, or top/bottom for vertical.",
+      "oneOf": [
+        { "$ref": "#/definitions/RunScriptHorizontalSplit" },
+        { "$ref": "#/definitions/RunScriptVerticalSplit" }
+      ]
+    },
+    "RunScriptHorizontalSplit": {
+      "title": "RunScriptHorizontalSplit",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "right"],
+      "properties": {
+        "left": { "$ref": "#/definitions/RunScriptNode" },
+        "right": { "$ref": "#/definitions/RunScriptNode" }
+      }
+    },
+    "RunScriptVerticalSplit": {
+      "title": "RunScriptVerticalSplit",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "bottom"],
+      "properties": {
+        "top": { "$ref": "#/definitions/RunScriptNode" },
+        "bottom": { "$ref": "#/definitions/RunScriptNode" }
+      }
+    },
+    "ScriptRunStatus": {
+      "title": "ScriptRunStatus",
+      "description": "Runtime status for a frontend-managed interactive run-script session.",
+      "type": "string",
+      "enum": ["idle", "running", "stopping"]
     },
     "Project": {
       "title": "Project",

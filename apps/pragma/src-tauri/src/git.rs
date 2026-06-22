@@ -9,6 +9,8 @@ use tauri::State;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 
+const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
+
 #[derive(Default)]
 pub struct GitLocks(Mutex<HashMap<String, Arc<Mutex<()>>>>);
 
@@ -80,8 +82,25 @@ pub fn ensure_pragma_excluded(project_path: &Path) -> AppResult<()> {
         std::fs::create_dir_all(parent)?;
     }
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
-    if !existing.lines().any(|line| line.trim() == ".pragma/") {
-        std::fs::write(exclude, format!("{existing}\n.pragma/\n"))?;
+    let mut has_worktrees_exclude = false;
+    let mut changed = false;
+    let mut lines = Vec::new();
+    for line in existing.lines() {
+        match line.trim() {
+            ".pragma/" => changed = true,
+            PRAGMA_WORKTREES_EXCLUDE => {
+                has_worktrees_exclude = true;
+                lines.push(line.to_string());
+            }
+            _ => lines.push(line.to_string()),
+        }
+    }
+    if !has_worktrees_exclude {
+        lines.push(PRAGMA_WORKTREES_EXCLUDE.to_string());
+        changed = true;
+    }
+    if changed {
+        std::fs::write(exclude, format!("{}\n", lines.join("\n")))?;
     }
     Ok(())
 }
@@ -1062,7 +1081,7 @@ mod tests {
         discard_unstaged_file_impl, ensure_pragma_excluded, ensure_repo, file_diff_impl,
         merge_worktree_to_parent_impl, remove_worktree, stage_all_impl, stage_file_impl,
         unstage_all_impl, unstage_file_impl, worktree_changes_impl, worktree_is_dirty,
-        worktree_is_merged,
+        worktree_is_merged, PRAGMA_WORKTREES_EXCLUDE,
     };
     use crate::db::Db;
 
@@ -1621,10 +1640,32 @@ mod tests {
         assert_eq!(
             exclude
                 .lines()
-                .filter(|line| line.trim() == ".pragma/")
+                .filter(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE)
                 .count(),
             1
         );
+        assert!(!exclude.lines().any(|line| line.trim() == ".pragma/"));
+    }
+
+    #[test]
+    fn migrates_broad_pragma_exclude_to_worktrees_only() {
+        let dir = tempdir().expect("tempdir");
+        Command::new("git")
+            .arg("init")
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        let exclude_path = dir.path().join(".git/info/exclude");
+        std::fs::write(&exclude_path, "*.log\n.pragma/\n").expect("write exclude");
+
+        ensure_pragma_excluded(dir.path()).expect("exclude");
+
+        let exclude = std::fs::read_to_string(exclude_path).expect("exclude file");
+        assert!(exclude.lines().any(|line| line.trim() == "*.log"));
+        assert!(exclude
+            .lines()
+            .any(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE));
+        assert!(!exclude.lines().any(|line| line.trim() == ".pragma/"));
     }
 
     #[test]

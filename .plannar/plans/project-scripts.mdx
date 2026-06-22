@@ -1,0 +1,341 @@
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+
+# Project scripts
+
+Add per-project lifecycle scripts loaded from `.pragma/scripts.json` in the project
+root. Scripts can run headlessly during worktree lifecycle events or interactively in
+terminal tabs from a new Run button in the workspace header.
+
+The feature has three script types:
+
+- **setup** runs after a new worktree is created, headlessly, from the new worktree root.
+- **run** starts user-facing long-running commands from the workspace header and opens tabs/splits.
+- **teardown** runs before deleting a worktree, headlessly, from the worktree root; failures block deletion.
+
+Every command receives `PRAGMA_WORKTREE_PATH`, `PRAGMA_PROJECT_PATH`, and
+`PRAGMA_WORKTREE_ID`. Headless setup/teardown commands do not receive `PRAGMA_TAB_ID`
+because no visible terminal tab exists.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and where it fits</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm">
+    <ul className="space-y-2 list-disc pl-5">
+      <li>
+        <strong>Config file:</strong> <code>{"<project>/.pragma/scripts.json"}</code>, project-owned
+        and not stored in SQLite.
+      </li>
+      <li>
+        <strong>Shared types:</strong> add script config definitions to{" "}
+        <code>packages/constants/schema.json</code>, then run <code>bun run generate</code>.
+      </li>
+      <li>
+        <strong>Rust backend:</strong> new <code>apps/pragma/src-tauri/src/scripts.rs</code> for
+        loading, validating, and headless execution.
+      </li>
+      <li>
+        <strong>Frontend orchestration:</strong> <code>workspace-context.tsx</code> owns run-script
+        UI state and creates/kills terminal tabs.
+      </li>
+      <li>
+        <strong>UI entry:</strong> add a play/stop button beside the current editor launcher in{" "}
+        <code>components/tabs/TerminalTabs.tsx</code>.
+      </li>
+      <li>
+        <strong>Execution limit:</strong> add a shared <code>scripts.maxConcurrentCommands</code>{" "}
+        constant and batch headless commands through it.
+      </li>
+      <li>
+        <strong>No daemon protocol change required:</strong> inject interactive run commands by
+        writing to newly spawned terminal sessions after the tab mounts.
+      </li>
+    </ul>
+  </CardContent>
+</Card>
+
+## Config Shape
+
+The file is optional. Missing file means no scripts.
+
+```json
+{
+  "setup": ["bun install", "bun run db:setup"],
+  "run": [
+    "bun run email:dev",
+    {
+      "left": "bun run dev",
+      "right": {
+        "top": "fastapi dev main.py",
+        "bottom": "bunx convex dev"
+      }
+    }
+  ],
+  "teardown": ["bun run cleanup"]
+}
+```
+
+Validation rules:
+
+- `setup` and `teardown` accept only `string[]`.
+- `run` accepts an array of run entries.
+- A run entry can be a string or a split object.
+- A split object must use exactly one axis: `left` + `right` for horizontal layout, or `top` + `bottom` for vertical layout.
+- Split children can be strings or nested split objects.
+- Empty commands are invalid.
+- Unknown keys are invalid so typos are surfaced early.
+
+Use the same semantic mapping as existing split layouts: `left/right` maps to a
+horizontal `ResizablePanelGroup`; `top/bottom` maps to a vertical group.
+
+## Execution Model
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="config">
+    <AccordionTrigger>1. Load and validate scripts</AccordionTrigger>
+    <AccordionContent>
+      <ul className="space-y-2 list-disc pl-5">
+        <li>
+          Add constants definitions: <code>ProjectScriptsConfig</code>, <code>RunScriptEntry</code>,{" "}
+          <code>RunScriptNode</code>, <code>RunScriptSplit</code>, and <code>ScriptRunStatus</code>.
+        </li>
+        <li>
+          Add <code>scripts.maxConcurrentCommands</code> to{" "}
+          <code>packages/constants/values.json</code> and mirror it in generated TS/Rust constants.
+        </li>
+        <li>
+          Implement <code>scripts::load_project_scripts(project_path)</code> to read{" "}
+          <code>.pragma/scripts.json</code>, return an empty config for <code>NotFound</code>, and
+          reject malformed JSON with <code>InvalidInput</code>.
+        </li>
+        <li>
+          Keep this config file path project-scoped: derive it from{" "}
+          <code>Db::project(project_id).path</code>; never accept an absolute script path from the
+          frontend.
+        </li>
+      </ul>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="headless">
+    <AccordionTrigger>2. Headless setup and teardown</AccordionTrigger>
+    <AccordionContent>
+      <ul className="space-y-2 list-disc pl-5">
+        <li>
+          Implement <code>scripts::run_headless_commands(project, worktree, kind, commands)</code>{" "}
+          with a concurrency-limited worker loop.
+        </li>
+        <li>
+          Run each command through the user's shell, e.g. <code>{"$SHELL -lc <command>"}</code>,
+          with <code>current_dir</code> set to the worktree root.
+        </li>
+        <li>Capture stdout, stderr, command, exit status, and duration for each command.</li>
+        <li>
+          Set env for every child: <code>PRAGMA_WORKTREE_PATH</code>,{" "}
+          <code>PRAGMA_PROJECT_PATH</code>, and <code>PRAGMA_WORKTREE_ID</code>.
+        </li>
+        <li>
+          Run commands concurrently up to <code>constants.scripts.maxConcurrentCommands</code>;
+          start the next batch as slots free up.
+        </li>
+        <li>
+          Return a structured failure listing every failed command, not just the first failure.
+        </li>
+      </ul>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="interactive">
+    <AccordionTrigger>3. Interactive run scripts</AccordionTrigger>
+    <AccordionContent>
+      <ul className="space-y-2 list-disc pl-5">
+        <li>
+          Add a Tauri command <code>load_project_scripts(project_id)</code> and a typed wrapper in{" "}
+          <code>src/lib/tauri.ts</code>.
+        </li>
+        <li>
+          Keep run orchestration in the frontend because run scripts create user-visible tabs and
+          split layouts, which are already frontend-owned.
+        </li>
+        <li>
+          For each string run entry, create one terminal tab via the existing <code>createTab</code>{" "}
+          path and then write the command to the terminal when it is ready.
+        </li>
+        <li>
+          For object entries, create all required terminal tabs, build a split layout from the
+          object, and dispatch the existing split reducer actions instead of inventing a second
+          layout store.
+        </li>
+        <li>
+          Track the tabs started by the current run session in workspace state so the stop button
+          can kill and close exactly those tabs.
+        </li>
+        <li>
+          Use <code>ptyKill(tabId)</code> plus <code>closeTab(tabId)</code> for stop; do not rely on
+          shell commands like <code>Ctrl-C</code>.
+        </li>
+        <li>
+          On worktree deletion, kill run tabs through the existing backend <code>kill_for_cwd</code>{" "}
+          safety net and also remove their persisted tab rows via the delete cascade.
+        </li>
+      </ul>
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Lifecycle Hooks
+
+### Setup
+
+Implementation point: `apps/pragma/src-tauri/src/worktrees.rs` `create_worktree`.
+
+Sequence:
+
+1. Validate branch and create the git worktree as today.
+2. Insert the worktree row as today so the new worktree id is available to script env.
+3. Load `.pragma/scripts.json` from the project root.
+4. Run `setup` commands headlessly in the new worktree root.
+5. If setup fails, return an error to the frontend and surface it via the existing create-worktree dialog error path.
+
+Rollback decision: do **not** automatically delete the worktree on setup failure in the first implementation. The worktree exists on disk and in SQLite, and the user can inspect logs or delete it manually. This avoids hiding partial setup state.
+
+### Run
+
+Implementation point: `apps/pragma/src/components/tabs/TerminalTabs.tsx` next to the editor launcher button.
+
+Behavior:
+
+- Show a play button to the right of the editor launcher.
+- Disable it when no worktree is selected or no `run` entries exist.
+- On click, create terminal tabs and splits from the `run` config.
+- Change the button to a stop button while run-managed tabs are alive.
+- Stop kills all run-managed PTY sessions and closes those tabs.
+- If a user manually closes a run-managed tab, remove it from the run set; when the set is empty, return to play state.
+
+Command injection detail:
+
+- Current `pragma-daemon` only spawns `$SHELL -l` in a cwd, with no initial command field.
+- Avoid changing daemon protocol for this feature: after a terminal tab mounts, write `command + "\r"` through `terminalManager` or a small workspace queue that calls `ptyWrite(tab.id, command + "\r")` once the session exists.
+- If the command should leave the shell open after a short-lived command exits, write the command as-is. If the desired behavior is to close automatically, make that a later option rather than defaulting to it.
+
+### Teardown
+
+Implementation point: `apps/pragma/src-tauri/src/worktrees.rs` `delete_worktree`.
+
+Sequence:
+
+1. Reject main-worktree deletion as today.
+2. Load project scripts.
+3. Run `teardown` commands headlessly in the target worktree root before killing PTYs or removing files.
+4. If any teardown command fails, return an error and block deletion.
+5. Only after successful teardown, continue with `pty.kill_for_cwd`, `git::remove_worktree`, optional branch deletion, and `db.delete_worktree`.
+
+Frontend adjustment: remove the current optimistic sidebar deletion for worktrees with possible teardown scripts. Prefer a pending/deleting state or delay local removal until the backend confirms success, because teardown failure must visibly block deletion.
+
+## Frontend State Plan
+
+Add a small run-script state slice in `workspace-context.tsx`:
+
+```ts
+type RunScriptsState = {
+  worktreeId: string;
+  tabIds: string[];
+  stopping: boolean;
+} | null;
+```
+
+Expose these workspace actions:
+
+- `runScripts()` loads the selected project config, creates tabs/splits, and injects commands.
+- `stopRunScripts()` kills and closes tracked run tabs.
+- `runScriptsState` lets `TerminalTabs` render play vs stop.
+
+Keep split creation reusable:
+
+- Add a pure helper in `apps/pragma/src/lib/scripts.ts` to flatten run entries into terminal creation requests and a `SplitLayoutNode` tree.
+- Unit-test this helper heavily, especially nested split validation.
+- Reuse `reserveSplitNodeIds`, `normalizeRoot`, and existing reducer actions where possible.
+
+## Backend API Plan
+
+New Rust module: `apps/pragma/src-tauri/src/scripts.rs`.
+
+New/changed Tauri commands:
+
+- `load_project_scripts(project_id) -> ProjectScriptsConfig` for UI availability and run orchestration.
+- No new command is required for setup/teardown if those are only called internally from `worktrees.rs`.
+
+Existing files to update:
+
+- `apps/pragma/src-tauri/src/lib.rs`: register the new command and module.
+- `apps/pragma/src/lib/tauri.ts`: add typed wrapper(s); keep `invoke()` centralized.
+- `apps/pragma/src/lib/tauri.test.ts`: assert wrapper command names and payloads.
+- `apps/pragma/src-tauri/src/worktrees.rs`: call setup/teardown at the lifecycle points.
+- `packages/constants/schema.json` and `values.json`: add script config/result types and concurrency constant.
+- `AGENTS.md`: document `.pragma/scripts.json`, lifecycle behavior, env vars, and concurrency limit.
+
+## Error Surfacing
+
+Headless failures should open a new editor tab with the captured command output.
+
+Example tab content:
+
+```text
+Setup scripts failed:
+1. bun install exited 1
+2. bun run db:setup exited 127
+
+Command: bun install
+Exit: 1
+Duration: 12.4s
+
+--- stdout ---
+...
+
+--- stderr ---
+...
+```
+
+Use a short toast or inline dialog error only to say setup/teardown failed and that the details were opened in a new editor tab. The editor tab should contain stdout, stderr, command, exit status, and duration for each failed command.
+
+For setup and teardown, prefer a structured Rust error variant such as `AppError::InvalidInput` for config issues and a new script-specific message for command failures. Do not swallow failures.
+
+## Security And Portability
+
+- Never accept a script path from the frontend: IPC callers pass only `project_id` / `worktree_id`, and Rust derives `<project root>/.pragma/scripts.json` from SQLite. This prevents a UI bug or malicious IPC call from pointing the loader at an arbitrary file outside the project.
+- Always derive project/worktree paths from SQLite.
+- Run commands in the worktree root with the user's shell; document that scripts are trusted project code.
+- Keep macOS/Linux behavior only; no Windows shell handling is needed.
+- Avoid daemon protocol changes unless initial-command spawning becomes necessary later.
+- Do not store secrets in `.pragma/scripts.json`; scripts inherit the user's process environment plus `PRAGMA_WORKTREE_PATH`, `PRAGMA_PROJECT_PATH`, and `PRAGMA_WORKTREE_ID`.
+
+## Acceptance Criteria
+
+- [ ] Missing `.pragma/scripts.json` is treated as no scripts.
+- [ ] Malformed config reports a clear error with file path and failing field.
+- [ ] `setup` runs after worktree creation, in the new worktree root, with all required env vars.
+- [ ] Setup command failures are surfaced to the user.
+- [ ] `run` play button appears beside the editor launcher and becomes stop while commands are running.
+- [ ] A string run entry opens one terminal tab and runs the command.
+- [ ] A nested `left/right` + `top/bottom` run entry creates the expected split tabs.
+- [ ] Stop kills all run-managed sessions and closes their tabs.
+- [ ] Deleting a worktree kills any running run-script processes for that worktree.
+- [ ] `teardown` runs before deletion and blocks deletion if any command fails.
+- [ ] Headless scripts run concurrently with the configured limit.
+- [ ] Unit tests cover config parsing, split validation, headless batching, setup failure, teardown blocking, and run-tab orchestration.
+
+## Suggested Implementation Order
+
+1. Add shared script types/constants and generate types.
+2. Implement Rust config loading and validation in `scripts.rs`.
+3. Implement headless concurrent command runner with tests.
+4. Wire setup and teardown into `worktrees.rs` and update deletion optimism in the frontend.
+5. Add frontend run config parsing helpers and tests.
+6. Add run play/stop UI and workspace run state.
+7. Add command injection into terminal tabs.
+8. Update `AGENTS.md` and run `bun run check` or, at minimum, targeted TS/Rust tests plus format/lint.

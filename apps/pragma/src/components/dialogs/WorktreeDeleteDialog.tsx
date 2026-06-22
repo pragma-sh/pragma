@@ -36,9 +36,8 @@ interface WorktreeDeleteDialogProps {
  *  2. Optionally, the user checking the "Also delete the branch" box.
  *
  * We use a plain `Button` (not `AlertDialogAction`) for the confirm action so
- * the click handler keeps full control: it fires the optimistic delete and
- * closes the modal itself, rather than relying on `AlertDialogAction`'s
- * auto-close.
+ * the click handler keeps full control: teardown scripts can fail and must keep
+ * the modal open with an inline error.
  */
 export function WorktreeDeleteDialog({
   worktreeId,
@@ -63,6 +62,7 @@ export function WorktreeDeleteDialog({
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [dirty, setDirty] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -90,17 +90,20 @@ export function WorktreeDeleteDialog({
     };
   }, [open, worktreeId, workspace]);
 
-  function confirm() {
-    // Optimistic: the context drops the worktree from local state (and thus
-    // the sidebar) synchronously — before the first await inside
-    // `deleteWorktree` — so we close the modal immediately. The backend delete
-    // continues in the background and surfaces a toast on failure; there's no
-    // inline error to show anymore (the dialog is already gone).
-    void workspace.deleteWorktree(worktreeId, {
-      deleteBranch,
-      force: dirty === true,
-    });
-    setOpen(false);
+  async function confirm() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await workspace.deleteWorktree(worktreeId, {
+        deleteBranch,
+        force: dirty === true,
+      });
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -135,10 +138,15 @@ export function WorktreeDeleteDialog({
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button onClick={() => confirm()} size="default" variant="destructive">
+          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <Button
+            disabled={deleting}
+            onClick={() => void confirm()}
+            size="default"
+            variant="destructive"
+          >
             <Trash2 data-icon="inline-start" />
-            Delete anyway
+            {deleting ? "Deleting..." : "Delete anyway"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
