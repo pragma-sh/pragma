@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDisposable } from "@xterm/xterm";
 import type { Channel } from "@tauri-apps/api/core";
 
 import type { Tab } from "@pragma/constants";
@@ -10,6 +10,7 @@ import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import { nativeEditingSequence } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMessage } from "@/lib/tauri";
+import { createFileLinkProvider, getTerminalLinkHandler } from "@/lib/terminal-links";
 
 const RESIZE_DEBOUNCE_MS = 75;
 export const MAX_TERMINAL_COLS = 240;
@@ -43,6 +44,8 @@ interface ManagedTerminal {
   writeInFlight: boolean;
   /** Live PTY event channel, retained so dispose() can detach its handler. */
   channel: Channel<PtyMessage> | null;
+  /** File-path link provider registration, disposed with the terminal. */
+  fileLinkProvider: IDisposable | null;
 }
 
 // Nerd Font variants ship full text-presentation glyph coverage for
@@ -117,7 +120,25 @@ export class TerminalManager {
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    terminal.loadAddon(new WebLinksAddon());
+    // Web links open through the workspace handler rather than the OS browser:
+    // Shift+click opens the URL in a browser split to the right; Alt/Option+
+    // Shift+click opens it in the system browser instead. A plain click is left
+    // to xterm (selection / TUI mouse reporting) — Shift is the deliberate
+    // "open this link" gesture, and also bypasses a TUI's mouse tracking.
+    terminal.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        const handler = getTerminalLinkHandler();
+        if (!handler || !event.shiftKey) {
+          return;
+        }
+        handler.openUrl({
+          tabId: tab.id,
+          worktreeId: tab.worktreeId,
+          url: uri,
+          external: event.altKey,
+        });
+      }),
+    );
     terminal.attachCustomKeyEventHandler((event) => {
       const platform = isMacPlatform() ? "mac" : "linux";
       // Shift+Enter is a soft newline: a literal LF that does not submit the
@@ -203,7 +224,14 @@ export class TerminalManager {
       pendingOutput: [],
       writeInFlight: false,
       channel: null,
+      fileLinkProvider: null,
     };
+    // Linkify existing worktree files printed in the terminal so a click opens
+    // them in an editor split to the right (validated against the worktree, so
+    // only real files are decorated). cwd is the worktree root.
+    managed.fileLinkProvider = terminal.registerLinkProvider(
+      createFileLinkProvider(terminal, tab.id, tab.worktreeId, cwd),
+    );
     this.terminals.set(tab.id, managed);
     terminal.onData((data) => void ptyWrite(tab.id, data));
     this.connect(tab, cwd, managed);
@@ -267,6 +295,8 @@ export class TerminalManager {
     }
     managed.pendingOutput = [];
     managed.writeInFlight = false;
+    managed.fileLinkProvider?.dispose();
+    managed.fileLinkProvider = null;
     // Detach the channel handler so Tauri stops delivering events to a disposed
     // terminal, then tell the daemon to tear down the shell — without this the
     // shell process and its scrollback leak for the lifetime of the daemon.

@@ -461,6 +461,27 @@ worktreeId, tabId }`; `workspace-context` routes that through `navigateToAgentLo
   left untouched so normal scrollback stays smooth. This interval is the scroll-feel
   knob (lower = faster/farther scroll but more redraw load; higher = calmer but a
   flick scrolls less); tune it rather than removing the throttle or rewriting reports.
+- **Terminal links open inside Pragma, never the OS browser by default.** Link parsing
+  - providers live in `lib/terminal-links.ts` (pure, unit-tested) and are wired into
+    xterm by `terminal-manager.ts`. URLs use the `@xterm/addon-web-links` addon with a
+    custom handler: **Shift+click** opens the URL in a **browser tab in a split to the
+    right**, **Alt/Option+Shift+click** opens it in the **system browser** (`browser_open_external`);
+    a plain click is left to xterm (selection / TUI mouse reporting), and Shift is also
+    what bypasses a TUI's mouse tracking. A second `registerLinkProvider`
+    (`createFileLinkProvider`) linkifies **existing worktree files** printed in the
+    terminal (compiler/test output, `ls`, grep): it parses path-like tokens
+    (`findFilePathCandidates`), resolves them to worktree-relative via
+    `toWorktreeRelativePath` (against the terminal's `cwd` = worktree root, rejecting
+    escapes), and **validates each against `path_exists`** so only real files are
+    decorated; **Shift+click** opens the file in an **editor tab in a split to the right**
+    (same gesture as URLs — a plain click is left to xterm for selection). The
+    manager is non-React, so the actions are injected by the workspace context via
+    `setTerminalLinkHandler` (the only place that can create tabs/splits), reading live
+    state through refs so the handler stays stable. "Open to the right" is the
+    `open-in-new-split` reducer action (mirrors `split-pane`, but pulls the _new_ tab into
+    the new pane and leaves the source terminal put); both openers dedupe — if the same
+    URL/file is already open in the worktree it just focuses that tab instead of stacking
+    duplicate panes.
 - **Shell-driven tab titles.** The daemon parses OSC 0 / OSC 2 (`ESC ]0/2;…BEL/ST`)
   out of the raw PTY stream in `crates/pragma-daemon/src/session.rs` and emits a
   `Title` event. The Tauri proxy in `apps/pragma/src-tauri/src/pty.rs` forwards it
