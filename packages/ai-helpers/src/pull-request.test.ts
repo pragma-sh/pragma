@@ -49,5 +49,10 @@ describe("generatePullRequestDraft", () => {
     expect(options?.modelKind).toBe("standard");
     expect(options).not.toHaveProperty("noTools");
     expect(options).not.toHaveProperty("tools");
+    const prompt = (mocks.runPromptToText.mock.calls[0] as unknown[] | undefined)?.[1] as
+      | string
+      | undefined;
+    expect(prompt).toContain("Do not ask the user questions");
+    expect(prompt).toContain("if you want me to");
   });
 });

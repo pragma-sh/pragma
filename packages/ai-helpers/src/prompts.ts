@@ -198,6 +198,7 @@ export function buildPullRequestPrompt(context: PullRequestPromptContext): strin
     "- The body should summarize what changed and why, with useful reviewer context.",
     "- Mention tests only when the commits or code changes show test changes or clear validation steps.",
     "- Do not invent ticket numbers, deployment notes, metrics, or test results.",
+    '- Do not ask the user questions or include meta follow-ups like "if you want me to"; focus only on the PR title and body.',
     '- Output ONLY valid JSON with this exact shape: {"title": string, "body": string}.',
     "- The body string must contain GitHub-flavored markdown.",
     "",
