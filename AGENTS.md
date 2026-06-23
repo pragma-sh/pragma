@@ -64,24 +64,25 @@ than no guide.
 
 ## Tech stack
 
-| Concern          | Choice                                                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                     |
-| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                      |
-| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                   |
-| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)   |
-| Backend          | Rust (Tauri commands)                                                                                                   |
-| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies |
-| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                  |
-| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                    |
-| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                |
-| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                 |
-| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                              |
-| Format (Rust)    | rustfmt                                                                                                                 |
-| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                       |
-| Commits          | Conventional Commits (commitlint)                                                                                       |
-| Git hooks        | Husky + lint-staged                                                                                                     |
-| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                             |
+| Concern          | Choice                                                                                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
+| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
+| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
+| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
+| Backend          | Rust (Tauri commands)                                                                                                                                           |
+| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
+| AI               | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
+| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
+| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
+| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                                                        |
+| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                                                         |
+| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                      |
+| Format (Rust)    | rustfmt                                                                                                                                                         |
+| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
+| Commits          | Conventional Commits (commitlint)                                                                                                                               |
+| Git hooks        | Husky + lint-staged                                                                                                                                             |
+| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
 
 ## Repository structure
 
@@ -98,6 +99,10 @@ than no guide.
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   └── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
+│   ├── constants/               # Dual TS + Rust package — shared source of truth
+│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
+│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules

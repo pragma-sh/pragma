@@ -6,7 +6,7 @@ import { CreatePullRequestView } from "@/components/github/CreatePullRequestView
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { ViewPullRequestView } from "@/components/github/ViewPullRequestView";
 import { findPullRequestForBranch, type PullRequestSummary } from "@/lib/github";
-import { githubRepoRef } from "@/lib/tauri";
+import { type AiPullRequestDraft, githubRepoRef } from "@/lib/tauri";
 import { useGitHub } from "@/state/github-context";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -33,7 +33,13 @@ function messageFor(cause: unknown): string {
  * Like `ChangesTab` it polls so externally created/merged PRs are reflected, and
  * drops in-flight responses for a stale worktree.
  */
-export function PullRequestTab() {
+export function PullRequestTab({
+  generatedDraft,
+  generatedDraftKey,
+}: {
+  generatedDraft?: AiPullRequestDraft | null;
+  generatedDraftKey?: number;
+}) {
   const { authenticated, loading: authLoading } = useGitHub();
   const workspace = useWorkspace();
   const worktreeId = workspace.selectedWorktreeId;
@@ -54,7 +60,14 @@ export function PullRequestTab() {
       <CenteredMessage tone="muted">Select a worktree to manage its pull request.</CenteredMessage>
     );
   }
-  return <PullRequestResolver key={worktreeId} worktreeId={worktreeId} />;
+  return (
+    <PullRequestResolver
+      generatedDraft={generatedDraft}
+      generatedDraftKey={generatedDraftKey}
+      key={worktreeId}
+      worktreeId={worktreeId}
+    />
+  );
 }
 
 type ResolveState =
@@ -64,7 +77,15 @@ type ResolveState =
   | { kind: "view"; repo: GitHubRepoRef; pr: PullRequestSummary };
 
 /** Resolves the repo ref + open PR for one worktree and renders the matching view. */
-function PullRequestResolver({ worktreeId }: { worktreeId: string }) {
+function PullRequestResolver({
+  generatedDraft,
+  generatedDraftKey,
+  worktreeId,
+}: {
+  generatedDraft?: AiPullRequestDraft | null;
+  generatedDraftKey?: number;
+  worktreeId: string;
+}) {
   const [state, setState] = useState<ResolveState>({ kind: "loading" });
   // Drops responses for a stale worktree (the resolver is keyed by worktree, so
   // this also guards against a poll landing after unmount).
@@ -107,6 +128,8 @@ function PullRequestResolver({ worktreeId }: { worktreeId: string }) {
   if (state.kind === "create") {
     return (
       <CreatePullRequestView
+        initialDraft={generatedDraft}
+        initialDraftKey={generatedDraftKey}
         onCreated={(pr) => setState({ kind: "view", repo: state.repo, pr })}
         repo={state.repo}
         worktreeId={worktreeId}

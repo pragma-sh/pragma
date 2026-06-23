@@ -724,3 +724,129 @@ export function loadKeybindings(): Promise<KeybindingsConfig> {
 export function saveKeybindings(config: KeybindingsConfig): Promise<void> {
   return invoke("save_keybindings", { config });
 }
+
+// ---------------------------------------------------------------------------
+// AI (pi sidecar)
+// ---------------------------------------------------------------------------
+
+/** Whether AI features can run, plus which providers are signed in. */
+export interface AiStatus {
+  available: boolean;
+  signedIn: string[];
+}
+
+/** One authorization method shown on the AI setup screen. */
+export interface AiAuthMethod {
+  provider: string;
+  label: string;
+  kind: "oauth" | "api-key";
+  featured: boolean;
+}
+
+/** An event streamed from the `pragma-ai` sidecar during an OAuth login. */
+export type AiLoginEvent =
+  | { type: "auth"; url: string; instructions?: string }
+  | {
+      type: "device-code";
+      userCode: string;
+      verificationUri: string;
+      intervalSeconds?: number;
+      expiresInSeconds?: number;
+    }
+  | { type: "progress"; message: string }
+  | { type: "prompt"; message: string; placeholder?: string; allowEmpty?: boolean }
+  | { type: "select"; message: string; options: Array<{ id: string; label: string }> }
+  | { type: "manual-code"; message: string }
+  | { type: "result"; provider: string }
+  | { type: "error"; code?: string; error: string }
+  | { type: "log"; line: string };
+
+/** Reports whether at least one authenticated provider exposes a usable model. */
+export function aiStatus(): Promise<AiStatus> {
+  return invoke<AiStatus>("ai_status");
+}
+
+/** Every authorization method to present on the AI setup screen. */
+export function aiAuthMethods(): Promise<AiAuthMethod[]> {
+  return invoke<AiAuthMethod[]>("ai_auth_methods");
+}
+
+/** Stores an API key for a provider, returning the refreshed status. */
+export function aiSetApiKey(provider: string, apiKey: string): Promise<AiStatus> {
+  return invoke<AiStatus>("ai_set_api_key", { provider, apiKey });
+}
+
+/** Removes all stored credentials for a provider, returning the refreshed status. */
+export function aiLogout(provider: string): Promise<AiStatus> {
+  return invoke<AiStatus>("ai_logout", { provider });
+}
+
+/** Whether the user has dismissed AI setup. */
+export function aiSetupDismissed(): Promise<boolean> {
+  return invoke<boolean>("ai_setup_dismissed");
+}
+
+/** Persists the "user skipped AI setup" flag so the modal never returns. */
+export function setAiSetupDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_ai_setup_dismissed", { dismissed });
+}
+
+/** Generates a commit message from a worktree's staged changes (quick model). */
+export function aiGenerateCommitMessage(worktreeId: string): Promise<string> {
+  return invoke<string>("ai_generate_commit_message", { worktreeId });
+}
+
+/** AI-generated pull request title and markdown body. */
+export interface AiPullRequestDraft {
+  title: string;
+  body: string;
+}
+
+/** Result of committing all changes and generating a PR draft. */
+export interface AiCommitAndPullRequestDraft extends AiPullRequestDraft {
+  commitCount: number;
+}
+
+/** Generates a pull request title/body from branch commits (standard model). */
+export function aiGeneratePullRequestDraft(worktreeId: string): Promise<AiPullRequestDraft> {
+  return invoke<AiPullRequestDraft>("ai_generate_pull_request_draft", { worktreeId });
+}
+
+/** Uses a standard model to commit all changes, then draft a pull request. */
+export function aiCommitAllAndGeneratePullRequestDraft(
+  worktreeId: string,
+): Promise<AiCommitAndPullRequestDraft> {
+  return invoke<AiCommitAndPullRequestDraft>("ai_commit_all_and_generate_pull_request_draft", {
+    worktreeId,
+  });
+}
+
+/**
+ * Starts an interactive OAuth login, streaming events through the returned
+ * channel. Answer prompts with {@link aiLoginRespond} and abort with
+ * {@link aiLoginCancel}, both keyed by the same `id`.
+ */
+export function aiLogin(
+  id: string,
+  provider: string,
+  onEvent: (event: AiLoginEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AiLoginEvent>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+  channel.onmessage = onEvent;
+  return invoke<void>("ai_login", { id, provider, onEvent: channel });
+}
+
+/** Answers a pending interactive login prompt (or cancels it). */
+export function aiLoginRespond(
+  id: string,
+  value: string | null,
+  cancelled: boolean,
+): Promise<void> {
+  return invoke("ai_login_respond", { id, value, cancelled });
+}
+
+/** Aborts an in-flight login and drops its session. */
+export function aiLoginCancel(id: string): Promise<void> {
+  return invoke("ai_login_cancel", { id });
+}

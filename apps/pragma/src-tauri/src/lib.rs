@@ -5,6 +5,7 @@ mod agent_cli;
 mod agent_events;
 mod agent_notifications;
 mod agents;
+mod ai;
 mod browser;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
@@ -331,6 +332,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let pty = PtyClient::new(app_data_dir, channel);
     app.manage(pty.clone());
     app.manage(GitLocks::default());
+    app.manage(ai::LoginRegistry::default());
     install_menu(app.handle())?;
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
         log::warn!("failed to install pragma-agent CLI: {error}");
@@ -355,6 +357,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::too_many_lines)] // The Tauri builder is one long registration chain.
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -432,6 +435,18 @@ pub fn run() {
             github::github_push_branch,
             github::github_pr_file_diff,
             github::github_delete_remote_branch,
+            ai::ai_status,
+            ai::ai_auth_methods,
+            ai::ai_set_api_key,
+            ai::ai_logout,
+            ai::ai_setup_dismissed,
+            ai::set_ai_setup_dismissed,
+            ai::ai_generate_commit_message,
+            ai::ai_generate_pull_request_draft,
+            ai::ai_commit_all_and_generate_pull_request_draft,
+            ai::ai_login,
+            ai::ai_login_respond,
+            ai::ai_login_cancel,
             browser::browser_create,
             browser::browser_frame_height,
             browser::browser_set_bounds,

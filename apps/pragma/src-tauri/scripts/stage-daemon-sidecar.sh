@@ -36,11 +36,23 @@ else
   cargo build -p pragma-agent-cli
 fi
 
+# Build the opencode plugin dist so it can be staged as a resource and
+# installed into the user's opencode config on app startup.
+bun --filter @pragma/opencode-plugin build
+
+# Build the `pragma-ai` sidecar (a Bun-compiled standalone that runs the
+# Node-only pi coding-agent SDK out of process for the AI features). A debug app
+# runs it from source via `bun`, but the binary must still exist so the Tauri
+# CLI's externalBin copy step succeeds.
+bun --filter @pragma/ai-helpers build:sidecar
+
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-daemon" \
   "$src_tauri_dir/binaries/pragma-daemon-$triple"
 cp "$repo_root/target/$profile/pragma-agent" \
   "$src_tauri_dir/binaries/pragma-agent-$triple"
+cp "$repo_root/packages/ai-helpers/dist/pragma-ai" \
+  "$src_tauri_dir/binaries/pragma-ai-$triple"
 
 # Remove any plugin JS left over from a previous staging layout. Pragma no longer
 # bundles plugin dist (opencode's .mjs) as a Tauri resource; since tauri.conf.json
@@ -61,4 +73,5 @@ cp -R "$repo_root/packages/claude-code-plugin/pragma/agents/." \
 
 echo "staged pragma-daemon ($profile) -> src-tauri/binaries/pragma-daemon-$triple"
 echo "staged pragma-agent ($profile) -> src-tauri/binaries/pragma-agent-$triple"
+echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged bundled agent configs -> src-tauri/resources/pragma/agents"

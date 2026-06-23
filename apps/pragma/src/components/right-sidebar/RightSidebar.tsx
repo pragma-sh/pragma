@@ -1,13 +1,28 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Icon } from "@iconify/react";
+import { Loader2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { toast } from "sonner";
 
 import { ChangesTab } from "@/components/right-sidebar/ChangesTab";
 import { FilesTab } from "@/components/right-sidebar/FilesTab";
 import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  aiCommitAllAndGeneratePullRequestDraft,
+  type AiPullRequestDraft,
+  worktreeChanges,
+} from "@/lib/tauri";
+import { useAi } from "@/state/ai-context";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
+import { useWorkspace } from "@/state/workspace-context";
+
+function messageFor(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
 
 /**
  * Secondary sidebar on the right edge of the workspace, mirroring the left
@@ -19,6 +34,103 @@ import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-
 export function RightSidebar() {
   const { collapsed, activeSubtab, width, toggleCollapsed, setActiveSubtab, setWidth } =
     useRightSidebar();
+  const workspace = useWorkspace();
+  const { available: aiAvailable } = useAi();
+  // Commit & PR jobs run in the Rust backend and survive a worktree switch, so
+  // we track them per worktree id rather than with a single boolean. That keeps
+  // the spinner on the worktree it belongs to and lets a job keep running (and
+  // land its draft) while the user works in a different worktree.
+  const [runningWorktrees, setRunningWorktrees] = useState<ReadonlySet<string>>(new Set());
+  const [generatedPrDrafts, setGeneratedPrDrafts] = useState<
+    Record<string, { key: number; draft: AiPullRequestDraft }>
+  >({});
+  const [hasUncommittedChanges, setHasUncommittedChanges] = useState(false);
+  const availabilityWorktree = useRef<string | null>(null);
+
+  const selectedWorktreeId = workspace.selectedWorktreeId;
+  const commitPrRunning = selectedWorktreeId ? runningWorktrees.has(selectedWorktreeId) : false;
+  const generatedPrDraft = selectedWorktreeId ? generatedPrDrafts[selectedWorktreeId] : undefined;
+
+  const refreshCommitPrAvailability = useCallback(async () => {
+    const worktreeId = workspace.selectedWorktreeId;
+    // Skip the IPC + git work entirely when AI is unavailable — the Commit & PR
+    // button is hidden then, so the answer is never used.
+    if (!worktreeId || !aiAvailable) {
+      setHasUncommittedChanges(false);
+      return;
+    }
+    try {
+      const changes = await worktreeChanges(worktreeId);
+      if (availabilityWorktree.current === worktreeId) {
+        setHasUncommittedChanges(changes.staged.length > 0 || changes.unstaged.length > 0);
+      }
+    } catch {
+      if (availabilityWorktree.current === worktreeId) {
+        setHasUncommittedChanges(false);
+      }
+    }
+  }, [workspace.selectedWorktreeId, aiAvailable]);
+
+  useEffect(() => {
+    availabilityWorktree.current = workspace.selectedWorktreeId;
+    setHasUncommittedChanges(false);
+    if (!aiAvailable) {
+      return;
+    }
+    void refreshCommitPrAvailability();
+    const interval = setInterval(
+      () => void refreshCommitPrAvailability(),
+      COMMIT_PR_REFRESH_INTERVAL_MS,
+    );
+    const onFocus = () => void refreshCommitPrAvailability();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [workspace.selectedWorktreeId, aiAvailable, refreshCommitPrAvailability]);
+
+  const runCommitAndPr = useCallback(async () => {
+    const worktreeId = workspace.selectedWorktreeId;
+    if (!worktreeId || runningWorktrees.has(worktreeId) || !hasUncommittedChanges) {
+      return;
+    }
+    if (!aiAvailable) {
+      toast.error("Connect an AI provider to commit and draft a pull request.");
+      return;
+    }
+    setRunningWorktrees((prev) => new Set(prev).add(worktreeId));
+    try {
+      const result = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
+      setGeneratedPrDrafts((prev) => ({
+        ...prev,
+        [worktreeId]: { key: Date.now(), draft: { title: result.title, body: result.body } },
+      }));
+      // Only steer the UI if the user is still on the worktree that finished;
+      // otherwise let the draft wait quietly until they return to it.
+      if (availabilityWorktree.current === worktreeId) {
+        setActiveSubtab("pullRequest");
+        setHasUncommittedChanges(false);
+      }
+      toast.success(
+        `Created ${result.commitCount} commit${result.commitCount === 1 ? "" : "s"} and drafted the PR`,
+      );
+    } catch (cause) {
+      toast.error(messageFor(cause));
+    } finally {
+      setRunningWorktrees((prev) => {
+        const next = new Set(prev);
+        next.delete(worktreeId);
+        return next;
+      });
+    }
+  }, [
+    workspace.selectedWorktreeId,
+    runningWorktrees,
+    hasUncommittedChanges,
+    aiAvailable,
+    setActiveSubtab,
+  ]);
 
   if (collapsed) {
     return (
@@ -69,6 +181,23 @@ export function RightSidebar() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        {aiAvailable ? (
+          <Button
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            disabled={commitPrRunning || !workspace.selectedWorktreeId || !hasUncommittedChanges}
+            onClick={() => void runCommitAndPr()}
+            size="sm"
+            title="Commit all changes and draft a pull request"
+            variant="secondary"
+          >
+            {commitPrRunning ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Icon className="size-3.5" icon="simple-icons:github" />
+            )}
+            Commit &amp; PR
+          </Button>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {activeSubtab === "files" ? (
@@ -76,7 +205,10 @@ export function RightSidebar() {
         ) : activeSubtab === "changes" ? (
           <ChangesTab />
         ) : (
-          <PullRequestTab />
+          <PullRequestTab
+            generatedDraft={generatedPrDraft?.draft ?? null}
+            generatedDraftKey={generatedPrDraft?.key}
+          />
         )}
       </div>
     </div>

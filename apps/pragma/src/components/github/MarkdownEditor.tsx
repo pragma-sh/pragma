@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Link } from "@tiptap/extension-link";
@@ -35,14 +35,24 @@ function getMarkdown(editor: Editor): string {
 export function MarkdownEditor({
   value,
   onChange,
+  onKeyDown,
   placeholder = "Describe your changes…",
   className,
 }: {
   value: string;
   onChange: (markdown: string) => void;
+  onKeyDown?: (event: KeyboardEvent) => void;
   placeholder?: string;
   className?: string;
 }) {
+  const onChangeRef = useRef(onChange);
+  const onKeyDownRef = useRef(onKeyDown);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onKeyDownRef.current = onKeyDown;
+  }, [onChange, onKeyDown]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false }),
@@ -57,9 +67,13 @@ export function MarkdownEditor({
         class:
           "tiptap prose prose-invert prose-sm max-w-none min-h-28 px-3 py-2 focus:outline-none",
       },
+      handleKeyDown: (_view, event) => {
+        onKeyDownRef.current?.(event);
+        return event.defaultPrevented;
+      },
     },
     onUpdate: ({ editor: instance }) => {
-      onChange(getMarkdown(instance));
+      onChangeRef.current(getMarkdown(instance));
     },
   });
 
