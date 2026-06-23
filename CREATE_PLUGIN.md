@@ -30,12 +30,12 @@ Two real plugins exist; copy the one whose route matches your tool:
 Every plugin does exactly one thing: it translates its host tool's lifecycle into four
 Pragma status reports, scoped to the current terminal tab.
 
-| Report      | Dot    | Meaning                                  | Emit when…                                       |
-| ----------- | ------ | ---------------------------------------- | ------------------------------------------------ |
-| `started`   | yellow | Agent is running                         | a turn/tool/command begins                       |
-| `stopped`   | green  | Finished — go look at the output         | a turn completes **normally**                    |
-| `attention` | red    | Needs input / permission                 | a prompt, question, or permission dialog appears |
-| `cleared`   | —      | Remove the indicator entirely            | the agent exits, crashes, or a turn is aborted   |
+| Report      | Dot    | Meaning                          | Emit when…                                       |
+| ----------- | ------ | -------------------------------- | ------------------------------------------------ |
+| `started`   | yellow | Agent is running                 | a turn/tool/command begins                       |
+| `stopped`   | green  | Finished — go look at the output | a turn completes **normally**                    |
+| `attention` | red    | Needs input / permission         | a prompt, question, or permission dialog appears |
+| `cleared`   | —      | Remove the indicator entirely    | the agent exits, crashes, or a turn is aborted   |
 
 `cleared` is **not** `stopped`. `stopped` is the green "done, go look" signal and must
 only ever follow a `started`. `cleared` removes the dot because there is nothing to look
@@ -139,7 +139,7 @@ Every plugin, regardless of route, **must** implement all of the following:
    user starts on their own. Check that `PRAGMA_DAEMON_SOCKET` (and ideally
    `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`) are set before reporting. The SDK guards on
    these for you; the CLI script must check explicitly (`[ -n "$PRAGMA_DAEMON_SOCKET" ]
-   || exit 0`).
+|| exit 0`).
 
 3. **Never disrupt the host session.** A missing `pragma-agent`, a down daemon, or any
    reporting error must never break the user's tool. The SDK swallows errors (optionally

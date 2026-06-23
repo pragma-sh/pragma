@@ -26,7 +26,7 @@ Inside the monorepo, depend on it as a workspace package:
 ```jsonc
 // packages/<your>-plugin/package.json
 {
-  "dependencies": { "@pragma/sdk": "workspace:*" }
+  "dependencies": { "@pragma/sdk": "workspace:*" },
 }
 ```
 
@@ -61,13 +61,13 @@ await reportCleared({ agent: "opencode" });
 
 All helpers share `PragmaAgentCommandOptions`:
 
-| Field        | Type                                  | Notes                                                            |
-| ------------ | ------------------------------------- | --------------------------------------------------------------- |
-| `agent`      | `string` (**required**)               | Stable agent id from your `config.json`. Maps to `--agent`.     |
-| `executable` | `string`                              | Path/name of the CLI. Defaults to `pragma-agent`.               |
-| `cwd`        | `string \| URL`                       | Working directory for the spawned process.                      |
-| `env`        | `Record<string, string \| undefined>` | Merged over `process.env` for the spawned process.              |
-| `signal`     | `AbortSignal`                         | Cancels the spawned process.                                    |
+| Field        | Type                                  | Notes                                                       |
+| ------------ | ------------------------------------- | ----------------------------------------------------------- |
+| `agent`      | `string` (**required**)               | Stable agent id from your `config.json`. Maps to `--agent`. |
+| `executable` | `string`                              | Path/name of the CLI. Defaults to `pragma-agent`.           |
+| `cwd`        | `string \| URL`                       | Working directory for the spawned process.                  |
+| `env`        | `Record<string, string \| undefined>` | Merged over `process.env` for the spawned process.          |
+| `signal`     | `AbortSignal`                         | Cancels the spawned process.                                |
 
 Helper-specific:
 

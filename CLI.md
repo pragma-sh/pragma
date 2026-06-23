@@ -24,12 +24,12 @@ pragma-agent --agent <id> report cleared
 `--agent <id>` comes **before** the `report` subcommand. `<id>` is the stable agent id
 from your `pragma/agents/<id>/config.json`.
 
-| Status      | Dot color | Meaning                              |
-| ----------- | --------- | ------------------------------------ |
-| `started`   | yellow    | Agent is running                     |
-| `stopped`   | green     | Finished — go look at the output     |
-| `attention` | red       | Needs input / permission             |
-| `cleared`   | —         | Remove the indicator entirely        |
+| Status      | Dot color | Meaning                          |
+| ----------- | --------- | -------------------------------- |
+| `started`   | yellow    | Agent is running                 |
+| `stopped`   | green     | Finished — go look at the output |
+| `attention` | red       | Needs input / permission         |
+| `cleared`   | —         | Remove the indicator entirely    |
 
 `cleared` is distinct from `stopped`: use it when the agent process exits without a
 meaningful result to show (user quit, crash, abort). `stopped` is the green "done" signal
@@ -37,10 +37,10 @@ and should only follow a `started`.
 
 ### Flags
 
-- `--kind question|command` *(optional, `report attention` only)* — hint for the kind of
+- `--kind question|command` _(optional, `report attention` only)_ — hint for the kind of
   attention. Omit it when the host can't tell question vs. command; Pragma then shows a
   generic attention indicator.
-- `--worktree-id <id>` *(optional, `report stopped` / `report cleared`)* — overrides
+- `--worktree-id <id>` _(optional, `report stopped` / `report cleared`)_ — overrides
   `PRAGMA_WORKTREE_ID`, useful when reporting final status from a parent process.
 
 ## How it works
