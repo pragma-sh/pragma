@@ -29,10 +29,11 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
-  status via `@pragma/sdk`, owns its bundled Pragma launcher config under `pragma/agents/`, and is
-  staged + registered in opencode's `plugin` config array on app startup (opencode does **not**
-  auto-load plugins from a directory; a file-path array entry is the only thing that loads, and the
-  bare unpublished package name must never be registered). See `src-tauri/src/opencode_plugin.rs`.
+  status via `@pragma/sdk` and owns its bundled Pragma launcher config under `pragma/agents/`.
+  Pragma does **not** bundle, install, or register the plugin — you register its built
+  `dist/index.mjs` absolute path in opencode's own `plugin` config array yourself (opencode does
+  **not** auto-load plugins from a directory; a file-path array entry is the only thing that loads,
+  and the bare unpublished package name must never be registered).
 
 ## Where does it go?
 

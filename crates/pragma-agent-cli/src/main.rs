@@ -39,8 +39,11 @@ enum ReportCommand {
         worktree_id: Option<String>,
     },
     Attention {
+        /// Optional hint for the kind of attention needed. Omit it when the host
+        /// agent can't tell a question from a command (e.g. Claude Code's
+        /// `Notification` hook) so Pragma shows a generic attention indicator.
         #[arg(long)]
-        kind: AttentionKind,
+        kind: Option<AttentionKind>,
     },
     /// Clears the tab's indicator entirely instead of leaving a `done`/green dot.
     /// Use when the agent process exits rather than finishing a turn.
@@ -76,7 +79,7 @@ fn run(cli: Cli) -> Result<(), String> {
             ReportCommand::Stopped { worktree_id } => ("done", None, worktree_id),
             ReportCommand::Attention { kind } => (
                 "attention",
-                Some(match kind {
+                kind.map(|kind| match kind {
                     AttentionKind::Question => "question",
                     AttentionKind::Command => "command",
                 }),
@@ -153,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn attention_requires_a_kind() {
+    fn attention_accepts_a_kind() {
         let cli = Cli::try_parse_from([
             "pragma-agent",
             "--agent",
@@ -165,6 +168,26 @@ mod tests {
         ])
         .expect("attention with a kind should parse");
         assert_eq!(cli.agent, "mock");
+        assert!(matches!(
+            cli.command,
+            Command::Report {
+                report: ReportCommand::Attention {
+                    kind: Some(AttentionKind::Question)
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn attention_kind_is_optional() {
+        let cli = Cli::try_parse_from(["pragma-agent", "--agent", "mock", "report", "attention"])
+            .expect("attention without a kind should parse");
+        assert!(matches!(
+            cli.command,
+            Command::Report {
+                report: ReportCommand::Attention { kind: None }
+            }
+        ));
     }
 
     #[test]

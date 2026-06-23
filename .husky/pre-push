@@ -1,5 +1,8 @@
 # Heavier gate before sharing work: full typecheck (TS) + Rust type check.
 # Lint/format are auto-fixed on commit and verified again in CI.
+# Tauri validates externalBin resources during cargo check, so stage sidecars
+# before compiling the workspace.
 bun run typecheck
 cargo fmt --all -- --check
+bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
 cargo check --workspace --all-targets

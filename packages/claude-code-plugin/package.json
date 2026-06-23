@@ -1,0 +1,21 @@
+{
+  "name": "@pragma/claude-code-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude Code plugin that reports agent status to Pragma automatically via shell hooks.",
+  "files": [
+    ".claude-plugin",
+    "hooks",
+    "pragma"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
