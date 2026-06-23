@@ -1,0 +1,6 @@
+{
+  "id": "claude-code",
+  "name": "Claude Code",
+  "icon": "icon.svg",
+  "start": ["claude", "--permission-mode", "auto"]
+}

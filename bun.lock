@@ -84,6 +84,15 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/claude-code-plugin": {
+      "name": "@pragma/claude-code-plugin",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/constants": {
       "name": "@pragma/constants",
       "version": "0.0.0",
@@ -636,6 +645,8 @@
     "@oxlint/binding-win32-ia32-msvc": ["@oxlint/binding-win32-ia32-msvc@1.70.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-FHMSWbVsPVs/f+Jcl04ws4JJ2wUnauyTzlpxWRG/lSO/8GpX08Fo2gQZqdA6CrRFI+zvkxl+N/KwJGWfUwYVZA=="],
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.70.0", "", { "os": "win32", "cpu": "x64" }, "sha512-ptOlKwCz7n4AKs5VweMqG6DAg677FmKOK+vBkkL9DMNgFATIQ+upqUYBTOEwRQyRAx1ncGlPlXleV2hIcm3z4g=="],
+
+    "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
 
     "@pragma/constants": ["@pragma/constants@workspace:packages/constants"],
 

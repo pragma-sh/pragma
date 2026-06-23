@@ -1,0 +1,14 @@
+{
+  "name": "pragma",
+  "description": "Pragma's bundled Claude Code plugin that reports agent status to the Pragma desktop app.",
+  "owner": {
+    "name": "Pragma"
+  },
+  "plugins": [
+    {
+      "name": "pragma-claude-code",
+      "source": "./",
+      "description": "Reports Claude Code agent status (running / done / attention) to Pragma automatically."
+    }
+  ]
+}
