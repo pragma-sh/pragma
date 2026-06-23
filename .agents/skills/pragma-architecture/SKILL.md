@@ -26,6 +26,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
 - `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-agent`.
+- `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
+  sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
   status via `@pragma/sdk`, owns its bundled Pragma launcher config under `pragma/agents/`, and is
   staged + registered in opencode's `plugin` config array on app startup (opencode does **not**
@@ -40,6 +42,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                         |
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                     |
 | Typed JS wrapper over the agent CLI              | `packages/sdk` (`@pragma/sdk`)                 |
+| Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)    |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                     |
 | Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                 |
 | A reusable UI primitive                          | `bunx shadcn@latest add <c>` → `components/ui` |

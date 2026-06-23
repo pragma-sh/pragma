@@ -48,24 +48,25 @@ than no guide.
 
 ## Tech stack
 
-| Concern          | Choice                                                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                     |
-| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                      |
-| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                   |
-| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)   |
-| Backend          | Rust (Tauri commands)                                                                                                   |
-| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies |
-| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                  |
-| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                    |
-| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                |
-| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                 |
-| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                              |
-| Format (Rust)    | rustfmt                                                                                                                 |
-| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                       |
-| Commits          | Conventional Commits (commitlint)                                                                                       |
-| Git hooks        | Husky + lint-staged                                                                                                     |
-| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                             |
+| Concern          | Choice                                                                                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
+| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
+| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
+| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
+| Backend          | Rust (Tauri commands)                                                                                                                                           |
+| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
+| AI               | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
+| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
+| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
+| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                                                        |
+| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                                                         |
+| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                      |
+| Format (Rust)    | rustfmt                                                                                                                                                         |
+| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
+| Commits          | Conventional Commits (commitlint)                                                                                                                               |
+| Git hooks        | Husky + lint-staged                                                                                                                                             |
+| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
 
 ## Repository structure
 
@@ -112,6 +113,7 @@ than no guide.
 │   │   ├── src/lib.rs           # Rust export (typify-generated types + parsed values)
 │   │   └── src/generated/       # Generated TS types (git-ignored; never edit)
 │   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
 │   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -176,6 +178,48 @@ Octokit()` happens** — the exact same discipline as the `invoke()` rule, becau
   file-level threads still list beneath the diff). Markdown is rendered read-only via `react-markdown` +
   `remark-gfm` (`github/GitHubMarkdown`). The `simple-icons:github` glyph is bundled
   offline through `brand-icons.json` (lucide-react dropped its brand `Github` export).
+- **AI features.** Built-in AI runs through the pi coding-agent SDK
+  (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`), which is **Node-only**, so it
+  cannot run in the webview. It is wrapped by **`@pragma/ai-helpers`** (`packages/ai-helpers`) and
+  executed out of process by the **`pragma-ai` sidecar** — a Bun-compiled standalone
+  (`bun build --compile` of `src/cli.ts`) staged + bundled exactly like the daemon
+  (`stage-daemon-sidecar.sh`, `tauri.conf.json` `externalBin`, debug runs it from source via `bun`).
+  The sidecar speaks **NDJSON**: one-shot `status`/`methods`/`set-key`/`logout`/`commit-message`
+  commands print a single `result`/`error` line; the interactive `login` command streams
+  `auth`/`device-code`/`progress`/`prompt`/`select` events and reads NDJSON responses on stdin.
+  Rust (`src-tauri/src/ai.rs`) is a thin proxy: one-shots run in `spawn_blocking`; `ai_login`
+  spawns a long-lived child, streams events over a Tauri `Channel`, and answers prompts via
+  `ai_login_respond` (a managed `LoginRegistry` holds each child's stdin keyed by a frontend id).
+  Auth lives in pi's default `~/.pi/agent/auth.json` (shared with a user's pi CLI, `0600`); the
+  "skip setup" flag persists in the `settings` table (`ai.setupDismissed`). `ai-helpers` owns
+  **`pickModel(kind)`** — lists `registry.getAvailable()` models, drops ones whose id/name-encoded
+  release date is >3 months old, then **quick** = context ≤ 500k with non-reasoning preferred
+  (fallback to reasoning when none qualify), **standard** = reasoning + context > 256k, picking the cheapest (input+output); pi `Model` objects carry no date
+  field, so age is parsed from the `…-YYYYMMDD`/`YYYY-MM-DD` id (undated = kept). All sessions go
+  through `createPragmaSession`, which uses the default resource loader (the worktree's AGENTS.md is
+  read + skills loadable) and a selective tool allowlist. Frontend: `state/ai-context.tsx` (`useAi`)
+  gates AI affordances on `available`; the first-run `components/ai/AiSetupModal` (featured providers —
+  Claude Code, Codex, OpenRouter, Copilot, Google AI, opencode Go — + a "More options" reveal, via
+  `AiAuthOptions`) is driven by `needsSetup` (`ai.setupDismissed` in SQLite), not by `available` — pi
+  credentials may already exist in the shared `~/.pi/agent/auth.json` before Pragma is opened. Done and
+  Skip both persist the dismiss flag; the modal latches open across connects so the user can add several
+  providers before closing.
+  Built-in generators:
+  **commit-message generation** — Shift+Tab in the Changes commit field
+  (`ChangesTab` `CommitInput`) calls `ai_generate_commit_message` (quick model over the staged
+  diff, with tools available to inspect `AGENTS.md` / `git log` for the commit convention); the
+  placeholder reads "Shift + tab to generate" (→ "Generating commit message…" while
+  running) and an empty index toasts an error. **pull-request generation** — Shift+Tab in the
+  Pull Request create title field or markdown body calls `ai_generate_pull_request_draft`
+  (standard model over the branch `merge-base..HEAD` git log + committed diff/stat, with tools
+  available so the agent can inspect changed code when commits/diff do not tell the full story)
+  and fills both title and body. **commit-and-PR generation** — the right-sidebar
+  header's **Commit & PR** GitHub button calls `ai_commit_all_and_generate_pull_request_draft`
+  (standard model over a dirty-worktree commit-plan prompt that returns exact path groups +
+  messages; Rust validates the plan, stages those path groups, creates the commits, then reruns the
+  PR-draft prompt over the newly committed branch). On success the sidebar switches to the Pull
+  Request subtab and injects the generated title/body for review before the user opens the PR. All AI affordances are hidden when no provider is
+  authenticated (`available === false`).
 - PTY/session business logic → `crates/pragma-daemon`; shared wire framing/types →
   `crates/pragma-protocol`; agent status CLI → `crates/pragma-agent-cli`. The Tauri app only proxies over
   the Unix socket and must not own PTYs.
