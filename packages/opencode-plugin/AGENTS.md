@@ -16,9 +16,10 @@ packages/opencode-plugin/
 └── dist/index.mjs       # Built output (Bunup; git-ignored)
 ```
 
-The built `dist/index.mjs` is staged to
-`apps/pragma/src-tauri/resources/pragma/plugins/opencode.mjs` by
-`scripts/stage-daemon-sidecar.sh` and bundled as a Tauri resource.
+The built `dist/index.mjs` is **not** bundled by Pragma — `stage-daemon-sidecar.sh`
+stages only the daemon/`pragma-agent` sidecars and the bundled agent launcher configs
+(`pragma/agents/`). To use the plugin, register its absolute path in opencode's own
+`plugin` config (see _Installation_ below).
 
 ## Installation
 

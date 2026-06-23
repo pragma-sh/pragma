@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the detached PTY daemon (`pragma-daemon`), agent reporter
-# (`pragma-agent`), and opencode plugin, then stage sidecars/resources so the bundle is self-contained. The release app launches the daemon
+# Build the detached PTY daemon (`pragma-daemon`) and agent reporter
+# (`pragma-agent`), then stage sidecars/resources so the bundle is self-contained. The release app launches the daemon
 # from beside its own executable (see `daemon_executable()` in
 # `src-tauri/src/pty.rs`), and the Tauri CLI only copies it there if a
 # `pragma-daemon-<target-triple>` binary exists under `src-tauri/binaries/`;
@@ -41,6 +41,12 @@ cp "$repo_root/target/$profile/pragma-daemon" \
   "$src_tauri_dir/binaries/pragma-daemon-$triple"
 cp "$repo_root/target/$profile/pragma-agent" \
   "$src_tauri_dir/binaries/pragma-agent-$triple"
+
+# Remove any plugin JS left over from a previous staging layout. Pragma no longer
+# bundles plugin dist (opencode's .mjs) as a Tauri resource; since tauri.conf.json
+# bundles `resources/**/*`, a stale `resources/pragma/plugins/` would still get
+# bundled, so delete it here.
+rm -rf "$src_tauri_dir/resources/pragma/plugins"
 
 # Stage the bundled agent launcher configs (config.json + icon) for every plugin
 # package. These are installed into ~/.pragma/agents by `agents::ensure_bundled_installed`

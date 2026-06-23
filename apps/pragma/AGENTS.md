@@ -42,7 +42,7 @@ apps/pragma/
     ├── src/main.rs              # Thin entrypoint
     ├── tauri.conf.json          # Window/bundle config; bundles daemon via externalBin
     ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
-    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages daemon, pragma-agent, plugin dist
+    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages daemon, pragma-agent, bundled agent configs
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
     ├── resources/pragma/agents/ # Staged bundled agent configs (git-ignored)
     ├── icons/                   # Production app icons
@@ -158,8 +158,9 @@ executable (`daemon_executable()` in `src-tauri/src/pty.rs` =
 `scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-daemon` + copy with host
 triple), wired in two places: `tauri:build`'s `beforeBuildCommand` runs it `--release`,
 and `tauri:dev` runs it (debug) before `tauri dev`. The daemon is spawned directly with
-`std::process::Command`, **not** the shell plugin. `pragma-agent` and the opencode
-plugin dist are staged by the same script. `binaries/` is git-ignored.
+`std::process::Command`, **not** the shell plugin. `pragma-agent` and the bundled
+agent launcher configs (`resources/pragma/agents/`) are staged by the same script;
+plugin JS itself is **not** bundled by Pragma. `binaries/` is git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build
