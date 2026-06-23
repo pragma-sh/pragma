@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDisposable } from "@xterm/xterm";
 import type { Channel } from "@tauri-apps/api/core";
 
 import type { Tab } from "@pragma/constants";
@@ -10,6 +10,7 @@ import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import { nativeEditingSequence } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMessage } from "@/lib/tauri";
+import { createFileLinkProvider, getTerminalLinkHandler } from "@/lib/terminal-links";
 
 const RESIZE_DEBOUNCE_MS = 75;
 export const MAX_TERMINAL_COLS = 240;
@@ -43,6 +44,8 @@ interface ManagedTerminal {
   writeInFlight: boolean;
   /** Live PTY event channel, retained so dispose() can detach its handler. */
   channel: Channel<PtyMessage> | null;
+  /** File-path link provider registration, disposed with the terminal. */
+  fileLinkProvider: IDisposable | null;
 }
 
 // Nerd Font variants ship full text-presentation glyph coverage for
@@ -71,6 +74,7 @@ export class TerminalManager {
   static readonly lineHeight = TERMINAL_LINE_HEIGHT;
 
   private terminals = new Map<string, ManagedTerminal>();
+  private pendingInput = new Map<string, string[]>();
   // Title listeners are keyed by tab id and kept **independent of the terminal's
   // lifecycle** so a consumer can subscribe before the terminal is mounted (e.g.
   // a background tab) and still receive shell-emitted titles once it connects.
@@ -116,7 +120,25 @@ export class TerminalManager {
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    terminal.loadAddon(new WebLinksAddon());
+    // Web links open through the workspace handler rather than the OS browser:
+    // Shift+click opens the URL in a browser split to the right; Alt/Option+
+    // Shift+click opens it in the system browser instead. A plain click is left
+    // to xterm (selection / TUI mouse reporting) — Shift is the deliberate
+    // "open this link" gesture, and also bypasses a TUI's mouse tracking.
+    terminal.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        const handler = getTerminalLinkHandler();
+        if (!handler || !event.shiftKey) {
+          return;
+        }
+        handler.openUrl({
+          tabId: tab.id,
+          worktreeId: tab.worktreeId,
+          url: uri,
+          external: event.altKey,
+        });
+      }),
+    );
     terminal.attachCustomKeyEventHandler((event) => {
       const platform = isMacPlatform() ? "mac" : "linux";
       // Shift+Enter is a soft newline: a literal LF that does not submit the
@@ -202,7 +224,14 @@ export class TerminalManager {
       pendingOutput: [],
       writeInFlight: false,
       channel: null,
+      fileLinkProvider: null,
     };
+    // Linkify existing worktree files printed in the terminal so a click opens
+    // them in an editor split to the right (validated against the worktree, so
+    // only real files are decorated). cwd is the worktree root.
+    managed.fileLinkProvider = terminal.registerLinkProvider(
+      createFileLinkProvider(terminal, tab.id, tab.worktreeId, cwd),
+    );
     this.terminals.set(tab.id, managed);
     terminal.onData((data) => void ptyWrite(tab.id, data));
     this.connect(tab, cwd, managed);
@@ -219,6 +248,18 @@ export class TerminalManager {
       return;
     }
     managed.terminal.clear();
+  }
+
+  /** Writes input once a tab's daemon PTY connection exists. */
+  writeWhenReady(tabId: string, data: string): void {
+    const managed = this.terminals.get(tabId);
+    if (managed?.channel) {
+      void ptyWrite(tabId, data);
+      return;
+    }
+    const pending = this.pendingInput.get(tabId) ?? [];
+    pending.push(data);
+    this.pendingInput.set(tabId, pending);
   }
 
   /** Scrolls the terminal viewport to the bottom (the live cursor row). */
@@ -254,6 +295,8 @@ export class TerminalManager {
     }
     managed.pendingOutput = [];
     managed.writeInFlight = false;
+    managed.fileLinkProvider?.dispose();
+    managed.fileLinkProvider = null;
     // Detach the channel handler so Tauri stops delivering events to a disposed
     // terminal, then tell the daemon to tear down the shell — without this the
     // shell process and its scrollback leak for the lifetime of the daemon.
@@ -264,6 +307,7 @@ export class TerminalManager {
     managed.terminal.dispose();
     managed.container.remove();
     this.terminals.delete(tabId);
+    this.pendingInput.delete(tabId);
     void ptyKill(tabId);
   }
 
@@ -380,7 +424,21 @@ export class TerminalManager {
     ptyAttach(tabId, cols, rows, onEvent)
       .catch(() => ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent))
       .then((channel) => {
-        managed.channel = channel;
+        const live = this.terminals.get(tabId);
+        if (!live || live !== managed) {
+          // Tab closed while attach/spawn was in flight — drop the session rather
+          // than wiring input/output to a disposed terminal.
+          void ptyKill(tabId);
+          return undefined;
+        }
+        live.channel = channel;
+        const pending = this.pendingInput.get(tabId);
+        if (pending) {
+          this.pendingInput.delete(tabId);
+          for (const data of pending) {
+            void ptyWrite(tabId, data);
+          }
+        }
         // The remote session is brand new — either a fresh spawn, or an attach
         // that fell back to spawn after a daemon reset — and was created with the
         // pre-fit default size (80x24), because connect() runs before the first
@@ -389,8 +447,8 @@ export class TerminalManager {
         // clear the cache to force fit() to re-send the current size now that the
         // session exists; otherwise it early-returns and the PTY stays at 80x24
         // while xterm fills the window.
-        managed.lastResizeCols = null;
-        managed.lastResizeRows = null;
+        live.lastResizeCols = null;
+        live.lastResizeRows = null;
         this.fit(tabId);
         return undefined;
       })

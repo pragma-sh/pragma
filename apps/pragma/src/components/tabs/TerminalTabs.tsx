@@ -8,8 +8,10 @@ import {
   Columns2,
   Globe,
   Pencil,
+  Play,
   Plus,
   Rows2,
+  Square,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -170,6 +172,10 @@ export function TerminalTabs() {
   const inputRef = useRef<HTMLInputElement>(null);
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
   const selectedEditor = editorFor(selectedEditorId);
+  const runState = workspace.runScriptsState;
+  const runDisabled = runState
+    ? runState.stopping
+    : !workspace.selectedWorktree || !workspace.runScriptsAvailable;
 
   // A split collapses into a single "parent" entry in the top bar, named after
   // its top-left pane. Its members are hidden from the bar (they live in the
@@ -225,6 +231,38 @@ export function TerminalTabs() {
         <div className="flex h-9 items-center justify-between gap-2 border-b border-white/5 bg-[#151b24] px-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
           <div className="flex min-w-0 items-center gap-1">
             <AgentsMenu />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    className={cn(
+                      "border shadow-sm hover:text-white",
+                      runState
+                        ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
+                        : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
+                    )}
+                    disabled={runDisabled}
+                    onClick={() =>
+                      void (runState ? workspace.stopRunScripts() : workspace.runScripts())
+                    }
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={runState ? "Stop project scripts" : "Run project scripts"}
+                  >
+                    {runState ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {runState
+                  ? "Stop project scripts"
+                  : workspace.runScriptsConfigError
+                    ? workspace.runScriptsConfigError
+                    : workspace.runScriptsAvailable
+                      ? "Run project scripts"
+                      : "No project run scripts"}
+              </TooltipContent>
+            </Tooltip>
             {workspace.agentBackAvailable ? (
               <Button
                 className="text-slate-200 hover:bg-white/10 hover:text-white"

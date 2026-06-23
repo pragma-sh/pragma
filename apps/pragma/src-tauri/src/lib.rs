@@ -19,6 +19,7 @@ mod keybindings;
 mod process_env;
 mod projects;
 mod pty;
+mod scripts;
 mod worktrees;
 
 use pragma_constants::{
@@ -383,6 +384,7 @@ pub fn run() {
             worktrees::rename_worktree,
             worktrees::hide_worktree,
             worktrees::delete_worktree,
+            scripts::load_project_scripts,
             editors::open_worktree,
             agents::list_agents,
             agent_notifications::show_agent_notification,

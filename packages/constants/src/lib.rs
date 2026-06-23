@@ -18,8 +18,10 @@ pub use generated::{
     BranchSyncStatus, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry,
     EditorLauncher, EditorLaunchers, FileContents, FileDiff, GitHub, GitHubAuthStatus,
     GitHubRepoRef, GitHubUser, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
-    KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, Tab, TabKind, WindowDefaults,
-    Worktree, WorktreeChanges, WorktreeStatus,
+    KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
+    RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
+    RunScriptVerticalSplit, ScriptRunStatus, Scripts, Tab, TabKind, WindowDefaults, Worktree,
+    WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
@@ -52,6 +54,11 @@ mod tests {
         // `minimum: 1` in the schema makes typify generate a `NonZeroU64`, so the
         // Rust side is statically guaranteed non-zero; `.get()` reads the value.
         assert!(CONSTANTS.max_parallel_agents.get() >= 1);
+    }
+
+    #[test]
+    fn max_concurrent_script_commands_is_positive() {
+        assert!(CONSTANTS.scripts.max_concurrent_commands.get() >= 1);
     }
 
     #[test]

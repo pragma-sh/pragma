@@ -24,6 +24,7 @@ import {
   deleteWorktree,
   fileDiff,
   listDirEntries,
+  loadProjectScripts,
   listSplits,
   markAgentsSeen,
   mergeWorktreeToParent,
@@ -193,6 +194,11 @@ describe("worktree IPC wrappers", () => {
       deleteBranch: true,
       force: false,
     });
+  });
+
+  it("loadProjectScripts forwards the project id", () => {
+    void loadProjectScripts("project-1");
+    expect(invokeMock).toHaveBeenCalledWith("load_project_scripts", { projectId: "project-1" });
   });
 });
 

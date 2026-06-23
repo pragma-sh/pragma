@@ -184,6 +184,108 @@ describe("workspaceReducer", () => {
     expect(tabIdsInLayout(root).toSorted()).toEqual(["one", "two"]);
   });
 
+  it("opens a new tab in a split to the right of the source, keeping the source put", () => {
+    const state = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("term"), tab("other")],
+        activeTabByWorktree: { worktree: "term" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link"),
+        sourceTabId: "term",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+
+    const root = state.splitRootByWorktree.worktree;
+    expect(root?.kind).toBe("split");
+    // The split holds the source terminal (left) and the new link tab (right);
+    // "other" stays a normal top-bar tab. The new tab is active and focused.
+    expect(tabIdsInLayout(root).toSorted()).toEqual(["link", "term"]);
+    if (root?.kind === "split") {
+      expect(tabIdsInLayout(root.children[0])).toEqual(["term"]);
+      expect(tabIdsInLayout(root.children[1])).toEqual(["link"]);
+    }
+    expect(state.activeTabByWorktree.worktree).toBe("link");
+    expect(state.tabs.some((item) => item.id === "link")).toBe(true);
+  });
+
+  it("falls back to a normal tab when open-in-new-split source is missing or wrong worktree", () => {
+    const missingSource = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("term")],
+        activeTabByWorktree: { worktree: "term" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link"),
+        sourceTabId: "gone",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+    expect(missingSource.tabs.map((item) => item.id)).toEqual(["term", "link"]);
+    expect(missingSource.activeTabByWorktree.worktree).toBe("link");
+    expect(missingSource.splitRootByWorktree.worktree).toBeUndefined();
+
+    const otherWorktree = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("term", "worktree-a"), tab("other", "worktree-a")],
+        activeTabByWorktree: { "worktree-a": "term" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link", "worktree-b"),
+        sourceTabId: "term",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+    expect(otherWorktree.tabs.some((item) => item.id === "link")).toBe(true);
+    expect(otherWorktree.activeTabByWorktree["worktree-b"]).toBe("link");
+    expect(otherWorktree.splitRootByWorktree["worktree-b"]).toBeUndefined();
+  });
+
+  it("opens a new tab beside the source pane inside an existing split", () => {
+    const state = workspaceReducer(
+      {
+        ...baseState,
+        tabs: [tab("one"), tab("two")],
+        activeTabByWorktree: { worktree: "one" },
+        splitRootByWorktree: {
+          worktree: {
+            kind: "split",
+            id: "split-1",
+            direction: "horizontal",
+            children: [
+              { kind: "pane", id: "pane-left", tabIds: ["one"], activeTabId: "one" },
+              { kind: "pane", id: "pane-right", tabIds: ["two"], activeTabId: "two" },
+            ],
+          },
+        },
+        focusedPaneByWorktree: { worktree: "pane-right" },
+      },
+      {
+        type: "open-in-new-split",
+        tab: tab("link"),
+        sourceTabId: "one",
+        direction: "horizontal",
+        placement: "after",
+      },
+    );
+
+    const root = state.splitRootByWorktree.worktree;
+    // The new tab joins the layout in its own pane next to the source pane; the
+    // existing panes keep their tabs.
+    expect(tabIdsInLayout(root).toSorted()).toEqual(["link", "one", "two"]);
+    expect(state.activeTabByWorktree.worktree).toBe("link");
+  });
+
   it("keeps newly loaded tabs out of an existing split (the normal bar)", () => {
     const state = workspaceReducer(
       {
