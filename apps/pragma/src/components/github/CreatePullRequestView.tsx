@@ -38,11 +38,14 @@ import {
   type RepoTarget,
 } from "@/lib/github";
 import {
+  type AiPullRequestDraft,
+  aiGeneratePullRequestDraft,
   githubDefaultPrTitle,
   githubFetchAndSync,
   githubPushBranch,
   worktreeChanges,
 } from "@/lib/tauri";
+import { useAi } from "@/state/ai-context";
 
 function messageFor(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -72,17 +75,23 @@ type Preflight =
  * directly instead of re-resolving and risking a transient "not found").
  */
 export function CreatePullRequestView({
+  initialDraft,
+  initialDraftKey,
   repo,
   worktreeId,
   onCreated,
 }: {
+  initialDraft?: AiPullRequestDraft | null;
+  initialDraftKey?: number;
   repo: GitHubRepoRef;
   worktreeId: string;
   onCreated: (pr: PullRequestSummary) => void;
 }) {
+  const { available: aiAvailable } = useAi();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>(null);
 
   // The merge-into target: which repository (origin, or its upstream parent for a
@@ -95,6 +104,14 @@ export function CreatePullRequestView({
   // Bumped on every base-repo switch so a slow `listBranches` for a now-stale
   // repo can't clobber the current selection.
   const branchToken = useRef(0);
+
+  useEffect(() => {
+    if (!initialDraft) {
+      return;
+    }
+    setTitle(initialDraft.title);
+    setBody(initialDraft.body);
+  }, [initialDraft, initialDraftKey]);
 
   useEffect(() => {
     let active = true;
@@ -232,7 +249,35 @@ export function CreatePullRequestView({
   );
 
   const canSubmit =
-    title.trim().length > 0 && !submitting && baseRepo !== null && baseBranch !== null;
+    title.trim().length > 0 &&
+    !submitting &&
+    !generating &&
+    baseRepo !== null &&
+    baseBranch !== null;
+  const generateDraft = useCallback(async () => {
+    if (!aiAvailable || generating || !worktreeId) {
+      return;
+    }
+    setGenerating(true);
+    try {
+      const draft = await aiGeneratePullRequestDraft(worktreeId);
+      setTitle(draft.title);
+      setBody(draft.body);
+    } catch (cause) {
+      toast.error(messageFor(cause));
+    } finally {
+      setGenerating(false);
+    }
+  }, [aiAvailable, generating, worktreeId]);
+  const handleGenerateShortcut = useCallback(
+    (event: { shiftKey: boolean; key: string; preventDefault: () => void }) => {
+      if (aiAvailable && event.shiftKey && event.key === "Tab") {
+        event.preventDefault();
+        void generateDraft();
+      }
+    },
+    [aiAvailable, generateDraft],
+  );
   const multipleRepos = baseRepos.length > 1;
   // The head ref, qualified with the origin owner when targeting a different repo
   // (a cross-fork PR), matching GitHub's `owner:branch` head display.
@@ -306,12 +351,25 @@ export function CreatePullRequestView({
       <Input
         aria-label="Pull request title"
         autoCapitalize="none"
+        disabled={generating}
         onChange={(event) => setTitle(event.target.value)}
-        placeholder="Title"
+        onKeyDown={handleGenerateShortcut}
+        placeholder={aiAvailable ? "Shift + tab to generate" : "Title"}
         spellCheck="true"
         value={title}
       />
-      <MarkdownEditor onChange={setBody} value={body} />
+      <MarkdownEditor
+        onChange={setBody}
+        onKeyDown={handleGenerateShortcut}
+        placeholder={
+          generating
+            ? "Generating pull request…"
+            : aiAvailable
+              ? "Shift + tab to generate"
+              : "Describe your changes…"
+        }
+        value={body}
+      />
       <div className="flex items-center">
         <Button
           className="rounded-r-none"

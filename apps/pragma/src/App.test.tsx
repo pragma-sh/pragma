@@ -40,6 +40,14 @@ describe("App", () => {
       if (command === "get_projects_directory") {
         return Promise.resolve("/tmp");
       }
+      // Keep the first-run AI setup modal closed so it doesn't aria-hide the
+      // workspace under test: report AI as already-dismissed.
+      if (command === "ai_status") {
+        return Promise.resolve({ available: false, signedIn: [] });
+      }
+      if (command === "ai_setup_dismissed") {
+        return Promise.resolve(true);
+      }
       return Promise.resolve(null);
     });
   });

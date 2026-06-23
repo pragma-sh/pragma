@@ -17,9 +17,11 @@ const unstageFileMock = vi.fn();
 const unstageAllMock = vi.fn();
 const commitStagedMock = vi.fn();
 const mergeWorktreeToParentMock = vi.fn();
+const aiGenerateCommitMessageMock = vi.fn();
 const deleteWorktreeMock = vi.fn();
 const getWorktreeStatusMock = vi.fn();
 const openDiffTabMock = vi.fn();
+let aiAvailableMock = false;
 
 const mainWorktree: Worktree = {
   id: "wt",
@@ -72,6 +74,7 @@ vi.mock("@/lib/tauri", () => ({
   unstageAll: (...args: unknown[]) => unstageAllMock(...args),
   commitStaged: (...args: unknown[]) => commitStagedMock(...args),
   mergeWorktreeToParent: (...args: unknown[]) => mergeWorktreeToParentMock(...args),
+  aiGenerateCommitMessage: (...args: unknown[]) => aiGenerateCommitMessageMock(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -80,6 +83,10 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
+}));
+
+vi.mock("@/state/ai-context", () => ({
+  useAi: () => ({ available: aiAvailableMock }),
 }));
 
 import { ChangesTab } from "./ChangesTab";
@@ -95,6 +102,8 @@ function change(path: string, status: ChangeStatus, side: DiffSide): ChangedFile
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  aiAvailableMock = false;
+  aiGenerateCommitMessageMock.mockReset();
   worktreeChangesMock.mockReset();
   discardUnstagedFileMock.mockReset();
   discardAllUnstagedMock.mockReset();
@@ -332,6 +341,55 @@ describe("ChangesTab", () => {
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("nothing to commit"));
     // The user can retry without re-typing.
     expect(input.value).toBe("ship it");
+  });
+
+  it("shows the generate hint and fills the message on Shift+Tab when AI is available", async () => {
+    aiAvailableMock = true;
+    aiGenerateCommitMessageMock.mockResolvedValue("feat: add the thing");
+    worktreeChangesMock.mockResolvedValue(
+      changes({
+        staged: [change("src/app.ts", "modified", "staged")],
+      }),
+    );
+    render(<ChangesTab />);
+    await screen.findByText("app.ts");
+
+    const input = screen.getByPlaceholderText("Shift + tab to generate") as HTMLInputElement;
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+
+    await vi.waitFor(() => expect(aiGenerateCommitMessageMock).toHaveBeenCalledWith("wt"));
+    await vi.waitFor(() => expect(input.value).toBe("feat: add the thing"));
+  });
+
+  it("toasts and does not generate on Shift+Tab when nothing is staged", async () => {
+    aiAvailableMock = true;
+    worktreeChangesMock.mockResolvedValue(changes());
+    render(<ChangesTab />);
+    await screen.findByText("No committed changes");
+
+    const input = screen.getByPlaceholderText("Shift + tab to generate");
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+
+    const { toast } = await import("sonner");
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "No staged changes to generate a commit message from.",
+      ),
+    );
+    expect(aiGenerateCommitMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("hides the generate hint when AI is unavailable", async () => {
+    worktreeChangesMock.mockResolvedValue(
+      changes({
+        staged: [change("src/app.ts", "modified", "staged")],
+      }),
+    );
+    render(<ChangesTab />);
+    await screen.findByText("app.ts");
+
+    expect(screen.getByPlaceholderText("Commit message")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Shift + tab to generate")).toBeNull();
   });
 
   it("shows merge when a child worktree only has committed changes", async () => {

@@ -1,19 +1,24 @@
+import { AiSetupModal } from "@/components/ai/AiSetupModal";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { GitHubSetupModal } from "@/components/github/GitHubSetupModal";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { AiProvider } from "@/state/ai-context";
 import { GitHubProvider } from "@/state/github-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
 
 function App() {
   return (
-    <GitHubProvider>
-      <WorkspaceProvider>
-        <ConfirmCloseProvider>
-          <WorkspaceShell />
-          <GitHubSetupModal />
-        </ConfirmCloseProvider>
-      </WorkspaceProvider>
-    </GitHubProvider>
+    <AiProvider>
+      <GitHubProvider>
+        <WorkspaceProvider>
+          <ConfirmCloseProvider>
+            <WorkspaceShell />
+            <GitHubSetupModal />
+            <AiSetupModal />
+          </ConfirmCloseProvider>
+        </WorkspaceProvider>
+      </GitHubProvider>
+    </AiProvider>
   );
 }
 

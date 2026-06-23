@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { basename } from "@/lib/path";
 import {
+  aiGenerateCommitMessage,
   commitStaged,
   discardAllUnstaged,
   discardUnstagedFile,
@@ -34,6 +35,7 @@ import {
   unstageFile,
   worktreeChanges,
 } from "@/lib/tauri";
+import { useAi } from "@/state/ai-context";
 import { useWorkspace } from "@/state/workspace-context";
 
 type LoadState =
@@ -69,11 +71,13 @@ function messageFor(cause: unknown): string {
  */
 export function ChangesTab() {
   const workspace = useWorkspace();
+  const { available: aiAvailable } = useAi();
   const worktreeId = workspace.selectedWorktreeId;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [pending, setPending] = useState<PendingDiscard | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
   // The worktree whose load is current; in-flight responses for a stale
@@ -178,6 +182,29 @@ export function ChangesTab() {
       setCommitting(false);
     }
   }, [worktreeId, commitMessage, committing, refresh]);
+
+  const stagedCount = state.kind === "ready" ? state.changes.staged.length : 0;
+
+  // Shift+Tab in the commit field: summarize the staged diff with a quick model.
+  // Only wired up when AI is available; an empty index surfaces a toast.
+  const generateCommit = useCallback(async () => {
+    if (!worktreeId || generating) {
+      return;
+    }
+    if (stagedCount === 0) {
+      toast.error("No staged changes to generate a commit message from.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const message = await aiGenerateCommitMessage(worktreeId);
+      setCommitMessage(message);
+    } catch (cause) {
+      toast.error(messageFor(cause));
+    } finally {
+      setGenerating(false);
+    }
+  }, [worktreeId, generating, stagedCount]);
 
   const submitMerge = useCallback(async () => {
     if (!worktreeId || merging) {
@@ -318,9 +345,13 @@ export function ChangesTab() {
         ) : null
       ) : (
         <CommitInput
-          disabled={committing || state.changes.staged.length === 0}
+          aiAvailable={aiAvailable}
+          canCommit={!committing && !generating && state.changes.staged.length > 0}
+          disabled={committing || generating || (!aiAvailable && state.changes.staged.length === 0)}
+          generating={generating}
           message={commitMessage}
           onChange={setCommitMessage}
+          onGenerate={() => void generateCommit()}
           onSubmit={() => void submitCommit()}
         />
       )}
@@ -409,22 +440,48 @@ function MergedDeleteAction({
 }
 
 interface CommitInputProps {
+  /** Whether AI is available — gates the Shift+Tab hint and handler. */
+  aiAvailable: boolean;
+  /** Whether a commit can be made now (staged work + not busy). */
+  canCommit: boolean;
+  /**
+   * Whether the input is read-only: while committing/generating, or — when AI is
+   * unavailable — when there is nothing staged. With AI available the input stays
+   * editable even with an empty index so Shift+Tab can run (and surface the
+   * "nothing staged" toast).
+   */
   disabled: boolean;
+  /** Whether a commit message is currently being generated. */
+  generating: boolean;
   message: string;
   onChange: (value: string) => void;
+  onGenerate: () => void;
   onSubmit: () => void;
 }
 
 /**
- * Commit-message input + button pinned to the top of the Changes subtab.
- * The input is disabled while there is no staged work to commit (the gate
- * that actually matters for `git commit`); the button is the second gate,
- * held off until the message is non-empty. ⌘/Ctrl-Enter submits from the
- * input as a keyboard shortcut.
+ * Commit-message input + button pinned to the top of the Changes subtab. The
+ * Commit button is gated on staged work and a non-empty message; ⌘/Ctrl-Enter
+ * submits. When AI is available the placeholder advertises "Shift + tab to
+ * generate" and Shift+Tab summarizes the staged diff (replacing the placeholder
+ * with a generating message); with no provider connected none of that shows.
  */
-function CommitInput({ disabled, message, onChange, onSubmit }: CommitInputProps) {
+function CommitInput({
+  aiAvailable,
+  canCommit,
+  disabled,
+  generating,
+  message,
+  onChange,
+  onGenerate,
+  onSubmit,
+}: CommitInputProps) {
   const trimmed = message.trim();
-  const canSubmit = !disabled && trimmed.length > 0;
+  const placeholder = generating
+    ? "Generating commit message…"
+    : aiAvailable
+      ? "Shift + tab to generate"
+      : "Commit message";
   return (
     <div className="flex flex-col gap-1 border-b border-border/60 px-2 py-2">
       <Input
@@ -434,20 +491,25 @@ function CommitInput({ disabled, message, onChange, onSubmit }: CommitInputProps
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
+          if (aiAvailable && event.shiftKey && event.key === "Tab") {
+            event.preventDefault();
+            onGenerate();
+            return;
+          }
           if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault();
-            if (canSubmit) {
+            if (canCommit && trimmed.length > 0) {
               onSubmit();
             }
           }
         }}
-        placeholder="Commit message"
+        placeholder={placeholder}
         spellCheck="true"
         value={message}
       />
       <Button
         className="h-7 w-full"
-        disabled={!canSubmit}
+        disabled={!canCommit || trimmed.length === 0}
         onClick={onSubmit}
         size="sm"
         variant="default"

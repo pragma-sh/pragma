@@ -1,0 +1,4 @@
+{
+  "setup": ["bun install", "cd .plannar && npm install"],
+  "run": ["bun run dev"]
+}

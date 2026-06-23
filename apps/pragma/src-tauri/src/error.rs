@@ -20,6 +20,8 @@ pub enum AppError {
     Browser(String),
     #[error("github error: {0}")]
     GitHub(String),
+    #[error("ai error: {0}")]
+    Ai(String),
     #[error("script error: {0}")]
     Script(String),
     #[error("invalid input: {0}")]
