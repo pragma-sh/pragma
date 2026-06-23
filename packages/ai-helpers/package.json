@@ -1,0 +1,32 @@
+{
+  "name": "@pragma/ai-helpers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lightweight AI helpers for Pragma — wraps the pi coding-agent SDK (auth, model selection, prompts).",
+  "bin": {
+    "pragma-ai": "./src/cli.ts"
+  },
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint .",
+    "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-ai"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.79.10",
+    "@earendil-works/pi-coding-agent": "0.79.10"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
