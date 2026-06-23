@@ -36,24 +36,23 @@ else
   cargo build -p pragma-agent-cli
 fi
 
-# Build the opencode plugin dist so it can be staged as a resource and
-# installed into the user's opencode config on app startup.
-bun --filter @pragma/opencode-plugin build
-
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-daemon" \
   "$src_tauri_dir/binaries/pragma-daemon-$triple"
 cp "$repo_root/target/$profile/pragma-agent" \
   "$src_tauri_dir/binaries/pragma-agent-$triple"
 
+# Stage the bundled agent launcher configs (config.json + icon) for every plugin
+# package. These are installed into ~/.pragma/agents by `agents::ensure_bundled_installed`
+# so the agents appear in the launcher. Plugins themselves (opencode's .mjs, Claude
+# Code's hooks.json) are installed into each tool's own config separately, not by Pragma.
 rm -rf "$src_tauri_dir/resources/pragma/agents"
-mkdir -p "$src_tauri_dir/resources/pragma/plugins"
-cp -R "$repo_root/packages/opencode-plugin/pragma/agents" \
+mkdir -p "$src_tauri_dir/resources/pragma/agents"
+cp -R "$repo_root/packages/opencode-plugin/pragma/agents/." \
   "$src_tauri_dir/resources/pragma/agents"
-cp "$repo_root/packages/opencode-plugin/dist/index.mjs" \
-  "$src_tauri_dir/resources/pragma/plugins/opencode.mjs"
+cp -R "$repo_root/packages/claude-code-plugin/pragma/agents/." \
+  "$src_tauri_dir/resources/pragma/agents"
 
 echo "staged pragma-daemon ($profile) -> src-tauri/binaries/pragma-daemon-$triple"
 echo "staged pragma-agent ($profile) -> src-tauri/binaries/pragma-agent-$triple"
 echo "staged bundled agent configs -> src-tauri/resources/pragma/agents"
-echo "staged opencode plugin -> src-tauri/resources/pragma/plugins/opencode.mjs"

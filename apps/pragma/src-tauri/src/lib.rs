@@ -16,7 +16,6 @@ mod git;
 mod github;
 mod icons;
 mod keybindings;
-mod opencode_plugin;
 mod process_env;
 mod projects;
 mod pty;
@@ -337,9 +336,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");
-    }
-    if let Err(error) = opencode_plugin::ensure_installed(app.handle()) {
-        log::warn!("failed to install opencode plugin: {error}");
     }
     agent_events::start(app.handle().clone(), pty);
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
