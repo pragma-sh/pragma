@@ -41,6 +41,6 @@ build, ci, chore, revert. Scope = package/app name (`pragma`, `constants`, `ci`)
 
 - pre-commit → lint-staged auto-fixes staged files.
 - commit-msg → commitlint.
-- pre-push → typecheck + cargo fmt check + cargo check.
+- pre-push → typecheck + cargo fmt check + sidecar staging + cargo check.
 
 If a hook blocks you, fix the underlying issue — don't bypass with `--no-verify`.

@@ -205,7 +205,8 @@ Shared rules:
 - **pre-commit:** `lint-staged` auto-fixes staged files (`oxlint --fix`, `oxfmt --write`,
   `rustfmt`). Fixing — not just checking — is the local behavior.
 - **commit-msg:** commitlint validates the message.
-- **pre-push:** full `typecheck` + `cargo fmt --check` + `cargo check`.
+- **pre-push:** full `typecheck` + `cargo fmt --check` + sidecar staging +
+  `cargo check`.
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
