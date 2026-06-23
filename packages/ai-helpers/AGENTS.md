@@ -61,7 +61,7 @@ The Rust side parses the last non-empty line.
 
 - **Constants live here, not in `@pragma/constants`.** Model-selection knobs
   (`PICK_MODEL`) never cross the TS/Rust boundary — they run entirely inside
-  this JS sidecar — so they stay local. Anything that *is* shared with Rust
+  this JS sidecar — so they stay local. Anything that _is_ shared with Rust
   still belongs in `@pragma/constants` per the root guide.
 - **Prompts stay in `prompts.ts`.** Keep prompt strings out of the feature
   modules so they are versioned in one place and testable without the SDK.
