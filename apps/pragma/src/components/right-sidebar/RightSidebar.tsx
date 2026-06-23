@@ -36,18 +36,26 @@ export function RightSidebar() {
     useRightSidebar();
   const workspace = useWorkspace();
   const { available: aiAvailable } = useAi();
-  const [commitPrRunning, setCommitPrRunning] = useState(false);
-  const [generatedPrDraft, setGeneratedPrDraft] = useState<{
-    worktreeId: string;
-    key: number;
-    draft: AiPullRequestDraft;
-  } | null>(null);
+  // Commit & PR jobs run in the Rust backend and survive a worktree switch, so
+  // we track them per worktree id rather than with a single boolean. That keeps
+  // the spinner on the worktree it belongs to and lets a job keep running (and
+  // land its draft) while the user works in a different worktree.
+  const [runningWorktrees, setRunningWorktrees] = useState<ReadonlySet<string>>(new Set());
+  const [generatedPrDrafts, setGeneratedPrDrafts] = useState<
+    Record<string, { key: number; draft: AiPullRequestDraft }>
+  >({});
   const [hasUncommittedChanges, setHasUncommittedChanges] = useState(false);
   const availabilityWorktree = useRef<string | null>(null);
 
+  const selectedWorktreeId = workspace.selectedWorktreeId;
+  const commitPrRunning = selectedWorktreeId ? runningWorktrees.has(selectedWorktreeId) : false;
+  const generatedPrDraft = selectedWorktreeId ? generatedPrDrafts[selectedWorktreeId] : undefined;
+
   const refreshCommitPrAvailability = useCallback(async () => {
     const worktreeId = workspace.selectedWorktreeId;
-    if (!worktreeId) {
+    // Skip the IPC + git work entirely when AI is unavailable — the Commit & PR
+    // button is hidden then, so the answer is never used.
+    if (!worktreeId || !aiAvailable) {
       setHasUncommittedChanges(false);
       return;
     }
@@ -61,11 +69,14 @@ export function RightSidebar() {
         setHasUncommittedChanges(false);
       }
     }
-  }, [workspace.selectedWorktreeId]);
+  }, [workspace.selectedWorktreeId, aiAvailable]);
 
   useEffect(() => {
     availabilityWorktree.current = workspace.selectedWorktreeId;
     setHasUncommittedChanges(false);
+    if (!aiAvailable) {
+      return;
+    }
     void refreshCommitPrAvailability();
     const interval = setInterval(
       () => void refreshCommitPrAvailability(),
@@ -77,38 +88,45 @@ export function RightSidebar() {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [workspace.selectedWorktreeId, refreshCommitPrAvailability]);
+  }, [workspace.selectedWorktreeId, aiAvailable, refreshCommitPrAvailability]);
 
   const runCommitAndPr = useCallback(async () => {
     const worktreeId = workspace.selectedWorktreeId;
-    if (!worktreeId || commitPrRunning || !hasUncommittedChanges) {
+    if (!worktreeId || runningWorktrees.has(worktreeId) || !hasUncommittedChanges) {
       return;
     }
     if (!aiAvailable) {
       toast.error("Connect an AI provider to commit and draft a pull request.");
       return;
     }
-    setCommitPrRunning(true);
+    setRunningWorktrees((prev) => new Set(prev).add(worktreeId));
     try {
       const result = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
-      setGeneratedPrDraft({
-        worktreeId,
-        key: Date.now(),
-        draft: { title: result.title, body: result.body },
-      });
-      setActiveSubtab("pullRequest");
-      setHasUncommittedChanges(false);
+      setGeneratedPrDrafts((prev) => ({
+        ...prev,
+        [worktreeId]: { key: Date.now(), draft: { title: result.title, body: result.body } },
+      }));
+      // Only steer the UI if the user is still on the worktree that finished;
+      // otherwise let the draft wait quietly until they return to it.
+      if (availabilityWorktree.current === worktreeId) {
+        setActiveSubtab("pullRequest");
+        setHasUncommittedChanges(false);
+      }
       toast.success(
         `Created ${result.commitCount} commit${result.commitCount === 1 ? "" : "s"} and drafted the PR`,
       );
     } catch (cause) {
       toast.error(messageFor(cause));
     } finally {
-      setCommitPrRunning(false);
+      setRunningWorktrees((prev) => {
+        const next = new Set(prev);
+        next.delete(worktreeId);
+        return next;
+      });
     }
   }, [
     workspace.selectedWorktreeId,
-    commitPrRunning,
+    runningWorktrees,
     hasUncommittedChanges,
     aiAvailable,
     setActiveSubtab,
@@ -188,11 +206,7 @@ export function RightSidebar() {
           <ChangesTab />
         ) : (
           <PullRequestTab
-            generatedDraft={
-              generatedPrDraft?.worktreeId === workspace.selectedWorktreeId
-                ? generatedPrDraft.draft
-                : null
-            }
+            generatedDraft={generatedPrDraft?.draft ?? null}
             generatedDraftKey={generatedPrDraft?.key}
           />
         )}

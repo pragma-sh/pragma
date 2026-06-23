@@ -30,7 +30,11 @@ interface AiContextValue {
   needsSetup: boolean;
   /** Re-reads status from the backend (after a sign-in / API key / skip). */
   refresh: () => Promise<void>;
-  /** Persists the skip flag and refreshes so the modal dismisses. */
+  /**
+   * Persists the skip flag and flips the local `dismissed` state so the setup
+   * modal closes. Does not re-read backend status (no `refresh()`); call
+   * {@link refresh} separately if you need fresh availability afterwards.
+   */
   dismissSetup: () => Promise<void>;
 }
 

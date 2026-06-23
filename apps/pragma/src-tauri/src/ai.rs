@@ -638,8 +638,12 @@ pub fn ai_login(
                 break;
             }
         }
-        if let Ok(mut guard) = map.lock() {
-            guard.remove(&id);
+        // Deregister and reap the child so a finished login does not leave a
+        // zombie on Unix. Take the handle out under the lock, then `wait()`
+        // outside it (the sidecar has already exited or is exiting).
+        let handle = map.lock().ok().and_then(|mut guard| guard.remove(&id));
+        if let Some(mut handle) = handle {
+            let _ = handle.child.wait();
         }
     });
 
@@ -668,6 +672,9 @@ pub fn ai_login_respond(
 pub fn ai_login_cancel(registry: State<'_, LoginRegistry>, id: String) -> AppResult<()> {
     if let Some(mut handle) = registry.0.lock()?.remove(&id) {
         let _ = handle.child.kill();
+        // Reap the killed child so it does not linger as a zombie until the
+        // Tauri process exits.
+        let _ = handle.child.wait();
     }
     Ok(())
 }
