@@ -18,9 +18,13 @@ const COLLAPSED_KEY = "pragma.rightSidebar.collapsed";
 const SUBTAB_KEY = "pragma.rightSidebar.subtab";
 const WIDTH_KEY = "pragma.rightSidebar.width";
 
-const DEFAULT_WIDTH = 288;
-const MIN_WIDTH = 200;
+const DEFAULT_WIDTH = 360;
+const MIN_WIDTH = 360;
 const MAX_WIDTH = 560;
+
+function clampWidth(width: number): number {
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(width)));
+}
 
 /** Narrows a stored string to a known subtab, or null for the default fallback. */
 function parseSubtab(raw: string): RightSidebarSubtab | null {
@@ -60,13 +64,15 @@ export function RightSidebarProvider({ children }: { children: ReactNode }) {
     readStored(SUBTAB_KEY, parseSubtab, "files"),
   );
   const [width, setWidthState] = useState(() =>
-    readStored(
-      WIDTH_KEY,
-      (raw) => {
-        const parsed = Number(raw);
-        return Number.isFinite(parsed) ? parsed : null;
-      },
-      DEFAULT_WIDTH,
+    clampWidth(
+      readStored(
+        WIDTH_KEY,
+        (raw) => {
+          const parsed = Number(raw);
+          return Number.isFinite(parsed) ? parsed : null;
+        },
+        DEFAULT_WIDTH,
+      ),
     ),
   );
 
@@ -89,7 +95,7 @@ export function RightSidebarProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setWidth = useCallback((next: number) => {
-    const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(next)));
+    const clamped = clampWidth(next);
     setWidthState(clamped);
     writeStored(WIDTH_KEY, String(clamped));
   }, []);

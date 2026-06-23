@@ -1,13 +1,28 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Icon } from "@iconify/react";
+import { Loader2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { toast } from "sonner";
 
 import { ChangesTab } from "@/components/right-sidebar/ChangesTab";
 import { FilesTab } from "@/components/right-sidebar/FilesTab";
 import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  aiCommitAllAndGeneratePullRequestDraft,
+  type AiPullRequestDraft,
+  worktreeChanges,
+} from "@/lib/tauri";
+import { useAi } from "@/state/ai-context";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
+import { useWorkspace } from "@/state/workspace-context";
+
+function messageFor(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
 
 /**
  * Secondary sidebar on the right edge of the workspace, mirroring the left
@@ -19,6 +34,85 @@ import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-
 export function RightSidebar() {
   const { collapsed, activeSubtab, width, toggleCollapsed, setActiveSubtab, setWidth } =
     useRightSidebar();
+  const workspace = useWorkspace();
+  const { available: aiAvailable } = useAi();
+  const [commitPrRunning, setCommitPrRunning] = useState(false);
+  const [generatedPrDraft, setGeneratedPrDraft] = useState<{
+    worktreeId: string;
+    key: number;
+    draft: AiPullRequestDraft;
+  } | null>(null);
+  const [hasUncommittedChanges, setHasUncommittedChanges] = useState(false);
+  const availabilityWorktree = useRef<string | null>(null);
+
+  const refreshCommitPrAvailability = useCallback(async () => {
+    const worktreeId = workspace.selectedWorktreeId;
+    if (!worktreeId) {
+      setHasUncommittedChanges(false);
+      return;
+    }
+    try {
+      const changes = await worktreeChanges(worktreeId);
+      if (availabilityWorktree.current === worktreeId) {
+        setHasUncommittedChanges(changes.staged.length > 0 || changes.unstaged.length > 0);
+      }
+    } catch {
+      if (availabilityWorktree.current === worktreeId) {
+        setHasUncommittedChanges(false);
+      }
+    }
+  }, [workspace.selectedWorktreeId]);
+
+  useEffect(() => {
+    availabilityWorktree.current = workspace.selectedWorktreeId;
+    setHasUncommittedChanges(false);
+    void refreshCommitPrAvailability();
+    const interval = setInterval(
+      () => void refreshCommitPrAvailability(),
+      COMMIT_PR_REFRESH_INTERVAL_MS,
+    );
+    const onFocus = () => void refreshCommitPrAvailability();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [workspace.selectedWorktreeId, refreshCommitPrAvailability]);
+
+  const runCommitAndPr = useCallback(async () => {
+    const worktreeId = workspace.selectedWorktreeId;
+    if (!worktreeId || commitPrRunning || !hasUncommittedChanges) {
+      return;
+    }
+    if (!aiAvailable) {
+      toast.error("Connect an AI provider to commit and draft a pull request.");
+      return;
+    }
+    setCommitPrRunning(true);
+    try {
+      const result = await aiCommitAllAndGeneratePullRequestDraft(worktreeId);
+      setGeneratedPrDraft({
+        worktreeId,
+        key: Date.now(),
+        draft: { title: result.title, body: result.body },
+      });
+      setActiveSubtab("pullRequest");
+      setHasUncommittedChanges(false);
+      toast.success(
+        `Created ${result.commitCount} commit${result.commitCount === 1 ? "" : "s"} and drafted the PR`,
+      );
+    } catch (cause) {
+      toast.error(messageFor(cause));
+    } finally {
+      setCommitPrRunning(false);
+    }
+  }, [
+    workspace.selectedWorktreeId,
+    commitPrRunning,
+    hasUncommittedChanges,
+    aiAvailable,
+    setActiveSubtab,
+  ]);
 
   if (collapsed) {
     return (
@@ -69,6 +163,23 @@ export function RightSidebar() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        {aiAvailable ? (
+          <Button
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            disabled={commitPrRunning || !workspace.selectedWorktreeId || !hasUncommittedChanges}
+            onClick={() => void runCommitAndPr()}
+            size="sm"
+            title="Commit all changes and draft a pull request"
+            variant="secondary"
+          >
+            {commitPrRunning ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Icon className="size-3.5" icon="simple-icons:github" />
+            )}
+            Commit &amp; PR
+          </Button>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {activeSubtab === "files" ? (
@@ -76,7 +187,14 @@ export function RightSidebar() {
         ) : activeSubtab === "changes" ? (
           <ChangesTab />
         ) : (
-          <PullRequestTab />
+          <PullRequestTab
+            generatedDraft={
+              generatedPrDraft?.worktreeId === workspace.selectedWorktreeId
+                ? generatedPrDraft.draft
+                : null
+            }
+            generatedDraftKey={generatedPrDraft?.key}
+          />
         )}
       </div>
     </div>

@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import type { BranchSyncStatus, GitHubRepoRef, WorktreeChanges } from "@pragma/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,15 +8,21 @@ const githubDefaultPrTitle = vi.fn();
 const githubFetchAndSync = vi.fn();
 const githubPushBranch = vi.fn();
 const worktreeChanges = vi.fn();
+const aiGeneratePullRequestDraft = vi.fn();
 const createPullRequest = vi.fn();
 const listBaseRepoOptions = vi.fn();
 const listBranches = vi.fn();
+let aiAvailableMock = false;
 
 vi.mock("@/lib/tauri", () => ({
+  aiGeneratePullRequestDraft: (...a: unknown[]) => aiGeneratePullRequestDraft(...a),
   githubDefaultPrTitle: (...a: unknown[]) => githubDefaultPrTitle(...a),
   githubFetchAndSync: (...a: unknown[]) => githubFetchAndSync(...a),
   githubPushBranch: (...a: unknown[]) => githubPushBranch(...a),
   worktreeChanges: (...a: unknown[]) => worktreeChanges(...a),
+}));
+vi.mock("@/state/ai-context", () => ({
+  useAi: () => ({ available: aiAvailableMock }),
 }));
 vi.mock("@/lib/github", () => ({
   createPullRequest: (...a: unknown[]) => createPullRequest(...a),
@@ -23,8 +31,21 @@ vi.mock("@/lib/github", () => ({
 }));
 // The TipTap editor pulls in canvas/lowlight; a plain textarea is enough here.
 vi.mock("@/components/github/MarkdownEditor", () => ({
-  MarkdownEditor: ({ onChange }: { onChange: (value: string) => void }) => (
-    <textarea aria-label="Body" onChange={(event) => onChange(event.target.value)} />
+  MarkdownEditor: ({
+    onChange,
+    onKeyDown,
+    value,
+  }: {
+    onChange: (value: string) => void;
+    onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+    value: string;
+  }) => (
+    <textarea
+      aria-label="Body"
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={onKeyDown}
+      value={value}
+    />
   ),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -66,8 +87,13 @@ describe("CreatePullRequestView pre-flight", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    aiAvailableMock = false;
     githubDefaultPrTitle.mockResolvedValue("Seed title");
     githubPushBranch.mockResolvedValue(undefined);
+    aiGeneratePullRequestDraft.mockResolvedValue({
+      title: "Generated PR title",
+      body: "Generated PR body",
+    });
     createPullRequest.mockResolvedValue({ number: 7 });
     listBaseRepoOptions.mockResolvedValue([
       { owner: "acme", repo: "widget", defaultBranch: "main", isUpstream: false },
@@ -137,5 +163,30 @@ describe("CreatePullRequestView pre-flight", () => {
       { owner: "acme", repo: "widget", branch: "develop" },
       expect.objectContaining({ draft: false }),
     );
+  });
+
+  it("generates a PR title and body from Shift+Tab in the title field", async () => {
+    aiAvailableMock = true;
+    await renderReady();
+
+    fireEvent.keyDown(screen.getByLabelText("Pull request title"), {
+      key: "Tab",
+      shiftKey: true,
+    });
+
+    await waitFor(() => expect(aiGeneratePullRequestDraft).toHaveBeenCalledWith("wt1"));
+    expect(screen.getByLabelText("Pull request title")).toHaveValue("Generated PR title");
+    expect(screen.getByLabelText("Body")).toHaveValue("Generated PR body");
+  });
+
+  it("generates a PR title and body from Shift+Tab in the body editor", async () => {
+    aiAvailableMock = true;
+    await renderReady();
+
+    fireEvent.keyDown(screen.getByLabelText("Body"), { key: "Tab", shiftKey: true });
+
+    await waitFor(() => expect(aiGeneratePullRequestDraft).toHaveBeenCalledWith("wt1"));
+    expect(screen.getByLabelText("Pull request title")).toHaveValue("Generated PR title");
+    expect(screen.getByLabelText("Body")).toHaveValue("Generated PR body");
   });
 });
