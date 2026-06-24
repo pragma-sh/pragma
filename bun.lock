@@ -118,6 +118,15 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/cursor-plugin": {
+      "name": "@pragma/cursor-plugin",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/opencode-plugin": {
       "name": "@pragma/opencode-plugin",
       "version": "0.0.0",
@@ -757,6 +766,8 @@
     "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
 
     "@pragma/constants": ["@pragma/constants@workspace:packages/constants"],
+
+    "@pragma/cursor-plugin": ["@pragma/cursor-plugin@workspace:packages/cursor-plugin"],
 
     "@pragma/opencode-plugin": ["@pragma/opencode-plugin@workspace:packages/opencode-plugin"],
 

@@ -1,0 +1,6 @@
+{
+  "id": "cursor",
+  "name": "Cursor Agent",
+  "icon": "icon.svg",
+  "start": ["agent", "--force", "--approve-mcps"]
+}

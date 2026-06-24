@@ -16,6 +16,7 @@ Two real plugins exist; copy the one whose route matches your tool:
 
 - `packages/opencode-plugin/` — **SDK route** (opencode has a JS plugin API).
 - `packages/claude-code-plugin/` — **CLI route** (Claude Code only exposes shell hooks).
+- `packages/cursor-plugin/` — **CLI route** (Cursor Agent CLI uses `~/.cursor/hooks.json`).
 
 > **Plugins stay out of core.** A plugin package is self-contained data plus its own
 > bundled assets. It must **not** add or modify code in Pragma core (`apps/pragma`,

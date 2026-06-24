@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "approvalMode": "unrestricted",
+  "showSandboxIntro": false,
+  "sandbox": {
+    "mode": "disabled",
+    "networkAccess": "user_config_with_defaults"
+  },
+  "permissions": {
+    "allow": ["Shell(**)", "Read(**)", "Write(**)", "Mcp(**)", "WebFetch(**)"],
+    "deny": []
+  }
+}
