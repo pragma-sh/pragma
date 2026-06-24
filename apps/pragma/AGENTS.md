@@ -191,6 +191,21 @@ are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them
 menu action: id const + item in `install_menu`, `MenuAction` variant +
 branch in `handleMenuAction`.
 
+## Deep links (`pragma://open`)
+
+`pragma://open` opens the app and starts the new-chat flow. Optional query params:
+`agent` (agent id; falls back to the default/first when missing or unknown),
+`message` (the prompt, **base64-encoded** — decoded before display), `worktree`
+(target worktree branch id), and `autoSubmit` (truthy → launch immediately, bypassing
+the dialog). The scheme is registered in `tauri.conf.json` (`plugins.deep-link.desktop.schemes`)
+via `tauri-plugin-deep-link`. `src-tauri/src/lib.rs` `install_deep_links` registers it at
+runtime (Linux), stashes a cold-start URL in `PendingDeepLink` (drained once by the
+`take_pending_deep_link` command), and emits every runtime URL as the `pragma:deep-link`
+event. `workspace-context` parses it with `parseNewChatDeepLink` (`lib/deep-link.ts`):
+auto-submit launches via `startChat`; otherwise it dispatches the `pragma:new-chat`
+window event that `ProjectSidebar` opens the prefilled `NewChatDialog` with. Note:
+deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
+
 ## Terminal rendering (xterm + WebGL)
 
 Terminal output → xterm in `src/lib/terminal-manager.ts`; never route through React
