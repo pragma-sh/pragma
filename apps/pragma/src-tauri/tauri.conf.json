@@ -27,6 +27,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["pragma"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "deb", "rpm", "appimage"],
