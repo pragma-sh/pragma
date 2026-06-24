@@ -98,7 +98,8 @@ than no guide.
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
-│   └── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
+│   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
+│   └── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
 │   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
