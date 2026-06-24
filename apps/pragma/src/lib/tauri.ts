@@ -704,6 +704,20 @@ export function onMenuAction(handler: (action: MenuAction) => void): Promise<Unl
   return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
 }
 
+/** Subscribes to incoming `pragma://` deep links; the payload is the raw URL. */
+export function onDeepLink(handler: (url: string) => void): Promise<UnlistenFn> {
+  return listen<string>("pragma:deep-link", (event) => handler(event.payload));
+}
+
+/**
+ * Drains the deep link the app was launched with, if any. Returns the raw URL
+ * once (clearing it) so a cold-start `pragma://` link delivered before the live
+ * {@link onDeepLink} listener attached is still handled exactly one time.
+ */
+export function takePendingDeepLink(): Promise<string | null> {
+  return invoke<string | null>("take_pending_deep_link");
+}
+
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */
 export async function pickDirectory(defaultPath?: string): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false, defaultPath });
