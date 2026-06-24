@@ -1588,7 +1588,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const projectId = await resolveProjectForWorktree(worktreeId);
         if (projectId) {
           await selectProject(projectId);
-          dispatch({ type: "select-worktree", projectId, worktreeId });
+          // Route through `selectWorktree` (not a raw dispatch) so its side
+          // effects run — notably clearing `agentBackLocation`, so a deep-link
+          // jump doesn't leave the notification-only "Go back" affordance up.
+          selectWorktree(worktreeId);
         } else {
           // Unknown worktree id: ignore it and fall back to the current selection.
           worktreeId = null;
@@ -1628,7 +1631,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         message: link.message,
       });
     },
-    [resolveProjectForWorktree, selectProject, startSession],
+    [resolveProjectForWorktree, selectProject, selectWorktree, startSession],
   );
   const handleDeepLinkRef = useRef(handleDeepLink);
   handleDeepLinkRef.current = handleDeepLink;
