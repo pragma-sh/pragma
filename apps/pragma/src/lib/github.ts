@@ -335,6 +335,28 @@ export async function listIssueComments(
   }));
 }
 
+/** Posts a new conversation (issue) comment on the PR as the signed-in user. */
+export async function createIssueComment(
+  repo: GitHubRepoRef,
+  prNumber: number,
+  body: string,
+): Promise<IssueComment> {
+  const octokit = await client();
+  const { data: comment } = await octokit.rest.issues.createComment({
+    owner: repo.owner,
+    repo: repo.repo,
+    issue_number: prNumber,
+    body,
+  });
+  return {
+    id: comment.id,
+    body: comment.body ?? "",
+    htmlUrl: comment.html_url,
+    createdAt: comment.created_at,
+    user: comment.user ? { login: comment.user.login, avatarUrl: comment.user.avatar_url } : null,
+  };
+}
+
 /** Lists the files changed in a PR (the review file list). */
 export async function listPullFiles(repo: GitHubRepoRef, prNumber: number): Promise<PullFile[]> {
   const octokit = await client();
