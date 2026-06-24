@@ -66,7 +66,17 @@ describe("startAgentInTab", () => {
     vi.advanceTimersByTime(500);
     expect(writeWhenReadyMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(2500);
-    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", `${ESC}[200~Fix the bug${ESC}[201~`);
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", `${ESC}[200~Fix the bug${ESC}[201~\r`);
+  });
+
+  it("appends selected model args to the start command", () => {
+    const selected = {
+      ...agent(["agent"]),
+      models: { source: "static" as const, modelArg: ["--model", "{model}"], items: [] },
+    };
+    startAgentInTab("tab-1", selected, undefined, { modelId: "sonnet", reasoningId: null });
+    vi.advanceTimersByTime(500);
+    expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "agent --model sonnet\r");
   });
 
   it("skips a whitespace-only prefill", () => {

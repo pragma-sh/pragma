@@ -1,20 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { AgentIcon } from "@/components/agents/AgentIcon";
+import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useAgentModels } from "@/hooks/use-agent-models";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
+import {
+  EMPTY_MODEL_SELECTION,
+  defaultModelSelection,
+  rememberModelSelection,
+  validateModelSelection,
+} from "@/lib/agent-model-selection";
 import { isMacPlatform } from "@/lib/platform";
-import { type AgentConfig, createWorktree, listAgents } from "@/lib/tauri";
+import {
+  type AgentConfig,
+  type AgentModelSelection,
+  createWorktree,
+  listAgents,
+} from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface CreateWorktreeDialogProps {
@@ -37,11 +42,14 @@ type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shift
 export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorktreeDialogProps) {
   const workspace = useWorkspace();
   const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const { modelsByAgent, loadModels, primeFromCache } = useAgentModels();
   const [branch, setBranch] = useState("");
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [modelSelection, setModelSelection] = useState<AgentModelSelection>(EMPTY_MODEL_SELECTION);
   const [error, setError] = useState<string | null>(null);
+  const previousAgentIdRef = useRef<string | null>(null);
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
@@ -68,6 +76,11 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
     };
   }, [isOpen]);
 
+  // Show already-resolved models immediately, without waiting for a hover.
+  useEffect(() => {
+    primeFromCache(agents.map((agent) => agent.id));
+  }, [agents, primeFromCache]);
+
   // Keep a valid agent selected, falling back to the first (default) agent.
   useEffect(() => {
     if (!isOpen || agents.length === 0) {
@@ -77,6 +90,27 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       current && agents.some((agent) => agent.id === current) ? current : agents[0]!.id,
     );
   }, [isOpen, agents]);
+
+  useEffect(() => {
+    if (!isOpen || !agentId) {
+      return;
+    }
+    const models = modelsByAgent[agentId];
+    if (!models) {
+      return;
+    }
+    const changedAgent = previousAgentIdRef.current !== agentId;
+    previousAgentIdRef.current = agentId;
+    setModelSelection((current) => {
+      if (changedAgent) {
+        return defaultModelSelection(agentId, models);
+      }
+      const valid = validateModelSelection(models, current);
+      return valid.modelId === null && current.modelId !== null
+        ? defaultModelSelection(agentId, models)
+        : valid;
+    });
+  }, [isOpen, agentId, modelsByAgent]);
 
   if (!isOpen) {
     return null;
@@ -102,7 +136,8 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       const prompt = message.trim();
       if (prompt && selectedAgent) {
         // A prompt was written: launch an agent session seeded with it.
-        await workspace.startSession(worktree.id, selectedAgent, prompt);
+        rememberModelSelection(selectedAgent.id, modelSelection);
+        await workspace.startSession(worktree.id, selectedAgent, prompt, modelSelection);
       } else {
         // No prompt: just open a terminal in the new worktree.
         workspace.selectWorktree(worktree.id);
@@ -112,10 +147,17 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       setBranch("");
       setTitle("");
       setMessage("");
+      setModelSelection(EMPTY_MODEL_SELECTION);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
+  }
+
+  function handleAgentChange(nextAgentId: string, nextSelection: AgentModelSelection) {
+    setAgentId(nextAgentId);
+    setModelSelection(nextSelection);
+    rememberModelSelection(nextAgentId, nextSelection);
   }
 
   function handleKeyDown(event: SubmitKeyEvent) {
@@ -174,25 +216,13 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
             </div>
             <div className="space-y-2">
               <Label>Agent</Label>
-              <Select value={agentId ?? ""} onValueChange={setAgentId}>
-                <SelectTrigger aria-label="Agent" className="w-full">
-                  <SelectValue placeholder="Select agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.length === 0 ? (
-                    <SelectItem value="__none" disabled>
-                      No agents configured
-                    </SelectItem>
-                  ) : (
-                    agents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        <AgentIcon agent={agent} />
-                        <span className="truncate">{agent.name}</span>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <AgentModelSelector
+                agents={agents}
+                modelsByAgent={modelsByAgent}
+                value={{ agentId, selection: modelSelection }}
+                onChange={handleAgentChange}
+                onLoadModels={loadModels}
+              />
             </div>
           </div>
           <div className="space-y-2">

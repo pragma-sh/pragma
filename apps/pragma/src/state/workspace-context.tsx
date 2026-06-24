@@ -23,6 +23,8 @@ import type {
 import { toast } from "sonner";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
+import { EMPTY_MODEL_SELECTION, resolveDeepLinkAgentSelection } from "@/lib/agent-model-selection";
+import { refreshAgentModels } from "@/lib/agent-model-cache";
 import {
   alertAgent,
   latchAlertedStatus,
@@ -31,7 +33,7 @@ import {
   shouldAlertForStatus,
 } from "@/lib/agent-alert";
 import { startAgentInTab } from "@/lib/agent-launch";
-import { parseNewChatDeepLink, requestNewChat } from "@/lib/deep-link";
+import { parseNewSessionDeepLink, requestNewSession } from "@/lib/deep-link";
 import { basename } from "@/lib/path";
 import {
   planRunScripts,
@@ -71,6 +73,7 @@ import {
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
   restartDaemon as restartDaemonCommand,
+  resolveAgentModels,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
@@ -78,7 +81,7 @@ import {
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
-import type { AgentConfig, SplitLayout } from "@/lib/tauri";
+import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import {
   agentStatusesForTab,
   applyAgentReport,
@@ -202,7 +205,12 @@ interface WorkspaceContextValue extends WorkspaceState {
    * Launches an agent thread in a worktree: switches to it, opens a terminal
    * tab, starts the agent, and optionally prefills its TUI with `message`.
    */
-  startChat: (worktreeId: string, agent: AgentConfig, message?: string) => Promise<Tab | null>;
+  startSession: (
+    worktreeId: string,
+    agent: AgentConfig,
+    message?: string,
+    modelSelection?: AgentModelSelection,
+  ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
@@ -1545,16 +1553,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Launches a fresh agent thread: switch to the worktree, open a terminal tab,
   // start the agent, and (optionally) prefill its TUI with `message`. Shared by
-  // the new-chat dialog and the `pragma://open` deep-link auto-submit path so
+  // the new-session dialog and the `pragma://open` deep-link auto-submit path so
   // both go through one launch implementation.
-  const startChat = useCallback(
-    async (worktreeId: string, agent: AgentConfig, message?: string): Promise<Tab | null> => {
+  const startSession = useCallback(
+    async (
+      worktreeId: string,
+      agent: AgentConfig,
+      message?: string,
+      modelSelection?: AgentModelSelection,
+    ): Promise<Tab | null> => {
       selectWorktree(worktreeId);
       const tab = await createTerminalTab(worktreeId);
       if (!tab) {
         return null;
       }
-      startAgentInTab(tab.id, agent, message);
+      startAgentInTab(tab.id, agent, message, modelSelection);
       return tab;
     },
     [createTerminalTab, selectWorktree],
@@ -1562,11 +1575,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // Handles an incoming `pragma://open` deep link: select the target worktree's
   // project, then either auto-launch the agent (when `autoSubmit` has everything
-  // it needs) or open the new-chat dialog prefilled via the sidebar's window
+  // it needs) or open the new-session dialog prefilled via the sidebar's window
   // event. Falls back to the dialog whenever auto-submit is under-specified.
   const handleDeepLink = useCallback(
     async (rawUrl: string) => {
-      const link = parseNewChatDeepLink(rawUrl);
+      const link = parseNewSessionDeepLink(rawUrl);
       if (!link) {
         return;
       }
@@ -1590,21 +1603,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       if (link.autoSubmit && targetWorktreeId && link.message?.trim()) {
         const agents = await listAgents().catch(() => [] as AgentConfig[]);
-        // Requested agent, else the default (first configured) agent.
-        const agent = agents.find((item) => item.id === link.agentId) ?? agents[0];
+        const requestedAgent = link.agentId
+          ? (resolveDeepLinkAgentSelection(link, agents, {}).agentId ?? link.agentId)
+          : null;
+        const agent = agents.find((item) => item.id === requestedAgent) ?? agents[0];
         if (agent) {
-          await startChat(targetWorktreeId, agent, link.message);
+          const models = await resolveAgentModels(agent.id).catch(() => []);
+          const resolved = resolveDeepLinkAgentSelection(link, agents, { [agent.id]: models });
+          await startSession(
+            targetWorktreeId,
+            agent,
+            link.message,
+            resolved.agentId === agent.id ? resolved.selection : EMPTY_MODEL_SELECTION,
+          );
           return;
         }
       }
 
-      requestNewChat({
+      requestNewSession({
         agentId: link.agentId,
+        modelId: link.modelId,
+        reasoningId: link.reasoningId,
         worktreeId: targetWorktreeId,
         message: link.message,
       });
     },
-    [resolveProjectForWorktree, selectProject, startChat],
+    [resolveProjectForWorktree, selectProject, startSession],
   );
   const handleDeepLinkRef = useRef(handleDeepLink);
   handleDeepLinkRef.current = handleDeepLink;
@@ -1915,6 +1939,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((agents) => {
+        if (!cancelled) {
+          for (const agent of agents) {
+            void refreshAgentModels(agent.id);
+          }
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!state.selectedProjectId) {
@@ -2503,7 +2544,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
-      startChat,
+      startSession,
       createTabInPane,
       openFileTab,
       openDiffTab,
@@ -2549,7 +2590,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
-      startChat,
+      startSession,
       createTabInPane,
       openFileTab,
       openDiffTab,

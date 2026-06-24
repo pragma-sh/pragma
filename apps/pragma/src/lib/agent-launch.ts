@@ -1,4 +1,5 @@
-import { type AgentConfig, ptyWrite } from "@/lib/tauri";
+import { modelLaunchArgs } from "@/lib/agent-model-selection";
+import { type AgentConfig, type AgentModelSelection, ptyWrite } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 
 /** Delay before sending an agent's start command to a freshly created tab. */
@@ -35,13 +36,18 @@ function shellQuote(value: string): string {
 
 /**
  * Sends an agent's start command to a freshly created terminal tab, then — when
- * `prefill` is given — pastes that text into the agent's TUI input without
- * submitting it. Both writes are time-delayed because the shell prompt and the
+ * `prefill` is given — pastes that text into the agent's TUI input and submits
+ * it. Both writes are time-delayed because the shell prompt and the
  * agent TUI each need a moment to become ready and there is no readiness event
  * to await; the prefill is bracketed-pasted so multi-line input stays literal.
  */
-export function startAgentInTab(tabId: string, agent: AgentConfig, prefill?: string): void {
-  const command = agentStartCommand(agent.start);
+export function startAgentInTab(
+  tabId: string,
+  agent: AgentConfig,
+  prefill?: string,
+  selection?: AgentModelSelection,
+): void {
+  const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
   const message = prefill?.trim() ? prefill : null;
   window.setTimeout(() => {
     void ptyWrite(tabId, `${command}\r`);
@@ -49,7 +55,7 @@ export function startAgentInTab(tabId: string, agent: AgentConfig, prefill?: str
       window.setTimeout(() => {
         terminalManager.writeWhenReady(
           tabId,
-          `${BRACKETED_PASTE_START}${message}${BRACKETED_PASTE_END}`,
+          `${BRACKETED_PASTE_START}${message}${BRACKETED_PASTE_END}\r`,
         );
       }, AGENT_PREFILL_DELAY_MS);
     }

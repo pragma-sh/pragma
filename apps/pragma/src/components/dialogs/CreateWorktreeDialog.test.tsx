@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listAgentsMock = vi.fn();
+const resolveAgentModelsMock = vi.fn();
 const createWorktreeMock = vi.fn();
 const startSessionMock = vi.fn();
 const refreshProjectMock = vi.fn();
@@ -13,6 +14,7 @@ const createTerminalTabMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   listAgents: () => listAgentsMock(),
+  resolveAgentModels: (agentId: string) => resolveAgentModelsMock(agentId),
   createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
 }));
 
@@ -69,6 +71,7 @@ describe("CreateWorktreeDialog", () => {
     listAgentsMock.mockResolvedValue([
       { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
     ]);
+    resolveAgentModelsMock.mockResolvedValue([{ id: "sonnet", name: "Sonnet", reasoning: [] }]);
     createWorktreeMock.mockResolvedValue(newWorktree);
     refreshProjectMock.mockResolvedValue(undefined);
     startSessionMock.mockResolvedValue({ id: "tab" });
@@ -88,7 +91,7 @@ describe("CreateWorktreeDialog", () => {
     expect(screen.getByLabelText("Display title")).toBeInTheDocument();
     expect(screen.getByLabelText("Prompt")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("Claude"),
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
     );
   });
 
@@ -99,11 +102,11 @@ describe("CreateWorktreeDialog", () => {
     ]);
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
-    const trigger = await screen.findByRole("combobox", { name: "Agent" });
+    const trigger = await screen.findByRole("button", { name: "Agent" });
     await waitFor(() => expect(trigger).toHaveTextContent("Claude"));
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
 
-    expect(await screen.findByRole("option", { name: "OpenCode" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /OpenCode/ })).toBeInTheDocument();
   });
 
   it("launches an agent session when a prompt is written", async () => {
@@ -111,7 +114,7 @@ describe("CreateWorktreeDialog", () => {
     render(<CreateWorktreeDialog open onOpenChange={onOpenChange} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("Claude"),
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
     );
 
     fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
@@ -127,6 +130,7 @@ describe("CreateWorktreeDialog", () => {
         "wt-new",
         expect.objectContaining({ id: "claude" }),
         "Do the thing",
+        { modelId: null, reasoningId: null },
       ),
     );
     expect(createTerminalTabMock).not.toHaveBeenCalled();
@@ -137,7 +141,7 @@ describe("CreateWorktreeDialog", () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("Claude"),
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
     );
 
     fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
@@ -153,7 +157,7 @@ describe("CreateWorktreeDialog", () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("Claude"),
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("Claude"),
     );
 
     expect(screen.getByRole("button", { name: /Create worktree/ })).toBeDisabled();
