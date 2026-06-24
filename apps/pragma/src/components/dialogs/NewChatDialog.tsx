@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { GitBranch } from "lucide-react";
 
@@ -6,15 +6,9 @@ import { AgentIcon } from "@/components/agents/AgentIcon";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
-import { startAgentInTab } from "@/lib/agent-launch";
+import type { NewChatDeepLinkDetail } from "@/lib/deep-link";
 import { isMacPlatform } from "@/lib/platform";
 import { type AgentConfig, listAgents } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
@@ -22,6 +16,8 @@ import { useWorkspace } from "@/state/workspace-context";
 interface NewChatDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Values to seed the form with when the dialog opens (e.g. from a deep link). */
+  initial?: NewChatDeepLinkDetail | null;
 }
 
 /**
@@ -30,7 +26,7 @@ interface NewChatDialogProps {
  * switches to the chosen worktree, opens a terminal tab, launches the agent, and
  * prefills the prompt into the agent's TUI without sending it.
  */
-export function NewChatDialog({ open: isOpen, onOpenChange }: NewChatDialogProps) {
+export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDialogProps) {
   const workspace = useWorkspace();
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [message, setMessage] = useState("");
@@ -46,6 +42,10 @@ export function NewChatDialog({ open: isOpen, onOpenChange }: NewChatDialogProps
         ? (workspace.worktrees[workspace.selectedProjectId] ?? []).filter((w) => !w.hidden)
         : [],
     [workspace.selectedProjectId, workspace.worktrees],
+  );
+  const loadedWorktrees = useMemo(
+    () => Object.values(workspace.worktrees).flat(),
+    [workspace.worktrees],
   );
 
   // Load the configured agents whenever the dialog opens.
@@ -71,38 +71,121 @@ export function NewChatDialog({ open: isOpen, onOpenChange }: NewChatDialogProps
     };
   }, [isOpen]);
 
-  // Seed the dropdowns each time the dialog opens: first agent, current worktree.
+  // Seed the form when the dialog opens, and also when a fresh deep-link payload
+  // arrives while it is open. Avoid reseeding on unrelated re-renders so the
+  // user's edits are not clobbered.
+  const wasOpenRef = useRef(false);
+  const lastInitialRef = useRef<NewChatDeepLinkDetail | null | undefined>(undefined);
+  const agentManuallyChangedRef = useRef(false);
+  const worktreeManuallyChangedRef = useRef(false);
   useEffect(() => {
-    if (!isOpen) {
+    const opened = isOpen && !wasOpenRef.current;
+    const receivedInitial = isOpen && initial !== lastInitialRef.current;
+    if (opened || receivedInitial) {
+      agentManuallyChangedRef.current = false;
+      worktreeManuallyChangedRef.current = false;
+      setMessage(initial?.message ?? "");
+      setWorktreeId(initial?.worktreeId ?? workspace.selectedWorktreeId);
+      setAgentId(initial?.agentId ?? null);
+    }
+    wasOpenRef.current = isOpen;
+    lastInitialRef.current = initial;
+  }, [isOpen, initial, workspace.selectedWorktreeId]);
+
+  // Resolve the agent selection: keep a valid choice, otherwise fall back to the
+  // first (default) agent — also covers a deep link naming an unknown agent id.
+  useEffect(() => {
+    if (!isOpen || agents.length === 0) {
       return;
     }
-    setWorktreeId((current) => current ?? workspace.selectedWorktreeId);
-  }, [isOpen, workspace.selectedWorktreeId]);
+    const requestedAgentId = initial?.agentId ?? null;
+    setAgentId((current) => {
+      if (
+        requestedAgentId &&
+        !agentManuallyChangedRef.current &&
+        agents.some((agent) => agent.id === requestedAgentId)
+      ) {
+        return requestedAgentId;
+      }
+      return current && agents.some((agent) => agent.id === current) ? current : agents[0]!.id;
+    });
+  }, [isOpen, initial?.agentId, agents]);
 
   useEffect(() => {
-    if (isOpen && agentId === null && agents.length > 0) {
-      setAgentId(agents[0]!.id);
+    const requestedWorktreeId = initial?.worktreeId;
+    if (!isOpen || !requestedWorktreeId || worktreeManuallyChangedRef.current) {
+      return;
     }
-  }, [isOpen, agentId, agents]);
+    if (
+      worktrees.some((worktree) => worktree.id === requestedWorktreeId) ||
+      loadedWorktrees.some((worktree) => worktree.id === requestedWorktreeId)
+    ) {
+      setWorktreeId(requestedWorktreeId);
+    }
+  }, [isOpen, initial?.worktreeId, loadedWorktrees, worktrees]);
+
+  // Default to the currently selected worktree even when that selection only
+  // becomes available after the dialog opened — e.g. a cold-start deep link
+  // opens the dialog before the persisted selection has hydrated. Only fills an
+  // empty choice, so a worktree the user (or deep link) picked is left alone.
+  useEffect(() => {
+    if (isOpen && !initial?.worktreeId && worktreeId === null && workspace.selectedWorktreeId) {
+      setWorktreeId(workspace.selectedWorktreeId);
+    }
+  }, [isOpen, initial?.worktreeId, worktreeId, workspace.selectedWorktreeId]);
 
   if (!isOpen) {
     return null;
   }
 
-  const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
-  const canSubmit = Boolean(selectedAgent && worktreeId && message.trim());
+  const requestedAgentId =
+    !agentManuallyChangedRef.current &&
+    initial?.agentId &&
+    agents.some((agent) => agent.id === initial.agentId)
+      ? initial.agentId
+      : null;
+  const requestedWorktreeId =
+    !worktreeManuallyChangedRef.current &&
+    initial?.worktreeId &&
+    loadedWorktrees.some((worktree) => worktree.id === initial.worktreeId)
+      ? initial.worktreeId
+      : null;
+  const effectiveAgentId = requestedAgentId ?? agentId;
+  const effectiveWorktreeId = requestedWorktreeId ?? worktreeId;
+  const selectedAgent = agents.find((agent) => agent.id === effectiveAgentId) ?? null;
+  const selectedWorktree =
+    worktrees.find((worktree) => worktree.id === effectiveWorktreeId) ??
+    loadedWorktrees.find((worktree) => worktree.id === effectiveWorktreeId) ??
+    null;
+  const agentSelectValue = effectiveAgentId ?? "";
+  const worktreeSelectValue = effectiveWorktreeId ?? "";
+  const canSubmit = Boolean(selectedAgent && effectiveWorktreeId && message.trim());
+
+  function handleAgentChange(nextAgentId: string) {
+    setAgentId(nextAgentId);
+  }
+
+  function handleWorktreeChange(nextWorktreeId: string) {
+    setWorktreeId(nextWorktreeId);
+  }
+
+  function markAgentManuallyChanged() {
+    agentManuallyChangedRef.current = true;
+  }
+
+  function markWorktreeManuallyChanged() {
+    worktreeManuallyChangedRef.current = true;
+  }
 
   async function submit() {
-    if (!workspace.selectedProjectId || !worktreeId || !selectedAgent) {
+    if (!effectiveWorktreeId || !selectedAgent) {
       return;
     }
     try {
-      workspace.selectWorktree(worktreeId);
-      const tab = await workspace.createTerminalTab(worktreeId);
+      const tab = await workspace.startChat(effectiveWorktreeId, selectedAgent, message);
       if (!tab) {
         return;
       }
-      startAgentInTab(tab.id, selectedAgent, message);
       onOpenChange(false);
       setMessage("");
       setAgentId(null);
@@ -154,16 +237,23 @@ export function NewChatDialog({ open: isOpen, onOpenChange }: NewChatDialogProps
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Agent</Label>
-              <Select value={agentId ?? undefined} onValueChange={setAgentId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select agent">
+              <Select value={agentSelectValue} onValueChange={handleAgentChange}>
+                <SelectTrigger
+                  aria-label="Agent"
+                  className="w-full"
+                  onKeyDown={markAgentManuallyChanged}
+                  onPointerDown={markAgentManuallyChanged}
+                >
+                  <span data-slot="select-value">
                     {selectedAgent ? (
                       <>
                         <AgentIcon agent={selectedAgent} />
                         <span className="truncate">{selectedAgent.name}</span>
                       </>
-                    ) : null}
-                  </SelectValue>
+                    ) : (
+                      <span className="text-muted-foreground">Select agent</span>
+                    )}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {agents.length === 0 ? (
@@ -183,9 +273,27 @@ export function NewChatDialog({ open: isOpen, onOpenChange }: NewChatDialogProps
             </div>
             <div className="space-y-2">
               <Label>Worktree</Label>
-              <Select value={worktreeId ?? undefined} onValueChange={setWorktreeId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select worktree" />
+              <Select value={worktreeSelectValue} onValueChange={handleWorktreeChange}>
+                <SelectTrigger
+                  aria-label="Worktree"
+                  className="w-full"
+                  onKeyDown={markWorktreeManuallyChanged}
+                  onPointerDown={markWorktreeManuallyChanged}
+                >
+                  <span data-slot="select-value">
+                    {selectedWorktree ? (
+                      <>
+                        <GitBranch className="size-3.5" />
+                        <span className="truncate">
+                          {selectedWorktree.isMain
+                            ? "main"
+                            : (selectedWorktree.title ?? selectedWorktree.branch)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">Select worktree</span>
+                    )}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {worktrees.length === 0 ? (

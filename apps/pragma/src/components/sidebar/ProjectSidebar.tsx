@@ -9,12 +9,14 @@ import { NewChatDialog } from "@/components/dialogs/NewChatDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
+import { consumePendingNewChat, NEW_CHAT_EVENT, type NewChatDeepLinkDetail } from "@/lib/deep-link";
 import { useWorkspace } from "@/state/workspace-context";
 
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
   const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
+  const [newChatInitial, setNewChatInitial] = useState<NewChatDeepLinkDetail | null>(null);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
 
@@ -24,6 +26,29 @@ export function ProjectSidebar() {
     }
     window.addEventListener("pragma:create-project", openDialog);
     return () => window.removeEventListener("pragma:create-project", openDialog);
+  }, []);
+
+  // A `pragma://open` deep link (without auto-submit) opens the new-chat dialog
+  // prefilled with the link's values. The workspace owns deep-link handling but
+  // the sidebar owns this dialog, so requests arrive via `requestNewChat`: drain
+  // any buffered request on mount (a cold-start deep link is handled before this
+  // listener exists) and also listen for live ones.
+  useEffect(() => {
+    function openPrefilled(detail: NewChatDeepLinkDetail) {
+      setNewChatInitial(detail);
+      setNewChatDialogOpen(true);
+    }
+    function onEvent(event: Event) {
+      // Clear the buffer too so a later remount doesn't reopen the same request.
+      consumePendingNewChat();
+      openPrefilled((event as CustomEvent<NewChatDeepLinkDetail>).detail);
+    }
+    const pending = consumePendingNewChat();
+    if (pending) {
+      openPrefilled(pending);
+    }
+    window.addEventListener(NEW_CHAT_EVENT, onEvent);
+    return () => window.removeEventListener(NEW_CHAT_EVENT, onEvent);
   }, []);
 
   return (
@@ -64,7 +89,10 @@ export function ProjectSidebar() {
             disabled={!workspace.selectedWorktree}
             size="icon-sm"
             variant="ghost"
-            onClick={() => setNewChatDialogOpen(true)}
+            onClick={() => {
+              setNewChatInitial(null);
+              setNewChatDialogOpen(true);
+            }}
           >
             <MessageSquarePlus />
           </Button>
@@ -88,7 +116,11 @@ export function ProjectSidebar() {
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
-      <NewChatDialog open={newChatDialogOpen} onOpenChange={setNewChatDialogOpen} />
+      <NewChatDialog
+        open={newChatDialogOpen}
+        onOpenChange={setNewChatDialogOpen}
+        initial={newChatInitial}
+      />
     </aside>
   );
 }

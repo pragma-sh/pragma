@@ -30,6 +30,8 @@ import {
   releaseAlertLatchForTab,
   shouldAlertForStatus,
 } from "@/lib/agent-alert";
+import { startAgentInTab } from "@/lib/agent-launch";
+import { parseNewChatDeepLink, requestNewChat } from "@/lib/deep-link";
 import { basename } from "@/lib/path";
 import {
   planRunScripts,
@@ -50,6 +52,7 @@ import {
   getActiveSelection,
   listProjects,
   loadProjectScripts,
+  listAgents,
   listSplits,
   listTabs,
   listWorktrees,
@@ -60,7 +63,9 @@ import {
   onAgentNotificationClick,
   onAgentReport,
   onAgentStatusReset,
+  onDeepLink,
   onMenuAction,
+  takePendingDeepLink,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
@@ -73,7 +78,7 @@ import {
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
-import type { SplitLayout } from "@/lib/tauri";
+import type { AgentConfig, SplitLayout } from "@/lib/tauri";
 import {
   agentStatusesForTab,
   applyAgentReport,
@@ -193,6 +198,11 @@ interface WorkspaceContextValue extends WorkspaceState {
   selectWorktree: (worktreeId: string | null) => void;
   createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
+  /**
+   * Launches an agent thread in a worktree: switches to it, opens a terminal
+   * tab, starts the agent, and optionally prefills its TUI with `message`.
+   */
+  startChat: (worktreeId: string, agent: AgentConfig, message?: string) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
@@ -1456,13 +1466,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const selectWorktree = useCallback(
     (worktreeId: string | null) => {
-      if (!state.selectedProjectId || !worktreeId) {
+      if (!worktreeId) {
+        return;
+      }
+      // Resolve the owning project from the worktree (ref, so it's correct for a
+      // worktree in a project other than the captured selection — e.g. a deep
+      // link), falling back to the current selection.
+      const projectId = worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
+      if (!projectId) {
         return;
       }
       // Navigating manually retires the agent "go back" affordance — it only
       // makes sense right after a notification jumped you somewhere.
       setAgentBackLocation(null);
-      dispatch({ type: "select-worktree", projectId: state.selectedProjectId, worktreeId });
+      dispatch({ type: "select-worktree", projectId, worktreeId });
     },
     [state.selectedProjectId],
   );
@@ -1471,7 +1488,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // split pane; otherwise it becomes a normal top-bar tab.
   const createTab = useCallback(
     async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
-      const projectId = state.selectedProjectId;
+      // Resolve the owning project from the explicit worktree first (read from a
+      // ref so it's correct even when a freshly-selected project hasn't flushed
+      // into this closure yet — e.g. a cross-project deep link), then fall back
+      // to the current selection.
+      const projectId =
+        (worktreeId ? worktreeProjectIdRef.current[worktreeId] : undefined) ??
+        state.selectedProjectId;
       const targetWorktreeId =
         worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
       if (!projectId || !targetWorktreeId) {
@@ -1519,6 +1542,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [createTab],
   );
+
+  // Launches a fresh agent thread: switch to the worktree, open a terminal tab,
+  // start the agent, and (optionally) prefill its TUI with `message`. Shared by
+  // the new-chat dialog and the `pragma://open` deep-link auto-submit path so
+  // both go through one launch implementation.
+  const startChat = useCallback(
+    async (worktreeId: string, agent: AgentConfig, message?: string): Promise<Tab | null> => {
+      selectWorktree(worktreeId);
+      const tab = await createTerminalTab(worktreeId);
+      if (!tab) {
+        return null;
+      }
+      startAgentInTab(tab.id, agent, message);
+      return tab;
+    },
+    [createTerminalTab, selectWorktree],
+  );
+
+  // Handles an incoming `pragma://open` deep link: select the target worktree's
+  // project, then either auto-launch the agent (when `autoSubmit` has everything
+  // it needs) or open the new-chat dialog prefilled via the sidebar's window
+  // event. Falls back to the dialog whenever auto-submit is under-specified.
+  const handleDeepLink = useCallback(
+    async (rawUrl: string) => {
+      const link = parseNewChatDeepLink(rawUrl);
+      if (!link) {
+        return;
+      }
+      let worktreeId = link.worktreeId;
+      if (worktreeId) {
+        const projectId = await resolveProjectForWorktree(worktreeId);
+        if (projectId) {
+          await selectProject(projectId);
+          dispatch({ type: "select-worktree", projectId, worktreeId });
+        } else {
+          // Unknown worktree id: ignore it and fall back to the current selection.
+          worktreeId = null;
+        }
+      }
+      const current = stateRef.current;
+      const targetWorktreeId =
+        worktreeId ??
+        (current.selectedProjectId
+          ? (current.selectedWorktreeByProject[current.selectedProjectId] ?? null)
+          : null);
+
+      if (link.autoSubmit && targetWorktreeId && link.message?.trim()) {
+        const agents = await listAgents().catch(() => [] as AgentConfig[]);
+        // Requested agent, else the default (first configured) agent.
+        const agent = agents.find((item) => item.id === link.agentId) ?? agents[0];
+        if (agent) {
+          await startChat(targetWorktreeId, agent, link.message);
+          return;
+        }
+      }
+
+      requestNewChat({
+        agentId: link.agentId,
+        worktreeId: targetWorktreeId,
+        message: link.message,
+      });
+    },
+    [resolveProjectForWorktree, selectProject, startChat],
+  );
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  handleDeepLinkRef.current = handleDeepLink;
 
   // Opens a terminal-link target in a split to the right of the clicked
   // terminal. A browser URL becomes a browser tab; a worktree-relative path
@@ -1787,6 +1876,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let unlisten: (() => void) | null = null;
     onMenuAction((action) => void handleMenuActionRef.current(action))
       .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Handle `pragma://open` deep links: subscribe to live ones and, once on
+  // mount, drain any URL the app was cold-started with (delivered before this
+  // listener existed). The ref keeps the latest handler so we subscribe once.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onDeepLink((url) => void handleDeepLinkRef.current(url))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    void takePendingDeepLink()
+      .then((url) => {
+        if (url) {
+          void handleDeepLinkRef.current(url);
+        }
+        return undefined;
+      })
       .catch(() => undefined);
     return () => {
       unlisten?.();
@@ -2393,6 +2503,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      startChat,
       createTabInPane,
       openFileTab,
       openDiffTab,
@@ -2438,6 +2549,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      startChat,
       createTabInPane,
       openFileTab,
       openDiffTab,
