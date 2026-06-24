@@ -24,11 +24,11 @@ The first version used a separate `pragma-cursor-agent` launcher with `expect` t
 not a permission gate Cursor exposes only via keystrokes — it is skipped when
 `~/.cursor/cli-config.json` already has the same settings the intro would write:
 
-| Intro choice | Persisted config |
-| ------------ | ---------------- |
-| **`a`** Auto sandbox | `sandbox.mode: "enabled"`, `approvalMode: "allowlist"` |
-| **`n`** No sandbox network | `sandbox.networkAccess: "user_config_with_defaults"` |
-| (done) | `showSandboxIntro: false` |
+| Intro choice               | Persisted config                                       |
+| -------------------------- | ------------------------------------------------------ |
+| **`a`** Auto sandbox       | `sandbox.mode: "enabled"`, `approvalMode: "allowlist"` |
+| **`n`** No sandbox network | `sandbox.networkAccess: "user_config_with_defaults"`   |
+| (done)                     | `showSandboxIntro: false`                              |
 
 `install-local.sh` merges those defaults into:
 
@@ -53,15 +53,15 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 
 ## Hook → status mapping
 
-| Cursor hook              | `report.sh` arg      | Reports                                              |
-| ------------------------ | -------------------- | ---------------------------------------------------- |
-| `sessionStart`           | `cleared`            | `cleared` (fresh session; clears stale dots)         |
-| `sessionEnd`             | `cleared`            | `cleared`                                            |
-| `beforeSubmitPrompt`     | `started`            | `started` (sets the turn marker)                     |
-| `stop`                   | `stopped`            | `stopped`                                            |
-| `beforeShellExecution`   | `attention-command`  | `attention --kind command` (observe-only)            |
-| `beforeMCPExecution`     | `attention-command`  | `attention --kind command` (observe-only)            |
-| `postToolUse`            | `running`            | `started` **iff** turn marker exists (clears stale red) |
+| Cursor hook            | `report.sh` arg     | Reports                                                 |
+| ---------------------- | ------------------- | ------------------------------------------------------- |
+| `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)            |
+| `sessionEnd`           | `cleared`           | `cleared`                                               |
+| `beforeSubmitPrompt`   | `started`           | `started` (sets the turn marker)                        |
+| `stop`                 | `stopped`           | `stopped`                                               |
+| `beforeShellExecution` | `attention-command` | `attention --kind command` (observe-only)               |
+| `beforeMCPExecution`   | `attention-command` | `attention --kind command` (observe-only)               |
+| `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red) |
 
 `beforeShellExecution` / `beforeMCPExecution` exit 0 with **no stdout** so Cursor keeps
 its normal approval UI (fail-open).
