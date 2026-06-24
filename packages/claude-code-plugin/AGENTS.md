@@ -18,7 +18,7 @@ packages/claude-code-plugin/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
 │   └── report.sh            # Event → pragma-agent translator (the actual logic)
 ├── test/report.test.ts      # Drives report.sh with a fake pragma-agent on PATH
-└── pragma/agents/claude-code/config.json  # Bundled agent launcher config
+└── pragma/agents/claude-code/config.json  # Bundled launcher config + static models
 ```
 
 Each hook in `hooks.json` invokes `sh "$CLAUDE_PLUGIN_ROOT/hooks/report.sh" <event>`.
@@ -186,6 +186,13 @@ missing CLI or down daemon can never disrupt a Claude session.
 `pragma/agents/claude-code/config.json` starts Claude Code with
 `claude --permission-mode auto`. Staged to
 `apps/pragma/src-tauri/resources/pragma/agents/` by `stage-daemon-sidecar.sh`.
+
+Claude Code supports `--model` and `--effort` but does not expose a supported model-list
+command, so `config.json` uses static `models.items`. Reasoning efforts are listed per
+model and are appended as `--effort {reasoning}` when selected; choosing a model with
+Auto reasoning appends only `--model`. If Claude Code changes its supported surface,
+prefer an official CLI/API model-list command before using private databases or internal
+caches.
 
 ## Known gotchas
 

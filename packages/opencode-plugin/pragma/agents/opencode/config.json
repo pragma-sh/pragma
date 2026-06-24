@@ -2,5 +2,10 @@
   "id": "opencode",
   "name": "OpenCode",
   "icon": "icon.svg",
-  "start": ["opencode"]
+  "start": ["opencode"],
+  "models": {
+    "source": "command",
+    "command": ["sh", "scripts/list-models.sh"],
+    "modelArg": ["--model", "{model}"]
+  }
 }

@@ -2,5 +2,39 @@
   "id": "claude-code",
   "name": "Claude Code",
   "icon": "icon.svg",
-  "start": ["claude", "--permission-mode", "auto"]
+  "start": ["claude", "--permission-mode", "auto"],
+  "models": {
+    "source": "static",
+    "modelArg": ["--model", "{model}"],
+    "reasoningArg": ["--effort", "{reasoning}"],
+    "items": [
+      {
+        "id": "sonnet",
+        "name": "Sonnet",
+        "reasoning": [
+          { "id": "low", "name": "Low" },
+          { "id": "medium", "name": "Medium" },
+          { "id": "high", "name": "High" }
+        ]
+      },
+      {
+        "id": "opus",
+        "name": "Opus",
+        "reasoning": [
+          { "id": "low", "name": "Low" },
+          { "id": "medium", "name": "Medium" },
+          { "id": "high", "name": "High" }
+        ]
+      },
+      {
+        "id": "haiku",
+        "name": "Haiku",
+        "reasoning": [
+          { "id": "low", "name": "Low" },
+          { "id": "medium", "name": "Medium" },
+          { "id": "high", "name": "High" }
+        ]
+      }
+    ]
+  }
 }

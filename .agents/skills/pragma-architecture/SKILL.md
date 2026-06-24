@@ -29,7 +29,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
-  status via `@pragma/sdk` and owns its bundled Pragma launcher config under `pragma/agents/`.
+  status via `@pragma/sdk` and owns its bundled Pragma launcher config/model scripts under `pragma/agents/`.
   Pragma does **not** bundle, install, or register the plugin — you register its built
   `dist/index.mjs` absolute path in opencode's own `plugin` config array yourself (opencode does
   **not** auto-load plugins from a directory; a file-path array entry is the only thing that loads,
@@ -64,6 +64,9 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 4. **No magic values across the boundary.** Put them in `@pragma/constants`.
 5. **Never route terminal output through React state.** Workspace state tracks metadata only.
 6. **Agent status is runtime-only.** Daemon snapshots live in memory; frontend status uses `useSyncExternalStore`; pins use localStorage; no SQLite migration.
-7. **Sweeping refactors for clarity are welcome** — this project is early.
+7. **Agent model discovery parsing belongs to plugins.** Core executes configured commands from
+   `~/.pragma/agents/<id>` and validates generic JSON only; host-specific parsers live under
+   `packages/*-plugin/pragma/agents/<id>/scripts/`.
+8. **Sweeping refactors for clarity are welcome** — this project is early.
 
 Full details: see `AGENTS.md` at the repo root.
