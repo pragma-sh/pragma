@@ -249,21 +249,25 @@ impl Db {
             .map_err(AppError::from)
     }
 
+    /// Inserts a worktree row using the caller-provided `id`. The id must match
+    /// the worktree's on-disk directory name (`.pragma/worktrees/<id>`) so the
+    /// database id and the visible path stay a single identity — deep links and
+    /// other consumers resolve worktrees by this id.
     pub fn insert_worktree(
         &self,
+        id: &str,
         project_id: &str,
         parent_id: &str,
         branch: &str,
         title: Option<String>,
         path: &str,
     ) -> AppResult<Worktree> {
-        let id = Uuid::new_v4().to_string();
         self.0.lock()?.execute(
             "INSERT INTO worktrees (id, project_id, parent_id, branch, title, path, is_main)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
             params![id, project_id, parent_id, branch, title, path],
         )?;
-        self.worktree(&id)
+        self.worktree(id)
     }
 
     /// Updates the optional display title. An empty/whitespace string clears it.
@@ -677,7 +681,14 @@ mod tests {
             .find(|w| w.is_main)
             .expect("main worktree should exist");
         let worktree = db
-            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .insert_worktree(
+                "wt-feature",
+                &project.id,
+                &main.id,
+                "feature",
+                None,
+                "/tmp/repo/feature",
+            )
             .expect("worktree should insert");
         let renamed = db
             .rename_worktree(&worktree.id, Some("  My feature  "))
@@ -706,7 +717,14 @@ mod tests {
             .find(|w| w.is_main)
             .expect("main worktree should exist");
         let worktree = db
-            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .insert_worktree(
+                "wt-feature",
+                &project.id,
+                &main.id,
+                "feature",
+                None,
+                "/tmp/repo/feature",
+            )
             .expect("worktree should insert");
         assert!(!worktree.hidden);
         let hidden = db
@@ -736,7 +754,14 @@ mod tests {
             .find(|w| w.is_main)
             .expect("main worktree should exist");
         let worktree = db
-            .insert_worktree(&project.id, &main.id, "feature", None, "/tmp/repo/feature")
+            .insert_worktree(
+                "wt-feature",
+                &project.id,
+                &main.id,
+                "feature",
+                None,
+                "/tmp/repo/feature",
+            )
             .expect("worktree should insert");
 
         db.set_split_layout(&worktree.id, "{\"kind\":\"split\"}")
@@ -789,10 +814,24 @@ mod tests {
             .find(|w| w.is_main)
             .expect("main worktree should exist");
         let parent = db
-            .insert_worktree(&project.id, &main.id, "parent", None, "/tmp/repo/parent")
+            .insert_worktree(
+                "wt-parent",
+                &project.id,
+                &main.id,
+                "parent",
+                None,
+                "/tmp/repo/parent",
+            )
             .expect("parent worktree should insert");
         let child = db
-            .insert_worktree(&project.id, &parent.id, "child", None, "/tmp/repo/child")
+            .insert_worktree(
+                "wt-child",
+                &project.id,
+                &parent.id,
+                "child",
+                None,
+                "/tmp/repo/child",
+            )
             .expect("child worktree should insert");
         let tab = db
             .create_tab(
