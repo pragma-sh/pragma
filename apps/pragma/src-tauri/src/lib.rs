@@ -47,7 +47,7 @@ const MENU_EVENT: &str = "pragma:menu";
 
 /// Tauri event emitted for each incoming `pragma://` deep link; payload is the
 /// raw URL string. The frontend parses it (`lib/deep-link.ts`) and opens the
-/// new-chat flow. Deep links that arrive at launch (cold start) instead land in
+/// new-session flow. Deep links that arrive at launch (cold start) instead land in
 /// [`PendingDeepLink`] for the frontend to drain once on mount.
 const DEEP_LINK_EVENT: &str = "pragma:deep-link";
 
@@ -106,7 +106,7 @@ fn install_deep_links(app: &tauri::App) {
                 }
             }
             // A cold-start link can land while another app holds a fullscreen
-            // Space; surface our window so the new chat is actually seen.
+            // Space; surface our window so the new session is actually seen.
             focus_main_window(app.handle());
         }
     }
@@ -470,6 +470,7 @@ pub fn run() {
             scripts::load_project_scripts,
             editors::open_worktree,
             agents::list_agents,
+            agents::resolve_agent_models,
             agent_notifications::show_agent_notification,
             project_icon,
             list_tabs,

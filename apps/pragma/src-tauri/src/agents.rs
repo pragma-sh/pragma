@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,56 @@ pub struct AgentConfig {
     pub name: String,
     pub icon_data_url: Option<String>,
     pub start: Vec<String>,
+    pub models: Option<AgentModelsConfig>,
+}
+
+/// Optional model discovery/argument configuration from an agent launcher config.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "source")]
+pub enum AgentModelsConfig {
+    /// A config-owned static model list.
+    #[serde(rename = "static", rename_all = "camelCase")]
+    Static {
+        model_arg: Option<Vec<String>>,
+        reasoning_arg: Option<Vec<String>>,
+        model_reasoning_arg: Option<Vec<String>>,
+        items: Vec<RawAgentModel>,
+    },
+    /// A plugin-owned command that emits the generic JSON model list.
+    #[serde(rename = "command", rename_all = "camelCase")]
+    Command {
+        command: Vec<String>,
+        model_arg: Option<Vec<String>>,
+        reasoning_arg: Option<Vec<String>>,
+        model_reasoning_arg: Option<Vec<String>>,
+    },
+}
+
+/// Model entry returned to the frontend.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModel {
+    pub id: String,
+    pub name: String,
+    pub reasoning: Vec<AgentReasoning>,
+}
+
+/// Optional reasoning effort exposed for a model.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReasoning {
+    pub id: String,
+    pub name: String,
+}
+
+/// Raw config/script model entry before validation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawAgentModel {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub reasoning: Vec<AgentReasoning>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +75,10 @@ struct RawAgentConfig {
     name: String,
     icon: Option<String>,
     start: StartCommand,
+    models: Option<AgentModelsConfig>,
 }
+
+const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -56,15 +111,30 @@ pub fn list_agents(app_handle: tauri::AppHandle) -> AppResult<Vec<AgentConfig>> 
     Ok(agents)
 }
 
+/// Resolves an agent's model list without blocking `list_agents` on model commands.
+#[tauri::command]
+pub fn resolve_agent_models(
+    app_handle: tauri::AppHandle,
+    agent_id: String,
+) -> AppResult<Vec<AgentModel>> {
+    let agents_dir = app_handle.path().home_dir()?.join(".pragma/agents");
+    Ok(resolve_agent_models_from_dir(
+        &agents_dir,
+        &agent_id,
+        MODEL_DISCOVERY_TIMEOUT,
+    ))
+}
+
 /// Installs Pragma-bundled agent configurations into `~/.pragma/agents`.
 pub fn ensure_bundled_installed(app_handle: &AppHandle) -> AppResult<()> {
-    let source = bundled_agents_dir(app_handle)?;
-    if !source.is_dir() {
-        return Ok(());
-    }
     let destination = app_handle.path().home_dir()?.join(".pragma/agents");
     std::fs::create_dir_all(&destination)?;
-    copy_dir_contents(&source, &destination)
+    for source in bundled_agent_dirs(app_handle)? {
+        if source.is_dir() {
+            copy_dir_contents(&source, &destination)?;
+        }
+    }
+    Ok(())
 }
 
 fn load_agent(dir: &Path, config_path: &Path) -> AppResult<AgentConfig> {
@@ -99,18 +169,145 @@ fn load_agent(dir: &Path, config_path: &Path) -> AppResult<AgentConfig> {
             .map(|icon| icon_data_url(dir, icon))
             .transpose()?,
         start,
+        models: raw.models,
     })
 }
 
-fn bundled_agents_dir(app_handle: &AppHandle) -> AppResult<PathBuf> {
+fn resolve_agent_models_from_dir(
+    agents_dir: &Path,
+    agent_id: &str,
+    timeout: Duration,
+) -> Vec<AgentModel> {
+    let Ok(entries) = std::fs::read_dir(agents_dir) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        let config_path = dir.join("config.json");
+        if !config_path.is_file() {
+            continue;
+        }
+        let Ok(agent) = load_agent(&dir, &config_path) else {
+            continue;
+        };
+        if agent.id != agent_id {
+            continue;
+        }
+        return resolve_models_for_agent_dir(&dir, agent.models.as_ref(), timeout);
+    }
+    Vec::new()
+}
+
+fn resolve_models_for_agent_dir(
+    agent_dir: &Path,
+    models: Option<&AgentModelsConfig>,
+    timeout: Duration,
+) -> Vec<AgentModel> {
+    let Some(models) = models else {
+        return Vec::new();
+    };
+    match models {
+        AgentModelsConfig::Static { items, .. } => validate_models(items.clone()),
+        AgentModelsConfig::Command { command, .. } => command_models(agent_dir, command, timeout),
+    }
+}
+
+fn command_models(agent_dir: &Path, command: &[String], timeout: Duration) -> Vec<AgentModel> {
+    if command.is_empty() || command.iter().any(|part| part.trim().is_empty()) {
+        return Vec::new();
+    }
+    let Some(output) = command_output(agent_dir, command, timeout) else {
+        return Vec::new();
+    };
+    let Ok(items) = serde_json::from_slice::<Vec<RawAgentModel>>(&output) else {
+        return Vec::new();
+    };
+    validate_models(items)
+}
+
+fn command_output(agent_dir: &Path, command: &[String], timeout: Duration) -> Option<Vec<u8>> {
+    let mut child = Command::new(&command[0])
+        .args(&command[1..])
+        .current_dir(agent_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().ok()?;
+                return status.success().then_some(output.stdout);
+            }
+            Ok(None) if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(_) => return None,
+        }
+    }
+}
+
+fn validate_models(items: Vec<RawAgentModel>) -> Vec<AgentModel> {
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let id = item.id.as_deref().unwrap_or_default().trim();
+            let name = item.name.as_deref().unwrap_or_default().trim();
+            if id.is_empty() || name.is_empty() {
+                return None;
+            }
+            let reasoning = item
+                .reasoning
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = entry.id.trim();
+                    let name = entry.name.trim();
+                    if id.is_empty() || name.is_empty() {
+                        return None;
+                    }
+                    Some(AgentReasoning {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                    })
+                })
+                .collect();
+            Some(AgentModel {
+                id: id.to_string(),
+                name: name.to_string(),
+                reasoning,
+            })
+        })
+        .collect()
+}
+
+fn bundled_agent_dirs(app_handle: &AppHandle) -> AppResult<Vec<PathBuf>> {
     if cfg!(debug_assertions) {
         let staged = workspace_root().join("apps/pragma/src-tauri/resources/pragma/agents");
         if staged.is_dir() {
-            return Ok(staged);
+            return Ok(vec![staged]);
         }
-        return Ok(workspace_root().join("packages/opencode-plugin/pragma/agents"));
+        let root = workspace_root();
+        return Ok(vec![
+            root.join("packages/opencode-plugin/pragma/agents"),
+            root.join("packages/claude-code-plugin/pragma/agents"),
+            root.join("packages/cursor-plugin/pragma/agents"),
+        ]);
     }
-    Ok(app_handle.path().resource_dir()?.join("pragma/agents"))
+    Ok(vec![app_handle
+        .path()
+        .resource_dir()?
+        .join("pragma/agents")])
 }
 
 fn copy_dir_contents(source: &Path, destination: &Path) -> AppResult<()> {
@@ -179,11 +376,193 @@ fn kebab_case(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::kebab_case;
+    use std::time::{Duration, Instant};
+
+    use super::{kebab_case, load_agent, resolve_agent_models_from_dir, AgentModelsConfig};
+
+    fn write_agent(root: &std::path::Path, id: &str, config: &str) -> std::path::PathBuf {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), config).unwrap();
+        dir
+    }
 
     #[test]
     fn normalizes_agent_ids() {
         assert_eq!(kebab_case("Claude Code"), "claude-code");
         assert_eq!(kebab_case(" sample_agent!! "), "sample-agent");
+    }
+
+    #[test]
+    fn parses_optional_static_model_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = write_agent(
+            temp.path(),
+            "claude-code",
+            r#"{
+              "id": "claude-code",
+              "name": "Claude Code",
+              "start": ["claude"],
+              "models": {
+                "source": "static",
+                "modelArg": ["--model", "{model}"],
+                "reasoningArg": ["--effort", "{reasoning}"],
+                "items": [{"id": "sonnet", "name": "Sonnet"}]
+              }
+            }"#,
+        );
+
+        let agent = load_agent(&dir, &dir.join("config.json")).unwrap();
+        match agent.models.unwrap() {
+            AgentModelsConfig::Static {
+                model_arg,
+                reasoning_arg,
+                model_reasoning_arg,
+                items,
+            } => {
+                assert_eq!(model_arg.unwrap(), ["--model", "{model}"]);
+                assert_eq!(reasoning_arg.unwrap(), ["--effort", "{reasoning}"]);
+                assert!(model_reasoning_arg.is_none());
+                assert_eq!(items[0].id.as_deref(), Some("sonnet"));
+            }
+            AgentModelsConfig::Command { .. } => panic!("expected static models"),
+        }
+    }
+
+    #[test]
+    fn preserves_current_behavior_without_models() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = write_agent(
+            temp.path(),
+            "plain",
+            r#"{"name":"Plain","start":["plain"]}"#,
+        );
+
+        let agent = load_agent(&dir, &dir.join("config.json")).unwrap();
+        assert_eq!(agent.id, "plain");
+        assert!(agent.models.is_none());
+        assert_eq!(
+            resolve_agent_models_from_dir(temp.path(), "plain", Duration::from_secs(1)),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn resolves_static_models_and_ignores_invalid_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        write_agent(
+            temp.path(),
+            "test",
+            r#"{
+              "id": "test",
+              "name": "Test",
+              "start": ["test"],
+              "models": {
+                "source": "static",
+                "items": [
+                  {"id": "", "name": "Broken"},
+                  {"id": "gpt-5.5", "name": "GPT-5.5", "reasoning": [
+                    {"id": "low", "name": "Low"},
+                    {"id": "", "name": "Broken"}
+                  ]}
+                ]
+              }
+            }"#,
+        );
+
+        let models = resolve_agent_models_from_dir(temp.path(), "test", Duration::from_secs(1));
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "gpt-5.5");
+        assert_eq!(models[0].reasoning.len(), 1);
+    }
+
+    #[test]
+    fn resolves_command_models_with_agent_dir_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = write_agent(
+            temp.path(),
+            "cursor",
+            r#"{
+              "id": "cursor",
+              "name": "Cursor",
+              "start": ["agent"],
+              "models": {"source": "command", "command": ["sh", "scripts/list-models.sh"]}
+            }"#,
+        );
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::write(dir.join("marker"), "").unwrap();
+        std::fs::write(
+            dir.join("scripts/list-models.sh"),
+            "[ -f marker ] || exit 1\nprintf '[{\"id\":\"model\",\"name\":\"Model\"}]'\n",
+        )
+        .unwrap();
+
+        let models = resolve_agent_models_from_dir(temp.path(), "cursor", Duration::from_secs(1));
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "model");
+    }
+
+    #[test]
+    fn command_invalid_json_returns_empty_list() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = write_agent(
+            temp.path(),
+            "cursor",
+            r#"{
+              "id": "cursor",
+              "name": "Cursor",
+              "start": ["agent"],
+              "models": {"source": "command", "command": ["sh", "scripts/list-models.sh"]}
+            }"#,
+        );
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::write(dir.join("scripts/list-models.sh"), "printf 'not json'\n").unwrap();
+
+        assert_eq!(
+            resolve_agent_models_from_dir(temp.path(), "cursor", Duration::from_secs(1)),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn command_failure_returns_empty_list() {
+        let temp = tempfile::tempdir().unwrap();
+        write_agent(
+            temp.path(),
+            "cursor",
+            r#"{
+              "id": "cursor",
+              "name": "Cursor",
+              "start": ["agent"],
+              "models": {"source": "command", "command": ["sh", "-c", "exit 7"]}
+            }"#,
+        );
+
+        assert_eq!(
+            resolve_agent_models_from_dir(temp.path(), "cursor", Duration::from_secs(1)),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn command_timeout_returns_empty_list() {
+        let temp = tempfile::tempdir().unwrap();
+        write_agent(
+            temp.path(),
+            "cursor",
+            r#"{
+              "id": "cursor",
+              "name": "Cursor",
+              "start": ["agent"],
+              "models": {"source": "command", "command": ["sh", "-c", "sleep 2"]}
+            }"#,
+        );
+
+        let started = Instant::now();
+        assert_eq!(
+            resolve_agent_models_from_dir(temp.path(), "cursor", Duration::from_millis(50)),
+            Vec::new(),
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
