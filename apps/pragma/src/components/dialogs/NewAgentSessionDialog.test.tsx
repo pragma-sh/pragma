@@ -2,15 +2,18 @@ import type { KeyboardEvent } from "react";
 
 import type { Worktree } from "@pragma/constants";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { NewChatDeepLinkDetail } from "@/lib/deep-link";
+import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 
 const listAgentsMock = vi.fn();
-const startChatMock = vi.fn();
+const resolveAgentModelsMock = vi.fn();
+const startSessionMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   listAgents: () => listAgentsMock(),
+  resolveAgentModels: (agentId: string) => resolveAgentModelsMock(agentId),
 }));
 
 // The TipTap editor is unrelated to dialog seeding; a textarea keeps the test focused.
@@ -66,34 +69,37 @@ interface WorkspaceMock {
   selectedProjectId: string;
   selectedWorktreeId: string;
   worktrees: Record<string, Worktree[]>;
-  startChat: typeof startChatMock;
+  startSession: typeof startSessionMock;
 }
 
 let workspaceMock: WorkspaceMock = {
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   worktrees: { p: [mainWorktree, linkedWorktree] },
-  startChat: startChatMock,
+  startSession: startSessionMock,
 };
 
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
 }));
 
-import { NewChatDialog } from "./NewChatDialog";
+import { NewAgentSessionDialog } from "./NewAgentSessionDialog";
 
-const deepLinkInitial: NewChatDeepLinkDetail = {
+const deepLinkInitial: NewSessionDeepLinkDetail = {
   agentId: "opencode",
+  modelId: null,
+  reasoningId: null,
   worktreeId: "wt-link",
   message: "Hello",
 };
 
-describe("NewChatDialog", () => {
+describe("NewAgentSessionDialog", () => {
   beforeEach(() => {
     listAgentsMock.mockResolvedValue([
       { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);
+    resolveAgentModelsMock.mockResolvedValue([{ id: "sonnet", name: "Sonnet", reasoning: [] }]);
   });
 
   afterEach(() => {
@@ -103,33 +109,41 @@ describe("NewChatDialog", () => {
       selectedProjectId: "p",
       selectedWorktreeId: "main",
       worktrees: { p: [mainWorktree, linkedWorktree] },
-      startChat: startChatMock,
+      startSession: startSessionMock,
     };
   });
 
   it("selects an agent-only deep link with no worktree or message", async () => {
     render(
-      <NewChatDialog
+      <NewAgentSessionDialog
         open
         onOpenChange={vi.fn()}
-        initial={{ agentId: "opencode", worktreeId: null, message: null }}
+        initial={{
+          agentId: "opencode",
+          modelId: null,
+          reasoningId: null,
+          worktreeId: null,
+          message: null,
+        }}
       />,
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("OpenCode"),
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("OpenCode"),
     );
   });
 
   it("applies deep-link values that arrive after the dialog is already open", async () => {
-    const { rerender } = render(<NewChatDialog open onOpenChange={vi.fn()} initial={null} />);
+    const { rerender } = render(
+      <NewAgentSessionDialog open onOpenChange={vi.fn()} initial={null} />,
+    );
 
     await waitFor(() => expect(screen.getByLabelText("Prompt")).toHaveValue(""));
 
-    rerender(<NewChatDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
+    rerender(<NewAgentSessionDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
 
     await waitFor(() => expect(screen.getByLabelText("Prompt")).toHaveValue("Hello"));
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("OpenCode");
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("OpenCode");
     expect(screen.getByRole("combobox", { name: "Worktree" })).toHaveTextContent("Agent control");
   });
 
@@ -138,10 +152,10 @@ describe("NewChatDialog", () => {
       selectedProjectId: "p",
       selectedWorktreeId: "main",
       worktrees: { p: [mainWorktree] },
-      startChat: startChatMock,
+      startSession: startSessionMock,
     };
     const { rerender } = render(
-      <NewChatDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />,
+      <NewAgentSessionDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />,
     );
 
     await waitFor(() => expect(screen.getByLabelText("Prompt")).toHaveValue("Hello"));
@@ -153,12 +167,29 @@ describe("NewChatDialog", () => {
       selectedProjectId: "p",
       selectedWorktreeId: "wt-link",
       worktrees: { p: [mainWorktree, linkedWorktree] },
-      startChat: startChatMock,
+      startSession: startSessionMock,
     };
-    rerender(<NewChatDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
+    rerender(<NewAgentSessionDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
 
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Worktree" })).toHaveTextContent("Agent control"),
+    );
+  });
+
+  it("opens the worktree dropdown after the agent menu has been opened and closed", async () => {
+    const user = userEvent.setup();
+    render(<NewAgentSessionDialog open onOpenChange={vi.fn()} initial={null} />);
+
+    // Open then close the agent menu. A modal Radix menu would leave
+    // `body { pointer-events: none }` stuck, blocking the worktree Select.
+    const agentTrigger = await screen.findByRole("button", { name: "Agent" });
+    await user.click(agentTrigger);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+
+    await user.click(screen.getByRole("combobox", { name: "Worktree" }));
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /Agent control/ })).toBeInTheDocument(),
     );
   });
 
@@ -167,14 +198,14 @@ describe("NewChatDialog", () => {
       selectedProjectId: "p",
       selectedWorktreeId: "main",
       worktrees: { p: [mainWorktree], "p-other": [otherProjectWorktree] },
-      startChat: startChatMock,
+      startSession: startSessionMock,
     };
 
-    render(<NewChatDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
+    render(<NewAgentSessionDialog open onOpenChange={vi.fn()} initial={deepLinkInitial} />);
 
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Worktree" })).toHaveTextContent("Agent control"),
     );
-    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveTextContent("OpenCode");
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent("OpenCode");
   });
 });

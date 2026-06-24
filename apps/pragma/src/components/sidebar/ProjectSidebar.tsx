@@ -5,18 +5,22 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
-import { NewChatDialog } from "@/components/dialogs/NewChatDialog";
+import { NewAgentSessionDialog } from "@/components/dialogs/NewAgentSessionDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
-import { consumePendingNewChat, NEW_CHAT_EVENT, type NewChatDeepLinkDetail } from "@/lib/deep-link";
+import {
+  consumePendingNewSession,
+  NEW_SESSION_EVENT,
+  type NewSessionDeepLinkDetail,
+} from "@/lib/deep-link";
 import { useWorkspace } from "@/state/workspace-context";
 
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
-  const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
-  const [newChatInitial, setNewChatInitial] = useState<NewChatDeepLinkDetail | null>(null);
+  const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
+  const [newSessionInitial, setNewSessionInitial] = useState<NewSessionDeepLinkDetail | null>(null);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
 
@@ -28,27 +32,27 @@ export function ProjectSidebar() {
     return () => window.removeEventListener("pragma:create-project", openDialog);
   }, []);
 
-  // A `pragma://open` deep link (without auto-submit) opens the new-chat dialog
+  // A `pragma://open` deep link (without auto-submit) opens the new-session dialog
   // prefilled with the link's values. The workspace owns deep-link handling but
-  // the sidebar owns this dialog, so requests arrive via `requestNewChat`: drain
+  // the sidebar owns this dialog, so requests arrive via `requestNewSession`: drain
   // any buffered request on mount (a cold-start deep link is handled before this
   // listener exists) and also listen for live ones.
   useEffect(() => {
-    function openPrefilled(detail: NewChatDeepLinkDetail) {
-      setNewChatInitial(detail);
-      setNewChatDialogOpen(true);
+    function openPrefilled(detail: NewSessionDeepLinkDetail) {
+      setNewSessionInitial(detail);
+      setNewSessionDialogOpen(true);
     }
     function onEvent(event: Event) {
       // Clear the buffer too so a later remount doesn't reopen the same request.
-      consumePendingNewChat();
-      openPrefilled((event as CustomEvent<NewChatDeepLinkDetail>).detail);
+      consumePendingNewSession();
+      openPrefilled((event as CustomEvent<NewSessionDeepLinkDetail>).detail);
     }
-    const pending = consumePendingNewChat();
+    const pending = consumePendingNewSession();
     if (pending) {
       openPrefilled(pending);
     }
-    window.addEventListener(NEW_CHAT_EVENT, onEvent);
-    return () => window.removeEventListener(NEW_CHAT_EVENT, onEvent);
+    window.addEventListener(NEW_SESSION_EVENT, onEvent);
+    return () => window.removeEventListener(NEW_SESSION_EVENT, onEvent);
   }, []);
 
   return (
@@ -85,13 +89,13 @@ export function ProjectSidebar() {
         </p>
         <div className="flex items-center gap-0.5">
           <Button
-            aria-label="Start new chat"
+            aria-label="New agent session"
             disabled={!workspace.selectedWorktree}
             size="icon-sm"
             variant="ghost"
             onClick={() => {
-              setNewChatInitial(null);
-              setNewChatDialogOpen(true);
+              setNewSessionInitial(null);
+              setNewSessionDialogOpen(true);
             }}
           >
             <MessageSquarePlus />
@@ -116,10 +120,10 @@ export function ProjectSidebar() {
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
-      <NewChatDialog
-        open={newChatDialogOpen}
-        onOpenChange={setNewChatDialogOpen}
-        initial={newChatInitial}
+      <NewAgentSessionDialog
+        open={newSessionDialogOpen}
+        onOpenChange={setNewSessionDialogOpen}
+        initial={newSessionInitial}
       />
     </aside>
   );

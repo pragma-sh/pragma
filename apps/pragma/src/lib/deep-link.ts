@@ -1,72 +1,79 @@
 /**
- * Parsed `pragma://open` deep link that drives the new-chat flow.
+ * Parsed `pragma://open` deep link that drives the new-session flow.
  *
  * Every field is optional from the URL's perspective: an absent query param
  * leaves the corresponding value `null` (or `false` for {@link autoSubmit}), and
  * the consumer fills the gap (default agent, current worktree, empty prompt).
  */
-export interface NewChatDeepLink {
+export interface NewSessionDeepLink {
   /** Requested agent id (`agent`); the consumer falls back to the default when absent or unknown. */
   agentId: string | null;
+  /** Requested model id (`model`) when explicit params are used. */
+  modelId: string | null;
+  /** Requested reasoning id (`reasoning`) when explicit params are used. */
+  reasoningId: string | null;
   /** Prompt to prefill (`message`), already base64-decoded for display. */
   message: string | null;
   /** Target worktree branch id (`worktree`). */
   worktreeId: string | null;
-  /** When truthy (`autoSubmit`), launch immediately and bypass the new-chat dialog. */
+  /** When truthy (`autoSubmit`), launch immediately and bypass the new-session dialog. */
   autoSubmit: boolean;
 }
 
 /**
- * Detail payload of the `pragma:new-chat` window event. The workspace dispatches
+ * Detail payload of the `pragma:new-session` window event. The workspace dispatches
  * it after handling a non-auto-submit deep link; the sidebar listens and opens
- * the new-chat dialog seeded with these values.
+ * the new-session dialog seeded with these values.
  */
-export interface NewChatDeepLinkDetail {
+export interface NewSessionDeepLinkDetail {
   agentId: string | null;
+  modelId: string | null;
+  reasoningId: string | null;
   worktreeId: string | null;
   message: string | null;
 }
 
-/** Window event name carrying a {@link NewChatDeepLinkDetail}. */
-export const NEW_CHAT_EVENT = "pragma:new-chat";
+/** Window event name carrying a {@link NewSessionDeepLinkDetail}. */
+export const NEW_SESSION_EVENT = "pragma:new-session";
 
 /**
- * Buffer for the most recent new-chat request. A cold-start deep link is handled
- * before the sidebar's {@link NEW_CHAT_EVENT} listener mounts, so the event alone
+ * Buffer for the most recent new-session request. A cold-start deep link is handled
+ * before the sidebar's {@link NEW_SESSION_EVENT} listener mounts, so the event alone
  * would be lost; the buffer lets the listener drain the request once on mount.
  */
-let pendingNewChat: NewChatDeepLinkDetail | null = null;
+let pendingNewSession: NewSessionDeepLinkDetail | null = null;
 
 /**
- * Requests the prefilled new-chat dialog. Dispatches {@link NEW_CHAT_EVENT} for an
+ * Requests the prefilled new-session dialog. Dispatches {@link NEW_SESSION_EVENT} for an
  * already-mounted listener and buffers the request so a listener mounting later
  * (e.g. on cold start from a deep link) can still drain it via
- * {@link consumePendingNewChat}.
+ * {@link consumePendingNewSession}.
  */
-export function requestNewChat(detail: NewChatDeepLinkDetail): void {
-  pendingNewChat = detail;
-  window.dispatchEvent(new CustomEvent<NewChatDeepLinkDetail>(NEW_CHAT_EVENT, { detail }));
+export function requestNewSession(detail: NewSessionDeepLinkDetail): void {
+  pendingNewSession = detail;
+  window.dispatchEvent(new CustomEvent<NewSessionDeepLinkDetail>(NEW_SESSION_EVENT, { detail }));
 }
 
-/** Returns and clears the buffered new-chat request, if any. */
-export function consumePendingNewChat(): NewChatDeepLinkDetail | null {
-  const detail = pendingNewChat;
-  pendingNewChat = null;
+/** Returns and clears the buffered new-session request, if any. */
+export function consumePendingNewSession(): NewSessionDeepLinkDetail | null {
+  const detail = pendingNewSession;
+  pendingNewSession = null;
   return detail;
 }
 
 /** The single deep-link scheme Pragma owns. */
 const DEEP_LINK_SCHEME = "pragma:";
-/** The only deep-link host/action currently supported: open the new-chat flow. */
+/** The only deep-link host/action currently supported: open the new-session flow. */
 const DEEP_LINK_OPEN_HOST = "open";
 
 /**
- * Parses a `pragma://open?...` deep link into a {@link NewChatDeepLink}, or
+ * Parses a `pragma://open?...` deep link into a {@link NewSessionDeepLink}, or
  * returns `null` when the URL is malformed or not a `pragma://open` link.
  *
- * Recognised query params: `agent`, `message` (base64), `worktree`, `autoSubmit`.
+ * Recognised query params: `agent`, `model`, `reasoning`, `message` (base64),
+ * `worktree`, `autoSubmit`.
  */
-export function parseNewChatDeepLink(raw: string): NewChatDeepLink | null {
+export function parseNewSessionDeepLink(raw: string): NewSessionDeepLink | null {
   let url: URL;
   try {
     url = new URL(raw);
@@ -77,8 +84,12 @@ export function parseNewChatDeepLink(raw: string): NewChatDeepLink | null {
     return null;
   }
   const params = url.searchParams;
+  const agentId = lastParam(params, "agent");
+  const modelId = agentId ? lastParam(params, "model") : null;
   return {
-    agentId: lastParam(params, "agent"),
+    agentId,
+    modelId,
+    reasoningId: modelId ? lastParam(params, "reasoning") : null,
     message: decodeMessage(lastRawParam(url.search, "message")),
     worktreeId: lastParam(params, "worktree"),
     autoSubmit: isTruthy(lastParam(params, "autoSubmit")),

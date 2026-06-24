@@ -2,35 +2,49 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { GitBranch } from "lucide-react";
 
-import { AgentIcon } from "@/components/agents/AgentIcon";
+import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { useAgentModels } from "@/hooks/use-agent-models";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
-import type { NewChatDeepLinkDetail } from "@/lib/deep-link";
+import {
+  EMPTY_MODEL_SELECTION,
+  defaultModelSelection,
+  rememberModelSelection,
+  resolveDeepLinkAgentSelection,
+  validateModelSelection,
+} from "@/lib/agent-model-selection";
+import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 import { isMacPlatform } from "@/lib/platform";
-import { type AgentConfig, listAgents } from "@/lib/tauri";
+import { type AgentConfig, type AgentModelSelection, listAgents } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
-interface NewChatDialogProps {
+interface NewAgentSessionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Values to seed the form with when the dialog opens (e.g. from a deep link). */
-  initial?: NewChatDeepLinkDetail | null;
+  initial?: NewSessionDeepLinkDetail | null;
 }
 
 /**
- * Starts a fresh agent thread: the user writes a markdown prompt, picks an agent
+ * Starts a fresh agent session: the user writes a markdown prompt, picks an agent
  * and a target worktree, then submits (⌘/Ctrl+↵ or the button). Submitting
  * switches to the chosen worktree, opens a terminal tab, launches the agent, and
- * prefills the prompt into the agent's TUI without sending it.
+ * submits the prompt to the agent when non-empty.
  */
-export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDialogProps) {
+export function NewAgentSessionDialog({
+  open: isOpen,
+  onOpenChange,
+  initial,
+}: NewAgentSessionDialogProps) {
   const workspace = useWorkspace();
   const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const { modelsByAgent, loadModels, primeFromCache } = useAgentModels();
   const [message, setMessage] = useState("");
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [modelSelection, setModelSelection] = useState<AgentModelSelection>(EMPTY_MODEL_SELECTION);
   const [worktreeId, setWorktreeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
@@ -71,13 +85,19 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
     };
   }, [isOpen]);
 
+  // Show already-resolved models immediately, without waiting for a hover.
+  useEffect(() => {
+    primeFromCache(agents.map((agent) => agent.id));
+  }, [agents, primeFromCache]);
+
   // Seed the form when the dialog opens, and also when a fresh deep-link payload
   // arrives while it is open. Avoid reseeding on unrelated re-renders so the
   // user's edits are not clobbered.
   const wasOpenRef = useRef(false);
-  const lastInitialRef = useRef<NewChatDeepLinkDetail | null | undefined>(undefined);
+  const lastInitialRef = useRef<NewSessionDeepLinkDetail | null | undefined>(undefined);
   const agentManuallyChangedRef = useRef(false);
   const worktreeManuallyChangedRef = useRef(false);
+  const previousAgentIdRef = useRef<string | null>(null);
   useEffect(() => {
     const opened = isOpen && !wasOpenRef.current;
     const receivedInitial = isOpen && initial !== lastInitialRef.current;
@@ -87,29 +107,53 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
       setMessage(initial?.message ?? "");
       setWorktreeId(initial?.worktreeId ?? workspace.selectedWorktreeId);
       setAgentId(initial?.agentId ?? null);
+      setModelSelection(EMPTY_MODEL_SELECTION);
+      previousAgentIdRef.current = null;
     }
     wasOpenRef.current = isOpen;
     lastInitialRef.current = initial;
   }, [isOpen, initial, workspace.selectedWorktreeId]);
 
   // Resolve the agent selection: keep a valid choice, otherwise fall back to the
-  // first (default) agent — also covers a deep link naming an unknown agent id.
+  // first (default) agent — also covers deep links with compact selectors.
   useEffect(() => {
     if (!isOpen || agents.length === 0) {
       return;
     }
-    const requestedAgentId = initial?.agentId ?? null;
-    setAgentId((current) => {
-      if (
-        requestedAgentId &&
-        !agentManuallyChangedRef.current &&
-        agents.some((agent) => agent.id === requestedAgentId)
-      ) {
-        return requestedAgentId;
+    if (initial?.agentId && !agentManuallyChangedRef.current) {
+      const resolved = resolveDeepLinkAgentSelection(initial, agents, modelsByAgent);
+      if (resolved.agentId) {
+        setAgentId(resolved.agentId);
+        setModelSelection(resolved.selection);
+        return;
       }
-      return current && agents.some((agent) => agent.id === current) ? current : agents[0]!.id;
-    });
-  }, [isOpen, initial?.agentId, agents]);
+    }
+    setAgentId((current) =>
+      current && agents.some((agent) => agent.id === current) ? current : agents[0]!.id,
+    );
+  }, [isOpen, initial, agents, modelsByAgent]);
+
+  const selectedAgentId = agentId && agents.some((agent) => agent.id === agentId) ? agentId : null;
+  useEffect(() => {
+    if (!isOpen || !selectedAgentId) {
+      return;
+    }
+    const models = modelsByAgent[selectedAgentId];
+    if (!models) {
+      return;
+    }
+    const changedAgent = previousAgentIdRef.current !== selectedAgentId;
+    previousAgentIdRef.current = selectedAgentId;
+    if (initial?.agentId && !agentManuallyChangedRef.current) {
+      setModelSelection(resolveDeepLinkAgentSelection(initial, agents, modelsByAgent).selection);
+      return;
+    }
+    setModelSelection((current) =>
+      changedAgent
+        ? defaultModelSelection(selectedAgentId, models)
+        : validateModelSelection(models, current),
+    );
+  }, [isOpen, selectedAgentId, initial, agents, modelsByAgent]);
 
   useEffect(() => {
     const requestedWorktreeId = initial?.worktreeId;
@@ -134,15 +178,9 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
     }
   }, [isOpen, initial?.worktreeId, worktreeId, workspace.selectedWorktreeId]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   const requestedAgentId =
-    !agentManuallyChangedRef.current &&
-    initial?.agentId &&
-    agents.some((agent) => agent.id === initial.agentId)
-      ? initial.agentId
+    !agentManuallyChangedRef.current && initial?.agentId
+      ? resolveDeepLinkAgentSelection(initial, agents, modelsByAgent).agentId
       : null;
   const requestedWorktreeId =
     !worktreeManuallyChangedRef.current &&
@@ -157,12 +195,18 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
     worktrees.find((worktree) => worktree.id === effectiveWorktreeId) ??
     loadedWorktrees.find((worktree) => worktree.id === effectiveWorktreeId) ??
     null;
-  const agentSelectValue = effectiveAgentId ?? "";
   const worktreeSelectValue = effectiveWorktreeId ?? "";
-  const canSubmit = Boolean(selectedAgent && effectiveWorktreeId && message.trim());
+  const canSubmit = Boolean(selectedAgent && effectiveWorktreeId);
 
-  function handleAgentChange(nextAgentId: string) {
+  if (!isOpen) {
+    return null;
+  }
+
+  function handleAgentChange(nextAgentId: string, nextSelection: AgentModelSelection) {
+    markAgentManuallyChanged();
     setAgentId(nextAgentId);
+    setModelSelection(nextSelection);
+    rememberModelSelection(nextAgentId, nextSelection);
   }
 
   function handleWorktreeChange(nextWorktreeId: string) {
@@ -182,13 +226,20 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
       return;
     }
     try {
-      const tab = await workspace.startChat(effectiveWorktreeId, selectedAgent, message);
+      rememberModelSelection(selectedAgent.id, modelSelection);
+      const tab = await workspace.startSession(
+        effectiveWorktreeId,
+        selectedAgent,
+        message.trim() ? message : undefined,
+        modelSelection,
+      );
       if (!tab) {
         return;
       }
       onOpenChange(false);
       setMessage("");
       setAgentId(null);
+      setModelSelection(EMPTY_MODEL_SELECTION);
       setWorktreeId(null);
       setError(null);
     } catch (cause) {
@@ -212,7 +263,7 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-xl rounded-xl border bg-background p-5 shadow-xl">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Start a new chat</h2>
+          <h2 className="text-lg font-semibold">New agent session</h2>
           <p className="text-sm text-muted-foreground">
             Write a prompt, pick an agent and a worktree, then launch a session.
           </p>
@@ -237,39 +288,14 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Agent</Label>
-              <Select value={agentSelectValue} onValueChange={handleAgentChange}>
-                <SelectTrigger
-                  aria-label="Agent"
-                  className="w-full"
-                  onKeyDown={markAgentManuallyChanged}
-                  onPointerDown={markAgentManuallyChanged}
-                >
-                  <span data-slot="select-value">
-                    {selectedAgent ? (
-                      <>
-                        <AgentIcon agent={selectedAgent} />
-                        <span className="truncate">{selectedAgent.name}</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">Select agent</span>
-                    )}
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.length === 0 ? (
-                    <SelectItem value="__none" disabled>
-                      No agents configured
-                    </SelectItem>
-                  ) : (
-                    agents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        <AgentIcon agent={agent} />
-                        <span className="truncate">{agent.name}</span>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <AgentModelSelector
+                agents={agents}
+                modelsByAgent={modelsByAgent}
+                value={{ agentId: effectiveAgentId, selection: modelSelection }}
+                onChange={handleAgentChange}
+                onLoadModels={loadModels}
+                onInteract={markAgentManuallyChanged}
+              />
             </div>
             <div className="space-y-2">
               <Label>Worktree</Label>
@@ -295,7 +321,7 @@ export function NewChatDialog({ open: isOpen, onOpenChange, initial }: NewChatDi
                     )}
                   </span>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
                   {worktrees.length === 0 ? (
                     <SelectItem value="__none" disabled>
                       No worktrees available
