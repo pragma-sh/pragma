@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { GitBranchPlus, Plus } from "lucide-react";
+import { GitBranchPlus, MessageSquarePlus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
+import { NewChatDialog } from "@/components/dialogs/NewChatDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
@@ -13,6 +14,7 @@ import { useWorkspace } from "@/state/workspace-context";
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
 
@@ -56,15 +58,26 @@ export function ProjectSidebar() {
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Worktrees
         </p>
-        <Button
-          aria-label="Create worktree"
-          disabled={!workspace.selectedWorktree}
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => setWorktreeDialogOpen(true)}
-        >
-          <GitBranchPlus />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            aria-label="Start new chat"
+            disabled={!workspace.selectedWorktree}
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setNewChatDialogOpen(true)}
+          >
+            <MessageSquarePlus />
+          </Button>
+          <Button
+            aria-label="Create worktree"
+            disabled={!workspace.selectedWorktree}
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setWorktreeDialogOpen(true)}
+          >
+            <GitBranchPlus />
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
@@ -75,6 +88,7 @@ export function ProjectSidebar() {
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
+      <NewChatDialog open={newChatDialogOpen} onOpenChange={setNewChatDialogOpen} />
     </aside>
   );
 }
