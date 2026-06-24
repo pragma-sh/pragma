@@ -70,6 +70,8 @@ cp -R "$repo_root/packages/opencode-plugin/pragma/agents/." \
   "$src_tauri_dir/resources/pragma/agents"
 cp -R "$repo_root/packages/claude-code-plugin/pragma/agents/." \
   "$src_tauri_dir/resources/pragma/agents"
+cp -R "$repo_root/packages/cursor-plugin/pragma/agents/." \
+  "$src_tauri_dir/resources/pragma/agents"
 
 echo "staged pragma-daemon ($profile) -> src-tauri/binaries/pragma-daemon-$triple"
 echo "staged pragma-agent ($profile) -> src-tauri/binaries/pragma-agent-$triple"

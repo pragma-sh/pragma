@@ -1,0 +1,22 @@
+{
+  "name": "@pragma/cursor-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cursor Agent CLI plugin that reports agent status to Pragma via shell hooks.",
+  "files": [
+    "hooks",
+    "scripts",
+    "pragma"
+  ],
+  "scripts": {
+    "install:local": "sh scripts/install-local.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
