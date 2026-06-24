@@ -1,0 +1,37 @@
+{
+  "sessionStart": [
+    {
+      "command": "__REPORT_SH__ cleared"
+    }
+  ],
+  "sessionEnd": [
+    {
+      "command": "__REPORT_SH__ cleared"
+    }
+  ],
+  "beforeSubmitPrompt": [
+    {
+      "command": "__REPORT_SH__ started"
+    }
+  ],
+  "stop": [
+    {
+      "command": "__REPORT_SH__ stopped"
+    }
+  ],
+  "beforeShellExecution": [
+    {
+      "command": "__REPORT_SH__ attention-command"
+    }
+  ],
+  "beforeMCPExecution": [
+    {
+      "command": "__REPORT_SH__ attention-command"
+    }
+  ],
+  "postToolUse": [
+    {
+      "command": "__REPORT_SH__ running"
+    }
+  ]
+}
