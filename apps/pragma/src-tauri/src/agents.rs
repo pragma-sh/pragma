@@ -385,6 +385,21 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Restores an environment variable to its original value (or removes it) on drop.
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     fn write_agent(root: &std::path::Path, id: &str, config: &str) -> std::path::PathBuf {
         let dir = root.join(id);
         std::fs::create_dir_all(&dir).unwrap();
@@ -510,8 +525,14 @@ mod tests {
     #[test]
     fn command_models_uses_gui_safe_path() {
         let _guard = ENV_LOCK.lock().unwrap();
-        let original_home = std::env::var_os("HOME");
-        let original_path = std::env::var_os("PATH");
+        let _home = EnvGuard {
+            key: "HOME",
+            original: std::env::var_os("HOME"),
+        };
+        let _path = EnvGuard {
+            key: "PATH",
+            original: std::env::var_os("PATH"),
+        };
         let temp = tempfile::tempdir().unwrap();
         let home_bin = temp.path().join(".local/bin");
         std::fs::create_dir_all(&home_bin).unwrap();
@@ -539,15 +560,6 @@ mod tests {
             &["sh".to_string(), "scripts/list-models.sh".to_string()],
             Duration::from_secs(1),
         );
-
-        match original_home {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-        match original_path {
-            Some(value) => std::env::set_var("PATH", value),
-            None => std::env::remove_var("PATH"),
-        }
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "model");

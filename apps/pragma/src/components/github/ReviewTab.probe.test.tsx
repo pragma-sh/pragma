@@ -57,7 +57,7 @@ vi.mock("@/components/github/GitHubMarkdown", () => ({
   GitHubMarkdown: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
-// The fix dialogs mount closed but still read the workspace via `useFixLauncher`.
+// The fix dialogs mount only when open; workspace context is still needed for the open case.
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => ({
     selectedProjectId: "p",

@@ -1,4 +1,12 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { MergeView } from "@codemirror/merge";
@@ -13,6 +21,8 @@ import {
   Decoration,
   type DecorationSet,
   EditorView,
+  ViewPlugin,
+  type ViewUpdate,
   WidgetType,
   lineNumbers,
 } from "@codemirror/view";
@@ -33,6 +43,17 @@ export interface DiffComment {
   line: number;
   /** Rendered comment content (mounted into the editor via a portal). */
   content: ReactNode;
+}
+
+/** Imperative handle exposed via `ref` for scrolling a comment into view. */
+export interface MergeDiffHandle {
+  /**
+   * Scroll the comment with {@link key} into the editor's viewport. The diff
+   * virtualizes its lines, so a comment anchored below the fold has no DOM node
+   * until its line is revealed — call this first, then scroll the resulting node
+   * into the outer container.
+   */
+  scrollCommentIntoView(key: string): void;
 }
 
 /** Block widget whose DOM is a stable container we render a React portal into. */
@@ -119,6 +140,33 @@ const commentDecorationsField = StateField.define<DecorationSet>({
 
 const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
 
+/**
+ * Publishes the line-number gutter's width as a `--cm-gutter-width` custom
+ * property on the scroller. Inline comment widgets pin sticky to `left: 0` of the
+ * scroll viewport, which sits *behind* the sticky gutter; the theme reads this var
+ * to offset the comment past the gutter so its left edge isn't clipped by the line
+ * numbers. Re-measures whenever geometry changes (e.g. fonts loading).
+ */
+const gutterWidthSync = ViewPlugin.fromClass(
+  class {
+    constructor(view: EditorView) {
+      this.measure(view);
+    }
+
+    update(update: ViewUpdate): void {
+      if (update.geometryChanged) {
+        this.measure(update.view);
+      }
+    }
+
+    private measure(view: EditorView): void {
+      const gutters = view.scrollDOM.querySelector(".cm-gutters");
+      const width = gutters ? gutters.getBoundingClientRect().width : 0;
+      view.scrollDOM.style.setProperty("--cm-gutter-width", `${width}px`);
+    }
+  },
+);
+
 /** Stable empty default so the `comments` prop keeps referential equality. */
 const NO_COMMENTS: DiffComment[] = [];
 
@@ -138,11 +186,13 @@ export function MergeDiff({
   newText,
   fileName,
   comments = NO_COMMENTS,
+  ref,
 }: {
   oldText: string;
   newText: string;
   fileName?: string;
   comments?: DiffComment[];
+  ref?: Ref<MergeDiffHandle>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Widget DOM containers, keyed by comment key, populated as the editor mounts
@@ -156,6 +206,28 @@ export function MergeDiff({
   // `comments` a dependency of view creation.
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollCommentIntoView(key: string) {
+        const view = viewRef.current?.b;
+        if (!view) {
+          return;
+        }
+        const comment = commentsRef.current.find((candidate) => candidate.key === key);
+        const { doc } = view.state;
+        if (!comment || comment.line < 1 || comment.line > doc.lines) {
+          return;
+        }
+        // Anchor on the comment's line so CodeMirror renders that span of the
+        // (virtualized) document, mounting the comment's block widget.
+        const pos = doc.line(comment.line).to;
+        view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      },
+    }),
+    [],
+  );
 
   const refreshPortals = useCallback(() => setVersion((value) => value + 1), []);
   const onMount = useCallback(
@@ -188,6 +260,7 @@ export function MergeDiff({
     const baseExtensions = (compartment: Compartment) => [
       ...READ_ONLY,
       lineNumbers(),
+      gutterWidthSync,
       pragmaSyntaxHighlighting,
       compartment.of([]),
       pragmaEditorTheme,

@@ -44,14 +44,21 @@ export const pragmaEditorTheme = EditorView.theme(
       // visible viewport width (`100cqw`) instead of the much wider code content.
       containerType: "inline-size",
     },
-    // Inline review-comment widgets: pin to the left edge of the scroll viewport
-    // and cap their width to the visible area so the comment is always fully
-    // readable without horizontal scrolling, even as the code beside it scrolls.
+    // Inline review-comment widgets: pin just past the line-number gutter at the
+    // left edge of the scroll viewport and cap their width to the remaining visible
+    // area so the comment is always fully readable without horizontal scrolling,
+    // even as the code beside it scrolls. The `--cm-gutter-width` offset (published
+    // by `gutterWidthSync`) keeps the sticky widget from sliding behind — and being
+    // clipped by — the sticky gutter. Reset `white-space`/`overflow-wrap` since the
+    // widget inherits the code's `white-space: pre` from `.cm-content`, which would
+    // stop long comment text from wrapping and clip it instead.
     ".cm-review-comment": {
       position: "sticky",
-      left: "0",
-      width: "100cqw",
+      left: "var(--cm-gutter-width, 0px)",
+      width: "calc(100cqw - var(--cm-gutter-width, 0px))",
       boxSizing: "border-box",
+      whiteSpace: "normal",
+      overflowWrap: "anywhere",
     },
   },
   { dark: true },

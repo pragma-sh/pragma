@@ -17,7 +17,7 @@ import { FixCommentDialog } from "@/components/github/FixCommentDialog";
 import { FixItListDialog } from "@/components/github/FixItListDialog";
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { ActorAvatar } from "@/components/github/ViewPullRequestView";
-import { type DiffComment, MergeDiff } from "@/components/editor/MergeDiff";
+import { type DiffComment, type MergeDiffHandle, MergeDiff } from "@/components/editor/MergeDiff";
 import { Button } from "@/components/ui/button";
 import {
   type PullFile,
@@ -89,6 +89,19 @@ export function ReviewTab({ tab }: { tab: Tab }) {
       sectionEls.current.set(path, el);
     } else {
       sectionEls.current.delete(path);
+    }
+  }, []);
+
+  // Inline comments live inside a virtualized diff, so a comment below the fold
+  // has no DOM node until its line is revealed. Each diff registers a reveal
+  // callback per comment id here; the toolbar calls it before scrolling so the
+  // arrows can reach comments that aren't the first in their file.
+  const commentReveal = useRef(new Map<string, () => void>());
+  const registerCommentReveal = useCallback((key: string, reveal: (() => void) | null) => {
+    if (reveal) {
+      commentReveal.current.set(key, reveal);
+    } else {
+      commentReveal.current.delete(key);
     }
   }, []);
 
@@ -168,7 +181,11 @@ export function ReviewTab({ tab }: { tab: Tab }) {
     if (state.kind !== "ready" || prNumber == null || focusPath === null) {
       return;
     }
-    sectionEls.current.get(focusPath)?.scrollIntoView({ block: "start" });
+    const el = sectionEls.current.get(focusPath);
+    if (!el) {
+      return;
+    }
+    el.scrollIntoView({ block: "start" });
     clearReviewFocus(prNumber);
   }, [focusPath, state.kind, prNumber]);
 
@@ -207,6 +224,7 @@ export function ReviewTab({ tab }: { tab: Tab }) {
       </div>
       <ReviewToolbar
         commentKeys={commentKeys}
+        commentReveal={commentReveal}
         onAddressFixIt={() => setListOpen(true)}
         prNumber={data.pr.number}
         scrollRef={scrollRef}
@@ -226,27 +244,32 @@ export function ReviewTab({ tab }: { tab: Tab }) {
           onFix={setFixTarget}
           onThreadResolvedChange={setThreadResolved}
           prNumber={data.pr.number}
+          registerCommentReveal={registerCommentReveal}
           registerSection={registerSection}
           threads={data.threadsByPath.get(file.path) ?? []}
           worktreeId={worktreeId}
         />
       ))}
-      <FixCommentDialog
-        comment={fixTarget}
-        onOpenChange={(open) => {
-          if (!open) {
-            setFixTarget(null);
-          }
-        }}
-        open={fixTarget !== null}
-        worktreeId={worktreeId}
-      />
-      <FixItListDialog
-        onOpenChange={setListOpen}
-        open={listOpen}
-        prNumber={data.pr.number}
-        worktreeId={worktreeId}
-      />
+      {fixTarget !== null ? (
+        <FixCommentDialog
+          comment={fixTarget}
+          onOpenChange={(open) => {
+            if (!open) {
+              setFixTarget(null);
+            }
+          }}
+          open={true}
+          worktreeId={worktreeId}
+        />
+      ) : null}
+      {listOpen ? (
+        <FixItListDialog
+          onOpenChange={setListOpen}
+          open={true}
+          prNumber={data.pr.number}
+          worktreeId={worktreeId}
+        />
+      ) : null}
     </div>
   );
 }
@@ -260,11 +283,13 @@ export function ReviewTab({ tab }: { tab: Tab }) {
  */
 function ReviewToolbar({
   commentKeys,
+  commentReveal,
   prNumber,
   scrollRef,
   onAddressFixIt,
 }: {
   commentKeys: string[];
+  commentReveal: React.RefObject<Map<string, () => void>>;
   prNumber: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onAddressFixIt: () => void;
@@ -285,27 +310,61 @@ function ReviewToolbar({
       if (!scroller) {
         return;
       }
-      const mounted = new Map<string, HTMLElement>();
-      for (const el of scroller.querySelectorAll<HTMLElement>("[data-review-comment]")) {
-        const key = el.dataset.reviewComment;
-        if (key) {
-          mounted.set(key, el);
-        }
-      }
-      // Walk the ordered ids outward from the cursor (no wrap) until we reach the
-      // next one whose node is mounted, then scroll it into view.
+      const nodeFor = (key: string) =>
+        scroller.querySelector<HTMLElement>(`[data-review-comment="${CSS.escape(key)}"]`);
+      // Walk the ordered ids outward from the cursor (no wrap) until we reach a
+      // reachable comment: one already mounted, or one whose diff registered a
+      // reveal callback. Comments in a collapsed (reviewed) file have neither, so
+      // they're skipped.
       const step = direction === "next" ? 1 : -1;
       for (let index = cursor + step; index >= 0 && index < commentKeys.length; index += step) {
-        const el = mounted.get(commentKeys[index]!);
-        if (el) {
-          setCursor(index);
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          return;
+        const key = commentKeys[index]!;
+        const reveal = commentReveal.current.get(key);
+        if (!reveal && !nodeFor(key)) {
+          continue;
         }
+        setCursor(index);
+        // Reveal first (renders the comment's line in the virtualized diff and
+        // centers it within the diff pane), then center the now-mounted node in
+        // the outer container. Two frames: one for CodeMirror to draw the widget,
+        // one for its React portal to mount the comment's DOM node.
+        reveal?.();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            nodeFor(key)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+          ),
+        );
+        return;
       }
     },
-    [commentKeys, cursor, scrollRef],
+    [commentKeys, commentReveal, cursor, scrollRef],
   );
+
+  // Cmd/Ctrl + ↑/↓ step between comments without leaving the keyboard. Scoped to
+  // this tab's visible scroll container (`offsetParent` is null when an ancestor is
+  // `display: none`, e.g. a background pane) so only the on-screen review responds,
+  // and skipped while typing in a field so the arrows don't hijack text editing.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+        return;
+      }
+      if (!scrollRef.current || scrollRef.current.offsetParent === null) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) {
+        return;
+      }
+      event.preventDefault();
+      go(event.key === "ArrowDown" ? "next" : "prev");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [go, scrollRef]);
 
   const count = commentKeys.length;
   // Disable each arrow at the ends of the list — nothing above the first comment,
@@ -320,7 +379,7 @@ function ReviewToolbar({
           disabled={!hasPrev}
           onClick={() => go("prev")}
           size="icon-sm"
-          title="Previous comment"
+          title="Previous comment (⌘/Ctrl ↑)"
           variant="ghost"
         >
           <ChevronUp />
@@ -330,7 +389,7 @@ function ReviewToolbar({
           disabled={!hasNext}
           onClick={() => go("next")}
           size="icon-sm"
-          title="Next comment"
+          title="Next comment (⌘/Ctrl ↓)"
           variant="ghost"
         >
           <ChevronDown />
@@ -409,6 +468,7 @@ function FileReview({
   worktreeId,
   onFix,
   onThreadResolvedChange,
+  registerCommentReveal,
   registerSection,
 }: {
   base: string;
@@ -418,6 +478,7 @@ function FileReview({
   worktreeId: string;
   onFix: (comment: FixItComment) => void;
   onThreadResolvedChange: (threadId: string, isResolved: boolean) => void;
+  registerCommentReveal: (key: string, reveal: (() => void) | null) => void;
   registerSection: (path: string, el: HTMLElement | null) => void;
 }) {
   const done = useReviewDone(prNumber, file.path);
@@ -475,7 +536,13 @@ function FileReview({
       </header>
       {done ? null : (
         <>
-          <FileDiffPane base={base} comments={inlineComments} file={file} worktreeId={worktreeId} />
+          <FileDiffPane
+            base={base}
+            comments={inlineComments}
+            file={file}
+            registerCommentReveal={registerCommentReveal}
+            worktreeId={worktreeId}
+          />
           {fileComments.length > 0 ? (
             <div className="flex flex-col gap-2 border-t border-white/5 p-2">
               {fileComments.map((thread) => (
@@ -501,16 +568,32 @@ function FileDiffPane({
   base,
   comments,
   file,
+  registerCommentReveal,
   worktreeId,
 }: {
   base: string;
   comments: DiffComment[];
   file: PullFile;
+  registerCommentReveal: (key: string, reveal: (() => void) | null) => void;
   worktreeId: string;
 }) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const diffRef = useRef<MergeDiffHandle>(null);
+
+  // Register a reveal callback per inline comment so the toolbar can scroll a
+  // below-the-fold comment into the virtualized diff before centering it.
+  useEffect(() => {
+    for (const comment of comments) {
+      registerCommentReveal(comment.key, () => diffRef.current?.scrollCommentIntoView(comment.key));
+    }
+    return () => {
+      for (const comment of comments) {
+        registerCommentReveal(comment.key, null);
+      }
+    };
+  }, [comments, registerCommentReveal]);
   // The diff only "captures" wheel scrolling once the user clicks into it. Until
   // then a wheel over the pane is redirected to the review scroll container, so
   // the user can scroll past the file instead of the fixed-height diff trapping
@@ -571,6 +654,7 @@ function FileDiffPane({
         fileName={file.path}
         newText={diff.newText}
         oldText={diff.oldText}
+        ref={diffRef}
       />
     );
   }
