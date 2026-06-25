@@ -125,6 +125,29 @@ describe("ReviewTab interactions", () => {
     );
   });
 
+  it("scrolls to a comment when the toolbar next arrow is clicked", async () => {
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const { container } = render(<ReviewTab tab={tab} />);
+    // The toolbar reports the single thread as one navigable comment.
+    await waitFor(() => expect(screen.getByText("1 comment")).toBeInTheDocument());
+    // The inline comment mounts into the diff via a portal; wait for its node.
+    await waitFor(() =>
+      expect(container.querySelector('[data-review-comment="thr1"]')).not.toBeNull(),
+    );
+    // Nothing visited yet: "previous" is disabled, "next" can reach the comment.
+    expect(screen.getByRole("button", { name: "Previous comment" })).toBeDisabled();
+    const next = screen.getByRole("button", { name: "Next comment" });
+    expect(next).toBeEnabled();
+    fireEvent.click(next);
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    // On the only comment now: both ends are reached, so both arrows disable.
+    expect(screen.getByRole("button", { name: "Next comment" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Previous comment" })).toBeDisabled();
+    scrollIntoView.mockRestore();
+  });
+
   it("redirects wheel scrolling to the review container until the diff is clicked", async () => {
     const { container } = render(<ReviewTab tab={tab} />);
     await screen.findByRole("button", { name: /Resolve/ });

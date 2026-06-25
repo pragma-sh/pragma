@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   ListChecks,
   Loader2,
   Sparkles,
@@ -74,6 +75,9 @@ export function ReviewTab({ tab }: { tab: Tab }) {
   const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const active = useRef(true);
+  // The review scroll container, so the sticky toolbar can scroll a comment into
+  // view (each comment marks its DOM node with `data-review-comment`).
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Each file section registers its DOM node here so a focus request (from
   // clicking a file in the PR's "Files changed" list) can scroll it into view.
@@ -176,8 +180,20 @@ export function ReviewTab({ tab }: { tab: Tab }) {
   }
 
   const { data } = state;
+  // Every review thread's id, in file-then-thread order, so the toolbar arrows
+  // step through comments top-to-bottom (it resolves each id to its mounted node).
+  const commentKeys: string[] = [];
+  for (const file of data.files) {
+    for (const thread of data.threadsByPath.get(file.path) ?? []) {
+      commentKeys.push(thread.id);
+    }
+  }
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-auto bg-[#0b0d10]" data-review-scroll>
+    <div
+      className="flex h-full min-h-0 flex-col overflow-auto bg-[#0b0d10]"
+      data-review-scroll
+      ref={scrollRef}
+    >
       <div className="flex items-start gap-2 border-b border-white/10 px-4 py-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-slate-100">
@@ -188,8 +204,13 @@ export function ReviewTab({ tab }: { tab: Tab }) {
             {data.pr.headRef}
           </p>
         </div>
-        <AddressFixItButton onClick={() => setListOpen(true)} prNumber={data.pr.number} />
       </div>
+      <ReviewToolbar
+        commentKeys={commentKeys}
+        onAddressFixIt={() => setListOpen(true)}
+        prNumber={data.pr.number}
+        scrollRef={scrollRef}
+      />
       {data.reviews.length > 0 ? (
         <div className="flex flex-col gap-2 border-b border-white/10 p-3">
           {data.reviews.map((review) => (
@@ -226,6 +247,100 @@ export function ReviewTab({ tab }: { tab: Tab }) {
         prNumber={data.pr.number}
         worktreeId={worktreeId}
       />
+    </div>
+  );
+}
+
+/**
+ * Sticky toolbar pinned above the file list (below the workspace tab bar): step
+ * between review comments with the arrows and open the fix-it list to fix them
+ * all. It lives inside the review scroll container so it stays put while the
+ * diffs scroll beneath it, and resolves each comment id to its mounted DOM node
+ * (collapsed/reviewed files don't render theirs) to scroll it into view.
+ */
+function ReviewToolbar({
+  commentKeys,
+  prNumber,
+  scrollRef,
+  onAddressFixIt,
+}: {
+  commentKeys: string[];
+  prNumber: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  onAddressFixIt: () => void;
+}) {
+  // Index into `commentKeys` of the comment we last scrolled to; -1 before any
+  // navigation so the first "next" lands on the first comment. State (not a ref)
+  // so the arrows re-render their disabled state as the cursor moves.
+  const [cursor, setCursor] = useState(-1);
+
+  // Keep the cursor in range if the comment set shrinks (e.g. after a refetch).
+  useEffect(() => {
+    setCursor((current) => Math.min(current, commentKeys.length - 1));
+  }, [commentKeys.length]);
+
+  const go = useCallback(
+    (direction: "next" | "prev") => {
+      const scroller = scrollRef.current;
+      if (!scroller) {
+        return;
+      }
+      const mounted = new Map<string, HTMLElement>();
+      for (const el of scroller.querySelectorAll<HTMLElement>("[data-review-comment]")) {
+        const key = el.dataset.reviewComment;
+        if (key) {
+          mounted.set(key, el);
+        }
+      }
+      // Walk the ordered ids outward from the cursor (no wrap) until we reach the
+      // next one whose node is mounted, then scroll it into view.
+      const step = direction === "next" ? 1 : -1;
+      for (let index = cursor + step; index >= 0 && index < commentKeys.length; index += step) {
+        const el = mounted.get(commentKeys[index]!);
+        if (el) {
+          setCursor(index);
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
+    },
+    [commentKeys, cursor, scrollRef],
+  );
+
+  const count = commentKeys.length;
+  // Disable each arrow at the ends of the list — nothing above the first comment,
+  // nothing below the last.
+  const hasPrev = cursor > 0;
+  const hasNext = cursor < count - 1;
+  return (
+    <div className="sticky top-0 z-20 flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#11151b] px-3">
+      <div className="flex items-center gap-0.5">
+        <Button
+          aria-label="Previous comment"
+          disabled={!hasPrev}
+          onClick={() => go("prev")}
+          size="icon-sm"
+          title="Previous comment"
+          variant="ghost"
+        >
+          <ChevronUp />
+        </Button>
+        <Button
+          aria-label="Next comment"
+          disabled={!hasNext}
+          onClick={() => go("next")}
+          size="icon-sm"
+          title="Next comment"
+          variant="ghost"
+        >
+          <ChevronDown />
+        </Button>
+      </div>
+      <span className="text-[11px] text-slate-500">
+        {count} comment{count === 1 ? "" : "s"}
+      </span>
+      <div className="flex-1" />
+      <AddressFixItButton onClick={onAddressFixIt} prNumber={prNumber} />
     </div>
   );
 }
@@ -318,7 +433,10 @@ function FileReview({
           key: thread.id,
           line: thread.line,
           content: (
-            <div className="border-y border-white/10 bg-black/30 px-3 py-2">
+            <div
+              className="border-y border-white/10 bg-black/30 px-3 py-2"
+              data-review-comment={thread.id}
+            >
               <ReviewThreadCard
                 onFix={onFix}
                 onResolvedChange={onThreadResolvedChange}
@@ -334,7 +452,7 @@ function FileReview({
 
   return (
     <section className="border-b border-white/10" ref={(el) => registerSection(file.path, el)}>
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-white/5 bg-[#11151b] px-3 py-1.5">
+      <header className="sticky top-9 z-10 flex items-center gap-2 border-b border-white/5 bg-[#11151b] px-3 py-1.5">
         <span className="min-w-0 flex-1 truncate text-xs text-slate-200" title={file.path}>
           {file.path}
         </span>
@@ -361,13 +479,14 @@ function FileReview({
           {fileComments.length > 0 ? (
             <div className="flex flex-col gap-2 border-t border-white/5 p-2">
               {fileComments.map((thread) => (
-                <ReviewThreadCard
-                  key={thread.id}
-                  onFix={onFix}
-                  onResolvedChange={onThreadResolvedChange}
-                  prNumber={prNumber}
-                  thread={thread}
-                />
+                <div data-review-comment={thread.id} key={thread.id}>
+                  <ReviewThreadCard
+                    onFix={onFix}
+                    onResolvedChange={onThreadResolvedChange}
+                    prNumber={prNumber}
+                    thread={thread}
+                  />
+                </div>
               ))}
             </div>
           ) : null}

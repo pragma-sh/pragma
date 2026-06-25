@@ -40,6 +40,18 @@ export const pragmaEditorTheme = EditorView.theme(
     },
     ".cm-scroller": {
       fontFamily: TERMINAL_FONT_FAMILY,
+      // Make the scroller a container so inline comment widgets can size to the
+      // visible viewport width (`100cqw`) instead of the much wider code content.
+      containerType: "inline-size",
+    },
+    // Inline review-comment widgets: pin to the left edge of the scroll viewport
+    // and cap their width to the visible area so the comment is always fully
+    // readable without horizontal scrolling, even as the code beside it scrolls.
+    ".cm-review-comment": {
+      position: "sticky",
+      left: "0",
+      width: "100cqw",
+      boxSizing: "border-box",
     },
   },
   { dark: true },
