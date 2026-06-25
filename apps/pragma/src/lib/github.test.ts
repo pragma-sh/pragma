@@ -5,7 +5,7 @@ const { octokit, githubToken } = vi.hoisted(() => ({
   octokit: {
     rest: {
       pulls: { list: vi.fn(), create: vi.fn(), get: vi.fn(), merge: vi.fn() },
-      issues: { listComments: vi.fn() },
+      issues: { listComments: vi.fn(), createComment: vi.fn() },
       checks: { listForRef: vi.fn() },
       repos: { getCombinedStatusForRef: vi.fn(), get: vi.fn(), listBranches: vi.fn() },
     },
@@ -25,6 +25,7 @@ vi.mock("@/lib/tauri", () => ({ githubToken: (...args: unknown[]) => githubToken
 
 import {
   GitHubAuthError,
+  createIssueComment,
   createPullRequest,
   findPullRequestForBranch,
   getChecksStatus,
@@ -308,6 +309,34 @@ describe("listReviewThreads", () => {
       id: 7,
       body: "nit",
       createdAt: "2026-01-01",
+      user: { login: "octo", avatarUrl: "https://avatars/octo" },
+    });
+  });
+});
+
+describe("createIssueComment", () => {
+  it("posts the comment and maps the response to an IssueComment", async () => {
+    octokit.rest.issues.createComment.mockResolvedValue({
+      data: {
+        id: 99,
+        body: "looks good",
+        html_url: "https://github.com/acme/widget/pull/42#issuecomment-99",
+        created_at: "2026-06-24",
+        user: { login: "octo", avatar_url: "https://avatars/octo" },
+      },
+    });
+    const comment = await createIssueComment(repo, 42, "looks good");
+    expect(octokit.rest.issues.createComment).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widget",
+      issue_number: 42,
+      body: "looks good",
+    });
+    expect(comment).toEqual({
+      id: 99,
+      body: "looks good",
+      htmlUrl: "https://github.com/acme/widget/pull/42#issuecomment-99",
+      createdAt: "2026-06-24",
       user: { login: "octo", avatarUrl: "https://avatars/octo" },
     });
   });

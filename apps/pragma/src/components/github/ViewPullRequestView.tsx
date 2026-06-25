@@ -6,6 +6,7 @@ import { CheckCircle2, CircleDot, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
+import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { ChangeGroup } from "@/components/right-sidebar/ChangeGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -35,6 +36,7 @@ import {
   type PullFile,
   type PullRequestSummary,
   type ReviewThread,
+  createIssueComment,
   getChecksStatus,
   listIssueComments,
   listPullFiles,
@@ -173,6 +175,8 @@ export function ViewPullRequestView({
         />
       </section>
 
+      <CommentBox onPosted={() => void load()} prNumber={pr.number} repo={repo} />
+
       {!pr.merged && pr.state === "open" ? (
         <MergeCard
           checks={data?.checks ?? null}
@@ -278,6 +282,74 @@ function CommentCard({ comment }: { comment: IssueComment }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The markdown comment composer pinned below the conversation: a TipTap editor
+ * whose markdown is posted as an issue comment on the signed-in user's behalf.
+ * Submits on click or ⌘/Ctrl+Enter, clears on success, and asks the parent to
+ * reload so the new comment joins the conversation.
+ */
+function CommentBox({
+  repo,
+  prNumber,
+  onPosted,
+}: {
+  repo: GitHubRepoRef;
+  prNumber: number;
+  onPosted: () => void;
+}) {
+  const [body, setBody] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  const submit = useCallback(async () => {
+    const trimmed = body.trim();
+    if (!trimmed || posting) {
+      return;
+    }
+    setPosting(true);
+    try {
+      await createIssueComment(repo, prNumber, trimmed);
+      setBody("");
+      onPosted();
+    } catch (cause) {
+      toast.error(messageFor(cause));
+    } finally {
+      setPosting(false);
+    }
+  }, [body, posting, repo, prNumber, onPosted]);
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        void submit();
+      }
+    },
+    [submit],
+  );
+
+  return (
+    <section className="flex flex-col gap-2">
+      <p className="text-[11px] uppercase tracking-wide text-slate-500">Add a comment</p>
+      <MarkdownEditor
+        onChange={setBody}
+        onKeyDown={onKeyDown}
+        placeholder="Leave a comment…"
+        value={body}
+      />
+      <div className="flex justify-end">
+        <Button
+          disabled={posting || body.trim().length === 0}
+          onClick={() => void submit()}
+          size="sm"
+        >
+          {posting ? <Loader2 className="animate-spin" /> : null}
+          Comment
+        </Button>
+      </div>
+    </section>
   );
 }
 
