@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -232,7 +232,7 @@ fn command_models(agent_dir: &Path, command: &[String], timeout: Duration) -> Ve
 }
 
 fn command_output(agent_dir: &Path, command: &[String], timeout: Duration) -> Option<Vec<u8>> {
-    let mut child = Command::new(&command[0])
+    let mut child = crate::process_env::command(&command[0])
         .args(&command[1..])
         .current_dir(agent_dir)
         .stdin(Stdio::null())
@@ -376,9 +376,14 @@ fn kebab_case(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use super::{kebab_case, load_agent, resolve_agent_models_from_dir, AgentModelsConfig};
+    use super::{
+        command_models, kebab_case, load_agent, resolve_agent_models_from_dir, AgentModelsConfig,
+    };
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write_agent(root: &std::path::Path, id: &str, config: &str) -> std::path::PathBuf {
         let dir = root.join(id);
@@ -498,6 +503,52 @@ mod tests {
         .unwrap();
 
         let models = resolve_agent_models_from_dir(temp.path(), "cursor", Duration::from_secs(1));
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "model");
+    }
+
+    #[test]
+    fn command_models_uses_gui_safe_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original_home = std::env::var_os("HOME");
+        let original_path = std::env::var_os("PATH");
+        let temp = tempfile::tempdir().unwrap();
+        let home_bin = temp.path().join(".local/bin");
+        std::fs::create_dir_all(&home_bin).unwrap();
+        let helper = home_bin.join("test-models");
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nprintf '[{\"id\":\"model\",\"name\":\"Model\"}]'\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&helper).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o755);
+        }
+        std::fs::set_permissions(&helper, permissions).unwrap();
+        let agent_dir = temp.path().join("agent");
+        std::fs::create_dir_all(agent_dir.join("scripts")).unwrap();
+        std::fs::write(agent_dir.join("scripts/list-models.sh"), "test-models\n").unwrap();
+
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        let models = command_models(
+            &agent_dir,
+            &["sh".to_string(), "scripts/list-models.sh".to_string()],
+            Duration::from_secs(1),
+        );
+
+        match original_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        match original_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "model");
     }
