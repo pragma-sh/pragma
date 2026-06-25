@@ -91,10 +91,14 @@ const mockWorkspace: WorkspaceContextValue = {
   splitTabAtPane: vi.fn(),
   moveTabToPane: vi.fn(),
   runScriptsAvailable: false,
+  buildScriptsAvailable: false,
   runScriptsConfigError: null,
   runScriptsState: null,
+  buildScriptsState: null,
   runScripts: vi.fn(),
+  buildScripts: vi.fn(),
   stopRunScripts: vi.fn(),
+  stopBuildScripts: vi.fn(),
 };
 
 vi.mock("@/state/workspace-context", () => ({
@@ -155,6 +159,26 @@ describe("TerminalTabs", () => {
     await userEvent.click(screen.getByLabelText("Run project scripts"));
 
     expect(mockWorkspace.runScripts).toHaveBeenCalled();
+  });
+
+  it("runs project build scripts from the header hammer button", async () => {
+    mockWorkspace.selectedWorktree = {
+      id: "worktree",
+      projectId: "project",
+      parentId: null,
+      branch: "main",
+      title: null,
+      path: "/tmp/project",
+      isMain: true,
+      hidden: false,
+      createdAt: "now",
+    };
+    mockWorkspace.buildScriptsAvailable = true;
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("Build project scripts"));
+
+    expect(mockWorkspace.buildScripts).toHaveBeenCalled();
   });
 
   it("stops managed project scripts while running", async () => {

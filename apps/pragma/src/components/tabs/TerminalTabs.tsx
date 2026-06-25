@@ -8,6 +8,7 @@ import {
   Columns2,
   Globe,
   Pencil,
+  Hammer,
   Play,
   Plus,
   Rows2,
@@ -83,6 +84,59 @@ const splitControls: Array<{
   { direction: "horizontal", label: "Split horizontal", icon: Columns2 },
   { direction: "vertical", label: "Split vertical", icon: Rows2 },
 ];
+
+function ProjectScriptButton({
+  activeState,
+  available,
+  configError,
+  disabled,
+  idleIcon: IdleIcon,
+  labels,
+  onRun,
+  onStop,
+}: {
+  activeState: ReturnType<typeof useWorkspace>["runScriptsState"];
+  available: boolean;
+  configError: string | null;
+  disabled: boolean;
+  idleIcon: typeof Play;
+  labels: { run: string; stop: string; none: string };
+  onRun: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Button
+            className={cn(
+              "border shadow-sm hover:text-white",
+              activeState
+                ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
+                : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
+            )}
+            disabled={disabled}
+            onClick={() => void (activeState ? onStop() : onRun())}
+            size="icon-sm"
+            variant="ghost"
+            aria-label={activeState ? labels.stop : labels.run}
+          >
+            {activeState ? <Square className="size-3.5" /> : <IdleIcon className="size-3.5" />}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {activeState
+          ? labels.stop
+          : configError
+            ? configError
+            : available
+              ? labels.run
+              : labels.none}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function findPane(node: SplitLayoutNode, paneId: string): SplitPaneNode | null {
   if (node.kind === "pane") {
@@ -173,9 +227,15 @@ export function TerminalTabs() {
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
   const selectedEditor = editorFor(selectedEditorId);
   const runState = workspace.runScriptsState;
+  const buildState = workspace.buildScriptsState;
   const runDisabled = runState
     ? runState.stopping
-    : !workspace.selectedWorktree || !workspace.runScriptsAvailable;
+    : !workspace.selectedWorktree || !workspace.runScriptsAvailable || (!runState && !!buildState);
+  const buildDisabled = buildState
+    ? buildState.stopping
+    : !workspace.selectedWorktree ||
+      !workspace.buildScriptsAvailable ||
+      (!buildState && !!runState);
 
   // A split collapses into a single "parent" entry in the top bar, named after
   // its top-left pane. Its members are hidden from the bar (they live in the
@@ -231,38 +291,34 @@ export function TerminalTabs() {
         <div className="flex h-9 items-center justify-between gap-2 border-b border-white/5 bg-[#151b24] px-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
           <div className="flex min-w-0 items-center gap-1">
             <AgentsMenu />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    className={cn(
-                      "border shadow-sm hover:text-white",
-                      runState
-                        ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
-                        : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
-                    )}
-                    disabled={runDisabled}
-                    onClick={() =>
-                      void (runState ? workspace.stopRunScripts() : workspace.runScripts())
-                    }
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={runState ? "Stop project scripts" : "Run project scripts"}
-                  >
-                    {runState ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {runState
-                  ? "Stop project scripts"
-                  : workspace.runScriptsConfigError
-                    ? workspace.runScriptsConfigError
-                    : workspace.runScriptsAvailable
-                      ? "Run project scripts"
-                      : "No project run scripts"}
-              </TooltipContent>
-            </Tooltip>
+            <ProjectScriptButton
+              activeState={runState}
+              available={workspace.runScriptsAvailable}
+              configError={workspace.runScriptsConfigError}
+              disabled={runDisabled}
+              idleIcon={Play}
+              labels={{
+                run: "Run project scripts",
+                stop: "Stop project scripts",
+                none: "No project run scripts",
+              }}
+              onRun={() => void workspace.runScripts()}
+              onStop={() => void workspace.stopRunScripts()}
+            />
+            <ProjectScriptButton
+              activeState={buildState}
+              available={workspace.buildScriptsAvailable}
+              configError={workspace.runScriptsConfigError}
+              disabled={buildDisabled}
+              idleIcon={Hammer}
+              labels={{
+                run: "Build project scripts",
+                stop: "Stop project scripts",
+                none: "No project build scripts",
+              }}
+              onRun={() => void workspace.buildScripts()}
+              onStop={() => void workspace.stopBuildScripts()}
+            />
             {workspace.agentBackAvailable ? (
               <Button
                 className="text-slate-200 hover:bg-white/10 hover:text-white"

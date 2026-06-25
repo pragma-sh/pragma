@@ -32,7 +32,7 @@ import {
 } from "@/lib/agent-alert";
 import { basename } from "@/lib/path";
 import {
-  planRunScripts,
+  planInteractiveScripts,
   type RunScriptLayoutTemplate,
   type PlannedRunScripts,
 } from "@/lib/scripts";
@@ -120,16 +120,35 @@ interface WorkspaceState {
   error: string | null;
 }
 
-/** Prior split layout saved before run scripts temporarily replace it. */
+/** Prior split layout saved before interactive scripts temporarily replace it. */
 export type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
+
+export type InteractiveScriptKind = "run" | "build";
 
 export type RunScriptsState = {
   worktreeId: string;
   tabIds: string[];
   stopping: boolean;
-  /** Non-null when run scripts applied a split layout that overwrote the worktree root. */
+  /** Non-null when scripts applied a split layout that overwrote the worktree root. */
   splitSnapshot: RunScriptsSplitSnapshot | null;
 } | null;
+
+type ManagedScriptsState = (RunScriptsState & { kind: InteractiveScriptKind }) | null;
+
+function managedScriptsStateForKind(
+  state: ManagedScriptsState,
+  kind: InteractiveScriptKind,
+): RunScriptsState {
+  if (!state || state.kind !== kind) {
+    return null;
+  }
+  return {
+    worktreeId: state.worktreeId,
+    tabIds: state.tabIds,
+    stopping: state.stopping,
+    splitSnapshot: state.splitSnapshot,
+  };
+}
 
 type WorkspaceAction =
   | { type: "load-start" }
@@ -231,11 +250,15 @@ interface WorkspaceContextValue extends WorkspaceState {
   ) => void;
   moveTabToPane: (tabId: string, paneId: string) => void;
   runScriptsAvailable: boolean;
+  buildScriptsAvailable: boolean;
   /** Set when `.pragma/scripts.json` fails to load or parse; null when valid or not yet loaded. */
   runScriptsConfigError: string | null;
   runScriptsState: RunScriptsState;
+  buildScriptsState: RunScriptsState;
   runScripts: () => Promise<void>;
+  buildScripts: () => Promise<void>;
   stopRunScripts: () => Promise<void>;
+  stopBuildScripts: () => Promise<void>;
   agentBackAvailable?: boolean;
   navigateToAgentLocation?: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
   goBackFromAgent?: () => Promise<void>;
@@ -244,6 +267,8 @@ interface WorkspaceContextValue extends WorkspaceState {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 const TERMINAL_TITLE_FLUSH_MS = 100;
+/** Wait after script tabs mount before injecting commands so the PTY shell is ready. */
+const INTERACTIVE_SCRIPT_START_DELAY_MS = 2000;
 const TERMINAL_TAB_ID_SEPARATOR = "\u0000";
 const AGENT_BACK_TTL_MS = 10 * 60 * 1000;
 
@@ -411,6 +436,10 @@ function nextAnimationFrame(): Promise<void> {
       ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
     frame(() => resolve());
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function initialRootForWorktree(
@@ -1122,9 +1151,17 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
   const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
-  const [runScriptsState, setRunScriptsState] = useState<RunScriptsState>(null);
+  const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>(null);
   const [runScriptsConfig, setRunScriptsConfig] = useState<ProjectScriptsConfig | null>(null);
   const [runScriptsConfigError, setRunScriptsConfigError] = useState<string | null>(null);
+  const runScriptsState = useMemo(
+    () => managedScriptsStateForKind(managedScriptsState, "run"),
+    [managedScriptsState],
+  );
+  const buildScriptsState = useMemo(
+    () => managedScriptsStateForKind(managedScriptsState, "build"),
+    [managedScriptsState],
+  );
   const stateRef = useRef(state);
   stateRef.current = state;
   const tabsRef = useRef(state.tabs);
@@ -1723,7 +1760,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       await closeTabCommand(tabId);
       dispatch({ type: "remove-tab", tabId });
-      setRunScriptsState((current) => {
+      setManagedScriptsState((current) => {
         if (!current?.tabIds.includes(tabId)) {
           return current;
         }
@@ -2041,7 +2078,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
       await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
       dispatch({ type: "remove-worktree", worktreeId });
-      setRunScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
+      setManagedScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
     },
     [],
   );
@@ -2125,99 +2162,114 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const activeTabId = legacyActiveTabId;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
   const runScriptsAvailable = (runScriptsConfig?.run?.length ?? 0) > 0;
+  const buildScriptsAvailable = (runScriptsConfig?.build?.length ?? 0) > 0;
 
-  const runScripts = useCallback(async () => {
-    const projectId = state.selectedProjectId;
-    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-    if (!projectId || !worktreeId || runScriptsState) {
-      return;
-    }
-    const startedTabIds: string[] = [];
-    let splitSnapshot: RunScriptsSplitSnapshot | null = null;
-    try {
-      const config = await loadProjectScripts(projectId);
-      setRunScriptsConfig(config);
-      setRunScriptsConfigError(null);
-      const entries = config.run ?? [];
-      if (entries.length === 0) {
-        toast.info("No run scripts configured for this project");
+  const startManagedScripts = useCallback(
+    async (kind: InteractiveScriptKind) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId || managedScriptsState) {
         return;
       }
-      const plan: PlannedRunScripts = planRunScripts(entries);
-      const tabIdsByCommand: string[] = [];
-      for (const item of plan.items) {
-        for (const commandIndex of item.commandIndexes) {
-          // oxlint-disable-next-line no-await-in-loop -- Create run tabs in display order so each top-level tab can mount before command injection.
-          const tab = await createTabCommand(
-            projectId,
-            worktreeId,
-            "terminal",
-            defaultTabTitle("terminal"),
-          );
-          startedTabIds.push(tab.id);
-          tabIdsByCommand[commandIndex] = tab.id;
-          dispatch({ type: "add-tab", tab });
-          setRunScriptsState({
-            worktreeId,
-            tabIds: [...startedTabIds],
-            stopping: false,
-            splitSnapshot,
-          });
+      const startedTabIds: string[] = [];
+      let splitSnapshot: RunScriptsSplitSnapshot | null = null;
+      try {
+        const config = await loadProjectScripts(projectId);
+        setRunScriptsConfig(config);
+        setRunScriptsConfigError(null);
+        const entries = kind === "run" ? (config.run ?? []) : (config.build ?? []);
+        if (entries.length === 0) {
+          toast.info(`No ${kind} scripts configured for this project`);
+          return;
         }
-        if (item.layout) {
-          if (splitSnapshot === null) {
-            splitSnapshot = {
-              root:
-                worktreeId in state.splitRootByWorktree
-                  ? (state.splitRootByWorktree[worktreeId] ?? null)
-                  : null,
-            };
+        const plan: PlannedRunScripts = planInteractiveScripts(entries, kind);
+        const tabIdsByCommand: string[] = [];
+        for (const item of plan.items) {
+          for (const commandIndex of item.commandIndexes) {
+            // oxlint-disable-next-line no-await-in-loop -- Create script tabs in display order so each top-level tab can mount before command injection.
+            const tab = await createTabCommand(
+              projectId,
+              worktreeId,
+              "terminal",
+              defaultTabTitle("terminal"),
+            );
+            startedTabIds.push(tab.id);
+            tabIdsByCommand[commandIndex] = tab.id;
+            dispatch({ type: "add-tab", tab });
+            setManagedScriptsState({
+              kind,
+              worktreeId,
+              tabIds: [...startedTabIds],
+              stopping: false,
+              splitSnapshot,
+            });
           }
-          dispatch({
-            type: "set-split-root",
-            worktreeId,
-            root: materializeRunScriptLayout(item.layout, tabIdsByCommand),
-          });
-        }
-        // oxlint-disable-next-line no-await-in-loop -- Each run entry needs one paint after its tabs/split are in state before queued terminal input flushes.
-        await nextAnimationFrame();
-        for (const commandIndex of item.commandIndexes) {
-          const tabId = tabIdsByCommand[commandIndex];
-          const command = plan.commands[commandIndex];
-          if (tabId && command) {
-            terminalManager.writeWhenReady(tabId, `${command}\r`);
+          if (item.layout) {
+            if (splitSnapshot === null) {
+              splitSnapshot = {
+                root:
+                  worktreeId in state.splitRootByWorktree
+                    ? (state.splitRootByWorktree[worktreeId] ?? null)
+                    : null,
+              };
+            }
+            dispatch({
+              type: "set-split-root",
+              worktreeId,
+              root: materializeRunScriptLayout(item.layout, tabIdsByCommand),
+            });
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Each script entry needs one paint after its tabs/split are in state, then time for the PTY shell to start, before queued terminal input flushes.
+          await nextAnimationFrame();
+          await delay(INTERACTIVE_SCRIPT_START_DELAY_MS);
+          for (const commandIndex of item.commandIndexes) {
+            const tabId = tabIdsByCommand[commandIndex];
+            const command = plan.commands[commandIndex];
+            if (tabId && command) {
+              terminalManager.writeWhenReady(tabId, `${command}\r`);
+            }
           }
         }
+      } catch (cause) {
+        setManagedScriptsState(null);
+        if (splitSnapshot) {
+          restoreRunScriptsSplitSnapshot(dispatch, worktreeId, splitSnapshot);
+        }
+        await Promise.all(startedTabIds.map((tabId) => closeTab(tabId)));
+        toast.error(`Failed to run project ${kind} scripts: ${messageFor(cause)}`);
       }
-    } catch (cause) {
-      setRunScriptsState(null);
-      if (splitSnapshot) {
-        restoreRunScriptsSplitSnapshot(dispatch, worktreeId, splitSnapshot);
-      }
-      await Promise.all(startedTabIds.map((tabId) => closeTab(tabId)));
-      toast.error(`Failed to run project scripts: ${messageFor(cause)}`);
-    }
-  }, [
-    closeTab,
-    dispatch,
-    runScriptsState,
-    state.selectedProjectId,
-    state.selectedWorktreeByProject,
-    state.splitRootByWorktree,
-  ]);
+    },
+    [
+      closeTab,
+      dispatch,
+      managedScriptsState,
+      state.selectedProjectId,
+      state.selectedWorktreeByProject,
+      state.splitRootByWorktree,
+    ],
+  );
 
-  const stopRunScripts = useCallback(async () => {
-    if (!runScriptsState) {
-      return;
-    }
-    const current = runScriptsState;
-    setRunScriptsState({ ...current, stopping: true });
-    if (current.splitSnapshot) {
-      restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
-    }
-    await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
-    setRunScriptsState(null);
-  }, [closeTab, dispatch, runScriptsState]);
+  const runScripts = useCallback(() => startManagedScripts("run"), [startManagedScripts]);
+  const buildScripts = useCallback(() => startManagedScripts("build"), [startManagedScripts]);
+
+  const stopManagedScripts = useCallback(
+    async (kind: InteractiveScriptKind) => {
+      if (!managedScriptsState || managedScriptsState.kind !== kind) {
+        return;
+      }
+      const current = managedScriptsState;
+      setManagedScriptsState({ ...current, stopping: true });
+      if (current.splitSnapshot) {
+        restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
+      }
+      await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
+      setManagedScriptsState(null);
+    },
+    [closeTab, dispatch, managedScriptsState],
+  );
+
+  const stopRunScripts = useCallback(() => stopManagedScripts("run"), [stopManagedScripts]);
+  const stopBuildScripts = useCallback(() => stopManagedScripts("build"), [stopManagedScripts]);
 
   // Every tab currently on screen for the selected worktree: the active tab,
   // plus each pane's active tab when a real split is shown. Viewing a tab clears
@@ -2414,10 +2466,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitTabAtPane,
       moveTabToPane,
       runScriptsAvailable,
+      buildScriptsAvailable,
       runScriptsConfigError,
       runScriptsState,
+      buildScriptsState,
       runScripts,
+      buildScripts,
       stopRunScripts,
+      stopBuildScripts,
       agentBackAvailable: !!agentBackLocation && agentBackLocation.expiresAt >= Date.now(),
       navigateToAgentLocation,
       goBackFromAgent,
@@ -2459,10 +2515,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       splitTabAtPane,
       moveTabToPane,
       runScriptsAvailable,
+      buildScriptsAvailable,
       runScriptsConfigError,
       runScriptsState,
+      buildScriptsState,
       runScripts,
+      buildScripts,
       stopRunScripts,
+      stopBuildScripts,
       agentBackLocation,
       navigateToAgentLocation,
       goBackFromAgent,
