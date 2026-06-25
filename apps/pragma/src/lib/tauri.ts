@@ -54,11 +54,60 @@ export interface AgentConfig {
   name: string;
   iconDataUrl: string | null;
   start: string[];
+  models?: AgentModelsConfig | null;
+}
+
+/** Optional agent model discovery and launch-argument config. */
+export type AgentModelsConfig =
+  | {
+      source: "static";
+      modelArg?: string[] | null;
+      reasoningArg?: string[] | null;
+      modelReasoningArg?: string[] | null;
+      items: RawAgentModel[];
+    }
+  | {
+      source: "command";
+      command: string[];
+      modelArg?: string[] | null;
+      reasoningArg?: string[] | null;
+      modelReasoningArg?: string[] | null;
+    };
+
+/** Model entry returned by `resolveAgentModels`. */
+export interface AgentModel {
+  id: string;
+  name: string;
+  reasoning: AgentReasoning[];
+}
+
+/** Optional reasoning effort for a model. */
+export interface AgentReasoning {
+  id: string;
+  name: string;
+}
+
+/** Raw static model entry mirrored from config metadata. */
+export interface RawAgentModel {
+  id: string;
+  name: string;
+  reasoning?: AgentReasoning[];
+}
+
+/** Selected model/reasoning for an agent launch; `modelId: null` means no model args. */
+export interface AgentModelSelection {
+  modelId: string | null;
+  reasoningId: string | null;
 }
 
 /** Lists configured external agents. */
 export function listAgents(): Promise<AgentConfig[]> {
   return invoke<AgentConfig[]>("list_agents");
+}
+
+/** Resolves one agent's model list. */
+export function resolveAgentModels(agentId: string): Promise<AgentModel[]> {
+  return invoke<AgentModel[]>("resolve_agent_models", { agentId });
 }
 
 /** Subscribes to daemon-forwarded agent status reports. */
@@ -702,6 +751,20 @@ export type MenuAction = "troubleshooting.restart-daemon" | "troubleshooting.ope
 /** Subscribes to native menubar actions (the Troubleshooting menu). */
 export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
   return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
+}
+
+/** Subscribes to incoming `pragma://` deep links; the payload is the raw URL. */
+export function onDeepLink(handler: (url: string) => void): Promise<UnlistenFn> {
+  return listen<string>("pragma:deep-link", (event) => handler(event.payload));
+}
+
+/**
+ * Drains the deep link the app was launched with, if any. Returns the raw URL
+ * once (clearing it) so a cold-start `pragma://` link delivered before the live
+ * {@link onDeepLink} listener attached is still handled exactly one time.
+ */
+export function takePendingDeepLink(): Promise<string | null> {
+  return invoke<string | null>("take_pending_deep_link");
 }
 
 /** Opens the native directory picker; resolves to the chosen path, or null if cancelled. */

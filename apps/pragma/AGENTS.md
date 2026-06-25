@@ -139,11 +139,19 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields `id`,
-`name`, `icon`, and `start`. Bundled configs live in
+`name`, `icon`, `start`, and optional `models`. Bundled configs live in
 `apps/pragma/src-tauri/resources/pragma/agents/` (staged by
 `scripts/stage-daemon-sidecar.sh`) and are installed/updated into `~/.pragma/agents`
 on app startup. `pragma-agent` is installed/updated to `~/.local/bin` on startup; the
 app emits a UI warning if that directory is not on `$PATH`.
+
+`models` may be `static` or `command` backed. Pragma resolves model lists lazily when the
+selector submenu is hovered/focused, caches the last result, executes command-backed
+discovery with cwd set to the installed agent directory, and validates only the generic
+JSON array (`[{ id, name, reasoning? }]`). Host-specific CLI parsing belongs in
+plugin-owned scripts under `pragma/agents/<id>/scripts/`; core must not learn Cursor,
+opencode, or other host output formats. There is no provider-level Auto model; when a
+model has reasoning entries, the model-only choice is shown as Auto reasoning.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
@@ -190,6 +198,21 @@ are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them
 (`PtyClient::read_log`, reading `log_path()` — beside the socket, not app data). Add a
 menu action: id const + item in `install_menu`, `MenuAction` variant +
 branch in `handleMenuAction`.
+
+## Deep links (`pragma://open`)
+
+`pragma://open` opens the app and starts the new-session flow. Optional query params:
+`agent` (agent id; falls back to the default/first when missing or unknown),
+`message` (the prompt, **base64-encoded** — decoded before display), `worktree`
+(target worktree branch id), and `autoSubmit` (truthy → launch immediately, bypassing
+the dialog). The scheme is registered in `tauri.conf.json` (`plugins.deep-link.desktop.schemes`)
+via `tauri-plugin-deep-link`. `src-tauri/src/lib.rs` `install_deep_links` registers it at
+runtime (Linux), stashes a cold-start URL in `PendingDeepLink` (drained once by the
+`take_pending_deep_link` command), and emits every runtime URL as the `pragma:deep-link`
+event. `workspace-context` parses it with `parseNewSessionDeepLink` (`lib/deep-link.ts`):
+auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new-session`
+window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
+deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
 
 ## Terminal rendering (xterm + WebGL)
 

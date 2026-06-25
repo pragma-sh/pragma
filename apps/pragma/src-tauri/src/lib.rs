@@ -29,6 +29,7 @@ use pragma_constants::{
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
@@ -43,6 +44,82 @@ const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
 /// above. The frontend (`workspace-context`) listens and runs the action so the
 /// resulting toast / tab lives where the rest of the UI does.
 const MENU_EVENT: &str = "pragma:menu";
+
+/// Tauri event emitted for each incoming `pragma://` deep link; payload is the
+/// raw URL string. The frontend parses it (`lib/deep-link.ts`) and opens the
+/// new-session flow. Deep links that arrive at launch (cold start) instead land in
+/// [`PendingDeepLink`] for the frontend to drain once on mount.
+const DEEP_LINK_EVENT: &str = "pragma:deep-link";
+
+/// Holds a `pragma://` URL captured during launch, before the frontend has
+/// attached its [`DEEP_LINK_EVENT`] listener. The frontend drains it exactly
+/// once via [`take_pending_deep_link`]; runtime deep links skip this and are
+/// emitted live.
+#[derive(Default)]
+struct PendingDeepLink(std::sync::Mutex<Option<String>>);
+
+/// Returns and clears any deep link captured at launch. Called by the frontend
+/// on mount so a cold-start `pragma://` URL — delivered before the live event
+/// listener existed — is not lost.
+#[tauri::command]
+fn take_pending_deep_link(pending: tauri::State<'_, PendingDeepLink>) -> Option<String> {
+    pending.0.lock().ok().and_then(|mut guard| guard.take())
+}
+
+/// Label of the app's main window (Tauri's default when none is set in config).
+const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Raises and focuses the main window so a deep link surfaces the app.
+///
+/// Crucial on macOS: a fullscreen window lives on its own Space, and only the app
+/// activating itself (`set_focus` → `makeKeyAndOrderFront:` + `NSApp activate`)
+/// makes the OS switch to it. Without this, a `pragma://` link is handled
+/// invisibly on the Space the user is currently looking at.
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        if let Err(error) = window.set_focus() {
+            log::warn!("failed to focus main window for deep link: {error}");
+        }
+    }
+}
+
+/// Wires `pragma://` deep-link delivery: registers the scheme at runtime (needed
+/// for Linux/dev where no installed bundle owns it), stashes any launch URL into
+/// [`PendingDeepLink`], and forwards every runtime URL to the frontend via
+/// [`DEEP_LINK_EVENT`].
+fn install_deep_links(app: &tauri::App) {
+    app.manage(PendingDeepLink::default());
+    // On Linux the scheme is owned by a generated `.desktop` file; register it at
+    // runtime so it works without a packaged install (and during development).
+    #[cfg(target_os = "linux")]
+    if let Err(error) = app.deep_link().register_all() {
+        log::warn!("failed to register deep-link schemes: {error}");
+    }
+    // Capture a URL the app was launched with — the frontend drains it on mount.
+    if let Ok(Some(urls)) = app.deep_link().get_current() {
+        if let Some(url) = urls.into_iter().next() {
+            if let Some(pending) = app.try_state::<PendingDeepLink>() {
+                if let Ok(mut guard) = pending.0.lock() {
+                    *guard = Some(url.to_string());
+                }
+            }
+            // A cold-start link can land while another app holds a fullscreen
+            // Space; surface our window so the new session is actually seen.
+            focus_main_window(app.handle());
+        }
+    }
+    let handle = app.handle().clone();
+    app.deep_link().on_open_url(move |event| {
+        // Bring the app forward first — a fullscreen Pragma on its own macOS
+        // Space won't switch into view unless the app activates itself.
+        focus_main_window(&handle);
+        for url in event.urls() {
+            let _ = handle.emit(DEEP_LINK_EVENT, url.to_string());
+        }
+    });
+}
 
 /// Installs the application menu — the OS default menu plus a Troubleshooting
 /// submenu — and wires the submenu's clicks to the frontend. Used on both macOS
@@ -334,6 +411,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
     install_menu(app.handle())?;
+    install_deep_links(app);
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
         log::warn!("failed to install pragma-agent CLI: {error}");
     }
@@ -360,6 +438,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[allow(clippy::too_many_lines)] // The Tauri builder is one long registration chain.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(setup_app)
@@ -375,6 +454,7 @@ pub fn run() {
             pty_kill,
             pty_kill_for_path,
             mark_agents_seen,
+            take_pending_deep_link,
             restart_daemon,
             read_daemon_log,
             projects::list_projects,
@@ -390,6 +470,7 @@ pub fn run() {
             scripts::load_project_scripts,
             editors::open_worktree,
             agents::list_agents,
+            agents::resolve_agent_models,
             agent_notifications::show_agent_notification,
             project_icon,
             list_tabs,

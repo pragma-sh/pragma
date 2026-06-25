@@ -1,18 +1,26 @@
 import { useEffect, useState } from "react";
-import { GitBranchPlus, Plus } from "lucide-react";
+import { GitBranchPlus, MessageSquarePlus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
+import { NewAgentSessionDialog } from "@/components/dialogs/NewAgentSessionDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
+import {
+  consumePendingNewSession,
+  NEW_SESSION_EVENT,
+  type NewSessionDeepLinkDetail,
+} from "@/lib/deep-link";
 import { useWorkspace } from "@/state/workspace-context";
 
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
+  const [newSessionInitial, setNewSessionInitial] = useState<NewSessionDeepLinkDetail | null>(null);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
 
@@ -22,6 +30,29 @@ export function ProjectSidebar() {
     }
     window.addEventListener("pragma:create-project", openDialog);
     return () => window.removeEventListener("pragma:create-project", openDialog);
+  }, []);
+
+  // A `pragma://open` deep link (without auto-submit) opens the new-session dialog
+  // prefilled with the link's values. The workspace owns deep-link handling but
+  // the sidebar owns this dialog, so requests arrive via `requestNewSession`: drain
+  // any buffered request on mount (a cold-start deep link is handled before this
+  // listener exists) and also listen for live ones.
+  useEffect(() => {
+    function openPrefilled(detail: NewSessionDeepLinkDetail) {
+      setNewSessionInitial(detail);
+      setNewSessionDialogOpen(true);
+    }
+    function onEvent(event: Event) {
+      // Clear the buffer too so a later remount doesn't reopen the same request.
+      consumePendingNewSession();
+      openPrefilled((event as CustomEvent<NewSessionDeepLinkDetail>).detail);
+    }
+    const pending = consumePendingNewSession();
+    if (pending) {
+      openPrefilled(pending);
+    }
+    window.addEventListener(NEW_SESSION_EVENT, onEvent);
+    return () => window.removeEventListener(NEW_SESSION_EVENT, onEvent);
   }, []);
 
   return (
@@ -56,15 +87,29 @@ export function ProjectSidebar() {
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Worktrees
         </p>
-        <Button
-          aria-label="Create worktree"
-          disabled={!workspace.selectedWorktree}
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => setWorktreeDialogOpen(true)}
-        >
-          <GitBranchPlus />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            aria-label="New agent session"
+            disabled={!workspace.selectedWorktree}
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => {
+              setNewSessionInitial(null);
+              setNewSessionDialogOpen(true);
+            }}
+          >
+            <MessageSquarePlus />
+          </Button>
+          <Button
+            aria-label="Create worktree"
+            disabled={!workspace.selectedWorktree}
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setWorktreeDialogOpen(true)}
+          >
+            <GitBranchPlus />
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
@@ -75,6 +120,11 @@ export function ProjectSidebar() {
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
+      <NewAgentSessionDialog
+        open={newSessionDialogOpen}
+        onOpenChange={setNewSessionDialogOpen}
+        initial={newSessionInitial}
+      />
     </aside>
   );
 }

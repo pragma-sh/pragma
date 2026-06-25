@@ -183,14 +183,20 @@ packages/<your>-plugin/pragma/agents/<agent-id>/config.json
 packages/<your>-plugin/pragma/agents/<agent-id>/icon.svg
 ```
 
-`config.json` fields (see the two existing examples):
+`config.json` fields (see the existing examples):
 
 ```json
 {
   "id": "claude-code",
   "name": "Claude Code",
   "icon": "icon.svg",
-  "start": ["claude", "--permission-mode", "auto"]
+  "start": ["claude", "--permission-mode", "auto"],
+  "models": {
+    "source": "static",
+    "modelArg": ["--model", "{model}"],
+    "reasoningArg": ["--effort", "{reasoning}"],
+    "items": [{ "id": "sonnet", "name": "Sonnet" }]
+  }
 }
 ```
 
@@ -198,6 +204,78 @@ packages/<your>-plugin/pragma/agents/<agent-id>/icon.svg
 - `name` — display name in the launcher.
 - `icon` — must resolve **inside** this agent directory.
 - `start` — argv used to launch the tool in a Pragma terminal.
+- `models` — optional model discovery and model/reasoning launch-argument metadata.
+
+### Optional model discovery
+
+Do not emit a provider-level Auto model in static `items` or script output. If a selected
+model has reasoning entries, Pragma shows an Auto reasoning choice for model-only launch;
+that appends `modelArg` and no reasoning arguments.
+
+Dynamic model discovery must be implemented by plugin-owned scripts under:
+
+```
+packages/<your>-plugin/pragma/agents/<agent-id>/scripts/
+```
+
+Pragma executes the configured command directly, with no implicit shell. If you need a
+shell, say so explicitly in config (`["sh", "scripts/list-models.sh"]`). The command cwd
+is the installed agent directory (`~/.pragma/agents/<agent-id>`), which is the only
+location Pragma can rely on at runtime.
+
+Command-backed config:
+
+```json
+"models": {
+  "source": "command",
+  "command": ["sh", "scripts/list-models.sh"],
+  "modelArg": ["--model", "{model}"],
+  "reasoningArg": ["--effort", "{reasoning}"],
+  "modelReasoningArg": ["--model", "{model}[effort={reasoning}]"]
+}
+```
+
+Static config is acceptable when the host tool has no supported model-list command:
+
+```json
+"models": {
+  "source": "static",
+  "modelArg": ["--model", "{model}"],
+  "items": [{ "id": "sonnet", "name": "Sonnet" }]
+}
+```
+
+Scripts must emit this generic JSON array on stdout:
+
+```json
+[
+  {
+    "id": "gpt-5.5",
+    "name": "GPT-5.5",
+    "reasoning": [
+      { "id": "low", "name": "Low" },
+      { "id": "medium", "name": "Medium" },
+      { "id": "high", "name": "High" }
+    ]
+  }
+]
+```
+
+`reasoning` is optional. Omit it when the host does not support reasoning or when levels
+cannot be exposed reliably for that model. Fast variants must be emitted as separate model
+entries, not collapsed into a fast toggle. Model discovery is lazy: Pragma runs the
+command when the selector submenu is hovered/focused, shows cached results immediately
+when available, then updates the menu with the refreshed result.
+
+Argument interpolation supports `{model}` and `{reasoning}` only. Launch rules:
+
+- Model selected, no reasoning: append `modelArg`.
+- Model and reasoning selected: prefer `modelReasoningArg` when present.
+- Model and reasoning selected, no `modelReasoningArg`: append `modelArg` then `reasoningArg`.
+
+Core must never learn host-specific model output formats. Keep parsing in your plugin's
+script and prefer supported host CLI/API model-list surfaces over private databases or
+internal caches.
 
 This is the **only** Pragma-side install. `apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh`
 copies every plugin package's `pragma/agents/*` into the bundle's
@@ -239,7 +317,7 @@ the env guard (Required functionality #2) is mandatory.
 - [ ] Reporting errors can never disrupt the host session.
 - [ ] Fires `cleared` on load and on exit.
 - [ ] Aborted turns reliably resolve to `cleared`.
-- [ ] `pragma/agents/<id>/config.json` + icon shipped, and staging script updated.
+- [ ] `pragma/agents/<id>/config.json` + icon shipped, optional model script documented, and staging script updated.
 - [ ] `AGENTS.md` written (mapping, install, gotchas).
 - [ ] Tests added; `bun run check` passes.
 - [ ] Updated the repo-root `AGENTS.md` structure table.

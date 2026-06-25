@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Bot, ChevronDown, Pin, PinOff } from "lucide-react";
 
+import { AgentIcon } from "@/components/agents/AgentIcon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,14 +12,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useIconNeedsInvert } from "@/lib/icon-contrast";
+import { startAgentInTab } from "@/lib/agent-launch";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
-import { type AgentConfig, listAgents, ptyWrite } from "@/lib/tauri";
-import { cn } from "@/lib/utils";
+import { type AgentConfig, listAgents } from "@/lib/tauri";
 import { isAgentPinned, toggleAgentPin, useAgentPins } from "@/state/agent-pins";
 import { useWorkspace } from "@/state/workspace-context";
-
-const AGENT_START_DELAY_MS = 500;
 
 /** Dropdown and pinned chips for launching configured external agents. */
 export function AgentsMenu() {
@@ -54,8 +52,7 @@ export function AgentsMenu() {
     if (!tab) {
       return;
     }
-    const command = commandFor(agent.start);
-    window.setTimeout(() => void ptyWrite(tab.id, `${command}\r`), AGENT_START_DELAY_MS);
+    startAgentInTab(tab.id, agent);
   }
 
   return (
@@ -124,31 +121,4 @@ export function AgentsMenu() {
       </DropdownMenu>
     </div>
   );
-}
-
-function AgentIcon({ agent }: { agent: AgentConfig }) {
-  const needsInvert = useIconNeedsInvert(agent.iconDataUrl);
-  return agent.iconDataUrl ? (
-    <img
-      alt=""
-      className={cn("size-4 rounded-sm", needsInvert && "invert")}
-      src={agent.iconDataUrl}
-    />
-  ) : (
-    <Bot className={cn("size-4 text-amber-200")} />
-  );
-}
-
-function commandFor(start: string[]): string {
-  if (start.length === 1) {
-    return start[0]!;
-  }
-  return start.map(shellQuote).join(" ");
-}
-
-function shellQuote(value: string): string {
-  if (/^[\w./:=@+-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }

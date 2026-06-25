@@ -36,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rusqlite = { version = "0.32", features = ["bundled"] }
 scopeguard = "1"
 tauri = { version = "2.11.2", features = ["unstable", "devtools"] }
+tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-notification = "2"
 xcap = { version = "0.6", features = ["image"] }

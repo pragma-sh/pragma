@@ -12,7 +12,9 @@ packages/opencode-plugin/
 ├── src/
 │   ├── index.ts         # PragmaOpencodePlugin entry point
 │   └── hooks.ts         # Two-flag state machine (busy + attention)
-├── pragma/agents/opencode/config.json  # Bundled agent launcher config
+├── pragma/agents/opencode/
+│   ├── config.json      # Bundled launcher config + model metadata
+│   └── scripts/list-models.sh  # opencode model listing → generic Pragma JSON
 └── dist/index.mjs       # Built output (Bunup; git-ignored)
 ```
 
@@ -87,6 +89,25 @@ leaves the last status lingering in the long-lived daemon).
 
 ## Agent launcher config
 
-`pragma/agents/opencode/config.json` — fields: `id`, `name`, `icon`, `start`. Icons
-must resolve inside that agent directory. Staged to
+`pragma/agents/opencode/config.json` — fields: `id`, `name`, `icon`, `start`, and
+optional `models`. Icons must resolve inside that agent directory. Staged to
 `apps/pragma/src-tauri/resources/pragma/agents/` by `stage-daemon-sidecar.sh`.
+
+The `models` block is command-backed and runs with cwd set to the installed agent
+directory (`~/.pragma/agents/opencode`):
+
+```json
+"models": {
+  "source": "command",
+  "command": ["sh", "scripts/list-models.sh"],
+  "modelArg": ["--model", "{model}"]
+}
+```
+
+`scripts/list-models.sh` owns all opencode-specific parsing. It tries supported opencode
+model-list surfaces (`opencode models --json`, then `--verbose`, then plain
+`opencode models`) and emits Pragma's generic JSON array. Each model's display name
+gets its provider appended in parentheses (e.g. `Claude Sonnet 4 (anthropic)`), derived
+from the `provider` field or the `provider/model` id prefix. Fast variants stay separate
+model entries when opencode exposes separate IDs. Reasoning is omitted unless opencode
+exposes reliable per-model reasoning levels.

@@ -76,6 +76,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       selectWorktree: vi.fn(),
       createTerminalTab: vi.fn(),
       createBrowserTab: vi.fn(),
+      startSession: vi.fn(),
       createTabInPane,
       openFileTab: vi.fn(),
       openDiffTab: vi.fn(),

@@ -2,5 +2,11 @@
   "id": "cursor",
   "name": "Cursor Agent",
   "icon": "icon.svg",
-  "start": ["agent", "--force", "--approve-mcps"]
+  "start": ["agent", "--force", "--approve-mcps"],
+  "models": {
+    "source": "command",
+    "command": ["sh", "scripts/list-models.sh"],
+    "modelArg": ["--model", "{model}"],
+    "modelReasoningArg": ["--model", "{model}[effort={reasoning}]"]
+  }
 }

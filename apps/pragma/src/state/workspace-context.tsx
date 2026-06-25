@@ -23,6 +23,8 @@ import type {
 import { toast } from "sonner";
 
 import { BROWSER_START_URL } from "@/lib/browser-manager";
+import { EMPTY_MODEL_SELECTION, resolveDeepLinkAgentSelection } from "@/lib/agent-model-selection";
+import { refreshAgentModels } from "@/lib/agent-model-cache";
 import {
   alertAgent,
   latchAlertedStatus,
@@ -30,6 +32,8 @@ import {
   releaseAlertLatchForTab,
   shouldAlertForStatus,
 } from "@/lib/agent-alert";
+import { startAgentInTab } from "@/lib/agent-launch";
+import { parseNewSessionDeepLink, requestNewSession } from "@/lib/deep-link";
 import { basename } from "@/lib/path";
 import {
   planRunScripts,
@@ -50,6 +54,7 @@ import {
   getActiveSelection,
   listProjects,
   loadProjectScripts,
+  listAgents,
   listSplits,
   listTabs,
   listWorktrees,
@@ -60,12 +65,15 @@ import {
   onAgentNotificationClick,
   onAgentReport,
   onAgentStatusReset,
+  onDeepLink,
   onMenuAction,
+  takePendingDeepLink,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
   restartDaemon as restartDaemonCommand,
+  resolveAgentModels,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
@@ -73,7 +81,7 @@ import {
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
 } from "@/lib/tauri";
-import type { SplitLayout } from "@/lib/tauri";
+import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import {
   agentStatusesForTab,
   applyAgentReport,
@@ -193,6 +201,16 @@ interface WorkspaceContextValue extends WorkspaceState {
   selectWorktree: (worktreeId: string | null) => void;
   createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
+  /**
+   * Launches an agent thread in a worktree: switches to it, opens a terminal
+   * tab, starts the agent, and optionally prefills its TUI with `message`.
+   */
+  startSession: (
+    worktreeId: string,
+    agent: AgentConfig,
+    message?: string,
+    modelSelection?: AgentModelSelection,
+  ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
@@ -1456,13 +1474,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const selectWorktree = useCallback(
     (worktreeId: string | null) => {
-      if (!state.selectedProjectId || !worktreeId) {
+      if (!worktreeId) {
+        return;
+      }
+      // Resolve the owning project from the worktree (ref, so it's correct for a
+      // worktree in a project other than the captured selection — e.g. a deep
+      // link), falling back to the current selection.
+      const projectId = worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
+      if (!projectId) {
         return;
       }
       // Navigating manually retires the agent "go back" affordance — it only
       // makes sense right after a notification jumped you somewhere.
       setAgentBackLocation(null);
-      dispatch({ type: "select-worktree", projectId: state.selectedProjectId, worktreeId });
+      dispatch({ type: "select-worktree", projectId, worktreeId });
     },
     [state.selectedProjectId],
   );
@@ -1471,7 +1496,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // split pane; otherwise it becomes a normal top-bar tab.
   const createTab = useCallback(
     async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
-      const projectId = state.selectedProjectId;
+      // Resolve the owning project from the explicit worktree first (read from a
+      // ref so it's correct even when a freshly-selected project hasn't flushed
+      // into this closure yet — e.g. a cross-project deep link), then fall back
+      // to the current selection.
+      const projectId =
+        (worktreeId ? worktreeProjectIdRef.current[worktreeId] : undefined) ??
+        state.selectedProjectId;
       const targetWorktreeId =
         worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
       if (!projectId || !targetWorktreeId) {
@@ -1519,6 +1550,91 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [createTab],
   );
+
+  // Launches a fresh agent thread: switch to the worktree, open a terminal tab,
+  // start the agent, and (optionally) prefill its TUI with `message`. Shared by
+  // the new-session dialog and the `pragma://open` deep-link auto-submit path so
+  // both go through one launch implementation.
+  const startSession = useCallback(
+    async (
+      worktreeId: string,
+      agent: AgentConfig,
+      message?: string,
+      modelSelection?: AgentModelSelection,
+    ): Promise<Tab | null> => {
+      selectWorktree(worktreeId);
+      const tab = await createTerminalTab(worktreeId);
+      if (!tab) {
+        return null;
+      }
+      startAgentInTab(tab.id, agent, message, modelSelection);
+      return tab;
+    },
+    [createTerminalTab, selectWorktree],
+  );
+
+  // Handles an incoming `pragma://open` deep link: select the target worktree's
+  // project, then either auto-launch the agent (when `autoSubmit` has everything
+  // it needs) or open the new-session dialog prefilled via the sidebar's window
+  // event. Falls back to the dialog whenever auto-submit is under-specified.
+  const handleDeepLink = useCallback(
+    async (rawUrl: string) => {
+      const link = parseNewSessionDeepLink(rawUrl);
+      if (!link) {
+        return;
+      }
+      let worktreeId = link.worktreeId;
+      if (worktreeId) {
+        const projectId = await resolveProjectForWorktree(worktreeId);
+        if (projectId) {
+          await selectProject(projectId);
+          // Route through `selectWorktree` (not a raw dispatch) so its side
+          // effects run — notably clearing `agentBackLocation`, so a deep-link
+          // jump doesn't leave the notification-only "Go back" affordance up.
+          selectWorktree(worktreeId);
+        } else {
+          // Unknown worktree id: ignore it and fall back to the current selection.
+          worktreeId = null;
+        }
+      }
+      const current = stateRef.current;
+      const targetWorktreeId =
+        worktreeId ??
+        (current.selectedProjectId
+          ? (current.selectedWorktreeByProject[current.selectedProjectId] ?? null)
+          : null);
+
+      if (link.autoSubmit && targetWorktreeId && link.message?.trim()) {
+        const agents = await listAgents().catch(() => [] as AgentConfig[]);
+        const requestedAgent = link.agentId
+          ? (resolveDeepLinkAgentSelection(link, agents, {}).agentId ?? link.agentId)
+          : null;
+        const agent = agents.find((item) => item.id === requestedAgent) ?? agents[0];
+        if (agent) {
+          const models = await resolveAgentModels(agent.id).catch(() => []);
+          const resolved = resolveDeepLinkAgentSelection(link, agents, { [agent.id]: models });
+          await startSession(
+            targetWorktreeId,
+            agent,
+            link.message,
+            resolved.agentId === agent.id ? resolved.selection : EMPTY_MODEL_SELECTION,
+          );
+          return;
+        }
+      }
+
+      requestNewSession({
+        agentId: link.agentId,
+        modelId: link.modelId,
+        reasoningId: link.reasoningId,
+        worktreeId: targetWorktreeId,
+        message: link.message,
+      });
+    },
+    [resolveProjectForWorktree, selectProject, selectWorktree, startSession],
+  );
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  handleDeepLinkRef.current = handleDeepLink;
 
   // Opens a terminal-link target in a split to the right of the clicked
   // terminal. A browser URL becomes a browser tab; a worktree-relative path
@@ -1793,6 +1909,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Handle `pragma://open` deep links: subscribe to live ones and, once on
+  // mount, drain any URL the app was cold-started with (delivered before this
+  // listener existed). The ref keeps the latest handler so we subscribe once.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onDeepLink((url) => void handleDeepLinkRef.current(url))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    void takePendingDeepLink()
+      .then((url) => {
+        if (url) {
+          void handleDeepLinkRef.current(url);
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const terminalTabIdsKey = useMemo(
     () =>
       state.tabs
@@ -1805,6 +1942,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((agents) => {
+        if (!cancelled) {
+          for (const agent of agents) {
+            void refreshAgentModels(agent.id);
+          }
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!state.selectedProjectId) {
@@ -2393,6 +2547,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      startSession,
       createTabInPane,
       openFileTab,
       openDiffTab,
@@ -2438,6 +2593,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectWorktree,
       createTerminalTab,
       createBrowserTab,
+      startSession,
       createTabInPane,
       openFileTab,
       openDiffTab,

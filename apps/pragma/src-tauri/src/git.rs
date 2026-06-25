@@ -1163,6 +1163,7 @@ mod tests {
             .expect("main worktree");
         let child = db
             .insert_worktree(
+                "wt-child",
                 &project.id,
                 &parent.id,
                 "feature",

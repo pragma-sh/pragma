@@ -14,7 +14,9 @@ packages/cursor-plugin/
 │   └── hooks.fragment.json    # Hook entries merged by install-local.sh
 ├── scripts/install-local.sh   # Local install (hooks + cli-config defaults)
 ├── test/report.test.ts
-└── pragma/agents/cursor/config.json  # Bundled agent launcher config
+└── pragma/agents/cursor/
+    ├── config.json            # Bundled agent launcher config + model metadata
+    └── scripts/list-models.sh # Cursor `agent models` → generic Pragma JSON
 ```
 
 ## Why plain `agent` (no wrapper CLI)
@@ -122,6 +124,24 @@ Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is in
 ## Agent launcher config
 
 `pragma/agents/cursor/config.json` — staged by `stage-daemon-sidecar.sh`.
+
+The optional `models` block is command-backed and runs with cwd set to the installed
+agent directory (`~/.pragma/agents/cursor`):
+
+```json
+"models": {
+  "source": "command",
+  "command": ["sh", "scripts/list-models.sh"],
+  "modelArg": ["--model", "{model}"],
+  "modelReasoningArg": ["--model", "{model}[effort={reasoning}]"]
+}
+```
+
+`scripts/list-models.sh` owns Cursor-specific parsing. It runs `agent models`, parses
+model lines shaped like `id - Display Name`, strips reasoning levels from display names
+into per-model `reasoning`, ignores headers/footers/tips, and emits the generic Pragma
+JSON array. Cursor fast variants are emitted as separate model entries because Cursor
+exposes them as separate IDs. Reasoning is only emitted when Cursor exposes it reliably.
 
 ## Known gotchas
 

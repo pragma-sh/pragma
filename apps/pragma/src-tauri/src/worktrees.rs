@@ -37,6 +37,7 @@ pub fn create_worktree(
         .join(&worktree_id);
     git::create_worktree(PathBuf::from(&parent.path).as_path(), branch.trim(), &path)?;
     let worktree = db.insert_worktree(
+        &worktree_id,
         &project_id,
         &parent_worktree_id,
         branch.trim(),

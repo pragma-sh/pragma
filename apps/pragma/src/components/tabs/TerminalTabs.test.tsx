@@ -70,6 +70,7 @@ const mockWorkspace: WorkspaceContextValue = {
   selectWorktree: vi.fn(),
   createTerminalTab: vi.fn(),
   createBrowserTab: vi.fn(),
+  startSession: vi.fn(),
   createTabInPane: vi.fn(),
   openFileTab: vi.fn(),
   openDiffTab: vi.fn(),

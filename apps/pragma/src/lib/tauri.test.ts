@@ -33,6 +33,7 @@ import {
   readFile,
   renameFile,
   renameWorktree,
+  resolveAgentModels,
   setSplitLayout,
   setTabTitle,
   setWorktreeHidden,
@@ -143,6 +144,11 @@ describe("browser IPC wrappers", () => {
       width: 3,
       height: 4,
     });
+  });
+
+  it("resolveAgentModels passes the agent id", () => {
+    void resolveAgentModels("cursor");
+    expect(invokeMock).toHaveBeenCalledWith("resolve_agent_models", { agentId: "cursor" });
   });
 
   it("openWorktree passes the worktree id and editor id", () => {
