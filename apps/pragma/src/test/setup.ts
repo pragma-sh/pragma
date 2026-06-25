@@ -12,3 +12,6 @@ Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => undefined;
 Element.prototype.setPointerCapture ??= () => undefined;
 Element.prototype.scrollIntoView ??= () => undefined;
+
+Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
