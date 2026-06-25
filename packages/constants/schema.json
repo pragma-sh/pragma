@@ -273,6 +273,11 @@
           "items": { "$ref": "#/definitions/RunScriptEntry" },
           "description": "Interactive commands opened from the workspace header as terminal tabs and optional split layouts."
         },
+        "build": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/RunScriptEntry" },
+          "description": "Interactive build commands opened from the workspace header as terminal tabs and optional split layouts."
+        },
         "teardown": {
           "type": "array",
           "items": { "type": "string" },

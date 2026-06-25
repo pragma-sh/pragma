@@ -21,6 +21,7 @@ const SCRIPT_CONFIG_PATH: &str = ".pragma/scripts.json";
 pub struct LoadedProjectScripts {
     pub setup: Vec<String>,
     pub run: Vec<Value>,
+    pub build: Vec<Value>,
     pub teardown: Vec<String>,
 }
 
@@ -182,13 +183,20 @@ fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {
     })?;
     Ok(LoadedProjectScripts {
         setup: string_array_from_value(object.get("setup"))?,
-        run: object
-            .get("run")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
+        run: interactive_array_from_value(object.get("run"))?,
+        build: interactive_array_from_value(object.get("build"))?,
         teardown: string_array_from_value(object.get("teardown"))?,
     })
+}
+
+fn interactive_array_from_value(value: Option<&Value>) -> AppResult<Vec<Value>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .cloned()
+        .ok_or_else(|| AppError::InvalidInput("expected script command array".to_string()))
 }
 
 fn string_array_from_value(value: Option<&Value>) -> AppResult<Vec<String>> {
@@ -213,7 +221,7 @@ fn validate_config(value: &Value, path: &Path) -> AppResult<()> {
         AppError::InvalidInput(format!("{} must contain a JSON object", path.display()))
     })?;
     for key in object.keys() {
-        if !matches!(key.as_str(), "setup" | "run" | "teardown") {
+        if !matches!(key.as_str(), "setup" | "run" | "build" | "teardown") {
             return Err(AppError::InvalidInput(format!(
                 "{} has unknown key `{key}`",
                 path.display()
@@ -222,13 +230,24 @@ fn validate_config(value: &Value, path: &Path) -> AppResult<()> {
     }
     validate_command_array(object.get("setup"), path, "setup")?;
     validate_command_array(object.get("teardown"), path, "teardown")?;
-    if let Some(run) = object.get("run") {
-        let entries = run.as_array().ok_or_else(|| {
-            AppError::InvalidInput(format!("{}.run must be an array", path.display()))
-        })?;
-        for (index, entry) in entries.iter().enumerate() {
-            validate_run_node(entry, path, &format!("run[{index}]"))?;
-        }
+    validate_interactive_script_array(object.get("run"), path, "run")?;
+    validate_interactive_script_array(object.get("build"), path, "build")?;
+    Ok(())
+}
+
+fn validate_interactive_script_array(
+    value: Option<&Value>,
+    path: &Path,
+    field: &str,
+) -> AppResult<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let entries = value.as_array().ok_or_else(|| {
+        AppError::InvalidInput(format!("{}.{field} must be an array", path.display()))
+    })?;
+    for (index, entry) in entries.iter().enumerate() {
+        validate_interactive_script_node(entry, path, &format!("{field}[{index}]"))?;
     }
     Ok(())
 }
@@ -246,7 +265,7 @@ fn validate_command_array(value: Option<&Value>, path: &Path, field: &str) -> Ap
     Ok(())
 }
 
-fn validate_run_node(value: &Value, path: &Path, field: &str) -> AppResult<()> {
+fn validate_interactive_script_node(value: &Value, path: &Path, field: &str) -> AppResult<()> {
     if value.is_string() {
         return validate_command(value, path, field);
     }
@@ -281,7 +300,7 @@ fn validate_run_node(value: &Value, path: &Path, field: &str) -> AppResult<()> {
         let child = object.get(key).ok_or_else(|| {
             AppError::InvalidInput(format!("{}.{field}.{key} is required", path.display()))
         })?;
-        validate_run_node(child, path, &format!("{field}.{key}"))?;
+        validate_interactive_script_node(child, path, &format!("{field}.{key}"))?;
     }
     Ok(())
 }
@@ -376,7 +395,27 @@ mod tests {
         let config = load_project_scripts_from_project_path(dir.path()).expect("load scripts");
         assert!(config.setup.is_empty());
         assert!(config.run.is_empty());
+        assert!(config.build.is_empty());
         assert!(config.teardown.is_empty());
+    }
+
+    #[test]
+    fn accepts_top_level_build_string_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_scripts(
+            dir.path(),
+            r#"{
+              "build": [
+                "cargo build",
+                { "left": "cargo build -p foo", "right": "cargo build -p bar" }
+              ]
+            }"#,
+        );
+
+        let config = load_project_scripts_from_project_path(dir.path()).expect("load scripts");
+
+        assert_eq!(config.build.len(), 2);
+        assert_eq!(config.build[0].as_str(), Some("cargo build"));
     }
 
     #[test]

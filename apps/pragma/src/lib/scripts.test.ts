@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planRunScripts } from "./scripts";
+import { planBuildScripts, planInteractiveScripts, planRunScripts } from "./scripts";
 
 describe("planRunScripts", () => {
   it("plans a string entry as one normal command", () => {
@@ -44,6 +44,11 @@ describe("planRunScripts", () => {
         },
       ],
     });
+  });
+
+  it("uses the script kind in validation errors", () => {
+    expect(() => planBuildScripts([" "])).toThrow("build[0] must not be empty");
+    expect(() => planInteractiveScripts([" "], "custom")).toThrow("custom[0] must not be empty");
   });
 
   it("rejects empty commands", () => {

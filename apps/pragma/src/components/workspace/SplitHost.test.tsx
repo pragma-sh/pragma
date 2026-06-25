@@ -98,10 +98,14 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       splitTabAtPane,
       moveTabToPane,
       runScriptsAvailable: false,
+      buildScriptsAvailable: false,
       runScriptsConfigError: null,
       runScriptsState: null,
+      buildScriptsState: null,
       runScripts: vi.fn(),
+      buildScripts: vi.fn(),
       stopRunScripts: vi.fn(),
+      stopBuildScripts: vi.fn(),
     };
     return {
       mockWorkspace: workspace,

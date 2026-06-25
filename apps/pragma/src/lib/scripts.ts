@@ -18,19 +18,33 @@ export interface PlannedRunScripts {
   items: PlannedRunScriptItem[];
 }
 
-/** Flattens interactive run-script entries into commands plus split templates. */
-export function planRunScripts(entries: RunScriptEntry[]): PlannedRunScripts {
+/** Flattens interactive script entries into commands plus split templates. */
+export function planInteractiveScripts(
+  entries: RunScriptEntry[],
+  label: string,
+): PlannedRunScripts {
   const commands: string[] = [];
   const items = entries.map((entry, index) => {
     const before = commands.length;
+    const path = `${label}[${index}]`;
     if (typeof entry === "string") {
-      const commandIndex = pushCommand(commands, entry, `run[${index}]`);
+      const commandIndex = pushCommand(commands, entry, path);
       return { commandIndexes: [commandIndex], layout: null };
     }
-    const layout = planNode(entry, commands, `run[${index}]`);
+    const layout = planNode(entry, commands, path);
     return { commandIndexes: range(before, commands.length), layout };
   });
   return { commands, items };
+}
+
+/** Flattens interactive run-script entries into commands plus split templates. */
+export function planRunScripts(entries: RunScriptEntry[]): PlannedRunScripts {
+  return planInteractiveScripts(entries, "run");
+}
+
+/** Flattens interactive build-script entries into commands plus split templates. */
+export function planBuildScripts(entries: RunScriptEntry[]): PlannedRunScripts {
+  return planInteractiveScripts(entries, "build");
 }
 
 function planNode(node: RunScriptNode, commands: string[], path: string): RunScriptLayoutTemplate {
