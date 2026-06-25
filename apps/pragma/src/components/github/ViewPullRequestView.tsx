@@ -44,6 +44,7 @@ import {
   mergePullRequest,
 } from "@/lib/github";
 import { browserOpenExternal, githubDeleteRemoteBranch } from "@/lib/tauri";
+import { requestReviewFocus } from "@/state/review-focus-store";
 import { useWorkspace } from "@/state/workspace-context";
 
 function messageFor(cause: unknown): string {
@@ -170,7 +171,12 @@ export function ViewPullRequestView({
           // oxlint-disable-next-line react/no-unstable-nested-components -- render prop, not a nested component definition; UnresolvedBadge is declared at module scope.
           fileBadge={(file) => <UnresolvedBadge count={unresolvedByPath.get(file.path) ?? 0} />}
           files={changedFiles}
-          onOpen={() => void workspace.openReviewTab(pr.number, `Review #${pr.number}`)}
+          onOpen={(file) => {
+            // Request the scroll first so the review tab (new or already open)
+            // jumps to this file once its sections are mounted.
+            requestReviewFocus(pr.number, file.path);
+            void workspace.openReviewTab(pr.number, `Review #${pr.number}`);
+          }}
           title={`${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}`}
         />
       </section>

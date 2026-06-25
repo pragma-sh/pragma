@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FileDiff, GitHubRepoRef, Tab } from "@pragma/constants";
-import { Check, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ListChecks,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 
+import { FixCommentDialog } from "@/components/github/FixCommentDialog";
+import { FixItListDialog } from "@/components/github/FixItListDialog";
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { ActorAvatar } from "@/components/github/ViewPullRequestView";
 import { type DiffComment, MergeDiff } from "@/components/editor/MergeDiff";
@@ -20,8 +30,17 @@ import {
   resolveReviewThread,
   unresolveReviewThread,
 } from "@/lib/github";
+import { reviewThreadToFixItComment } from "@/lib/fix-it-prompt";
 import { githubPrFileDiff, githubRepoRef } from "@/lib/tauri";
+import {
+  addFixItComment,
+  type FixItComment,
+  removeFixItComment,
+  useFixItComments,
+  useIsFixItComment,
+} from "@/state/fix-it-store";
 import { useReviewDone, setReviewDone } from "@/state/review-done-store";
+import { clearReviewFocus, useReviewFocus } from "@/state/review-focus-store";
 
 function messageFor(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -50,7 +69,24 @@ type LoadState =
 export function ReviewTab({ tab }: { tab: Tab }) {
   const { worktreeId, prNumber } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  // The comment a single-comment "Fix" dialog is open for (null when closed), and
+  // whether the "Address fix it list" dialog is open.
+  const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
+  const [listOpen, setListOpen] = useState(false);
   const active = useRef(true);
+
+  // Each file section registers its DOM node here so a focus request (from
+  // clicking a file in the PR's "Files changed" list) can scroll it into view.
+  const sectionEls = useRef(new Map<string, HTMLElement>());
+  const focusPath = useReviewFocus(prNumber);
+
+  const registerSection = useCallback((path: string, el: HTMLElement | null) => {
+    if (el) {
+      sectionEls.current.set(path, el);
+    } else {
+      sectionEls.current.delete(path);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (prNumber === null || prNumber === undefined) {
@@ -120,6 +156,18 @@ export function ReviewTab({ tab }: { tab: Tab }) {
     };
   }, [load]);
 
+  // Consume a pending focus request once the file sections exist: scroll the
+  // requested file to the top, then clear the request so it fires only on an
+  // explicit click and re-clicking the same file re-triggers it. Runs after the
+  // ready render so `sectionEls` is populated.
+  useEffect(() => {
+    if (state.kind !== "ready" || prNumber == null || focusPath === null) {
+      return;
+    }
+    sectionEls.current.get(focusPath)?.scrollIntoView({ block: "start" });
+    clearReviewFocus(prNumber);
+  }, [focusPath, state.kind, prNumber]);
+
   if (state.kind === "loading") {
     return <Centered>Loading review…</Centered>;
   }
@@ -129,15 +177,18 @@ export function ReviewTab({ tab }: { tab: Tab }) {
 
   const { data } = state;
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-auto bg-[#0b0d10]">
-      <div className="border-b border-white/10 px-4 py-2">
-        <p className="text-sm font-semibold text-slate-100">
-          {data.pr.title} <span className="text-slate-500">#{data.pr.number}</span>
-        </p>
-        <p className="text-xs text-slate-500">
-          {data.files.length} file{data.files.length === 1 ? "" : "s"} · {data.pr.baseRef} ←{" "}
-          {data.pr.headRef}
-        </p>
+    <div className="flex h-full min-h-0 flex-col overflow-auto bg-[#0b0d10]" data-review-scroll>
+      <div className="flex items-start gap-2 border-b border-white/10 px-4 py-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-100">
+            {data.pr.title} <span className="text-slate-500">#{data.pr.number}</span>
+          </p>
+          <p className="text-xs text-slate-500">
+            {data.files.length} file{data.files.length === 1 ? "" : "s"} · {data.pr.baseRef} ←{" "}
+            {data.pr.headRef}
+          </p>
+        </div>
+        <AddressFixItButton onClick={() => setListOpen(true)} prNumber={data.pr.number} />
       </div>
       {data.reviews.length > 0 ? (
         <div className="flex flex-col gap-2 border-b border-white/10 p-3">
@@ -151,13 +202,53 @@ export function ReviewTab({ tab }: { tab: Tab }) {
           base={data.pr.baseRef}
           file={file}
           key={file.path}
+          onFix={setFixTarget}
           onThreadResolvedChange={setThreadResolved}
           prNumber={data.pr.number}
+          registerSection={registerSection}
           threads={data.threadsByPath.get(file.path) ?? []}
           worktreeId={worktreeId}
         />
       ))}
+      <FixCommentDialog
+        comment={fixTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFixTarget(null);
+          }
+        }}
+        open={fixTarget !== null}
+        worktreeId={worktreeId}
+      />
+      <FixItListDialog
+        onOpenChange={setListOpen}
+        open={listOpen}
+        prNumber={data.pr.number}
+        worktreeId={worktreeId}
+      />
     </div>
+  );
+}
+
+/** Top-of-tab button opening the fix-it list dialog, badged with the flagged count. */
+function AddressFixItButton({ prNumber, onClick }: { prNumber: number; onClick: () => void }) {
+  const count = useFixItComments(prNumber).length;
+  return (
+    <Button
+      className="shrink-0"
+      disabled={count === 0}
+      onClick={onClick}
+      size="xs"
+      variant="outline"
+    >
+      <ListChecks />
+      Address fix it list
+      {count > 0 ? (
+        <span className="ml-1 rounded bg-amber-500/20 px-1 text-[10px] text-amber-300">
+          {count}
+        </span>
+      ) : null}
+    </Button>
   );
 }
 
@@ -201,14 +292,18 @@ function FileReview({
   prNumber,
   threads,
   worktreeId,
+  onFix,
   onThreadResolvedChange,
+  registerSection,
 }: {
   base: string;
   file: PullFile;
   prNumber: number;
   threads: ReviewThread[];
   worktreeId: string;
+  onFix: (comment: FixItComment) => void;
   onThreadResolvedChange: (threadId: string, isResolved: boolean) => void;
+  registerSection: (path: string, el: HTMLElement | null) => void;
 }) {
   const done = useReviewDone(prNumber, file.path);
   const unresolved = threads.filter((thread) => !thread.isResolved).length;
@@ -224,16 +319,21 @@ function FileReview({
           line: thread.line,
           content: (
             <div className="border-y border-white/10 bg-black/30 px-3 py-2">
-              <ReviewThreadCard onResolvedChange={onThreadResolvedChange} thread={thread} />
+              <ReviewThreadCard
+                onFix={onFix}
+                onResolvedChange={onThreadResolvedChange}
+                prNumber={prNumber}
+                thread={thread}
+              />
             </div>
           ),
         })),
-    [threads, onThreadResolvedChange],
+    [threads, prNumber, onFix, onThreadResolvedChange],
   );
   const fileComments = threads.filter((thread) => thread.line === null);
 
   return (
-    <section className="border-b border-white/10">
+    <section className="border-b border-white/10" ref={(el) => registerSection(file.path, el)}>
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-white/5 bg-[#11151b] px-3 py-1.5">
         <span className="min-w-0 flex-1 truncate text-xs text-slate-200" title={file.path}>
           {file.path}
@@ -263,7 +363,9 @@ function FileReview({
               {fileComments.map((thread) => (
                 <ReviewThreadCard
                   key={thread.id}
+                  onFix={onFix}
                   onResolvedChange={onThreadResolvedChange}
+                  prNumber={prNumber}
                   thread={thread}
                 />
               ))}
@@ -289,6 +391,12 @@ function FileDiffPane({
 }) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  // The diff only "captures" wheel scrolling once the user clicks into it. Until
+  // then a wheel over the pane is redirected to the review scroll container, so
+  // the user can scroll past the file instead of the fixed-height diff trapping
+  // the scroll. A ref (not state) keeps the wheel listener from re-subscribing.
+  const engaged = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,23 +417,60 @@ function FileDiffPane({
     };
   }, [worktreeId, base, file.path, file.oldPath]);
 
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) {
+      return;
+    }
+    // Non-passive so we can cancel the diff's own scroll and forward it upward.
+    const onWheel = (event: WheelEvent) => {
+      if (engaged.current) {
+        return;
+      }
+      const scroller = el.closest<HTMLElement>("[data-review-scroll]");
+      if (!scroller) {
+        return;
+      }
+      event.preventDefault();
+      scroller.scrollTop += event.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  let content: React.ReactNode;
   if (error) {
-    return <p className="px-3 py-2 text-xs text-destructive">{error}</p>;
-  }
-  if (!diff) {
-    return <p className="px-3 py-2 text-xs text-slate-500">Loading diff…</p>;
-  }
-  if (diff.binary) {
-    return <p className="px-3 py-2 text-xs text-slate-500">Binary file — no diff.</p>;
-  }
-  return (
-    <div className="h-80 min-h-0">
+    content = <p className="px-3 py-2 text-xs text-destructive">{error}</p>;
+  } else if (!diff) {
+    content = <p className="px-3 py-2 text-xs text-slate-500">Loading diff…</p>;
+  } else if (diff.binary) {
+    content = <p className="px-3 py-2 text-xs text-slate-500">Binary file — no diff.</p>;
+  } else {
+    content = (
       <MergeDiff
         comments={comments}
         fileName={file.path}
         newText={diff.newText}
         oldText={diff.oldText}
       />
+    );
+  }
+
+  // A stable `h-80` for every state (loading / error / diff) so a file's height
+  // never changes once it mounts — that keeps a pending scroll-into-view request
+  // landing on the right file even while diffs above it are still loading.
+  return (
+    <div
+      className="h-80 min-h-0"
+      onPointerDown={() => {
+        engaged.current = true;
+      }}
+      onPointerLeave={() => {
+        engaged.current = false;
+      }}
+      ref={wrapperRef}
+    >
+      {content}
     </div>
   );
 }
@@ -336,16 +481,34 @@ function FileDiffPane({
  * the parent flips the thread's state in place without a refetch — and only
  * surfaces a toast when the GitHub mutation actually fails, reverting the
  * optimistic flip so the UI matches the server again.
+ *
+ * Two fix affordances sit beside Resolve: **Fix** opens a dialog (via `onFix`) to
+ * launch an agent on just this comment, and **Add to fix it list** flags it for a
+ * later batch fix (`fix-it-store`), toggling back off if already flagged.
  */
 function ReviewThreadCard({
   thread,
+  prNumber,
+  onFix,
   onResolvedChange,
 }: {
   thread: ReviewThread;
+  prNumber: number;
+  onFix: (comment: FixItComment) => void;
   onResolvedChange: (threadId: string, isResolved: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(thread.isResolved);
+  const onFixItList = useIsFixItComment(prNumber, thread.id);
+
+  const toggleFixItList = useCallback(() => {
+    if (onFixItList) {
+      removeFixItComment(prNumber, thread.id);
+    } else {
+      addFixItComment(prNumber, reviewThreadToFixItComment(thread));
+      toast.success("Added to fix it list");
+    }
+  }, [onFixItList, prNumber, thread]);
 
   const toggleResolved = useCallback(async () => {
     const next = !thread.isResolved;
@@ -394,16 +557,29 @@ function ReviewThreadCard({
               </div>
             </div>
           ))}
-          <Button
-            className="self-start"
-            disabled={busy}
-            onClick={() => void toggleResolved()}
-            size="sm"
-            variant="outline"
-          >
-            {busy ? <Loader2 className="animate-spin" /> : null}
-            {thread.isResolved ? "Unresolve" : "Resolve"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => void toggleResolved()}
+              size="sm"
+              variant="outline"
+            >
+              {busy ? <Loader2 className="animate-spin" /> : null}
+              {thread.isResolved ? "Unresolve" : "Resolve"}
+            </Button>
+            <Button onClick={() => onFix(reviewThreadToFixItComment(thread))} size="sm">
+              <Sparkles />
+              Fix
+            </Button>
+            <Button
+              onClick={toggleFixItList}
+              size="sm"
+              variant={onFixItList ? "secondary" : "outline"}
+            >
+              {onFixItList ? <Check /> : <ListChecks />}
+              {onFixItList ? "On fix it list" : "Add to fix it list"}
+            </Button>
+          </div>
         </div>
       )}
     </div>

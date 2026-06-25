@@ -29,7 +29,9 @@ apps/pragma/
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── right-sidebar-context.tsx
 │   │   ├── editor-dirty-store.ts   # Ephemeral editor dirty state (never in reducer)
-│   │   └── review-done-store.ts    # Ephemeral per-file PR review done-toggle
+│   │   ├── review-done-store.ts    # Ephemeral per-file PR review done-toggle
+│   │   ├── review-focus-store.ts   # Ephemeral "scroll this review file into view" request
+│   │   └── fix-it-store.ts         # Ephemeral per-PR "fix it list" of flagged review comments
 │   ├── App.tsx
 │   └── main.tsx
 └── src-tauri/                   # Rust backend
@@ -98,6 +100,14 @@ review opens a `pr-review` `TabKind` (v7 `pr_number` column) rendered through
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
 (fed by `github_pr_file_diff`), and inline thread resolve/unresolve.
+
+Each `ReviewThreadCard` also offers two fix affordances: **Fix** (opens
+`github/FixCommentDialog` to launch an agent on that one comment) and **Add to fix it
+list** (flags it into the ephemeral `state/fix-it-store.ts`); the tab header's **Address
+fix it list** button opens `github/FixItListDialog` to fix the whole batch at once. Both
+dialogs share `hooks/use-fix-launcher.ts` (agent pick via `hooks/use-agent-selection.ts`,
+an optional new-worktree to fix on, then `startSession`) and build prompts with
+`lib/fix-it-prompt.ts`.
 
 The resolve/unresolve toggle is **optimistic**: `ReviewThreadCard` flips the thread in
 place and fires the GraphQL mutation in the background, reverting + toasting **only on

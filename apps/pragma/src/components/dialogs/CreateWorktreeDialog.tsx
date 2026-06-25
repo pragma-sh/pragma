@@ -1,25 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAgentModels } from "@/hooks/use-agent-models";
+import { useAgentSelection } from "@/hooks/use-agent-selection";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
-import {
-  EMPTY_MODEL_SELECTION,
-  defaultModelSelection,
-  rememberModelSelection,
-  validateModelSelection,
-} from "@/lib/agent-model-selection";
+import { rememberModelSelection } from "@/lib/agent-model-selection";
 import { isMacPlatform } from "@/lib/platform";
-import {
-  type AgentConfig,
-  type AgentModelSelection,
-  createWorktree,
-  listAgents,
-} from "@/lib/tauri";
+import { createWorktree } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface CreateWorktreeDialogProps {
@@ -41,82 +31,26 @@ type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shift
  */
 export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorktreeDialogProps) {
   const workspace = useWorkspace();
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
-  const { modelsByAgent, loadModels, primeFromCache } = useAgentModels();
+  const {
+    agents,
+    modelsByAgent,
+    agentId,
+    modelSelection,
+    selectedAgent,
+    loadModels,
+    handleAgentChange,
+  } = useAgentSelection(isOpen);
   const [branch, setBranch] = useState("");
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const [modelSelection, setModelSelection] = useState<AgentModelSelection>(EMPTY_MODEL_SELECTION);
   const [error, setError] = useState<string | null>(null);
-  const previousAgentIdRef = useRef<string | null>(null);
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
-
-  // Load the configured agents whenever the dialog opens.
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) {
-          setAgents(Array.isArray(items) ? items : []);
-        }
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAgents([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen]);
-
-  // Show already-resolved models immediately, without waiting for a hover.
-  useEffect(() => {
-    primeFromCache(agents.map((agent) => agent.id));
-  }, [agents, primeFromCache]);
-
-  // Keep a valid agent selected, falling back to the first (default) agent.
-  useEffect(() => {
-    if (!isOpen || agents.length === 0) {
-      return;
-    }
-    setAgentId((current) =>
-      current && agents.some((agent) => agent.id === current) ? current : agents[0]!.id,
-    );
-  }, [isOpen, agents]);
-
-  useEffect(() => {
-    if (!isOpen || !agentId) {
-      return;
-    }
-    const models = modelsByAgent[agentId];
-    if (!models) {
-      return;
-    }
-    const changedAgent = previousAgentIdRef.current !== agentId;
-    previousAgentIdRef.current = agentId;
-    setModelSelection((current) => {
-      if (changedAgent) {
-        return defaultModelSelection(agentId, models);
-      }
-      const valid = validateModelSelection(models, current);
-      return valid.modelId === null && current.modelId !== null
-        ? defaultModelSelection(agentId, models)
-        : valid;
-    });
-  }, [isOpen, agentId, modelsByAgent]);
 
   if (!isOpen) {
     return null;
   }
 
-  const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
   const canSubmit = branch.trim().length > 0;
 
   async function submit() {
@@ -147,17 +81,10 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       setBranch("");
       setTitle("");
       setMessage("");
-      setModelSelection(EMPTY_MODEL_SELECTION);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }
-
-  function handleAgentChange(nextAgentId: string, nextSelection: AgentModelSelection) {
-    setAgentId(nextAgentId);
-    setModelSelection(nextSelection);
-    rememberModelSelection(nextAgentId, nextSelection);
   }
 
   function handleKeyDown(event: SubmitKeyEvent) {
