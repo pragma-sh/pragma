@@ -202,7 +202,7 @@ impl Registry {
     }
 
     /// Drops a tab's resolved (`done`) agent statuses once the user has viewed
-    /// the tab, so the daemon stops replaying them on the next subscriber
+    /// the tab, so the server stops replaying them on the next subscriber
     /// reconnect. `running`/`attention` are kept — they persist until the agent
     /// itself moves on. Unlike a `cleared` report this does **not** broadcast: the
     /// viewing client has already dropped the green dot locally, so the sole
@@ -215,12 +215,6 @@ impl Registry {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.sessions
-            .lock()
-            .map_or(true, |sessions| sessions.is_empty())
-    }
-
     fn session(&self, session_id: &str) -> Result<Arc<Session>, RegistryError> {
         self.sessions
             .lock()
@@ -228,6 +222,14 @@ impl Registry {
             .get(session_id)
             .cloned()
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.sessions
+            .lock()
+            .map(|sessions| sessions.is_empty())
+            .unwrap_or(false)
     }
 
     fn broadcast_agent(&self, event: &EventFrame) {

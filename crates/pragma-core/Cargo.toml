@@ -1,0 +1,15 @@
+[package]
+name = "pragma-core"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Pure Rust host-side business logic for Pragma."
+
+[lints]
+workspace = true
+
+[dependencies]
+pragma-constants = { path = "../../packages/constants" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

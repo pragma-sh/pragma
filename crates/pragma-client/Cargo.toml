@@ -1,0 +1,22 @@
+[package]
+name = "pragma-client"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Rust client transport and frame I/O library for Pragma native clients."
+
+[lints]
+workspace = true
+
+[dependencies]
+pragma-constants = { path = "../../packages/constants" }
+pragma-protocol = { path = "../pragma-protocol" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+russh = "0.61.2"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "sync", "time"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

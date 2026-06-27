@@ -9,6 +9,10 @@ export type {
   EditorLaunchers,
   EditorLauncher,
   Scripts,
+  Protocol,
+  ProtocolRpcMethod,
+  ProtocolEventKind,
+  ProtocolErrorCode,
   ProjectScriptsConfig,
   RunScriptEntry,
   RunScriptNode,
@@ -55,6 +59,6 @@ export type {
  * The same JSON is consumed by the Rust backend (see `src/lib.rs`), so this is
  * the single source of truth across both languages.
  */
-export const constants: Constants = values;
+export const constants = values as Constants;
 
 export default constants;

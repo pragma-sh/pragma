@@ -14,7 +14,7 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
-describe("pragma-agent sdk", () => {
+describe("pragma-cli sdk", () => {
   it("runs report started with the typed agent flag", async () => {
     const { argsFile, executable } = await createArgCaptureExecutable();
 

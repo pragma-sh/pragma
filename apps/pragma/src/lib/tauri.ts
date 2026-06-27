@@ -133,7 +133,7 @@ export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("pragma:agent-status-reset", () => handler());
 }
 
-/** Warns once when `~/.local/bin` is not on PATH after installing `pragma-agent`. */
+/** Warns once when `~/.local/bin` is not on PATH after installing `pragma-cli`. */
 export function onAgentCliPathWarning(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
@@ -242,7 +242,7 @@ export function restartDaemon(): Promise<void> {
   return invoke("restart_daemon");
 }
 
-/** Returns the current contents of the daemon log file (empty if not yet created). */
+/** Returns the current contents of the server log file (empty if not yet created). */
 export function readDaemonLog(): Promise<string> {
   return invoke<string>("read_daemon_log");
 }

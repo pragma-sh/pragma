@@ -24,6 +24,7 @@ mod pty;
 mod scripts;
 mod worktrees;
 
+use pragma_client::router::RouterDb;
 use pragma_constants::{
     AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
 };
@@ -37,9 +38,9 @@ use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
 use crate::pty::PtyClient;
 
-/// Menu item id for "Restart Daemon" in the Troubleshooting submenu.
+/// Menu item id for "Restart Server" in the Troubleshooting submenu.
 const MENU_RESTART_DAEMON: &str = "troubleshooting.restart-daemon";
-/// Menu item id for "Open Daemon Logs" in the Troubleshooting submenu.
+/// Menu item id for "Open Server Logs" in the Troubleshooting submenu.
 const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The frontend (`workspace-context`) listens and runs the action so the
@@ -133,14 +134,14 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let restart_daemon = MenuItem::with_id(
         app,
         MENU_RESTART_DAEMON,
-        "Restart Daemon",
+        "Restart Server",
         true,
         None::<&str>,
     )?;
     let open_logs = MenuItem::with_id(
         app,
         MENU_OPEN_DAEMON_LOGS,
-        "Open Daemon Logs",
+        "Open Server Logs",
         true,
         None::<&str>,
     )?;
@@ -267,16 +268,16 @@ async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> 
         .map_err(|error| AppError::Daemon(format!("pty task failed: {error}")))?
 }
 
-/// Restarts the detached PTY daemon (Troubleshooting menu). Kills the running
-/// daemon and spawns a fresh build, terminating every running shell session.
+/// Restarts the persistent PTY server (Troubleshooting menu). Kills the running
+/// server and spawns a fresh build, terminating every running shell session.
 #[tauri::command]
 async fn restart_daemon(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
     let client = pty.inner().clone();
     run_pty_task(move || client.restart()).await
 }
 
-/// Returns the current contents of the daemon log file (empty if not yet
-/// created). Backs the Troubleshooting menu's "Open Daemon Logs" tab.
+/// Returns the current contents of the server log file (empty if not yet
+/// created). Backs the Troubleshooting menu's "Open Server Logs" tab.
 #[tauri::command]
 fn read_daemon_log(pty: tauri::State<'_, PtyClient>) -> AppResult<String> {
     pty.read_log()
@@ -405,6 +406,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let channel = pty::instance_channel(app.config().product_name.as_deref());
     let data_dir = pty::instance_data_dir(&app_data_dir, &channel);
     std::fs::create_dir_all(&data_dir)?;
+    app.manage(RouterDb::open(data_dir.join("router.db"))?);
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
     let pty = PtyClient::new(app_data_dir, channel);
@@ -414,7 +416,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     install_menu(app.handle())?;
     install_deep_links(app);
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
-        log::warn!("failed to install pragma-agent CLI: {error}");
+        log::warn!("failed to install pragma-cli: {error}");
     }
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");

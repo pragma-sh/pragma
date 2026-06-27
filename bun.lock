@@ -132,6 +132,21 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/github-helpers": {
+      "name": "@pragma/github-helpers",
+      "version": "0.0.0",
+      "bin": {
+        "pragma-github": "./src/cli.ts",
+      },
+      "dependencies": {
+        "octokit": "^5.0.5",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/opencode-plugin": {
       "name": "@pragma/opencode-plugin",
       "version": "0.0.0",
@@ -781,6 +796,8 @@
     "@pragma/constants": ["@pragma/constants@workspace:packages/constants"],
 
     "@pragma/cursor-plugin": ["@pragma/cursor-plugin@workspace:packages/cursor-plugin"],
+
+    "@pragma/github-helpers": ["@pragma/github-helpers@workspace:packages/github-helpers"],
 
     "@pragma/opencode-plugin": ["@pragma/opencode-plugin@workspace:packages/opencode-plugin"],
 

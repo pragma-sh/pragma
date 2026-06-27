@@ -20,12 +20,15 @@ architecture** with **consistent conventions across TypeScript and Rust**.
   - `state/` — workspace metadata state for projects, worktrees, tabs, selection, icons.
   - `lib/utils.ts` — `cn()` + small reusable helpers.
 - `apps/pragma/src-tauri/` — Rust backend (`src/lib.rs` = wiring; modules for db, pty, git, projects, worktrees, scripts, icons).
-- `crates/pragma-agent-cli/` — `pragma-agent` helper CLI that external agents call from terminals.
-- `crates/pragma-daemon/` — detached Unix-socket PTY daemon; owns shell sessions, scrollback, and runtime agent status fanout.
+- `crates/pragma-cli/` — `pragma-cli` helper CLI that external agents call from terminals.
+- `crates/pragma-client/` — Rust native-client transport, frame I/O, and SSH streamlocal bridge.
+- `crates/pragma-core/` — pure Rust host business logic boundary, no Tauri dependencies.
+- `crates/pragma-server/` — persistent Unix-socket host server; owns PTYs, scrollback, and runtime agent status fanout.
 - `crates/pragma-protocol/` — shared daemon wire frames/framing used by daemon, Tauri app, and CLI.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
-- `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-agent`.
+- `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
+- `packages/github-helpers/` — `@pragma/github-helpers`, the `pragma-github` host-side sidecar scaffold.
 - `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
@@ -42,15 +45,15 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Value used by BOTH frontend and backend          | `packages/constants` (`values.json`)           |
 | Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                         |
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                     |
-| Typed JS wrapper over the agent CLI              | `packages/sdk` (`@pragma/sdk`)                 |
+| Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                 |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)    |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                     |
 | Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                 |
 | A reusable UI primitive                          | `bunx shadcn@latest add <c>` → `components/ui` |
 | A feature component (composition of primitives)  | elsewhere under `src/`                         |
-| PTY/session ownership                            | `crates/pragma-daemon`                         |
+| PTY/session ownership                            | `crates/pragma-server`                         |
 | Daemon wire frame types/framing                  | `crates/pragma-protocol`                       |
-| External agent report CLI                        | `crates/pragma-agent-cli`                      |
+| External agent report CLI                        | `crates/pragma-cli`                            |
 | Terminal rendering/output flow                   | `apps/pragma/src/lib/terminal-manager.ts`      |
 | Project script config/headless lifecycle         | `apps/pragma/src-tauri/src/scripts.rs`         |
 | Interactive run-script planning                  | `apps/pragma/src/lib/scripts.ts`               |

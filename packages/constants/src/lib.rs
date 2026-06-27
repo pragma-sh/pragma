@@ -19,10 +19,11 @@ pub use generated::{
     EditorLauncher, EditorLaunchers, FileContents, FileDiff, GitHub, GitHubAuthStatus,
     GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus,
     KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
-    KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
-    RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScriptRunStatus, Scripts, Tab, TabKind, WindowDefaults, Worktree,
-    WorktreeChanges, WorktreeStatus,
+    KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol,
+    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, RunScriptEntry,
+    RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
+    ScriptRunStatus, Scripts, Tab, TabKind, WindowDefaults, Worktree, WorktreeChanges,
+    WorktreeStatus,
 };
 
 /// The parsed, shared constants.
@@ -60,6 +61,13 @@ mod tests {
     #[test]
     fn max_concurrent_script_commands_is_positive() {
         assert!(CONSTANTS.scripts.max_concurrent_commands.get() >= 1);
+    }
+
+    #[test]
+    fn protocol_contract_names_are_present() {
+        assert!(!CONSTANTS.protocol.rpc_methods.is_empty());
+        assert!(!CONSTANTS.protocol.events.is_empty());
+        assert!(!CONSTANTS.protocol.errors.is_empty());
     }
 
     #[test]

@@ -29,9 +29,9 @@ beforeEach(() => {
   logPath = join(workdir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(tmpEnvDir, { recursive: true });
-  // A fake `pragma-agent` on PATH that records its arguments, one call per line,
+  // A fake `pragma-cli` on PATH that records its arguments, one call per line,
   // so the test can assert exactly which statuses report.sh emits.
-  const fake = join(binDir, "pragma-agent");
+  const fake = join(binDir, "pragma-cli");
   writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
 });
 
@@ -50,10 +50,10 @@ afterEach(() => {
 
 /** The marker file report.sh keys on PRAGMA_TAB_ID inside TMPDIR. */
 function markerPath(): string {
-  return join(tmpEnvDir, `pragma-agent-claude-code-${TAB_ID}.active`);
+  return join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.active`);
 }
 
-/** Runs report.sh for one event and returns the recorded pragma-agent calls. */
+/** Runs report.sh for one event and returns the recorded pragma-cli calls. */
 function run(
   event: string,
   {
@@ -79,7 +79,7 @@ function run(
 
 /** The pid of the watcher report.sh spawned for the current tab, if any. */
 function watcherPid(): number | undefined {
-  const path = join(tmpEnvDir, `pragma-agent-claude-code-${TAB_ID}.watcher`);
+  const path = join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.watcher`);
   if (!existsSync(path)) {
     return undefined;
   }
@@ -132,7 +132,7 @@ const INTERRUPTED_TOOL = JSON.stringify({
   },
 });
 
-/** All pragma-agent invocations recorded so far, e.g. `--agent claude-code report started`. */
+/** All pragma-cli invocations recorded so far, e.g. `--agent claude-code report started`. */
 function calls(): string[] {
   if (!existsSync(logPath)) {
     return [];

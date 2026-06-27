@@ -1383,8 +1383,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return undefined;
     });
     void onAgentCliPathWarning((path) => {
-      toast.warning("pragma-agent installed, but its directory is not on PATH", {
-        description: `Add ${path} to PATH so agents can call pragma-agent.`,
+      toast.warning("pragma-cli installed, but its directory is not on PATH", {
+        description: `Add ${path} to PATH so agents can call pragma-cli.`,
       });
     }).then((unlisten) => {
       if (cancelled) {

@@ -22,7 +22,7 @@ function logTab(): Tab {
     projectId: "proj",
     worktreeId: "wt",
     kind: "log",
-    title: "Daemon Logs",
+    title: "Server Logs",
     url: null,
     filePath: null,
     diffSide: null,
@@ -39,7 +39,7 @@ beforeEach(() => {
 });
 
 describe("LogView", () => {
-  it("reads the daemon log on mount", async () => {
+  it("reads the server log on mount", async () => {
     readDaemonLogMock.mockResolvedValue("daemon started\n");
     render(<LogView tab={logTab()} />);
     await waitFor(() => expect(readDaemonLogMock).toHaveBeenCalledTimes(1));
@@ -49,7 +49,7 @@ describe("LogView", () => {
   it("shows a placeholder message for an empty log", async () => {
     readDaemonLogMock.mockResolvedValue("");
     render(<LogView tab={logTab()} />);
-    expect(await screen.findByLabelText("log")).toHaveTextContent("The daemon log is empty.");
+    expect(await screen.findByLabelText("log")).toHaveTextContent("The server log is empty.");
   });
 
   it("re-reads when Refresh is clicked", async () => {

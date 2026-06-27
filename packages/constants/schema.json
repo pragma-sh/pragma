@@ -12,6 +12,7 @@
     "editorLaunchers",
     "scripts",
     "daemon",
+    "protocol",
     "github"
   ],
   "properties": {
@@ -26,9 +27,77 @@
     "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
     "scripts": { "$ref": "#/definitions/Scripts" },
     "daemon": { "$ref": "#/definitions/Daemon" },
+    "protocol": { "$ref": "#/definitions/Protocol" },
     "github": { "$ref": "#/definitions/GitHub" }
   },
   "definitions": {
+    "ProtocolRpcMethod": {
+      "title": "ProtocolRpcMethod",
+      "description": "Top-level request/response RPC domains served by pragma-server over the Unix-socket frame protocol.",
+      "type": "string",
+      "enum": [
+        "git",
+        "filesystem",
+        "database",
+        "kanban",
+        "worktrees",
+        "projects",
+        "tabs",
+        "settings",
+        "github",
+        "ai"
+      ]
+    },
+    "ProtocolEventKind": {
+      "title": "ProtocolEventKind",
+      "description": "Snapshot-then-delta subscription event streams served by pragma-server.",
+      "type": "string",
+      "enum": [
+        "agentStatus",
+        "worktreeChanged",
+        "kanbanChanged",
+        "tabsChanged",
+        "fileChanged",
+        "echoMode"
+      ]
+    },
+    "ProtocolErrorCode": {
+      "title": "ProtocolErrorCode",
+      "description": "Stable protocol-level RPC error codes.",
+      "type": "string",
+      "enum": [
+        "invalidPayload",
+        "unsupportedMethod",
+        "notFound",
+        "staleWrite",
+        "permissionDenied",
+        "internal"
+      ]
+    },
+    "Protocol": {
+      "title": "Protocol",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared schema source of truth for the host-server RPC and subscription protocol. The frame codec itself lives in `pragma-protocol`; these values name the cross-language methods, events, and errors.",
+      "required": ["rpcMethods", "events", "errors"],
+      "properties": {
+        "rpcMethods": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolRpcMethod" },
+          "uniqueItems": true
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolEventKind" },
+          "uniqueItems": true
+        },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolErrorCode" },
+          "uniqueItems": true
+        }
+      }
+    },
     "GitHub": {
       "title": "GitHub",
       "type": "object",
@@ -398,7 +467,7 @@
     },
     "AgentReportPayload": {
       "title": "AgentReportPayload",
-      "description": "Status report sent by pragma-agent through the daemon to the app.",
+      "description": "Status report sent by pragma-cli through pragma-server to native clients.",
       "type": "object",
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "status"],

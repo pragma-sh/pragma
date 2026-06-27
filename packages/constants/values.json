@@ -3,6 +3,36 @@
   "daemon": {
     "protocolVersion": 6
   },
+  "protocol": {
+    "rpcMethods": [
+      "git",
+      "filesystem",
+      "database",
+      "kanban",
+      "worktrees",
+      "projects",
+      "tabs",
+      "settings",
+      "github",
+      "ai"
+    ],
+    "events": [
+      "agentStatus",
+      "worktreeChanged",
+      "kanbanChanged",
+      "tabsChanged",
+      "fileChanged",
+      "echoMode"
+    ],
+    "errors": [
+      "invalidPayload",
+      "unsupportedMethod",
+      "notFound",
+      "staleWrite",
+      "permissionDenied",
+      "internal"
+    ]
+  },
   "scripts": {
     "maxConcurrentCommands": 4
   },

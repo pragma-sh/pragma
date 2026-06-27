@@ -2,9 +2,11 @@
 resolver = "2"
 members = [
   "apps/pragma/src-tauri",
-  "crates/pragma-agent-cli",
-  "crates/pragma-daemon",
+  "crates/pragma-cli",
+  "crates/pragma-client",
+  "crates/pragma-core",
   "crates/pragma-protocol",
+  "crates/pragma-server",
   "packages/constants",
 ]
 

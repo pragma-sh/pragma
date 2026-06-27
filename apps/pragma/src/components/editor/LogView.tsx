@@ -37,7 +37,7 @@ export function LogView({ tab }: { tab: Tab }) {
       try {
         const doc = await readDaemonLog();
         if (!cancelled) {
-          setState({ kind: "ready", doc: doc || "The daemon log is empty." });
+          setState({ kind: "ready", doc: doc || "The server log is empty." });
         }
       } catch (cause) {
         if (!cancelled) {

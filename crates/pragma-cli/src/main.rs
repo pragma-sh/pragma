@@ -6,13 +6,10 @@ use pragma_constants::CONSTANTS;
 use pragma_protocol::{read_json_frame, write_json_frame, RequestFrame, RequestKind, ServerFrame};
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "pragma-agent",
-    about = "Report external agent status to Pragma"
-)]
+#[command(name = "pragma-cli", about = "Report external agent status to Pragma")]
 struct Cli {
     /// Stable agent id from the agent config. Must be passed before the
-    /// subcommand (`pragma-agent --agent <id> report ...`). Not a clap `global`
+    /// subcommand (`pragma-cli --agent <id> report ...`). Not a clap `global`
     /// arg: clap globals cannot be required, and marking a required arg global
     /// makes clap re-demand it at every subcommand level even when it is given.
     #[arg(long)]
@@ -64,14 +61,14 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("pragma-agent: {error}");
+            eprintln!("pragma-cli: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
 fn run(cli: Cli) -> Result<(), String> {
-    let socket = env_required("PRAGMA_DAEMON_SOCKET")?;
+    let socket = env_any_required(["PRAGMA_SERVER_SOCKET", "PRAGMA_DAEMON_SOCKET"])?;
     let tab_id = env_required("PRAGMA_TAB_ID")?;
     let (status, attention_kind, worktree_override) = match cli.command {
         Command::Report { report } => match report {
@@ -105,22 +102,24 @@ fn run(cli: Cli) -> Result<(), String> {
         cols: None,
         rows: None,
         data: Some(payload.to_string()),
+        rpc: None,
+        subscription: None,
     };
     let mut stream = UnixStream::connect(&socket)
-        .map_err(|error| format!("failed to connect to daemon socket {socket}: {error}"))?;
+        .map_err(|error| format!("failed to connect to server socket {socket}: {error}"))?;
     let expected = CONSTANTS.daemon.protocol_version.get();
     match read_json_frame::<ServerFrame>(&mut stream) {
         Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {}
         Ok(ServerFrame::Hello(hello)) => {
             return Err(format!(
-                "daemon protocol mismatch: expected {expected}, got {}",
+                "server protocol mismatch: expected {expected}, got {}",
                 hello.protocol_version
             ));
         }
-        Ok(ServerFrame::Response(_) | ServerFrame::Event(_)) => {
-            return Err("daemon did not send hello frame".to_string());
+        Ok(ServerFrame::Response(_) | ServerFrame::Event(_) | ServerFrame::Rpc(_)) => {
+            return Err("server did not send hello frame".to_string());
         }
-        Err(error) => return Err(format!("failed to read daemon hello: {error}")),
+        Err(error) => return Err(format!("failed to read server hello: {error}")),
     }
     write_json_frame(&mut stream, &frame)
         .map_err(|error| format!("failed to report status: {error}"))
@@ -131,6 +130,13 @@ fn env_required(name: &str) -> Result<String, String> {
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("missing {name}"))
+}
+
+fn env_any_required<const N: usize>(names: [&str; N]) -> Result<String, String> {
+    names
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .ok_or_else(|| format!("missing one of {}", names.join(", ")))
 }
 
 #[cfg(test)]
@@ -144,7 +150,7 @@ mod tests {
     /// and **every** invocation failed even with `--agent` provided.
     #[test]
     fn agent_flag_is_accepted_before_subcommand() {
-        let cli = Cli::try_parse_from(["pragma-agent", "--agent", "mock", "report", "started"])
+        let cli = Cli::try_parse_from(["pragma-cli", "--agent", "mock", "report", "started"])
             .expect("--agent before the subcommand should parse");
         assert_eq!(cli.agent, "mock");
         assert!(matches!(
@@ -158,7 +164,7 @@ mod tests {
     #[test]
     fn attention_accepts_a_kind() {
         let cli = Cli::try_parse_from([
-            "pragma-agent",
+            "pragma-cli",
             "--agent",
             "mock",
             "report",
@@ -180,7 +186,7 @@ mod tests {
 
     #[test]
     fn attention_kind_is_optional() {
-        let cli = Cli::try_parse_from(["pragma-agent", "--agent", "mock", "report", "attention"])
+        let cli = Cli::try_parse_from(["pragma-cli", "--agent", "mock", "report", "attention"])
             .expect("attention without a kind should parse");
         assert!(matches!(
             cli.command,
@@ -193,7 +199,7 @@ mod tests {
     #[test]
     fn cleared_accepts_optional_worktree_override() {
         let cli = Cli::try_parse_from([
-            "pragma-agent",
+            "pragma-cli",
             "--agent",
             "mock",
             "report",

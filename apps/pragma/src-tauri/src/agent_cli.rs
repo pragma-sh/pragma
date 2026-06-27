@@ -8,12 +8,12 @@ use crate::pty::{cargo_executable, sidecar_executable, workspace_root};
 
 const PATH_WARNING_EVENT: &str = "pragma:agent-cli-path-warning";
 
-/// Ensures the `pragma-agent` helper is available from `~/.local/bin`.
+/// Ensures the `pragma-cli` helper is available from `~/.local/bin`.
 pub fn ensure_installed(app: &AppHandle) -> AppResult<()> {
     let home = app.path().home_dir()?;
     let bin_dir = home.join(".local/bin");
     std::fs::create_dir_all(&bin_dir)?;
-    let destination = bin_dir.join("pragma-agent");
+    let destination = bin_dir.join("pragma-cli");
     let source = agent_source()?;
     copy_if_changed(&source, &destination)?;
     if !path_contains(&bin_dir) {
@@ -25,18 +25,16 @@ pub fn ensure_installed(app: &AppHandle) -> AppResult<()> {
 fn agent_source() -> AppResult<PathBuf> {
     if cfg!(debug_assertions) {
         let status = Command::new(cargo_executable())
-            .args(["build", "-p", "pragma-agent-cli"])
+            .args(["build", "-p", "pragma-cli"])
             .current_dir(workspace_root())
             .stdin(Stdio::null())
             .status()?;
         if !status.success() {
-            return Err(AppError::Daemon(
-                "failed to build pragma-agent CLI".to_string(),
-            ));
+            return Err(AppError::Daemon("failed to build pragma-cli".to_string()));
         }
-        Ok(workspace_root().join("target/debug/pragma-agent"))
+        Ok(workspace_root().join("target/debug/pragma-cli"))
     } else {
-        Ok(sidecar_executable("pragma-agent"))
+        Ok(sidecar_executable("pragma-cli"))
     }
 }
 

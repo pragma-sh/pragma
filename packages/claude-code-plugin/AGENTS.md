@@ -4,7 +4,7 @@ Static Claude Code plugin that reports agent status into Pragma. Unlike the open
 plugin, **Claude Code has no in-process JS plugin API** — its only live extension point
 is shell-command hooks — so this is the **CLI route, not the SDK**: a real Claude Code
 plugin (`.claude-plugin/plugin.json` + `hooks/hooks.json`) where every hook shells out
-to a single bundled script (`hooks/report.sh`) that calls `pragma-agent`. (The TS here
+to a single bundled script (`hooks/report.sh`) that calls `pragma-cli`. (The TS here
 is test-only — there is no TS plugin runtime.)
 
 ## File map
@@ -16,8 +16,8 @@ packages/claude-code-plugin/
 │   └── marketplace.json     # For `claude plugin marketplace add`
 ├── hooks/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
-│   └── report.sh            # Event → pragma-agent translator (the actual logic)
-├── test/report.test.ts      # Drives report.sh with a fake pragma-agent on PATH
+│   └── report.sh            # Event → pragma-cli translator (the actual logic)
+├── test/report.test.ts      # Drives report.sh with a fake pragma-cli on PATH
 └── pragma/agents/claude-code/config.json  # Bundled launcher config + static models
 ```
 
@@ -74,7 +74,7 @@ response, only flipping back at `Stop`. That stale attention is the perceived la
 "needs attention" and "in progress".
 
 `PostToolUse` fires the moment the approved tool finishes, so we use it to re-assert
-`running` (`report.sh running` → `pragma-agent report started`), dropping the tab back to
+`running` (`report.sh running` → `pragma-cli report started`), dropping the tab back to
 "in progress" at once. It is **guarded on the turn marker** — a stray `PostToolUse`
 outside a turn reports nothing — and deliberately leaves the marker and abort watcher
 alone (same turn), so it re-asserts running on every tool without disturbing cancel
@@ -84,7 +84,7 @@ visible.
 
 `attention` reports a **generic** attention with no `--kind`: `PermissionRequest` gives no
 structured question-vs-command signal, so Pragma shows a neutral "needs attention"
-indicator. (`--kind` is optional in `pragma-agent`; opencode, which does know the kind,
+indicator. (`--kind` is optional in `pragma-cli`; opencode, which does know the kind,
 still passes `question`/`command`.)
 
 **The `attention` report is guarded on the turn marker** (`[ -f "$marker" ] && report
@@ -177,8 +177,8 @@ outside Pragma.
 silently no-ops in every non-Pragma Claude session (it's installed at user scope, so it
 runs everywhere). Inside Pragma the terminal injects `PRAGMA_DAEMON_SOCKET`,
 `PRAGMA_TAB_ID`, and `PRAGMA_WORKTREE_ID`; `report.sh` keys its marker on
-`PRAGMA_TAB_ID`, and `pragma-agent` (on `~/.local/bin`, installed by the app on startup)
-reads all three. Every `pragma-agent` call is wrapped `… >/dev/null 2>&1 || true` so a
+`PRAGMA_TAB_ID`, and `pragma-cli` (on `~/.local/bin`, installed by the app on startup)
+reads all three. Every `pragma-cli` call is wrapped `… >/dev/null 2>&1 || true` so a
 missing CLI or down daemon can never disrupt a Claude session.
 
 ## Agent launcher config

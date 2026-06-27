@@ -852,7 +852,7 @@ mod tests {
                 &project.id,
                 &worktrees[0].id,
                 TabKind::Log,
-                Some("Daemon Logs".to_string()),
+                Some("Server Logs".to_string()),
                 None,
                 None,
                 None,

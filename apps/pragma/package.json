@@ -13,9 +13,9 @@
     "test": "vitest run",
     "lint": "oxlint .",
     "tauri": "tauri",
-    "sidecar:daemon": "bash src-tauri/scripts/stage-daemon-sidecar.sh",
-    "sidecar:daemon:release": "bash src-tauri/scripts/stage-daemon-sidecar.sh --release",
-    "tauri:dev": "bun run sidecar:daemon && tauri dev --config src-tauri/tauri.dev.conf.json",
+    "sidecar:server": "bash src-tauri/scripts/stage-daemon-sidecar.sh",
+    "sidecar:server:release": "bash src-tauri/scripts/stage-daemon-sidecar.sh --release",
+    "tauri:dev": "bun run sidecar:server && tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build"
   },
   "dependencies": {

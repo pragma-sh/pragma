@@ -6,11 +6,11 @@
 
 ## What is Pragma?
 
-Pragma is a **macOS + Linux desktop app** (Tauri v2) that hosts AI coding agents in
-persistent, worktree-scoped terminal sessions. It manages git worktrees as first-class
-workspaces, proxies PTY I/O through a detached Unix-socket daemon, and surfaces agent
-status (running / attention / done) in real time. Plugins for opencode and Claude Code
-report their status back through the `pragma-agent` CLI.
+Pragma is a **macOS + Linux desktop app** (Tauri v2) moving toward a host-server + thin
+native-client architecture. The host runs persistent, worktree-scoped terminal sessions
+through `pragma-server`; native clients connect over a local Unix socket or an SSH
+streamlocal bridge. Plugins for opencode, Claude Code, and Cursor report status through
+the `pragma-cli` helper.
 
 ## North star: clean, reusable, consistent
 
@@ -31,8 +31,8 @@ across TypeScript and Rust**. When you write code:
   propose and make it — restructuring for clarity is welcome, not discouraged.
 - **Plugins stay out of core — ask first.** A plugin/agent package (`packages/*-plugin`)
   is **self-contained data plus its own bundled assets**. It must **not** add or modify
-  code in pragma core (`apps/pragma`, including `src-tauri`), the daemon
-  (`crates/pragma-daemon`), the UI, the CLI (`crates/pragma-agent-cli`), or the SDK
+  code in pragma core (`apps/pragma`, including `src-tauri`), the server
+  (`crates/pragma-server`), the UI, the CLI (`crates/pragma-cli`), or the SDK
   (`packages/sdk`) **without explicit owner permission**. A plugin **installs itself
   through its host tool's own plugin mechanism**, never through per-plugin Pragma code.
   The only Pragma-side install is the **generic** launcher step
@@ -91,18 +91,22 @@ than no guide.
 ├── apps/
 │   └── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
 ├── crates/
-│   ├── pragma-agent-cli/        # `pragma-agent` CLI → see crates/pragma-agent-cli/AGENTS.md
-│   ├── pragma-daemon/           # Detached Unix-socket PTY daemon → see crates/pragma-daemon/AGENTS.md
-│   └── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
+│   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
+│   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
+│   ├── pragma-core/             # Host business logic boundary → see crates/pragma-core/AGENTS.md
+│   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
+│   └── pragma-server/           # Persistent Unix-socket host server → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
+│   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   └── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
-│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-agent`
+│   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-cli`
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
+│   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -119,14 +123,15 @@ than no guide.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
-- A typed JS wrapper over the bundled agent CLI → `packages/sdk` (`@pragma/sdk`).
+- A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
 - GitHub REST/GraphQL → `apps/pragma/src/lib/github.ts` only (never instantiate Octokit
   in components). See `apps/pragma/AGENTS.md`.
-- PTY/session business logic → `crates/pragma-daemon`; wire framing → `crates/pragma-protocol`;
-  agent status CLI → `crates/pragma-agent-cli`. The Tauri app only proxies over the socket.
+- PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH bridge →
+  `crates/pragma-client`; host business logic → `crates/pragma-core`; wire framing →
+  `crates/pragma-protocol`; CLI/status reporting → `crates/pragma-cli`.
 
 ## Common commands
 
@@ -152,8 +157,8 @@ bun run rust:test          # cargo test --workspace
 bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
-cargo run -p pragma-daemon # Run the detached PTY daemon directly for debugging
-cargo run -p pragma-agent-cli -- --agent dev report started # Manually send an agent report (inside a Pragma terminal env)
+cargo run -p pragma-server # Run the persistent server directly for debugging
+cargo run -p pragma-cli -- --agent dev report started # Manually send an agent report (inside a Pragma terminal env)
 ```
 
 ## Code standards (consistent across TypeScript & Rust)

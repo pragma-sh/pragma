@@ -1,8 +1,8 @@
 # apps/pragma — Tauri Desktop App
 
-The Pragma desktop app: React frontend + Rust (Tauri) backend. Manages git worktrees,
-proxies PTY sessions through the daemon, renders terminals via xterm, and surfaces agent
-status. See the root `AGENTS.md` for repo-wide rules.
+The Pragma desktop app: React frontend + Rust (Tauri) backend. It is being shrunk into
+a thin native client: presentation, native windows/menus/deep links, and client-side
+PTY channel forwarding live here; host-owned state moves behind `pragma-server`.
 
 ## File map
 
@@ -40,14 +40,14 @@ apps/pragma/
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # SQLite migrations + typed CRUD (v8 = kanban_cards)
     ├── src/kanban.rs            # Tauri commands for the prompt Kanban board (CRUD + move)
-    ├── src/pty.rs               # Daemon client + PTY command proxying + instance channel
+    ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
     ├── src/github.rs            # GitHub auth (0600 token file, OAuth device flow, gh CLI)
     ├── src/fs.rs                # Worktree-scoped, path-safe filesystem commands
     ├── src/main.rs              # Thin entrypoint
-    ├── tauri.conf.json          # Window/bundle config; bundles daemon via externalBin
+    ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
     ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
-    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages daemon, pragma-agent, pragma-ai, bundled agent configs
+    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, sidecars, bundled agent configs
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
     ├── resources/pragma/agents/ # Staged bundled agent configs (git-ignored)
     ├── icons/                   # Production app icons
@@ -163,7 +163,7 @@ pre-TUI gates / input semantics owned by that agent config; core must not hard-c
 per-agent keystrokes. Bundled configs live in
 `apps/pragma/src-tauri/resources/pragma/agents/` (staged by
 `scripts/stage-daemon-sidecar.sh`) and are installed/updated into `~/.pragma/agents`
-on app startup. `pragma-agent` is installed/updated to `~/.local/bin` on startup; the
+on app startup. `pragma-cli` is installed/updated to `~/.local/bin` on startup; the
 app emits a UI warning if that directory is not on `$PATH`.
 
 `models` may be `static` or `command` backed. Pragma resolves model lists lazily when the
@@ -176,22 +176,22 @@ model has reasoning entries, the model-only choice is shown as Auto reasoning.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
-## Daemon sidecar + instance channel
+## Server sidecar + instance channel
 
-See `crates/pragma-daemon/AGENTS.md` for the daemon's internals. App-side notes:
+See `crates/pragma-server/AGENTS.md` and `crates/pragma-client/AGENTS.md` for the
+server/client internals. App-side notes:
 
-**The daemon ships as a Tauri sidecar.** A release app launches it from beside its own
-executable (`daemon_executable()` in `src-tauri/src/pty.rs` =
-`current_exe().parent()/pragma-daemon`); a debug app spawns it via
-`cargo run -p pragma-daemon`. The sidecar is staged by
-`scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-daemon` + copy with host
+**The server ships as a Tauri sidecar.** A release app launches it from beside its own
+executable (`pragma-client::sidecar_executable("pragma-server")`); a debug app spawns it via
+`cargo run -p pragma-server`. The sidecar is staged by
+`scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-server` + copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook
 runs it before `cargo check` because Tauri validates `externalBin` paths during
-compilation. The daemon is spawned directly with `std::process::Command`, **not** the
-shell plugin. `pragma-agent`, `pragma-ai`, and the bundled agent launcher configs
-(`resources/pragma/agents/`) are staged by the same script; plugin JS itself is **not**
-bundled by Pragma. `binaries/` is git-ignored.
+compilation. The server is spawned directly with `std::process::Command`, **not** the
+shell plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and the bundled agent launcher
+configs (`resources/pragma/agents/`) are staged by the same script; plugin JS itself is
+**not** bundled by Pragma. `binaries/` is git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build
@@ -204,18 +204,19 @@ release-built dev app keeps its own per-worktree instance.
 - **Data dir:** `instance_data_dir` returns the legacy app-data root verbatim for prod
   (no relocation) and `app_data_dir/<channel>` for dev. `lib.rs` `setup_app` resolves
   the channel once, opens the DB and `TokenStore` under that dir.
-- **Daemon dir:** same channel; on Linux it's `$XDG_RUNTIME_DIR/<channel>`, elsewhere
-  `<app_data_dir>/<channel>`. The app hands the channel to the daemon via
-  `PRAGMA_DAEMON_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars.
+- **Server dir:** same channel; on Linux it's `$XDG_RUNTIME_DIR/<channel>`, elsewhere
+  `<app_data_dir>/<channel>`. The app hands the channel to the server via
+  `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
+  `daemon.sock` for SSH streamlocal compatibility.
 
 ## Native menubar + Troubleshooting menu
 
 Built once in `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` plus a
-`Troubleshooting` submenu with **Restart Daemon** and **Open Daemon Logs**. Menu clicks
+`Troubleshooting` submenu with **Restart Server** and **Open Server Logs**. Menu clicks
 are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them via
-`onMenuAction` in `lib/tauri.ts`. **Restart Daemon** calls `restart_daemon`
+`onMenuAction` in `lib/tauri.ts`. **Restart Server** calls `restart_daemon`
 (`PtyClient::restart` = kill + respawn + confirm reachable) with a `sonner` toast.
-**Open Daemon Logs** opens the `log` tab; logs load through `read_daemon_log`
+**Open Server Logs** opens the `log` tab; logs load through `read_daemon_log`
 (`PtyClient::read_log`, reading `log_path()` — beside the socket, not app data). Add a
 menu action: id const + item in `install_menu`, `MenuAction` variant +
 branch in `handleMenuAction`.

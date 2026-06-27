@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "bun run dev",
-    "beforeBuildCommand": "bun run build && bun run sidecar:daemon:release"
+    "beforeBuildCommand": "bun run build && bun run sidecar:server:release"
   },
   "app": {
     "windows": [
@@ -37,7 +37,12 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "deb", "rpm", "appimage"],
-    "externalBin": ["binaries/pragma-daemon", "binaries/pragma-agent", "binaries/pragma-ai"],
+    "externalBin": [
+      "binaries/pragma-server",
+      "binaries/pragma-cli",
+      "binaries/pragma-ai",
+      "binaries/pragma-github"
+    ],
     "resources": ["resources/**/*"],
     "icon": [
       "icons/32x32.png",

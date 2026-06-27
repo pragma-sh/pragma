@@ -21,7 +21,7 @@ beforeEach(() => {
   logPath = join(workdir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(tmpEnvDir, { recursive: true });
-  const fake = join(binDir, "pragma-agent");
+  const fake = join(binDir, "pragma-cli");
   writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
 });
 
@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 function markerPath(): string {
-  return join(tmpEnvDir, `pragma-agent-cursor-${TAB_ID}.active`);
+  return join(tmpEnvDir, `pragma-cli-cursor-${TAB_ID}.active`);
 }
 
 function run(event: string, { socket = true }: { socket?: boolean } = {}): string[] {

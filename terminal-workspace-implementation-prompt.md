@@ -17,7 +17,7 @@ Business logic belongs in Rust. The frontend is React + shadcn/ui + motion/react
 ## Non-Negotiable Architecture
 
 1. Do not run PTYs in the Tauri app process.
-2. Add a standalone `pragma-daemon` binary crate that owns all PTY sessions.
+2. Add a standalone `pragma-server` binary crate that owns all PTY sessions.
 3. The Tauri app talks to the daemon over a Unix domain socket using length-prefixed JSON frames.
 4. The daemon must be launched detached, not as a Tauri sidecar.
 5. On app exit, close the socket only. Do not kill daemon sessions.
@@ -178,7 +178,7 @@ Serialize mutating git operations per project with a mutex.
 
 ## Daemon Crate
 
-Create `crates/pragma-daemon`.
+Create `crates/pragma-server`.
 
 Responsibilities:
 
