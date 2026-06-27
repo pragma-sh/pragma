@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma/constants";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,15 @@ const dispatchMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   fileDiff: (...args: unknown[]) => fileDiffMock(...args),
+}));
+
+// Capture the live-reload listener so tests can simulate watcher events without
+// going through the Tauri channel.
+let fileChangeListener: ((change: FileChange) => void) | null = null;
+vi.mock("@/lib/file-watch", () => ({
+  useWorktreeFileChange: (_worktreeId: string, onChange: (change: FileChange) => void) => {
+    fileChangeListener = onChange;
+  },
 }));
 vi.mock("@/lib/terminal-manager", () => ({ TERMINAL_FONT_FAMILY: "monospace" }));
 vi.mock("@/components/editor/codemirror-language", () => ({
@@ -46,6 +55,7 @@ function diffTab(): Tab {
 
 afterEach(cleanup);
 beforeEach(() => {
+  fileChangeListener = null;
   fileDiffMock.mockReset();
   mergeViewMock.mockReset();
   loadLanguageExtensionMock.mockReset();
@@ -80,6 +90,37 @@ describe("DiffView", () => {
 
     await waitFor(() => expect(loadLanguageExtensionMock).toHaveBeenCalledWith("src/app.ts"));
     await waitFor(() => expect(dispatchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
+  });
+
+  it("recomputes the diff when the watched file changes on disk", async () => {
+    fileDiffMock.mockResolvedValue({
+      path: "src/app.ts",
+      oldText: "a",
+      newText: "b",
+      binary: false,
+    });
+    render(<DiffView tab={diffTab()} />);
+    await waitFor(() => expect(fileDiffMock).toHaveBeenCalledTimes(1));
+
+    fileChangeListener?.({ path: "src/app.ts", kind: "modified" });
+
+    await waitFor(() => expect(fileDiffMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores changes to other files", async () => {
+    fileDiffMock.mockResolvedValue({
+      path: "src/app.ts",
+      oldText: "a",
+      newText: "b",
+      binary: false,
+    });
+    render(<DiffView tab={diffTab()} />);
+    await waitFor(() => expect(fileDiffMock).toHaveBeenCalledTimes(1));
+
+    fileChangeListener?.({ path: "src/other.ts", kind: "modified" });
+
+    await Promise.resolve();
+    expect(fileDiffMock).toHaveBeenCalledTimes(1);
   });
 
   it("renders a placeholder for binary diffs without a MergeView", async () => {

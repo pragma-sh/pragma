@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
-use pragma_protocol::{read_frame, EventFrame, Frame, ServerFrame};
+use pragma_protocol::{read_frame, EventFrame, Frame, ProtocolEventKind, ServerFrame};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
@@ -77,6 +77,25 @@ impl PtyClient {
     ) -> AppResult<()> {
         let stream = self.inner.attach_stream(session_id, cols, rows)?;
         forward_stream(stream, on_event);
+        Ok(())
+    }
+
+    /// Opens a live filesystem-change subscription for a worktree and forwards
+    /// each [`FileChange`](pragma_constants::FileChange) to the webview as a JSON
+    /// channel message. `root` is the trusted absolute worktree path resolved by
+    /// the caller — it is never accepted from the frontend.
+    pub fn watch_files(
+        &self,
+        worktree_id: String,
+        root: String,
+        on_event: Channel<InvokeResponseBody>,
+    ) -> AppResult<()> {
+        let stream = self.inner.subscribe_stream(
+            ProtocolEventKind::FileChanged,
+            Some(worktree_id),
+            Some(root),
+        )?;
+        forward_file_stream(stream, on_event);
         Ok(())
     }
 
@@ -182,6 +201,32 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                     )
                     | Err(_) => {}
                 },
+            }
+        }
+        let _ = stream.shutdown(Shutdown::Both);
+    });
+}
+
+/// Forwards a worktree file-change subscription stream to the webview. Each
+/// `fileChanged` delta carries `{ worktreeId, change }`; only the inner
+/// `change` ([`FileChange`](pragma_constants::FileChange)) is relayed as a JSON
+/// channel message. The initial empty snapshot and any other frame are ignored.
+fn forward_file_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>) {
+    thread::spawn(move || {
+        while let Ok(frame) = read_frame(&mut stream) {
+            let Frame::Json(bytes) = frame else {
+                continue;
+            };
+            if let Ok(ServerFrame::Event(EventFrame::Delta { payload, .. })) =
+                serde_json::from_slice::<ServerFrame>(&bytes)
+            {
+                let change = payload.get("change").cloned().unwrap_or(payload);
+                let Ok(json) = serde_json::to_string(&change) else {
+                    continue;
+                };
+                if on_event.send(InvokeResponseBody::Json(json)).is_err() {
+                    break;
+                }
             }
         }
         let _ = stream.shutdown(Shutdown::Both);

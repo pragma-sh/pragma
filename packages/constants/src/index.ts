@@ -35,6 +35,8 @@ export type {
   ChangedFile,
   WorktreeChanges,
   FileDiff,
+  FileChange,
+  FileChangeKind,
   FileContents,
   ProjectIcon,
   KanbanPromptStatus,

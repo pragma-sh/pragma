@@ -11,6 +11,7 @@ use thiserror::Error;
 use pragma_constants::ProtocolRpcMethod;
 
 pub mod rpc;
+pub mod watcher;
 
 /// Result type for host-side core operations.
 pub type CoreResult<T> = Result<T, CoreError>;

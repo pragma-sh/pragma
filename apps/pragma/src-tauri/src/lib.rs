@@ -262,6 +262,21 @@ async fn mark_agents_seen(pty: tauri::State<'_, PtyClient>, tab_id: String) -> A
     run_pty_task(move || client.mark_agents_seen(tab_id)).await
 }
 
+/// Opens a live filesystem-change subscription for a worktree, streaming each
+/// change to the webview over `on_event`. The worktree's trusted absolute root
+/// is resolved from the DB here — no absolute path crosses IPC.
+#[tauri::command]
+async fn watch_worktree_files(
+    db: tauri::State<'_, Db>,
+    pty: tauri::State<'_, PtyClient>,
+    worktree_id: String,
+    on_event: Channel<InvokeResponseBody>,
+) -> AppResult<()> {
+    let root = db.worktree(&worktree_id)?.path;
+    let client = pty.inner().clone();
+    run_pty_task(move || client.watch_files(worktree_id, root, on_event)).await
+}
+
 async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> AppResult<()> {
     tauri::async_runtime::spawn_blocking(task)
         .await
@@ -456,6 +471,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_kill_for_path,
+            watch_worktree_files,
             mark_agents_seen,
             take_pending_deep_link,
             restart_daemon,

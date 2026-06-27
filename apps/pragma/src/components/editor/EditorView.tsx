@@ -9,8 +9,9 @@ import { toast } from "sonner";
 import { loadLanguageExtension } from "@/components/editor/codemirror-language";
 import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 import { Button } from "@/components/ui/button";
+import { useWorktreeFileChange } from "@/lib/file-watch";
 import { readFile, writeFile } from "@/lib/tauri";
-import { disposeTab, setTabDirty, setTabDoc } from "@/state/editor-dirty-store";
+import { disposeTab, isTabDirty, setTabDirty, setTabDoc } from "@/state/editor-dirty-store";
 
 type LoadState =
   | { kind: "loading" }
@@ -72,6 +73,15 @@ export function EditorView({ tab }: { tab: Tab }) {
   }, [tabId, worktreeId, filePath]);
 
   useEffect(() => load(), [load]);
+
+  // Live preview: when the server's worktree watcher reports the open file
+  // changed on disk (e.g. an agent edits it), reload it — unless the user has
+  // unsaved edits, in which case their in-progress work must not be clobbered.
+  useWorktreeFileChange(worktreeId, (change) => {
+    if (change.path === filePath && !isTabDirty(tabId)) {
+      load();
+    }
+  });
 
   // Resolve a language grammar lazily by filename; plain text on no match.
   useEffect(() => {

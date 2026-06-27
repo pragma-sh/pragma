@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::CONSTANTS;
 use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, RequestFrame, RequestKind, ServerFrame,
+    read_frame, read_json_frame, write_json_frame, ProtocolEventKind, RequestFrame, RequestKind,
+    ServerFrame, SubscriptionRequest,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -157,6 +158,20 @@ impl PragmaClient {
         rows: u16,
     ) -> ClientResult<UnixStream> {
         let request = request_attach(session_id, cols, rows);
+        self.open_event_stream(&request)
+    }
+
+    /// Opens a snapshot-then-delta subscription and returns the event stream
+    /// positioned after the request's success response. For `FileChanged`,
+    /// `worktree_id` labels the deltas and `cwd` is the trusted absolute root
+    /// the server watches.
+    pub fn subscribe_stream(
+        &self,
+        event: ProtocolEventKind,
+        worktree_id: Option<String>,
+        cwd: Option<String>,
+    ) -> ClientResult<UnixStream> {
+        let request = request_subscribe(event, worktree_id, cwd);
         self.open_event_stream(&request)
     }
 
@@ -637,6 +652,30 @@ pub fn request_subscribe_agents() -> RequestFrame {
         None,
         None,
     )
+}
+
+/// Builds a `Subscribe` request frame for a snapshot-then-delta event stream.
+#[must_use]
+pub fn request_subscribe(
+    event: ProtocolEventKind,
+    worktree_id: Option<String>,
+    cwd: Option<String>,
+) -> RequestFrame {
+    RequestFrame {
+        request_id: Uuid::new_v4().to_string(),
+        kind: RequestKind::Subscribe,
+        session_id: None,
+        worktree_id,
+        cwd,
+        cols: None,
+        rows: None,
+        data: None,
+        rpc: None,
+        subscription: Some(SubscriptionRequest {
+            event,
+            cursor: None,
+        }),
+    }
 }
 
 fn request_frame(

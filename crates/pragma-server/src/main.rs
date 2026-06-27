@@ -16,7 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use daemonize::Daemonize;
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ProtocolEventKind, CONSTANTS};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
@@ -264,7 +264,7 @@ fn handle_request(
                 })),
             }
         }
-        RequestKind::Subscribe => Ok(Some(subscription_snapshot(request)?)),
+        RequestKind::Subscribe => Ok(Some(subscription_snapshot(request, registry)?)),
     }
 }
 
@@ -288,12 +288,27 @@ impl std::fmt::Display for HandledRequestError {
     }
 }
 
-fn subscription_snapshot(request: RequestFrame) -> Result<EventStream, HandledRequestError> {
+fn subscription_snapshot(
+    request: RequestFrame,
+    registry: &Registry,
+) -> Result<EventStream, HandledRequestError> {
     let Some(subscription) = request.subscription else {
         return Err(HandledRequestError::Request(
             "missing subscription payload".to_string(),
         ));
     };
+    // The filesystem-change stream is backed by a live per-worktree watcher; it
+    // needs the worktree id (for delta labeling) and the trusted absolute root
+    // (`cwd`) to watch. Other event kinds are not wired to a source yet and
+    // return an empty, never-updating snapshot.
+    if matches!(subscription.event, ProtocolEventKind::FileChanged) {
+        let worktree_id = required(request.worktree_id, "worktreeId")?;
+        let root = required(request.cwd, "cwd")?;
+        let (scrollback, rx) = registry
+            .subscribe_files(worktree_id, &root)
+            .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
     let (_tx, rx) = std::sync::mpsc::channel();
     Ok(EventStream {
         scrollback: vec![EventFrame::Snapshot {

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { FileTree, type FileTreeController } from "@/components/right-sidebar/FileTreeNode";
 import { Button } from "@/components/ui/button";
+import { useWorktreeFileChange } from "@/lib/file-watch";
 import { basename, dirname, joinPath } from "@/lib/path";
 import { createFile, createFolder, deleteFile, renameFile } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
@@ -50,6 +51,14 @@ export function FilesTab() {
   const bumpNonce = useCallback((path: string) => {
     setNonces((previous) => ({ ...previous, [path]: (previous[path] ?? 0) + 1 }));
   }, []);
+
+  // Reflect external filesystem changes (e.g. a file created from the terminal
+  // or by an agent) by refreshing the directory that contains each change. Our
+  // own create/delete/rename actions already bump the relevant nonce, so the
+  // duplicate watcher event is a cheap, idempotent re-list.
+  useWorktreeFileChange(worktreeId ?? "", (change) => {
+    bumpNonce(dirname(change.path));
+  });
 
   /**
    * Deletes a file (or empty directory) immediately. Git tracks the worktree so

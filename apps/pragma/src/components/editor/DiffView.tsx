@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Tab } from "@pragma/constants";
 
 import { MergeDiff } from "@/components/editor/MergeDiff";
+import { useWorktreeFileChange } from "@/lib/file-watch";
 import { fileDiff } from "@/lib/tauri";
 
 type LoadState =
@@ -24,6 +25,14 @@ function messageFor(cause: unknown): string {
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  // Live preview: recompute the diff whenever the watched file changes on disk.
+  useWorktreeFileChange(worktreeId, (change) => {
+    if (change.path === filePath) {
+      setReloadNonce((nonce) => nonce + 1);
+    }
+  });
 
   useEffect(() => {
     if (!filePath || !diffSide) {
@@ -54,7 +63,7 @@ export function DiffView({ tab }: { tab: Tab }) {
     return () => {
       cancelled = true;
     };
-  }, [tabId, worktreeId, filePath, diffSide]);
+  }, [tabId, worktreeId, filePath, diffSide, reloadNonce]);
 
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;

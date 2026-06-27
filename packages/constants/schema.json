@@ -625,6 +625,26 @@
         }
       }
     },
+    "FileChangeKind": {
+      "title": "FileChangeKind",
+      "description": "How a watched entry changed on disk, as reported by the pragma-server worktree filesystem watcher.",
+      "type": "string",
+      "enum": ["created", "modified", "removed"]
+    },
+    "FileChange": {
+      "title": "FileChange",
+      "description": "A single filesystem change delivered over a `fileChanged` subscription by the pragma-server worktree watcher. Drives live file previews on the client.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path (forward slashes) of the changed entry."
+        },
+        "kind": { "$ref": "#/definitions/FileChangeKind" }
+      }
+    },
     "FileContents": {
       "title": "FileContents",
       "type": "object",

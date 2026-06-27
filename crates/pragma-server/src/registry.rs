@@ -1,8 +1,10 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use pragma_constants::ProtocolEventKind;
+use pragma_core::watcher::WorktreeWatcher;
 use pragma_protocol::{AgentReportPayload, AgentStatus, EventFrame};
 use thiserror::Error;
 
@@ -16,6 +18,8 @@ pub enum RegistryError {
     NotFound(String),
     #[error(transparent)]
     Session(#[from] SessionError),
+    #[error("filesystem watcher failed: {0}")]
+    Watcher(String),
     #[error("lock poisoned")]
     LockPoisoned,
 }
@@ -26,9 +30,20 @@ pub struct Registry {
     socket_path: PathBuf,
     agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
+    file_watchers: Mutex<HashMap<String, WorktreeFileWatch>>,
 }
 
 type AgentKey = (String, String, String);
+
+/// One live filesystem watcher for a worktree plus the set of subscribers it
+/// fans changes out to. Both the watcher and the subscriber list are shared
+/// (`Arc`) so the watcher's background callback can broadcast without holding
+/// the registry lock.
+struct WorktreeFileWatch {
+    subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+    // Kept alive for the worktree's watch lifetime; dropping it stops watching.
+    _watcher: WorktreeWatcher,
+}
 
 impl Registry {
     pub fn new(socket_path: PathBuf) -> Self {
@@ -37,6 +52,7 @@ impl Registry {
             socket_path,
             agent_statuses: Mutex::new(HashMap::new()),
             agent_subscribers: Mutex::new(Vec::new()),
+            file_watchers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -195,6 +211,75 @@ impl Registry {
         Ok((statuses.values().map(agent_event).collect(), rx))
     }
 
+    /// Subscribes to filesystem changes under a worktree, lazily starting (and
+    /// reusing) one recursive watcher per `worktree_id`. `root` is the trusted
+    /// absolute worktree path supplied by the host client. Returns an empty
+    /// snapshot (file changes are deltas only) and the delta receiver.
+    pub fn subscribe_files(
+        &self,
+        worktree_id: String,
+        root: &str,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        let (tx, rx) = mpsc::channel();
+        let mut watchers = self
+            .file_watchers
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        if let Some(watch) = watchers.get(&worktree_id) {
+            watch
+                .subscribers
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?
+                .push(tx);
+        } else {
+            let subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>> = Arc::new(Mutex::new(vec![tx]));
+            let watcher = Self::start_file_watcher(&worktree_id, root, Arc::clone(&subscribers))?;
+            watchers.insert(
+                worktree_id,
+                WorktreeFileWatch {
+                    subscribers,
+                    _watcher: watcher,
+                },
+            );
+        }
+        Ok((
+            vec![EventFrame::Snapshot {
+                subscription: ProtocolEventKind::FileChanged,
+                payload: serde_json::Value::Array(Vec::new()),
+            }],
+            rx,
+        ))
+    }
+
+    /// Builds a watcher whose callback broadcasts each batch of changes to the
+    /// worktree's subscribers, pruning any that have disconnected.
+    fn start_file_watcher(
+        worktree_id: &str,
+        root: &str,
+        subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+    ) -> Result<WorktreeWatcher, RegistryError> {
+        let worktree_id = worktree_id.to_string();
+        WorktreeWatcher::new(Path::new(root), move |changes| {
+            let Ok(mut subscribers) = subscribers.lock() else {
+                return;
+            };
+            for change in changes {
+                let Ok(payload) = serde_json::to_value(&change) else {
+                    continue;
+                };
+                let event = EventFrame::Delta {
+                    subscription: ProtocolEventKind::FileChanged,
+                    payload: serde_json::json!({
+                        "worktreeId": worktree_id,
+                        "change": payload,
+                    }),
+                };
+                subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+            }
+        })
+        .map_err(|err| RegistryError::Watcher(err.to_string()))
+    }
+
     pub fn clear_agents_for_tab(&self, tab_id: &str) {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
             statuses.retain(|(_, status_tab_id, _), _| status_tab_id != tab_id);
@@ -228,8 +313,7 @@ impl Registry {
     fn is_empty(&self) -> bool {
         self.sessions
             .lock()
-            .map(|sessions| sessions.is_empty())
-            .unwrap_or(false)
+            .is_ok_and(|sessions| sessions.is_empty())
     }
 
     fn broadcast_agent(&self, event: &EventFrame) {
