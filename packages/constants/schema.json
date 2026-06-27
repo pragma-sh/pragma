@@ -605,6 +605,91 @@
         }
       }
     },
+    "KanbanPromptStatus": {
+      "title": "KanbanPromptStatus",
+      "description": "Column a prompt card lives in on the project Kanban board.",
+      "type": "string",
+      "enum": ["draft", "inProgress", "reviewNeeded", "completed"]
+    },
+    "KanbanCompletedAction": {
+      "title": "KanbanCompletedAction",
+      "description": "How a reviewed card was completed: committed and merged, committed with a PR opened, or finished manually.",
+      "type": "string",
+      "enum": ["commitMerge", "commitPr", "manual"]
+    },
+    "KanbanSchedulingMode": {
+      "title": "KanbanSchedulingMode",
+      "description": "When the card's agent run is started. MVP supports manual start only.",
+      "type": "string",
+      "enum": ["manual"]
+    },
+    "KanbanPromptCard": {
+      "title": "KanbanPromptCard",
+      "description": "A persisted prompt card on a project's Kanban board, scoped by projectId.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "projectId",
+        "branchName",
+        "prompt",
+        "agentId",
+        "status",
+        "schedulingMode",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "worktreeId": {
+          "type": ["string", "null"],
+          "description": "The worktree backing this card once it starts running; null for a draft."
+        },
+        "branchName": {
+          "type": "string",
+          "description": "Branch the card targets — an existing project worktree branch or a new one to create."
+        },
+        "prompt": { "type": "string" },
+        "agentId": { "type": "string" },
+        "modelId": {
+          "type": ["string", "null"],
+          "description": "Selected model id for the agent launch; null uses the agent default."
+        },
+        "status": { "$ref": "#/definitions/KanbanPromptStatus" },
+        "agentTabId": {
+          "type": ["string", "null"],
+          "description": "Terminal tab/daemon session id the agent runs in once started; null before launch."
+        },
+        "completedAction": {
+          "description": "Which completion path finished the card; null until completed.",
+          "anyOf": [{ "$ref": "#/definitions/KanbanCompletedAction" }, { "type": "null" }]
+        },
+        "pullRequestUrl": {
+          "type": ["string", "null"],
+          "description": "URL of the pull request opened during completion, when applicable."
+        },
+        "pullRequestNumber": {
+          "type": ["integer", "null"],
+          "description": "Number of the pull request opened during completion, when applicable."
+        },
+        "schedulingMode": { "$ref": "#/definitions/KanbanSchedulingMode" },
+        "scheduledFor": {
+          "type": ["string", "null"],
+          "description": "Reserved for scheduled runs; always null in the manual MVP."
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "startedAt": {
+          "type": ["string", "null"],
+          "description": "When the card first moved to inProgress; null before launch."
+        },
+        "completedAt": {
+          "type": ["string", "null"],
+          "description": "When the card moved to completed; null until completed."
+        }
+      }
+    },
     "KeybindingChord": {
       "title": "KeybindingChord",
       "type": "object",

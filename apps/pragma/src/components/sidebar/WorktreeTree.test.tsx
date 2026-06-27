@@ -49,6 +49,10 @@ vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
 }));
 
+vi.mock("@/state/kanban-context", () => ({
+  useKanban: () => ({ exitBoard: vi.fn() }),
+}));
+
 import { WorktreeTree } from "./WorktreeTree";
 
 afterEach(() => {

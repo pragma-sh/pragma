@@ -30,6 +30,7 @@ import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog"
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { cn } from "@/lib/utils";
+import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -137,6 +138,7 @@ function WorktreeRow({
   mergedByWorktreeId: Record<string, boolean>;
 }) {
   const workspace = useWorkspace();
+  const kanban = useKanban();
   const selected = workspace.selectedWorktreeId === node.worktree.id;
   const label = node.worktree.isMain ? "main" : (node.worktree.title ?? node.worktree.branch);
   const [expanded, setExpanded] = useState(true);
@@ -212,7 +214,12 @@ function WorktreeRow({
             )}
             <button
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              onClick={() => workspace.selectWorktree(node.worktree.id)}
+              onClick={() => {
+                workspace.selectWorktree(node.worktree.id);
+                // Selecting a worktree always returns to the terminal view, even
+                // when the prompt board is the visible surface.
+                kanban.exitBoard();
+              }}
               onDoubleClick={isMain ? undefined : startRename}
             >
               <WorktreeIcon className={cn("size-3.5 shrink-0", merged && "text-emerald-500")} />

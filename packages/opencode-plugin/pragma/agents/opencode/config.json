@@ -3,6 +3,7 @@
   "name": "OpenCode",
   "icon": "icon.svg",
   "start": ["opencode"],
+  "prefillDelayMs": 6000,
   "models": {
     "source": "command",
     "command": ["sh", "scripts/list-models.sh"],

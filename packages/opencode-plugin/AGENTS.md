@@ -90,7 +90,7 @@ leaves the last status lingering in the long-lived daemon).
 ## Agent launcher config
 
 `pragma/agents/opencode/config.json` — fields: `id`, `name`, `icon`, `start`, and
-optional `models`. Icons must resolve inside that agent directory. Staged to
+optional `models` / launch timing. Icons must resolve inside that agent directory. Staged to
 `apps/pragma/src-tauri/resources/pragma/agents/` by `stage-daemon-sidecar.sh`.
 
 The `models` block is command-backed and runs with cwd set to the installed agent
@@ -103,6 +103,9 @@ directory (`~/.pragma/agents/opencode`):
   "modelArg": ["--model", "{model}"]
 }
 ```
+
+`prefillDelayMs` is set higher than the core default because opencode's TUI can take
+longer to mount its input in a background PTY before prompt paste/submit is reliable.
 
 `scripts/list-models.sh` owns all opencode-specific parsing. It tries supported opencode
 model-list surfaces (`opencode models --json`, then `--verbose`, then plain

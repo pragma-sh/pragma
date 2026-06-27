@@ -16,6 +16,7 @@ mod fs;
 mod git;
 mod github;
 mod icons;
+mod kanban;
 mod keybindings;
 mod process_env;
 mod projects;
@@ -484,6 +485,11 @@ pub fn run() {
             clear_split_layout,
             get_active_selection,
             set_active_selection,
+            kanban::list_kanban_cards,
+            kanban::create_kanban_card,
+            kanban::update_kanban_card,
+            kanban::move_kanban_card,
+            kanban::delete_kanban_card,
             fs::list_dir_entries,
             fs::create_file,
             fs::create_folder,

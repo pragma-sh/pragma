@@ -9,6 +9,8 @@ import type {
   GitHubAuthStatus,
   GitHubRepoRef,
   GitHubUser,
+  KanbanPromptCard,
+  KanbanPromptStatus,
   KeybindingsConfig,
   Project,
   ProjectIcon,
@@ -54,7 +56,18 @@ export interface AgentConfig {
   name: string;
   iconDataUrl: string | null;
   start: string[];
+  startupInput?: AgentStartupInput[] | null;
+  prefillDelayMs?: number | null;
+  prefillMode?: "bracketed" | "plain" | null;
+  prefillSubmit?: string | null;
+  prefillSubmitDelayMs?: number | null;
   models?: AgentModelsConfig | null;
+}
+
+/** Timed input sent after an agent starts and before an optional prompt prefill. */
+export interface AgentStartupInput {
+  delayMs: number;
+  data: string;
 }
 
 /** Optional agent model discovery and launch-argument config. */
@@ -405,6 +418,43 @@ export function setSplitLayout(worktreeId: string, layout: string): Promise<void
 /** Clears a worktree's split-pane layout when it collapses back to a single pane. */
 export function clearSplitLayout(worktreeId: string): Promise<void> {
   return invoke("clear_split_layout", { worktreeId });
+}
+
+/** Lists a project's Kanban prompt cards. */
+export function listKanbanCards(projectId: string): Promise<KanbanPromptCard[]> {
+  return invoke<KanbanPromptCard[]>("list_kanban_cards", { projectId });
+}
+
+/** Creates a fresh draft card scoped to a project. */
+export function createKanbanCard(
+  projectId: string,
+  branchName: string,
+  prompt: string,
+  agentId: string,
+  modelId?: string | null,
+): Promise<KanbanPromptCard> {
+  return invoke<KanbanPromptCard>("create_kanban_card", {
+    projectId,
+    branchName,
+    prompt,
+    agentId,
+    modelId: modelId ?? null,
+  });
+}
+
+/** Persists every mutable field of a card (draft edits and status transitions). */
+export function updateKanbanCard(card: KanbanPromptCard): Promise<KanbanPromptCard> {
+  return invoke<KanbanPromptCard>("update_kanban_card", { card });
+}
+
+/** Moves a card to a different column (status only). */
+export function moveKanbanCard(id: string, status: KanbanPromptStatus): Promise<KanbanPromptCard> {
+  return invoke<KanbanPromptCard>("move_kanban_card", { id, status });
+}
+
+/** Deletes a Kanban card. */
+export function deleteKanbanCard(id: string): Promise<void> {
+  return invoke("delete_kanban_card", { id });
 }
 
 /**
