@@ -1,0 +1,732 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# Prompt Kanban Workspace
+
+Add a **project-scoped prompt board** that replaces the sidebar new-chat entry point
+with a Kanban icon. Clicking it leaves the normal terminal workspace mounted in app
+state, but visually replaces the full app shell with a board for writing, saving, and
+starting prompts. The existing `NewAgentSessionDialog` stays available for deeplinks and
+other entry points.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships and where the risk is</CardDescription>
+  </CardHeader>
+  <CardContent className="space-y-2 text-sm">
+
+- **New full-app mode:** `WorkspaceShell` toggles between normal workspace UI and `ProjectKanbanWorkspace`.
+- **Entry point change:** `ProjectSidebar` replaces the `MessageSquarePlus` button with a Kanban icon button.
+- **Deeplink safety:** move the `NewAgentSessionDialog` event host out of `ProjectSidebar` so `pragma://open` still works while the board is visible.
+- **Persistent cards:** add SQLite-backed kanban prompt records, scoped to the selected project.
+- **Board columns:** Drafts, In progress, Review needed, Completed.
+- **Hardest technical part:** background agent launch. Starting a card must create a tab and spawn the PTY without requiring `TerminalView` to mount.
+- **Future scheduling:** persist manual queue fields now so timed scheduling can be added later without reshaping cards.
+
+</CardContent>
+</Card>
+
+## Resolved Decisions
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Question</TableHead>
+      <TableHead>Decision</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Persistence</TableCell>
+      <TableCell>
+        Persist board cards locally. Use the existing app SQLite DB instead of browser-only storage
+        because cards reference projects, worktrees, tabs, and PR metadata.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Scheduling</TableCell>
+      <TableCell>
+        Ship manual queueing first. Store scheduling fields as <code>mode: "manual"</code> so timed
+        start rules can become a follow-up.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Scope</TableCell>
+      <TableCell>
+        Scope each board to the currently selected project. The board heading shows that project
+        name, and all draft records carry the same <code>projectId</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Normal new-session modal</TableCell>
+      <TableCell>
+        Keep <code>NewAgentSessionDialog.tsx</code> behavior intact. Only move its host/listener so
+        deeplinks do not depend on the sidebar being visible.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Board Preview
+
+This mock uses the ReUI Kanban interaction model as inspiration: status columns,
+compact cards, strict transitions, and a modal gate for completion. The actual app should
+use Pragma's existing Tailwind and shadcn primitives rather than introducing a separate
+visual language.
+
+<Playground>
+  <div bind="status:'draft'" className="hidden" />
+  <div bind="selected:'none'" className="hidden" />
+  <div bind="attention:true" className="hidden" />
+  <div bind="prOpen:false" className="hidden" />
+
+  <div className="rounded-xl border bg-[#090b0f] p-4 text-sm text-slate-200 shadow-sm">
+    <div className="mb-4 flex items-center gap-3">
+      <button className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10">
+        Back
+      </button>
+      <div>
+        <div className="text-lg font-semibold">Pragma</div>
+        <div className="text-xs text-slate-500">Prompt board for the current project</div>
+      </div>
+      {selected !== "none" && (
+        <button
+          onClick={() => setSelected("none")}
+          className="ml-auto rounded-md bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-200"
+        >
+          Back to Kanban
+        </button>
+      )}
+    </div>
+
+    <div className="grid gap-3 md:grid-cols-4">
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-medium">Drafts</span>
+          <button className="rounded bg-white/10 px-2 py-1 text-[11px] hover:bg-white/15">
+            New draft
+          </button>
+        </div>
+        {status === "draft" && (
+          <button
+            onClick={() => setSelected("draft")}
+            className="w-full rounded-md border border-white/10 bg-[#10151d] p-3 text-left hover:border-cyan-400/50"
+          >
+            <div className="text-xs font-semibold text-cyan-200">feature/prompt-board</div>
+            <p className="mt-2 line-clamp-3 text-xs text-slate-300">
+              Build a persisted board for drafting prompts, then start Claude in a new worktree...
+            </p>
+            <div className="mt-3 text-[11px] text-slate-500">planned: Claude Sonnet</div>
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+        <div className="mb-2 font-medium">In progress</div>
+        {status === "running" && (
+          <button
+            onClick={() => setSelected("worktree")}
+            className="w-full rounded-md border border-amber-400/20 bg-[#10151d] p-3 text-left hover:border-amber-300/50"
+          >
+            <div className="text-xs font-semibold text-amber-200">feature/prompt-board</div>
+            <p className="mt-2 line-clamp-3 text-xs text-slate-300">
+              Build a persisted board for drafting prompts, then start Claude in a new worktree...
+            </p>
+            <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+              <span>Claude Sonnet</span>
+              {attention && <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-red-200">attention</span>}
+            </div>
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+        <div className="mb-2 font-medium">Review needed</div>
+        {status === "review" && (
+          <button
+            onClick={() => setSelected("review")}
+            className="w-full rounded-md border border-emerald-400/20 bg-[#10151d] p-3 text-left hover:border-emerald-300/50"
+          >
+            <div className="text-xs font-semibold text-emerald-200">feature/prompt-board</div>
+            <p className="mt-2 line-clamp-3 text-xs text-slate-300">
+              Agent completed the implementation. Review the diff, then choose a completion action.
+            </p>
+            <div className="mt-3 text-[11px] text-slate-500">used: Claude Sonnet</div>
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+        <div className="mb-2 font-medium">Completed</div>
+        {status === "done" && (
+          <button
+            onClick={() => setSelected("complete")}
+            className="w-full rounded-md border border-white/10 bg-[#10151d] p-3 text-left hover:border-white/25"
+          >
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-100">
+              <span>feature/prompt-board</span>
+              {prOpen && <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] text-violet-200">PR open</span>}
+            </div>
+            <p className="mt-2 line-clamp-3 text-xs text-slate-300">
+              Completed prompt card with retained branch, agent, and review outcome metadata.
+            </p>
+            <div className="mt-3 text-[11px] text-slate-500">used: Claude Sonnet</div>
+          </button>
+        )}
+      </div>
+    </div>
+
+    <div className="mt-4 flex flex-wrap gap-2 text-xs">
+      <button onClick={() => setStatus("draft")} className="rounded bg-white/10 px-2 py-1">draft</button>
+      <button onClick={() => setStatus("running")} className="rounded bg-white/10 px-2 py-1">in progress</button>
+      <button onClick={() => setStatus("review")} className="rounded bg-white/10 px-2 py-1">review needed</button>
+      <button onClick={() => setStatus("done")} className="rounded bg-white/10 px-2 py-1">completed</button>
+      <button onClick={() => setAttention(!attention)} className="rounded bg-white/10 px-2 py-1">toggle attention</button>
+      <button onClick={() => setPrOpen(!prOpen)} className="rounded bg-white/10 px-2 py-1">toggle PR</button>
+    </div>
+
+  </div>
+</Playground>
+
+## Architecture
+
+<Tabs defaultValue="shell" className="my-4">
+  <TabsList>
+    <TabsTrigger value="shell">Shell</TabsTrigger>
+    <TabsTrigger value="data">Data</TabsTrigger>
+    <TabsTrigger value="launch">Agent launch</TabsTrigger>
+    <TabsTrigger value="review">Review actions</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="shell">
+
+Add a view-mode switch at the `WorkspaceShell` level. Kanban mode must replace the
+normal shell, not overlay it, because native `BrowserView` surfaces float above HTML and
+would otherwise cover the board.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>File</TableHead>
+      <TableHead>Change</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>components/workspace/WorkspaceShell.tsx</code>
+      </TableCell>
+      <TableCell>
+        Own <code>workspaceMode</code> with values <code>"normal"</code> and <code>"kanban"</code>.
+        Render <code>ProjectKanbanWorkspace</code> when in Kanban mode. Keep providers and workspace
+        state unchanged.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/sidebar/ProjectSidebar.tsx</code>
+      </TableCell>
+      <TableCell>
+        Replace the visible new-agent-session button with a Kanban icon button that calls
+        <code>openKanban()</code>. Remove dialog ownership from this component.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/workspace/WorkspaceDialogs.tsx</code>
+      </TableCell>
+      <TableCell>
+        New always-mounted host for <code>NewAgentSessionDialog</code> and the
+        <code>NEW_SESSION_EVENT</code> listener. This preserves deeplinks while Kanban hides the
+        sidebar.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>components/kanban/ProjectKanbanWorkspace.tsx</code>
+      </TableCell>
+      <TableCell>
+        Full-app board with project heading, obvious Back button, and board-level dialogs.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+Navigation rule: the board Back button simply exits Kanban. Any card action that opens a
+worktree, PR screen, or normal workspace sets a temporary `returnToKanbanProjectId`, so
+the normal UI can show a **Back to Kanban** button.
+
+</TabsContent>
+
+  <TabsContent value="data">
+
+Persist card records in SQLite because this is durable workspace state, not cosmetic UI
+preference. Add shared TS/Rust payload types through `packages/constants` and regenerate
+before wiring Tauri commands.
+
+```ts
+type KanbanPromptStatus = "draft" | "inProgress" | "reviewNeeded" | "completed";
+
+type KanbanPromptCard = {
+  id: string;
+  projectId: string;
+  worktreeId?: string;
+  branchName: string;
+  prompt: string;
+  agentId: string;
+  modelId?: string;
+  status: KanbanPromptStatus;
+  agentTabId?: string;
+  completedAction?: "commitMerge" | "commitPr" | "manual";
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
+  schedulingMode: "manual";
+  scheduledFor?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+```
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Layer</TableHead>
+      <TableHead>Work</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>packages/constants</code>
+      </TableCell>
+      <TableCell>
+        Add <code>KanbanPromptStatus</code>, card payloads, create/update inputs, and transition
+        payloads to <code>schema.json</code>. Run <code>bun run generate</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>src-tauri/src/db.rs</code>
+      </TableCell>
+      <TableCell>
+        Add a migration for <code>kanban_prompt_cards</code>. Index by <code>project_id</code> and
+        <code>status</code>. Store optional PR and scheduling columns explicitly instead of one
+        opaque blob.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>src-tauri/src/kanban.rs</code>
+      </TableCell>
+      <TableCell>
+        New Rust command module for list/create/update/delete/move operations. Keep validation
+        server-side: project id required, branch non-empty, prompt non-empty for save/start.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>src/lib/tauri.ts</code>
+      </TableCell>
+      <TableCell>
+        Add typed wrappers. Components never call <code>invoke()</code> directly.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>state/use-project-kanban-cards.ts</code>
+      </TableCell>
+      <TableCell>
+        Load cards for the selected project, expose mutation helpers, and reload after each mutation
+        for the first implementation.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+</TabsContent>
+
+  <TabsContent value="launch">
+
+Dragging a draft to In progress must create the worktree if needed, spawn the selected
+agent in a new tab, and keep the user in Kanban. The existing `workspace.startSession`
+does not meet this because it selects the worktree and relies on mounted terminal
+behavior.
+
+<Alert className="my-3">
+  <AlertTitle>Primary implementation risk</AlertTitle>
+  <AlertDescription>
+
+`startAgentInTab` writes the agent command to a PTY, but hidden tabs do not mount
+`TerminalView`, and `TerminalView` is what normally spawns the PTY. Add an explicit
+background launch path before wiring drag-to-start.
+
+  </AlertDescription>
+</Alert>
+
+Recommended extraction:
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>API</TableHead>
+      <TableHead>Responsibility</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>workspace.startSessionInBackground(input)</code>
+      </TableCell>
+      <TableCell>
+        Create a terminal tab for the target worktree without selecting it, ensure the PTY exists,
+        run the configured agent start command, paste the prompt, and return the tab id.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>lib/agent-launch.ts</code>
+      </TableCell>
+      <TableCell>
+        Keep command construction and prompt injection centralized. Add a lower-level helper that
+        works with an already-spawned background PTY.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>lib/terminal-manager.ts</code>
+      </TableCell>
+      <TableCell>
+        Keep xterm rendering out of the background path. The background helper should talk to the
+        Tauri PTY command wrappers directly, not require a DOM element.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+Allowed transitions should be enforced in code:
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Transition</TableHead>
+      <TableHead>Behavior</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>draft</code> to <code>inProgress</code>
+      </TableCell>
+      <TableCell>
+        Create or reuse worktree, create background tab, start agent, update card.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>inProgress</code> to anything
+      </TableCell>
+      <TableCell>Denied. The agent status owns the next move.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>inProgress</code> to <code>reviewNeeded</code>
+      </TableCell>
+      <TableCell>
+        Automatic when the matching agent tab reports <code>done</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>reviewNeeded</code> to <code>completed</code>
+      </TableCell>
+      <TableCell>
+        Open the completion modal. Move only after the selected action succeeds.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+</TabsContent>
+
+  <TabsContent value="review">
+
+The completion modal should reuse the standard terminal view operations instead of
+copying them into Kanban components.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Choice</TableHead>
+      <TableHead>Shared operations</TableHead>
+      <TableHead>Card update</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Commit all and merge</TableCell>
+      <TableCell>
+        Reuse <code>worktreeChanges</code>, <code>stageAll</code>,{" "}
+        <code>aiGenerateCommitMessage</code>,<code>commitStaged</code>, and{" "}
+        <code>mergeWorktreeToParent</code>. Ask about deleting the worktree and branch after the
+        merge succeeds.
+      </TableCell>
+      <TableCell>
+        <code>completedAction: "commitMerge"</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Commit all and open PR</TableCell>
+      <TableCell>
+        Extract the current <code>RightSidebar</code> commit-and-PR orchestration so Kanban can open
+        the same prefilled PR submit screen. Reuse GitHub UI instead of making a second PR form.
+      </TableCell>
+      <TableCell>
+        <code>completedAction: "commitPr"</code>, plus PR number and URL after creation.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Go to worktree</TableCell>
+      <TableCell>
+        Mark the card complete, select/open the worktree, and show <strong>Back to Kanban</strong>
+        in the normal workspace.
+      </TableCell>
+      <TableCell>
+        <code>completedAction: "manual"</code>
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+Refactor targets:
+
+- Extract commit-all + AI message logic from `ChangesTab.tsx` into a worktree-scoped helper or hook.
+- Extract commit-and-PR orchestration from `RightSidebar.tsx` so it accepts an explicit `worktreeId`.
+- Expose `PullRequestResolver` or a wrapper around `CreatePullRequestView` so Kanban can navigate to the same prefilled submit UI.
+- Keep GitHub API use in `lib/github.ts`; Kanban must not instantiate Octokit.
+
+</TabsContent>
+</Tabs>
+
+## User Flows
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="drafts">
+    <AccordionTrigger>Draft creation and editing</AccordionTrigger>
+    <AccordionContent>
+
+`DraftPromptDialog` should look like `CreateWorktreeDialog`, with one important change:
+the branch input is a combobox over existing project worktrees. If the typed value does
+not match a worktree branch, show a "Create new worktree" option and save it as a pending
+branch.
+
+Fields:
+
+- Branch or existing worktree.
+- Prompt textarea.
+- Agent selector using the same `listAgents` data as new sessions.
+- Model selector if the selected agent exposes models.
+
+Buttons:
+
+- Save persists or updates a draft card.
+- Discard draft deletes an existing draft after confirmation.
+- Discarding an unsaved, dirty modal should confirm before closing.
+
+Clicking a Drafts card opens the same dialog prefilled for editing.
+
+</AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="progress">
+    <AccordionTrigger>In progress behavior</AccordionTrigger>
+    <AccordionContent>
+
+In progress cards are not user-draggable. They reflect the spawned agent session.
+
+- Footer shows the selected agent and model.
+- If `useTabAgentStatus(agentTabId)` or `useWorktreeAgentStatus(worktreeId)` reports attention, show an attention badge.
+- Current reports only have `attentionKind`; if the product requires exact question or command text, extend `AgentReportPayload` with optional `attentionMessage` or `attentionCommand` in `packages/constants`.
+- Clicking the card opens the worktree in normal workspace and shows **Back to Kanban**.
+- A `done` report for the matching `agentTabId` moves the card to Review needed.
+
+</AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="review">
+    <AccordionTrigger>Review and completion</AccordionTrigger>
+    <AccordionContent>
+
+Review cards open their worktree when clicked. Dragging to Completed opens
+`CompleteReviewDialog` and defers the status change until the chosen action completes.
+
+- Commit all and merge performs the AI commit message, commit, local merge, then cleanup prompt.
+- Commit all and open PR launches the same submit PR screen as the GitHub integration and records PR metadata after creation.
+- Go to worktree marks the card complete, navigates to the worktree, and lets the user finish manually.
+
+Completed cards are read-only for MVP. If a completed card has PR metadata, show a PR-open
+badge on the card.
+
+</AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="navigation">
+    <AccordionTrigger>Back behavior</AccordionTrigger>
+    <AccordionContent>
+
+Use two distinct back paths:
+
+- Board Back button: exits Kanban mode to the normal workspace and does not show a return pill.
+- Card-driven navigation: exits to normal workspace and sets `returnToKanbanProjectId`, causing a visible **Back to Kanban** button in the normal workspace chrome.
+- Back to Kanban: reopens the same project board and clears the return state.
+
+This keeps intentional escape from the board separate from temporary review navigation.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Implementation Sequence
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Phase</TableHead>
+      <TableHead>Deliverable</TableHead>
+      <TableHead>Verification</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>1</TableCell>
+      <TableCell>
+        Shell mode, Kanban icon entry point, and always-mounted new-session dialog host.
+      </TableCell>
+      <TableCell>Deeplink opens the session modal in normal mode and Kanban mode.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>2</TableCell>
+      <TableCell>
+        Shared constants, SQLite migration, Rust CRUD commands, and `tauri.ts` wrappers.
+      </TableCell>
+      <TableCell>Rust tests for CRUD and a TS invoke-wrapper mock test.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>3</TableCell>
+      <TableCell>Static board and card rendering from persisted records.</TableCell>
+      <TableCell>Component test shows four columns and project-scoped cards.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>4</TableCell>
+      <TableCell>
+        Draft modal with existing-worktree combobox and new-worktree typed option.
+      </TableCell>
+      <TableCell>Draft save, edit, discard, and restart persistence tests.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>5</TableCell>
+      <TableCell>Background session launch path and draft-to-progress transition.</TableCell>
+      <TableCell>
+        Manual test confirms the board stays visible while a hidden tab starts the agent.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>6</TableCell>
+      <TableCell>Agent status sync, attention badge, and done-to-review transition.</TableCell>
+      <TableCell>Mock agent reports move cards and render attention state.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>7</TableCell>
+      <TableCell>Completion modal with commit-merge, commit-PR, and manual paths.</TableCell>
+      <TableCell>Mock git/GitHub tests plus manual PR flow verification.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>8</TableCell>
+      <TableCell>Polish, responsive layout, keyboard escape behavior, and quality gates.</TableCell>
+      <TableCell>
+        <code>bun run typecheck</code>, <code>bun run test</code>, Rust tests, and focused UI QA.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Risks And Mitigations
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Risk</TableHead>
+      <TableHead>Mitigation</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Hidden tabs do not spawn PTYs today.</TableCell>
+      <TableCell>Implement and test background session launch before drag-to-start.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>PR and commit flows are UI-coupled to the right sidebar.</TableCell>
+      <TableCell>
+        Extract shared worktree-scoped actions before wiring Kanban completion choices.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Multiple agent sessions can exist in one worktree.</TableCell>
+      <TableCell>
+        Store <code>agentTabId</code> on the card and prefer tab-specific status matching.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Attention payload may not contain question or command text.</TableCell>
+      <TableCell>
+        Ship a generic attention badge first, then extend shared payloads if detailed text is
+        required.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Moving the dialog host could break deeplinks.</TableCell>
+      <TableCell>
+        Add a targeted test/manual check for `pragma://open` before and during Kanban mode.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Kanban overlay could conflict with native browser webviews.</TableCell>
+      <TableCell>
+        Do not overlay. Replace/unmount the normal shell content while Kanban is active.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Acceptance Checklist
+
+- The sidebar new-chat button is replaced by a Kanban icon button.
+- `NewAgentSessionDialog` still opens for deeplinks and other callers.
+- Kanban mode replaces the full app UI and has a clear project heading plus Back button.
+- Draft cards persist across restart.
+- Draft modal can select an existing worktree or type a new branch option.
+- Dragging a draft to In progress creates/reuses a worktree, starts the agent in a new tab, and keeps Kanban visible.
+- In progress cards cannot be dragged by the user.
+- Agent attention appears on the card footer.
+- Agent completion moves the card to Review needed.
+- Review-to-Completed opens the completion modal and supports all three required choices.
+- PR completion records PR metadata and shows a PR-open badge.
+- Any card action that navigates to the normal workspace shows **Back to Kanban**.

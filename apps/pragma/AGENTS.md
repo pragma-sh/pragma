@@ -22,8 +22,10 @@ apps/pragma/
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
+│   ├── components/kanban/       # Project prompt board (ProjectKanbanWorkspace, cards, draft/completion modals)
 │   ├── state/
 │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
+│   │   ├── kanban-context.tsx      # Project prompt board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
@@ -34,7 +36,8 @@ apps/pragma/
 │   └── main.tsx
 └── src-tauri/                   # Rust backend
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
-    ├── src/db.rs                # SQLite migrations + typed CRUD
+    ├── src/db.rs                # SQLite migrations + typed CRUD (v8 = kanban_cards)
+    ├── src/kanban.rs            # Tauri commands for the prompt Kanban board (CRUD + move)
     ├── src/pty.rs               # Daemon client + PTY command proxying + instance channel
     ├── src/git.rs               # Git CLI helpers
     ├── src/github.rs            # GitHub auth (0600 token file, OAuth device flow, gh CLI)
@@ -139,7 +142,15 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields `id`,
-`name`, `icon`, `start`, and optional `models`. Bundled configs live in
+`name`, `icon`, `start`, optional `models`, optional `prefillDelayMs`, optional
+`startupInput` (`[{ delayMs, data }]`, sent after `start` and before the prompt prefill),
+and optional prefill controls (`prefillMode: "bracketed" | "plain"`, `prefillSubmit`,
+`prefillSubmitDelayMs`). The prompt body and its submit key are always sent as two
+separate PTY writes (`prefillSubmitDelayMs` apart, default 200ms) so a paste-aware TUI
+commits the text before the submit keypress lands — this is why Kanban background launches
+and foreground launches both submit reliably across agents. Use these only for generic
+pre-TUI gates / input semantics owned by that agent config; core must not hard-code
+per-agent keystrokes. Bundled configs live in
 `apps/pragma/src-tauri/resources/pragma/agents/` (staged by
 `scripts/stage-daemon-sidecar.sh`) and are installed/updated into `~/.pragma/agents`
 on app startup. `pragma-agent` is installed/updated to `~/.local/bin` on startup; the
@@ -389,3 +400,42 @@ key (`activeSelection`) via `get_active_selection` / `set_active_selection` — 
 stores the string verbatim (same pattern as split layouts). The mount-time `reload`
 rehydrates via `hydrate-selection`; a persist effect writes on every selection change,
 gated by `didHydrateRef` and deduped by `lastPersistedRef`.
+
+## Prompt Kanban board
+
+A **project-scoped prompt board** lives behind the sidebar's Kanban-icon button (it
+replaced the new-session button). `state/kanban-context.tsx` (`useKanban`) is mounted in
+`App.tsx` **inside** `WorkspaceProvider` and is **always alive**, so it works in both
+shell modes. It owns a `mode: "normal" | "kanban"` switch: `WorkspaceShell` renders
+`ProjectKanbanWorkspace` in place of the terminal `<section>` + right sidebar in Kanban
+mode (the **sidebar stays**). Kanban **replaces** the shell rather than overlaying it —
+native browser webviews (BrowserView) float above HTML, so an overlay would be clipped.
+
+Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
+commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The
+shared `KanbanPromptCard` shape lives in `@pragma/constants` (`KanbanPromptStatus` /
+`KanbanCompletedAction` / `KanbanSchedulingMode`). The board is project-scoped: cards
+load by `selectedProjectId` and reload after every mutation.
+
+**Transitions are enforced, not free-form** (no drag): `draft → inProgress` only via the
+card's Start flow; `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to
+`onAgentReport` and moves a card whose `agentTabId` matches a `done` report (live
+attention/running is shown per card via `useTabAgentStatus`); `reviewNeeded → completed`
+only after a completion-modal action succeeds; completed cards are read-only.
+
+**Background launch** (`startBackgroundAgentSession` in `lib/agent-launch.ts`) is the
+crux: starting a draft creates/reuses a worktree, creates a terminal tab, and spawns the
+daemon PTY **directly** (`ptySpawn` + `ptyWrite`, no mounted `TerminalManager`) so the
+board stays visible. The session persists in the daemon; opening the card later attaches
+(`ptyAttach`) and replays scrollback with the agent already running.
+
+**Completion** (`runCompletion`) reuses existing commands, never re-implements them:
+commit+merge = `stageAll` → `aiGenerateCommitMessage` → `commitStaged` →
+`mergeWorktreeToParent`, then asks about worktree cleanup; commit+PR =
+`aiCommitAllAndGeneratePullRequestDraft` → `githubPushBranch` → `createPullRequest`
+(records PR url/number, shown as a PR badge); manual marks complete and navigates.
+Card-driven navigation (`openCardWorktree`) switches to `mode: "normal"` and leaves a
+**Back to Kanban** control in the shell; the board's own **Back** button just exits
+Kanban without that return affordance. The always-mounted `WorkspaceDialogs` hosts the
+`NewAgentSessionDialog` + its deep-link listener (moved out of `ProjectSidebar`) so
+`pragma://open` works in both modes.
