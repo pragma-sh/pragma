@@ -83,6 +83,7 @@ than no guide.
 | Commits          | Conventional Commits (commitlint)                                                                                                                               |
 | Git hooks        | Husky + lint-staged                                                                                                                                             |
 | CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
+| Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                          |
 
 ## Repository structure
 
@@ -154,6 +155,7 @@ bun run test               # turbo: Vitest across packages
 bun run rust:fmt           # cargo fmt --all
 bun run rust:clippy        # cargo clippy -D warnings
 bun run rust:test          # cargo test --workspace
+bun run fallow:check       # fallow audit (TS/JS): block on issues this branch introduces
 bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
@@ -212,11 +214,15 @@ Shared rules:
   `rustfmt`). Fixing — not just checking — is the local behavior.
 - **commit-msg:** commitlint validates the message.
 - **pre-push:** full `typecheck` + `cargo fmt --check` + sidecar staging +
-  `cargo check`.
+  `cargo check` + `fallow:check` (fallow audit, blocks on TS/JS issues this branch
+  introduces vs `main`).
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
-compile-only Tauri build on macOS **and** Linux.
+compile-only Tauri build on macOS **and** Linux. A separate **Fallow** workflow
+(`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
+`fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
+inline annotations, and fails the check on issues the PR introduces.
 
 ## Platform targets
 

@@ -21,13 +21,18 @@
     "rust:fmt:check": "cargo fmt --all -- --check",
     "rust:clippy": "cargo clippy --all-targets --all-features -- -D warnings",
     "rust:test": "cargo test --workspace",
+    "fallow:check": "fallow audit --base main --gate new-only --fail-on-issues",
     "check": "bun run lint && bun run format:check && bun run typecheck && bun run rust:fmt:check && bun run rust:clippy",
     "prepare": "husky"
+  },
+  "dependencies": {
+    "@google/design.md": "^0.3.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
     "@tailwindcss/typography": "^0.5.20",
+    "fallow": "^2.102.0",
     "husky": "^9.1.7",
     "json-schema-to-typescript": "^15.0.4",
     "lint-staged": "^17.0.7",
