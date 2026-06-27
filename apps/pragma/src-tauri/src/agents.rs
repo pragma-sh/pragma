@@ -16,7 +16,20 @@ pub struct AgentConfig {
     pub name: String,
     pub icon_data_url: Option<String>,
     pub start: Vec<String>,
+    pub startup_input: Vec<AgentStartupInput>,
+    pub prefill_delay_ms: Option<u64>,
+    pub prefill_mode: Option<String>,
+    pub prefill_submit: Option<String>,
+    pub prefill_submit_delay_ms: Option<u64>,
     pub models: Option<AgentModelsConfig>,
+}
+
+/// Optional timed input sent after an agent start command and before the prompt prefill.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStartupInput {
+    pub delay_ms: u64,
+    pub data: String,
 }
 
 /// Optional model discovery/argument configuration from an agent launcher config.
@@ -75,6 +88,12 @@ struct RawAgentConfig {
     name: String,
     icon: Option<String>,
     start: StartCommand,
+    #[serde(default)]
+    startup_input: Vec<AgentStartupInput>,
+    prefill_delay_ms: Option<u64>,
+    prefill_mode: Option<String>,
+    prefill_submit: Option<String>,
+    prefill_submit_delay_ms: Option<u64>,
     models: Option<AgentModelsConfig>,
 }
 
@@ -169,6 +188,11 @@ fn load_agent(dir: &Path, config_path: &Path) -> AppResult<AgentConfig> {
             .map(|icon| icon_data_url(dir, icon))
             .transpose()?,
         start,
+        startup_input: raw.startup_input,
+        prefill_delay_ms: raw.prefill_delay_ms,
+        prefill_mode: raw.prefill_mode,
+        prefill_submit: raw.prefill_submit,
+        prefill_submit_delay_ms: raw.prefill_submit_delay_ms,
         models: raw.models,
     })
 }
@@ -445,6 +469,34 @@ mod tests {
             resolve_agent_models_from_dir(temp.path(), "plain", Duration::from_secs(1)),
             Vec::new()
         );
+    }
+
+    #[test]
+    fn parses_optional_launch_timing_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = write_agent(
+            temp.path(),
+            "gated",
+            r#"{
+              "id": "gated",
+              "name": "Gated Agent",
+              "start": ["agent"],
+              "startupInput": [{"delayMs": 1000, "data": "a\r"}],
+              "prefillDelayMs": 7000,
+              "prefillMode": "plain",
+              "prefillSubmitDelayMs": 120,
+              "prefillSubmit": "\u001b[13;5u"
+            }"#,
+        );
+
+        let agent = load_agent(&dir, &dir.join("config.json")).unwrap();
+        assert_eq!(agent.startup_input.len(), 1);
+        assert_eq!(agent.startup_input[0].delay_ms, 1000);
+        assert_eq!(agent.startup_input[0].data, "a\r");
+        assert_eq!(agent.prefill_delay_ms, Some(7000));
+        assert_eq!(agent.prefill_mode.as_deref(), Some("plain"));
+        assert_eq!(agent.prefill_submit.as_deref(), Some("\u{1b}[13;5u"));
+        assert_eq!(agent.prefill_submit_delay_ms, Some(120));
     }
 
     #[test]

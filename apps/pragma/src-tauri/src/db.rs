@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use pragma_constants::{DiffSide, Project, Tab, TabKind, Worktree};
+use pragma_constants::{
+    DiffSide, KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus, KanbanSchedulingMode,
+    Project, Tab, TabKind, Worktree,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
@@ -84,7 +87,28 @@ impl Db {
                worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
                layout      TEXT NOT NULL,
                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS kanban_cards (
+               id                  TEXT PRIMARY KEY,
+               project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               worktree_id         TEXT,
+               branch_name         TEXT NOT NULL,
+               prompt              TEXT NOT NULL,
+               agent_id            TEXT NOT NULL,
+               model_id            TEXT,
+               status              TEXT NOT NULL DEFAULT 'draft',
+               agent_tab_id        TEXT,
+               completed_action    TEXT,
+               pull_request_url    TEXT,
+               pull_request_number INTEGER,
+               scheduling_mode     TEXT NOT NULL DEFAULT 'manual',
+               scheduled_for       TEXT,
+               created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+               started_at          TEXT,
+               completed_at        TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_kanban_project ON kanban_cards(project_id);",
         )?;
 
         // Versioned migrations. v2 adds browser-tab columns to `tabs`. Running the
@@ -174,6 +198,12 @@ impl Db {
                 conn.execute_batch("ALTER TABLE tabs ADD COLUMN pr_number INTEGER;")?;
             }
             conn.execute_batch("PRAGMA user_version = 7;")?;
+        }
+        // v8 adds the `kanban_cards` table, which persists the project-scoped
+        // prompt Kanban board. The CREATE block above already provisions it for
+        // fresh DBs; the version bump keeps upgraded DBs marked consistently.
+        if version < 8 {
+            conn.execute_batch("PRAGMA user_version = 8;")?;
         }
         Ok(())
     }
@@ -451,6 +481,115 @@ impl Db {
         Ok(())
     }
 
+    /// Lists a project's Kanban prompt cards, newest first within each column.
+    pub fn list_kanban_cards(&self, project_id: &str) -> AppResult<Vec<KanbanPromptCard>> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, status,
+                    agent_tab_id, completed_action, pull_request_url, pull_request_number,
+                    scheduling_mode, scheduled_for, created_at, updated_at, started_at, completed_at
+             FROM kanban_cards WHERE project_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([project_id], kanban_card_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
+    /// Inserts a fresh draft card. New cards always start in the `draft` column
+    /// with no worktree or agent session.
+    pub fn create_kanban_card(
+        &self,
+        project_id: &str,
+        branch_name: &str,
+        prompt: &str,
+        agent_id: &str,
+        model_id: Option<&str>,
+    ) -> AppResult<KanbanPromptCard> {
+        let id = Uuid::new_v4().to_string();
+        self.0.lock()?.execute(
+            "INSERT INTO kanban_cards (id, project_id, branch_name, prompt, agent_id, model_id, status, scheduling_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'draft', 'manual')",
+            params![id, project_id, branch_name, prompt, agent_id, model_id],
+        )?;
+        self.kanban_card(&id)
+    }
+
+    /// Replaces every mutable column of a card from a full payload and stamps
+    /// `updated_at`. This single path backs draft edits and every status
+    /// transition (start, done, complete) — the frontend mutates the card and
+    /// sends the whole row back.
+    pub fn update_kanban_card(&self, card: &KanbanPromptCard) -> AppResult<KanbanPromptCard> {
+        self.0.lock()?.execute(
+            "UPDATE kanban_cards SET
+               worktree_id = ?2,
+               branch_name = ?3,
+               prompt = ?4,
+               agent_id = ?5,
+               model_id = ?6,
+               status = ?7,
+               agent_tab_id = ?8,
+               completed_action = ?9,
+               pull_request_url = ?10,
+               pull_request_number = ?11,
+               scheduled_for = ?12,
+               started_at = ?13,
+               completed_at = ?14,
+               updated_at = datetime('now')
+             WHERE id = ?1",
+            params![
+                card.id,
+                card.worktree_id,
+                card.branch_name,
+                card.prompt,
+                card.agent_id,
+                card.model_id,
+                kanban_status_as_str(card.status),
+                card.agent_tab_id,
+                card.completed_action.map(kanban_action_as_str),
+                card.pull_request_url,
+                card.pull_request_number,
+                card.scheduled_for,
+                card.started_at,
+                card.completed_at,
+            ],
+        )?;
+        self.kanban_card(&card.id)
+    }
+
+    /// Moves a card to a new column, updating only its status and `updated_at`.
+    pub fn move_kanban_card(
+        &self,
+        id: &str,
+        status: KanbanPromptStatus,
+    ) -> AppResult<KanbanPromptCard> {
+        self.0.lock()?.execute(
+            "UPDATE kanban_cards SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![id, kanban_status_as_str(status)],
+        )?;
+        self.kanban_card(id)
+    }
+
+    /// Hard-deletes a Kanban card.
+    pub fn delete_kanban_card(&self, id: &str) -> AppResult<()> {
+        self.0
+            .lock()?
+            .execute("DELETE FROM kanban_cards WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    fn kanban_card(&self, id: &str) -> AppResult<KanbanPromptCard> {
+        self.0
+            .lock()?
+            .query_row(
+                "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, status,
+                        agent_tab_id, completed_action, pull_request_url, pull_request_number,
+                        scheduling_mode, scheduled_for, created_at, updated_at, started_at, completed_at
+                 FROM kanban_cards WHERE id = ?1",
+                [id],
+                kanban_card_from_row,
+            )
+            .map_err(AppError::from)
+    }
+
     fn tab(&self, tab_id: &str) -> AppResult<Tab> {
         self.0
             .lock()?
@@ -506,6 +645,69 @@ fn diff_side_from_str(value: Option<String>) -> Option<DiffSide> {
         Some("worktree") => Some(DiffSide::Worktree),
         _ => None,
     }
+}
+
+/// Serializes a Kanban status to the camelCase string stored in `kanban_cards.status`.
+fn kanban_status_as_str(status: KanbanPromptStatus) -> &'static str {
+    match status {
+        KanbanPromptStatus::Draft => "draft",
+        KanbanPromptStatus::InProgress => "inProgress",
+        KanbanPromptStatus::ReviewNeeded => "reviewNeeded",
+        KanbanPromptStatus::Completed => "completed",
+    }
+}
+
+/// Parses the `kanban_cards.status` column, defaulting unknown values to `draft`.
+fn kanban_status_from_str(value: &str) -> KanbanPromptStatus {
+    match value {
+        "inProgress" => KanbanPromptStatus::InProgress,
+        "reviewNeeded" => KanbanPromptStatus::ReviewNeeded,
+        "completed" => KanbanPromptStatus::Completed,
+        _ => KanbanPromptStatus::Draft,
+    }
+}
+
+/// Serializes a completion action to the string stored in `kanban_cards.completed_action`.
+fn kanban_action_as_str(action: KanbanCompletedAction) -> &'static str {
+    match action {
+        KanbanCompletedAction::CommitMerge => "commitMerge",
+        KanbanCompletedAction::CommitPr => "commitPr",
+        KanbanCompletedAction::Manual => "manual",
+    }
+}
+
+/// Parses the optional `kanban_cards.completed_action` column; unknown values are none.
+fn kanban_action_from_str(value: Option<String>) -> Option<KanbanCompletedAction> {
+    match value.as_deref() {
+        Some("commitMerge") => Some(KanbanCompletedAction::CommitMerge),
+        Some("commitPr") => Some(KanbanCompletedAction::CommitPr),
+        Some("manual") => Some(KanbanCompletedAction::Manual),
+        _ => None,
+    }
+}
+
+fn kanban_card_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KanbanPromptCard> {
+    Ok(KanbanPromptCard {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        worktree_id: row.get(2)?,
+        branch_name: row.get(3)?,
+        prompt: row.get(4)?,
+        agent_id: row.get(5)?,
+        model_id: row.get(6)?,
+        status: kanban_status_from_str(&row.get::<_, String>(7)?),
+        agent_tab_id: row.get(8)?,
+        completed_action: kanban_action_from_str(row.get::<_, Option<String>>(9)?),
+        pull_request_url: row.get(10)?,
+        pull_request_number: row.get::<_, Option<i64>>(11)?,
+        // MVP only ever stores "manual"; the column exists for forward-compat.
+        scheduling_mode: KanbanSchedulingMode::Manual,
+        scheduled_for: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        started_at: row.get(16)?,
+        completed_at: row.get(17)?,
+    })
 }
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -859,6 +1061,104 @@ mod tests {
             .expect("tabs should list")
             .is_empty());
         let _ = tab;
+    }
+
+    #[test]
+    fn kanban_cards_crud_and_status_transitions() {
+        use pragma_constants::{KanbanCompletedAction, KanbanPromptStatus};
+
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+
+        let card = db
+            .create_kanban_card(
+                &project.id,
+                "feature/x",
+                "do the thing",
+                "claude",
+                Some("opus"),
+            )
+            .expect("card should insert");
+        assert_eq!(card.status, KanbanPromptStatus::Draft);
+        assert_eq!(card.branch_name, "feature/x");
+        assert_eq!(card.model_id.as_deref(), Some("opus"));
+        assert!(card.worktree_id.is_none());
+
+        let listed = db
+            .list_kanban_cards(&project.id)
+            .expect("cards should list");
+        assert_eq!(listed.len(), 1);
+
+        // Full update covers the start transition (worktree + agent tab + status).
+        let mut started = card.clone();
+        started.status = KanbanPromptStatus::InProgress;
+        started.worktree_id = Some("wt-1".to_string());
+        started.agent_tab_id = Some("tab-1".to_string());
+        started.started_at = Some("2026-06-25T00:00:00Z".to_string());
+        let started = db
+            .update_kanban_card(&started)
+            .expect("update should succeed");
+        assert_eq!(started.status, KanbanPromptStatus::InProgress);
+        assert_eq!(started.agent_tab_id.as_deref(), Some("tab-1"));
+
+        // Dedicated move covers the automatic done -> reviewNeeded transition.
+        let moved = db
+            .move_kanban_card(&card.id, KanbanPromptStatus::ReviewNeeded)
+            .expect("move should succeed");
+        assert_eq!(moved.status, KanbanPromptStatus::ReviewNeeded);
+        // Move leaves the previously-set worktree intact.
+        assert_eq!(moved.worktree_id.as_deref(), Some("wt-1"));
+
+        // Completion records the action + PR metadata.
+        let mut completed = moved.clone();
+        completed.status = KanbanPromptStatus::Completed;
+        completed.completed_action = Some(KanbanCompletedAction::CommitPr);
+        completed.pull_request_url = Some("https://example.com/pr/1".to_string());
+        completed.pull_request_number = Some(1);
+        let completed = db
+            .update_kanban_card(&completed)
+            .expect("complete should succeed");
+        assert_eq!(completed.status, KanbanPromptStatus::Completed);
+        assert_eq!(
+            completed.completed_action,
+            Some(KanbanCompletedAction::CommitPr)
+        );
+        assert_eq!(completed.pull_request_number, Some(1));
+
+        db.delete_kanban_card(&card.id)
+            .expect("delete should succeed");
+        assert!(db
+            .list_kanban_cards(&project.id)
+            .expect("cards should list")
+            .is_empty());
+    }
+
+    #[test]
+    fn kanban_cards_cascade_on_project_delete() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None)
+            .expect("card should insert");
+        db.0.lock()
+            .expect("lock")
+            .execute("DELETE FROM projects WHERE id = ?1", [&project.id])
+            .expect("project delete");
+        assert!(db
+            .list_kanban_cards(&project.id)
+            .expect("cards should list")
+            .is_empty());
     }
 
     #[test]

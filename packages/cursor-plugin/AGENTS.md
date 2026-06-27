@@ -125,6 +125,23 @@ Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is in
 
 `pragma/agents/cursor/config.json` — staged by `stage-daemon-sidecar.sh`.
 
+The config uses Pragma's generic launch timing fields:
+
+- `startupInput: [{ delayMs: 5000, data: "a" }]` accepts Cursor's TUI workspace-trust
+  gate for new git worktree paths.
+- `prefillDelayMs: 14000` waits for the real Cursor Agent TUI input before prompt paste.
+- `prefillMode: "plain"` pastes the prompt unbracketed; the prompt's own `\n`s are
+  inserted as newlines (Cursor's TUI only submits on a parsed `return` key, not on a
+  raw line feed), so multi-line prompts stay intact.
+- `prefillSubmit: "\\r"` submits with a plain carriage return. Cursor's TUI input parser
+  treats Shift+Enter CSI-u/`modifyOtherKeys` sequences (`[13;2u`, `[27;2;13~`, …) as
+  newline insertion and only submits when the key parses to `return` — i.e. a bare `\r`.
+  An earlier Ctrl+Enter sequence (`\\u001b[13;5u`) was **not** decoded as `return`, so the
+  prompt pasted but never sent.
+
+These are config-owned keystrokes/timing, not Pragma core Cursor branches. User-defined
+agents can use the same fields for their own pre-TUI gates.
+
 The optional `models` block is command-backed and runs with cwd set to the installed
 agent directory (`~/.pragma/agents/cursor`):
 
