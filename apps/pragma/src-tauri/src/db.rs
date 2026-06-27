@@ -488,7 +488,7 @@ impl Db {
             "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, status,
                     agent_tab_id, completed_action, pull_request_url, pull_request_number,
                     scheduling_mode, scheduled_for, created_at, updated_at, started_at, completed_at
-             FROM kanban_cards WHERE project_id = ?1 ORDER BY created_at",
+             FROM kanban_cards WHERE project_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([project_id], kanban_card_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)

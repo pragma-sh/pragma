@@ -80,18 +80,19 @@ export function ProjectKanbanWorkspace() {
   const anyDialogOpen = draftDialog.open || completionCard !== null || deletionCard !== null;
 
   // Escape exits the board when no modal is open (modals own their own Escape).
+  const { exitBoard } = kanban;
   useEffect(() => {
     if (anyDialogOpen) {
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        kanban.exitBoard();
+        exitBoard();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [anyDialogOpen, kanban]);
+  }, [anyDialogOpen, exitBoard]);
 
   function agentConfig(card: KanbanPromptCard): AgentConfig | null {
     return kanban.agents.find((agent) => agent.id === card.agentId) ?? null;
