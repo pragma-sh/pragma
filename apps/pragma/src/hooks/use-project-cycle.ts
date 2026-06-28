@@ -21,6 +21,15 @@ const WHEEL_MOMENTUM_DECAY_FRACTION = 0.6;
 /** Magnitude jitter (px) to ignore when deciding whether the wheel is rising. */
 const WHEEL_RISE_TOLERANCE = 4;
 
+/** Horizontal delta for a wheel event: native deltaX, or deltaY when shift is held. */
+function horizontalWheelDelta(event: React.WheelEvent): number {
+  return Math.abs(event.deltaX) > Math.abs(event.deltaY)
+    ? event.deltaX
+    : event.shiftKey
+      ? event.deltaY
+      : 0;
+}
+
 /** Provides project cycling driven by horizontal wheel or touch swipe gestures. */
 export function useProjectCycle() {
   const workspace = useWorkspace();
@@ -65,12 +74,7 @@ export function useProjectCycle() {
   }
 
   function onWheel(event: React.WheelEvent) {
-    const horizontal =
-      Math.abs(event.deltaX) > Math.abs(event.deltaY)
-        ? event.deltaX
-        : event.shiftKey
-          ? event.deltaY
-          : 0;
+    const horizontal = horizontalWheelDelta(event);
     if (horizontal === 0) {
       return;
     }
@@ -79,38 +83,58 @@ export function useProjectCycle() {
     const sign = Math.sign(horizontal) as 1 | -1;
 
     // Any event (including momentum) defers the end of the gesture.
-    if (wheelGestureTimer.current) {
-      clearTimeout(wheelGestureTimer.current);
-    }
+    clearWheelGestureTimer();
 
     // A direction reversal is unambiguous new intent — switch the other way now.
-    if (wheelSign.current !== 0 && sign !== wheelSign.current) {
+    if (isDirectionReversal(sign)) {
       resetWheelGesture();
     }
 
     // A separate swipe in the same direction: after this swipe has moved and its
     // momentum has decayed below the threshold fraction of its peak, a rise in
-    // magnitude can only be a new finger push. Compare against the prior event's
-    // values, before they're updated below.
-    const momentumDecayed =
-      wheelSwitched.current && magnitude < wheelPeak.current * WHEEL_MOMENTUM_DECAY_FRACTION;
-    const rose = magnitude > lastWheelMagnitude.current + WHEEL_RISE_TOLERANCE;
-    if (momentumDecayed && rose) {
+    // magnitude can only be a new finger push.
+    if (shouldStartNewSwipeStep(magnitude)) {
       startWheelStep();
     }
 
-    if (wheelSign.current === 0) {
-      wheelSign.current = sign;
-    }
-    wheelPeak.current = Math.max(wheelPeak.current, magnitude);
-    lastWheelMagnitude.current = magnitude;
-    wheelGestureTimer.current = setTimeout(resetWheelGesture, WHEEL_GESTURE_QUIET_MS);
+    trackWheelStep(sign, magnitude);
 
     // Already moved this step: ignore the rest of the swipe and its momentum.
     if (wheelSwitched.current) {
       return;
     }
 
+    accumulateAndMaybeSwitch(horizontal, sign);
+  }
+
+  function clearWheelGestureTimer(): void {
+    if (wheelGestureTimer.current) {
+      clearTimeout(wheelGestureTimer.current);
+    }
+  }
+
+  function isDirectionReversal(sign: 1 | -1): boolean {
+    return wheelSign.current !== 0 && sign !== wheelSign.current;
+  }
+
+  /** Detects a new finger push mid-momentum by comparing against the prior event. */
+  function shouldStartNewSwipeStep(magnitude: number): boolean {
+    const momentumDecayed =
+      wheelSwitched.current && magnitude < wheelPeak.current * WHEEL_MOMENTUM_DECAY_FRACTION;
+    const rose = magnitude > lastWheelMagnitude.current + WHEEL_RISE_TOLERANCE;
+    return momentumDecayed && rose;
+  }
+
+  function trackWheelStep(sign: 1 | -1, magnitude: number): void {
+    if (wheelSign.current === 0) {
+      wheelSign.current = sign;
+    }
+    wheelPeak.current = Math.max(wheelPeak.current, magnitude);
+    lastWheelMagnitude.current = magnitude;
+    wheelGestureTimer.current = setTimeout(resetWheelGesture, WHEEL_GESTURE_QUIET_MS);
+  }
+
+  function accumulateAndMaybeSwitch(horizontal: number, sign: 1 | -1): void {
     wheelTotal.current += horizontal;
     if (Math.abs(wheelTotal.current) > WHEEL_THRESHOLD) {
       switchBy(sign);
@@ -127,25 +151,34 @@ export function useProjectCycle() {
   }
 
   function onTouchEnd(event: React.TouchEvent) {
-    if ((event.touches?.length ?? 0) > 0 || touchStartX.current == null) {
+    if (shouldIgnoreTouchEnd(event)) {
       return;
     }
     if (touchSwitched.current) {
       touchStartX.current = null;
       return;
     }
-    const endX = event.changedTouches[0]?.clientX;
-    if (endX == null) {
-      return;
-    }
-    const deltaX = endX - touchStartX.current;
-    if (Math.abs(deltaX) < SWIPE_THRESHOLD) {
+    const deltaX = touchSwipeDelta(event);
+    if (deltaX == null || Math.abs(deltaX) < SWIPE_THRESHOLD) {
       return;
     }
     touchStartX.current = null;
     touchSwitched.current = true;
     // Swipe left (negative delta) moves to the next project; right moves back.
     switchBy(deltaX < 0 ? 1 : -1);
+  }
+
+  function shouldIgnoreTouchEnd(event: React.TouchEvent): boolean {
+    return (event.touches?.length ?? 0) > 0 || touchStartX.current == null;
+  }
+
+  /** Delta from the recorded touch-start to the lifted finger's client X, if any. */
+  function touchSwipeDelta(event: React.TouchEvent): number | null {
+    const endX = event.changedTouches[0]?.clientX;
+    if (endX == null) {
+      return null;
+    }
+    return endX - (touchStartX.current ?? 0);
   }
 
   return { switchBy, onWheel, onTouchStart, onTouchEnd };

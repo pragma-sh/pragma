@@ -134,12 +134,12 @@ function DeviceCodePrompt({ className, start }: { className?: string; start: Dev
           Enter this code on GitHub to finish signing in:
         </p>
         <Button
-          className="h-auto px-4 py-2 font-mono text-lg tracking-[0.3em] text-slate-100"
+          className="h-auto px-4 py-2 font-mono text-lg tracking-[0.3em] text-foreground"
           onClick={() => void copyCode()}
           variant="outline"
         >
           {start.userCode}
-          <Copy className="size-4 text-slate-400" />
+          <Copy className="size-4 text-muted-foreground" />
         </Button>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 
 import { fileIconId, folderIconId } from "@/lib/file-icons";
+import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 
 const INDENT_PX = 12;
@@ -96,8 +97,8 @@ export function RenameEntryInput({
         autoComplete="off"
         autoCorrect="off"
         className={cn(
-          "w-full min-w-0 max-w-[14rem] rounded border bg-black/40 px-1 text-xs text-slate-100 outline-none",
-          value && invalid ? "border-red-400/70" : "border-cyan-400/50",
+          "w-full min-w-0 max-w-[14rem] rounded border bg-canvas px-1 text-xs text-foreground outline-none",
+          value && invalid ? "border-destructive/70" : "border-primary/50",
         )}
         spellCheck="false"
         style={{ textTransform: "none" }}
@@ -107,15 +108,7 @@ export function RenameEntryInput({
           }
         }}
         onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            submit();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
+        onKeyDown={commitOnEnterCancelOnEscape(submit, onCancel)}
         value={value}
       />
     </div>

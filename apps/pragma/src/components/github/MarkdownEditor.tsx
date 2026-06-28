@@ -92,7 +92,7 @@ export function MarkdownEditor({
 
   return (
     <div
-      className={`rounded-md border border-white/15 bg-black/30 text-sm text-slate-100 focus-within:border-cyan-400/60 ${className ?? ""}`}
+      className={`rounded-md border border-input bg-canvas text-sm text-foreground focus-within:border-primary/60 ${className ?? ""}`}
     >
       <EditorContent editor={editor} />
     </div>

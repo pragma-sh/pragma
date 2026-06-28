@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgentSelection } from "@/hooks/use-agent-selection";
@@ -100,80 +101,78 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl rounded-xl border bg-background p-5 shadow-xl">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">New worktree at</h2>
-          <p className="text-sm text-muted-foreground">
-            Branches from the selected parent worktree HEAD. Add a prompt to launch an agent session
-            in it.
-          </p>
-        </div>
-        <form
-          className="mt-5 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="branch">Branch name</Label>
-              <Input
-                id="branch"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                value={branch}
-                onChange={(event) => setBranch(event.target.value.replace(/\s+/g, "-"))}
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="title">Display title</Label>
-              <Input
-                id="title"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Agent</Label>
-              <AgentModelSelector
-                agents={agents}
-                modelsByAgent={modelsByAgent}
-                value={{ agentId, selection: modelSelection }}
-                onChange={handleAgentChange}
-                onLoadModels={loadModels}
-              />
-            </div>
-          </div>
+    <ModalShell className="max-w-2xl">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">New worktree at</h2>
+        <p className="text-sm text-muted-foreground">
+          Branches from the selected parent worktree HEAD. Add a prompt to launch an agent session
+          in it.
+        </p>
+      </div>
+      <form
+        className="mt-5 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="space-y-2">
-            <Label>Prompt</Label>
-            <MarkdownEditor
-              value={message}
-              onChange={setMessage}
+            <Label htmlFor="branch">Branch name</Label>
+            <Input
+              id="branch"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              value={branch}
+              onChange={(event) => setBranch(event.target.value.replace(/\s+/g, "-"))}
               onKeyDown={handleKeyDown}
-              placeholder="Describe what you want the agent to do… (leave empty to skip the session)"
-              className="min-h-40"
             />
           </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              Create worktree
-              <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
-            </Button>
+          <div className="space-y-2">
+            <Label htmlFor="title">Display title</Label>
+            <Input
+              id="title"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              onKeyDown={handleKeyDown}
+            />
           </div>
-        </form>
-      </div>
-    </div>
+          <div className="space-y-2">
+            <Label>Agent</Label>
+            <AgentModelSelector
+              agents={agents}
+              modelsByAgent={modelsByAgent}
+              value={{ agentId, selection: modelSelection }}
+              onChange={handleAgentChange}
+              onLoadModels={loadModels}
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Prompt</Label>
+          <MarkdownEditor
+            value={message}
+            onChange={setMessage}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe what you want the agent to do… (leave empty to skip the session)"
+            className="min-h-40"
+          />
+        </div>
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!canSubmit}>
+            Create worktree
+            <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
+          </Button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }

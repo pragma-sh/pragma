@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { errorMessage } from "@/lib/errors";
 
 import type { FileDiff, GitHubRepoRef, Tab } from "@pragma/constants";
 import {
@@ -43,10 +44,6 @@ import {
 import { useReviewDone, setReviewDone } from "@/state/review-done-store";
 import { clearReviewFocus, useReviewFocus } from "@/state/review-focus-store";
 
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
-
 interface ReviewData {
   repo: GitHubRepoRef;
   pr: PullRequestSummary;
@@ -60,50 +57,35 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ready"; data: ReviewData };
 
-/**
- * The PR review tab (one `pr-review` tab per PR). A scrollable list of changed
- * files; each file has a sticky header with a **Done reviewing** toggle (ephemeral
- * `review-done-store`, collapses the diff when checked), a side-by-side
- * `base...HEAD` diff from `github_pr_file_diff`, and the file's inline review
- * threads, each resolvable via `resolveReviewThread` (resolved threads dim).
- */
-export function ReviewTab({ tab }: { tab: Tab }) {
-  const { worktreeId, prNumber } = tab;
+/** Group review threads into a per-path map (file order is preserved by the caller). */
+function groupThreadsByPath(threads: ReviewThread[]): Map<string, ReviewThread[]> {
+  const map = new Map<string, ReviewThread[]>();
+  for (const thread of threads) {
+    const bucket = map.get(thread.path);
+    if (bucket) {
+      bucket.push(thread);
+    } else {
+      map.set(thread.path, [thread]);
+    }
+  }
+  return map;
+}
+
+/** Every review thread's id, in file-then-thread order, for toolbar navigation. */
+function buildCommentKeys(files: PullFile[], threadsByPath: Map<string, ReviewThread[]>): string[] {
+  const keys: string[] = [];
+  for (const file of files) {
+    for (const thread of threadsByPath.get(file.path) ?? []) {
+      keys.push(thread.id);
+    }
+  }
+  return keys;
+}
+
+/** Load the PR + files + reviews + threads, and own the optimistic thread-resolve flip. */
+function useReviewData(worktreeId: string, prNumber: number | null) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  // The comment a single-comment "Fix" dialog is open for (null when closed), and
-  // whether the "Address fix it list" dialog is open.
-  const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
-  const [listOpen, setListOpen] = useState(false);
   const active = useRef(true);
-  // The review scroll container, so the sticky toolbar can scroll a comment into
-  // view (each comment marks its DOM node with `data-review-comment`).
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Each file section registers its DOM node here so a focus request (from
-  // clicking a file in the PR's "Files changed" list) can scroll it into view.
-  const sectionEls = useRef(new Map<string, HTMLElement>());
-  const focusPath = useReviewFocus(prNumber);
-
-  const registerSection = useCallback((path: string, el: HTMLElement | null) => {
-    if (el) {
-      sectionEls.current.set(path, el);
-    } else {
-      sectionEls.current.delete(path);
-    }
-  }, []);
-
-  // Inline comments live inside a virtualized diff, so a comment below the fold
-  // has no DOM node until its line is revealed. Each diff registers a reveal
-  // callback per comment id here; the toolbar calls it before scrolling so the
-  // arrows can reach comments that aren't the first in their file.
-  const commentReveal = useRef(new Map<string, () => void>());
-  const registerCommentReveal = useCallback((key: string, reveal: (() => void) | null) => {
-    if (reveal) {
-      commentReveal.current.set(key, reveal);
-    } else {
-      commentReveal.current.delete(key);
-    }
-  }, []);
 
   const load = useCallback(async () => {
     if (prNumber === null || prNumber === undefined) {
@@ -119,28 +101,21 @@ export function ReviewTab({ tab }: { tab: Tab }) {
         listPullReviews(repo, prNumber),
         listReviewThreads(repo, prNumber),
       ]);
-      const threadsByPath = new Map<string, ReviewThread[]>();
-      for (const thread of threads) {
-        const bucket = threadsByPath.get(thread.path);
-        if (bucket) {
-          bucket.push(thread);
-        } else {
-          threadsByPath.set(thread.path, [thread]);
-        }
-      }
       if (active.current) {
-        setState({ kind: "ready", data: { repo, pr, files, reviews, threadsByPath } });
+        setState({
+          kind: "ready",
+          data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
+        });
       }
     } catch (cause) {
       if (active.current) {
-        setState({ kind: "error", message: messageFor(cause) });
+        setState({ kind: "error", message: errorMessage(cause) });
       }
     }
   }, [worktreeId, prNumber]);
 
   // Optimistically flips one thread's resolved state in place — no refetch, so the
-  // diff panes and decorations don't flash. The mutating call reverts via this same
-  // setter on failure (see `ReviewThreadCard`). Stable (functional update) so each
+  // diff panes and decorations don't flash. Stable (functional update) so each
   // file's memoized inline-comment content only changes when its threads actually do.
   const setThreadResolved = useCallback((threadId: string, isResolved: boolean) => {
     setState((prev) => {
@@ -173,10 +148,37 @@ export function ReviewTab({ tab }: { tab: Tab }) {
     };
   }, [load]);
 
-  // Consume a pending focus request once the file sections exist: scroll the
-  // requested file to the top, then clear the request so it fires only on an
-  // explicit click and re-clicking the same file re-triggers it. Runs after the
-  // ready render so `sectionEls` is populated.
+  return { state, setThreadResolved };
+}
+
+/** DOM-node registries so focus requests and toolbar arrows can reach file sections and comments. */
+function useReviewRegistration() {
+  const sectionEls = useRef(new Map<string, HTMLElement>());
+  const commentReveal = useRef(new Map<string, () => void>());
+  const registerSection = useCallback((path: string, el: HTMLElement | null) => {
+    if (el) {
+      sectionEls.current.set(path, el);
+    } else {
+      sectionEls.current.delete(path);
+    }
+  }, []);
+  const registerCommentReveal = useCallback((key: string, reveal: (() => void) | null) => {
+    if (reveal) {
+      commentReveal.current.set(key, reveal);
+    } else {
+      commentReveal.current.delete(key);
+    }
+  }, []);
+  return { sectionEls, commentReveal, registerSection, registerCommentReveal };
+}
+
+/** Scroll a focus-requested file into view once its section is mounted, then clear the request. */
+function useReviewFocusScroll(
+  state: LoadState,
+  prNumber: number | null,
+  focusPath: string | null,
+  sectionEls: React.RefObject<Map<string, HTMLElement>>,
+): void {
   useEffect(() => {
     if (state.kind !== "ready" || prNumber == null || focusPath === null) {
       return;
@@ -187,7 +189,60 @@ export function ReviewTab({ tab }: { tab: Tab }) {
     }
     el.scrollIntoView({ block: "start" });
     clearReviewFocus(prNumber);
-  }, [focusPath, state.kind, prNumber]);
+  }, [focusPath, state.kind, prNumber, sectionEls]);
+}
+
+/** Whether the key is Cmd/Ctrl (no alt/shift) + an arrow up/down. */
+function isReviewNavKey(event: KeyboardEvent): boolean {
+  if (!(event.metaKey || event.ctrlKey)) {
+    return false;
+  }
+  if (event.altKey || event.shiftKey) {
+    return false;
+  }
+  return event.key === "ArrowDown" || event.key === "ArrowUp";
+}
+
+/** Whether the event target is an input/textarea/contenteditable (don't hijack typing). */
+function isTypingTarget(target: HTMLElement | null): boolean {
+  return !!target?.closest("input, textarea, [contenteditable='true']");
+}
+
+/** Decide whether a keyboard event is a scoped Cmd/Ctrl+↑/↓ review navigation keystroke. */
+function shouldHandleReviewArrowKey(
+  event: KeyboardEvent,
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+): boolean {
+  if (!isReviewNavKey(event)) {
+    return false;
+  }
+  if (!scrollRef.current || scrollRef.current.offsetParent === null) {
+    return false;
+  }
+  return !isTypingTarget(event.target as HTMLElement | null);
+}
+
+/**
+ * The PR review tab (one `pr-review` tab per PR). A scrollable list of changed
+ * files; each file has a sticky header with a **Done reviewing** toggle (ephemeral
+ * `review-done-store`, collapses the diff when checked), a side-by-side
+ * `base...HEAD` diff from `github_pr_file_diff`, and the file's inline review
+ * threads, each resolvable via `resolveReviewThread` (resolved threads dim).
+ */
+export function ReviewTab({ tab }: { tab: Tab }) {
+  const { worktreeId, prNumber } = tab;
+  const { state, setThreadResolved } = useReviewData(worktreeId, prNumber);
+  const { sectionEls, commentReveal, registerSection, registerCommentReveal } =
+    useReviewRegistration();
+  // The review scroll container, so the sticky toolbar can scroll a comment into
+  // view (each comment marks its DOM node with `data-review-comment`).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const focusPath = useReviewFocus(prNumber);
+  // The comment a single-comment "Fix" dialog is open for (null when closed), and
+  // whether the "Address fix it list" dialog is open.
+  const [fixTarget, setFixTarget] = useState<FixItComment | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  useReviewFocusScroll(state, prNumber, focusPath, sectionEls);
 
   if (state.kind === "loading") {
     return <Centered>Loading review…</Centered>;
@@ -197,26 +252,19 @@ export function ReviewTab({ tab }: { tab: Tab }) {
   }
 
   const { data } = state;
-  // Every review thread's id, in file-then-thread order, so the toolbar arrows
-  // step through comments top-to-bottom (it resolves each id to its mounted node).
-  const commentKeys: string[] = [];
-  for (const file of data.files) {
-    for (const thread of data.threadsByPath.get(file.path) ?? []) {
-      commentKeys.push(thread.id);
-    }
-  }
+  const commentKeys = buildCommentKeys(data.files, data.threadsByPath);
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-auto bg-[#0b0d10]"
+      className="flex h-full min-h-0 flex-col overflow-auto bg-canvas"
       data-review-scroll
       ref={scrollRef}
     >
-      <div className="flex items-start gap-2 border-b border-white/10 px-4 py-2">
+      <div className="flex items-start gap-2 border-b border-border px-4 py-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-100">
-            {data.pr.title} <span className="text-slate-500">#{data.pr.number}</span>
+          <p className="text-sm font-semibold text-foreground">
+            {data.pr.title} <span className="text-muted-foreground">#{data.pr.number}</span>
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {data.files.length} file{data.files.length === 1 ? "" : "s"} · {data.pr.baseRef} ←{" "}
             {data.pr.headRef}
           </p>
@@ -230,7 +278,7 @@ export function ReviewTab({ tab }: { tab: Tab }) {
         scrollRef={scrollRef}
       />
       {data.reviews.length > 0 ? (
-        <div className="flex flex-col gap-2 border-b border-white/10 p-3">
+        <div className="flex flex-col gap-2 border-b border-border p-3">
           {data.reviews.map((review) => (
             <ReviewSummaryCard key={review.id} review={review} />
           ))}
@@ -342,21 +390,10 @@ function ReviewToolbar({
 
   // Cmd/Ctrl + ↑/↓ step between comments without leaving the keyboard. Scoped to
   // this tab's visible scroll container (`offsetParent` is null when an ancestor is
-  // `display: none`, e.g. a background pane) so only the on-screen review responds,
-  // and skipped while typing in a field so the arrows don't hijack text editing.
+  // `display: none`, e.g. a background pane) so only the on-screen review responds.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
-        return;
-      }
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-        return;
-      }
-      if (!scrollRef.current || scrollRef.current.offsetParent === null) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, [contenteditable='true']")) {
+      if (!shouldHandleReviewArrowKey(event, scrollRef)) {
         return;
       }
       event.preventDefault();
@@ -372,7 +409,7 @@ function ReviewToolbar({
   const hasPrev = cursor > 0;
   const hasNext = cursor < count - 1;
   return (
-    <div className="sticky top-0 z-20 flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#11151b] px-3">
+    <div className="sticky top-0 z-20 flex h-9 shrink-0 items-center gap-2 border-b border-border bg-elevated px-3">
       <div className="flex items-center gap-0.5">
         <Button
           aria-label="Previous comment"
@@ -395,7 +432,7 @@ function ReviewToolbar({
           <ChevronDown />
         </Button>
       </div>
-      <span className="text-[11px] text-slate-500">
+      <span className="text-[11px] text-muted-foreground">
         {count} comment{count === 1 ? "" : "s"}
       </span>
       <div className="flex-1" />
@@ -418,9 +455,7 @@ function AddressFixItButton({ prNumber, onClick }: { prNumber: number; onClick: 
       <ListChecks />
       Address fix it list
       {count > 0 ? (
-        <span className="ml-1 rounded bg-amber-500/20 px-1 text-[10px] text-amber-300">
-          {count}
-        </span>
+        <span className="ml-1 rounded bg-warning/20 px-1 text-[10px] text-warning">{count}</span>
       ) : null}
     </Button>
   );
@@ -428,11 +463,14 @@ function AddressFixItButton({ prNumber, onClick }: { prNumber: number; onClick: 
 
 /** Human label + badge styling for each review verdict. */
 const REVIEW_STATE_META: Record<PullReview["state"], { label: string; className: string }> = {
-  APPROVED: { label: "approved", className: "bg-green-700/40 text-green-300" },
-  CHANGES_REQUESTED: { label: "requested changes", className: "bg-red-700/40 text-red-300" },
-  COMMENTED: { label: "commented", className: "bg-slate-600/40 text-slate-300" },
-  DISMISSED: { label: "dismissed", className: "bg-slate-600/40 text-slate-400" },
-  PENDING: { label: "pending", className: "bg-amber-600/40 text-amber-200" },
+  APPROVED: { label: "approved", className: "bg-success/20 text-success" },
+  CHANGES_REQUESTED: {
+    label: "requested changes",
+    className: "bg-destructive/20 text-destructive",
+  },
+  COMMENTED: { label: "commented", className: "bg-muted text-muted-foreground" },
+  DISMISSED: { label: "dismissed", className: "bg-muted text-muted-foreground" },
+  PENDING: { label: "pending", className: "bg-warning/20 text-warning" },
 };
 
 /**
@@ -442,10 +480,10 @@ const REVIEW_STATE_META: Record<PullReview["state"], { label: string; className:
 function ReviewSummaryCard({ review }: { review: PullReview }) {
   const meta = REVIEW_STATE_META[review.state] ?? REVIEW_STATE_META.COMMENTED;
   return (
-    <div className="rounded-md border border-white/10 bg-black/20 p-2">
+    <div className="rounded-md border border-border bg-canvas p-2">
       <div className="flex items-center gap-2">
         <ActorAvatar actor={review.user} />
-        <span className="text-xs text-slate-300">{review.user?.login ?? "ghost"}</span>
+        <span className="text-xs text-muted-foreground">{review.user?.login ?? "ghost"}</span>
         <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${meta.className}`}>
           {meta.label}
         </span>
@@ -495,7 +533,7 @@ function FileReview({
           line: thread.line,
           content: (
             <div
-              className="border-y border-white/10 bg-black/30 px-3 py-2"
+              className="border-y border-border bg-canvas px-3 py-2"
               data-review-comment={thread.id}
             >
               <ReviewThreadCard
@@ -512,18 +550,18 @@ function FileReview({
   const fileComments = threads.filter((thread) => thread.line === null);
 
   return (
-    <section className="border-b border-white/10" ref={(el) => registerSection(file.path, el)}>
-      <header className="sticky top-9 z-10 flex items-center gap-2 border-b border-white/5 bg-[#11151b] px-3 py-1.5">
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-200" title={file.path}>
+    <section className="border-b border-border" ref={(el) => registerSection(file.path, el)}>
+      <header className="sticky top-9 z-10 flex items-center gap-2 border-b border-border bg-elevated px-3 py-1.5">
+        <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={file.path}>
           {file.path}
         </span>
         {unresolved > 0 ? (
-          <span className="shrink-0 rounded bg-amber-500/20 px-1 text-[10px] text-amber-300">
+          <span className="shrink-0 rounded bg-warning/20 px-1 text-[10px] text-warning">
             {unresolved} unresolved
           </span>
         ) : null}
-        <span className="shrink-0 font-mono text-[10px] text-emerald-400">+{file.additions}</span>
-        <span className="shrink-0 font-mono text-[10px] text-red-400">-{file.deletions}</span>
+        <span className="shrink-0 font-mono text-[10px] text-success">+{file.additions}</span>
+        <span className="shrink-0 font-mono text-[10px] text-destructive">-{file.deletions}</span>
         <Button
           className="shrink-0"
           onClick={() => setReviewDone(prNumber, file.path, !done)}
@@ -544,7 +582,7 @@ function FileReview({
             worktreeId={worktreeId}
           />
           {fileComments.length > 0 ? (
-            <div className="flex flex-col gap-2 border-t border-white/5 p-2">
+            <div className="flex flex-col gap-2 border-t border-border p-2">
               {fileComments.map((thread) => (
                 <div data-review-comment={thread.id} key={thread.id}>
                   <ReviewThreadCard
@@ -610,7 +648,7 @@ function FileDiffPane({
         }
       } catch (cause) {
         if (!cancelled) {
-          setError(messageFor(cause));
+          setError(errorMessage(cause));
         }
       }
     })();
@@ -644,9 +682,9 @@ function FileDiffPane({
   if (error) {
     content = <p className="px-3 py-2 text-xs text-destructive">{error}</p>;
   } else if (!diff) {
-    content = <p className="px-3 py-2 text-xs text-slate-500">Loading diff…</p>;
+    content = <p className="px-3 py-2 text-xs text-muted-foreground">Loading diff…</p>;
   } else if (diff.binary) {
-    content = <p className="px-3 py-2 text-xs text-slate-500">Binary file — no diff.</p>;
+    content = <p className="px-3 py-2 text-xs text-muted-foreground">Binary file — no diff.</p>;
   } else {
     content = (
       <MergeDiff
@@ -674,6 +712,89 @@ function FileDiffPane({
       ref={wrapperRef}
     >
       {content}
+    </div>
+  );
+}
+
+/** Collapsible header showing the thread's line (or "File comment") and resolved state. */
+function ReviewThreadHeader({
+  thread,
+  collapsed,
+  onToggle,
+}: {
+  thread: ReviewThread;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      className="h-auto w-full justify-start gap-1 px-0 py-0 text-[11px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+      onClick={onToggle}
+      size="xs"
+      variant="ghost"
+    >
+      {collapsed ? <ChevronRight /> : <ChevronDown />}
+      {thread.line ? `Line ${thread.line}` : "File comment"}
+      {thread.isResolved ? (
+        <span className="ml-1 inline-flex items-center gap-0.5 text-success">
+          <CheckCircle2 className="size-3" /> resolved
+        </span>
+      ) : null}
+    </Button>
+  );
+}
+
+/** The thread's comments (append-only; index disambiguates when databaseId is missing). */
+function ReviewThreadComments({ thread }: { thread: ReviewThread }) {
+  return (
+    <>
+      {thread.comments.map((comment, index) => (
+        // `comment.id` falls back to 0 when GitHub omits `databaseId`, so it can
+        // collide within a thread; the position disambiguates. Comments in a thread
+        // are append-only and never reorder, so the index is stable.
+        // oxlint-disable-next-line no-array-index-key -- composite key needs the index for uniqueness when databaseId is missing
+        <div className="flex gap-2" key={`${thread.id}:${comment.id}:${index}`}>
+          <ActorAvatar actor={comment.user} />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-muted-foreground">{comment.user?.login ?? "ghost"}</p>
+            <GitHubMarkdown>{comment.body}</GitHubMarkdown>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Resolve / Fix / Add-to-fix-it-list buttons for a thread. */
+function ReviewThreadActions({
+  thread,
+  busy,
+  onFixItList,
+  onToggleResolved,
+  onFix,
+  onToggleFixItList,
+}: {
+  thread: ReviewThread;
+  busy: boolean;
+  onFixItList: boolean;
+  onToggleResolved: () => void;
+  onFix: (comment: FixItComment) => void;
+  onToggleFixItList: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button disabled={busy} onClick={onToggleResolved} size="sm" variant="outline">
+        {busy ? <Loader2 className="animate-spin" /> : null}
+        {thread.isResolved ? "Unresolve" : "Resolve"}
+      </Button>
+      <Button onClick={() => onFix(reviewThreadToFixItComment(thread))} size="sm">
+        <Sparkles />
+        Fix
+      </Button>
+      <Button onClick={onToggleFixItList} size="sm" variant={onFixItList ? "secondary" : "outline"}>
+        {onFixItList ? <Check /> : <ListChecks />}
+        {onFixItList ? "On fix it list" : "Add to fix it list"}
+      </Button>
     </div>
   );
 }
@@ -721,7 +842,7 @@ function ReviewThreadCard({
       await (next ? resolveReviewThread(thread.id) : unresolveReviewThread(thread.id));
     } catch (cause) {
       onResolvedChange(thread.id, !next); // revert on failure
-      toast.error(messageFor(cause));
+      toast.error(errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -729,60 +850,24 @@ function ReviewThreadCard({
 
   return (
     <div
-      className={`rounded-md border border-white/10 bg-black/20 p-2 ${thread.isResolved ? "opacity-60" : ""}`}
+      className={`rounded-md border border-border bg-canvas p-2 ${thread.isResolved ? "opacity-60" : ""}`}
     >
-      <Button
-        className="h-auto w-full justify-start gap-1 px-0 py-0 text-[11px] font-normal text-slate-400 hover:bg-transparent hover:text-slate-200"
-        onClick={() => setCollapsed((value) => !value)}
-        size="xs"
-        variant="ghost"
-      >
-        {collapsed ? <ChevronRight /> : <ChevronDown />}
-        {thread.line ? `Line ${thread.line}` : "File comment"}
-        {thread.isResolved ? (
-          <span className="ml-1 inline-flex items-center gap-0.5 text-green-400">
-            <CheckCircle2 className="size-3" /> resolved
-          </span>
-        ) : null}
-      </Button>
+      <ReviewThreadHeader
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((value) => !value)}
+        thread={thread}
+      />
       {collapsed ? null : (
         <div className="mt-2 flex flex-col gap-2">
-          {thread.comments.map((comment, index) => (
-            // `comment.id` falls back to 0 when GitHub omits `databaseId`, so it can
-            // collide within a thread; the position disambiguates. Comments in a thread
-            // are append-only and never reorder, so the index is stable.
-            // oxlint-disable-next-line no-array-index-key -- composite key needs the index for uniqueness when databaseId is missing
-            <div className="flex gap-2" key={`${thread.id}:${comment.id}:${index}`}>
-              <ActorAvatar actor={comment.user} />
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] text-slate-400">{comment.user?.login ?? "ghost"}</p>
-                <GitHubMarkdown>{comment.body}</GitHubMarkdown>
-              </div>
-            </div>
-          ))}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              disabled={busy}
-              onClick={() => void toggleResolved()}
-              size="sm"
-              variant="outline"
-            >
-              {busy ? <Loader2 className="animate-spin" /> : null}
-              {thread.isResolved ? "Unresolve" : "Resolve"}
-            </Button>
-            <Button onClick={() => onFix(reviewThreadToFixItComment(thread))} size="sm">
-              <Sparkles />
-              Fix
-            </Button>
-            <Button
-              onClick={toggleFixItList}
-              size="sm"
-              variant={onFixItList ? "secondary" : "outline"}
-            >
-              {onFixItList ? <Check /> : <ListChecks />}
-              {onFixItList ? "On fix it list" : "Add to fix it list"}
-            </Button>
-          </div>
+          <ReviewThreadComments thread={thread} />
+          <ReviewThreadActions
+            busy={busy}
+            onFix={onFix}
+            onFixItList={onFixItList}
+            onToggleFixItList={toggleFixItList}
+            onToggleResolved={() => void toggleResolved()}
+            thread={thread}
+          />
         </div>
       )}
     </div>
@@ -792,8 +877,8 @@ function ReviewThreadCard({
 function Centered({ children, tone }: { children: React.ReactNode; tone?: "error" }) {
   return (
     <div
-      className={`flex h-full items-center justify-center bg-[#0b0d10] p-6 text-center text-sm ${
-        tone === "error" ? "text-destructive" : "text-slate-400"
+      className={`flex h-full items-center justify-center bg-canvas p-6 text-center text-sm ${
+        tone === "error" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {children}

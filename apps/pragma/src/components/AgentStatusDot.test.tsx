@@ -9,18 +9,18 @@ describe("AgentStatusDot", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders a green indicator for a done agent", () => {
+  it("renders a success indicator for a done agent", () => {
     const { container } = render(<AgentStatusDot status="done" />);
     expect(container.firstChild).not.toBeNull();
-    expect(container.firstChild).toHaveClass("bg-green-500");
+    expect(container.firstChild).toHaveClass("bg-success");
   });
 
-  it("renders yellow and red indicators for running and attention", () => {
+  it("renders running and attention indicators with their state tokens", () => {
     expect(render(<AgentStatusDot status="running" />).container.firstChild).toHaveClass(
-      "bg-yellow-400",
+      "bg-primary",
     );
     expect(render(<AgentStatusDot status="attention" />).container.firstChild).toHaveClass(
-      "bg-red-500",
+      "bg-warning",
     );
   });
 });

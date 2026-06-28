@@ -315,7 +315,7 @@ export function MergeDiff({
 
   return (
     <>
-      <div className="h-full min-h-0 overflow-auto bg-[#0b0d10]" ref={containerRef} />
+      <div className="h-full min-h-0 overflow-auto bg-canvas" ref={containerRef} />
       {comments.map((comment) => {
         const el = portalsRef.current.get(comment.key);
         return el ? createPortal(comment.content, el, comment.key) : null;

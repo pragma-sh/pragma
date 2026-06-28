@@ -240,14 +240,14 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full w-full flex-col bg-[#0b0d10]">
+      <div className="flex h-full w-full flex-col bg-canvas">
         <div
-          className="flex h-11 shrink-0 items-center gap-1 border-b border-white/10 bg-[#11151b] px-2"
+          className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-elevated px-2"
           onPointerDown={(event) => event.stopPropagation()}
         >
           <Button
             aria-label="Back"
-            className="text-slate-300 hover:bg-white/10 hover:text-white"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
             size="icon-sm"
             variant="ghost"
             onClick={() => void browserBack(tab.id)}
@@ -256,7 +256,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
           </Button>
           <Button
             aria-label="Forward"
-            className="text-slate-300 hover:bg-white/10 hover:text-white"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
             size="icon-sm"
             variant="ghost"
             onClick={() => void browserForward(tab.id)}
@@ -265,7 +265,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
           </Button>
           <Button
             aria-label="Reload"
-            className="text-slate-300 hover:bg-white/10 hover:text-white"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
             size="icon-sm"
             variant="ghost"
             onClick={() => void browserReload(tab.id)}
@@ -275,7 +275,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
           <form className="min-w-0 flex-1" onSubmit={submitAddress}>
             <Input
               aria-label="Address"
-              className="h-8 bg-[#0b0d10] text-sm text-slate-200"
+              className="h-8 bg-canvas text-sm text-foreground"
               placeholder="Enter a URL"
               spellCheck={false}
               value={address}
@@ -286,7 +286,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             <TooltipTrigger asChild>
               <Button
                 aria-label="Open dev tools"
-                className="text-slate-300 hover:bg-white/10 hover:text-white"
+                className="text-muted-foreground hover:bg-muted hover:text-foreground"
                 size="icon-sm"
                 variant="ghost"
                 onClick={() => void browserDevtools(tab.id)}
@@ -300,7 +300,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             <TooltipTrigger asChild>
               <Button
                 aria-label="Open in default browser"
-                className="text-slate-300 hover:bg-white/10 hover:text-white"
+                className="text-muted-foreground hover:bg-muted hover:text-foreground"
                 size="icon-sm"
                 variant="ghost"
                 onClick={() => void browserOpenExternal(tab.url ?? address)}
@@ -312,7 +312,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
           </Tooltip>
           <Button
             aria-label="Save screenshot"
-            className="text-slate-300 hover:bg-white/10 hover:text-white"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
             size="icon-sm"
             variant="ghost"
             onClick={takeScreenshot}
@@ -323,7 +323,7 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label="More options"
-                className="text-slate-300 hover:bg-white/10 hover:text-white"
+                className="text-muted-foreground hover:bg-muted hover:text-foreground"
                 size="icon-sm"
                 variant="ghost"
               >

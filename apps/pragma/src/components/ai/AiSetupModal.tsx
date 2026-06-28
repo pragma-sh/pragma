@@ -43,7 +43,7 @@ export function AiSetupModal() {
         showCloseButton={false}
       >
         <div className="flex flex-col items-center gap-2 text-center">
-          <div className="mb-2 inline-flex size-12 items-center justify-center rounded-full bg-white/10">
+          <div className="mb-2 inline-flex size-12 items-center justify-center rounded-full bg-muted">
             <Sparkles className="size-6" />
           </div>
           <DialogTitle className="text-base">Enable AI features</DialogTitle>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { errorMessage } from "@/lib/errors";
 
 import type { GitHubRepoRef } from "@pragma/constants";
 
@@ -17,10 +18,6 @@ import { useWorkspace } from "@/state/workspace-context";
  * state changes far less often than the working tree.
  */
 const PR_REFRESH_INTERVAL_MS = 10_000;
-
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 /**
  * The Pull Request subtab controller. Resolves, in order:
@@ -50,7 +47,7 @@ export function PullRequestTab({
   if (!authenticated) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-        <p className="text-xs text-slate-400">Sign in to GitHub to manage pull requests.</p>
+        <p className="text-xs text-muted-foreground">Sign in to GitHub to manage pull requests.</p>
         <GitHubAuthOptions className="w-full max-w-56" />
       </div>
     );
@@ -101,7 +98,7 @@ function PullRequestResolver({
       setState(pr ? { kind: "view", repo, pr } : { kind: "create", repo });
     } catch (cause) {
       if (active.current) {
-        setState({ kind: "error", message: messageFor(cause) });
+        setState({ kind: "error", message: errorMessage(cause) });
       }
     }
   }, [worktreeId]);
@@ -157,7 +154,7 @@ function CenteredMessage({
   return (
     <div
       className={`flex h-full items-center justify-center p-4 text-center text-xs ${
-        tone === "error" ? "text-destructive" : "text-slate-500"
+        tone === "error" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {children}

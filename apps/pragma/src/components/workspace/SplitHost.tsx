@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Globe, Plus, SquareTerminal, X } from "lucide-react";
@@ -47,7 +47,7 @@ export function SplitHost() {
   }
 
   return (
-    <div className="min-h-0 flex-1 bg-[#0b0d10]">
+    <div className="min-h-0 flex-1 bg-canvas">
       <SplitNode
         node={workspace.splitRoot}
         showPaneBars={workspace.splitRoot.kind === "split"}
@@ -90,7 +90,7 @@ function SplitNode({
           worktreePathById={worktreePathById}
         />
       </ResizablePanel>
-      <ResizableHandle className="bg-white/10" withHandle />
+      <ResizableHandle className="bg-border" withHandle />
       <ResizablePanel minSize={15}>
         <SplitNode
           node={node.children[1]}
@@ -101,6 +101,57 @@ function SplitNode({
       </ResizablePanel>
     </ResizablePanelGroup>
   );
+}
+
+/** Render the content for a pane's active tab keyed by its kind. */
+const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string) => ReactNode>> = {
+  browser: (tab) => <BrowserView active key={tab.id} tab={tab} />,
+  editor: (tab) => <EditorView key={tab.id} tab={tab} />,
+  diff: (tab) => <DiffView key={tab.id} tab={tab} />,
+  log: (tab) => <LogView key={tab.id} tab={tab} />,
+  "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,
+};
+
+/** Render a pane's active tab, defaulting unknown kinds to a terminal view. */
+function renderActiveTab(activeTab: Tab, cwd: string): ReactNode {
+  const render = PANE_CONTENT_RENDERERS[activeTab.kind];
+  if (render) return render(activeTab, cwd);
+  return <TerminalView cwd={cwd} key={activeTab.id} tab={activeTab} />;
+}
+
+/** Focus/activate the active tab's surface when a pane receives focus. */
+function activatePaneTab(activeTab: Tab): void {
+  if (activeTab.kind === "terminal") {
+    terminalManager.activate(activeTab.id);
+    return;
+  }
+  if (activeTab.kind === "browser") {
+    void browserFocus(activeTab.id).catch(() => undefined);
+  }
+}
+
+/** Resolve a pane's tabs in order, dropping any ids whose tab has vanished. */
+function resolvePaneTabs(pane: SplitPaneNode, tabsById: Map<string, Tab>): Tab[] {
+  return pane.tabIds.flatMap((tabId) => {
+    const tab = tabsById.get(tabId);
+    return tab ? [tab] : [];
+  });
+}
+
+/** Resolve the cwd for a pane's active tab (worktree path, else selection, home). */
+function resolvePaneCwd(
+  activeTab: Tab | null,
+  worktreePathById: Map<string, string>,
+  selectedWorktreePath: string | undefined,
+): string {
+  if (!activeTab) return "~";
+  return worktreePathById.get(activeTab.worktreeId) ?? selectedWorktreePath ?? "~";
+}
+
+/** Border class for a pane: highlighted when focused within a split. */
+function paneBorderClass(showBar: boolean, focused: boolean): string {
+  if (!showBar) return "border-transparent";
+  return focused ? "border-primary/35" : "border-border";
 }
 
 function SplitPane({
@@ -116,64 +167,43 @@ function SplitPane({
 }) {
   const workspace = useWorkspace();
   const { isDragging, draggingTabId } = useTabDrag();
-  const tabs = pane.tabIds.flatMap((tabId) => {
-    const tab = tabsById.get(tabId);
-    return tab ? [tab] : [];
-  });
-  const activeTab = tabs.find((tab) => tab.id === pane.activeTabId) ?? tabs[0] ?? null;
+  const tabs = useMemo(() => resolvePaneTabs(pane, tabsById), [pane, tabsById]);
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === pane.activeTabId) ?? tabs[0] ?? null,
+    [tabs, pane.activeTabId],
+  );
   const focused = workspace.focusedPaneId === pane.id;
-  // Every pane inside a split is its own group, so each gets its own tab bar.
   const showBar = showPaneBars;
+  const cwd = useMemo(
+    () => resolvePaneCwd(activeTab, worktreePathById, workspace.selectedWorktree?.path),
+    [activeTab, worktreePathById, workspace.selectedWorktree?.path],
+  );
 
-  const cwd = activeTab
-    ? (worktreePathById.get(activeTab.worktreeId) ?? workspace.selectedWorktree?.path ?? "~")
-    : "~";
+  const handlePointerDown = useCallback(() => workspace.focusPane(pane.id), [workspace, pane.id]);
+  const handleSplitDrop = useCallback(
+    (tabId: string, target: DropTarget) =>
+      workspace.splitTabAtPane(tabId, pane.id, target.direction, target.placement),
+    [workspace, pane.id],
+  );
 
   useEffect(() => {
-    if (!focused || !activeTab) {
-      return;
-    }
-    if (activeTab.kind === "terminal") {
-      terminalManager.activate(activeTab.id);
-    } else if (activeTab.kind === "browser") {
-      void browserFocus(activeTab.id).catch(() => undefined);
-    }
+    if (!focused || !activeTab) return;
+    activatePaneTab(activeTab);
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- keyed on the active tab's id/kind, not the per-render `activeTab` object identity.
   }, [activeTab?.id, activeTab?.kind, focused]);
 
   return (
     <section
       className={cn(
-        "flex h-full min-h-0 flex-col border bg-[#0b0d10]",
-        showBar ? (focused ? "border-cyan-400/35" : "border-white/10") : "border-transparent",
+        "flex h-full min-h-0 flex-col border bg-canvas",
+        paneBorderClass(showBar, focused),
       )}
-      onPointerDown={() => workspace.focusPane(pane.id)}
+      onPointerDown={handlePointerDown}
     >
-      {showBar ? <PaneBar activeTabId={activeTab?.id ?? null} pane={pane} tabs={tabs} /> : null}
+      {showBar && <PaneBar activeTabId={activeTab?.id ?? null} pane={pane} tabs={tabs} />}
       <div className="relative min-h-0 flex-1">
-        {activeTab ? (
-          activeTab.kind === "browser" ? (
-            <BrowserView active key={activeTab.id} tab={activeTab} />
-          ) : activeTab.kind === "editor" ? (
-            <EditorView key={activeTab.id} tab={activeTab} />
-          ) : activeTab.kind === "diff" ? (
-            <DiffView key={activeTab.id} tab={activeTab} />
-          ) : activeTab.kind === "log" ? (
-            <LogView key={activeTab.id} tab={activeTab} />
-          ) : activeTab.kind === "pr-review" ? (
-            <ReviewTab key={activeTab.id} tab={activeTab} />
-          ) : (
-            <TerminalView cwd={cwd} key={activeTab.id} tab={activeTab} />
-          )
-        ) : null}
-        {isDragging ? (
-          <PaneDropZone
-            draggingTabId={draggingTabId}
-            onDrop={(tabId, target) => {
-              workspace.splitTabAtPane(tabId, pane.id, target.direction, target.placement);
-            }}
-          />
-        ) : null}
+        {activeTab ? renderActiveTab(activeTab, cwd) : null}
+        {isDragging && <PaneDropZone draggingTabId={draggingTabId} onDrop={handleSplitDrop} />}
       </div>
     </section>
   );
@@ -196,8 +226,8 @@ function PaneBar({
   return (
     <div
       className={cn(
-        "flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b bg-[#11151b] px-1.5",
-        dropActive ? "border-cyan-400/60 bg-cyan-400/10" : "border-white/10",
+        "flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b bg-elevated px-1.5",
+        dropActive ? "border-primary/60 bg-primary/10" : "border-border",
       )}
       onDragOver={(event) => {
         if (!isDragging) {
@@ -230,8 +260,8 @@ function PaneBar({
             className={cn(
               "group flex h-6 min-w-24 max-w-44 items-center gap-1 rounded-md border px-1.5 text-xs",
               active
-                ? "border-slate-600 bg-slate-800 text-white"
-                : "border-transparent text-slate-300 hover:bg-white/5",
+                ? "border-border bg-elevated text-foreground"
+                : "text-muted-foreground border-transparent hover:bg-muted",
             )}
             draggable
             key={tab.id}
@@ -256,7 +286,7 @@ function PaneBar({
             <TabDirtyDot tabId={tab.id} />
             <button
               aria-label="Close tab"
-              className="rounded p-0.5 opacity-60 hover:bg-white/10 hover:opacity-100"
+              className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
               onClick={(event) => {
                 event.stopPropagation();
                 requestClose(tab);
@@ -271,7 +301,7 @@ function PaneBar({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label="New tab in pane"
-            className="size-6 shrink-0 text-slate-300 hover:bg-white/10 hover:text-white"
+            className="size-6 shrink-0"
             size="icon-sm"
             variant="ghost"
           >
@@ -342,7 +372,7 @@ function PaneDropZone({
     >
       {target ? (
         <div
-          className="pointer-events-none absolute rounded-md border-2 border-cyan-400/70 bg-cyan-400/15 transition-all duration-75"
+          className="pointer-events-none absolute rounded-md border-2 border-primary/70 bg-primary/15 transition-all duration-75"
           style={{
             left: target.highlight.left,
             top: target.highlight.top,

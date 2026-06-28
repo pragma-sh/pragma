@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { LayoutGrid } from "lucide-react";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
+import type { Tab } from "@pragma/constants";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
 import { Button } from "@/components/ui/button";
@@ -17,40 +18,31 @@ import { useKanban } from "@/state/kanban-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-export function WorkspaceShell() {
-  const workspace = useWorkspace();
-  const kanban = useKanban();
-  const requestClose = useConfirmClose();
+type Workspace = ReturnType<typeof useWorkspace>;
+
+/** Global keyboard shortcuts wired to workspace actions. */
+function useWorkspaceShortcuts(workspace: Workspace, requestClose: (tab: Tab) => void) {
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
-
   useShortcuts({
     projectCount: workspace.projects.length,
     onProject: (index) => void workspace.selectProject(workspace.projects[index]?.id ?? null),
     onNextTab: () => workspace.cycleTab(1),
     onPreviousTab: () => workspace.cycleTab(-1),
     onCloseTopTab: () => {
-      if (workspace.activeTab) {
-        requestClose(workspace.activeTab);
-      }
+      if (workspace.activeTab) requestClose(workspace.activeTab);
     },
     onNewTerminalTab: () => void workspace.createTerminalTab(),
     onNewBrowserTab: () => void workspace.createBrowserTab(),
     onClearTerminal: () => {
-      if (workspace.activeTabId) {
-        terminalManager.clear(workspace.activeTabId);
-      }
+      if (workspace.activeTabId) terminalManager.clear(workspace.activeTabId);
     },
     // Browser-only: no-op (and harmless preventDefault upstream) on terminal tabs.
     onBrowserReload: () => {
-      if (activeBrowserTabId) {
-        void browserReload(activeBrowserTabId);
-      }
+      if (activeBrowserTabId) void browserReload(activeBrowserTabId);
     },
     onBrowserDevtools: () => {
-      if (activeBrowserTabId) {
-        void browserDevtools(activeBrowserTabId);
-      }
+      if (activeBrowserTabId) void browserDevtools(activeBrowserTabId);
     },
     onBrowserCopyUrl: () => {
       if (workspace.activeTab?.kind === "browser" && workspace.activeTab.url) {
@@ -58,26 +50,120 @@ export function WorkspaceShell() {
       }
     },
     onSplitHorizontal: () => {
-      if (workspace.activeTabId) {
-        workspace.splitActivePane(workspace.activeTabId, "horizontal");
-      }
+      if (workspace.activeTabId) workspace.splitActivePane(workspace.activeTabId, "horizontal");
     },
     onSplitVertical: () => {
-      if (workspace.activeTabId) {
-        workspace.splitActivePane(workspace.activeTabId, "vertical");
-      }
+      if (workspace.activeTabId) workspace.splitActivePane(workspace.activeTabId, "vertical");
     },
     onDeleteSelectedFile: () => {
-      // Bridge to the right-sidebar Files tree, which owns the selected-file
-      // state. The tree listens for this event and opens its delete confirm.
+      // Bridge to the right-sidebar Files tree, which owns the selected-file state.
       window.dispatchEvent(new Event("pragma:request-delete-file"));
     },
     onScrollTerminalBottom: () => {
-      if (workspace.activeTabId) {
-        terminalManager.scrollToBottom(workspace.activeTabId);
-      }
+      if (workspace.activeTabId) terminalManager.scrollToBottom(workspace.activeTabId);
     },
   });
+}
+
+/** The "Opened from the prompt board" banner with a Back to Kanban button. */
+function BackToKanbanBar({ onReturn }: { onReturn: () => void }) {
+  return (
+    <div className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-3 py-1.5">
+      <span className="text-xs text-muted-foreground">Opened from the prompt board</span>
+      <Button size="sm" variant="secondary" onClick={onReturn}>
+        <LayoutGrid className="size-3.5" />
+        Back to Kanban
+      </Button>
+    </div>
+  );
+}
+
+/** Transient workspace error toast. */
+function WorkspaceErrorToast({ error }: { error: string | null }) {
+  return (
+    <AnimatePresence>
+      {error ? (
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          exit={{ opacity: 0, y: -6 }}
+          initial={{ opacity: 0, y: -6 }}
+        >
+          {error}
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+/** Empty state shown when no project is loaded. */
+function NoProjectsState() {
+  return (
+    <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
+      <div className="max-w-md space-y-3">
+        <h1 className="text-foreground text-2xl font-semibold">No projects yet</h1>
+        <p className="text-muted-foreground text-sm">
+          Open an existing git checkout or clone a repository to start juggling terminals across
+          worktrees.
+        </p>
+        <Button onClick={() => window.dispatchEvent(new Event("pragma:create-project"))}>
+          Add project
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Empty state shown when a project is loaded but has no tabs yet. */
+function NoTabsState({ workspace }: { workspace: Workspace }) {
+  return (
+    <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
+      <div className="max-w-md space-y-3">
+        <h1 className="text-foreground text-2xl font-semibold">Create a terminal tab</h1>
+        <p className="text-muted-foreground text-sm">New tabs start in the selected worktree.</p>
+        <Button
+          disabled={!workspace.selectedWorktree}
+          onClick={() => void workspace.createTerminalTab()}
+        >
+          New terminal
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The terminal/right-sidebar area: banner, tabs, error toast, and main split or empty state. */
+function WorkspaceContent({
+  kanban,
+  workspace,
+}: {
+  kanban: ReturnType<typeof useKanban>;
+  workspace: Workspace;
+}) {
+  return (
+    <>
+      <section className="bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {kanban.backToKanbanAvailable ? <BackToKanbanBar onReturn={kanban.returnToKanban} /> : null}
+        <TerminalTabs />
+        <WorkspaceErrorToast error={workspace.error} />
+        {workspace.projects.length === 0 && !workspace.loading ? (
+          <NoProjectsState />
+        ) : workspace.tabs.length === 0 ? (
+          <NoTabsState workspace={workspace} />
+        ) : (
+          <SplitHost />
+        )}
+      </section>
+      <RightSidebar />
+    </>
+  );
+}
+
+export function WorkspaceShell() {
+  const workspace = useWorkspace();
+  const kanban = useKanban();
+  const requestClose = useConfirmClose();
+  useWorkspaceShortcuts(workspace, requestClose);
 
   return (
     <RightSidebarProvider>
@@ -98,68 +184,7 @@ export function WorkspaceShell() {
           {kanban.mode === "kanban" ? (
             <ProjectKanbanWorkspace />
           ) : (
-            <>
-              <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0b0d10]">
-                {kanban.backToKanbanAvailable ? (
-                  <div className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-3 py-1.5">
-                    <span className="text-xs text-muted-foreground">
-                      Opened from the prompt board
-                    </span>
-                    <Button size="sm" variant="secondary" onClick={() => kanban.returnToKanban()}>
-                      <LayoutGrid className="size-3.5" />
-                      Back to Kanban
-                    </Button>
-                  </div>
-                ) : null}
-                <TerminalTabs />
-                <AnimatePresence>
-                  {workspace.error ? (
-                    <motion.div
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                      exit={{ opacity: 0, y: -6 }}
-                      initial={{ opacity: 0, y: -6 }}
-                    >
-                      {workspace.error}
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-                {workspace.projects.length === 0 && !workspace.loading ? (
-                  <div className="flex flex-1 items-center justify-center p-8 text-center text-slate-300">
-                    <div className="max-w-md space-y-3">
-                      <h1 className="text-2xl font-semibold text-white">No projects yet</h1>
-                      <p className="text-sm text-slate-400">
-                        Open an existing git checkout or clone a repository to start juggling
-                        terminals across worktrees.
-                      </p>
-                      <Button
-                        onClick={() => window.dispatchEvent(new Event("pragma:create-project"))}
-                      >
-                        Add project
-                      </Button>
-                    </div>
-                  </div>
-                ) : workspace.tabs.length === 0 ? (
-                  <div className="flex flex-1 items-center justify-center p-8 text-center text-slate-300">
-                    <div className="max-w-md space-y-3">
-                      <h1 className="text-2xl font-semibold text-white">Create a terminal tab</h1>
-                      <p className="text-sm text-slate-400">
-                        New tabs start in the selected worktree.
-                      </p>
-                      <Button
-                        disabled={!workspace.selectedWorktree}
-                        onClick={() => void workspace.createTerminalTab()}
-                      >
-                        New terminal
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <SplitHost />
-                )}
-              </section>
-              <RightSidebar />
-            </>
+            <WorkspaceContent kanban={kanban} workspace={workspace} />
           )}
         </main>
       </TabDragProvider>

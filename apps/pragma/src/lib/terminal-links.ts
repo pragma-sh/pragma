@@ -46,6 +46,29 @@ const WRAPPING_TRAIL = /[)\]}>'"`.,;:]+$/;
 const LINE_LOCATOR = /:\d+(?::\d+)?$/;
 const HAS_EXTENSION = /\.[A-Za-z0-9]+$/;
 
+/** Strips wrapping brackets/quotes from a token, adjusting the start index. */
+function trimWrappers(raw: string, start: number): { raw: string; start: number } {
+  const lead = WRAPPING_LEAD.exec(raw);
+  if (!lead) {
+    return { raw, start };
+  }
+  return { raw: raw.slice(lead[0].length), start: start + lead[0].length };
+}
+
+/** Strips a trailing `:line:col` locator from a token, returning the path part. */
+function stripLineLocator(raw: string): string {
+  const locator = LINE_LOCATOR.exec(raw);
+  return locator ? raw.slice(0, locator.index) : raw;
+}
+
+/** Whether a stripped token is a file-path candidate (separator or extension). */
+function isFilePathCandidate(path: string): boolean {
+  if (path === "" || path === "/" || path === "." || path === "..") {
+    return false;
+  }
+  return path.includes("/") || HAS_EXTENSION.test(path);
+}
+
 /**
  * Finds file-path-like tokens in a single line of terminal text. A token must
  * either contain a path separator (`/`) or end in a file extension to qualify,
@@ -59,13 +82,7 @@ export function findFilePathCandidates(text: string): FilePathCandidate[] {
   const token = /\S+/g;
   let match: RegExpExecArray | null;
   while ((match = token.exec(text)) !== null) {
-    let raw = match[0];
-    let start = match.index;
-    const lead = WRAPPING_LEAD.exec(raw);
-    if (lead) {
-      start += lead[0].length;
-      raw = raw.slice(lead[0].length);
-    }
+    let { raw, start } = trimWrappers(match[0], match.index);
     const trail = WRAPPING_TRAIL.exec(raw);
     if (trail) {
       raw = raw.slice(0, raw.length - trail[0].length);
@@ -73,15 +90,8 @@ export function findFilePathCandidates(text: string): FilePathCandidate[] {
     if (!raw || raw.includes("://")) {
       continue;
     }
-    let path = raw;
-    const locator = LINE_LOCATOR.exec(raw);
-    if (locator) {
-      path = raw.slice(0, locator.index);
-    }
-    if (path === "" || path === "/" || path === "." || path === "..") {
-      continue;
-    }
-    if (!path.includes("/") && !HAS_EXTENSION.test(path)) {
+    const path = stripLineLocator(raw);
+    if (!isFilePathCandidate(path)) {
       continue;
     }
     candidates.push({ start, end: start + path.length, path });

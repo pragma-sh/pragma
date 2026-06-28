@@ -33,7 +33,9 @@ export function ProjectSidebar() {
       onTouchStart={cycle.onTouchStart}
       onTouchEnd={cycle.onTouchEnd}
     >
-      <div className="space-y-3 p-3">
+      {/* Draggable titlebar strip: clears the inset macOS traffic lights and
+          gives the frameless window a drag handle. Buttons remain interactive. */}
+      <div className="titlebar-pad space-y-3 p-3" data-tauri-drag-region>
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

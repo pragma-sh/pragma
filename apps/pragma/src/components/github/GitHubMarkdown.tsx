@@ -42,10 +42,10 @@ const MARKDOWN_COMPONENTS: Components = {
  */
 export function GitHubMarkdown({ children }: { children: string }) {
   if (!children.trim()) {
-    return <p className="text-xs italic text-slate-500">No description provided.</p>;
+    return <p className="text-xs italic text-muted-foreground">No description provided.</p>;
   }
   return (
-    <div className="prose prose-invert prose-sm max-w-none overflow-hidden break-words text-slate-200 [&_code]:break-words [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_table]:block [&_table]:overflow-x-auto">
+    <div className="prose prose-invert prose-sm max-w-none overflow-hidden break-words text-foreground [&_code]:break-words [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_table]:block [&_table]:overflow-x-auto">
       <ReactMarkdown
         components={MARKDOWN_COMPONENTS}
         rehypePlugins={[rehypeRaw, rehypeSanitize]}

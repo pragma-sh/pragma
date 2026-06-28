@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 
 import { fileIconId, folderIconId } from "@/lib/file-icons";
+import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 
 const INDENT_PX = 12;
@@ -63,8 +64,8 @@ export function NewEntryInput({
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the create row is opened on demand and must take focus
         autoFocus
         className={cn(
-          "w-full min-w-0 rounded border bg-black/40 px-1 text-xs text-slate-100 outline-none",
-          value && invalid ? "border-red-400/70" : "border-cyan-400/50",
+          "w-full min-w-0 rounded border bg-canvas px-1 text-xs text-foreground outline-none",
+          value && invalid ? "border-destructive/70" : "border-primary/50",
         )}
         spellCheck="false"
         onBlur={() => {
@@ -73,15 +74,7 @@ export function NewEntryInput({
           }
         }}
         onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            submit();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
+        onKeyDown={commitOnEnterCancelOnEscape(submit, onCancel)}
         placeholder={kind === "folder" ? "new-folder" : "new-file.ts"}
         value={value}
       />

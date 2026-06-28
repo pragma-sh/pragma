@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { errorMessage } from "@/lib/errors";
 
 import type { Tab } from "@pragma/constants";
 import { toast } from "sonner";
@@ -20,10 +21,6 @@ import { useWorkspace } from "@/state/workspace-context";
 type RequestClose = (tab: Tab) => void;
 
 const ConfirmCloseContext = createContext<RequestClose | null>(null);
-
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 /**
  * Provides a `requestClose(tab)` action that guards closing a **dirty editor
@@ -66,7 +63,7 @@ export function ConfirmCloseProvider({ children }: { children: ReactNode }) {
       await workspace.closeTab(tab.id);
     } catch (cause) {
       // Save failed: keep the tab open and dirty so no edits are lost.
-      toast.error(messageFor(cause));
+      toast.error(errorMessage(cause));
     }
   }, [pending, workspace]);
 

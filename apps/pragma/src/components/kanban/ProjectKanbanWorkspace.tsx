@@ -142,7 +142,7 @@ export function ProjectKanbanWorkspace() {
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0b0d10]">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
       <header className="flex items-center justify-between gap-3 border-b border-sidebar-border px-4 py-3">
         <h1 className="truncate text-base font-semibold">Prompt board</h1>
       </header>
