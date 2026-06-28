@@ -43,6 +43,7 @@ import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { isMacPlatform } from "@/lib/platform";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { startWindowDrag } from "@/lib/window-drag";
 import { useTabAgentStatus } from "@/state/agent-status-store";
 import {
   type SplitDirection,
@@ -533,7 +534,7 @@ function EditorLauncherMenu({
           disabled={disabled}
           onClick={() => onSelect(selectedEditor)}
           size="sm"
-          variant="secondary"
+          variant="outline"
           aria-label={`Open worktree in ${selectedEditor.name}`}
         >
           <Icon
@@ -548,7 +549,7 @@ function EditorLauncherMenu({
             className="rounded-l-none border-l border-l-border px-1"
             disabled={disabled}
             size="icon-sm"
-            variant="secondary"
+            variant="outline"
             aria-label="Choose editor"
           >
             <ChevronDown className="size-4 opacity-70" />
@@ -642,11 +643,12 @@ export function TerminalTabs() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <header className="text-muted-foreground bg-background flex shrink-0 flex-col border-b border-border">
+      <header className="text-muted-foreground bg-sidebar flex shrink-0 flex-col">
         {/* The toolbar doubles as the window drag handle on the content side. */}
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
         <div
-          className="bg-elevated flex h-9 items-center justify-between gap-2 border-b border-border px-2"
-          data-tauri-drag-region
+          className="flex h-9 items-center justify-between gap-2 border-b border-sidebar-border px-2"
+          onMouseDown={startWindowDrag}
         >
           <TerminalToolbar
             buildDisabled={buildDisabled}
@@ -661,7 +663,7 @@ export function TerminalTabs() {
             />
           </div>
         </div>
-        <div className="flex h-11 items-center">
+        <div className="bg-canvas flex h-11 items-center">
           <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
             {topTabs.map((tab) => (
               <TerminalTabEntry
