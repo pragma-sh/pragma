@@ -194,18 +194,18 @@ function parseCommitPlanContext(raw: string): {
   diffStat: string;
   worktreeDiff: string;
 } {
-  const context = JSON.parse(raw) as {
+  const {
+    allowedPaths = [],
+    status = "",
+    diffStat = "",
+    worktreeDiff = "",
+  } = JSON.parse(raw) as {
     allowedPaths?: string[];
     status?: string;
     diffStat?: string;
     worktreeDiff?: string;
   };
-  return {
-    allowedPaths: context.allowedPaths ?? [],
-    status: context.status ?? "",
-    diffStat: context.diffStat ?? "",
-    worktreeDiff: context.worktreeDiff ?? "",
-  };
+  return { allowedPaths, status, diffStat, worktreeDiff };
 }
 
 async function runCommitPlan(args: string[]): Promise<number> {
