@@ -54,6 +54,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space
+        # GitHub-hosted runners ship with ~14 GB free, which a debug Tauri +
+        # Rust workspace build (plus rust-cache) exhausts at link time
+        # ("No space left on device"). Reclaim the preinstalled toolchains we
+        # don't use to recover ~25-30 GB.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force || true
+          df -h
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
@@ -101,6 +112,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        # See the rust job: reclaim preinstalled toolchains so the debug build
+        # has room to link ("No space left on device").
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force || true
+          df -h
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
