@@ -67,15 +67,7 @@ function groupByDirectory(files: ChangedFile[]): Array<[string, ChangedFile[]]> 
  * (stage / unstage / discard) and `headerActions` adds matching group-wide icon
  * buttons to the header (shown only when the group is non-empty).
  */
-export function ChangeGroup({
-  title,
-  files,
-  emptyLabel,
-  onOpen,
-  fileActions = NO_FILE_ACTIONS,
-  headerActions = NO_HEADER_ACTIONS,
-  fileBadge,
-}: {
+interface ChangeGroupProps {
   title: string;
   files: ChangedFile[];
   emptyLabel: string;
@@ -84,7 +76,17 @@ export function ChangeGroup({
   headerActions?: ChangeGroupAction[];
   /** Optional trailing badge per row (e.g. a PR's unresolved-comment count). */
   fileBadge?: (file: ChangedFile) => ReactNode;
-}) {
+}
+
+export function ChangeGroup({
+  title,
+  files,
+  emptyLabel,
+  onOpen,
+  fileActions = NO_FILE_ACTIONS,
+  headerActions = NO_HEADER_ACTIONS,
+  fileBadge,
+}: ChangeGroupProps) {
   const [open, setOpen] = useState(true);
   const groups = useMemo(() => groupByDirectory(files), [files]);
 

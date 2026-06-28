@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useAgentsList } from "@/hooks/use-agents-list";
 import { useAgentModels } from "@/hooks/use-agent-models";
 import {
   EMPTY_MODEL_SELECTION,
@@ -7,12 +8,7 @@ import {
   rememberModelSelection,
   validateModelSelection,
 } from "@/lib/agent-model-selection";
-import {
-  type AgentConfig,
-  type AgentModel,
-  type AgentModelSelection,
-  listAgents,
-} from "@/lib/tauri";
+import { type AgentConfig, type AgentModel, type AgentModelSelection } from "@/lib/tauri";
 
 /** Agent + model picking shared by the agent-launch dialogs. */
 export interface AgentSelection {
@@ -35,34 +31,11 @@ export interface AgentSelection {
  * fetches while `active` (a dialog being open), so closed dialogs stay idle.
  */
 export function useAgentSelection(active: boolean): AgentSelection {
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const agents = useAgentsList(active);
   const { modelsByAgent, loadModels, primeFromCache } = useAgentModels();
   const [agentId, setAgentId] = useState<string | null>(null);
   const [modelSelection, setModelSelection] = useState<AgentModelSelection>(EMPTY_MODEL_SELECTION);
   const previousAgentIdRef = useRef<string | null>(null);
-
-  // Load the configured agents whenever the consumer becomes active.
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) {
-          setAgents(Array.isArray(items) ? items : []);
-        }
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAgents([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
 
   // Show already-resolved models immediately, without waiting for a hover.
   useEffect(() => {

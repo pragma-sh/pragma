@@ -384,16 +384,14 @@ function useNewAgentSessionForm({
   const selectedAgentId = agentId && agents.some((agent) => agent.id === agentId) ? agentId : null;
   useSessionFormEffects({
     refs,
-    isOpen,
-    initial,
-    selectedWorktreeId: workspace.selectedWorktreeId,
-    agents,
-    modelsByAgent,
-    primeFromCache,
-    selectedAgentId,
-    worktrees,
-    loadedWorktrees,
-    worktreeId,
+    dialog: { isOpen, initial },
+    agent: { agents, modelsByAgent, primeFromCache, selectedAgentId },
+    worktree: {
+      worktrees,
+      loadedWorktrees,
+      worktreeId,
+      selectedWorktreeId: workspace.selectedWorktreeId,
+    },
     setters: { setMessage, setWorktreeId, setAgentId, setModelSelection },
   });
 
@@ -438,36 +436,41 @@ function useNewAgentSessionForm({
   };
 }
 
+interface SessionFormEffectsArgs {
+  refs: RefObject<SessionFormRefs>;
+  dialog: {
+    isOpen: boolean;
+    initial: NewSessionDeepLinkDetail | null | undefined;
+  };
+  agent: {
+    agents: AgentConfig[];
+    modelsByAgent: ReturnType<typeof useAgentModels>["modelsByAgent"];
+    primeFromCache: ReturnType<typeof useAgentModels>["primeFromCache"];
+    selectedAgentId: string | null;
+  };
+  worktree: {
+    worktrees: WorktreeLike[];
+    loadedWorktrees: WorktreeLike[];
+    worktreeId: string | null;
+    selectedWorktreeId: string | null;
+  };
+  setters: SessionFormSetters;
+}
+
 /** Wires the form's seeding/selection/worktree side effects. */
 function useSessionFormEffects({
   refs,
-  isOpen,
-  initial,
-  selectedWorktreeId,
-  agents,
-  modelsByAgent,
-  primeFromCache,
-  selectedAgentId,
-  worktrees,
-  loadedWorktrees,
-  worktreeId,
+  dialog,
+  agent,
+  worktree,
   setters,
-}: {
-  refs: RefObject<SessionFormRefs>;
-  isOpen: boolean;
-  initial: NewSessionDeepLinkDetail | null | undefined;
-  selectedWorktreeId: string | null;
-  agents: AgentConfig[];
-  modelsByAgent: ReturnType<typeof useAgentModels>["modelsByAgent"];
-  primeFromCache: ReturnType<typeof useAgentModels>["primeFromCache"];
-  selectedAgentId: string | null;
-  worktrees: WorktreeLike[];
-  loadedWorktrees: WorktreeLike[];
-  worktreeId: string | null;
-  setters: SessionFormSetters;
-}): void {
+}: SessionFormEffectsArgs): void {
+  const { isOpen, initial } = dialog;
+  const { agents, modelsByAgent, primeFromCache, selectedAgentId } = agent;
+  const { worktrees, loadedWorktrees, worktreeId, selectedWorktreeId } = worktree;
+
   useEffect(() => {
-    primeFromCache(agents.map((agent) => agent.id));
+    primeFromCache(agents.map((agentItem) => agentItem.id));
   }, [agents, primeFromCache]);
 
   useEffect(() => {

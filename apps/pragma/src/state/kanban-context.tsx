@@ -19,6 +19,7 @@ import type {
   Worktree,
 } from "@pragma/constants";
 
+import { useAgentsList } from "@/hooks/use-agents-list";
 import { startBackgroundAgentSession } from "@/lib/agent-launch";
 import { createPullRequest } from "@/lib/github";
 import { defaultTabTitle } from "@/lib/tab-title";
@@ -33,7 +34,6 @@ import {
   deleteKanbanCard,
   githubPushBranch,
   githubRepoRef,
-  listAgents,
   listKanbanCards,
   mergeWorktreeToParent,
   moveKanbanCard,
@@ -210,30 +210,6 @@ function moveInProgressCardToReview(
     return;
   }
   void moveKanbanCard(card.id, "reviewNeeded").then(() => reload());
-}
-
-/** Loads the configured agents once for card display and launch. */
-function useKanbanAgents(): AgentConfig[] {
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) {
-          setAgents(Array.isArray(items) ? items : []);
-        }
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAgents([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return agents;
 }
 
 /** Loads and clears cards as the selected project changes. */
@@ -550,7 +526,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     setBackToKanbanAvailable,
     setMode,
   } = useKanbanBoardMode(projectId);
-  const agents = useKanbanAgents();
+  const agents = useAgentsList();
   const { cards, loading, reload, cardsRef } = useKanbanCards(projectId);
   useKanbanCompletionSync(cardsRef, reload);
   const { createCard, updateCardDraft, deleteCard } = useKanbanCardDrafts(

@@ -53,6 +53,16 @@ function diffTab(): Tab {
   };
 }
 
+/** Common resolved diff payload for the tab's `src/app.ts` path. */
+function mockAppFileDiff(): void {
+  fileDiffMock.mockResolvedValue({
+    path: "src/app.ts",
+    oldText: "a",
+    newText: "b",
+    binary: false,
+  });
+}
+
 afterEach(cleanup);
 beforeEach(() => {
   fileChangeListener = null;
@@ -65,24 +75,14 @@ beforeEach(() => {
 
 describe("DiffView", () => {
   it("loads the diff for the tab's side and mounts a MergeView", async () => {
-    fileDiffMock.mockResolvedValue({
-      path: "src/app.ts",
-      oldText: "a",
-      newText: "b",
-      binary: false,
-    });
+    mockAppFileDiff();
     render(<DiffView tab={diffTab()} />);
     await waitFor(() => expect(fileDiffMock).toHaveBeenCalledWith("wt", "src/app.ts", "committed"));
     await waitFor(() => expect(mergeViewMock).toHaveBeenCalled());
   });
 
   it("loads the file language grammar through the shared diff renderer", async () => {
-    fileDiffMock.mockResolvedValue({
-      path: "src/app.ts",
-      oldText: "a",
-      newText: "b",
-      binary: false,
-    });
+    mockAppFileDiff();
     const languageExtension = { sentinel: "language" };
     loadLanguageExtensionMock.mockResolvedValue(languageExtension);
 
@@ -93,12 +93,7 @@ describe("DiffView", () => {
   });
 
   it("recomputes the diff when the watched file changes on disk", async () => {
-    fileDiffMock.mockResolvedValue({
-      path: "src/app.ts",
-      oldText: "a",
-      newText: "b",
-      binary: false,
-    });
+    mockAppFileDiff();
     render(<DiffView tab={diffTab()} />);
     await waitFor(() => expect(fileDiffMock).toHaveBeenCalledTimes(1));
 
@@ -108,12 +103,7 @@ describe("DiffView", () => {
   });
 
   it("ignores changes to other files", async () => {
-    fileDiffMock.mockResolvedValue({
-      path: "src/app.ts",
-      oldText: "a",
-      newText: "b",
-      binary: false,
-    });
+    mockAppFileDiff();
     render(<DiffView tab={diffTab()} />);
     await waitFor(() => expect(fileDiffMock).toHaveBeenCalledTimes(1));
 

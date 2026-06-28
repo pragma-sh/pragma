@@ -149,6 +149,17 @@ function CollapsedRightSidebar({ onExpand }: { onExpand: () => void }) {
 }
 
 /** The header: collapse button, subtab tabs, and the Commit & PR button. */
+interface RightSidebarHeaderProps {
+  activeSubtab: RightSidebarSubtab;
+  aiAvailable: boolean;
+  commitPrRunning: boolean;
+  hasUncommittedChanges: boolean;
+  worktreeId: string | null;
+  onCommitPr: () => void;
+  onCollapse: () => void;
+  setActiveSubtab: (tab: RightSidebarSubtab) => void;
+}
+
 function RightSidebarHeader({
   activeSubtab,
   aiAvailable,
@@ -158,16 +169,7 @@ function RightSidebarHeader({
   onCommitPr,
   onCollapse,
   setActiveSubtab,
-}: {
-  activeSubtab: RightSidebarSubtab;
-  aiAvailable: boolean;
-  commitPrRunning: boolean;
-  hasUncommittedChanges: boolean;
-  worktreeId: string | null;
-  onCommitPr: () => void;
-  onCollapse: () => void;
-  setActiveSubtab: (tab: RightSidebarSubtab) => void;
-}) {
+}: RightSidebarHeaderProps) {
   return (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-1 pr-2">
       <Button

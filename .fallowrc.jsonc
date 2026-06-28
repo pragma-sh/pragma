@@ -31,6 +31,13 @@
       // design across files. Refactoring it would fight the upstream generator
       // and the `shadcn add` workflow, so it's intentional duplication.
       "**/components/ui/**",
+      // `lib/tauri.ts` is the typed IPC boundary (see the matching `ignoreExports`
+      // entry above): every backend `#[tauri::command]` gets exactly one named
+      // `invoke<T>("cmd", { args })` wrapper with its own JSDoc. That 1:1
+      // boilerplate repeats by design — collapsing it into a factory would lose
+      // the per-command typing and the explicit contract AGENTS.md mandates
+      // ("Keep the IPC surface typed and centralized").
+      "**/lib/tauri.ts",
     ],
   },
   "rules": {
