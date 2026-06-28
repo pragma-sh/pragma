@@ -22,6 +22,7 @@ mod process_env;
 mod projects;
 mod pty;
 mod scripts;
+mod window_chrome;
 mod worktrees;
 
 use pragma_client::router::RouterDb;
@@ -428,6 +429,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(pty.clone());
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        window_chrome::apply(&window);
+    }
     install_menu(app.handle())?;
     install_deep_links(app);
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
@@ -456,6 +460,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[allow(clippy::too_many_lines)] // The Tauri builder is one long registration chain.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())

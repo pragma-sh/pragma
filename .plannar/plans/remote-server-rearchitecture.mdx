@@ -23,7 +23,7 @@ import {
 Turn Pragma from a single-machine desktop app into a **host server + thin clients** system.
 A persistent **`pragma-server`** runs on the machine that holds the repos; clients reach it
 **over SSH** (no new auth or TLS layer). The PTY and agent-status model that already exists
-in `pragma-daemon` is the template — most of the work is making everything *else* (git, fs,
+in `pragma-daemon` is the template — most of the work is making everything _else_ (git, fs,
 db, kanban, GitHub, AI) work the way the daemon already does.
 
 <Card className="my-4">
@@ -57,47 +57,99 @@ db, kanban, GitHub, AI) work the way the daemon already does.
   <TableBody>
     <TableRow>
       <TableCell className="font-medium">Access / transport</TableCell>
-      <TableCell><strong>Unix socket only — no TCP port.</strong> The <code>0600</code> <code>daemon.sock</code> is forwarded over SSH via <code>russh</code> <code>channel_open_direct_streamlocal</code> (streamlocal — the Unix-socket analog of <code>ssh -L</code>), plus a bootstrap <code>exec</code> to ensure the server runs. <strong>Verified</strong> russh exposes this on the client <code>Handle</code>. No transport abstraction / TCP listener is added: socket perms remain the access control even when forwarded.</TableCell>
+      <TableCell>
+        <strong>Unix socket only — no TCP port.</strong> The <code>0600</code>{" "}
+        <code>daemon.sock</code> is forwarded over SSH via <code>russh</code>{" "}
+        <code>channel_open_direct_streamlocal</code> (streamlocal — the Unix-socket analog of{" "}
+        <code>ssh -L</code>), plus a bootstrap <code>exec</code> to ensure the server runs.{" "}
+        <strong>Verified</strong> russh exposes this on the client <code>Handle</code>. No transport
+        abstraction / TCP listener is added: socket perms remain the access control even when
+        forwarded.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">SSH timing</TableCell>
-      <TableCell><strong>Backend fully wired in Phase 4; frontend deferred.</strong> Phases 1–3 deliver the client/server flip locally. Phase 4 implements the complete SSH transport (bridge, bootstrap <code>exec</code>, router DB, version negotiation) behind the connect seam — no server or codec changes — and proves the russh streamlocal path end-to-end. The <strong>remote-host management UI stays out of the frontend</strong> until a later, UI-only phase; the remote path is driven via the router DB / CLI / tests. App UX stays local-only even though the transport is fully capable.</TableCell>
+      <TableCell>
+        <strong>Backend fully wired in Phase 4; frontend deferred.</strong> Phases 1–3 deliver the
+        client/server flip locally. Phase 4 implements the complete SSH transport (bridge, bootstrap{" "}
+        <code>exec</code>, router DB, version negotiation) behind the connect seam — no server or
+        codec changes — and proves the russh streamlocal path end-to-end. The{" "}
+        <strong>remote-host management UI stays out of the frontend</strong> until a later, UI-only
+        phase; the remote path is driven via the router DB / CLI / tests. App UX stays local-only
+        even though the transport is fully capable.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Connection model</TableCell>
-      <TableCell>Per-<em>host</em>, not per-project. Router DB maps project → host: <strong>local host → direct <code>UnixStream::connect</code></strong>; <strong>remote host → one shared SSH <code>Handle</code></strong> with the socket forwarded, multiplexing a channel per stream. Local and remote projects can be open concurrently behind the same connect seam.</TableCell>
+      <TableCell>
+        Per-<em>host</em>, not per-project. Router DB maps project → host:{" "}
+        <strong>
+          local host → direct <code>UnixStream::connect</code>
+        </strong>
+        ;{" "}
+        <strong>
+          remote host → one shared SSH <code>Handle</code>
+        </strong>{" "}
+        with the socket forwarded, multiplexing a channel per stream. Local and remote projects can
+        be open concurrently behind the same connect seam.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Auth + encryption</TableCell>
-      <TableCell>SSH credentials only. No tokens, no TLS, no pairing. Unix socket perms = access control.</TableCell>
+      <TableCell>
+        SSH credentials only. No tokens, no TLS, no pairing. Unix socket perms = access control.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Server lifecycle</TableCell>
-      <TableCell>Persistent. Disable the empty-idle self-exit (<code>main.rs:105</code>); lifecycle owned by host service manager + bootstrap.</TableCell>
+      <TableCell>
+        Persistent. Disable the empty-idle self-exit (<code>main.rs:105</code>); lifecycle owned by
+        host service manager + bootstrap.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Version handshake</TableCell>
-      <TableCell>Client advertises the <em>protocol</em> version it expects; provision a new server only on incompatibility. App updates that don't touch the protocol need no server update.</TableCell>
+      <TableCell>
+        Client advertises the <em>protocol</em> version it expects; provision a new server only on
+        incompatibility. App updates that don't touch the protocol need no server update.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">GitHub + AI</TableCell>
-      <TableCell>Bun-compiled sidecars, server-spawned, piped over stdio, proxied as RPC. Creds stay on host.</TableCell>
+      <TableCell>
+        Bun-compiled sidecars, server-spawned, piped over stdio, proxied as RPC. Creds stay on host.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">DB engine</TableCell>
-      <TableCell>Keep SQLite (<code>rusqlite</code>) + WAL + connection pool. <strong>Not Turso</strong> (beta; data-of-record). <code>libsql</code> is the only alt worth considering if async/sync-replica is later wanted.</TableCell>
+      <TableCell>
+        Keep SQLite (<code>rusqlite</code>) + WAL + connection pool. <strong>Not Turso</strong>{" "}
+        (beta; data-of-record). <code>libsql</code> is the only alt worth considering if
+        async/sync-replica is later wanted.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Storage model</TableCell>
-      <TableCell>Per-project SQLite on the host (in <code>&lt;project&gt;/.pragma/</code>) = authority. Client-local router DB maps project → host + device prefs.</TableCell>
+      <TableCell>
+        Per-project SQLite on the host (in <code>&lt;project&gt;/.pragma/</code>) = authority.
+        Client-local router DB maps project → host + device prefs.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Async</TableCell>
-      <TableCell>Server stays synchronous (thread-per-connection). Async quarantined to the client SSH bridge.</TableCell>
+      <TableCell>
+        Server stays synchronous (thread-per-connection). Async quarantined to the client SSH
+        bridge.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Out of scope (v1)</TableCell>
-      <TableCell>Multi-user collaboration; sharing one terminal's <em>input</em> across devices; a pure browser client (clients are native + embed SSH); the <strong>remote-host management UI</strong> (the SSH transport is fully wired in Phase 4, but adding / selecting / authenticating hosts in the GUI is a later phase).</TableCell>
+      <TableCell>
+        Multi-user collaboration; sharing one terminal's <em>input</em> across devices; a pure
+        browser client (clients are native + embed SSH); the{" "}
+        <strong>remote-host management UI</strong> (the SSH transport is fully wired in Phase 4, but
+        adding / selecting / authenticating hosts in the GUI is a later phase).
+      </TableCell>
     </TableRow>
   </TableBody>
 </Table>
@@ -188,22 +240,23 @@ length-prefixed codec and the raw-binary PTY fast path:
     </p>
     <ul>
       <li>
-        <strong>PTY output</strong> (the high-volume direction) stays a <strong>raw binary frame</strong> (
-        <code>FRAME_TAG_OUTPUT</code>, <code>write_output_frame</code>) — no JSON escaping, no UTF-8
-        round-trip.
+        <strong>PTY output</strong> (the high-volume direction) stays a{" "}
+        <strong>raw binary frame</strong> (<code>FRAME_TAG_OUTPUT</code>,{" "}
+        <code>write_output_frame</code>) — no JSON escaping, no UTF-8 round-trip.
       </li>
       <li>
-        <strong>Keystrokes</strong> stay tiny <code>RequestFrame</code> JSON messages, exactly as today
-        (negligible).
+        <strong>Keystrokes</strong> stay tiny <code>RequestFrame</code> JSON messages, exactly as
+        today (negligible).
       </li>
       <li>
-        <strong>SSH</strong> runs <code>tokio::io::copy_bidirectional</code> over the raw socket bytes —
-        it adds <strong>zero</strong> framing or parsing; the same length-prefixed frames pass through
-        untouched.
+        <strong>SSH</strong> runs <code>tokio::io::copy_bidirectional</code> over the raw socket
+        bytes — it adds <strong>zero</strong> framing or parsing; the same length-prefixed frames
+        pass through untouched.
       </li>
       <li>
-        The new <strong>RPC + subscription</strong> traffic (git / fs / db / kanban) is request/response
-        and snapshot+delta — deliberately <strong>off</strong> the keystroke and output hot path.
+        The new <strong>RPC + subscription</strong> traffic (git / fs / db / kanban) is
+        request/response and snapshot+delta — deliberately <strong>off</strong> the keystroke and
+        output hot path.
       </li>
     </ul>
   </AlertDescription>
@@ -232,9 +285,9 @@ predictions never appear over a hidden password field.
 <Alert>
   <AlertTitle>Why echo gating matters</AlertTitle>
   <AlertDescription>
-    Predictive echo masks SSH latency, but it must never speculatively paint a character the
-    program intends to hide. Gating every prediction on <code>echo == true</code> is the mechanism
-    that keeps password and secret prompts safe.
+    Predictive echo masks SSH latency, but it must never speculatively paint a character the program
+    intends to hide. Gating every prediction on <code>echo == true</code> is the mechanism that
+    keeps password and secret prompts safe.
   </AlertDescription>
 </Alert>
 
@@ -256,42 +309,79 @@ broadcast) are all things the agent registry already demonstrates.
     <TableRow>
       <TableCell className="font-medium">Agent status</TableCell>
       <TableCell>daemon registry ✅</TableCell>
-      <TableCell>The model. One <strong>daemon-wide</strong> subscription covers every worktree/tab. Reported by the <code>pragma-cli</code> CLI (was <code>pragma-agent</code>), <strong>not</strong> by parsing output — so background worktrees update with zero terminal streaming.</TableCell>
+      <TableCell>
+        The model. One <strong>daemon-wide</strong> subscription covers every worktree/tab. Reported
+        by the <code>pragma-cli</code> CLI (was <code>pragma-agent</code>), <strong>not</strong> by
+        parsing output — so background worktrees update with zero terminal streaming.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell className="font-medium">DB (projects, worktrees, tabs, splits, kanban, settings)</TableCell>
-      <TableCell><code>src-tauri/db.rs</code></TableCell>
-      <TableCell>Workspace schema → per-project SQLite on host = source of truth. Clients query + subscribe; server broadcasts change events. Optimistic versioning rejects stale writes.</TableCell>
+      <TableCell className="font-medium">
+        DB (projects, worktrees, tabs, splits, kanban, settings)
+      </TableCell>
+      <TableCell>
+        <code>src-tauri/db.rs</code>
+      </TableCell>
+      <TableCell>
+        Workspace schema → per-project SQLite on host = source of truth. Clients query + subscribe;
+        server broadcasts change events. Optimistic versioning rejects stale writes.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Git changes / status</TableCell>
-      <TableCell><code>git.rs</code></TableCell>
-      <TableCell>Run on host. Per-worktree <code>lock_for</code> moves server-side (process-global). <code>notify</code> watcher pushes <code>WorktreeChanged</code> instead of polling. Diffs request/response, chunked.</TableCell>
+      <TableCell>
+        <code>git.rs</code>
+      </TableCell>
+      <TableCell>
+        Run on host. Per-worktree <code>lock_for</code> moves server-side (process-global).{" "}
+        <code>notify</code> watcher pushes <code>WorktreeChanged</code> instead of polling. Diffs
+        request/response, chunked.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Filesystem / editor</TableCell>
-      <TableCell><code>fs.rs</code></TableCell>
-      <TableCell>Remote reads/writes via RPC + watcher invalidation. Client holds the unsaved buffer; server holds the saved file; save ships content/diff.</TableCell>
+      <TableCell>
+        <code>fs.rs</code>
+      </TableCell>
+      <TableCell>
+        Remote reads/writes via RPC + watcher invalidation. Client holds the unsaved buffer; server
+        holds the saved file; save ships content/diff.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">GitHub</TableCell>
-      <TableCell><code>github.ts</code> + <code>github.rs</code></TableCell>
-      <TableCell>Server-managed Bun sidecar (Octokit). Token stays on host; remote clients need no creds.</TableCell>
+      <TableCell>
+        <code>github.ts</code> + <code>github.rs</code>
+      </TableCell>
+      <TableCell>
+        Server-managed Bun sidecar (Octokit). Token stays on host; remote clients need no creds.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">AI</TableCell>
-      <TableCell><code>pragma-ai</code> sidecar</TableCell>
+      <TableCell>
+        <code>pragma-ai</code> sidecar
+      </TableCell>
       <TableCell>Reparented from app to server; streaming → server events.</TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Browser tabs / webviews</TableCell>
-      <TableCell><code>browser.rs</code></TableCell>
-      <TableCell><strong>Stays client-side</strong> — native embedded webviews can't be remoted.</TableCell>
+      <TableCell>
+        <code>browser.rs</code>
+      </TableCell>
+      <TableCell>
+        <strong>Stays client-side</strong> — native embedded webviews can't be remoted.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Menus, deep links, notifications, window/splits</TableCell>
-      <TableCell><code>lib.rs</code></TableCell>
-      <TableCell>Stay client-side (presentation). Keybinding <em>definitions</em> sync via settings; capture is client.</TableCell>
+      <TableCell>
+        <code>lib.rs</code>
+      </TableCell>
+      <TableCell>
+        Stay client-side (presentation). Keybinding <em>definitions</em> sync via settings; capture
+        is client.
+      </TableCell>
     </TableRow>
   </TableBody>
 </Table>
@@ -318,20 +408,22 @@ current state of every worktree and the visible terminal replays scrollback.
 
 **The one cost that does _not_ decouple:** server-side scrollback is allocated **per running PTY**,
 not per attached tab. With ~50 open terminals the client still renders only the 1–2 you're looking at,
-but the host holds ~50 full rings — so the aggregate-scrollback bound is a *server* concern handled in
-Phase 5, independent of how many tabs are visible. See *Risks & watch-items → Scrollback bound*.
+but the host holds ~50 full rings — so the aggregate-scrollback bound is a _server_ concern handled in
+Phase 5, independent of how many tabs are visible. See _Risks & watch-items → Scrollback bound_.
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="size">
     <AccordionTrigger>Terminal window-size conflicts — out of scope</AccordionTrigger>
     <AccordionContent>
 
-Because we are not sharing one terminal's *input* across devices, the multi-attach size-conflict
+Because we are not sharing one terminal's _input_ across devices, the multi-attach size-conflict
 problem (tmux min-bounding-box vs primary-driver) does not need solving in v1. Each device drives
 its own terminals; `attach` resizing to the attaching client is acceptable.
 
     </AccordionContent>
+
   </AccordionItem>
 </Accordion>
 
@@ -356,7 +448,7 @@ its own terminals; `attach` resizing to the attaching client is acceptable.
 - **Verified:** `russh::client::Handle::channel_open_direct_streamlocal(socket_path)` exists.
 
 **The connect seam (one decision point):** look up the project's host in the router DB →
-*local* host → `UnixStream::connect(daemon.sock)`; *remote* host → get-or-open the shared SSH
+_local_ host → `UnixStream::connect(daemon.sock)`; _remote_ host → get-or-open the shared SSH
 `Handle` for that host and `channel_open_direct_streamlocal(daemon.sock)`. Everything above the
 seam (frame codec, `pty.rs`, RPC calls) is identical for both. Phases 1–3 implement only the
 local branch; Phase 4 fully implements the remote branch (backend only — no host-management UI)
@@ -389,49 +481,125 @@ library, consumed by the server. The Tauri app shrinks to presentation + an SSH 
   </TableHeader>
   <TableBody>
     <TableRow>
-      <TableCell><code>crates/pragma-core</code></TableCell>
-      <TableCell><Badge>new</Badge></TableCell>
-      <TableCell>git, fs, db (workspace schema), projects, worktrees, tabs, kanban, agent registry, fs-watcher — pure logic, no Tauri. Extracted from <code>src-tauri/src/*.rs</code>.</TableCell>
+      <TableCell>
+        <code>crates/pragma-core</code>
+      </TableCell>
+      <TableCell>
+        <Badge>new</Badge>
+      </TableCell>
+      <TableCell>
+        git, fs, db (workspace schema), projects, worktrees, tabs, kanban, agent registry,
+        fs-watcher — pure logic, no Tauri. Extracted from <code>src-tauri/src/*.rs</code>.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>crates/pragma-server</code></TableCell>
-      <TableCell><Badge variant="secondary">rename</Badge></TableCell>
-      <TableCell>was <code>pragma-daemon</code>. PTYs + serves <code>pragma-core</code> over the Unix socket. Spawns Bun sidecars. Persistent.</TableCell>
+      <TableCell>
+        <code>crates/pragma-server</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">rename</Badge>
+      </TableCell>
+      <TableCell>
+        was <code>pragma-daemon</code>. PTYs + serves <code>pragma-core</code> over the Unix socket.
+        Spawns Bun sidecars. Persistent.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>crates/pragma-protocol</code></TableCell>
-      <TableCell><Badge variant="outline">grow</Badge></TableCell>
+      <TableCell>
+        <code>crates/pragma-protocol</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">grow</Badge>
+      </TableCell>
       <TableCell>full RPC + event variants (codec unchanged).</TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>crates/pragma-client</code></TableCell>
-      <TableCell><Badge>new</Badge></TableCell>
-      <TableCell>Rust client lib: SSH bridge (<code>russh</code>) + frame I/O. Used by the Tauri app, a future CLI.</TableCell>
+      <TableCell>
+        <code>crates/pragma-client</code>
+      </TableCell>
+      <TableCell>
+        <Badge>new</Badge>
+      </TableCell>
+      <TableCell>
+        Rust client lib: SSH bridge (<code>russh</code>) + frame I/O. Used by the Tauri app, a
+        future CLI.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>crates/pragma-cli</code></TableCell>
-      <TableCell><Badge variant="secondary">rename</Badge></TableCell>
-      <TableCell>was <code>pragma-agent-cli</code>; binary <code>pragma-agent</code> → <code>pragma-cli</code> (binary == crate name — <strong>not</strong> bare <code>pragma</code>, which would collide with the app crate's own <code>target/debug/pragma</code>). Renamed now to become the home for a <strong>general-purpose Pragma CLI</strong> as the client/server split lands (e.g. driving the router DB, host management, and connect/bootstrap from Phase 4) — but <strong>this re-architecture adds no new subcommands</strong>. The only hard requirement here is that the existing agent reporting (<code>report started/stopped/attention/cleared</code>) keeps working against the renamed <code>pragma-server</code>. The rename touches the crate dir/package, the bundled sidecar + staging script, the <code>~/.local/bin</code> install name, and every plugin/SDK invocation that spells the binary by name.</TableCell>
+      <TableCell>
+        <code>crates/pragma-cli</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">rename</Badge>
+      </TableCell>
+      <TableCell>
+        was <code>pragma-agent-cli</code>; binary <code>pragma-agent</code> →{" "}
+        <code>pragma-cli</code> (binary == crate name — <strong>not</strong> bare{" "}
+        <code>pragma</code>, which would collide with the app crate's own{" "}
+        <code>target/debug/pragma</code>). Renamed now to become the home for a{" "}
+        <strong>general-purpose Pragma CLI</strong> as the client/server split lands (e.g. driving
+        the router DB, host management, and connect/bootstrap from Phase 4) — but{" "}
+        <strong>this re-architecture adds no new subcommands</strong>. The only hard requirement
+        here is that the existing agent reporting (
+        <code>report started/stopped/attention/cleared</code>) keeps working against the renamed{" "}
+        <code>pragma-server</code>. The rename touches the crate dir/package, the bundled sidecar +
+        staging script, the <code>~/.local/bin</code> install name, and every plugin/SDK invocation
+        that spells the binary by name.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>apps/pragma</code></TableCell>
-      <TableCell><Badge variant="destructive">shrink</Badge></TableCell>
-      <TableCell>Tauri thin client: windows, menus, deep links, OS notifications, native browser webviews, predictive-echo overlay, client-local router DB, and <code>pragma-client</code>. Loses git/fs/db/ai/kanban/github.</TableCell>
+      <TableCell>
+        <code>apps/pragma</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="destructive">shrink</Badge>
+      </TableCell>
+      <TableCell>
+        Tauri thin client: windows, menus, deep links, OS notifications, native browser webviews,
+        predictive-echo overlay, client-local router DB, and <code>pragma-client</code>. Loses
+        git/fs/db/ai/kanban/github.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>packages/github-helpers</code></TableCell>
-      <TableCell><Badge>new</Badge></TableCell>
-      <TableCell><code>pragma-github</code> Bun sidecar (Octokit), mirroring <code>ai-helpers</code> → <code>pragma-ai</code>.</TableCell>
+      <TableCell>
+        <code>packages/github-helpers</code>
+      </TableCell>
+      <TableCell>
+        <Badge>new</Badge>
+      </TableCell>
+      <TableCell>
+        <code>pragma-github</code> Bun sidecar (Octokit), mirroring <code>ai-helpers</code> →{" "}
+        <code>pragma-ai</code>.
+      </TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>packages/constants</code></TableCell>
-      <TableCell><Badge variant="outline">grow</Badge></TableCell>
+      <TableCell>
+        <code>packages/constants</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">grow</Badge>
+      </TableCell>
       <TableCell>schema source of truth for the whole RPC/event protocol.</TableCell>
     </TableRow>
     <TableRow>
-      <TableCell><code>packages/sdk</code></TableCell>
-      <TableCell><Badge variant="secondary">unchanged (for now)</Badge></TableCell>
-      <TableCell><code>@pragma/sdk</code> <strong>keeps wrapping the renamed <code>pragma-cli</code></strong> (was <code>pragma-agent</code>; typed argv around <code>report started/stopped/attention/cleared</code>) — only the default binary name it spawns changes; the CLI still reports over the server socket as today, so the wrapper otherwise works unmodified. Growing it into a direct frame-level JS/TS client to <code>pragma-server</code> (the JS analog of <code>pragma-client</code>) is a <strong>deferred, separate effort</strong>, not part of this re-architecture.</TableCell>
+      <TableCell>
+        <code>packages/sdk</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">unchanged (for now)</Badge>
+      </TableCell>
+      <TableCell>
+        <code>@pragma/sdk</code>{" "}
+        <strong>
+          keeps wrapping the renamed <code>pragma-cli</code>
+        </strong>{" "}
+        (was <code>pragma-agent</code>; typed argv around{" "}
+        <code>report started/stopped/attention/cleared</code>) — only the default binary name it
+        spawns changes; the CLI still reports over the server socket as today, so the wrapper
+        otherwise works unmodified. Growing it into a direct frame-level JS/TS client to{" "}
+        <code>pragma-server</code> (the JS analog of <code>pragma-client</code>) is a{" "}
+        <strong>deferred, separate effort</strong>, not part of this re-architecture.
+      </TableCell>
     </TableRow>
   </TableBody>
 </Table>
@@ -439,7 +607,9 @@ library, consumed by the server. The Tauri app shrinks to presentation + an SSH 
 <p className="text-sm text-muted-foreground my-2">
 
 `src-tauri` keeps: <code>browser</code>, <code>icons</code>, <code>editors</code>, keybinding-capture,
-<code>deep_link</code>, menu, notifications, and <code>pty.rs</code> (now a thin client to the bridge).
+
+<code>deep_link</code>, menu, notifications, and <code>pty.rs</code> (now a thin client to the
+bridge).
 
 </p>
 
@@ -457,6 +627,7 @@ Move logic out of `src-tauri` into the new library crate; Tauri commands become 
 calling `pragma-core` in-process. Behavior-identical, fully testable. **No protocol or UX change.**
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p2">
     <AccordionTrigger>2 · Generalize the protocol</AccordionTrigger>
@@ -467,6 +638,7 @@ Add RPC + event variants to `pragma-protocol`, schema in `@pragma/constants`. Re
 alongside PTY. Bump `daemon.protocolVersion`.
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p3">
     <AccordionTrigger>3 · Route Tauri commands through the socket</AccordionTrigger>
@@ -476,6 +648,7 @@ Extend the client (`pty.rs` → `pragma-client`) so git/fs/db calls go over the 
 is now a client of the server **even locally** (still one machine). Architecture flipped.
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p4">
     <AccordionTrigger>4 · SSH transport + bootstrap</AccordionTrigger>
@@ -489,6 +662,7 @@ host-management UI yet** (adding / selecting / authenticating remote hosts is a 
 phase). The app's UX stays local-only even though the transport is fully capable.
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p5">
     <AccordionTrigger>5 · Per-project DB + fs-watcher + change events</AccordionTrigger>
@@ -501,9 +675,10 @@ caches with optimistic versioned writes. Make the server persistent (drop empty-
 **Bound aggregate scrollback here, too.** Once the server is persistent and may hold ~50 running
 PTYs, the per-session 10k ring becomes a real resident footprint (~250–500 MB). Switch the per-session
 ring to a **byte budget**, add a **daemon-wide cap / LRU**, and **hibernate idle, unattached sessions**
-to disk (rehydrated at the existing attach-time `frames()` replay). See *Risks & watch-items → Scrollback bound*.
+to disk (rehydrated at the existing attach-time `frames()` replay). See _Risks & watch-items → Scrollback bound_.
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p6">
     <AccordionTrigger>6 · Predictive echo</AccordionTrigger>
@@ -513,6 +688,7 @@ Server-side `EchoMode` detection (termios `ECHO`) + event; client-side predictio
 (printable + space, gated on echo, reconciled against real output).
 
     </AccordionContent>
+
   </AccordionItem>
   <AccordionItem value="p7">
     <AccordionTrigger>7 · GitHub + AI sidecars</AccordionTrigger>
@@ -522,6 +698,7 @@ Build `pragma-github` (Bun + Octokit); reparent `pragma-ai` to the server. Serve
 and proxies both; creds stay on host.
 
     </AccordionContent>
+
   </AccordionItem>
 </Accordion>
 
@@ -541,18 +718,39 @@ because the most common Windows dev setup is WSL2, which is a real Linux kernel.
   <TableBody>
     <TableRow>
       <TableCell className="font-medium">Server + client both inside WSL2</TableCell>
-      <TableCell><Badge>works as-is</Badge></TableCell>
-      <TableCell>Inside WSL2 it is just Linux — Unix sockets, <code>0600</code> perms, <code>notify</code> all work unmodified. The Tauri GUI runs via WSLg. Zero plan changes.</TableCell>
+      <TableCell>
+        <Badge>works as-is</Badge>
+      </TableCell>
+      <TableCell>
+        Inside WSL2 it is just Linux — Unix sockets, <code>0600</code> perms, <code>notify</code>{" "}
+        all work unmodified. The Tauri GUI runs via WSLg. Zero plan changes.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Server in WSL2, accessed as a remote host</TableCell>
-      <TableCell><Badge>works as-is</Badge></TableCell>
-      <TableCell>WSL2 is "just another Linux host running <code>pragma-server</code>." Repos live on the fast ext4 side (not the slow <code>\\wsl$</code> bridge) and <code>pragma-core</code> does git/fs locally. Reach it via <code>sshd</code> in WSL2 (the Phase 4 transport) <em>or</em> <code>wsl.exe -d &lt;distro&gt; -e pragma-server …</code> piped over stdio (Transport B), which avoids needing <code>sshd</code> and sidesteps streamlocal-on-Windows entirely.</TableCell>
+      <TableCell>
+        <Badge>works as-is</Badge>
+      </TableCell>
+      <TableCell>
+        WSL2 is "just another Linux host running <code>pragma-server</code>." Repos live on the fast
+        ext4 side (not the slow <code>\\wsl$</code> bridge) and <code>pragma-core</code> does git/fs
+        locally. Reach it via <code>sshd</code> in WSL2 (the Phase 4 transport) <em>or</em>{" "}
+        <code>wsl.exe -d &lt;distro&gt; -e pragma-server …</code> piped over stdio (Transport B),
+        which avoids needing <code>sshd</code> and sidesteps streamlocal-on-Windows entirely.
+      </TableCell>
     </TableRow>
     <TableRow>
       <TableCell className="font-medium">Native-Windows client → WSL2 server</TableCell>
-      <TableCell><Badge variant="outline">future</Badge></TableCell>
-      <TableCell>Server side is untouched (pure Linux). Only the <em>thin client's</em> connect path needs Windows work — Rust <code>std::os::unix::net</code> is <code>#[cfg(unix)]</code> and won't compile on Windows, so the client would use a named pipe / <code>interprocess</code> local socket or bridge in via SSH / <code>wsl.exe</code>. The architecture's "push all logic server-side" goal is what keeps this tractable.</TableCell>
+      <TableCell>
+        <Badge variant="outline">future</Badge>
+      </TableCell>
+      <TableCell>
+        Server side is untouched (pure Linux). Only the <em>thin client's</em> connect path needs
+        Windows work — Rust <code>std::os::unix::net</code> is <code>#[cfg(unix)]</code> and won't
+        compile on Windows, so the client would use a named pipe / <code>interprocess</code> local
+        socket or bridge in via SSH / <code>wsl.exe</code>. The architecture's "push all logic
+        server-side" goal is what keeps this tractable.
+      </TableCell>
     </TableRow>
   </TableBody>
 </Table>
@@ -592,7 +790,7 @@ ACL equivalent. WSL2 hosts have no such issue.
     `session_id` inside the already-per-session ring — if so, storing raw bytes and reattaching the id
     only at replay drops 10k redundant string allocs per session.
   - **Note:** this is the one cost that does **not** decouple with attach (see Connection management) —
-    client bandwidth/xterm scale with *visible* tabs, but server scrollback scales with *running* PTYs.
+    client bandwidth/xterm scale with _visible_ tabs, but server scrollback scales with _running_ PTYs.
 - **`russh` `direct-streamlocal`** — verified present; Phase 4 now wires it end-to-end (not just a
   spike), which de-risks it directly. B (stdio-over-exec) remains the fallback if it ever fails.
 

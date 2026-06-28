@@ -64,26 +64,26 @@ than no guide.
 
 ## Tech stack
 
-| Concern          | Choice                                                                                                                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Monorepo / tasks | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
-| Desktop shell    | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
-| Frontend         | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
-| Styling / UI     | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
-| Backend          | Rust (Tauri commands)                                                                                                                                           |
-| GitHub           | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
-| AI               | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
-| Shared constants | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
-| SDK bundling     | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
-| Lint (TS)        | [oxlint](https://oxc.rs)                                                                                                                                        |
-| Format (TS)      | [oxfmt](https://oxc.rs)                                                                                                                                         |
-| Lint (Rust)      | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                      |
-| Format (Rust)    | rustfmt                                                                                                                                                         |
-| Tests            | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
-| Commits          | Conventional Commits (commitlint)                                                                                                                               |
-| Git hooks        | Husky + lint-staged                                                                                                                                             |
-| CI               | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
-| Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                          |
+| Concern           | Choice                                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Monorepo / tasks  | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
+| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
+| Frontend          | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
+| Styling / UI      | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
+| Backend           | Rust (Tauri commands)                                                                                                                                           |
+| GitHub            | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
+| AI                | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
+| Shared constants  | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
+| SDK bundling      | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
+| Lint (TS)         | [oxlint](https://oxc.rs)                                                                                                                                        |
+| Format (TS)       | [oxfmt](https://oxc.rs)                                                                                                                                         |
+| Lint (Rust)       | clippy (`-D warnings`, `all` + `pedantic`)                                                                                                                      |
+| Format (Rust)     | rustfmt                                                                                                                                                         |
+| Tests             | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
+| Commits           | Conventional Commits (commitlint)                                                                                                                               |
+| Git hooks         | Husky + lint-staged                                                                                                                                             |
+| CI                | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
+| Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                           |
 
 ## Repository structure
 

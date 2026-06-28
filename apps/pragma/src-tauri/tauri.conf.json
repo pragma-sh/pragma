@@ -10,6 +10,7 @@
     "beforeBuildCommand": "bun run build && bun run sidecar:server:release"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Pragma",
@@ -20,7 +21,10 @@
         "resizable": true,
         "fullscreen": false,
         "theme": "Dark",
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

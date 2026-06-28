@@ -8,32 +8,32 @@ description: >-
   monospace code voice, and hairline structure. Built on Tauri + React + shadcn.
 colors:
   # --- Surfaces (dark is canonical; light variant documented in prose) ---
-  background: "oklch(0.17 0.006 256)"        # app canvas, deepest layer
-  surface: "oklch(0.20 0.006 256)"           # window / panel background
-  elevated: "oklch(0.23 0.007 256)"          # cards, popovers, menus
-  sidebar: "oklch(0.15 0.006 256)"           # Arc-spaces rail (often translucent)
-  overlay: "oklch(0.12 0.006 256 / 0.62)"    # modal scrim
+  background: "oklch(0.17 0.006 256)" # app canvas, deepest layer
+  surface: "oklch(0.20 0.006 256)" # window / panel background
+  elevated: "oklch(0.23 0.007 256)" # cards, popovers, menus
+  sidebar: "oklch(0.15 0.006 256)" # Arc-spaces rail (often translucent)
+  overlay: "oklch(0.12 0.006 256 / 0.62)" # modal scrim
   # --- Text ---
-  foreground: "oklch(0.93 0.004 256)"        # primary ink
-  subtle: "oklch(0.70 0.009 256)"            # secondary / metadata text
-  muted: "oklch(0.26 0.007 256)"             # muted fill (hover rows, chips)
+  foreground: "oklch(0.93 0.004 256)" # primary ink
+  subtle: "oklch(0.70 0.009 256)" # secondary / metadata text
+  muted: "oklch(0.26 0.007 256)" # muted fill (hover rows, chips)
   # --- Lines & focus ---
-  border: "oklch(0.28 0.008 256)"            # hairline separators
-  input: "oklch(0.31 0.008 256)"             # control borders
-  ring: "oklch(0.62 0.15 252)"               # focus ring (accent)
-  selection: "oklch(0.58 0.15 252 / 0.32)"   # text/selection highlight
+  border: "oklch(0.28 0.008 256)" # hairline separators
+  input: "oklch(0.31 0.008 256)" # control borders
+  ring: "oklch(0.62 0.15 252)" # focus ring (accent)
+  selection: "oklch(0.58 0.15 252 / 0.32)" # text/selection highlight
   # --- Accent (the single driver of interaction) ---
-  primary: "oklch(0.56 0.15 252)"            # Codex blue
+  primary: "oklch(0.56 0.15 252)" # Codex blue
   on-primary: "oklch(0.99 0 0)"
   primary-hover: "oklch(0.52 0.17 252)"
   # --- Semantic (mirrors codex semanticColors) ---
-  success: "oklch(0.78 0.13 152)"            # diff added
+  success: "oklch(0.78 0.13 152)" # diff added
   on-success: "oklch(0.20 0.03 152)"
-  destructive: "oklch(0.64 0.19 18)"         # diff removed
+  destructive: "oklch(0.64 0.19 18)" # diff removed
   on-destructive: "oklch(0.16 0.04 18)"
-  warning: "oklch(0.80 0.12 78)"             # attention / permission prompts
+  warning: "oklch(0.80 0.12 78)" # attention / permission prompts
   on-warning: "oklch(0.22 0.03 78)"
-  skill: "oklch(0.74 0.08 330)"              # agent/skill annotations
+  skill: "oklch(0.74 0.08 330)" # agent/skill annotations
   on-skill: "oklch(0.18 0.02 330)"
 typography:
   display:
@@ -222,11 +222,11 @@ isn't text or state lives on the neutral ramp.
 - **background `oklch(0.17 0.006 256)`** — the deepest canvas; the empty space behind panels.
 - **surface `oklch(0.20 0.006 256)`** — default panel/window background.
 - **elevated `oklch(0.23 0.007 256)`** — cards, popovers, menus, the active tab. One step up from surface.
-- **sidebar `oklch(0.15 0.006 256)`** — the project rail; one step *down*, often rendered translucent over the desktop (vibrancy on macOS).
+- **sidebar `oklch(0.15 0.006 256)`** — the project rail; one step _down_, often rendered translucent over the desktop (vibrancy on macOS).
 - **foreground `oklch(0.93 0.004 256)`** — primary ink. Soft white, never `#fff`.
 - **subtle `oklch(0.70 0.009 256)`** — metadata, captions, inactive tabs, secondary labels.
 - **border `oklch(0.28 0.008 256)`** — hairline separators; the primary structural device.
-- **primary `oklch(0.56 0.15 252)`** — Codex blue. The *only* interactive accent: selected state, focus ring, primary action, links.
+- **primary `oklch(0.56 0.15 252)`** — Codex blue. The _only_ interactive accent: selected state, focus ring, primary action, links.
 
 Semantic colors mirror the Codex `semanticColors` channel and are used **only**
 to communicate state:
@@ -299,7 +299,7 @@ Borders are always `1px` hairlines.
   native press. Secondary is an `elevated` fill with a hairline; ghost is
   transparent until hover, where it picks up the `muted` fill. Reserve the blue
   primary for the single most important action in a view.
-- **Inputs.** Sit on `background` (recessed, one step *below* surface) with an
+- **Inputs.** Sit on `background` (recessed, one step _below_ surface) with an
   `input` hairline; focus swaps the border to `ring` and adds the focus glow.
 - **Cards & popovers.** `elevated` fill, hairline border, `10px` radius, floating
   shadow for popovers only.
@@ -343,22 +343,22 @@ Borders are always `1px` hairlines.
 
 Mapping from DESIGN.md tokens to shadcn CSS variables (dark / canonical):
 
-| shadcn variable          | DESIGN.md token        |
-| ------------------------ | ---------------------- |
-| `--background`           | `colors.surface`       |
-| `--foreground`           | `colors.foreground`    |
-| `--card` / `--popover`   | `colors.elevated`      |
-| `--primary`              | `colors.primary`       |
-| `--primary-foreground`   | `colors.on-primary`    |
-| `--secondary` / `--muted`| `colors.muted`         |
-| `--muted-foreground`     | `colors.subtle`        |
-| `--accent`               | `colors.muted`         |
-| `--destructive`          | `colors.destructive`   |
-| `--border`               | `colors.border`        |
-| `--input`                | `colors.input`         |
-| `--ring`                 | `colors.ring`          |
-| `--sidebar`              | `colors.sidebar`       |
-| `--radius`               | `rounded.lg` (0.625rem)|
+| shadcn variable           | DESIGN.md token         |
+| ------------------------- | ----------------------- |
+| `--background`            | `colors.surface`        |
+| `--foreground`            | `colors.foreground`     |
+| `--card` / `--popover`    | `colors.elevated`       |
+| `--primary`               | `colors.primary`        |
+| `--primary-foreground`    | `colors.on-primary`     |
+| `--secondary` / `--muted` | `colors.muted`          |
+| `--muted-foreground`      | `colors.subtle`         |
+| `--accent`                | `colors.muted`          |
+| `--destructive`           | `colors.destructive`    |
+| `--border`                | `colors.border`         |
+| `--input`                 | `colors.input`          |
+| `--ring`                  | `colors.ring`           |
+| `--sidebar`               | `colors.sidebar`        |
+| `--radius`                | `rounded.lg` (0.625rem) |
 
 Plus three Pragma-specific extension variables that shadcn doesn't define but
 the diff/agent UI needs: `--diff-added` (`colors.success`), `--diff-removed`

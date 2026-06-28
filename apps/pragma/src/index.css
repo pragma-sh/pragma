@@ -1,53 +1,190 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
 
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
+/* ---------------------------------------------------------------------------
+   Theme tokens — derived from DESIGN.md. Dark is canonical; `:root` carries the
+   light inversion and `.dark` the canonical charcoal ramp. Do not hand-edit
+   individual values to taste: re-derive from the DESIGN.md front matter so the
+   two languages and the design doc stay in lockstep.
+--------------------------------------------------------------------------- */
+
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", sans-serif;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
+  /* Two voices only: the native system UI face and a monospace code voice. */
+  --font-sans:
+    -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-heading: -apple-system, "SF Pro Display", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, "Cascadia Code", monospace;
+
+  /* shadcn surface + control ramp */
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-foreground: var(--foreground);
+  --color-canvas: var(--canvas);
+  --color-elevated: var(--elevated);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Semantic state ramp (used only to communicate state, never decoration) */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-skill: var(--skill);
+  --color-skill-foreground: var(--skill-foreground);
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
+
+  /* Sidebar (Arc-spaces project rail) */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Tight radius scale (DESIGN.md `rounded`) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+
+  /* Elevation: hairline first, soft low-alpha shadow second. */
+  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-floating: 0 8px 24px oklch(0 0 0 / 0.4);
+}
+
+/* ----- Light variant (faithful inversion, not a different identity) ------- */
+:root {
+  --radius: 0.625rem;
+
+  --canvas: oklch(0.99 0.002 256);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.22 0.01 256);
+  --elevated: oklch(1 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.01 256);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.01 256);
+
+  --primary: oklch(0.52 0.16 252);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-hover: oklch(0.48 0.17 252);
+
+  --secondary: oklch(0.96 0.003 256);
+  --secondary-foreground: oklch(0.22 0.01 256);
+  --muted: oklch(0.96 0.003 256);
+  --muted-foreground: oklch(0.5 0.01 256);
+  --accent: oklch(0.96 0.003 256);
+  --accent-foreground: oklch(0.22 0.01 256);
+
+  --border: oklch(0.92 0.004 256);
+  --input: oklch(0.89 0.005 256);
+  --ring: oklch(0.52 0.16 252);
+  --selection: oklch(0.52 0.16 252 / 0.2);
+  --overlay: oklch(0.5 0.01 256 / 0.4);
+
+  --destructive: oklch(0.58 0.2 18);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.6 0.13 152);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.7 0.13 78);
+  --warning-foreground: oklch(0.22 0.03 78);
+  --skill: oklch(0.6 0.1 330);
+  --skill-foreground: oklch(0.99 0 0);
+  --diff-added: oklch(0.6 0.13 152);
+  --diff-removed: oklch(0.58 0.2 18);
+
+  --sidebar: oklch(0.97 0.002 256);
+  --sidebar-foreground: oklch(0.5 0.01 256);
+  --sidebar-primary: oklch(0.52 0.16 252);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.93 0.004 256);
+  --sidebar-accent-foreground: oklch(0.22 0.01 256);
+  --sidebar-border: oklch(0.92 0.004 256);
+  --sidebar-ring: oklch(0.52 0.16 252);
+}
+
+/* ----- Dark variant (canonical) ------------------------------------------- */
+.dark {
+  --canvas: oklch(0.17 0.006 256);
+  --background: oklch(0.2 0.006 256);
+  --foreground: oklch(0.93 0.004 256);
+  --elevated: oklch(0.23 0.007 256);
+
+  --card: oklch(0.23 0.007 256);
+  --card-foreground: oklch(0.93 0.004 256);
+  --popover: oklch(0.23 0.007 256);
+  --popover-foreground: oklch(0.93 0.004 256);
+
+  --primary: oklch(0.56 0.15 252);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-hover: oklch(0.52 0.17 252);
+
+  --secondary: oklch(0.26 0.007 256);
+  --secondary-foreground: oklch(0.93 0.004 256);
+  --muted: oklch(0.26 0.007 256);
+  --muted-foreground: oklch(0.7 0.009 256);
+  --accent: oklch(0.26 0.007 256);
+  --accent-foreground: oklch(0.93 0.004 256);
+
+  --border: oklch(0.28 0.008 256);
+  --input: oklch(0.31 0.008 256);
+  --ring: oklch(0.62 0.15 252);
+  --selection: oklch(0.58 0.15 252 / 0.32);
+  --overlay: oklch(0.12 0.006 256 / 0.62);
+
+  --destructive: oklch(0.64 0.19 18);
+  --destructive-foreground: oklch(0.16 0.04 18);
+  --success: oklch(0.78 0.13 152);
+  --success-foreground: oklch(0.2 0.03 152);
+  --warning: oklch(0.8 0.12 78);
+  --warning-foreground: oklch(0.22 0.03 78);
+  --skill: oklch(0.74 0.08 330);
+  --skill-foreground: oklch(0.18 0.02 330);
+  --diff-added: oklch(0.78 0.13 152);
+  --diff-removed: oklch(0.64 0.19 18);
+
+  --sidebar: oklch(0.15 0.006 256);
+  --sidebar-foreground: oklch(0.7 0.009 256);
+  --sidebar-primary: oklch(0.56 0.15 252);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.26 0.007 256);
+  --sidebar-accent-foreground: oklch(0.93 0.004 256);
+  --sidebar-border: oklch(0.28 0.008 256);
+  --sidebar-ring: oklch(0.62 0.15 252);
+}
+
+/* When the macOS NSVisualEffectView vibrancy layer is active, the project rail
+   renders translucent so the desktop blur reads through it (set by main.tsx on
+   macOS). Elsewhere the rail stays a solid one-step-down charcoal. */
+.vibrancy .dark,
+.dark.vibrancy {
+  --sidebar: oklch(0.15 0.006 256 / 0.6);
 }
 
 @keyframes agent-attention {
@@ -80,78 +217,19 @@
   animation: agent-running 1.6s ease-in-out infinite;
 }
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+/* Reserves the custom-titlebar strip so content clears the inset macOS traffic
+   lights. `--titlebar-height` is only set on macOS (see main.tsx); elsewhere it
+   falls back to 0 and the rule is inert. */
+@utility titlebar-pad {
+  padding-top: var(--titlebar-height, 0px);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  ::selection {
+    background-color: var(--selection);
   }
   html,
   body,
@@ -161,9 +239,28 @@
     overscroll-behavior: none;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Under macOS vibrancy the canvas itself is transparent so the project rail
+     (translucent) reveals the NSVisualEffectView blur; opaque content panes
+     paint over it. */
+  .vibrancy body {
+    background-color: transparent;
   }
   html {
     @apply font-sans;
+  }
+  /* Ligatures off in code contexts so columns, SHAs and paths stay honest. */
+  code,
+  pre,
+  kbd,
+  samp,
+  .font-mono {
+    font-variant-ligatures: none;
+    font-feature-settings:
+      "liga" 0,
+      "calt" 0;
   }
 }

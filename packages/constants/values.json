@@ -53,7 +53,9 @@
     "defaultWidth": 1024,
     "defaultHeight": 768,
     "minWidth": 640,
-    "minHeight": 480
+    "minHeight": 480,
+    "titlebarHeight": 38,
+    "trafficLightInset": 12
   },
   "links": {
     "homepage": "https://pragma.example.com",

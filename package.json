@@ -38,7 +38,6 @@
     "lint-staged": "^17.0.7",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
-    "pragma": "workspace:*",
     "turbo": "^2.9.18",
     "typescript": "^6.0.3"
   },

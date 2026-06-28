@@ -259,12 +259,29 @@
       "title": "WindowDefaults",
       "type": "object",
       "additionalProperties": false,
-      "required": ["defaultWidth", "defaultHeight", "minWidth", "minHeight"],
+      "required": [
+        "defaultWidth",
+        "defaultHeight",
+        "minWidth",
+        "minHeight",
+        "titlebarHeight",
+        "trafficLightInset"
+      ],
       "properties": {
         "defaultWidth": { "type": "integer", "minimum": 1 },
         "defaultHeight": { "type": "integer", "minimum": 1 },
         "minWidth": { "type": "integer", "minimum": 1 },
-        "minHeight": { "type": "integer", "minimum": 1 }
+        "minHeight": { "type": "integer", "minimum": 1 },
+        "titlebarHeight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Height in px of the custom draggable titlebar strip the frontend reserves above the content. Must clear the inset macOS traffic lights."
+        },
+        "trafficLightInset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "macOS traffic-light button inset in px from the top-left window corner, applied via tauri-plugin-decorum so the controls center vertically within the custom titlebar."
+        }
       }
     },
     "Links": {
