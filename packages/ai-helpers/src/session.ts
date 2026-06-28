@@ -42,6 +42,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** Event union emitted by an {@link AgentSession} subscription. */
+type SessionEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
+
 function assistantMessageText(message: unknown): string | undefined {
   if (!isRecord(message) || message.role !== "assistant") {
     return undefined;
@@ -122,15 +125,92 @@ export async function createPragmaSession(
 }
 
 /**
+ * Mutable accumulator for one {@link runPromptToText} attempt. `agent_end`
+ * resets it when the run will retry, so deltas from a failed attempt never
+ * leak into the resolved text.
+ */
+interface PromptRunState {
+  text: string;
+  latestAssistantText: string;
+  latestAssistantError: string;
+}
+
+function resetPromptRunState(state: PromptRunState): void {
+  state.text = "";
+  state.latestAssistantText = "";
+  state.latestAssistantError = "";
+}
+
+function handleAssistantTextDelta(state: PromptRunState, delta: string): void {
+  state.text += delta;
+}
+
+function handleAssistantTextEnd(state: PromptRunState, content: string): void {
+  const trimmed = content.trim();
+  if (trimmed) {
+    state.latestAssistantText = trimmed;
+  }
+}
+
+function handleSessionMessageUpdate(
+  event: Extract<SessionEvent, { type: "message_update" }>,
+  state: PromptRunState,
+  finish: (fn: () => void) => void,
+  reject: (error: Error) => void,
+): void {
+  state.latestAssistantText = assistantMessageText(event.message) ?? state.latestAssistantText;
+  state.latestAssistantError = assistantErrorMessage(event.message) ?? state.latestAssistantError;
+  const inner = event.assistantMessageEvent;
+  if (inner.type === "text_delta") {
+    handleAssistantTextDelta(state, inner.delta);
+  } else if (inner.type === "text_end") {
+    handleAssistantTextEnd(state, inner.content);
+  } else if (inner.type === "error") {
+    finish(() => reject(new Error(inner.error.errorMessage ?? "The model returned an error.")));
+  }
+}
+
+function handleSessionMessageEnd(
+  event: Extract<SessionEvent, { type: "message_end" }>,
+  state: PromptRunState,
+): void {
+  state.latestAssistantText = assistantMessageText(event.message) ?? state.latestAssistantText;
+  state.latestAssistantError = assistantErrorMessage(event.message) ?? state.latestAssistantError;
+}
+
+function handleSessionAgentEnd(
+  event: Extract<SessionEvent, { type: "agent_end" }>,
+  state: PromptRunState,
+  finish: (fn: () => void) => void,
+  resolve: (text: string) => void,
+  reject: (error: Error) => void,
+): void {
+  if (event.willRetry) {
+    resetPromptRunState(state);
+    return;
+  }
+  const finalText =
+    state.text.trim() || state.latestAssistantText || finalAssistantText(event.messages);
+  const finalError = state.latestAssistantError || finalAssistantError(event.messages);
+  finish(() => {
+    if (finalText) resolve(finalText);
+    else if (finalError) reject(new Error(finalError));
+    else reject(new Error("The model returned no text."));
+  });
+}
+
+/**
  * Send one prompt and resolve with the assistant's final text. Accumulates
  * streamed text deltas and resolves when the agent run ends. Rejects if the
  * model reports an error.
  */
 export function runPromptToText(session: AgentSession, prompt: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    let text = "";
-    let latestAssistantText = "";
-    let latestAssistantError = "";
+    const state: PromptRunState = {
+      text: "",
+      latestAssistantText: "",
+      latestAssistantError: "",
+    };
     let settled = false;
     const finish = (fn: () => void): void => {
       if (settled) return;
@@ -141,35 +221,11 @@ export function runPromptToText(session: AgentSession, prompt: string): Promise<
 
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "message_update") {
-        latestAssistantText = assistantMessageText(event.message) ?? latestAssistantText;
-        latestAssistantError = assistantErrorMessage(event.message) ?? latestAssistantError;
-        const inner = event.assistantMessageEvent;
-        if (inner.type === "text_delta") {
-          text += inner.delta;
-        } else if (inner.type === "text_end") {
-          latestAssistantText = inner.content.trim() || latestAssistantText;
-        } else if (inner.type === "error") {
-          finish(() =>
-            reject(new Error(inner.error.errorMessage ?? "The model returned an error.")),
-          );
-        }
+        handleSessionMessageUpdate(event, state, finish, reject);
       } else if (event.type === "message_end") {
-        latestAssistantText = assistantMessageText(event.message) ?? latestAssistantText;
-        latestAssistantError = assistantErrorMessage(event.message) ?? latestAssistantError;
+        handleSessionMessageEnd(event, state);
       } else if (event.type === "agent_end") {
-        if (event.willRetry) {
-          text = "";
-          latestAssistantText = "";
-          latestAssistantError = "";
-          return;
-        }
-        const finalText = text.trim() || latestAssistantText || finalAssistantText(event.messages);
-        const finalError = latestAssistantError || finalAssistantError(event.messages);
-        finish(() => {
-          if (finalText) resolve(finalText);
-          else if (finalError) reject(new Error(finalError));
-          else reject(new Error("The model returned no text."));
-        });
+        handleSessionAgentEnd(event, state, finish, resolve, reject);
       }
     });
 

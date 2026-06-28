@@ -23,29 +23,41 @@ function tokenFromEnvironment(): string {
   return token;
 }
 
+async function runStatus(): Promise<number> {
+  emit({
+    type: "status",
+    available: Boolean(process.env.GITHUB_TOKEN ?? process.env.PRAGMA_GITHUB_TOKEN),
+  });
+  return 0;
+}
+
+async function runViewer(args: string[]): Promise<number> {
+  const login = await viewerLogin(tokenFromEnvironment(), flag(args, "base-url"));
+  emit({ type: "result", login });
+  return 0;
+}
+
+const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
+  status: runStatus,
+  viewer: runViewer,
+};
+
 async function main(): Promise<number> {
   const [, , command, ...args] = process.argv;
   try {
-    switch (command) {
-      case "status": {
-        emit({
-          type: "status",
-          available: Boolean(process.env.GITHUB_TOKEN ?? process.env.PRAGMA_GITHUB_TOKEN),
-        });
-        return 0;
-      }
-      case "viewer": {
-        const login = await viewerLogin(tokenFromEnvironment(), flag(args, "base-url"));
-        emit({ type: "result", login });
-        return 0;
-      }
-      default:
-        throw new Error(`unknown command: ${command ?? "<none>"}`);
-    }
+    return await dispatchCommand(command, args);
   } catch (error) {
     emitError(error);
     return 1;
   }
+}
+
+async function dispatchCommand(command: string | undefined, args: string[]): Promise<number> {
+  const handler = command ? COMMANDS[command] : undefined;
+  if (handler) {
+    return await handler(args);
+  }
+  throw new Error(`unknown command: ${command ?? "<none>"}`);
 }
 
 process.exitCode = await main();

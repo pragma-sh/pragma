@@ -41,6 +41,18 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   let attentionKind: AttentionKind = "command";
   let lastReported: ReportKey | null = null;
 
+  const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
+    "session.status": applySessionStatusEvent,
+    "session.idle": applySessionIdleEvent,
+    "session.error": applySessionErrorEvent,
+    "session.deleted": applySessionDeletedEvent,
+    "server.instance.disposed": () => "clear",
+    "permission.asked": applyPermissionAskedEvent,
+    "permission.updated": applyPermissionAskedEvent,
+    "permission.replied": applyPermissionRepliedEvent,
+    "message.part.updated": applyMessagePartEvent,
+  };
+
   return {
     event: async ({ event }) => {
       const action = applyEvent(event as RuntimeEvent);
@@ -139,45 +151,51 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   /** Updates the flags for a runtime event and returns the action to take. */
   function applyEvent(event: RuntimeEvent): EventAction {
-    switch (event.type) {
-      case "session.status":
-        applySessionStatus(event);
-        return "sync";
-      case "session.idle":
-        busy = false;
-        return "sync";
-      case "session.error":
-        // An aborted turn (esc-esc / `session.abort`) surfaces as a session
-        // error carrying `MessageAbortedError`. There is no result to look at,
-        // so reset the indicator instead of leaving a green "finished" dot.
-        if (isAbortError(event)) {
-          return "clear";
-        }
-        busy = false;
-        attention = false;
-        return "sync";
-      case "session.deleted":
-        busy = false;
-        attention = false;
-        return "sync";
-      case "server.instance.disposed":
-        // opencode's server is shutting down (the agent is quitting): clear the
-        // indicator rather than leaving a stale dot, even when the `dispose`
-        // plugin hook doesn't run (e.g. an abrupt shutdown).
-        return "clear";
-      case "permission.asked":
-      case "permission.updated":
-        raiseAttention("command");
-        return "sync";
-      case "permission.replied":
-        attention = false;
-        busy = true;
-        return "sync";
-      case "message.part.updated":
-        return applyMessagePart(event) ? "sync" : "none";
-      default:
-        return "none";
+    const handler = EVENT_HANDLERS[event.type];
+    return handler ? handler(event) : "none";
+  }
+
+  function applySessionStatusEvent(event: RuntimeEvent): EventAction {
+    applySessionStatus(event);
+    return "sync";
+  }
+
+  function applySessionIdleEvent(): EventAction {
+    busy = false;
+    return "sync";
+  }
+
+  function applySessionErrorEvent(event: RuntimeEvent): EventAction {
+    // An aborted turn (esc-esc / `session.abort`) surfaces as a session
+    // error carrying `MessageAbortedError`. There is no result to look at,
+    // so reset the indicator instead of leaving a green "finished" dot.
+    if (isAbortError(event)) {
+      return "clear";
     }
+    busy = false;
+    attention = false;
+    return "sync";
+  }
+
+  function applySessionDeletedEvent(): EventAction {
+    busy = false;
+    attention = false;
+    return "sync";
+  }
+
+  function applyPermissionAskedEvent(): EventAction {
+    raiseAttention("command");
+    return "sync";
+  }
+
+  function applyPermissionRepliedEvent(): EventAction {
+    attention = false;
+    busy = true;
+    return "sync";
+  }
+
+  function applyMessagePartEvent(event: RuntimeEvent): EventAction {
+    return applyMessagePart(event) ? "sync" : "none";
   }
 
   /** Whether a `session.error` event carries opencode's abort error. */
@@ -193,19 +211,34 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   /** Handles only the question tool: raise attention while pending, resume once resolved. */
   function applyMessagePart(event: RuntimeEvent): boolean {
+    const part = questionPartFromEvent(event);
+    if (!part) {
+      return false;
+    }
+    applyQuestionPartState(part);
+    return true;
+  }
+
+  /** Pulls the `question` tool part out of a `message.part.updated` event, if any. */
+  function questionPartFromEvent(event: RuntimeEvent): Record<string, unknown> | undefined {
     const properties = event.properties;
     const part = isRecord(properties) && "part" in properties ? properties.part : undefined;
     if (!isRecord(part) || part.type !== "tool" || part.tool !== "question") {
-      return false;
+      return undefined;
     }
+    return part;
+  }
+
+  /** Updates flags from a question tool part's state: resume when resolved, else raise. */
+  function applyQuestionPartState(part: Record<string, unknown>): void {
     const state = isRecord(part.state) ? part.state : undefined;
-    if (state?.status === "completed" || state?.status === "error") {
+    const status = state?.status;
+    if (status === "completed" || status === "error") {
       attention = false;
       busy = true;
     } else {
       raiseAttention("question");
     }
-    return true;
   }
 }
 
