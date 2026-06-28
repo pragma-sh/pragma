@@ -1,16 +1,20 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
+  type Dispatch,
   type ReactNode,
+  type RefObject,
+  type SetStateAction,
 } from "react";
+import { useRequiredContext } from "@/lib/context";
 
 import type {
+  AgentReportPayload,
   DiffSide,
   Project,
   ProjectIcon,
@@ -22,6 +26,7 @@ import type {
 
 import { toast } from "sonner";
 
+import { errorMessage } from "@/lib/errors";
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { EMPTY_MODEL_SELECTION, resolveDeepLinkAgentSelection } from "@/lib/agent-model-selection";
 import { refreshAgentModels } from "@/lib/agent-model-cache";
@@ -31,6 +36,7 @@ import {
   releaseAlertLatch,
   releaseAlertLatchForTab,
   shouldAlertForStatus,
+  type AgentAlertOptions,
 } from "@/lib/agent-alert";
 import { startAgentInTab } from "@/lib/agent-launch";
 import { parseNewSessionDeepLink, requestNewSession } from "@/lib/deep-link";
@@ -131,9 +137,9 @@ interface WorkspaceState {
 /** Prior split layout saved before interactive scripts temporarily replace it. */
 export type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
 
-export type InteractiveScriptKind = "run" | "build";
+type InteractiveScriptKind = "run" | "build";
 
-export type RunScriptsState = {
+type RunScriptsState = {
   worktreeId: string;
   tabIds: string[];
   stopping: boolean;
@@ -644,852 +650,1208 @@ function focusForRoot(
   return (focusedPaneId ? paneById(root, focusedPaneId) : null) ?? firstPane(root);
 }
 
-export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
-  switch (action.type) {
-    case "load-start":
-      return { ...state, loading: true, error: null };
-    case "load-error":
-      return { ...state, loading: false, error: action.error };
-    case "set-projects": {
-      // Keep the already-selected (hydrated or user-chosen) project when it is
-      // still in the loaded list; otherwise fall back to the first project. The
-      // guard is what makes a persisted selection survive a restart while still
-      // recovering if that project was deleted in another session.
-      const persisted = state.selectedProjectId;
-      const selectedProjectId =
-        persisted && action.projects.some((project) => project.id === persisted)
-          ? persisted
-          : (action.projects[0]?.id ?? null);
-      return { ...state, projects: action.projects, selectedProjectId, loading: false };
+// Per-action reducer handlers. Each takes the state and its narrowed action and
+// returns the next state, so `workspaceReducer` stays a thin dispatcher instead
+// of one giant switch. Grouped roughly: loading/selection, then split-layout.
+type ActionOf<T extends WorkspaceAction["type"]> = Extract<WorkspaceAction, { type: T }>;
+
+function reduceSetProjects(
+  state: WorkspaceState,
+  action: ActionOf<"set-projects">,
+): WorkspaceState {
+  // Keep the already-selected (hydrated or user-chosen) project when it is still
+  // in the loaded list; otherwise fall back to the first project. The guard is
+  // what makes a persisted selection survive a restart while still recovering if
+  // that project was deleted in another session.
+  const persisted = state.selectedProjectId;
+  const selectedProjectId =
+    persisted && action.projects.some((project) => project.id === persisted)
+      ? persisted
+      : (action.projects[0]?.id ?? null);
+  return { ...state, projects: action.projects, selectedProjectId, loading: false };
+}
+
+function reduceSetWorktrees(
+  state: WorkspaceState,
+  action: ActionOf<"set-worktrees">,
+): WorkspaceState {
+  // Keep the remembered worktree if it still exists; otherwise fall back to main.
+  const remembered = state.selectedWorktreeByProject[action.projectId];
+  const fallback =
+    action.worktrees.find((worktree) => worktree.isMain)?.id ?? action.worktrees[0]?.id;
+  const selectedWorktreeId =
+    remembered && action.worktrees.some((worktree) => worktree.id === remembered)
+      ? remembered
+      : fallback;
+  return {
+    ...state,
+    worktrees: { ...state.worktrees, [action.projectId]: action.worktrees },
+    selectedWorktreeByProject: selectedWorktreeId
+      ? { ...state.selectedWorktreeByProject, [action.projectId]: selectedWorktreeId }
+      : state.selectedWorktreeByProject,
+  };
+}
+
+function reduceSetSplits(state: WorkspaceState, action: ActionOf<"set-splits">): WorkspaceState {
+  // Merge persisted layouts for the loaded project's worktrees over whatever is
+  // in memory, reconciling each against the current tabs (a tab may have been
+  // closed in another window/session). Other worktrees are untouched.
+  const splitRootByWorktree = { ...state.splitRootByWorktree };
+  for (const [worktreeId, root] of Object.entries(action.worktreeRoots)) {
+    const normalized = normalizeRoot(
+      root,
+      worktreeId,
+      state.tabs,
+      state.activeTabByWorktree[worktreeId],
+    );
+    if (normalized) {
+      splitRootByWorktree[worktreeId] = normalized;
+    } else {
+      delete splitRootByWorktree[worktreeId];
     }
-    case "hydrate-selection":
-      // Seeds the active project + per-project worktree map from the persisted
-      // selection before `set-projects` runs, so the project-load effect lands
-      // on the remembered project/worktree instead of the first/main one.
-      return {
-        ...state,
-        selectedProjectId: action.projectId,
-        selectedWorktreeByProject: { ...action.worktreeByProject },
-      };
-    case "set-worktrees": {
-      // Keep the remembered worktree if it still exists; otherwise fall back to main.
-      const remembered = state.selectedWorktreeByProject[action.projectId];
-      const fallback =
-        action.worktrees.find((worktree) => worktree.isMain)?.id ?? action.worktrees[0]?.id;
-      const selectedWorktreeId =
-        remembered && action.worktrees.some((worktree) => worktree.id === remembered)
-          ? remembered
-          : fallback;
-      return {
-        ...state,
-        worktrees: { ...state.worktrees, [action.projectId]: action.worktrees },
-        selectedWorktreeByProject: selectedWorktreeId
-          ? { ...state.selectedWorktreeByProject, [action.projectId]: selectedWorktreeId }
-          : state.selectedWorktreeByProject,
-      };
-    }
-    case "set-tabs":
-      return {
-        ...state,
-        tabs: action.tabs,
-        splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
-      };
-    case "set-splits": {
-      // Merge persisted layouts for the loaded project's worktrees over whatever
-      // is in memory, reconciling each against the current tabs (a tab may have
-      // been closed in another window/session). Other worktrees are untouched.
-      const splitRootByWorktree = { ...state.splitRootByWorktree };
-      for (const [worktreeId, root] of Object.entries(action.worktreeRoots)) {
-        const normalized = normalizeRoot(
-          root,
-          worktreeId,
-          state.tabs,
-          state.activeTabByWorktree[worktreeId],
-        );
-        if (normalized) {
-          splitRootByWorktree[worktreeId] = normalized;
-        } else {
-          delete splitRootByWorktree[worktreeId];
-        }
-      }
-      return { ...state, splitRootByWorktree };
-    }
-    case "select-project":
-      return { ...state, selectedProjectId: action.projectId };
-    case "select-worktree":
-      return {
-        ...state,
-        selectedWorktreeByProject: {
-          ...state.selectedWorktreeByProject,
-          [action.projectId]: action.worktreeId,
-        },
-      };
-    case "set-active-tab": {
-      const root = state.splitRootByWorktree[action.worktreeId];
-      const pane = paneContainingTab(root, action.tabId);
-      return {
-        ...state,
-        activeTabByWorktree: {
-          ...state.activeTabByWorktree,
-          [action.worktreeId]: action.tabId,
-        },
-        splitRootByWorktree:
-          root && pane
-            ? {
-                ...state.splitRootByWorktree,
-                [action.worktreeId]: replacePane(root, pane.id, (item) =>
-                  createPane(item.tabIds, action.tabId, item.id),
-                ),
-              }
-            : state.splitRootByWorktree,
-        focusedPaneByWorktree: pane
-          ? { ...state.focusedPaneByWorktree, [action.worktreeId]: pane.id }
-          : Object.fromEntries(
-              Object.entries(state.focusedPaneByWorktree).filter(
-                ([worktreeId]) => worktreeId !== action.worktreeId,
-              ),
+  }
+  return { ...state, splitRootByWorktree };
+}
+
+function reduceSetActiveTab(
+  state: WorkspaceState,
+  action: ActionOf<"set-active-tab">,
+): WorkspaceState {
+  const root = state.splitRootByWorktree[action.worktreeId];
+  const pane = paneContainingTab(root, action.tabId);
+  return {
+    ...state,
+    activeTabByWorktree: {
+      ...state.activeTabByWorktree,
+      [action.worktreeId]: action.tabId,
+    },
+    splitRootByWorktree:
+      root && pane
+        ? {
+            ...state.splitRootByWorktree,
+            [action.worktreeId]: replacePane(root, pane.id, (item) =>
+              createPane(item.tabIds, action.tabId, item.id),
             ),
-      };
-    }
-    case "focus-pane": {
-      const root = normalizeRoot(
-        state.splitRootByWorktree[action.worktreeId],
-        action.worktreeId,
-        state.tabs,
-        state.activeTabByWorktree[action.worktreeId],
-      );
-      const pane = paneById(root, action.paneId);
-      if (!root || !pane) {
-        return state;
-      }
-      return {
-        ...state,
-        activeTabByWorktree: pane.activeTabId
-          ? { ...state.activeTabByWorktree, [action.worktreeId]: pane.activeTabId }
-          : state.activeTabByWorktree,
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [action.worktreeId]: root,
-        },
-        focusedPaneByWorktree: {
-          ...state.focusedPaneByWorktree,
-          [action.worktreeId]: action.paneId,
-        },
-      };
-    }
-    case "set-pane-active-tab": {
-      const root = normalizeRoot(
-        state.splitRootByWorktree[action.worktreeId],
-        action.worktreeId,
-        state.tabs,
-        state.activeTabByWorktree[action.worktreeId],
-      );
-      const pane = paneById(root, action.paneId);
-      if (!root || !pane?.tabIds.includes(action.tabId)) {
-        return state;
-      }
-      return {
-        ...state,
-        activeTabByWorktree: {
-          ...state.activeTabByWorktree,
-          [action.worktreeId]: action.tabId,
-        },
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [action.worktreeId]: replacePane(root, action.paneId, (item) =>
-            createPane(item.tabIds, action.tabId, item.id),
-          ),
-        },
-        focusedPaneByWorktree: {
-          ...state.focusedPaneByWorktree,
-          [action.worktreeId]: action.paneId,
-        },
-      };
-    }
-    case "split-pane": {
-      const root = normalizeRoot(
-        state.splitRootByWorktree[action.worktreeId],
-        action.worktreeId,
-        state.tabs,
-        state.activeTabByWorktree[action.worktreeId],
-      );
-      if (!root) {
-        return state;
-      }
-      const selectedTab = state.tabs.find(
-        (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
-      );
-      if (!selectedTab) {
-        return state;
-      }
-      const sourcePane =
-        (action.paneId ? paneById(root, action.paneId) : null) ??
-        focusForRoot(root, state.focusedPaneByWorktree[action.worktreeId]);
-      if (!sourcePane) {
-        return state;
-      }
-      // When the worktree is not yet split the root is one implicit pane holding
-      // every tab, but only the displayed (active) tab is really "shown" — so the
-      // new split is [activeTab | droppedTab] and the other tabs fall back to
-      // being normal top-bar tabs. Inside a real split the source pane keeps its
-      // own tabs.
-      const implicit = root.kind === "pane";
-      const keepIds = (
-        implicit ? (sourcePane.activeTabId ? [sourcePane.activeTabId] : []) : sourcePane.tabIds
-      ).filter((id) => id !== action.tabId);
-      if (keepIds.length === 0) {
-        return state;
-      }
-      const targetPane = createPane([action.tabId], action.tabId);
-      const currentPane = createPane(
-        keepIds,
-        keepIds.includes(sourcePane.activeTabId ?? "") ? sourcePane.activeTabId : keepIds.at(-1),
-        sourcePane.id,
-      );
-      const splitNode: SplitLayoutNode = {
-        kind: "split",
-        id: splitNodeId("split"),
-        direction: action.direction,
-        children:
-          action.placement === "after" ? [currentPane, targetPane] : [targetPane, currentPane],
-      };
-      const nextRoot = implicit
-        ? splitNode
-        : replacePane(
-            removeTabFromNode(root, action.tabId) ?? root,
-            sourcePane.id,
-            () => splitNode,
-          );
-      return {
-        ...state,
-        activeTabByWorktree: {
-          ...state.activeTabByWorktree,
-          [action.worktreeId]: action.tabId,
-        },
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [action.worktreeId]: nextRoot,
-        },
-        focusedPaneByWorktree: {
-          ...state.focusedPaneByWorktree,
-          [action.worktreeId]: targetPane.id,
-        },
-      };
-    }
-    case "move-tab-to-pane": {
-      const root = normalizeRoot(
-        state.splitRootByWorktree[action.worktreeId],
-        action.worktreeId,
-        state.tabs,
-        state.activeTabByWorktree[action.worktreeId],
-      );
-      const selectedTab = state.tabs.find(
-        (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
-      );
-      if (!root || !selectedTab) {
-        return state;
-      }
-      const withoutMoved = removeTabFromNode(root, action.tabId) ?? root;
-      const targetPane = paneById(withoutMoved, action.paneId) ?? firstPane(withoutMoved);
-      if (!targetPane) {
-        return state;
-      }
-      const nextRoot = replacePane(withoutMoved, targetPane.id, (pane) =>
-        createPane([...pane.tabIds, action.tabId], action.tabId, pane.id),
-      );
-      return {
-        ...state,
-        activeTabByWorktree: {
-          ...state.activeTabByWorktree,
-          [action.worktreeId]: action.tabId,
-        },
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [action.worktreeId]: nextRoot,
-        },
-        focusedPaneByWorktree: {
-          ...state.focusedPaneByWorktree,
-          [action.worktreeId]: targetPane.id,
-        },
-      };
-    }
-    case "set-split-root": {
-      const first = firstPane(action.root);
-      return {
-        ...state,
-        activeTabByWorktree: first?.activeTabId
-          ? { ...state.activeTabByWorktree, [action.worktreeId]: first.activeTabId }
-          : state.activeTabByWorktree,
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [action.worktreeId]: action.root,
-        },
-        focusedPaneByWorktree: first
-          ? { ...state.focusedPaneByWorktree, [action.worktreeId]: first.id }
-          : state.focusedPaneByWorktree,
-      };
-    }
-    case "clear-split-root": {
-      const splitRootByWorktree = { ...state.splitRootByWorktree };
-      delete splitRootByWorktree[action.worktreeId];
-      const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
-      delete focusedPaneByWorktree[action.worktreeId];
-      return { ...state, splitRootByWorktree, focusedPaneByWorktree };
-    }
-    case "add-tab": {
-      return {
-        ...state,
-        tabs: [...state.tabs, action.tab],
-        activeTabByWorktree: {
-          ...state.activeTabByWorktree,
-          [action.tab.worktreeId]: action.tab.id,
-        },
-      };
-    }
-    case "add-tab-to-pane": {
-      const { tab, paneId } = action;
-      const tabs = [...state.tabs, tab];
-      const activeTabByWorktree = {
-        ...state.activeTabByWorktree,
-        [tab.worktreeId]: tab.id,
-      };
-      const root = state.splitRootByWorktree[tab.worktreeId];
-      const pane = paneById(root, paneId);
-      // If the pane vanished, fall back to a normal top-bar tab.
-      if (!root || !pane) {
-        return { ...state, tabs, activeTabByWorktree };
-      }
-      return {
-        ...state,
-        tabs,
-        activeTabByWorktree,
-        splitRootByWorktree: {
-          ...state.splitRootByWorktree,
-          [tab.worktreeId]: replacePane(root, paneId, (item) =>
-            createPane([...item.tabIds, tab.id], tab.id, item.id),
-          ),
-        },
-        focusedPaneByWorktree: {
-          ...state.focusedPaneByWorktree,
-          [tab.worktreeId]: paneId,
-        },
-      };
-    }
-    case "open-in-new-split": {
-      // Add a freshly-created tab and split it into a new pane next to the
-      // source tab (the terminal the link was clicked in). Mirrors `split-pane`,
-      // but the new tab is the one pulled into the new pane and the source tab
-      // stays put — used by terminal-link "open to the right" actions.
-      const { tab, sourceTabId, direction, placement } = action;
-      const worktreeId = tab.worktreeId;
-      const tabs = [...state.tabs, tab];
-      const activeTabByWorktree = { ...state.activeTabByWorktree, [worktreeId]: tab.id };
-      const sourceTab = state.tabs.find((item) => item.id === sourceTabId);
-      // Stale or cross-worktree source ids must not enter keepIds — fall back to
-      // a normal top-bar tab (same as add-tab) instead of corrupting split state.
-      if (!sourceTab || sourceTab.worktreeId !== worktreeId) {
-        return { ...state, tabs, activeTabByWorktree };
-      }
-      // Normalize anchored on the source tab so the implicit single-pane root
-      // keeps the source (not the just-added tab) as its active tab.
-      const root = normalizeRoot(
-        state.splitRootByWorktree[worktreeId],
-        worktreeId,
-        tabs,
-        sourceTabId,
-      );
-      const sourcePane = paneContainingTab(root, sourceTabId) ?? firstPane(root);
-      if (!root || !sourcePane) {
-        return { ...state, tabs, activeTabByWorktree };
-      }
-      // When un-split the root is one implicit pane holding every tab, but only
-      // the source tab should follow into the split; the rest fall back to
-      // normal top-bar tabs (matching drag-to-split). Inside a real split the
-      // source pane keeps its own tabs.
-      const implicit = root.kind === "pane";
-      const keepIds = (implicit ? [sourceTabId] : sourcePane.tabIds).filter((id) => id !== tab.id);
-      if (keepIds.length === 0) {
-        return { ...state, tabs, activeTabByWorktree };
-      }
-      const targetPane = createPane([tab.id], tab.id);
-      const stayingPane = createPane(keepIds, sourceTabId, sourcePane.id);
-      const splitNode: SplitLayoutNode = {
-        kind: "split",
-        id: splitNodeId("split"),
-        direction,
-        children: placement === "after" ? [stayingPane, targetPane] : [targetPane, stayingPane],
-      };
-      const nextRoot = implicit
-        ? splitNode
-        : replacePane(removeTabFromNode(root, tab.id) ?? root, sourcePane.id, () => splitNode);
-      return {
-        ...state,
-        tabs,
-        activeTabByWorktree,
-        splitRootByWorktree: { ...state.splitRootByWorktree, [worktreeId]: nextRoot },
-        focusedPaneByWorktree: { ...state.focusedPaneByWorktree, [worktreeId]: targetPane.id },
-      };
-    }
-    case "remove-tab": {
-      const removed = state.tabs.find((tab) => tab.id === action.tabId);
-      const tabs = state.tabs.filter((tab) => tab.id !== action.tabId);
-      let activeTabByWorktree = state.activeTabByWorktree;
-      let splitRootByWorktree = state.splitRootByWorktree;
-      let focusedPaneByWorktree = state.focusedPaneByWorktree;
-      let sourcePane: SplitPaneNode | null = null;
-      let nextRoot: SplitLayoutNode | null = null;
-      if (removed) {
-        const root = state.splitRootByWorktree[removed.worktreeId];
-        if (root) {
-          sourcePane = paneContainingTab(root, action.tabId);
-          nextRoot = removeTabFromNode(root, action.tabId);
-          splitRootByWorktree = { ...splitRootByWorktree };
-          focusedPaneByWorktree = { ...focusedPaneByWorktree };
-          if (nextRoot) {
-            const focusedPane = focusForRoot(nextRoot, focusedPaneByWorktree[removed.worktreeId]);
-            splitRootByWorktree[removed.worktreeId] = nextRoot;
-            if (focusedPane) {
-              focusedPaneByWorktree[removed.worktreeId] = focusedPane.id;
-            }
-          } else {
-            delete splitRootByWorktree[removed.worktreeId];
-            delete focusedPaneByWorktree[removed.worktreeId];
           }
-        }
-      }
-      if (removed && state.activeTabByWorktree[removed.worktreeId] === action.tabId) {
-        const nextPane = sourcePane && nextRoot ? paneById(nextRoot, sourcePane.id) : null;
-        const restoredTabIds = nextRoot ? tabIdsInNode(nextRoot) : new Set<string>();
-        const fallback =
-          nextPane?.activeTabId ??
-          tabs.findLast(
-            (tab) => tab.worktreeId === removed.worktreeId && !restoredTabIds.has(tab.id),
-          )?.id ??
-          tabs.findLast((tab) => tab.worktreeId === removed.worktreeId)?.id;
-        activeTabByWorktree = { ...activeTabByWorktree };
-        if (fallback) {
-          activeTabByWorktree[removed.worktreeId] = fallback;
-        } else {
-          delete activeTabByWorktree[removed.worktreeId];
-        }
-      }
-      return { ...state, tabs, activeTabByWorktree, splitRootByWorktree, focusedPaneByWorktree };
-    }
-    case "rename-tab":
-      return {
-        ...state,
-        tabs: state.tabs.map((tab) =>
-          tab.id === action.tabId ? { ...tab, title: action.title, userRenamed: true } : tab,
+        : state.splitRootByWorktree,
+    focusedPaneByWorktree: pane
+      ? { ...state.focusedPaneByWorktree, [action.worktreeId]: pane.id }
+      : Object.fromEntries(
+          Object.entries(state.focusedPaneByWorktree).filter(
+            ([worktreeId]) => worktreeId !== action.worktreeId,
+          ),
         ),
-      };
-    case "set-auto-title":
-      // Shell/browser-emitted title. Respects `userRenamed` so a user-typed
-      // rename can never be silently clobbered by a `precmd`/`PROMPT_COMMAND`
-      // title push or a stray `<title>` update from a browser webview. A blank
-      // push (e.g. opencode clearing the title on exit) falls back to the kind's
-      // default so the tab never goes nameless.
-      return {
-        ...state,
-        tabs: state.tabs.map((tab) =>
-          tab.id === action.tabId && !tab.userRenamed
-            ? { ...tab, title: action.title.trim() || defaultTabTitle(tab.kind) }
-            : tab,
-        ),
-      };
-    case "set-tab-url":
-      return {
-        ...state,
-        tabs: state.tabs.map((tab) =>
-          tab.id === action.tabId ? { ...tab, url: action.url } : tab,
-        ),
-      };
-    case "set-icon":
-      return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
-    case "remove-worktree": {
-      // Filter the row out of every project list and drop tabs owned by it
-      // (SQLite cascades, but our local snapshot still has them). The Tauri
-      // side has already terminated the worktree's PTY sessions by the time
-      // we get here, so we just need to keep the in-memory state in sync.
-      const worktrees: Record<string, Worktree[]> = {};
-      const selectedWorktreeByProject: Record<string, string> = {
-        ...state.selectedWorktreeByProject,
-      };
-      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
-        const remaining = projectWorktrees.filter((worktree) => worktree.id !== action.worktreeId);
-        if (remaining.length === projectWorktrees.length) {
-          worktrees[projectId] = projectWorktrees;
-          continue;
-        }
-        worktrees[projectId] = remaining;
-        if (selectedWorktreeByProject[projectId] === action.worktreeId) {
-          const fallback =
-            remaining.find((worktree) => worktree.isMain)?.id ??
-            remaining.find((worktree) => worktree.parentId === null)?.id ??
-            remaining[0]?.id;
-          if (fallback) {
-            selectedWorktreeByProject[projectId] = fallback;
-          } else {
-            delete selectedWorktreeByProject[projectId];
-          }
-        }
-      }
-      const tabs = state.tabs.filter((tab) => tab.worktreeId !== action.worktreeId);
-      // Drop the worktree's split layout/focus too (SQLite cascades the `splits`
-      // row via the worktree FK; this keeps the in-memory snapshot in sync).
-      const splitRootByWorktree = { ...state.splitRootByWorktree };
-      delete splitRootByWorktree[action.worktreeId];
-      const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
-      delete focusedPaneByWorktree[action.worktreeId];
-      return {
-        ...state,
-        worktrees,
-        selectedWorktreeByProject,
-        tabs,
-        splitRootByWorktree,
-        focusedPaneByWorktree,
-      };
+  };
+}
+
+function reduceFocusPane(state: WorkspaceState, action: ActionOf<"focus-pane">): WorkspaceState {
+  const root = normalizeRoot(
+    state.splitRootByWorktree[action.worktreeId],
+    action.worktreeId,
+    state.tabs,
+    state.activeTabByWorktree[action.worktreeId],
+  );
+  const pane = paneById(root, action.paneId);
+  if (!root || !pane) {
+    return state;
+  }
+  return {
+    ...state,
+    activeTabByWorktree: pane.activeTabId
+      ? { ...state.activeTabByWorktree, [action.worktreeId]: pane.activeTabId }
+      : state.activeTabByWorktree,
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [action.worktreeId]: root,
+    },
+    focusedPaneByWorktree: {
+      ...state.focusedPaneByWorktree,
+      [action.worktreeId]: action.paneId,
+    },
+  };
+}
+
+function reduceSetPaneActiveTab(
+  state: WorkspaceState,
+  action: ActionOf<"set-pane-active-tab">,
+): WorkspaceState {
+  const root = normalizeRoot(
+    state.splitRootByWorktree[action.worktreeId],
+    action.worktreeId,
+    state.tabs,
+    state.activeTabByWorktree[action.worktreeId],
+  );
+  const pane = paneById(root, action.paneId);
+  if (!root || !pane?.tabIds.includes(action.tabId)) {
+    return state;
+  }
+  return {
+    ...state,
+    activeTabByWorktree: {
+      ...state.activeTabByWorktree,
+      [action.worktreeId]: action.tabId,
+    },
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [action.worktreeId]: replacePane(root, action.paneId, (item) =>
+        createPane(item.tabIds, action.tabId, item.id),
+      ),
+    },
+    focusedPaneByWorktree: {
+      ...state.focusedPaneByWorktree,
+      [action.worktreeId]: action.paneId,
+    },
+  };
+}
+
+function reduceSplitPane(state: WorkspaceState, action: ActionOf<"split-pane">): WorkspaceState {
+  const root = normalizeRoot(
+    state.splitRootByWorktree[action.worktreeId],
+    action.worktreeId,
+    state.tabs,
+    state.activeTabByWorktree[action.worktreeId],
+  );
+  if (!root) {
+    return state;
+  }
+  const selectedTab = state.tabs.find(
+    (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
+  );
+  if (!selectedTab) {
+    return state;
+  }
+  const sourcePane = resolveSplitSourcePane(
+    root,
+    action,
+    state.focusedPaneByWorktree[action.worktreeId],
+  );
+  if (!sourcePane) {
+    return state;
+  }
+  // When the worktree is not yet split the root is one implicit pane holding
+  // every tab, but only the displayed (active) tab is really "shown" — so the new
+  // split is [activeTab | droppedTab] and the other tabs fall back to being
+  // normal top-bar tabs. Inside a real split the source pane keeps its own tabs.
+  const implicit = root.kind === "pane";
+  const keepIds = computeSplitKeepIds(sourcePane, action.tabId, implicit);
+  if (keepIds.length === 0) {
+    return state;
+  }
+  const targetPane = createPane([action.tabId], action.tabId);
+  const currentPane = createPane(
+    keepIds,
+    pickCurrentPaneActiveTab(sourcePane, keepIds),
+    sourcePane.id,
+  );
+  const splitNode = buildSplitNode(action.direction, action.placement, currentPane, targetPane);
+  const nextRoot = applySplitToRoot(root, action, sourcePane, splitNode, implicit);
+  return applySplitResult(state, action, nextRoot, targetPane.id);
+}
+
+/** Resolves the pane a tab is being split out of, honoring an explicit pane id then focus. */
+function resolveSplitSourcePane(
+  root: SplitLayoutNode,
+  action: ActionOf<"split-pane">,
+  focusedPaneId: string | undefined,
+): SplitPaneNode | null {
+  return (
+    (action.paneId ? paneById(root, action.paneId) : null) ?? focusForRoot(root, focusedPaneId)
+  );
+}
+
+/** Tabs that stay in the source pane after the split tab is pulled out. */
+function computeSplitKeepIds(
+  sourcePane: SplitPaneNode,
+  tabId: string,
+  implicit: boolean,
+): string[] {
+  const base = implicit
+    ? sourcePane.activeTabId
+      ? [sourcePane.activeTabId]
+      : []
+    : sourcePane.tabIds;
+  return base.filter((id) => id !== tabId);
+}
+
+/** Picks the active tab for the staying pane: the source's active tab if still present. */
+function pickCurrentPaneActiveTab(
+  sourcePane: SplitPaneNode,
+  keepIds: string[],
+): string | undefined {
+  return keepIds.includes(sourcePane.activeTabId ?? "")
+    ? (sourcePane.activeTabId ?? undefined)
+    : keepIds.at(-1);
+}
+
+/** Builds the new split node, ordering panes by the requested placement. */
+function buildSplitNode(
+  direction: SplitDirection,
+  placement: SplitPlacement,
+  currentPane: SplitPaneNode,
+  targetPane: SplitPaneNode,
+): SplitLayoutNode {
+  return {
+    kind: "split",
+    id: splitNodeId("split"),
+    direction,
+    children: placement === "after" ? [currentPane, targetPane] : [targetPane, currentPane],
+  };
+}
+
+/** Inserts the new split into the root, replacing the implicit pane or the source pane. */
+function applySplitToRoot(
+  root: SplitLayoutNode,
+  action: ActionOf<"split-pane">,
+  sourcePane: SplitPaneNode,
+  splitNode: SplitLayoutNode,
+  implicit: boolean,
+): SplitLayoutNode {
+  return implicit
+    ? splitNode
+    : replacePane(removeTabFromNode(root, action.tabId) ?? root, sourcePane.id, () => splitNode);
+}
+
+/** Writes the new root, active tab, and focused pane back into state. */
+function applySplitResult(
+  state: WorkspaceState,
+  action: ActionOf<"split-pane">,
+  nextRoot: SplitLayoutNode,
+  targetPaneId: string,
+): WorkspaceState {
+  return {
+    ...state,
+    activeTabByWorktree: {
+      ...state.activeTabByWorktree,
+      [action.worktreeId]: action.tabId,
+    },
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [action.worktreeId]: nextRoot,
+    },
+    focusedPaneByWorktree: {
+      ...state.focusedPaneByWorktree,
+      [action.worktreeId]: targetPaneId,
+    },
+  };
+}
+
+function reduceMoveTabToPane(
+  state: WorkspaceState,
+  action: ActionOf<"move-tab-to-pane">,
+): WorkspaceState {
+  const root = normalizeRoot(
+    state.splitRootByWorktree[action.worktreeId],
+    action.worktreeId,
+    state.tabs,
+    state.activeTabByWorktree[action.worktreeId],
+  );
+  const selectedTab = state.tabs.find(
+    (tab) => tab.id === action.tabId && tab.worktreeId === action.worktreeId,
+  );
+  if (!root || !selectedTab) {
+    return state;
+  }
+  const withoutMoved = removeTabFromNode(root, action.tabId) ?? root;
+  const targetPane = paneById(withoutMoved, action.paneId) ?? firstPane(withoutMoved);
+  if (!targetPane) {
+    return state;
+  }
+  const nextRoot = replacePane(withoutMoved, targetPane.id, (pane) =>
+    createPane([...pane.tabIds, action.tabId], action.tabId, pane.id),
+  );
+  return {
+    ...state,
+    activeTabByWorktree: {
+      ...state.activeTabByWorktree,
+      [action.worktreeId]: action.tabId,
+    },
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [action.worktreeId]: nextRoot,
+    },
+    focusedPaneByWorktree: {
+      ...state.focusedPaneByWorktree,
+      [action.worktreeId]: targetPane.id,
+    },
+  };
+}
+
+function reduceSetSplitRoot(
+  state: WorkspaceState,
+  action: ActionOf<"set-split-root">,
+): WorkspaceState {
+  const first = firstPane(action.root);
+  return {
+    ...state,
+    activeTabByWorktree: first?.activeTabId
+      ? { ...state.activeTabByWorktree, [action.worktreeId]: first.activeTabId }
+      : state.activeTabByWorktree,
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [action.worktreeId]: action.root,
+    },
+    focusedPaneByWorktree: first
+      ? { ...state.focusedPaneByWorktree, [action.worktreeId]: first.id }
+      : state.focusedPaneByWorktree,
+  };
+}
+
+function reduceClearSplitRoot(
+  state: WorkspaceState,
+  action: ActionOf<"clear-split-root">,
+): WorkspaceState {
+  const splitRootByWorktree = { ...state.splitRootByWorktree };
+  delete splitRootByWorktree[action.worktreeId];
+  const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+  delete focusedPaneByWorktree[action.worktreeId];
+  return { ...state, splitRootByWorktree, focusedPaneByWorktree };
+}
+
+function reduceAddTabToPane(
+  state: WorkspaceState,
+  action: ActionOf<"add-tab-to-pane">,
+): WorkspaceState {
+  const { tab, paneId } = action;
+  const tabs = [...state.tabs, tab];
+  const activeTabByWorktree = {
+    ...state.activeTabByWorktree,
+    [tab.worktreeId]: tab.id,
+  };
+  const root = state.splitRootByWorktree[tab.worktreeId];
+  const pane = paneById(root, paneId);
+  // If the pane vanished, fall back to a normal top-bar tab.
+  if (!root || !pane) {
+    return { ...state, tabs, activeTabByWorktree };
+  }
+  return {
+    ...state,
+    tabs,
+    activeTabByWorktree,
+    splitRootByWorktree: {
+      ...state.splitRootByWorktree,
+      [tab.worktreeId]: replacePane(root, paneId, (item) =>
+        createPane([...item.tabIds, tab.id], tab.id, item.id),
+      ),
+    },
+    focusedPaneByWorktree: {
+      ...state.focusedPaneByWorktree,
+      [tab.worktreeId]: paneId,
+    },
+  };
+}
+
+function reduceOpenInNewSplit(
+  state: WorkspaceState,
+  action: ActionOf<"open-in-new-split">,
+): WorkspaceState {
+  // Add a freshly-created tab and split it into a new pane next to the source
+  // tab (the terminal the link was clicked in). Mirrors `split-pane`, but the new
+  // tab is the one pulled into the new pane and the source tab stays put — used
+  // by terminal-link "open to the right" actions.
+  const { tab, sourceTabId, direction, placement } = action;
+  const worktreeId = tab.worktreeId;
+  const tabs = [...state.tabs, tab];
+  const activeTabByWorktree = { ...state.activeTabByWorktree, [worktreeId]: tab.id };
+  const sourceTab = state.tabs.find((item) => item.id === sourceTabId);
+  // Stale or cross-worktree source ids must not enter keepIds — fall back to a
+  // normal top-bar tab (same as add-tab) instead of corrupting split state.
+  if (!sourceTab || sourceTab.worktreeId !== worktreeId) {
+    return { ...state, tabs, activeTabByWorktree };
+  }
+  // Normalize anchored on the source tab so the implicit single-pane root keeps
+  // the source (not the just-added tab) as its active tab.
+  const root = normalizeRoot(state.splitRootByWorktree[worktreeId], worktreeId, tabs, sourceTabId);
+  const sourcePane = paneContainingTab(root, sourceTabId) ?? firstPane(root);
+  if (!root || !sourcePane) {
+    return { ...state, tabs, activeTabByWorktree };
+  }
+  // When un-split the root is one implicit pane holding every tab, but only the
+  // source tab should follow into the split; the rest fall back to normal top-bar
+  // tabs (matching drag-to-split). Inside a real split the source pane keeps its
+  // own tabs.
+  const implicit = root.kind === "pane";
+  const keepIds = computeOpenSplitKeepIds(sourcePane, sourceTabId, implicit, tab.id);
+  if (keepIds.length === 0) {
+    return { ...state, tabs, activeTabByWorktree };
+  }
+  const targetPane = createPane([tab.id], tab.id);
+  const stayingPane = createPane(keepIds, sourceTabId, sourcePane.id);
+  const splitNode = buildOpenSplitNode(direction, placement, stayingPane, targetPane);
+  const nextRoot = applyOpenSplitToRoot(root, tab.id, sourcePane.id, splitNode, implicit);
+  return {
+    ...state,
+    tabs,
+    activeTabByWorktree,
+    splitRootByWorktree: { ...state.splitRootByWorktree, [worktreeId]: nextRoot },
+    focusedPaneByWorktree: { ...state.focusedPaneByWorktree, [worktreeId]: targetPane.id },
+  };
+}
+
+/** Tabs that stay in the source pane when opening a new tab into a split. */
+function computeOpenSplitKeepIds(
+  sourcePane: SplitPaneNode,
+  sourceTabId: string,
+  implicit: boolean,
+  newTabId: string,
+): string[] {
+  const base = implicit ? [sourceTabId] : sourcePane.tabIds;
+  return base.filter((id) => id !== newTabId);
+}
+
+/** Builds the split node for an open-in-new-split, ordering panes by placement. */
+function buildOpenSplitNode(
+  direction: SplitDirection,
+  placement: SplitPlacement,
+  stayingPane: SplitPaneNode,
+  targetPane: SplitPaneNode,
+): SplitLayoutNode {
+  return {
+    kind: "split",
+    id: splitNodeId("split"),
+    direction,
+    children: placement === "after" ? [stayingPane, targetPane] : [targetPane, stayingPane],
+  };
+}
+
+/** Inserts the open-in-new-split node into the root, mirroring `applySplitToRoot`. */
+function applyOpenSplitToRoot(
+  root: SplitLayoutNode,
+  newTabId: string,
+  sourcePaneId: string,
+  splitNode: SplitLayoutNode,
+  implicit: boolean,
+): SplitLayoutNode {
+  return implicit
+    ? splitNode
+    : replacePane(removeTabFromNode(root, newTabId) ?? root, sourcePaneId, () => splitNode);
+}
+
+type RemovedLayout = {
+  splitRootByWorktree: WorkspaceState["splitRootByWorktree"];
+  focusedPaneByWorktree: WorkspaceState["focusedPaneByWorktree"];
+  sourcePane: SplitPaneNode | null;
+  nextRoot: SplitLayoutNode | null;
+};
+
+/**
+ * Removes `tabId` from its worktree's split layout, returning the updated
+ * root/focus maps plus the pane it lived in and the resulting root (both null
+ * when the worktree has no split). Pure: the input maps are never mutated.
+ */
+function removeTabFromLayout(
+  state: WorkspaceState,
+  worktreeId: string,
+  tabId: string,
+): RemovedLayout {
+  const root = state.splitRootByWorktree[worktreeId];
+  if (!root) {
+    return {
+      splitRootByWorktree: state.splitRootByWorktree,
+      focusedPaneByWorktree: state.focusedPaneByWorktree,
+      sourcePane: null,
+      nextRoot: null,
+    };
+  }
+  const sourcePane = paneContainingTab(root, tabId);
+  const nextRoot = removeTabFromNode(root, tabId);
+  const splitRootByWorktree = { ...state.splitRootByWorktree };
+  const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+  if (nextRoot) {
+    const focusedPane = focusForRoot(nextRoot, focusedPaneByWorktree[worktreeId]);
+    splitRootByWorktree[worktreeId] = nextRoot;
+    if (focusedPane) {
+      focusedPaneByWorktree[worktreeId] = focusedPane.id;
     }
-    case "update-worktree": {
-      // Patch a single worktree row in-place (rename, hide/show). Cascades to
-      // the visible worktrees and the per-worktree active-tab map is
-      // untouched because ids don't change.
-      const worktrees: Record<string, Worktree[]> = {};
-      for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
-        worktrees[projectId] = projectWorktrees.map((worktree) =>
-          worktree.id === action.worktree.id ? action.worktree : worktree,
-        );
-      }
-      return { ...state, worktrees };
+  } else {
+    delete splitRootByWorktree[worktreeId];
+    delete focusedPaneByWorktree[worktreeId];
+  }
+  return { splitRootByWorktree, focusedPaneByWorktree, sourcePane, nextRoot };
+}
+
+/**
+ * Picks a worktree's next active tab after its current active tab is closed: the
+ * restored pane's active tab, else the last remaining tab not already shown in a
+ * pane, else any remaining tab in the worktree (`undefined` when none remain).
+ */
+function nextActiveTabAfterRemoval(
+  worktreeId: string,
+  remainingTabs: Tab[],
+  layout: RemovedLayout,
+): string | undefined {
+  const nextPane =
+    layout.sourcePane && layout.nextRoot ? paneById(layout.nextRoot, layout.sourcePane.id) : null;
+  const restoredTabIds = layout.nextRoot ? tabIdsInNode(layout.nextRoot) : new Set<string>();
+  return (
+    nextPane?.activeTabId ??
+    remainingTabs.findLast((tab) => tab.worktreeId === worktreeId && !restoredTabIds.has(tab.id))
+      ?.id ??
+    remainingTabs.findLast((tab) => tab.worktreeId === worktreeId)?.id
+  );
+}
+
+function reduceRemoveTab(state: WorkspaceState, action: ActionOf<"remove-tab">): WorkspaceState {
+  const removed = state.tabs.find((tab) => tab.id === action.tabId);
+  const tabs = state.tabs.filter((tab) => tab.id !== action.tabId);
+  if (!removed) {
+    return { ...state, tabs };
+  }
+  const layout = removeTabFromLayout(state, removed.worktreeId, action.tabId);
+  let activeTabByWorktree = state.activeTabByWorktree;
+  if (state.activeTabByWorktree[removed.worktreeId] === action.tabId) {
+    const fallback = nextActiveTabAfterRemoval(removed.worktreeId, tabs, layout);
+    activeTabByWorktree = { ...activeTabByWorktree };
+    if (fallback) {
+      activeTabByWorktree[removed.worktreeId] = fallback;
+    } else {
+      delete activeTabByWorktree[removed.worktreeId];
     }
-    case "clear-error":
-      return { ...state, error: null };
+  }
+  return {
+    ...state,
+    tabs,
+    activeTabByWorktree,
+    splitRootByWorktree: layout.splitRootByWorktree,
+    focusedPaneByWorktree: layout.focusedPaneByWorktree,
+  };
+}
+
+function reduceRemoveWorktree(
+  state: WorkspaceState,
+  action: ActionOf<"remove-worktree">,
+): WorkspaceState {
+  // Filter the row out of every project list and drop tabs owned by it (SQLite
+  // cascades, but our local snapshot still has them). The Tauri side has already
+  // terminated the worktree's PTY sessions by the time we get here, so we just
+  // need to keep the in-memory state in sync.
+  const worktrees: Record<string, Worktree[]> = {};
+  const selectedWorktreeByProject: Record<string, string> = {
+    ...state.selectedWorktreeByProject,
+  };
+  for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+    worktrees[projectId] = pruneRemovedWorktreeFromProject(
+      projectWorktrees,
+      action.worktreeId,
+      selectedWorktreeByProject,
+      projectId,
+    );
+  }
+  const tabs = state.tabs.filter((tab) => tab.worktreeId !== action.worktreeId);
+  // Drop the worktree's split layout/focus too (SQLite cascades the `splits` row
+  // via the worktree FK; this keeps the in-memory snapshot in sync).
+  const { splitRootByWorktree, focusedPaneByWorktree } = dropWorktreeLayoutMaps(
+    state,
+    action.worktreeId,
+  );
+  return {
+    ...state,
+    worktrees,
+    selectedWorktreeByProject,
+    tabs,
+    splitRootByWorktree,
+    focusedPaneByWorktree,
+  };
+}
+
+/** Removes a worktree from one project's list, fixing up that project's selection. */
+function pruneRemovedWorktreeFromProject(
+  projectWorktrees: Worktree[],
+  removedId: string,
+  selectedWorktreeByProject: Record<string, string>,
+  projectId: string,
+): Worktree[] {
+  const remaining = projectWorktrees.filter((worktree) => worktree.id !== removedId);
+  if (remaining.length === projectWorktrees.length) {
+    return projectWorktrees;
+  }
+  if (selectedWorktreeByProject[projectId] === removedId) {
+    const fallback = pickFallbackWorktree(remaining);
+    if (fallback) {
+      selectedWorktreeByProject[projectId] = fallback;
+    } else {
+      delete selectedWorktreeByProject[projectId];
+    }
+  }
+  return remaining;
+}
+
+/** Picks the worktree to select after the selected one is removed: main, then root, then first. */
+function pickFallbackWorktree(remaining: Worktree[]): string | undefined {
+  return (
+    remaining.find((worktree) => worktree.isMain)?.id ??
+    remaining.find((worktree) => worktree.parentId === null)?.id ??
+    remaining[0]?.id
+  );
+}
+
+/** Returns copies of the split/focus maps with one worktree's entries dropped. */
+function dropWorktreeLayoutMaps(
+  state: WorkspaceState,
+  worktreeId: string,
+): Pick<WorkspaceState, "splitRootByWorktree" | "focusedPaneByWorktree"> {
+  const splitRootByWorktree = { ...state.splitRootByWorktree };
+  delete splitRootByWorktree[worktreeId];
+  const focusedPaneByWorktree = { ...state.focusedPaneByWorktree };
+  delete focusedPaneByWorktree[worktreeId];
+  return { splitRootByWorktree, focusedPaneByWorktree };
+}
+
+function reduceUpdateWorktree(
+  state: WorkspaceState,
+  action: ActionOf<"update-worktree">,
+): WorkspaceState {
+  // Patch a single worktree row in-place (rename, hide/show). The per-worktree
+  // active-tab map is untouched because ids don't change.
+  const worktrees: Record<string, Worktree[]> = {};
+  for (const [projectId, projectWorktrees] of Object.entries(state.worktrees)) {
+    worktrees[projectId] = projectWorktrees.map((worktree) =>
+      worktree.id === action.worktree.id ? action.worktree : worktree,
+    );
+  }
+  return { ...state, worktrees };
+}
+
+function reduceLoadStart(state: WorkspaceState, _action: ActionOf<"load-start">): WorkspaceState {
+  return { ...state, loading: true, error: null };
+}
+
+function reduceLoadError(state: WorkspaceState, action: ActionOf<"load-error">): WorkspaceState {
+  return { ...state, loading: false, error: action.error };
+}
+
+function reduceHydrateSelection(
+  state: WorkspaceState,
+  action: ActionOf<"hydrate-selection">,
+): WorkspaceState {
+  // Seeds the active project + per-project worktree map from the persisted
+  // selection before `set-projects` runs, so the project-load effect lands on
+  // the remembered project/worktree instead of the first/main one.
+  return {
+    ...state,
+    selectedProjectId: action.projectId,
+    selectedWorktreeByProject: { ...action.worktreeByProject },
+  };
+}
+
+function reduceSetTabs(state: WorkspaceState, action: ActionOf<"set-tabs">): WorkspaceState {
+  return {
+    ...state,
+    tabs: action.tabs,
+    splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
+  };
+}
+
+function reduceSelectProject(
+  state: WorkspaceState,
+  action: ActionOf<"select-project">,
+): WorkspaceState {
+  return { ...state, selectedProjectId: action.projectId };
+}
+
+function reduceSelectWorktree(
+  state: WorkspaceState,
+  action: ActionOf<"select-worktree">,
+): WorkspaceState {
+  return {
+    ...state,
+    selectedWorktreeByProject: {
+      ...state.selectedWorktreeByProject,
+      [action.projectId]: action.worktreeId,
+    },
+  };
+}
+
+function reduceAddTab(state: WorkspaceState, action: ActionOf<"add-tab">): WorkspaceState {
+  return {
+    ...state,
+    tabs: [...state.tabs, action.tab],
+    activeTabByWorktree: {
+      ...state.activeTabByWorktree,
+      [action.tab.worktreeId]: action.tab.id,
+    },
+  };
+}
+
+function reduceRenameTab(state: WorkspaceState, action: ActionOf<"rename-tab">): WorkspaceState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === action.tabId ? { ...tab, title: action.title, userRenamed: true } : tab,
+    ),
+  };
+}
+
+function reduceSetAutoTitle(
+  state: WorkspaceState,
+  action: ActionOf<"set-auto-title">,
+): WorkspaceState {
+  // Shell/browser-emitted title. Respects `userRenamed` so a user-typed rename
+  // can never be silently clobbered by a `precmd`/`PROMPT_COMMAND` title push
+  // or a stray `<title>` update from a browser webview. A blank push (e.g.
+  // opencode clearing the title on exit) falls back to the kind's default so
+  // the tab never goes nameless.
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === action.tabId && !tab.userRenamed
+        ? { ...tab, title: action.title.trim() || defaultTabTitle(tab.kind) }
+        : tab,
+    ),
+  };
+}
+
+function reduceSetTabUrl(state: WorkspaceState, action: ActionOf<"set-tab-url">): WorkspaceState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) => (tab.id === action.tabId ? { ...tab, url: action.url } : tab)),
+  };
+}
+
+function reduceSetIcon(state: WorkspaceState, action: ActionOf<"set-icon">): WorkspaceState {
+  return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
+}
+
+function reduceClearError(state: WorkspaceState, _action: ActionOf<"clear-error">): WorkspaceState {
+  return { ...state, error: null };
+}
+
+type ReducerMap = {
+  [K in WorkspaceAction["type"]]: (state: WorkspaceState, action: ActionOf<K>) => WorkspaceState;
+};
+
+const REDUCERS: ReducerMap = {
+  "load-start": reduceLoadStart,
+  "load-error": reduceLoadError,
+  "set-projects": reduceSetProjects,
+  "hydrate-selection": reduceHydrateSelection,
+  "set-worktrees": reduceSetWorktrees,
+  "set-tabs": reduceSetTabs,
+  "set-splits": reduceSetSplits,
+  "select-project": reduceSelectProject,
+  "select-worktree": reduceSelectWorktree,
+  "set-active-tab": reduceSetActiveTab,
+  "focus-pane": reduceFocusPane,
+  "set-pane-active-tab": reduceSetPaneActiveTab,
+  "split-pane": reduceSplitPane,
+  "move-tab-to-pane": reduceMoveTabToPane,
+  "set-split-root": reduceSetSplitRoot,
+  "clear-split-root": reduceClearSplitRoot,
+  "add-tab": reduceAddTab,
+  "add-tab-to-pane": reduceAddTabToPane,
+  "open-in-new-split": reduceOpenInNewSplit,
+  "remove-tab": reduceRemoveTab,
+  "rename-tab": reduceRenameTab,
+  "set-auto-title": reduceSetAutoTitle,
+  "set-tab-url": reduceSetTabUrl,
+  "set-icon": reduceSetIcon,
+  "remove-worktree": reduceRemoveWorktree,
+  "update-worktree": reduceUpdateWorktree,
+  "clear-error": reduceClearError,
+};
+
+export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
+  return REDUCERS[action.type](state, action as never);
+}
+
+type DeepLink = NonNullable<ReturnType<typeof parseNewSessionDeepLink>>;
+type AgentModelOptions = Parameters<typeof resolveDeepLinkAgentSelection>[2];
+
+/** Resolves and selects the deep link's target worktree, returning its id (or null if unknown). */
+async function resolveDeepLinkWorktreeSelection(
+  link: DeepLink,
+  resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>,
+  selectProject: (projectId: string) => Promise<void>,
+  selectWorktree: (worktreeId: string) => void,
+): Promise<string | null> {
+  if (!link.worktreeId) {
+    return null;
+  }
+  const projectId = await resolveProjectForWorktree(link.worktreeId);
+  if (!projectId) {
+    // Unknown worktree id: ignore it and fall back to the current selection.
+    return null;
+  }
+  await selectProject(projectId);
+  // Route through `selectWorktree` (not a raw dispatch) so its side effects run —
+  // notably clearing `agentBackLocation`, so a deep-link jump doesn't leave the
+  // notification-only "Go back" affordance up.
+  selectWorktree(link.worktreeId);
+  return link.worktreeId;
+}
+
+/** Picks the worktree the deep link should target, falling back to the current selection. */
+function resolveDeepLinkTargetWorktree(
+  state: WorkspaceState,
+  worktreeId: string | null,
+): string | null {
+  return (
+    worktreeId ??
+    (state.selectedProjectId
+      ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
+      : null)
+  );
+}
+
+/** Auto-launches the agent when the deep link carries everything it needs. Returns true if handled. */
+async function autoSubmitDeepLink(
+  link: DeepLink,
+  targetWorktreeId: string | null,
+  listAgentsFn: () => Promise<AgentConfig[]>,
+  resolveAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
+  startSession: (
+    worktreeId: string,
+    agent: AgentConfig,
+    message?: string,
+    modelSelection?: AgentModelSelection,
+  ) => Promise<unknown>,
+): Promise<boolean> {
+  if (!link.autoSubmit || !targetWorktreeId || !link.message?.trim()) {
+    return false;
+  }
+  const agents = await listAgentsFn().catch(() => [] as AgentConfig[]);
+  const agent = resolveAutoSubmitAgent(link, agents);
+  if (!agent) {
+    return false;
+  }
+  await startAutoSubmitSession(
+    link,
+    targetWorktreeId,
+    agent,
+    agents,
+    resolveAgentModelsFn,
+    startSession,
+  );
+  return true;
+}
+
+/** Picks the agent to auto-launch: the requested one (resolved against known agents), else the first. */
+function resolveAutoSubmitAgent(link: DeepLink, agents: AgentConfig[]): AgentConfig | undefined {
+  const requestedAgent = link.agentId
+    ? (resolveDeepLinkAgentSelection(link, agents, {}).agentId ?? link.agentId)
+    : null;
+  return agents.find((item) => item.id === requestedAgent) ?? agents[0];
+}
+
+/** Resolves the agent's model selection and launches the auto-submitted session. */
+async function startAutoSubmitSession(
+  link: DeepLink,
+  targetWorktreeId: string,
+  agent: AgentConfig,
+  agents: AgentConfig[],
+  resolveAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
+  startSession: (
+    worktreeId: string,
+    agent: AgentConfig,
+    message?: string,
+    modelSelection?: AgentModelSelection,
+  ) => Promise<unknown>,
+): Promise<void> {
+  const models = await resolveAgentModelsFn(agent.id).catch(() => []);
+  const resolved = resolveDeepLinkAgentSelection(link, agents, { [agent.id]: models });
+  await startSession(
+    targetWorktreeId,
+    agent,
+    link.message ?? undefined,
+    resolved.agentId === agent.id ? resolved.selection : EMPTY_MODEL_SELECTION,
+  );
+}
+
+/** Shared dependencies for running/stopping a project's interactive script tabs. */
+interface ManagedScriptRunContext {
+  projectId: string;
+  worktreeId: string;
+  kind: InteractiveScriptKind;
+  dispatch: (action: WorkspaceAction) => void;
+  setManagedScriptsState: (state: ManagedScriptsState) => void;
+  splitRootByWorktree: WorkspaceState["splitRootByWorktree"];
+  closeTab: (tabId: string) => Promise<unknown>;
+}
+
+/** Creates one script tab, registers it, and records progress in the managed-scripts state. */
+async function createScriptTabForCommand(
+  ctx: ManagedScriptRunContext,
+  commandIndex: number,
+  tabIdsByCommand: string[],
+  startedTabIds: string[],
+  splitSnapshot: RunScriptsSplitSnapshot | null,
+): Promise<void> {
+  const tab = await createTabCommand(
+    ctx.projectId,
+    ctx.worktreeId,
+    "terminal",
+    defaultTabTitle("terminal"),
+  );
+  startedTabIds.push(tab.id);
+  tabIdsByCommand[commandIndex] = tab.id;
+  ctx.dispatch({ type: "add-tab", tab });
+  ctx.setManagedScriptsState({
+    kind: ctx.kind,
+    worktreeId: ctx.worktreeId,
+    tabIds: [...startedTabIds],
+    stopping: false,
+    splitSnapshot,
+  });
+}
+
+/** Applies one plan item's split layout, capturing the pre-split snapshot on first use. */
+function applyRunScriptItemLayout(
+  item: PlannedRunScripts["items"][number],
+  splitSnapshot: RunScriptsSplitSnapshot | null,
+  ctx: ManagedScriptRunContext,
+  tabIdsByCommand: string[],
+): RunScriptsSplitSnapshot | null {
+  if (!item.layout) {
+    return splitSnapshot;
+  }
+  const snapshot =
+    splitSnapshot ??
+    ({
+      root:
+        ctx.worktreeId in ctx.splitRootByWorktree
+          ? (ctx.splitRootByWorktree[ctx.worktreeId] ?? null)
+          : null,
+    } satisfies RunScriptsSplitSnapshot);
+  ctx.dispatch({
+    type: "set-split-root",
+    worktreeId: ctx.worktreeId,
+    root: materializeRunScriptLayout(item.layout, tabIdsByCommand),
+  });
+  return snapshot;
+}
+
+/** Writes each queued command into its terminal once the shell has had time to start. */
+function flushScriptCommands(
+  item: PlannedRunScripts["items"][number],
+  plan: PlannedRunScripts,
+  tabIdsByCommand: string[],
+): void {
+  for (const commandIndex of item.commandIndexes) {
+    const tabId = tabIdsByCommand[commandIndex];
+    const command = plan.commands[commandIndex];
+    if (tabId && command) {
+      terminalManager.writeWhenReady(tabId, `${command}\r`);
+    }
   }
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(workspaceReducer, initialState);
-  const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
-  const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>(null);
+/** Runs the planned script tabs/splits, returning the captured split snapshot. */
+async function runManagedScriptPlan(
+  ctx: ManagedScriptRunContext,
+  config: Awaited<ReturnType<typeof loadProjectScripts>>,
+  startedTabIds: string[],
+): Promise<RunScriptsSplitSnapshot | null> {
+  const entries = ctx.kind === "run" ? (config.run ?? []) : (config.build ?? []);
+  if (entries.length === 0) {
+    toast.info(`No ${ctx.kind} scripts configured for this project`);
+    return null;
+  }
+  const plan = planInteractiveScripts(entries, ctx.kind);
+  const tabIdsByCommand: string[] = [];
+  let splitSnapshot: RunScriptsSplitSnapshot | null = null;
+  for (const item of plan.items) {
+    for (const commandIndex of item.commandIndexes) {
+      // oxlint-disable-next-line no-await-in-loop -- Create script tabs in display order so each top-level tab can mount before command injection.
+      await createScriptTabForCommand(
+        ctx,
+        commandIndex,
+        tabIdsByCommand,
+        startedTabIds,
+        splitSnapshot,
+      );
+    }
+    splitSnapshot = applyRunScriptItemLayout(item, splitSnapshot, ctx, tabIdsByCommand);
+    // oxlint-disable-next-line no-await-in-loop -- Each script entry needs one paint after its tabs/split are in state, then time for the PTY shell to start, before queued terminal input flushes.
+    await nextAnimationFrame();
+    await delay(INTERACTIVE_SCRIPT_START_DELAY_MS);
+    flushScriptCommands(item, plan, tabIdsByCommand);
+  }
+  return splitSnapshot;
+}
+
+/** Cleans up partial script tabs and restores the split on a mid-run failure. */
+async function handleManagedScriptsFailure(
+  ctx: ManagedScriptRunContext,
+  splitSnapshot: RunScriptsSplitSnapshot | null,
+  startedTabIds: string[],
+  cause: unknown,
+): Promise<void> {
+  ctx.setManagedScriptsState(null);
+  if (splitSnapshot) {
+    restoreRunScriptsSplitSnapshot(ctx.dispatch, ctx.worktreeId, splitSnapshot);
+  }
+  await Promise.all(startedTabIds.map((tabId) => ctx.closeTab(tabId)));
+  toast.error(`Failed to run project ${ctx.kind} scripts: ${errorMessage(cause)}`);
+}
+
+/** Records the location to offer "Go back" to before navigating away. */
+function recordAgentBackLocation(
+  current: WorkspaceState,
+  setAgentBackLocation: (location: AgentBackLocation | null) => void,
+): void {
+  const projectId = current.selectedProjectId;
+  if (!projectId) {
+    return;
+  }
+  const currentWorktreeId = current.selectedWorktreeByProject[projectId];
+  if (!currentWorktreeId) {
+    return;
+  }
+  // `activeTabByWorktree` is only written by an explicit tab switch, so fall
+  // back to the worktree's first tab (matching `isTabCurrentlyViewed`) —
+  // otherwise a jump from a worktree the user never re-tabbed records no
+  // back location and the "Go back" button never appears.
+  const currentTabId =
+    current.activeTabByWorktree[currentWorktreeId] ??
+    current.tabs.find((tab) => tab.worktreeId === currentWorktreeId)?.id ??
+    null;
+  if (currentTabId) {
+    setAgentBackLocation({
+      projectId,
+      worktreeId: currentWorktreeId,
+      tabId: currentTabId,
+      expiresAt: Date.now() + AGENT_BACK_TTL_MS,
+    });
+  }
+}
+
+/** Loads a project's worktrees, tabs, and splits after selecting it. */
+async function loadProjectWorkspace(
+  projectId: string,
+  dispatch: (action: WorkspaceAction) => void,
+): Promise<void> {
+  dispatch({ type: "select-project", projectId });
+  const [worktrees, tabs, splits] = await Promise.all([
+    listWorktrees(projectId),
+    listTabs(projectId),
+    listSplits(projectId),
+  ]);
+  dispatch({ type: "set-worktrees", projectId, worktrees });
+  dispatch({ type: "set-tabs", tabs });
+  dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+}
+
+/** Resolves the owning project for a new tab from an explicit worktree, then the selection. */
+function resolveCreateTabProject(
+  worktreeId: string | undefined,
+  worktreeProjectId: Record<string, string>,
+  selectedProjectId: string | null,
+): string | null {
+  return (worktreeId ? worktreeProjectId[worktreeId] : undefined) ?? selectedProjectId ?? null;
+}
+
+/** Resolves the worktree a new tab lives in, falling back to the project's selection. */
+function resolveCreateTabWorktreeId(
+  worktreeId: string | undefined,
+  projectId: string | null,
+  selectedWorktreeByProject: Record<string, string>,
+): string | undefined {
+  return worktreeId ?? (projectId ? selectedWorktreeByProject[projectId] : undefined);
+}
+
+/** Creates a terminal or browser tab via the Tauri command. */
+async function createTabOfKind(
+  kind: "terminal" | "browser",
+  projectId: string,
+  worktreeId: string,
+): Promise<Tab> {
+  return kind === "terminal"
+    ? await createTabCommand(projectId, worktreeId, "terminal", defaultTabTitle("terminal"))
+    : await createTabCommand(
+        projectId,
+        worktreeId,
+        "browser",
+        defaultTabTitle("browser"),
+        BROWSER_START_URL,
+      );
+}
+
+/** Dispatches a newly created tab into a pane (when given) or the top bar. */
+function dispatchNewTab(
+  dispatch: (action: WorkspaceAction) => void,
+  tab: Tab,
+  paneId: string | null,
+): void {
+  dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+}
+
+/** Handlers needed to react to a single agent status report. */
+interface AgentReportContext {
+  visibleTabIdsRef: RefObject<Set<string>>;
+  clearDoneStatusForTab: (tabId: string) => void;
+  markAgentsSeen: (tabId: string) => Promise<void>;
+  latchAlertedStatus: (payload: AgentReportPayload) => void;
+  releaseAlertLatch: (payload: AgentReportPayload) => void;
+  isTabCurrentlyViewed: (tabId: string) => boolean;
+  shouldAlertForStatus: (payload: AgentReportPayload) => boolean;
+  resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
+  navigateToAgentLocation: (projectId: string, worktreeId: string, tabId: string) => void;
+  alertAgent: (payload: AgentReportPayload, options?: AgentAlertOptions) => Promise<void>;
+}
+
+/** Releases the alert latch when the agent moves on (new turn or process exit). */
+function releaseLatchOnAgentMove(
+  payload: AgentReportPayload,
+  releaseAlertLatchFn: (payload: AgentReportPayload) => void,
+): void {
+  if (payload.status === "running" || payload.status === "cleared") {
+    releaseAlertLatchFn(payload);
+  }
+}
+
+/** Latches a completion/attention seen on screen, dropping the green dot for `done`. */
+function latchSeenAgentCompletion(payload: AgentReportPayload, ctx: AgentReportContext): void {
+  if (
+    (payload.status === "done" || payload.status === "attention") &&
+    ctx.visibleTabIdsRef.current.has(payload.tabId)
+  ) {
+    // For `done` also drop the green dot immediately instead of flashing it;
+    // `attention` (red) keeps showing until the agent moves on.
+    if (payload.status === "done") {
+      ctx.clearDoneStatusForTab(payload.tabId);
+      // Tell the daemon this completion was seen so its stored `done` is dropped —
+      // otherwise a later reconnect would replay it and the green dot (and
+      // notification) would come back.
+      void ctx.markAgentsSeen(payload.tabId);
+    }
+    ctx.latchAlertedStatus(payload);
+  }
+}
+
+/** Alerts an unseen attention/done at most once per status occurrence. */
+function alertUnseenAgentStatus(payload: AgentReportPayload, ctx: AgentReportContext): void {
+  if (
+    !ctx.isTabCurrentlyViewed(payload.tabId) &&
+    (payload.status === "attention" || payload.status === "done") &&
+    ctx.shouldAlertForStatus(payload)
+  ) {
+    ctx.latchAlertedStatus(payload);
+    void ctx.resolveProjectForWorktree(payload.worktreeId).then((projectId) => {
+      const onGoTo = projectId
+        ? () => void ctx.navigateToAgentLocation(projectId, payload.worktreeId, payload.tabId)
+        : undefined;
+      void ctx.alertAgent(payload, { projectId: projectId ?? undefined, onGoTo });
+      return undefined;
+    });
+  }
+}
+
+/** Loads (and reloads) the active project's `.pragma/scripts.json` config + error. */
+function useProjectScriptsConfig(selectedProjectId: string | null): {
+  runScriptsConfig: ProjectScriptsConfig | null;
+  runScriptsConfigError: string | null;
+  setRunScriptsConfig: (config: ProjectScriptsConfig | null) => void;
+  setRunScriptsConfigError: (error: string | null) => void;
+} {
   const [runScriptsConfig, setRunScriptsConfig] = useState<ProjectScriptsConfig | null>(null);
   const [runScriptsConfigError, setRunScriptsConfigError] = useState<string | null>(null);
-  const runScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, "run"),
-    [managedScriptsState],
-  );
-  const buildScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, "build"),
-    [managedScriptsState],
-  );
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const tabsRef = useRef(state.tabs);
-  tabsRef.current = state.tabs;
-
-  // Latest selected project, readable from async callbacks without re-creating
-  // them on every selection change.
-  const selectedProjectIdRef = useRef(state.selectedProjectId);
-  selectedProjectIdRef.current = state.selectedProjectId;
-
-  // Latest worktree → owning-project map, readable from async callbacks (e.g.
-  // the optimistic delete's failure-restore) without re-creating them on every
-  // state change. Rebuilt each render like `selectedProjectIdRef` above.
-  const worktreeProjectIdRef = useRef<Record<string, string>>({});
-  worktreeProjectIdRef.current = Object.fromEntries(
-    Object.entries(state.worktrees).flatMap(([projectId, worktrees]) =>
-      worktrees.map((worktree) => [worktree.id, projectId]),
-    ),
-  );
-
-  // Hydration / persistence bookkeeping for the active selection (last active
-  // project + per-project last active worktree). `didHydrateRef` flips true
-  // once the mount-time `reload` has rehydrated from SQLite; the persist effect
-  // stays inert until then so the initial empty state isn't written back over a
-  // saved selection. `lastPersistedRef` holds the last JSON string written so
-  // the effect can skip a no-op write (and so the first post-hydration run,
-  // which reproduces the just-loaded value, doesn't re-write it).
-  const didHydrateRef = useRef(false);
-  const lastPersistedRef = useRef<string | null>(null);
-
-  const activateLocation = useCallback(
-    async (projectId: string, worktreeId: string, tabId: string, recordBack: boolean) => {
-      const current = stateRef.current;
-      if (
-        recordBack &&
-        current.selectedProjectId &&
-        current.selectedWorktreeByProject[current.selectedProjectId]
-      ) {
-        const currentWorktreeId = current.selectedWorktreeByProject[current.selectedProjectId];
-        // `activeTabByWorktree` is only written by an explicit tab switch, so fall
-        // back to the worktree's first tab (matching `isTabCurrentlyViewed`) —
-        // otherwise a jump from a worktree the user never re-tabbed records no
-        // back location and the "Go back" button never appears.
-        const currentTabId = currentWorktreeId
-          ? (current.activeTabByWorktree[currentWorktreeId] ??
-            current.tabs.find((tab) => tab.worktreeId === currentWorktreeId)?.id ??
-            null)
-          : null;
-        if (currentWorktreeId && currentTabId) {
-          setAgentBackLocation({
-            projectId: current.selectedProjectId,
-            worktreeId: currentWorktreeId,
-            tabId: currentTabId,
-            expiresAt: Date.now() + AGENT_BACK_TTL_MS,
-          });
-        }
-      }
-      if (stateRef.current.selectedProjectId !== projectId) {
-        dispatch({ type: "select-project", projectId });
-        const [worktrees, tabs, splits] = await Promise.all([
-          listWorktrees(projectId),
-          listTabs(projectId),
-          listSplits(projectId),
-        ]);
-        dispatch({ type: "set-worktrees", projectId, worktrees });
-        dispatch({ type: "set-tabs", tabs });
-        dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
-      }
-      dispatch({ type: "select-worktree", projectId, worktreeId });
-      dispatch({ type: "set-active-tab", worktreeId, tabId });
-    },
-    [],
-  );
-
-  const navigateToAgentLocation = useCallback(
-    (projectId: string, worktreeId: string, tabId: string) =>
-      activateLocation(projectId, worktreeId, tabId, true),
-    [activateLocation],
-  );
-
-  const resolveProjectForWorktree = useCallback(async (worktreeId: string) => {
-    const known = worktreeProjectIdRef.current[worktreeId];
-    if (known) {
-      return known;
-    }
-    const projects = await listProjects();
-    dispatch({ type: "set-projects", projects });
-    const projectWorktrees = await Promise.all(
-      projects.map(async (project) => ({ project, worktrees: await listWorktrees(project.id) })),
-    );
-    for (const { project, worktrees } of projectWorktrees) {
-      dispatch({ type: "set-worktrees", projectId: project.id, worktrees });
-      if (worktrees.some((worktree) => worktree.id === worktreeId)) {
-        return project.id;
-      }
-    }
-    return null;
-  }, []);
-
-  const isTabCurrentlyViewed = useCallback((tabId: string) => {
-    const current = stateRef.current;
-    const projectId = current.selectedProjectId;
-    const worktreeId = projectId ? current.selectedWorktreeByProject[projectId] : null;
-    if (!worktreeId) {
-      return false;
-    }
-    const activeTabId =
-      current.activeTabByWorktree[worktreeId] ??
-      current.tabs.find((tab) => tab.worktreeId === worktreeId)?.id ??
-      null;
-    return activeTabId === tabId;
-  }, []);
-
-  const goBackFromAgent = useCallback(async () => {
-    const location = agentBackLocation;
-    if (!location || location.expiresAt < Date.now()) {
-      setAgentBackLocation(null);
-      return;
-    }
-    setAgentBackLocation(null);
-    await activateLocation(location.projectId, location.worktreeId, location.tabId, false);
-  }, [activateLocation, agentBackLocation]);
-
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setAgentBackLocation((location) =>
-        location && location.expiresAt < Date.now() ? null : location,
-      );
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlistenReport: (() => void) | null = null;
-    let unlistenReset: (() => void) | null = null;
-    let unlistenPath: (() => void) | null = null;
-    let unlistenNotificationClick: (() => void) | null = null;
-    void onAgentStatusReset(() => {
-      clearAllAgentStatuses();
-    }).then((unlisten) => {
-      if (cancelled) {
-        unlisten();
-        return undefined;
-      }
-      unlistenReset = unlisten;
-      return undefined;
-    });
-    void onAgentReport((payload) => {
-      applyAgentReport(payload);
-      // The agent genuinely moved on (started a new turn, or its process exited),
-      // so release the alert latch: its next completion/attention is a new event,
-      // not a snapshot replay, and should notify again.
-      if (payload.status === "running" || payload.status === "cleared") {
-        releaseAlertLatch(payload);
-      }
-      // A tab that finishes or needs attention while already on screen is
-      // considered seen: latch it so a later daemon snapshot replay (on
-      // reconnect) doesn't re-fire a notification the user already looked at.
-      // For `done` also drop the green dot immediately instead of flashing it;
-      // `attention` (red) keeps showing until the agent moves on.
-      if (
-        (payload.status === "done" || payload.status === "attention") &&
-        visibleTabIdsRef.current.has(payload.tabId)
-      ) {
-        if (payload.status === "done") {
-          clearDoneStatusForTab(payload.tabId);
-          // Tell the daemon this completion was seen so its stored `done` is
-          // dropped — otherwise a later reconnect would replay it and the green
-          // dot (and notification) would come back.
-          void markAgentsSeen(payload.tabId);
-        }
-        latchAlertedStatus(payload);
-      }
-      // Alert at most once per status occurrence. The latch (not the dot store,
-      // which viewing clears) gates this, so the daemon's snapshot replay on
-      // every reconnect restores the dots without re-firing notifications the
-      // user already saw.
-      if (
-        !isTabCurrentlyViewed(payload.tabId) &&
-        (payload.status === "attention" || payload.status === "done") &&
-        shouldAlertForStatus(payload)
-      ) {
-        latchAlertedStatus(payload);
-        void resolveProjectForWorktree(payload.worktreeId).then((projectId) => {
-          void alertAgent(payload, {
-            projectId: projectId ?? undefined,
-            onGoTo: projectId
-              ? () => void navigateToAgentLocation(projectId, payload.worktreeId, payload.tabId)
-              : undefined,
-          });
-          return undefined;
-        });
-      }
-    }).then((unlisten) => {
-      if (cancelled) {
-        unlisten();
-        return undefined;
-      }
-      unlistenReport = unlisten;
-      return undefined;
-    });
-    void onAgentCliPathWarning((path) => {
-      toast.warning("pragma-cli installed, but its directory is not on PATH", {
-        description: `Add ${path} to PATH so agents can call pragma-cli.`,
-      });
-    }).then((unlisten) => {
-      if (cancelled) {
-        unlisten();
-        return undefined;
-      }
-      unlistenPath = unlisten;
-      return undefined;
-    });
-    void onAgentNotificationClick((payload) => {
-      void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
-    }).then((unlisten) => {
-      if (cancelled) {
-        unlisten();
-        return undefined;
-      }
-      unlistenNotificationClick = unlisten;
-      return undefined;
-    });
-    return () => {
-      cancelled = true;
-      unlistenReport?.();
-      unlistenReset?.();
-      unlistenPath?.();
-      unlistenNotificationClick?.();
-    };
-  }, [isTabCurrentlyViewed, navigateToAgentLocation, resolveProjectForWorktree]);
-
-  const reload = useCallback(async () => {
-    dispatch({ type: "load-start" });
-    try {
-      // Only the mount-time reload rehydrates the selection. Subsequent
-      // reloads (after add/clone) just refresh the project list — the
-      // in-memory selection is already authoritative, and re-reading stale
-      // backend state could race an in-flight persist write.
-      if (didHydrateRef.current) {
-        const projects = await listProjects();
-        dispatch({ type: "set-projects", projects });
-        return;
-      }
-      const [projects, rawSelection] = await Promise.all([listProjects(), getActiveSelection()]);
-      const selection = parseSelection(rawSelection);
-      if (selection) {
-        dispatch({
-          type: "hydrate-selection",
-          projectId: selection.projectId,
-          worktreeByProject: selection.worktreeByProject,
-        });
-        lastPersistedRef.current = serializeSelection(
-          selection.projectId,
-          selection.worktreeByProject,
-        );
-      } else {
-        lastPersistedRef.current = null;
-      }
-      // `set-projects` validates the hydrated project id against the loaded
-      // list and falls back to the first project if it was deleted elsewhere.
-      dispatch({ type: "set-projects", projects });
-      didHydrateRef.current = true;
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
-    }
-  }, []);
-
-  const selectProject = useCallback(async (projectId: string | null) => {
-    // Navigating manually retires the agent "go back" affordance — it only
-    // makes sense right after a notification jumped you somewhere.
-    setAgentBackLocation(null);
-    dispatch({ type: "select-project", projectId });
-  }, []);
-
-  const refreshProject = useCallback(async (projectId?: string | null) => {
-    const targetProjectId = projectId ?? selectedProjectIdRef.current;
-    if (!targetProjectId) {
-      return;
-    }
-    try {
-      const [worktrees, tabs, splits] = await Promise.all([
-        listWorktrees(targetProjectId),
-        listTabs(targetProjectId),
-        listSplits(targetProjectId),
-      ]);
-      // `set-tabs` replaces the whole (single-project) tab list, so only apply
-      // it if this refresh still targets the selected project — otherwise a
-      // slow refresh could clobber a project the user has since switched to.
-      if (selectedProjectIdRef.current !== targetProjectId) {
-        return;
-      }
-      dispatch({ type: "set-worktrees", projectId: targetProjectId, worktrees });
-      dispatch({ type: "set-tabs", tabs });
-      dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
-    }
-  }, []);
-
-  useEffect(() => {
-    const projectId = state.selectedProjectId;
     setRunScriptsConfig(null);
     setRunScriptsConfigError(null);
-    if (!projectId) {
+    if (!selectedProjectId) {
       return;
     }
     let cancelled = false;
-    loadProjectScripts(projectId)
+    loadProjectScripts(selectedProjectId)
       .then((config) => {
         if (!cancelled) {
           setRunScriptsConfig(config);
@@ -1500,547 +1862,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       .catch((cause) => {
         if (!cancelled) {
           setRunScriptsConfig(null);
-          setRunScriptsConfigError(messageFor(cause));
+          setRunScriptsConfigError(errorMessage(cause));
         }
         return undefined;
       });
     return () => {
       cancelled = true;
     };
-  }, [state.selectedProjectId]);
+  }, [selectedProjectId]);
+  return { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError };
+}
 
-  const selectWorktree = useCallback(
-    (worktreeId: string | null) => {
-      if (!worktreeId) {
-        return;
-      }
-      // Resolve the owning project from the worktree (ref, so it's correct for a
-      // worktree in a project other than the captured selection — e.g. a deep
-      // link), falling back to the current selection.
-      const projectId = worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
-      if (!projectId) {
-        return;
-      }
-      // Navigating manually retires the agent "go back" affordance — it only
-      // makes sense right after a notification jumped you somewhere.
-      setAgentBackLocation(null);
-      dispatch({ type: "select-worktree", projectId, worktreeId });
-    },
-    [state.selectedProjectId],
-  );
-
-  // Shared tab-creation path. When `paneId` is set the new tab lands inside that
-  // split pane; otherwise it becomes a normal top-bar tab.
-  const createTab = useCallback(
-    async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
-      // Resolve the owning project from the explicit worktree first (read from a
-      // ref so it's correct even when a freshly-selected project hasn't flushed
-      // into this closure yet — e.g. a cross-project deep link), then fall back
-      // to the current selection.
-      const projectId =
-        (worktreeId ? worktreeProjectIdRef.current[worktreeId] : undefined) ??
-        state.selectedProjectId;
-      const targetWorktreeId =
-        worktreeId ?? (projectId ? state.selectedWorktreeByProject[projectId] : undefined);
-      if (!projectId || !targetWorktreeId) {
-        return null;
-      }
-      try {
-        const tab =
-          kind === "terminal"
-            ? await createTabCommand(
-                projectId,
-                targetWorktreeId,
-                "terminal",
-                defaultTabTitle("terminal"),
-              )
-            : await createTabCommand(
-                projectId,
-                targetWorktreeId,
-                "browser",
-                defaultTabTitle("browser"),
-                BROWSER_START_URL,
-              );
-        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
-        return tab;
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-        return null;
-      }
-    },
-    [state.selectedProjectId, state.selectedWorktreeByProject],
-  );
-
-  const createTerminalTab = useCallback(
-    (worktreeId?: string) => createTab("terminal", null, worktreeId),
-    [createTab],
-  );
-
-  const createBrowserTab = useCallback(
-    (worktreeId?: string) => createTab("browser", null, worktreeId),
-    [createTab],
-  );
-
-  const createTabInPane = useCallback(
-    async (paneId: string, kind: "terminal" | "browser") => {
-      await createTab(kind, paneId);
-    },
-    [createTab],
-  );
-
-  // Launches a fresh agent thread: switch to the worktree, open a terminal tab,
-  // start the agent, and (optionally) prefill its TUI with `message`. Shared by
-  // the new-session dialog and the `pragma://open` deep-link auto-submit path so
-  // both go through one launch implementation.
-  const startSession = useCallback(
-    async (
-      worktreeId: string,
-      agent: AgentConfig,
-      message?: string,
-      modelSelection?: AgentModelSelection,
-    ): Promise<Tab | null> => {
-      selectWorktree(worktreeId);
-      const tab = await createTerminalTab(worktreeId);
-      if (!tab) {
-        return null;
-      }
-      startAgentInTab(tab.id, agent, message, modelSelection);
-      return tab;
-    },
-    [createTerminalTab, selectWorktree],
-  );
-
-  // Handles an incoming `pragma://open` deep link: select the target worktree's
-  // project, then either auto-launch the agent (when `autoSubmit` has everything
-  // it needs) or open the new-session dialog prefilled via the sidebar's window
-  // event. Falls back to the dialog whenever auto-submit is under-specified.
-  const handleDeepLink = useCallback(
-    async (rawUrl: string) => {
-      const link = parseNewSessionDeepLink(rawUrl);
-      if (!link) {
-        return;
-      }
-      let worktreeId = link.worktreeId;
-      if (worktreeId) {
-        const projectId = await resolveProjectForWorktree(worktreeId);
-        if (projectId) {
-          await selectProject(projectId);
-          // Route through `selectWorktree` (not a raw dispatch) so its side
-          // effects run — notably clearing `agentBackLocation`, so a deep-link
-          // jump doesn't leave the notification-only "Go back" affordance up.
-          selectWorktree(worktreeId);
-        } else {
-          // Unknown worktree id: ignore it and fall back to the current selection.
-          worktreeId = null;
-        }
-      }
-      const current = stateRef.current;
-      const targetWorktreeId =
-        worktreeId ??
-        (current.selectedProjectId
-          ? (current.selectedWorktreeByProject[current.selectedProjectId] ?? null)
-          : null);
-
-      if (link.autoSubmit && targetWorktreeId && link.message?.trim()) {
-        const agents = await listAgents().catch(() => [] as AgentConfig[]);
-        const requestedAgent = link.agentId
-          ? (resolveDeepLinkAgentSelection(link, agents, {}).agentId ?? link.agentId)
-          : null;
-        const agent = agents.find((item) => item.id === requestedAgent) ?? agents[0];
-        if (agent) {
-          const models = await resolveAgentModels(agent.id).catch(() => []);
-          const resolved = resolveDeepLinkAgentSelection(link, agents, { [agent.id]: models });
-          await startSession(
-            targetWorktreeId,
-            agent,
-            link.message,
-            resolved.agentId === agent.id ? resolved.selection : EMPTY_MODEL_SELECTION,
-          );
-          return;
-        }
-      }
-
-      requestNewSession({
-        agentId: link.agentId,
-        modelId: link.modelId,
-        reasoningId: link.reasoningId,
-        worktreeId: targetWorktreeId,
-        message: link.message,
-      });
-    },
-    [resolveProjectForWorktree, selectProject, selectWorktree, startSession],
-  );
-  const handleDeepLinkRef = useRef(handleDeepLink);
-  handleDeepLinkRef.current = handleDeepLink;
-
-  // Opens a terminal-link target in a split to the right of the clicked
-  // terminal. A browser URL becomes a browser tab; a worktree-relative path
-  // becomes an editor tab. If the same resource is already open in the worktree
-  // we just focus it instead of stacking duplicate panes. Reads live state via
-  // refs so the handler registered with `setTerminalLinkHandler` stays stable.
-  const openFromTerminalLink = useCallback(
-    async (
-      sourceTabId: string,
-      worktreeId: string,
-      spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
-    ) => {
-      const projectId = worktreeProjectIdRef.current[worktreeId] ?? selectedProjectIdRef.current;
-      if (!projectId) {
-        return;
-      }
-      const existing = tabsRef.current.find((tab) =>
-        spec.kind === "browser"
-          ? tab.kind === "browser" && tab.worktreeId === worktreeId && tab.url === spec.url
-          : tab.kind === "editor" &&
-            tab.worktreeId === worktreeId &&
-            tab.filePath === spec.path &&
-            tab.diffSide === null,
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab =
-          spec.kind === "browser"
-            ? await createTabCommand(
-                projectId,
-                worktreeId,
-                "browser",
-                defaultTabTitle("browser"),
-                spec.url,
-              )
-            : await createTabCommand(
-                projectId,
-                worktreeId,
-                "editor",
-                basename(spec.path),
-                undefined,
-                spec.path,
-                null,
-              );
-        dispatch({
-          type: "open-in-new-split",
-          tab,
-          sourceTabId,
-          direction: "horizontal",
-          placement: "after",
-        });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-      }
-    },
-    [],
-  );
-
-  // Wire the non-React terminal link providers to workspace actions. Registered
-  // once (the callback is ref-backed and stable); cleared on unmount.
-  useEffect(() => {
-    setTerminalLinkHandler({
-      openUrl: ({ tabId, worktreeId, url, external }) => {
-        if (external) {
-          void browserOpenExternal(url).catch((cause) => toast.error(messageFor(cause)));
-          return;
-        }
-        void openFromTerminalLink(tabId, worktreeId, { kind: "browser", url });
-      },
-      openFile: ({ tabId, worktreeId, path }) => {
-        void openFromTerminalLink(tabId, worktreeId, { kind: "editor", path });
-      },
-      pathExists: (worktreeId, path) => pathExists(worktreeId, path).catch(() => false),
-    });
-    return () => setTerminalLinkHandler(null);
-  }, [openFromTerminalLink]);
-
-  // Shared opener for editor/diff tabs. Both dedupe against the active worktree's
-  // existing tabs (a file path is worktree-relative) before creating a new one.
-  const openLocatorTab = useCallback(
-    async (
-      kind: "editor" | "diff",
-      path: string,
-      side: DiffSide | null,
-      paneId: string | undefined,
-    ) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        return;
-      }
-      const existing = state.tabs.find(
-        (tab) =>
-          tab.kind === kind &&
-          tab.worktreeId === worktreeId &&
-          tab.filePath === path &&
-          tab.diffSide === side,
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await createTabCommand(
-          projectId,
-          worktreeId,
-          kind,
-          basename(path),
-          undefined,
-          path,
-          side,
-        );
-        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-      }
-    },
-    [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
-  );
-
-  const openFileTab = useCallback(
-    (path: string, opts?: { paneId?: string }) =>
-      openLocatorTab("editor", path, null, opts?.paneId),
-    [openLocatorTab],
-  );
-
-  const openDiffTab = useCallback(
-    (path: string, side: DiffSide, opts?: { paneId?: string }) =>
-      openLocatorTab("diff", path, side, opts?.paneId),
-    [openLocatorTab],
-  );
-
-  // Opens (or focuses) the PR review tab for a pull request. Deduped by
-  // kind+prNumber within the active worktree (the review is scoped to the
-  // worktree's branch); a single review tab per PR is enough.
-  const openReviewTab = useCallback(
-    async (prNumber: number, title: string) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        return;
-      }
-      const existing = state.tabs.find(
-        (tab) =>
-          tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await createTabCommand(
-          projectId,
-          worktreeId,
-          "pr-review",
-          title,
-          undefined,
-          null,
-          null,
-          prNumber,
-        );
-        dispatch({ type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-      }
-    },
-    [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
-  );
-
-  // Opens (or focuses) the read-only daemon-log tab. The daemon is global, so a
-  // single log tab per project is enough — dedupe by kind, hosting it in the
-  // active worktree (its content is not worktree-scoped).
-  const openDaemonLogTab = useCallback(async () => {
-    const projectId = state.selectedProjectId;
-    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-    if (!projectId || !worktreeId) {
-      return;
-    }
-    const existing = state.tabs.find((tab) => tab.kind === "log");
-    if (existing) {
-      dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
-      return;
-    }
-    try {
-      const tab = await createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log"));
-      dispatch({ type: "add-tab", tab });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
-    }
-  }, [state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
-
-  // Tear down both backends regardless of kind: each is a no-op for the other's
-  // tabs, so we don't need to look up the tab's kind on the close path.
-  const closeTab = useCallback(async (tabId: string) => {
-    terminalManager.dispose(tabId);
-    removeAgentStatusForTab(tabId);
-    releaseAlertLatchForTab(tabId);
-    void browserClose(tabId);
-    try {
-      await closeTabCommand(tabId);
-      dispatch({ type: "remove-tab", tabId });
-      setManagedScriptsState((current) => {
-        if (!current?.tabIds.includes(tabId)) {
-          return current;
-        }
-        const tabIds = current.tabIds.filter((id) => id !== tabId);
-        return tabIds.length === 0 ? null : { ...current, tabIds };
-      });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
-    }
-  }, []);
-
-  const renameTerminalTab = useCallback(async (tabId: string, title: string) => {
-    try {
-      await renameTabCommand(tabId, title);
-      dispatch({ type: "rename-tab", tabId, title });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
-    }
-  }, []);
-
-  const setActiveTab = useCallback(
-    (tabId: string | null) => {
-      const worktreeId = tabId ? state.tabs.find((tab) => tab.id === tabId)?.worktreeId : undefined;
-      if (!tabId || !worktreeId) {
-        return;
-      }
-      clearDoneStatusForTab(tabId);
-      dispatch({ type: "set-active-tab", worktreeId, tabId });
-    },
-    [state.tabs],
-  );
-
-  // Latest `setActiveTab`, readable from event listeners without re-subscribing.
-  const setActiveTabRef = useRef(setActiveTab);
-  setActiveTabRef.current = setActiveTab;
-
-  // Runs a Troubleshooting-menu action: restart the daemon (with toast feedback)
-  // or open the daemon-log tab. Kept in a ref so the listener subscribes once.
-  const handleMenuAction = useCallback(
-    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
-      if (action === "troubleshooting.open-daemon-logs") {
-        await openDaemonLogTab();
-        return;
-      }
-      const pending = toast.loading("Restarting daemon…");
-      try {
-        await restartDaemonCommand();
-        toast.success("Daemon restarted", { id: pending });
-      } catch (cause) {
-        toast.error(messageFor(cause), { id: pending });
-      }
-    },
-    [openDaemonLogTab],
-  );
-  const handleMenuActionRef = useRef(handleMenuAction);
-  handleMenuActionRef.current = handleMenuAction;
-
-  // Forward native Troubleshooting-menu clicks to the handler. Subscribe once;
-  // the ref keeps the latest handler so we never re-listen as state changes.
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    onMenuAction((action) => void handleMenuActionRef.current(action))
-      .then((stop) => (unlisten = stop))
-      .catch(() => undefined);
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  // Handle `pragma://open` deep links: subscribe to live ones and, once on
-  // mount, drain any URL the app was cold-started with (delivered before this
-  // listener existed). The ref keeps the latest handler so we subscribe once.
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    onDeepLink((url) => void handleDeepLinkRef.current(url))
-      .then((stop) => (unlisten = stop))
-      .catch(() => undefined);
-    void takePendingDeepLink()
-      .then((url) => {
-        if (url) {
-          void handleDeepLinkRef.current(url);
-        }
-        return undefined;
-      })
-      .catch(() => undefined);
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  const terminalTabIdsKey = useMemo(
-    () =>
-      state.tabs
-        .filter((tab) => tab.kind === "terminal")
-        .map((tab) => tab.id)
-        .join(TERMINAL_TAB_ID_SEPARATOR),
-    [state.tabs],
-  );
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    let cancelled = false;
-    listAgents()
-      .then((agents) => {
-        if (!cancelled) {
-          for (const agent of agents) {
-            void refreshAgentModels(agent.id);
-          }
-        }
-        return undefined;
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!state.selectedProjectId) {
-      return;
-    }
-    let cancelled = false;
-    async function loadProjectDetails(projectId: string) {
-      try {
-        const [worktrees, tabs, splits] = await Promise.all([
-          listWorktrees(projectId),
-          listTabs(projectId),
-          listSplits(projectId),
-        ]);
-        if (!cancelled) {
-          dispatch({ type: "set-worktrees", projectId, worktrees });
-          dispatch({ type: "set-tabs", tabs });
-          dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          dispatch({ type: "load-error", error: messageFor(cause) });
-        }
-      }
-    }
-    void loadProjectDetails(state.selectedProjectId);
-    return () => {
-      cancelled = true;
-    };
-  }, [state.selectedProjectId]);
-
-  useEffect(() => {
-    for (const project of state.projects) {
-      if (project.id in state.icons) {
-        continue;
-      }
-      void projectIcon(project.id).then((icon) =>
-        dispatch({ type: "set-icon", projectId: project.id, icon }),
-      );
-    }
-  }, [state.icons, state.projects]);
-
-  // Browser webviews report their page title/URL natively; mirror those into tab
-  // state (so the tab strip + address bar update) and persist them for restore.
-  // Browser titles are auto-titles (the page is the source of truth) and route
-  // through the `set-auto-title` action so they can never flip `userRenamed`.
+/** Subscribes to native browser/terminal metadata and mirrors it into tab state. */
+function useTabMetaListeners(
+  dispatch: (action: WorkspaceAction) => void,
+  tabsRef: RefObject<Tab[]>,
+  terminalTabIdsKey: string,
+  setActiveTabRef: RefObject<(tabId: string | null) => void>,
+): void {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     onBrowserMeta((meta) => {
@@ -2059,11 +1898,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       unlisten?.();
     };
-  }, []);
+  }, [dispatch]);
 
-  // Browser webviews live as native overlays, so clicks on the page don't reach
-  // React. Listen for focus requests injected into each browser page and move
-  // split-pane focus to the corresponding tab.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     onBrowserFocusRequest((request) => setActiveTabRef.current(request.tabId))
@@ -2072,14 +1908,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       unlisten?.();
     };
-  }, []);
+  }, [setActiveTabRef]);
 
-  // Terminals pipe OSC 0/2 title updates through the non-React
-  // `terminalManager` registry. Subscribe once per terminal tab id, then
-  // coalesce noisy title streams before touching React state; otherwise TUIs
-  // that emit repeated OSC titles can force the whole workspace/sidebar tree to
-  // re-render during terminal output, which is especially visible in projects
-  // with many worktrees.
   useEffect(() => {
     const unsubscribes: Array<() => void> = [];
     const pendingTitles = new Map<string, string>();
@@ -2132,12 +1962,890 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         off();
       }
     };
-  }, [terminalTabIdsKey]);
+  }, [dispatch, terminalTabIdsKey, tabsRef]);
+}
 
-  // Persist split layouts so they survive project switches and app restarts,
-  // mirroring how tabs persist. Only real splits are stored; a worktree that
-  // collapses back to a single pane clears its row. `persistedSplitsRef` tracks
-  // what we've already written so each actual change issues exactly one command.
+/** Wires the non-React terminal link providers to workspace open actions. */
+function useTerminalLinkHandler(
+  openFromTerminalLink: (
+    sourceTabId: string,
+    worktreeId: string,
+    spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
+  ) => Promise<void>,
+): void {
+  useEffect(() => {
+    setTerminalLinkHandler({
+      openUrl: ({ tabId, worktreeId, url, external }) => {
+        if (external) {
+          void browserOpenExternal(url).catch((cause) => toast.error(errorMessage(cause)));
+          return;
+        }
+        void openFromTerminalLink(tabId, worktreeId, { kind: "browser", url });
+      },
+      openFile: ({ tabId, worktreeId, path }) => {
+        void openFromTerminalLink(tabId, worktreeId, { kind: "editor", path });
+      },
+      pathExists: (worktreeId, path) => pathExists(worktreeId, path).catch(() => false),
+    });
+    return () => setTerminalLinkHandler(null);
+  }, [openFromTerminalLink]);
+}
+
+type WorkspaceDispatch = (action: WorkspaceAction) => void;
+
+/** Holds the latest workspace state + derived lookup refs for async callbacks. */
+function useWorkspaceRefs(state: WorkspaceState): {
+  stateRef: RefObject<WorkspaceState>;
+  tabsRef: RefObject<Tab[]>;
+  selectedProjectIdRef: RefObject<string | null>;
+  worktreeProjectIdRef: RefObject<Record<string, string>>;
+  didHydrateRef: RefObject<boolean>;
+  lastPersistedRef: RefObject<string | null>;
+} {
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const tabsRef = useRef(state.tabs);
+  tabsRef.current = state.tabs;
+  const selectedProjectIdRef = useRef(state.selectedProjectId);
+  selectedProjectIdRef.current = state.selectedProjectId;
+  const worktreeProjectIdRef = useRef<Record<string, string>>({});
+  worktreeProjectIdRef.current = Object.fromEntries(
+    Object.entries(state.worktrees).flatMap(([projectId, worktrees]) =>
+      worktrees.map((worktree) => [worktree.id, projectId]),
+    ),
+  );
+  const didHydrateRef = useRef(false);
+  const lastPersistedRef = useRef<string | null>(null);
+  return {
+    stateRef,
+    tabsRef,
+    selectedProjectIdRef,
+    worktreeProjectIdRef,
+    didHydrateRef,
+    lastPersistedRef,
+  };
+}
+
+/** Agent "go back" location + activate/navigate/go-back actions. */
+function useAgentNavigation(
+  stateRef: RefObject<WorkspaceState>,
+  dispatch: WorkspaceDispatch,
+): {
+  agentBackLocation: AgentBackLocation | null;
+  setAgentBackLocation: (location: AgentBackLocation | null) => void;
+  activateLocation: (
+    projectId: string,
+    worktreeId: string,
+    tabId: string,
+    recordBack: boolean,
+  ) => Promise<void>;
+  navigateToAgentLocation: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
+  goBackFromAgent: () => Promise<void>;
+} {
+  const [agentBackLocation, setAgentBackLocation] = useState<AgentBackLocation | null>(null);
+
+  const activateLocation = useCallback(
+    async (projectId: string, worktreeId: string, tabId: string, recordBack: boolean) => {
+      if (recordBack) {
+        recordAgentBackLocation(stateRef.current, setAgentBackLocation);
+      }
+      if (stateRef.current.selectedProjectId !== projectId) {
+        await loadProjectWorkspace(projectId, dispatch);
+      }
+      dispatch({ type: "select-worktree", projectId, worktreeId });
+      dispatch({ type: "set-active-tab", worktreeId, tabId });
+    },
+    [dispatch, stateRef],
+  );
+
+  const navigateToAgentLocation = useCallback(
+    (projectId: string, worktreeId: string, tabId: string) =>
+      activateLocation(projectId, worktreeId, tabId, true),
+    [activateLocation],
+  );
+
+  const goBackFromAgent = useCallback(async () => {
+    const location = agentBackLocation;
+    if (!location || location.expiresAt < Date.now()) {
+      setAgentBackLocation(null);
+      return;
+    }
+    setAgentBackLocation(null);
+    await activateLocation(location.projectId, location.worktreeId, location.tabId, false);
+  }, [activateLocation, agentBackLocation]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setAgentBackLocation((location) =>
+        location && location.expiresAt < Date.now() ? null : location,
+      );
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return {
+    agentBackLocation,
+    setAgentBackLocation,
+    activateLocation,
+    navigateToAgentLocation,
+    goBackFromAgent,
+  };
+}
+
+/** Resolves the owning project for a worktree id (lazy-loading projects as needed). */
+function useWorktreeResolution(
+  stateRef: RefObject<WorkspaceState>,
+  worktreeProjectIdRef: RefObject<Record<string, string>>,
+  dispatch: WorkspaceDispatch,
+): {
+  resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
+  isTabCurrentlyViewed: (tabId: string) => boolean;
+} {
+  const resolveProjectForWorktree = useCallback(
+    async (worktreeId: string) => {
+      const known = worktreeProjectIdRef.current[worktreeId];
+      if (known) {
+        return known;
+      }
+      const projects = await listProjects();
+      dispatch({ type: "set-projects", projects });
+      const projectWorktrees = await Promise.all(
+        projects.map(async (project) => ({ project, worktrees: await listWorktrees(project.id) })),
+      );
+      for (const { project, worktrees } of projectWorktrees) {
+        dispatch({ type: "set-worktrees", projectId: project.id, worktrees });
+        if (worktrees.some((worktree) => worktree.id === worktreeId)) {
+          return project.id;
+        }
+      }
+      return null;
+    },
+    [dispatch, worktreeProjectIdRef],
+  );
+
+  const isTabCurrentlyViewed = useCallback(
+    (tabId: string) => {
+      const current = stateRef.current;
+      const projectId = current.selectedProjectId;
+      const worktreeId = projectId ? current.selectedWorktreeByProject[projectId] : null;
+      if (!worktreeId) {
+        return false;
+      }
+      const activeTabId =
+        current.activeTabByWorktree[worktreeId] ??
+        current.tabs.find((tab) => tab.worktreeId === worktreeId)?.id ??
+        null;
+      return activeTabId === tabId;
+    },
+    [stateRef],
+  );
+
+  return { resolveProjectForWorktree, isTabCurrentlyViewed };
+}
+
+/** Subscribes to agent status/reset/cli-path/notification events and routes them. */
+function useAgentStatusListeners(
+  reportCtx: Omit<AgentReportContext, "visibleTabIdsRef"> & {
+    visibleTabIdsRef: RefObject<Set<string>>;
+  },
+): void {
+  const { navigateToAgentLocation } = reportCtx;
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenReport: (() => void) | null = null;
+    let unlistenReset: (() => void) | null = null;
+    let unlistenPath: (() => void) | null = null;
+    let unlistenNotificationClick: (() => void) | null = null;
+    void onAgentStatusReset(() => {
+      clearAllAgentStatuses();
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenReset = unlisten;
+      return undefined;
+    });
+    void onAgentReport((payload) => {
+      applyAgentReport(payload);
+      releaseLatchOnAgentMove(payload, reportCtx.releaseAlertLatch);
+      latchSeenAgentCompletion(payload, reportCtx);
+      alertUnseenAgentStatus(payload, reportCtx);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenReport = unlisten;
+      return undefined;
+    });
+    void onAgentCliPathWarning((path) => {
+      toast.warning("pragma-cli installed, but its directory is not on PATH", {
+        description: `Add ${path} to PATH so agents can call pragma-cli.`,
+      });
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenPath = unlisten;
+      return undefined;
+    });
+    void onAgentNotificationClick((payload) => {
+      void navigateToAgentLocation(payload.projectId, payload.worktreeId, payload.tabId);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenNotificationClick = unlisten;
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+      unlistenReport?.();
+      unlistenReset?.();
+      unlistenPath?.();
+      unlistenNotificationClick?.();
+    };
+    // reportCtx fields are stable callbacks/refs; only navigateToAgentLocation
+    // is a real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigateToAgentLocation]);
+}
+
+/** Project + worktree selection actions (reload/hydrate, select, refresh). */
+function useProjectSelection(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  refs: {
+    didHydrateRef: RefObject<boolean>;
+    lastPersistedRef: RefObject<string | null>;
+    selectedProjectIdRef: RefObject<string | null>;
+    worktreeProjectIdRef: RefObject<Record<string, string>>;
+  },
+  setAgentBackLocation: (location: AgentBackLocation | null) => void,
+): {
+  reload: () => Promise<void>;
+  selectProject: (projectId: string | null) => Promise<void>;
+  refreshProject: (projectId?: string | null) => Promise<void>;
+  selectWorktree: (worktreeId: string | null) => void;
+} {
+  const { didHydrateRef, lastPersistedRef, selectedProjectIdRef, worktreeProjectIdRef } = refs;
+  const reload = useCallback(async () => {
+    dispatch({ type: "load-start" });
+    try {
+      if (didHydrateRef.current) {
+        const projects = await listProjects();
+        dispatch({ type: "set-projects", projects });
+        return;
+      }
+      const [projects, rawSelection] = await Promise.all([listProjects(), getActiveSelection()]);
+      const selection = parseSelection(rawSelection);
+      if (selection) {
+        dispatch({
+          type: "hydrate-selection",
+          projectId: selection.projectId,
+          worktreeByProject: selection.worktreeByProject,
+        });
+        lastPersistedRef.current = serializeSelection(
+          selection.projectId,
+          selection.worktreeByProject,
+        );
+      } else {
+        lastPersistedRef.current = null;
+      }
+      // `set-projects` validates the hydrated project id against the loaded
+      // list and falls back to the first project if it was deleted elsewhere.
+      dispatch({ type: "set-projects", projects });
+      didHydrateRef.current = true;
+    } catch (cause) {
+      dispatch({ type: "load-error", error: errorMessage(cause) });
+    }
+  }, [didHydrateRef, dispatch, lastPersistedRef]);
+
+  const selectProject = useCallback(
+    async (projectId: string | null) => {
+      // Navigating manually retires the agent "go back" affordance — it only
+      // makes sense right after a notification jumped you somewhere.
+      setAgentBackLocation(null);
+      dispatch({ type: "select-project", projectId });
+    },
+    [dispatch, setAgentBackLocation],
+  );
+
+  const refreshProject = useCallback(
+    async (projectId?: string | null) => {
+      const targetProjectId = projectId ?? selectedProjectIdRef.current;
+      if (!targetProjectId) {
+        return;
+      }
+      try {
+        const [worktrees, tabs, splits] = await Promise.all([
+          listWorktrees(targetProjectId),
+          listTabs(targetProjectId),
+          listSplits(targetProjectId),
+        ]);
+        // `set-tabs` replaces the whole (single-project) tab list, so only apply
+        // it if this refresh still targets the selected project — otherwise a
+        // slow refresh could clobber a project the user has since switched to.
+        if (selectedProjectIdRef.current !== targetProjectId) {
+          return;
+        }
+        dispatch({ type: "set-worktrees", projectId: targetProjectId, worktrees });
+        dispatch({ type: "set-tabs", tabs });
+        dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, selectedProjectIdRef],
+  );
+
+  const selectWorktree = useCallback(
+    (worktreeId: string | null) => {
+      if (!worktreeId) {
+        return;
+      }
+      // Resolve the owning project from the worktree (ref, so it's correct for a
+      // worktree in a project other than the captured selection — e.g. a deep
+      // link), falling back to the current selection.
+      const projectId = worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
+      if (!projectId) {
+        return;
+      }
+      // Navigating manually retires the agent "go back" affordance — it only
+      // makes sense right after a notification jumped you somewhere.
+      setAgentBackLocation(null);
+      dispatch({ type: "select-worktree", projectId, worktreeId });
+    },
+    [dispatch, setAgentBackLocation, state.selectedProjectId, worktreeProjectIdRef],
+  );
+
+  return { reload, selectProject, refreshProject, selectWorktree };
+}
+
+/** Finds an existing browser tab matching a terminal link's URL. */
+function findExistingBrowserTab(tabs: Tab[], worktreeId: string, url: string): Tab | undefined {
+  return tabs.find(
+    (tab) => tab.kind === "browser" && tab.worktreeId === worktreeId && tab.url === url,
+  );
+}
+
+/** Finds an existing editor tab matching a terminal link's worktree-relative path. */
+function findExistingEditorTab(tabs: Tab[], worktreeId: string, path: string): Tab | undefined {
+  return tabs.find(
+    (tab) =>
+      tab.kind === "editor" &&
+      tab.worktreeId === worktreeId &&
+      tab.filePath === path &&
+      tab.diffSide === null,
+  );
+}
+
+/** Creates the tab record for a terminal link target (browser URL or editor path). */
+async function createLinkTab(
+  spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
+  projectId: string,
+  worktreeId: string,
+): Promise<Tab> {
+  if (spec.kind === "browser") {
+    return createTabCommand(projectId, worktreeId, "browser", defaultTabTitle("browser"), spec.url);
+  }
+  return createTabCommand(
+    projectId,
+    worktreeId,
+    "editor",
+    basename(spec.path),
+    undefined,
+    spec.path,
+    null,
+  );
+}
+
+/** Shared tab-creation path + the convenience per-kind and per-pane wrappers. */
+function useTabCreation(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  worktreeProjectIdRef: RefObject<Record<string, string>>,
+): {
+  createTab: (
+    kind: "terminal" | "browser",
+    paneId: string | null,
+    worktreeId?: string,
+  ) => Promise<Tab | null>;
+  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+} {
+  const createTab = useCallback(
+    async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
+      const projectId = resolveCreateTabProject(
+        worktreeId,
+        worktreeProjectIdRef.current,
+        state.selectedProjectId,
+      );
+      const targetWorktreeId = resolveCreateTabWorktreeId(
+        worktreeId,
+        projectId,
+        state.selectedWorktreeByProject,
+      );
+      if (!projectId || !targetWorktreeId) {
+        return null;
+      }
+      try {
+        const tab = await createTabOfKind(kind, projectId, targetWorktreeId);
+        dispatchNewTab(dispatch, tab, paneId);
+        return tab;
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+        return null;
+      }
+    },
+    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, worktreeProjectIdRef],
+  );
+
+  const createTerminalTab = useCallback(
+    (worktreeId?: string) => createTab("terminal", null, worktreeId),
+    [createTab],
+  );
+  const createBrowserTab = useCallback(
+    (worktreeId?: string) => createTab("browser", null, worktreeId),
+    [createTab],
+  );
+  const createTabInPane = useCallback(
+    async (paneId: string, kind: "terminal" | "browser") => {
+      await createTab(kind, paneId);
+    },
+    [createTab],
+  );
+  return { createTab, createTerminalTab, createBrowserTab, createTabInPane };
+}
+
+/** Launches an agent thread: switch worktree, open a terminal tab, start the agent. */
+function useSessionLaunch(
+  selectWorktree: (worktreeId: string | null) => void,
+  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>,
+): (
+  worktreeId: string,
+  agent: AgentConfig,
+  message?: string,
+  modelSelection?: AgentModelSelection,
+) => Promise<Tab | null> {
+  return useCallback(
+    async (
+      worktreeId: string,
+      agent: AgentConfig,
+      message?: string,
+      modelSelection?: AgentModelSelection,
+    ): Promise<Tab | null> => {
+      selectWorktree(worktreeId);
+      const tab = await createTerminalTab(worktreeId);
+      if (!tab) {
+        return null;
+      }
+      startAgentInTab(tab.id, agent, message, modelSelection);
+      return tab;
+    },
+    [createTerminalTab, selectWorktree],
+  );
+}
+
+/** Handles `pragma://open` deep links: subscribe live + drain any cold-start URL. */
+function useDeepLinkHandler(
+  stateRef: RefObject<WorkspaceState>,
+  resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>,
+  selectProject: (projectId: string | null) => Promise<void>,
+  selectWorktree: (worktreeId: string | null) => void,
+  startSession: (
+    worktreeId: string,
+    agent: AgentConfig,
+    message?: string,
+    modelSelection?: AgentModelSelection,
+  ) => Promise<Tab | null>,
+): void {
+  const handleDeepLink = useCallback(
+    async (rawUrl: string) => {
+      const link = parseNewSessionDeepLink(rawUrl);
+      if (!link) {
+        return;
+      }
+      const worktreeId = await resolveDeepLinkWorktreeSelection(
+        link,
+        resolveProjectForWorktree,
+        selectProject,
+        selectWorktree,
+      );
+      const targetWorktreeId = resolveDeepLinkTargetWorktree(stateRef.current, worktreeId);
+      if (
+        await autoSubmitDeepLink(
+          link,
+          targetWorktreeId,
+          listAgents,
+          resolveAgentModels,
+          startSession,
+        )
+      ) {
+        return;
+      }
+      requestNewSession({
+        agentId: link.agentId,
+        modelId: link.modelId,
+        reasoningId: link.reasoningId,
+        worktreeId: targetWorktreeId,
+        message: link.message,
+      });
+    },
+    [resolveProjectForWorktree, selectProject, selectWorktree, startSession, stateRef],
+  );
+  const handleDeepLinkRef = useRef(handleDeepLink);
+  handleDeepLinkRef.current = handleDeepLink;
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onDeepLink((url) => void handleDeepLinkRef.current(url))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    void takePendingDeepLink()
+      .then((url) => {
+        if (url) {
+          void handleDeepLinkRef.current(url);
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+}
+
+/** Opens a terminal-link target in a split right of the clicked terminal (deduped). */
+function useTerminalLinkOpener(
+  dispatch: WorkspaceDispatch,
+  worktreeProjectIdRef: RefObject<Record<string, string>>,
+  selectedProjectIdRef: RefObject<string | null>,
+  tabsRef: RefObject<Tab[]>,
+): (
+  sourceTabId: string,
+  worktreeId: string,
+  spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
+) => Promise<void> {
+  return useCallback(
+    async (
+      sourceTabId: string,
+      worktreeId: string,
+      spec: { kind: "browser"; url: string } | { kind: "editor"; path: string },
+    ) => {
+      const projectId = worktreeProjectIdRef.current[worktreeId] ?? selectedProjectIdRef.current;
+      if (!projectId) {
+        return;
+      }
+      const existing =
+        spec.kind === "browser"
+          ? findExistingBrowserTab(tabsRef.current, worktreeId, spec.url)
+          : findExistingEditorTab(tabsRef.current, worktreeId, spec.path);
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createLinkTab(spec, projectId, worktreeId);
+        dispatch({
+          type: "open-in-new-split",
+          tab,
+          sourceTabId,
+          direction: "horizontal",
+          placement: "after",
+        });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, selectedProjectIdRef, tabsRef, worktreeProjectIdRef],
+  );
+}
+
+/** Opens (or focuses) editor/diff/PR-review/daemon-log tabs, deduped per worktree. */
+function useTabOpeners(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+): {
+  openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
+  openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  openReviewTab: (prNumber: number, title: string) => Promise<void>;
+  openDaemonLogTab: () => Promise<void>;
+} {
+  const openLocatorTab = useCallback(
+    async (
+      kind: "editor" | "diff",
+      path: string,
+      side: DiffSide | null,
+      paneId: string | undefined,
+    ) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === kind &&
+          tab.worktreeId === worktreeId &&
+          tab.filePath === path &&
+          tab.diffSide === side,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          worktreeId,
+          kind,
+          basename(path),
+          undefined,
+          path,
+          side,
+        );
+        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
+  const openFileTab = useCallback(
+    (path: string, opts?: { paneId?: string }) =>
+      openLocatorTab("editor", path, null, opts?.paneId),
+    [openLocatorTab],
+  );
+  const openDiffTab = useCallback(
+    (path: string, side: DiffSide, opts?: { paneId?: string }) =>
+      openLocatorTab("diff", path, side, opts?.paneId),
+    [openLocatorTab],
+  );
+
+  const openReviewTab = useCallback(
+    async (prNumber: number, title: string) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createTabCommand(
+          projectId,
+          worktreeId,
+          "pr-review",
+          title,
+          undefined,
+          null,
+          null,
+          prNumber,
+        );
+        dispatch({ type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
+  const openDaemonLogTab = useCallback(async () => {
+    const projectId = state.selectedProjectId;
+    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+    if (!projectId || !worktreeId) {
+      return;
+    }
+    const existing = state.tabs.find((tab) => tab.kind === "log");
+    if (existing) {
+      dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
+      return;
+    }
+    try {
+      const tab = await createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log"));
+      dispatch({ type: "add-tab", tab });
+    } catch (cause) {
+      dispatch({ type: "load-error", error: errorMessage(cause) });
+    }
+  }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+
+  return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab };
+}
+
+/** Closes/renames/activates tabs and drops them from the managed-scripts set. */
+function useTabLifecycle(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
+): {
+  closeTab: (tabId: string) => Promise<void>;
+  renameTerminalTab: (tabId: string, title: string) => Promise<void>;
+  setActiveTab: (tabId: string | null) => void;
+  setActiveTabRef: RefObject<(tabId: string | null) => void>;
+} {
+  const closeTab = useCallback(
+    async (tabId: string) => {
+      terminalManager.dispose(tabId);
+      removeAgentStatusForTab(tabId);
+      releaseAlertLatchForTab(tabId);
+      void browserClose(tabId);
+      try {
+        await closeTabCommand(tabId);
+        dispatch({ type: "remove-tab", tabId });
+        setManagedScriptsState((current) => {
+          if (!current?.tabIds.includes(tabId)) {
+            return current;
+          }
+          const tabIds = current.tabIds.filter((id) => id !== tabId);
+          return tabIds.length === 0 ? null : { ...current, tabIds };
+        });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, setManagedScriptsState],
+  );
+
+  const renameTerminalTab = useCallback(
+    async (tabId: string, title: string) => {
+      try {
+        await renameTabCommand(tabId, title);
+        dispatch({ type: "rename-tab", tabId, title });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch],
+  );
+
+  const setActiveTab = useCallback(
+    (tabId: string | null) => {
+      const worktreeId = tabId ? state.tabs.find((tab) => tab.id === tabId)?.worktreeId : undefined;
+      if (!tabId || !worktreeId) {
+        return;
+      }
+      clearDoneStatusForTab(tabId);
+      dispatch({ type: "set-active-tab", worktreeId, tabId });
+    },
+    [dispatch, state.tabs],
+  );
+  const setActiveTabRef = useRef(setActiveTab);
+  setActiveTabRef.current = setActiveTab;
+  return { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef };
+}
+
+/** Forwards native Troubleshooting-menu clicks to the restart/open-logs handler. */
+function useMenuActionListener(openDaemonLogTab: () => Promise<void>): void {
+  const handleMenuAction = useCallback(
+    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
+      if (action === "troubleshooting.open-daemon-logs") {
+        await openDaemonLogTab();
+        return;
+      }
+      const pending = toast.loading("Restarting daemon…");
+      try {
+        await restartDaemonCommand();
+        toast.success("Daemon restarted", { id: pending });
+      } catch (cause) {
+        toast.error(errorMessage(cause), { id: pending });
+      }
+    },
+    [openDaemonLogTab],
+  );
+  const handleMenuActionRef = useRef(handleMenuAction);
+  handleMenuActionRef.current = handleMenuAction;
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onMenuAction((action) => void handleMenuActionRef.current(action))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+}
+
+/** Mount-time + selection-driven project loading (reload, agents, details, icons). */
+function useProjectLoading(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  reload: () => Promise<void>,
+): void {
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((agents) => {
+        if (!cancelled) {
+          for (const agent of agents) {
+            void refreshAgentModels(agent.id);
+          }
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!state.selectedProjectId) {
+      return;
+    }
+    let cancelled = false;
+    async function loadProjectDetails(projectId: string) {
+      try {
+        const [worktrees, tabs, splits] = await Promise.all([
+          listWorktrees(projectId),
+          listTabs(projectId),
+          listSplits(projectId),
+        ]);
+        if (!cancelled) {
+          dispatch({ type: "set-worktrees", projectId, worktrees });
+          dispatch({ type: "set-tabs", tabs });
+          dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          dispatch({ type: "load-error", error: errorMessage(cause) });
+        }
+      }
+    }
+    void loadProjectDetails(state.selectedProjectId);
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, state.selectedProjectId]);
+
+  useEffect(() => {
+    for (const project of state.projects) {
+      if (project.id in state.icons) {
+        continue;
+      }
+      void projectIcon(project.id).then((icon) =>
+        dispatch({ type: "set-icon", projectId: project.id, icon }),
+      );
+    }
+  }, [dispatch, state.icons, state.projects]);
+}
+
+/** Persists split layouts so they survive project switches and app restarts. */
+function useSplitPersist(state: WorkspaceState): void {
   const persistedSplitsRef = useRef<Record<string, string>>({});
   useEffect(() => {
     const seen = persistedSplitsRef.current;
@@ -2159,14 +2867,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     persistedSplitsRef.current = nextSeen;
   }, [state.splitRootByWorktree]);
+}
 
-  // Persist the active selection (last active project + per-project last active
-  // worktree) so switching away from a project and coming back — even across
-  // app restarts — returns to the worktree the user left off on. Inert until
-  // the mount-time `reload` has rehydrated, so the initial empty state can't
-  // clobber a saved selection; `lastPersistedRef` skips a no-op rewrite of the
-  // value that was just loaded (and self-heals when `set-projects` had to fall
-  // back because the persisted project was deleted elsewhere).
+/** Persists the active project + per-project last-active worktree selection. */
+function useSelectionPersistence(
+  state: WorkspaceState,
+  didHydrateRef: RefObject<boolean>,
+  lastPersistedRef: RefObject<string | null>,
+): void {
   useEffect(() => {
     if (!didHydrateRef.current) {
       return;
@@ -2177,146 +2885,69 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     lastPersistedRef.current = json;
     void setActiveSelection(json).catch((cause) => {
-      toast.error(`Failed to save active selection: ${messageFor(cause)}`);
+      toast.error(`Failed to save active selection: ${errorMessage(cause)}`);
     });
-  }, [state.selectedProjectId, state.selectedWorktreeByProject]);
+  }, [didHydrateRef, lastPersistedRef, state.selectedProjectId, state.selectedWorktreeByProject]);
+}
 
-  const activeProject =
-    state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
-  const projectWorktrees = state.selectedProjectId
-    ? (state.worktrees[state.selectedProjectId] ?? [])
-    : [];
-  const selectedWorktreeId = state.selectedProjectId
-    ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
-    : null;
-  const selectedWorktree =
-    projectWorktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? null;
-
-  const openSelectedWorktree = useCallback(
-    async (editorId?: string | null) => {
-      if (!selectedWorktree) {
-        return;
-      }
-      try {
-        await openWorktreeCommand(selectedWorktree.id, editorId);
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-      }
-    },
-    [selectedWorktree],
-  );
-
-  const openWorktreeInEditor = useCallback(
-    async (worktreeId: string, editorId?: string | null) => {
-      // Walk every project's worktree list; the user might right-click a
-      // hidden worktree or one in a sibling project. Cost is trivial.
-      const all = Object.values(state.worktrees).flat();
-      const target = all.find((worktree) => worktree.id === worktreeId);
-      if (!target) {
-        return;
-      }
-      try {
-        await openWorktreeCommand(target.id, editorId);
-      } catch (cause) {
-        dispatch({ type: "load-error", error: messageFor(cause) });
-      }
-    },
-    [state.worktrees],
-  );
-
-  const getWorktreeStatus = useCallback(async (worktreeId: string) => {
-    return worktreeStatusCommand(worktreeId);
-  }, []);
-
-  const deleteWorktree = useCallback(
-    async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
-      await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
-      dispatch({ type: "remove-worktree", worktreeId });
-      setManagedScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
-    },
-    [],
-  );
-
-  const renameWorktree = useCallback(async (worktreeId: string, title: string) => {
-    try {
-      const updated = await renameWorktreeCommand(worktreeId, title);
-      dispatch({ type: "update-worktree", worktree: updated });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
+/** Latches seen attention/done statuses for a tab, clears its green dot, marks seen. */
+function latchAndClearSeenTab(tabId: string): void {
+  let hasDone = false;
+  for (const entry of agentStatusesForTab(tabId)) {
+    if (entry.status === "attention" || entry.status === "done") {
+      latchAlertedStatus({
+        worktreeId: entry.worktreeId,
+        tabId,
+        agent: entry.agent,
+        status: entry.status,
+      });
     }
-  }, []);
+    if (entry.status === "done") {
+      hasDone = true;
+    }
+  }
+  clearDoneStatusForTab(tabId);
+  if (hasDone) {
+    void markAgentsSeen(tabId);
+  }
+}
 
-  const hideWorktree = useCallback(async (worktreeId: string, hidden: boolean) => {
-    try {
-      const updated = await setWorktreeHiddenCommand(worktreeId, hidden);
-      dispatch({ type: "update-worktree", worktree: updated });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: messageFor(cause) });
+/** Marks on-screen tabs' agent statuses as seen so reconnect replays don't re-alert. */
+function useVisibleTabAgentSeen(visibleTabIds: Set<string>): void {
+  useEffect(() => {
+    for (const tabId of visibleTabIds) {
+      latchAndClearSeenTab(tabId);
     }
-  }, []);
+  }, [visibleTabIds]);
+}
 
-  const visibleTabs = useMemo(
-    () => state.tabs.filter((tab) => tab.worktreeId === selectedWorktreeId),
-    [state.tabs, selectedWorktreeId],
+/** Interactive run/build scripts: start, stop, and per-kind derived state. */
+function useManagedScripts(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  closeTab: (tabId: string) => Promise<void>,
+  managedScriptsState: ManagedScriptsState,
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
+  setRunScriptsConfig: (config: ProjectScriptsConfig | null) => void,
+  setRunScriptsConfigError: (error: string | null) => void,
+): {
+  runScriptsState: RunScriptsState;
+  buildScriptsState: RunScriptsState;
+  startManagedScripts: (kind: InteractiveScriptKind) => Promise<void>;
+  runScripts: () => Promise<void>;
+  buildScripts: () => Promise<void>;
+  stopManagedScripts: (kind: InteractiveScriptKind) => Promise<void>;
+  stopRunScripts: () => Promise<void>;
+  stopBuildScripts: () => Promise<void>;
+} {
+  const runScriptsState = useMemo(
+    () => managedScriptsStateForKind(managedScriptsState, "run"),
+    [managedScriptsState],
   );
-  const legacyActiveTabId = (() => {
-    if (!selectedWorktreeId) {
-      return null;
-    }
-    const remembered = state.activeTabByWorktree[selectedWorktreeId];
-    if (remembered && visibleTabs.some((tab) => tab.id === remembered)) {
-      return remembered;
-    }
-    return visibleTabs[0]?.id ?? null;
-  })();
-  const storedSplitRoot = useMemo(
-    () =>
-      selectedWorktreeId
-        ? normalizeRoot(
-            state.splitRootByWorktree[selectedWorktreeId],
-            selectedWorktreeId,
-            state.tabs,
-            legacyActiveTabId,
-          )
-        : null,
-    [state.splitRootByWorktree, state.tabs, selectedWorktreeId, legacyActiveTabId],
+  const buildScriptsState = useMemo(
+    () => managedScriptsStateForKind(managedScriptsState, "build"),
+    [managedScriptsState],
   );
-  const activeTabInStoredSplit = legacyActiveTabId
-    ? paneContainingTab(storedSplitRoot, legacyActiveTabId)
-    : null;
-  const storedFocusedPane = focusForRoot(
-    storedSplitRoot,
-    selectedWorktreeId ? state.focusedPaneByWorktree[selectedWorktreeId] : null,
-  );
-  const splitRepresentativeTabId =
-    storedSplitRoot?.kind === "split" ? (storedFocusedPane?.activeTabId ?? null) : null;
-  const splitRoot = useMemo(() => {
-    if (!selectedWorktreeId) {
-      return null;
-    }
-    if (storedSplitRoot?.kind === "split") {
-      if (legacyActiveTabId && !activeTabInStoredSplit) {
-        return createPane(
-          [legacyActiveTabId],
-          legacyActiveTabId,
-          `pane-regular-${legacyActiveTabId}`,
-        );
-      }
-      return storedSplitRoot;
-    }
-    return (
-      storedSplitRoot ?? initialRootForWorktree(selectedWorktreeId, state.tabs, legacyActiveTabId)
-    );
-  }, [activeTabInStoredSplit, legacyActiveTabId, selectedWorktreeId, state.tabs, storedSplitRoot]);
-  const focusedPane = focusForRoot(
-    splitRoot,
-    selectedWorktreeId ? state.focusedPaneByWorktree[selectedWorktreeId] : null,
-  );
-  const focusedPaneId = splitRoot?.kind === "split" ? (focusedPane?.id ?? null) : null;
-  const activeTabId = legacyActiveTabId;
-  const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
-  const runScriptsAvailable = (runScriptsConfig?.run?.length ?? 0) > 0;
-  const buildScriptsAvailable = (runScriptsConfig?.build?.length ?? 0) > 0;
 
   const startManagedScripts = useCallback(
     async (kind: InteractiveScriptKind) => {
@@ -2325,78 +2956,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!projectId || !worktreeId || managedScriptsState) {
         return;
       }
+      const ctx: ManagedScriptRunContext = {
+        projectId,
+        worktreeId,
+        kind,
+        dispatch,
+        setManagedScriptsState,
+        splitRootByWorktree: state.splitRootByWorktree,
+        closeTab,
+      };
       const startedTabIds: string[] = [];
       let splitSnapshot: RunScriptsSplitSnapshot | null = null;
       try {
         const config = await loadProjectScripts(projectId);
         setRunScriptsConfig(config);
         setRunScriptsConfigError(null);
-        const entries = kind === "run" ? (config.run ?? []) : (config.build ?? []);
-        if (entries.length === 0) {
-          toast.info(`No ${kind} scripts configured for this project`);
-          return;
-        }
-        const plan: PlannedRunScripts = planInteractiveScripts(entries, kind);
-        const tabIdsByCommand: string[] = [];
-        for (const item of plan.items) {
-          for (const commandIndex of item.commandIndexes) {
-            // oxlint-disable-next-line no-await-in-loop -- Create script tabs in display order so each top-level tab can mount before command injection.
-            const tab = await createTabCommand(
-              projectId,
-              worktreeId,
-              "terminal",
-              defaultTabTitle("terminal"),
-            );
-            startedTabIds.push(tab.id);
-            tabIdsByCommand[commandIndex] = tab.id;
-            dispatch({ type: "add-tab", tab });
-            setManagedScriptsState({
-              kind,
-              worktreeId,
-              tabIds: [...startedTabIds],
-              stopping: false,
-              splitSnapshot,
-            });
-          }
-          if (item.layout) {
-            if (splitSnapshot === null) {
-              splitSnapshot = {
-                root:
-                  worktreeId in state.splitRootByWorktree
-                    ? (state.splitRootByWorktree[worktreeId] ?? null)
-                    : null,
-              };
-            }
-            dispatch({
-              type: "set-split-root",
-              worktreeId,
-              root: materializeRunScriptLayout(item.layout, tabIdsByCommand),
-            });
-          }
-          // oxlint-disable-next-line no-await-in-loop -- Each script entry needs one paint after its tabs/split are in state, then time for the PTY shell to start, before queued terminal input flushes.
-          await nextAnimationFrame();
-          await delay(INTERACTIVE_SCRIPT_START_DELAY_MS);
-          for (const commandIndex of item.commandIndexes) {
-            const tabId = tabIdsByCommand[commandIndex];
-            const command = plan.commands[commandIndex];
-            if (tabId && command) {
-              terminalManager.writeWhenReady(tabId, `${command}\r`);
-            }
-          }
-        }
+        splitSnapshot = await runManagedScriptPlan(ctx, config, startedTabIds);
       } catch (cause) {
-        setManagedScriptsState(null);
-        if (splitSnapshot) {
-          restoreRunScriptsSplitSnapshot(dispatch, worktreeId, splitSnapshot);
-        }
-        await Promise.all(startedTabIds.map((tabId) => closeTab(tabId)));
-        toast.error(`Failed to run project ${kind} scripts: ${messageFor(cause)}`);
+        await handleManagedScriptsFailure(ctx, splitSnapshot, startedTabIds, cause);
       }
     },
     [
       closeTab,
       dispatch,
       managedScriptsState,
+      setManagedScriptsState,
+      setRunScriptsConfig,
+      setRunScriptsConfigError,
       state.selectedProjectId,
       state.selectedWorktreeByProject,
       state.splitRootByWorktree,
@@ -2412,68 +2998,316 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       const current = managedScriptsState;
-      setManagedScriptsState({ ...current, stopping: true });
+      setManagedScriptsState(() => ({ ...current, stopping: true }));
       if (current.splitSnapshot) {
         restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
       }
       await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
-      setManagedScriptsState(null);
+      setManagedScriptsState(() => null);
     },
-    [closeTab, dispatch, managedScriptsState],
+    [closeTab, dispatch, managedScriptsState, setManagedScriptsState],
   );
 
   const stopRunScripts = useCallback(() => stopManagedScripts("run"), [stopManagedScripts]);
   const stopBuildScripts = useCallback(() => stopManagedScripts("build"), [stopManagedScripts]);
 
-  // Every tab currently on screen for the selected worktree: the active tab,
-  // plus each pane's active tab when a real split is shown. Viewing a tab clears
-  // its resolved (green) agent indicator — running/attention persist — so the
-  // worktree dot also stops being green once all its finished tabs are seen.
-  const visibleTabIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (activeTabId) {
-      ids.add(activeTabId);
-    }
-    if (splitRoot?.kind === "split") {
-      for (const tabId of activeTabIdsInNode(splitRoot)) {
-        ids.add(tabId);
-      }
-    }
-    return ids;
-  }, [activeTabId, splitRoot]);
-  const visibleTabIdsRef = useRef(visibleTabIds);
-  visibleTabIdsRef.current = visibleTabIds;
+  return {
+    runScriptsState,
+    buildScriptsState,
+    startManagedScripts,
+    runScripts,
+    buildScripts,
+    stopManagedScripts,
+    stopRunScripts,
+    stopBuildScripts,
+  };
+}
 
-  useEffect(() => {
-    for (const tabId of visibleTabIds) {
-      // Mark the agent statuses the user is now seeing as alerted, so a later
-      // daemon snapshot replay (on reconnect) doesn't re-fire a notification for
-      // a pending prompt or completion the user has already looked at. Do this
-      // before clearing the green dots so the `done` entries are still readable.
-      let hasDone = false;
-      for (const entry of agentStatusesForTab(tabId)) {
-        if (entry.status === "attention" || entry.status === "done") {
-          latchAlertedStatus({
-            worktreeId: entry.worktreeId,
-            tabId,
-            agent: entry.agent,
-            status: entry.status,
-          });
-        }
-        if (entry.status === "done") {
-          hasDone = true;
-        }
+/** Worktree open/status/delete/rename/hide actions. */
+function useWorktreeActions(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
+  selectedWorktree: Worktree | null,
+): {
+  openSelectedWorktree: (editorId?: string | null) => Promise<void>;
+  openWorktreeInEditor: (worktreeId: string, editorId?: string | null) => Promise<void>;
+  getWorktreeStatus: (worktreeId: string) => Promise<WorktreeStatus>;
+  deleteWorktree: (
+    worktreeId: string,
+    options: { deleteBranch: boolean; force: boolean },
+  ) => Promise<void>;
+  renameWorktree: (worktreeId: string, title: string) => Promise<void>;
+  hideWorktree: (worktreeId: string, hidden: boolean) => Promise<void>;
+} {
+  const openSelectedWorktree = useCallback(
+    async (editorId?: string | null) => {
+      if (!selectedWorktree) {
+        return;
       }
-      clearDoneStatusForTab(tabId);
-      if (hasDone) {
-        // Tell the daemon these completions were seen so its stored `done` is
-        // dropped — clearing the dot locally alone would let a later reconnect
-        // replay it and resurrect the green dot.
-        void markAgentsSeen(tabId);
+      try {
+        await openWorktreeCommand(selectedWorktree.id, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
       }
-    }
-  }, [visibleTabIds]);
+    },
+    [dispatch, selectedWorktree],
+  );
 
+  const openWorktreeInEditor = useCallback(
+    async (worktreeId: string, editorId?: string | null) => {
+      // Walk every project's worktree list; the user might right-click a
+      // hidden worktree or one in a sibling project. Cost is trivial.
+      const all = Object.values(state.worktrees).flat();
+      const target = all.find((worktree) => worktree.id === worktreeId);
+      if (!target) {
+        return;
+      }
+      try {
+        await openWorktreeCommand(target.id, editorId);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, state.worktrees],
+  );
+
+  const getWorktreeStatus = useCallback(async (worktreeId: string) => {
+    return worktreeStatusCommand(worktreeId);
+  }, []);
+
+  const deleteWorktree = useCallback(
+    async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+      dispatch({ type: "remove-worktree", worktreeId });
+      setManagedScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
+    },
+    [dispatch, setManagedScriptsState],
+  );
+
+  const renameWorktree = useCallback(
+    async (worktreeId: string, title: string) => {
+      try {
+        const updated = await renameWorktreeCommand(worktreeId, title);
+        dispatch({ type: "update-worktree", worktree: updated });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch],
+  );
+
+  const hideWorktree = useCallback(
+    async (worktreeId: string, hidden: boolean) => {
+      try {
+        const updated = await setWorktreeHiddenCommand(worktreeId, hidden);
+        dispatch({ type: "update-worktree", worktree: updated });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch],
+  );
+
+  return {
+    openSelectedWorktree,
+    openWorktreeInEditor,
+    getWorktreeStatus,
+    deleteWorktree,
+    renameWorktree,
+    hideWorktree,
+  };
+}
+
+/** Resolves the legacy (non-split) active tab id for the selected worktree. */
+function selectLegacyActiveTab(
+  state: WorkspaceState,
+  selectedWorktreeId: string,
+  visibleTabs: Tab[],
+): string | null {
+  const remembered = state.activeTabByWorktree[selectedWorktreeId];
+  if (remembered && visibleTabs.some((tab) => tab.id === remembered)) {
+    return remembered;
+  }
+  return visibleTabs[0]?.id ?? null;
+}
+
+/** Resolves the effective split root from the stored root + legacy active tab. */
+function resolveSplitRoot(
+  storedSplitRoot: SplitLayoutNode | null,
+  legacyActiveTabId: string | null,
+  activeTabInStoredSplit: SplitPaneNode | null,
+  selectedWorktreeId: string,
+  tabs: Tab[],
+): SplitLayoutNode | null {
+  if (storedSplitRoot?.kind === "split") {
+    if (legacyActiveTabId && !activeTabInStoredSplit) {
+      return createPane(
+        [legacyActiveTabId],
+        legacyActiveTabId,
+        `pane-regular-${legacyActiveTabId}`,
+      );
+    }
+    return storedSplitRoot;
+  }
+  return storedSplitRoot ?? initialRootForWorktree(selectedWorktreeId, tabs, legacyActiveTabId);
+}
+
+/** Focused pane for a root, scoped to the selected worktree's stored focus id. */
+function focusedPaneForRoot(
+  root: SplitLayoutNode | null,
+  focusedPaneByWorktree: Record<string, string>,
+  selectedWorktreeId: string | null,
+): SplitPaneNode | null {
+  return focusForRoot(root, selectedWorktreeId ? focusedPaneByWorktree[selectedWorktreeId] : null);
+}
+
+/** Pane id when a real split is shown, else null. */
+function focusedPaneIdForSplit(
+  splitRoot: SplitLayoutNode | null,
+  focusedPane: SplitPaneNode | null,
+): string | null {
+  if (splitRoot?.kind !== "split") {
+    return null;
+  }
+  return focusedPane?.id ?? null;
+}
+
+/** Pane's active tab id when a real split is shown, else null. */
+function representativeTabIdForSplit(
+  splitRoot: SplitLayoutNode | null,
+  focusedPane: SplitPaneNode | null,
+): string | null {
+  if (splitRoot?.kind !== "split") {
+    return null;
+  }
+  return focusedPane?.activeTabId ?? null;
+}
+
+/** Derives the split layout + active tab for the selected worktree. */
+function useSplitLayout(
+  state: WorkspaceState,
+  selectedWorktreeId: string | null,
+): {
+  visibleTabs: Tab[];
+  legacyActiveTabId: string | null;
+  storedSplitRoot: SplitLayoutNode | null;
+  splitRoot: SplitLayoutNode | null;
+  focusedPaneId: string | null;
+  activeTabId: string | null;
+  activeTab: Tab | null;
+  splitRepresentativeTabId: string | null;
+} {
+  const visibleTabs = useMemo(
+    () => state.tabs.filter((tab) => tab.worktreeId === selectedWorktreeId),
+    [state.tabs, selectedWorktreeId],
+  );
+  const legacyActiveTabId = useMemo(
+    () =>
+      selectedWorktreeId ? selectLegacyActiveTab(state, selectedWorktreeId, visibleTabs) : null,
+    [selectedWorktreeId, state, visibleTabs],
+  );
+  const storedSplitRoot = useMemo(
+    () =>
+      selectedWorktreeId
+        ? normalizeRoot(
+            state.splitRootByWorktree[selectedWorktreeId],
+            selectedWorktreeId,
+            state.tabs,
+            legacyActiveTabId,
+          )
+        : null,
+    [state.splitRootByWorktree, state.tabs, selectedWorktreeId, legacyActiveTabId],
+  );
+  const activeTabInStoredSplit = legacyActiveTabId
+    ? paneContainingTab(storedSplitRoot, legacyActiveTabId)
+    : null;
+  const storedFocusedPane = focusedPaneForRoot(
+    storedSplitRoot,
+    state.focusedPaneByWorktree,
+    selectedWorktreeId,
+  );
+  const splitRepresentativeTabId = representativeTabIdForSplit(storedSplitRoot, storedFocusedPane);
+  const splitRoot = useMemo(
+    () =>
+      selectedWorktreeId
+        ? resolveSplitRoot(
+            storedSplitRoot,
+            legacyActiveTabId,
+            activeTabInStoredSplit,
+            selectedWorktreeId,
+            state.tabs,
+          )
+        : null,
+    [activeTabInStoredSplit, legacyActiveTabId, selectedWorktreeId, state.tabs, storedSplitRoot],
+  );
+  const focusedPane = focusedPaneForRoot(
+    splitRoot,
+    state.focusedPaneByWorktree,
+    selectedWorktreeId,
+  );
+  const focusedPaneId = focusedPaneIdForSplit(splitRoot, focusedPane);
+  const activeTabId = legacyActiveTabId;
+  const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
+  return {
+    visibleTabs,
+    legacyActiveTabId,
+    storedSplitRoot,
+    splitRoot,
+    focusedPaneId,
+    activeTabId,
+    activeTab,
+    splitRepresentativeTabId,
+  };
+}
+
+/** Computes the tab-id cycle order for the pane (or top-bar fallback) the active tab is in. */
+function computeCyclePaneTabIds(
+  visibleTabs: Tab[],
+  storedSplitRoot: SplitLayoutNode | null,
+  activeTabId: string,
+  splitRepresentativeTabId: string | null,
+): { paneTabIds: string[]; activeStoredPane: SplitPaneNode | null } {
+  const storedSplitTabIds = tabIdsInNode(
+    storedSplitRoot?.kind === "split" ? storedSplitRoot : null,
+  );
+  const activeStoredPane = paneContainingTab(storedSplitRoot, activeTabId);
+  const paneTabIds = activeStoredPane
+    ? activeStoredPane.tabIds
+    : visibleTabs
+        .map((tab) => tab.id)
+        .filter(
+          (tabId) =>
+            !storedSplitTabIds.has(tabId) ||
+            tabId === activeTabId ||
+            tabId === splitRepresentativeTabId,
+        );
+  return { paneTabIds, activeStoredPane };
+}
+
+/** Split-pane focus/active/split/move actions + top-bar/pane tab cycling. */
+function useSplitActions(
+  dispatch: WorkspaceDispatch,
+  selectedWorktreeId: string | null,
+  splitRoot: SplitLayoutNode | null,
+  focusedPaneId: string | null,
+  visibleTabs: Tab[],
+  activeTabId: string | null,
+  storedSplitRoot: SplitLayoutNode | null,
+  splitRepresentativeTabId: string | null,
+): {
+  focusPane: (paneId: string) => void;
+  setPaneActiveTab: (paneId: string, tabId: string) => void;
+  splitTabAtPane: (
+    tabId: string,
+    paneId: string,
+    direction: SplitDirection,
+    placement: SplitPlacement,
+  ) => void;
+  splitActivePane: (tabId: string, direction: SplitDirection) => void;
+  moveTabToPane: (tabId: string, paneId: string) => void;
+  cycleTab: (direction: 1 | -1) => void;
+} {
   const focusPane = useCallback(
     (paneId: string) => {
       if (!selectedWorktreeId) {
@@ -2485,7 +3319,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "focus-pane", worktreeId: selectedWorktreeId, paneId });
     },
-    [selectedWorktreeId, splitRoot],
+    [dispatch, selectedWorktreeId, splitRoot],
   );
 
   const setPaneActiveTab = useCallback(
@@ -2496,7 +3330,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearDoneStatusForTab(tabId);
       dispatch({ type: "set-pane-active-tab", worktreeId: selectedWorktreeId, paneId, tabId });
     },
-    [selectedWorktreeId],
+    [dispatch, selectedWorktreeId],
   );
 
   const splitTabAtPane = useCallback(
@@ -2513,7 +3347,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         placement,
       });
     },
-    [selectedWorktreeId],
+    [dispatch, selectedWorktreeId],
   );
 
   const splitActivePane = useCallback(
@@ -2530,7 +3364,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         placement: "after",
       });
     },
-    [focusedPaneId, selectedWorktreeId],
+    [dispatch, focusedPaneId, selectedWorktreeId],
   );
 
   const moveTabToPane = useCallback(
@@ -2540,7 +3374,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "move-tab-to-pane", worktreeId: selectedWorktreeId, paneId, tabId });
     },
-    [selectedWorktreeId],
+    [dispatch, selectedWorktreeId],
   );
 
   const cycleTab = useCallback(
@@ -2548,20 +3382,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (visibleTabs.length === 0 || !activeTabId || !selectedWorktreeId) {
         return;
       }
-      const storedSplitTabIds = tabIdsInNode(
-        storedSplitRoot?.kind === "split" ? storedSplitRoot : null,
+      const { paneTabIds, activeStoredPane } = computeCyclePaneTabIds(
+        visibleTabs,
+        storedSplitRoot,
+        activeTabId,
+        splitRepresentativeTabId,
       );
-      const activeStoredPane = paneContainingTab(storedSplitRoot, activeTabId);
-      const paneTabIds = activeStoredPane
-        ? activeStoredPane.tabIds
-        : visibleTabs
-            .map((tab) => tab.id)
-            .filter(
-              (tabId) =>
-                !storedSplitTabIds.has(tabId) ||
-                tabId === activeTabId ||
-                tabId === splitRepresentativeTabId,
-            );
       const current = paneTabIds.findIndex((tabId) => tabId === activeTabId);
       const next = (current + direction + paneTabIds.length) % paneTabIds.length;
       const tabId = paneTabIds[next];
@@ -2579,8 +3405,438 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "set-active-tab", worktreeId: selectedWorktreeId, tabId });
       }
     },
-    [visibleTabs, activeTabId, selectedWorktreeId, storedSplitRoot, splitRepresentativeTabId],
+    [
+      activeTabId,
+      dispatch,
+      selectedWorktreeId,
+      splitRepresentativeTabId,
+      storedSplitRoot,
+      visibleTabs,
+    ],
   );
+
+  return {
+    focusPane,
+    setPaneActiveTab,
+    splitTabAtPane,
+    splitActivePane,
+    moveTabToPane,
+    cycleTab,
+  };
+}
+
+/** Derives the active project + selected worktree for the current selection. */
+function deriveSelectedWorktree(state: WorkspaceState): {
+  activeProject: Project | null;
+  projectWorktrees: Worktree[];
+  selectedWorktreeId: string | null;
+  selectedWorktree: Worktree | null;
+} {
+  const activeProject =
+    state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
+  const projectWorktrees = state.selectedProjectId
+    ? (state.worktrees[state.selectedProjectId] ?? [])
+    : [];
+  const selectedWorktreeId = state.selectedProjectId
+    ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
+    : null;
+  const selectedWorktree =
+    projectWorktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? null;
+  return { activeProject, projectWorktrees, selectedWorktreeId, selectedWorktree };
+}
+
+/** Agent navigation, worktree resolution, and agent-status event listeners. */
+function useAgentManagement({
+  stateRef,
+  worktreeProjectIdRef,
+  dispatch,
+  visibleTabIdsRef,
+}: {
+  stateRef: RefObject<WorkspaceState>;
+  worktreeProjectIdRef: RefObject<Record<string, string>>;
+  dispatch: WorkspaceDispatch;
+  visibleTabIdsRef: RefObject<Set<string>>;
+}) {
+  const { agentBackLocation, setAgentBackLocation, navigateToAgentLocation, goBackFromAgent } =
+    useAgentNavigation(stateRef, dispatch);
+  const { resolveProjectForWorktree, isTabCurrentlyViewed } = useWorktreeResolution(
+    stateRef,
+    worktreeProjectIdRef,
+    dispatch,
+  );
+  useAgentStatusListeners({
+    visibleTabIdsRef,
+    clearDoneStatusForTab,
+    markAgentsSeen,
+    latchAlertedStatus,
+    releaseAlertLatch,
+    isTabCurrentlyViewed,
+    shouldAlertForStatus,
+    resolveProjectForWorktree,
+    navigateToAgentLocation,
+    alertAgent,
+  });
+  return {
+    agentBackLocation,
+    setAgentBackLocation,
+    navigateToAgentLocation,
+    goBackFromAgent,
+    resolveProjectForWorktree,
+  };
+}
+
+/** Tab creation, launching, deep-link, terminal-link, openers, lifecycle, and id key. */
+function useTabManagement({
+  state,
+  dispatch,
+  stateRef,
+  worktreeProjectIdRef,
+  selectedProjectIdRef,
+  tabsRef,
+  selectWorktree,
+  selectProject,
+  resolveProjectForWorktree,
+  setManagedScriptsState,
+}: {
+  state: WorkspaceState;
+  dispatch: WorkspaceDispatch;
+  stateRef: RefObject<WorkspaceState>;
+  worktreeProjectIdRef: RefObject<Record<string, string>>;
+  selectedProjectIdRef: RefObject<string | null>;
+  tabsRef: RefObject<Tab[]>;
+  selectWorktree: (worktreeId: string | null) => void;
+  selectProject: (projectId: string | null) => Promise<void>;
+  resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
+}) {
+  const { createTerminalTab, createBrowserTab, createTabInPane } = useTabCreation(
+    state,
+    dispatch,
+    worktreeProjectIdRef,
+  );
+  const startSession = useSessionLaunch(selectWorktree, createTerminalTab);
+  useDeepLinkHandler(
+    stateRef,
+    resolveProjectForWorktree,
+    selectProject,
+    selectWorktree,
+    startSession,
+  );
+  const openFromTerminalLink = useTerminalLinkOpener(
+    dispatch,
+    worktreeProjectIdRef,
+    selectedProjectIdRef,
+    tabsRef,
+  );
+  useTerminalLinkHandler(openFromTerminalLink);
+  const { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab } = useTabOpeners(
+    state,
+    dispatch,
+  );
+  const { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef } = useTabLifecycle(
+    state,
+    dispatch,
+    setManagedScriptsState,
+  );
+  const terminalTabIdsKey = useMemo(
+    () =>
+      state.tabs
+        .filter((tab) => tab.kind === "terminal")
+        .map((tab) => tab.id)
+        .join(TERMINAL_TAB_ID_SEPARATOR),
+    [state.tabs],
+  );
+  return {
+    createTerminalTab,
+    createBrowserTab,
+    createTabInPane,
+    startSession,
+    openFileTab,
+    openDiffTab,
+    openReviewTab,
+    openDaemonLogTab,
+    closeTab,
+    renameTerminalTab,
+    setActiveTab,
+    setActiveTabRef,
+    terminalTabIdsKey,
+  };
+}
+
+/** Project loading + browser/terminal metadata + troubleshooting-menu listeners. */
+function useWorkspaceListeners({
+  state,
+  dispatch,
+  reload,
+  tabsRef,
+  terminalTabIdsKey,
+  setActiveTabRef,
+  openDaemonLogTab,
+}: {
+  state: WorkspaceState;
+  dispatch: WorkspaceDispatch;
+  reload: () => Promise<void>;
+  tabsRef: RefObject<Tab[]>;
+  terminalTabIdsKey: string;
+  setActiveTabRef: RefObject<(tabId: string | null) => void>;
+  openDaemonLogTab: () => Promise<void>;
+}): void {
+  useProjectLoading(state, dispatch, reload);
+  useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
+  useMenuActionListener(openDaemonLogTab);
+}
+
+/** Split-layout + selection persistence. */
+function useWorkspacePersistence(
+  state: WorkspaceState,
+  didHydrateRef: RefObject<boolean>,
+  lastPersistedRef: RefObject<string | null>,
+): void {
+  useSplitPersist(state);
+  useSelectionPersistence(state, didHydrateRef, lastPersistedRef);
+}
+
+/** Worktree actions, split layout, managed scripts, visible tabs, and split actions. */
+function useWorkspaceActions({
+  state,
+  dispatch,
+  closeTab,
+  managedScriptsState,
+  setManagedScriptsState,
+  setRunScriptsConfig,
+  setRunScriptsConfigError,
+  runScriptsConfig,
+  selectedWorktree,
+  selectedWorktreeId,
+  visibleTabIdsRef,
+}: {
+  state: WorkspaceState;
+  dispatch: WorkspaceDispatch;
+  closeTab: (tabId: string) => Promise<void>;
+  managedScriptsState: ManagedScriptsState;
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
+  setRunScriptsConfig: (config: ProjectScriptsConfig | null) => void;
+  setRunScriptsConfigError: (error: string | null) => void;
+  runScriptsConfig: ProjectScriptsConfig | null;
+  selectedWorktree: Worktree | null;
+  selectedWorktreeId: string | null;
+  visibleTabIdsRef: RefObject<Set<string>>;
+}) {
+  const {
+    openSelectedWorktree,
+    openWorktreeInEditor,
+    getWorktreeStatus,
+    deleteWorktree,
+    renameWorktree,
+    hideWorktree,
+  } = useWorktreeActions(state, dispatch, setManagedScriptsState, selectedWorktree);
+
+  const {
+    visibleTabs,
+    legacyActiveTabId,
+    storedSplitRoot,
+    splitRoot,
+    focusedPaneId,
+    activeTabId,
+    activeTab,
+    splitRepresentativeTabId,
+  } = useSplitLayout(state, selectedWorktreeId);
+  void legacyActiveTabId;
+
+  const runScriptsAvailable = (runScriptsConfig?.run?.length ?? 0) > 0;
+  const buildScriptsAvailable = (runScriptsConfig?.build?.length ?? 0) > 0;
+
+  const {
+    runScriptsState,
+    buildScriptsState,
+    runScripts,
+    buildScripts,
+    stopRunScripts,
+    stopBuildScripts,
+  } = useManagedScripts(
+    state,
+    dispatch,
+    closeTab,
+    managedScriptsState,
+    setManagedScriptsState,
+    setRunScriptsConfig,
+    setRunScriptsConfigError,
+  );
+
+  const visibleTabIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (activeTabId) {
+      ids.add(activeTabId);
+    }
+    if (splitRoot?.kind === "split") {
+      for (const tabId of activeTabIdsInNode(splitRoot)) {
+        ids.add(tabId);
+      }
+    }
+    return ids;
+  }, [activeTabId, splitRoot]);
+  visibleTabIdsRef.current = visibleTabIds;
+
+  useVisibleTabAgentSeen(visibleTabIds);
+
+  const { focusPane, setPaneActiveTab, splitTabAtPane, splitActivePane, moveTabToPane, cycleTab } =
+    useSplitActions(
+      dispatch,
+      selectedWorktreeId,
+      splitRoot,
+      focusedPaneId,
+      visibleTabs,
+      activeTabId,
+      storedSplitRoot,
+      splitRepresentativeTabId,
+    );
+
+  return {
+    openSelectedWorktree,
+    openWorktreeInEditor,
+    getWorktreeStatus,
+    deleteWorktree,
+    renameWorktree,
+    hideWorktree,
+    visibleTabs,
+    storedSplitRoot,
+    splitRoot,
+    focusedPaneId,
+    activeTabId,
+    activeTab,
+    splitRepresentativeTabId,
+    runScriptsAvailable,
+    buildScriptsAvailable,
+    runScriptsState,
+    buildScriptsState,
+    runScripts,
+    buildScripts,
+    stopRunScripts,
+    stopBuildScripts,
+    focusPane,
+    setPaneActiveTab,
+    splitTabAtPane,
+    splitActivePane,
+    moveTabToPane,
+    cycleTab,
+  };
+}
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(workspaceReducer, initialState);
+  const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>(null);
+  const { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError } =
+    useProjectScriptsConfig(state.selectedProjectId);
+  const {
+    stateRef,
+    tabsRef,
+    selectedProjectIdRef,
+    worktreeProjectIdRef,
+    didHydrateRef,
+    lastPersistedRef,
+  } = useWorkspaceRefs(state);
+
+  const visibleTabIdsRef = useRef<Set<string>>(new Set());
+
+  const {
+    agentBackLocation,
+    setAgentBackLocation,
+    navigateToAgentLocation,
+    goBackFromAgent,
+    resolveProjectForWorktree,
+  } = useAgentManagement({ stateRef, worktreeProjectIdRef, dispatch, visibleTabIdsRef });
+
+  const { reload, selectProject, refreshProject, selectWorktree } = useProjectSelection(
+    state,
+    dispatch,
+    { didHydrateRef, lastPersistedRef, selectedProjectIdRef, worktreeProjectIdRef },
+    setAgentBackLocation,
+  );
+
+  const {
+    createTerminalTab,
+    createBrowserTab,
+    startSession,
+    createTabInPane,
+    openFileTab,
+    openDiffTab,
+    openReviewTab,
+    openDaemonLogTab,
+    closeTab,
+    renameTerminalTab,
+    setActiveTab,
+    setActiveTabRef,
+    terminalTabIdsKey,
+  } = useTabManagement({
+    state,
+    dispatch,
+    stateRef,
+    worktreeProjectIdRef,
+    selectedProjectIdRef,
+    tabsRef,
+    selectWorktree,
+    selectProject,
+    resolveProjectForWorktree,
+    setManagedScriptsState,
+  });
+
+  useWorkspaceListeners({
+    state,
+    dispatch,
+    reload,
+    tabsRef,
+    terminalTabIdsKey,
+    setActiveTabRef,
+    openDaemonLogTab,
+  });
+
+  useWorkspacePersistence(state, didHydrateRef, lastPersistedRef);
+
+  const { activeProject, selectedWorktreeId, selectedWorktree } = deriveSelectedWorktree(state);
+
+  const {
+    openSelectedWorktree,
+    openWorktreeInEditor,
+    getWorktreeStatus,
+    deleteWorktree,
+    renameWorktree,
+    hideWorktree,
+    visibleTabs,
+    storedSplitRoot: _storedSplitRoot,
+    splitRoot,
+    focusedPaneId,
+    activeTabId,
+    activeTab,
+    splitRepresentativeTabId: _splitRepresentativeTabId,
+    runScriptsAvailable,
+    buildScriptsAvailable,
+    runScriptsState,
+    buildScriptsState,
+    runScripts,
+    buildScripts,
+    stopRunScripts,
+    stopBuildScripts,
+    focusPane,
+    setPaneActiveTab,
+    splitTabAtPane,
+    splitActivePane,
+    moveTabToPane,
+    cycleTab,
+  } = useWorkspaceActions({
+    state,
+    dispatch,
+    closeTab,
+    managedScriptsState,
+    setManagedScriptsState,
+    setRunScriptsConfig,
+    setRunScriptsConfigError,
+    runScriptsConfig,
+    selectedWorktree,
+    selectedWorktreeId,
+    visibleTabIdsRef,
+  });
+  void _storedSplitRoot;
+  void _splitRepresentativeTabId;
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -2690,13 +3946,5 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Accesses workspace metadata state and high-level actions. */
 export function useWorkspace(): WorkspaceContextValue {
-  const context = useContext(WorkspaceContext);
-  if (!context) {
-    throw new Error("useWorkspace must be used inside WorkspaceProvider");
-  }
-  return context;
-}
-
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+  return useRequiredContext(WorkspaceContext, "useWorkspace");
 }

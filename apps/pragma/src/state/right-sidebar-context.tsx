@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useMemo, useState, type ReactNode } from "react";
+import { useRequiredContext } from "@/lib/context";
 
 export type RightSidebarSubtab = "files" | "changes" | "pullRequest";
 
@@ -118,9 +119,5 @@ export function RightSidebarProvider({ children }: { children: ReactNode }) {
 
 /** Accesses the right sidebar's cosmetic state. */
 export function useRightSidebar(): RightSidebarContextValue {
-  const context = useContext(RightSidebarContext);
-  if (!context) {
-    throw new Error("useRightSidebar must be used inside RightSidebarProvider");
-  }
-  return context;
+  return useRequiredContext(RightSidebarContext, "useRightSidebar");
 }

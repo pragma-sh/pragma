@@ -60,6 +60,18 @@ function removeAgent(worktreeId: string, tabId: string, agent: string): AgentSta
   return previous;
 }
 
+/** Removes every `done` (green) entry from an agent map; returns whether any changed. */
+function clearDoneAgents(agents: AgentMap): boolean {
+  let changed = false;
+  for (const [agentId, status] of agents) {
+    if (status === "done") {
+      agents.delete(agentId);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /**
  * Clears only resolved (`done`/green) indicators for a tab once the user views
  * it. `running` (yellow) and `attention` (red) persist through a focus so the
@@ -70,11 +82,8 @@ export function clearDoneStatusForTab(tabId: string): void {
   for (const [worktreeId, tabs] of statuses) {
     const agents = tabs.get(tabId);
     if (agents) {
-      for (const [agentId, status] of agents) {
-        if (status === "done") {
-          agents.delete(agentId);
-          changed = true;
-        }
+      if (clearDoneAgents(agents)) {
+        changed = true;
       }
       if (agents.size === 0) {
         tabs.delete(tabId);

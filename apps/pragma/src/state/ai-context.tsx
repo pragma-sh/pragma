@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRequiredContext } from "@/lib/context";
 
 import { aiSetupDismissed, aiStatus, setAiSetupDismissed, type AiStatus } from "@/lib/tauri";
 
@@ -105,9 +98,5 @@ export function AiProvider({ children }: { children: ReactNode }) {
 
 /** Access the AI availability context. Throws outside an {@link AiProvider}. */
 export function useAi(): AiContextValue {
-  const value = useContext(AiContext);
-  if (!value) {
-    throw new Error("useAi must be used within an AiProvider");
-  }
-  return value;
+  return useRequiredContext(AiContext, "useAi");
 }
