@@ -7,6 +7,7 @@ import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { useAgentModels } from "@/hooks/use-agent-models";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import {
@@ -384,91 +385,89 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4">
-      <div className="w-full max-w-xl rounded-xl border bg-background p-5 shadow-xl">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">{card ? "Edit draft" : "New prompt draft"}</h2>
-          <p className="text-sm text-muted-foreground">
-            Pick an agent and a branch, write a prompt, then save. Move the draft to In progress to
-            launch it.
-          </p>
-        </div>
-        <form
-          className="mt-5 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void form.submit();
-          }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="kanban-branch">Branch</Label>
-              <Input
-                id="kanban-branch"
-                list="kanban-branch-options"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                placeholder="existing or new branch"
-                value={form.branch}
-                onChange={(event) => form.setBranch(event.target.value.replace(/\s+/g, "-"))}
-                onKeyDown={form.handleKeyDown}
-              />
-              <datalist id="kanban-branch-options">
-                {form.branchOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </datalist>
-            </div>
-            <div className="space-y-2">
-              <Label>Agent</Label>
-              <AgentModelSelector
-                agents={form.agents}
-                modelsByAgent={form.modelsByAgent}
-                value={{ agentId: form.agentId, selection: form.modelSelection }}
-                onChange={form.handleAgentChange}
-                onLoadModels={form.loadModels}
-              />
-            </div>
+    <ModalShell className="max-w-xl">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">{card ? "Edit draft" : "New prompt draft"}</h2>
+        <p className="text-sm text-muted-foreground">
+          Pick an agent and a branch, write a prompt, then save. Move the draft to In progress to
+          launch it.
+        </p>
+      </div>
+      <form
+        className="mt-5 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void form.submit();
+        }}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="kanban-branch">Branch</Label>
+            <Input
+              id="kanban-branch"
+              list="kanban-branch-options"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              placeholder="existing or new branch"
+              value={form.branch}
+              onChange={(event) => form.setBranch(event.target.value.replace(/\s+/g, "-"))}
+              onKeyDown={form.handleKeyDown}
+            />
+            <datalist id="kanban-branch-options">
+              {form.branchOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </datalist>
           </div>
           <div className="space-y-2">
-            <Label>Prompt</Label>
-            <MarkdownEditor
-              value={form.prompt}
-              onChange={form.setPrompt}
-              onKeyDown={form.handleKeyDown}
-              placeholder="Describe what you want the agent to do…"
-              className="min-h-40 max-h-[40vh] overflow-y-auto"
+            <Label>Agent</Label>
+            <AgentModelSelector
+              agents={form.agents}
+              modelsByAgent={form.modelsByAgent}
+              value={{ agentId: form.agentId, selection: form.modelSelection }}
+              onChange={form.handleAgentChange}
+              onLoadModels={form.loadModels}
             />
           </div>
-          {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
-          <div className="flex justify-between gap-2">
-            <div>
-              {card ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={form.busy}
-                  onClick={() => void form.discard()}
-                >
-                  Discard
-                </Button>
-              ) : null}
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+        </div>
+        <div className="space-y-2">
+          <Label>Prompt</Label>
+          <MarkdownEditor
+            value={form.prompt}
+            onChange={form.setPrompt}
+            onKeyDown={form.handleKeyDown}
+            placeholder="Describe what you want the agent to do…"
+            className="min-h-40 max-h-[40vh] overflow-y-auto"
+          />
+        </div>
+        {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
+        <div className="flex justify-between gap-2">
+          <div>
+            {card ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={form.busy}
+                onClick={() => void form.discard()}
+              >
+                Discard
               </Button>
-              <Button type="submit" disabled={!form.canSubmit}>
-                {card ? "Save draft" : "Add draft"}
-                <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
-              </Button>
-            </div>
+            ) : null}
           </div>
-        </form>
-      </div>
-    </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!form.canSubmit}>
+              {card ? "Save draft" : "Add draft"}
+              <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
+            </Button>
+          </div>
+        </div>
+      </form>
+    </ModalShell>
   );
 }

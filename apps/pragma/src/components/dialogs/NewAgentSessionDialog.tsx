@@ -15,6 +15,7 @@ import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useAgentModels } from "@/hooks/use-agent-models";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
@@ -633,98 +634,96 @@ export function NewAgentSessionDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4">
-      <div className="w-full max-w-xl rounded-xl border bg-background p-5 shadow-xl">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">New agent session</h2>
-          <p className="text-sm text-muted-foreground">
-            Write a prompt, pick an agent and a worktree, then launch a session.
-          </p>
+    <ModalShell className="max-w-xl">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">New agent session</h2>
+        <p className="text-sm text-muted-foreground">
+          Write a prompt, pick an agent and a worktree, then launch a session.
+        </p>
+      </div>
+      <form
+        className="mt-5 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void form.submit();
+        }}
+      >
+        <div className="space-y-2">
+          <Label>Prompt</Label>
+          <MarkdownEditor
+            value={form.message}
+            onChange={form.setMessage}
+            onKeyDown={form.handleKeyDown}
+            placeholder="Describe what you want the agent to do…"
+            className="min-h-40"
+          />
         </div>
-        <form
-          className="mt-5 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void form.submit();
-          }}
-        >
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label>Prompt</Label>
-            <MarkdownEditor
-              value={form.message}
-              onChange={form.setMessage}
-              onKeyDown={form.handleKeyDown}
-              placeholder="Describe what you want the agent to do…"
-              className="min-h-40"
+            <Label>Agent</Label>
+            <AgentModelSelector
+              agents={form.agents}
+              modelsByAgent={form.modelsByAgent}
+              value={{ agentId: form.effectiveAgentId, selection: form.modelSelection }}
+              onChange={form.handleAgentChange}
+              onLoadModels={form.loadModels}
+              onInteract={form.markAgentManuallyChanged}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Agent</Label>
-              <AgentModelSelector
-                agents={form.agents}
-                modelsByAgent={form.modelsByAgent}
-                value={{ agentId: form.effectiveAgentId, selection: form.modelSelection }}
-                onChange={form.handleAgentChange}
-                onLoadModels={form.loadModels}
-                onInteract={form.markAgentManuallyChanged}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Worktree</Label>
-              <Select value={form.worktreeSelectValue} onValueChange={form.handleWorktreeChange}>
-                <SelectTrigger
-                  aria-label="Worktree"
-                  className="w-full"
-                  onKeyDown={form.markWorktreeManuallyChanged}
-                  onPointerDown={form.markWorktreeManuallyChanged}
-                >
-                  <span data-slot="select-value">
-                    {form.selectedWorktree ? (
-                      <>
-                        <GitBranch className="size-3.5" />
-                        <span className="truncate">
-                          {form.selectedWorktree.isMain
-                            ? "main"
-                            : (form.selectedWorktree.title ?? form.selectedWorktree.branch)}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">Select worktree</span>
-                    )}
-                  </span>
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  {form.worktrees.length === 0 ? (
-                    <SelectItem value="__none" disabled>
-                      No worktrees available
-                    </SelectItem>
+          <div className="space-y-2">
+            <Label>Worktree</Label>
+            <Select value={form.worktreeSelectValue} onValueChange={form.handleWorktreeChange}>
+              <SelectTrigger
+                aria-label="Worktree"
+                className="w-full"
+                onKeyDown={form.markWorktreeManuallyChanged}
+                onPointerDown={form.markWorktreeManuallyChanged}
+              >
+                <span data-slot="select-value">
+                  {form.selectedWorktree ? (
+                    <>
+                      <GitBranch className="size-3.5" />
+                      <span className="truncate">
+                        {form.selectedWorktree.isMain
+                          ? "main"
+                          : (form.selectedWorktree.title ?? form.selectedWorktree.branch)}
+                      </span>
+                    </>
                   ) : (
-                    form.worktrees.map((worktree) => (
-                      <SelectItem key={worktree.id} value={worktree.id}>
-                        <GitBranch className="size-3.5" />
-                        <span className="truncate">
-                          {worktree.isMain ? "main" : (worktree.title ?? worktree.branch)}
-                        </span>
-                      </SelectItem>
-                    ))
+                    <span className="text-muted-foreground">Select worktree</span>
                   )}
-                </SelectContent>
-              </Select>
-            </div>
+                </span>
+              </SelectTrigger>
+              <SelectContent position="popper">
+                {form.worktrees.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No worktrees available
+                  </SelectItem>
+                ) : (
+                  form.worktrees.map((worktree) => (
+                    <SelectItem key={worktree.id} value={worktree.id}>
+                      <GitBranch className="size-3.5" />
+                      <span className="truncate">
+                        {worktree.isMain ? "main" : (worktree.title ?? worktree.branch)}
+                      </span>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
-          {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!form.canSubmit}>
-              Start session
-              <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+        {form.error ? <p className="text-sm text-destructive">{form.error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!form.canSubmit}>
+            Start session
+            <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
+          </Button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }

@@ -17,8 +17,9 @@ interface ModalShellProps {
  */
 export function ModalShell({ children, className }: ModalShellProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 supports-backdrop-filter:backdrop-blur-md">
       <div
+        data-slot="modal-shell-card"
         className={cn(
           "bg-background w-full max-w-md rounded-xl border p-5 shadow-floating",
           className,
