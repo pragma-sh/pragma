@@ -62,7 +62,12 @@ export function AgentsMenu() {
       ) : null}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button disabled={!workspace.selectedWorktree} size="sm" variant="outline">
+          <Button
+            className="text-foreground"
+            disabled={!workspace.selectedWorktree}
+            size="sm"
+            variant="outline"
+          >
             <Bot className="size-3.5" />
             <span>Open agent</span>
             <ChevronDown className="size-3 opacity-70" />

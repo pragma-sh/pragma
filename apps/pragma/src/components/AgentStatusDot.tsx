@@ -18,9 +18,9 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
         "inline-block size-2 shrink-0 rounded-full ring-1 ring-black/30",
         status === "done" && "bg-success shadow-[0_0_6px_var(--color-success)]",
         status === "attention" &&
-          "animate-agent-attention bg-warning shadow-[0_0_8px_var(--color-warning)]",
+          "animate-agent-attention bg-destructive shadow-[0_0_8px_var(--color-destructive)]",
         status === "running" &&
-          "animate-agent-running bg-primary shadow-[0_0_6px_var(--color-primary)]",
+          "animate-agent-running bg-warning shadow-[0_0_6px_var(--color-warning)]",
         className,
       )}
       title={`Agent ${status}`}

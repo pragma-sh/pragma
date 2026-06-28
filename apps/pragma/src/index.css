@@ -98,7 +98,7 @@
   --secondary: oklch(0.96 0.003 256);
   --secondary-foreground: oklch(0.22 0.01 256);
   --muted: oklch(0.96 0.003 256);
-  --muted-foreground: oklch(0.5 0.01 256);
+  --muted-foreground: oklch(0.44 0.01 256);
   --accent: oklch(0.96 0.003 256);
   --accent-foreground: oklch(0.22 0.01 256);
 
@@ -120,7 +120,7 @@
   --diff-removed: oklch(0.58 0.2 18);
 
   --sidebar: oklch(0.97 0.002 256);
-  --sidebar-foreground: oklch(0.5 0.01 256);
+  --sidebar-foreground: oklch(0.44 0.01 256);
   --sidebar-primary: oklch(0.52 0.16 252);
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.93 0.004 256);
@@ -134,7 +134,7 @@
   --canvas: oklch(0.17 0.006 256);
   --background: oklch(0.2 0.006 256);
   --foreground: oklch(0.93 0.004 256);
-  --elevated: oklch(0.23 0.007 256);
+  --elevated: oklch(0.27 0.008 256);
 
   --card: oklch(0.23 0.007 256);
   --card-foreground: oklch(0.93 0.004 256);
@@ -145,15 +145,15 @@
   --primary-foreground: oklch(0.99 0 0);
   --primary-hover: oklch(0.52 0.17 252);
 
-  --secondary: oklch(0.26 0.007 256);
+  --secondary: oklch(0.34 0.008 256);
   --secondary-foreground: oklch(0.93 0.004 256);
   --muted: oklch(0.26 0.007 256);
-  --muted-foreground: oklch(0.7 0.009 256);
+  --muted-foreground: oklch(0.77 0.008 256);
   --accent: oklch(0.26 0.007 256);
   --accent-foreground: oklch(0.93 0.004 256);
 
   --border: oklch(0.28 0.008 256);
-  --input: oklch(0.31 0.008 256);
+  --input: oklch(0.37 0.008 256);
   --ring: oklch(0.62 0.15 252);
   --selection: oklch(0.58 0.15 252 / 0.32);
   --overlay: oklch(0.12 0.006 256 / 0.62);
@@ -170,7 +170,7 @@
   --diff-removed: oklch(0.64 0.19 18);
 
   --sidebar: oklch(0.15 0.006 256);
-  --sidebar-foreground: oklch(0.7 0.009 256);
+  --sidebar-foreground: oklch(0.77 0.008 256);
   --sidebar-primary: oklch(0.56 0.15 252);
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.26 0.007 256);
@@ -185,6 +185,22 @@
 .vibrancy .dark,
 .dark.vibrancy {
   --sidebar: oklch(0.15 0.006 256 / 0.6);
+}
+
+/* macOS vibrancy: modal cards (Radix `Dialog`/`AlertDialog` content and the
+   bespoke `ModalShell` card) render translucent so the desktop blur reads
+   through them — same model as the project rail. Unlayered on purpose: this
+   must override the `bg-popover`/`bg-background` Tailwind utilities (which sit
+   in the higher-priority `utilities` layer), and unlayered declarations outrank
+   every cascade layer regardless of specificity. The hairline ring/border and
+   `shadow-floating` elevation still frame the card against the blur. Off macOS
+   the modals keep their opaque `bg-popover`/`bg-background`. */
+.dark.vibrancy [data-slot="dialog-content"],
+.dark.vibrancy [data-slot="alert-dialog-content"] {
+  background-color: oklch(0.23 0.007 256 / 0.7);
+}
+.dark.vibrancy [data-slot="modal-shell-card"] {
+  background-color: oklch(0.2 0.006 256 / 0.7);
 }
 
 @keyframes agent-attention {
@@ -243,12 +259,6 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  /* Under macOS vibrancy the canvas itself is transparent so the project rail
-     (translucent) reveals the NSVisualEffectView blur; opaque content panes
-     paint over it. */
-  .vibrancy body {
-    background-color: transparent;
-  }
   html {
     @apply font-sans;
   }
@@ -263,4 +273,28 @@
       "liga" 0,
       "calt" 0;
   }
+}
+
+/* macOS vibrancy: the surfaces behind the translucent project rail must not
+   paint, or they block the desktop blur from the NSVisualEffectView. These live
+   OUTSIDE @layer base on purpose — they have to override Tailwind `bg-*`
+   utilities (which sit in the higher-priority `utilities` layer), and unlayered
+   declarations outrank every cascade layer regardless of specificity. The body
+   and the workspace shell root (`<main className="bg-background">`) go clear;
+   the opaque content panes (`bg-canvas` / `bg-elevated`) still paint over the
+   rail as designed. */
+.vibrancy body,
+.vibrancy main {
+  background-color: transparent;
+}
+
+/* The toolbar and secondary-sidebar tab strips share the project rail's surface
+   (`bg-sidebar`, which the vibrancy rule above already drops to 0.6 alpha) so
+   the desktop blur reads through them and the chrome regions match. Their
+   containers (`.app-content`) only need to go clear behind that translucent
+   strip — the opaque content panes inside still paint `bg-canvas`. Unlayered on
+   purpose: this must override the `bg-canvas` utility, like the body/main rules
+   above. */
+.dark.vibrancy .app-content {
+  background-color: transparent;
 }

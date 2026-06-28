@@ -171,7 +171,7 @@ function RightSidebarHeader({
   setActiveSubtab,
 }: RightSidebarHeaderProps) {
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pl-1 pr-2">
+    <div className="bg-sidebar flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border pl-1 pr-2">
       <Button
         aria-label="Collapse files sidebar"
         onClick={onCollapse}
@@ -185,7 +185,7 @@ function RightSidebarHeader({
         onValueChange={(value) => setActiveSubtab(value as RightSidebarSubtab)}
         value={activeSubtab}
       >
-        <TabsList className="h-7">
+        <TabsList className="h-7 group-data-horizontal/tabs:h-7">
           <TabsTrigger className="text-xs" value="files">
             Files
           </TabsTrigger>
@@ -204,7 +204,7 @@ function RightSidebarHeader({
           onClick={onCommitPr}
           size="sm"
           title="Commit all changes and draft a pull request"
-          variant="secondary"
+          variant="default"
         >
           {commitPrRunning ? (
             <Loader2 className="size-3.5 animate-spin" />
@@ -263,7 +263,7 @@ export function RightSidebar() {
 
   return (
     <div
-      className="bg-canvas relative flex shrink-0 flex-col border-l border-border"
+      className="app-content bg-canvas relative flex shrink-0 flex-col border-l border-sidebar-border"
       style={{ width }}
     >
       <ResizeHandle onResize={setWidth} />
@@ -277,7 +277,7 @@ export function RightSidebar() {
         setActiveSubtab={setActiveSubtab}
         worktreeId={worktreeId}
       />
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="bg-canvas min-h-0 flex-1 overflow-hidden">
         <RightSidebarBody activeSubtab={activeSubtab} generatedPrDraft={generatedPrDraft} />
       </div>
     </div>

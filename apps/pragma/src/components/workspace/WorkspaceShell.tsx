@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
+import type { MouseEvent } from "react";
 import { LayoutGrid } from "lucide-react";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
@@ -19,6 +20,12 @@ import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 
 type Workspace = ReturnType<typeof useWorkspace>;
+
+function preventNativeContextMenu(event: MouseEvent): void {
+  // Bubble-phase fallback: Radix context-menu triggers open first, then this blocks
+  // the WebView debug/native menu from appearing behind or instead of them.
+  event.preventDefault();
+}
 
 /** Global keyboard shortcuts wired to workspace actions. */
 function useWorkspaceShortcuts(workspace: Workspace, requestClose: (tab: Tab) => void) {
@@ -99,7 +106,7 @@ function WorkspaceErrorToast({ error }: { error: string | null }) {
 /** Empty state shown when no project is loaded. */
 function NoProjectsState() {
   return (
-    <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
+    <div className="bg-canvas text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
       <div className="max-w-md space-y-3">
         <h1 className="text-foreground text-2xl font-semibold">No projects yet</h1>
         <p className="text-muted-foreground text-sm">
@@ -117,7 +124,7 @@ function NoProjectsState() {
 /** Empty state shown when a project is loaded but has no tabs yet. */
 function NoTabsState({ workspace }: { workspace: Workspace }) {
   return (
-    <div className="text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
+    <div className="bg-canvas text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
       <div className="max-w-md space-y-3">
         <h1 className="text-foreground text-2xl font-semibold">Create a terminal tab</h1>
         <p className="text-muted-foreground text-sm">New tabs start in the selected worktree.</p>
@@ -142,7 +149,7 @@ function WorkspaceContent({
 }) {
   return (
     <>
-      <section className="bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="app-content bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {kanban.backToKanbanAvailable ? <BackToKanbanBar onReturn={kanban.returnToKanban} /> : null}
         <TerminalTabs />
         <WorkspaceErrorToast error={workspace.error} />
@@ -173,7 +180,11 @@ export function WorkspaceShell() {
             the terminal's ResizeObserver — at the launch size. A percentage chain
             from html/body/#root (all height:100% in index.css) does recalc on
             resize, so the terminal re-fits. */}
-        <main className="bg-background flex h-full overflow-hidden text-foreground">
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onContextMenu on <main> blocks the WebView debug menu behind Radix context menus; there is no interactive role that fits a full-shell capture. */}
+        <main
+          className="bg-background flex h-full overflow-hidden text-foreground"
+          onContextMenu={preventNativeContextMenu}
+        >
           <ProjectSidebar />
           {/* Always-mounted dialogs (new-session / deep links) so they work in
               both the normal shell and the Kanban board. */}

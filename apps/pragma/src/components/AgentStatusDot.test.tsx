@@ -17,10 +17,10 @@ describe("AgentStatusDot", () => {
 
   it("renders running and attention indicators with their state tokens", () => {
     expect(render(<AgentStatusDot status="running" />).container.firstChild).toHaveClass(
-      "bg-primary",
+      "bg-warning",
     );
     expect(render(<AgentStatusDot status="attention" />).container.firstChild).toHaveClass(
-      "bg-warning",
+      "bg-destructive",
     );
   });
 });
