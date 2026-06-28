@@ -1,5 +1,5 @@
 import type { Worktree } from "@pragma/constants";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const worktreesMergedStatusMock = vi.fn();
@@ -93,5 +93,16 @@ describe("WorktreeTree", () => {
     await screen.findByText("feature");
     await vi.waitFor(() => expect(worktreesMergedStatusMock).toHaveBeenCalledWith(["child"]));
     expect(container.querySelector(".lucide-git-merge")).toBeNull();
+  });
+
+  it("opens the row context menu on right click", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    const rowLabel = await screen.findByText("main");
+
+    fireEvent.contextMenu(rowLabel);
+
+    expect(screen.getByRole("menuitem", { name: "Copy worktree path" })).toBeInTheDocument();
   });
 });

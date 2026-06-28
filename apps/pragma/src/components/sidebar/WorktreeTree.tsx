@@ -1,4 +1,13 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Icon } from "@iconify/react";
 import { constants, type Worktree } from "@pragma/constants";
@@ -187,7 +196,7 @@ function worktreeLabel(worktree: Worktree): string {
   return worktree.isMain ? "main" : (worktree.title ?? worktree.branch);
 }
 
-interface WorktreeRowLabelProps {
+interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
   depth: number;
   expanded: boolean;
   hasChildren: boolean;
@@ -325,56 +334,67 @@ function WorktreeRowActions({
 }
 
 /** The row's visible label: expand caret, branch icon, name/rename input, actions. */
-function WorktreeRowLabel({
-  depth,
-  expanded,
-  hasChildren,
-  isMain,
-  label,
-  merged,
-  WorktreeIcon,
-  agentStatus,
-  rename,
-  startRename,
-  toggleExpanded,
-  handleSelect,
-  handleCreateChild,
-  openDelete,
-  selected,
-}: WorktreeRowLabelProps) {
-  return (
-    <div
-      className={cn(
-        "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
-        worktreeRowClass(selected),
-      )}
-      style={{ paddingLeft: 8 + depth * 14 }}
-    >
-      <WorktreeExpandCaret
-        expanded={expanded}
-        hasChildren={hasChildren}
-        label={label}
-        toggleExpanded={toggleExpanded}
-      />
-      <WorktreeRowPrimaryButton
-        agentStatus={agentStatus}
-        handleSelect={handleSelect}
-        isMain={isMain}
-        label={label}
-        merged={merged}
-        rename={rename}
-        startRename={startRename}
-        WorktreeIcon={WorktreeIcon}
-      />
-      <WorktreeRowActions
-        handleCreateChild={handleCreateChild}
-        isMain={isMain}
-        label={label}
-        openDelete={openDelete}
-      />
-    </div>
-  );
-}
+const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
+  function WorktreeRowLabel(
+    {
+      depth,
+      expanded,
+      hasChildren,
+      isMain,
+      label,
+      merged,
+      WorktreeIcon,
+      agentStatus,
+      rename,
+      startRename,
+      toggleExpanded,
+      handleSelect,
+      handleCreateChild,
+      openDelete,
+      selected,
+      className,
+      style,
+      ...props
+    },
+    ref,
+  ) {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
+          worktreeRowClass(selected),
+          className,
+        )}
+        style={{ ...style, paddingLeft: 8 + depth * 14 }}
+        {...props}
+      >
+        <WorktreeExpandCaret
+          expanded={expanded}
+          hasChildren={hasChildren}
+          label={label}
+          toggleExpanded={toggleExpanded}
+        />
+        <WorktreeRowPrimaryButton
+          agentStatus={agentStatus}
+          handleSelect={handleSelect}
+          isMain={isMain}
+          label={label}
+          merged={merged}
+          rename={rename}
+          startRename={startRename}
+          WorktreeIcon={WorktreeIcon}
+        />
+        <WorktreeRowActions
+          handleCreateChild={handleCreateChild}
+          isMain={isMain}
+          label={label}
+          openDelete={openDelete}
+        />
+      </div>
+    );
+  },
+);
 
 /** The row's right-click menu: rename, copy path/branch, open in editor, hide, delete. */
 function WorktreeContextMenu({

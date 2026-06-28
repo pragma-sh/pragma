@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useState, type ComponentPropsWithoutRef } from "react";
 import { errorMessage } from "@/lib/errors";
 
 import type { DirEntry } from "@pragma/constants";
@@ -139,25 +139,28 @@ export function FileTreeNode({
   const renaming = ctrl.renameMode?.path === entry.path;
   const renameKind: "file" | "folder" = entry.isDir ? "folder" : "file";
 
+  if (renaming) {
+    return (
+      <RenameEntryInput
+        depth={depth}
+        initialName={entry.name}
+        kind={renameKind}
+        onCancel={ctrl.cancelRename}
+        onCommit={(name) => ctrl.commitRename(entry.path, renameKind, name)}
+        siblings={siblings}
+      />
+    );
+  }
+
   return (
     <>
       <ContextMenu onOpenChange={setMenuOpen}>
         <ContextMenuTrigger asChild>
-          <FileTreeNodeTrigger
-            ctrl={ctrl}
-            depth={depth}
-            entry={entry}
-            expanded={expanded}
-            renameKind={renameKind}
-            renaming={renaming}
-            siblings={siblings}
-          />
+          <FileTreeNodeTrigger ctrl={ctrl} depth={depth} entry={entry} expanded={expanded} />
         </ContextMenuTrigger>
-        {!renaming ? (
-          <FileTreeNodeContextMenu ctrl={ctrl} entry={entry} renameKind={renameKind} />
-        ) : null}
+        <FileTreeNodeContextMenu ctrl={ctrl} entry={entry} renameKind={renameKind} />
       </ContextMenu>
-      {expanded && !renaming ? <FileTree ctrl={ctrl} depth={depth + 1} path={entry.path} /> : null}
+      {expanded ? <FileTree ctrl={ctrl} depth={depth + 1} path={entry.path} /> : null}
     </>
   );
 }
@@ -198,30 +201,32 @@ function FileTreeRowChevron({ entry, expanded }: { entry: DirEntry; expanded: bo
 }
 
 /** The clickable row: chevron, file/folder icon, and name. */
-function FileTreeRowButton({
-  ctrl,
-  depth,
-  entry,
-  expanded,
-}: {
-  ctrl: FileTreeController;
-  depth: number;
-  entry: DirEntry;
-  expanded: boolean;
-}) {
+const FileTreeRowButton = forwardRef<
+  HTMLButtonElement,
+  {
+    ctrl: FileTreeController;
+    depth: number;
+    entry: DirEntry;
+    expanded: boolean;
+  } & ComponentPropsWithoutRef<"button">
+>(function FileTreeRowButton({ ctrl, depth, entry, expanded, ...props }, ref) {
   const selected = ctrl.selectedDir === entry.path;
   const fileSelected = !entry.isDir && ctrl.selectedFile === entry.path;
+  const { className, style, ...buttonProps } = props;
   return (
     <button
+      ref={ref}
       className={cn(
         "flex h-6 w-full items-center gap-1 px-2 text-left text-xs hover:bg-muted",
         selected ? "bg-muted" : null,
         fileSelected ? "outline outline-1 -outline-offset-1 outline-primary/60" : null,
+        className,
       )}
       onClick={() => handleRowClick(ctrl, entry)}
       onDoubleClick={() => handleRowDoubleClick(ctrl, entry)}
-      style={{ paddingLeft: depth * INDENT_PX + 8 }}
+      style={{ ...style, paddingLeft: depth * INDENT_PX + 8 }}
       type="button"
+      {...buttonProps}
     >
       <FileTreeRowChevron entry={entry} expanded={expanded} />
       <Icon
@@ -231,40 +236,29 @@ function FileTreeRowButton({
       <span className="min-w-0 flex-1 truncate text-foreground">{entry.name}</span>
     </button>
   );
-}
+});
 
-/** The context-menu trigger: an inline rename input when renaming, otherwise the row button. */
-function FileTreeNodeTrigger({
-  ctrl,
-  depth,
-  entry,
-  expanded,
-  renaming,
-  renameKind,
-  siblings,
-}: {
-  ctrl: FileTreeController;
-  depth: number;
-  entry: DirEntry;
-  expanded: boolean;
-  renaming: boolean;
-  renameKind: "file" | "folder";
-  siblings: string[];
-}) {
-  if (renaming) {
-    return (
-      <RenameEntryInput
-        depth={depth}
-        initialName={entry.name}
-        kind={renameKind}
-        onCancel={ctrl.cancelRename}
-        onCommit={(name) => ctrl.commitRename(entry.path, renameKind, name)}
-        siblings={siblings}
-      />
-    );
-  }
-  return <FileTreeRowButton ctrl={ctrl} depth={depth} entry={entry} expanded={expanded} />;
-}
+/** The context-menu trigger row. It forwards Radix's injected right-click handlers. */
+const FileTreeNodeTrigger = forwardRef<
+  HTMLButtonElement,
+  {
+    ctrl: FileTreeController;
+    depth: number;
+    entry: DirEntry;
+    expanded: boolean;
+  } & ComponentPropsWithoutRef<"button">
+>(function FileTreeNodeTrigger({ ctrl, depth, entry, expanded, ...props }, ref) {
+  return (
+    <FileTreeRowButton
+      ref={ref}
+      ctrl={ctrl}
+      depth={depth}
+      entry={entry}
+      expanded={expanded}
+      {...props}
+    />
+  );
+});
 
 /** Right-click actions: new file/folder, rename, delete. */
 function FileTreeNodeContextMenu({
