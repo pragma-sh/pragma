@@ -105,4 +105,17 @@ describe("WorktreeTree", () => {
 
     expect(screen.getByRole("menuitem", { name: "Copy worktree path" })).toBeInTheDocument();
   });
+
+  it("shows the new-worktree button on the main worktree row", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    const onCreateChild = vi.fn();
+
+    render(<WorktreeTree onCreateChild={onCreateChild} />);
+
+    const button = await screen.findByRole("button", { name: "New worktree from main" });
+    fireEvent.click(button);
+
+    expect(selectWorktreeMock).toHaveBeenCalledWith("main");
+    expect(onCreateChild).toHaveBeenCalledOnce();
+  });
 });

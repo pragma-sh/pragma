@@ -296,7 +296,7 @@ function WorktreeRowPrimaryButton({
   );
 }
 
-/** Row actions: an always-visible create-child button on main, hover-revealed
+/** Row actions: an always-visible new-worktree button on main, hover-revealed
  *  create-child and delete buttons on nested worktrees. */
 function WorktreeRowActions({
   isMain,
@@ -312,12 +312,14 @@ function WorktreeRowActions({
   if (isMain) {
     return (
       <Button
-        aria-label={`Create child worktree from ${label}`}
-        size="icon-xs"
-        variant="ghost"
+        aria-label={`New worktree from ${label}`}
+        className="ml-1 h-6 px-1.5 text-xs"
+        size="xs"
+        variant="secondary"
         onClick={handleCreateChild}
       >
         <GitBranchPlus />
+        New
       </Button>
     );
   }
