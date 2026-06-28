@@ -177,9 +177,11 @@ outside Pragma.
 silently no-ops in every non-Pragma Claude session (it's installed at user scope, so it
 runs everywhere). Inside Pragma the terminal injects `PRAGMA_DAEMON_SOCKET`,
 `PRAGMA_TAB_ID`, and `PRAGMA_WORKTREE_ID`; `report.sh` keys its marker on
-`PRAGMA_TAB_ID`, and `pragma-cli` (on `~/.local/bin`, installed by the app on startup)
-reads all three. Every `pragma-cli` call is wrapped `… >/dev/null 2>&1 || true` so a
-missing CLI or down daemon can never disrupt a Claude session.
+`PRAGMA_TAB_ID`, and `pragma-cli` (installed by the app on startup) reads all three.
+Pragma sessions also export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; `report.sh` uses
+that absolute path before falling back to `pragma-cli` from `PATH`. Every call is wrapped
+`… >/dev/null 2>&1 || true` so a missing CLI or down daemon can never disrupt a Claude
+session.
 
 ## Agent launcher config
 

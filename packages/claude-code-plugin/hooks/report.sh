@@ -30,6 +30,7 @@ set -u
 [ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
 agent="claude-code"
+pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
 state_dir="${TMPDIR:-/tmp}"
 # Per-tab files: the marker holds the active turn's token (presence = a turn is
@@ -47,7 +48,7 @@ max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Claude Code session (e.g. when pragma-cli or the server is unavailable).
 report() {
-  pragma-cli --agent "$agent" report "$@" >/dev/null 2>&1 || true
+  "$pragma_cli" --agent "$agent" report "$@" >/dev/null 2>&1 || true
 }
 
 # Reads the hook's stdin JSON and prints the `transcript_path` field, if any.

@@ -6,7 +6,9 @@ instead of hand-building `pragma-cli` argv.
 ## What it does
 
 Shells out to the `pragma-cli` binary (installed to `~/.local/bin` by the app on
-startup) with typed options. Bundled by Bunup as ESM, CJS, and `.d.ts`.
+startup) with typed options. When `executable` is not passed, the SDK uses
+`PRAGMA_CLI` from the merged environment before falling back to `pragma-cli`. Bundled by
+Bunup as ESM, CJS, and `.d.ts`.
 
 ## When to use it
 

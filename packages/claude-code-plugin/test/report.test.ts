@@ -57,23 +57,25 @@ function markerPath(): string {
 function run(
   event: string,
   {
+    env: extraEnv = {},
     socket = true,
     stdin = "",
     args = [],
-  }: { socket?: boolean; stdin?: string; args?: string[] } = {},
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string; args?: string[] } = {},
 ): string[] {
-  const env: Record<string, string> = {
+  const runEnv: Record<string, string> = {
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     TMPDIR: tmpEnvDir,
     PRAGMA_TAB_ID: TAB_ID,
     PRAGMA_TEST_LOG: logPath,
     // Poll fast so the background watcher's behavior is observable within a test.
     PRAGMA_WATCH_INTERVAL: "0.1",
+    ...extraEnv,
   };
   if (socket) {
-    env.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
+    runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
-  execFileSync("sh", [REPORT_SH, event, ...args], { env, input: stdin });
+  execFileSync("sh", [REPORT_SH, event, ...args], { env: runEnv, input: stdin });
   return calls();
 }
 
@@ -149,6 +151,14 @@ describe("report.sh", () => {
   it("reports started and marks the turn in flight", () => {
     expect(run("started")).toEqual(["--agent claude-code report started"]);
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("uses PRAGMA_CLI when it is set", () => {
+    expect(
+      run("started", {
+        env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
+      }),
+    ).toEqual(["--agent claude-code report started"]);
   });
 
   it("reports stopped and clears the in-flight marker on normal completion", () => {

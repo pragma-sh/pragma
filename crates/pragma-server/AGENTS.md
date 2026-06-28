@@ -47,4 +47,6 @@ Lifecycle is owned by a host service manager or client-side bootstrap.
 The server keeps runtime-only agent status keyed by `(worktreeId, tabId, agent)`.
 Shell sessions export both `PRAGMA_SERVER_SOCKET` and the legacy
 `PRAGMA_DAEMON_SOCKET` so existing plugins keep working while clients migrate to
-`pragma-cli`.
+`pragma-cli`. They also export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
+directory to `PATH` so plugins can find the helper even when the user's login shell omits
+`~/.local/bin`.

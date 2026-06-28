@@ -174,13 +174,14 @@ function runPragmaAgent(
   args: readonly string[],
   options: PragmaAgentSpawnOptions,
 ): Promise<PragmaCliResult> {
-  const executable = options.executable ?? DEFAULT_PRAGMA_CLI_EXECUTABLE;
+  const env = { ...process.env, ...options.env };
+  const executable = options.executable ?? env.PRAGMA_CLI ?? DEFAULT_PRAGMA_CLI_EXECUTABLE;
   return new Promise((resolve, reject) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const child = spawn(executable, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env,
       signal: options.signal,
       stdio: ["ignore", "pipe", "pipe"],
     });

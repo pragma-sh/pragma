@@ -119,7 +119,9 @@ Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is in
 ## Guard + non-Pragma sessions
 
 `report.sh` exits 0 when `PRAGMA_DAEMON_SOCKET` is unset. Hooks live in user-scope
-`~/.cursor/hooks.json`, so the env guard is mandatory.
+`~/.cursor/hooks.json`, so the env guard is mandatory. Inside Pragma, sessions export
+`PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; `report.sh` uses that absolute path before
+falling back to `pragma-cli` from `PATH`.
 
 ## Agent launcher config
 

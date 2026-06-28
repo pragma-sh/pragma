@@ -163,8 +163,11 @@ pre-TUI gates / input semantics owned by that agent config; core must not hard-c
 per-agent keystrokes. Bundled configs live in
 `apps/pragma/src-tauri/resources/pragma/agents/` (staged by
 `scripts/stage-daemon-sidecar.sh`) and are installed/updated into `~/.pragma/agents`
-on app startup. `pragma-cli` is installed/updated to `~/.local/bin` on startup; the
-app emits a UI warning if that directory is not on `$PATH`.
+on app startup. `pragma-cli` is installed/updated to `~/.local/bin` on startup; daemon
+terminal sessions export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
+directory to `PATH` so bundled plugins can report status even when the user's shell
+doesn't include it. The app still emits a UI warning if that directory is not on the
+app's startup `$PATH`.
 
 `models` may be `static` or `command` backed. Pragma resolves model lists lazily when the
 selector submenu is hovered/focused, caches the last result, executes command-backed

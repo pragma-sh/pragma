@@ -20,6 +20,7 @@ set -u
 [ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
 agent="cursor"
+pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
 state_dir="${TMPDIR:-/tmp}"
 # Presence of the marker = a turn is in flight (keyed per Pragma tab). It gates
@@ -30,7 +31,7 @@ marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Cursor session (e.g. when pragma-cli or the server is unavailable).
 report() {
-  pragma-cli --agent "$agent" report "$@" >/dev/null 2>&1 || true
+  "$pragma_cli" --agent "$agent" report "$@" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in
