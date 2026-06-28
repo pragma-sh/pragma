@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -114,7 +115,7 @@ impl Session {
         cwd: String,
         cols: u16,
         rows: u16,
-        daemon_socket: String,
+        server_socket: String,
     ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
             rows,
@@ -129,7 +130,12 @@ impl Session {
         command.env("COLORTERM", "truecolor");
         command.env("PRAGMA_TAB_ID", &id);
         command.env("PRAGMA_WORKTREE_ID", worktree_id);
-        command.env("PRAGMA_DAEMON_SOCKET", daemon_socket);
+        command.env("PRAGMA_DAEMON_SOCKET", &server_socket);
+        command.env("PRAGMA_SERVER_SOCKET", server_socket);
+        if let Some(cli_path) = pragma_cli_path() {
+            command.env("PRAGMA_CLI", &cli_path);
+            command.env("PATH", path_with_cli_dir(&cli_path));
+        }
         let child = pair.slave.spawn_command(command)?;
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
@@ -587,9 +593,39 @@ fn shell_path() -> String {
     })
 }
 
+fn pragma_cli_path() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .map(|home| home.join(".local/bin/pragma-cli"))
+}
+
+fn path_with_cli_dir(cli_path: &Path) -> String {
+    path_with_cli_dir_from(cli_path, std::env::var_os("PATH"))
+}
+
+fn path_with_cli_dir_from(cli_path: &Path, existing: Option<std::ffi::OsString>) -> String {
+    let Some(cli_dir) = cli_path.parent() else {
+        return existing
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    };
+    let mut paths = vec![cli_dir.to_path_buf()];
+    let fallback = existing
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Some(existing) = existing {
+        paths.extend(std::env::split_paths(&existing).filter(|entry| entry != cli_dir));
+    }
+    std::env::join_paths(paths).map_or(fallback, |path| path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{OscChunk, OscParser, OutputCoalescer, Scrollback};
+    use std::path::Path;
+
+    use super::{path_with_cli_dir_from, OscChunk, OscParser, OutputCoalescer, Scrollback};
     use pragma_protocol::EventFrame;
 
     #[test]
@@ -737,5 +773,15 @@ mod tests {
         let chunks = parser.push(b"\x1b]0;first\x07\x1b]0;second\x07");
         let (_, titles) = split(chunks);
         assert_eq!(titles, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn cli_dir_is_prepended_to_path_once() {
+        let path = path_with_cli_dir_from(
+            Path::new("/Users/test/.local/bin/pragma-cli"),
+            Some("/usr/bin:/Users/test/.local/bin:/bin".into()),
+        );
+
+        assert_eq!(path, "/Users/test/.local/bin:/usr/bin:/bin");
     }
 }

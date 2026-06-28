@@ -16,21 +16,22 @@
 
 set -u
 
-# Outside Pragma there is no daemon to report to; every event is a silent no-op.
-[ -n "${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
+# Outside Pragma there is no server to report to; every event is a silent no-op.
+[ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
 agent="cursor"
+pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
 state_dir="${TMPDIR:-/tmp}"
 # Presence of the marker = a turn is in flight (keyed per Pragma tab). It gates
 # the attention/running reports so a stray event outside a turn can't flash a
 # phantom status onto an already-finished turn.
-marker="${state_dir}/pragma-agent-${agent}-${tab}.active"
+marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
-# a Cursor session (e.g. when pragma-agent or the daemon is unavailable).
+# a Cursor session (e.g. when pragma-cli or the server is unavailable).
 report() {
-  pragma-agent --agent "$agent" report "$@" >/dev/null 2>&1 || true
+  "$pragma_cli" --agent "$agent" report "$@" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in

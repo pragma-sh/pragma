@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { GitBranchPlus, LayoutGrid, Plus } from "lucide-react";
+import { LayoutGrid, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -8,6 +8,7 @@ import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog"
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
+import { startWindowDrag } from "@/lib/window-drag";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -33,31 +34,17 @@ export function ProjectSidebar() {
       onTouchStart={cycle.onTouchStart}
       onTouchEnd={cycle.onTouchEnd}
     >
-      <div className="space-y-3 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Projects
-            </p>
-            <h2 className="truncate text-sm font-semibold">
-              {workspace.activeProject?.name ?? "Pragma"}
-            </h2>
-          </div>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setProjectDialogOpen(true)}
-            aria-label="Add project"
-          >
-            <Plus />
-          </Button>
-        </div>
-      </div>
-      <Separator />
-      <div className="flex items-center justify-between px-3 py-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Worktrees
-        </p>
+      {/* Draggable titlebar strip: clears the inset macOS traffic lights and
+          gives the frameless window a drag handle. The project row itself is
+          the drag handle so content sits right under the reserved titlebar. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
+      <div
+        className="titlebar-pad flex items-center justify-between px-3 pt-2 pb-1"
+        onMouseDown={startWindowDrag}
+      >
+        <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
+          {workspace.activeProject?.name ?? "Pragma"}
+        </h2>
         <div className="flex items-center gap-0.5">
           <Button
             aria-label="Toggle prompt board"
@@ -70,13 +57,12 @@ export function ProjectSidebar() {
             <LayoutGrid />
           </Button>
           <Button
-            aria-label="Create worktree"
-            disabled={!workspace.selectedWorktree}
+            aria-label="Add project"
             size="icon-sm"
             variant="ghost"
-            onClick={() => setWorktreeDialogOpen(true)}
+            onClick={() => setProjectDialogOpen(true)}
           >
-            <GitBranchPlus />
+            <Plus />
           </Button>
         </div>
       </div>

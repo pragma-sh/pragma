@@ -6,3 +6,7 @@ bun run typecheck
 cargo fmt --all -- --check
 bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
 cargo check --workspace --all-targets
+
+# Fallow code intelligence: block on dead-code/duplication/complexity issues
+# this branch *introduces* (audit --gate new-only, diffed against main).
+bun run fallow:check

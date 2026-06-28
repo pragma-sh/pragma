@@ -4,6 +4,7 @@ import type {
   ChangeStatus,
   DiffSide,
   DirEntry,
+  FileChange,
   FileContents,
   FileDiff,
   GitHubAuthStatus,
@@ -133,7 +134,7 @@ export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("pragma:agent-status-reset", () => handler());
 }
 
-/** Warns once when `~/.local/bin` is not on PATH after installing `pragma-agent`. */
+/** Warns once when `~/.local/bin` is not on PATH after installing `pragma-cli`. */
 export function onAgentCliPathWarning(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
@@ -242,7 +243,7 @@ export function restartDaemon(): Promise<void> {
   return invoke("restart_daemon");
 }
 
-/** Returns the current contents of the daemon log file (empty if not yet created). */
+/** Returns the current contents of the server log file (empty if not yet created). */
 export function readDaemonLog(): Promise<string> {
   return invoke<string>("read_daemon_log");
 }
@@ -505,6 +506,23 @@ export function renameFile(worktreeId: string, fromPath: string, toPath: string)
  */
 export function deleteFile(worktreeId: string, path: string): Promise<void> {
   return invoke("delete_file", { worktreeId, path });
+}
+
+/**
+ * Subscribes to live filesystem changes under a worktree. The server runs one
+ * recursive watcher per worktree and streams each {@link FileChange} (worktree-
+ * relative POSIX path, `.git` filtered out) through a Tauri channel. Resolves
+ * with the channel so callers can detach (`channel.onmessage = noop`) when they
+ * unmount — Tauri has no explicit channel-close API.
+ */
+export function watchWorktreeFiles(
+  worktreeId: string,
+  onChange: (change: FileChange) => void,
+): Promise<Channel<FileChange>> {
+  const channel = new Channel<FileChange>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+  channel.onmessage = onChange;
+  return invoke<void>("watch_worktree_files", { worktreeId, onEvent: channel }).then(() => channel);
 }
 
 /**

@@ -1,12 +1,11 @@
 use std::thread;
 use std::time::Duration;
 
+use pragma_client::request_subscribe_agents;
 use pragma_protocol::{
-    read_frame, write_json_frame, AgentReportPayload, EventFrame, Frame, RequestFrame, RequestKind,
-    ServerFrame,
+    read_frame, write_json_frame, AgentReportPayload, EventFrame, Frame, ServerFrame,
 };
 use tauri::{AppHandle, Emitter};
-use uuid::Uuid;
 
 use crate::pty::PtyClient;
 
@@ -27,16 +26,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
     let mut stream = pty
         .connect_with_spawn()
         .map_err(|error| error.to_string())?;
-    let request = RequestFrame {
-        request_id: Uuid::new_v4().to_string(),
-        kind: RequestKind::SubscribeAgents,
-        session_id: None,
-        worktree_id: None,
-        cwd: None,
-        cols: None,
-        rows: None,
-        data: None,
-    };
+    let request = request_subscribe_agents();
     write_json_frame(&mut stream, &request).map_err(|error| error.to_string())?;
     loop {
         match read_frame(&mut stream).map_err(|error| error.to_string())? {
@@ -67,7 +57,12 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                     };
                     let _ = app.emit(AGENT_REPORT_EVENT, payload);
                 }
-                Ok(ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_))
+                Ok(
+                    ServerFrame::Hello(_)
+                    | ServerFrame::Response(_)
+                    | ServerFrame::Rpc(_)
+                    | ServerFrame::Event(_),
+                )
                 | Err(_) => {}
             },
             Frame::Output { .. } => {}

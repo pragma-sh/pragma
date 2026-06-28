@@ -14,7 +14,7 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
-describe("pragma-agent sdk", () => {
+describe("pragma-cli sdk", () => {
   it("runs report started with the typed agent flag", async () => {
     const { argsFile, executable } = await createArgCaptureExecutable();
 
@@ -96,6 +96,17 @@ describe("pragma-agent sdk", () => {
       exitCode: 7,
       stderr: "nope",
     } satisfies Partial<PragmaCliError>);
+  });
+
+  it("uses PRAGMA_CLI from the merged environment when no executable is passed", async () => {
+    const { argsFile, executable } = await createArgCaptureExecutable();
+
+    await reportStarted({
+      agent: "mock",
+      env: { PRAGMA_CLI: executable, PRAGMA_SDK_ARGS_FILE: argsFile },
+    });
+
+    await expect(readArgs(argsFile)).resolves.toEqual(["--agent", "mock", "report", "started"]);
   });
 });
 

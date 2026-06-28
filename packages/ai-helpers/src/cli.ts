@@ -145,107 +145,153 @@ async function runLogin(provider: string): Promise<void> {
   emit({ type: "result", provider });
 }
 
+async function runMethods(): Promise<number> {
+  const methods: AiAuthMethod[] = listAuthMethods();
+  emit({ type: "methods", methods });
+  return 0;
+}
+
+async function runStatus(): Promise<number> {
+  const authStorage = createAuthStorage();
+  statusEvent(createModelRegistry(authStorage), authStorage);
+  return 0;
+}
+
+async function runSetKey(args: string[]): Promise<number> {
+  const provider = flag(args, "provider");
+  if (!provider) throw new Error("--provider is required");
+  const key = (await readAllStdin()).trim();
+  if (!key) throw new Error("No API key provided on stdin");
+  const authStorage = createAuthStorage();
+  setApiKey(authStorage, provider, key);
+  authStorage.reload();
+  statusEvent(createModelRegistry(authStorage), authStorage);
+  return 0;
+}
+
+async function runLogout(args: string[]): Promise<number> {
+  const provider = flag(args, "provider");
+  if (!provider) throw new Error("--provider is required");
+  const authStorage = createAuthStorage();
+  logout(authStorage, provider);
+  statusEvent(createModelRegistry(authStorage), authStorage);
+  return 0;
+}
+
+async function runCommitMessage(args: string[]): Promise<number> {
+  const cwd = flag(args, "cwd") ?? process.cwd();
+  const stagedDiff = await readAllStdin();
+  const authStorage = createAuthStorage();
+  const registry = createModelRegistry(authStorage);
+  const message = await generateCommitMessage({ stagedDiff, cwd, authStorage, registry });
+  emit({ type: "result", message });
+  return 0;
+}
+
+function parseCommitPlanContext(raw: string): {
+  allowedPaths: string[];
+  status: string;
+  diffStat: string;
+  worktreeDiff: string;
+} {
+  const {
+    allowedPaths = [],
+    status = "",
+    diffStat = "",
+    worktreeDiff = "",
+  } = JSON.parse(raw) as {
+    allowedPaths?: string[];
+    status?: string;
+    diffStat?: string;
+    worktreeDiff?: string;
+  };
+  return { allowedPaths, status, diffStat, worktreeDiff };
+}
+
+async function runCommitPlan(args: string[]): Promise<number> {
+  const cwd = flag(args, "cwd") ?? process.cwd();
+  const context = parseCommitPlanContext(await readAllStdin());
+  const authStorage = createAuthStorage();
+  const registry = createModelRegistry(authStorage);
+  const plan = await generateCommitPlan({ ...context, cwd, authStorage, registry });
+  emit({ type: "result", commits: plan.commits });
+  return 0;
+}
+
+function parsePullRequestContext(raw: string): {
+  gitLog: string;
+  diffStat: string;
+  committedDiff: string;
+} {
+  const context = JSON.parse(raw) as {
+    gitLog?: string;
+    diffStat?: string;
+    committedDiff?: string;
+  };
+  return {
+    gitLog: context.gitLog ?? "",
+    diffStat: context.diffStat ?? "",
+    committedDiff: context.committedDiff ?? "",
+  };
+}
+
+async function runPullRequest(args: string[]): Promise<number> {
+  const cwd = flag(args, "cwd") ?? process.cwd();
+  const context = parsePullRequestContext(await readAllStdin());
+  const authStorage = createAuthStorage();
+  const registry = createModelRegistry(authStorage);
+  const draft = await generatePullRequestDraft({ ...context, cwd, authStorage, registry });
+  emit({ type: "result", title: draft.title, body: draft.body });
+  return 0;
+}
+
+async function runLoginCommand(args: string[]): Promise<number> {
+  const provider = flag(args, "provider");
+  if (!provider) throw new Error("--provider is required");
+  await runLogin(provider);
+  return 0;
+}
+
+const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
+  methods: runMethods,
+  status: runStatus,
+  "set-key": runSetKey,
+  logout: runLogout,
+  "commit-message": runCommitMessage,
+  "commit-plan": runCommitPlan,
+  "pull-request": runPullRequest,
+  login: runLoginCommand,
+};
+
 async function main(): Promise<number> {
   const [, , command, ...args] = process.argv;
-
   try {
-    switch (command) {
-      case "methods": {
-        const methods: AiAuthMethod[] = listAuthMethods();
-        emit({ type: "methods", methods });
-        return 0;
-      }
-      case "status": {
-        const authStorage = createAuthStorage();
-        statusEvent(createModelRegistry(authStorage), authStorage);
-        return 0;
-      }
-      case "set-key": {
-        const provider = flag(args, "provider");
-        if (!provider) throw new Error("--provider is required");
-        const key = (await readAllStdin()).trim();
-        if (!key) throw new Error("No API key provided on stdin");
-        const authStorage = createAuthStorage();
-        setApiKey(authStorage, provider, key);
-        authStorage.reload();
-        statusEvent(createModelRegistry(authStorage), authStorage);
-        return 0;
-      }
-      case "logout": {
-        const provider = flag(args, "provider");
-        if (!provider) throw new Error("--provider is required");
-        const authStorage = createAuthStorage();
-        logout(authStorage, provider);
-        statusEvent(createModelRegistry(authStorage), authStorage);
-        return 0;
-      }
-      case "commit-message": {
-        const cwd = flag(args, "cwd") ?? process.cwd();
-        const stagedDiff = await readAllStdin();
-        const authStorage = createAuthStorage();
-        const registry = createModelRegistry(authStorage);
-        const message = await generateCommitMessage({ stagedDiff, cwd, authStorage, registry });
-        emit({ type: "result", message });
-        return 0;
-      }
-      case "commit-plan": {
-        const cwd = flag(args, "cwd") ?? process.cwd();
-        const context = JSON.parse(await readAllStdin()) as {
-          allowedPaths?: string[];
-          status?: string;
-          diffStat?: string;
-          worktreeDiff?: string;
-        };
-        const authStorage = createAuthStorage();
-        const registry = createModelRegistry(authStorage);
-        const plan = await generateCommitPlan({
-          allowedPaths: context.allowedPaths ?? [],
-          status: context.status ?? "",
-          diffStat: context.diffStat ?? "",
-          worktreeDiff: context.worktreeDiff ?? "",
-          cwd,
-          authStorage,
-          registry,
-        });
-        emit({ type: "result", commits: plan.commits });
-        return 0;
-      }
-      case "pull-request": {
-        const cwd = flag(args, "cwd") ?? process.cwd();
-        const context = JSON.parse(await readAllStdin()) as {
-          gitLog?: string;
-          diffStat?: string;
-          committedDiff?: string;
-        };
-        const authStorage = createAuthStorage();
-        const registry = createModelRegistry(authStorage);
-        const draft = await generatePullRequestDraft({
-          gitLog: context.gitLog ?? "",
-          diffStat: context.diffStat ?? "",
-          committedDiff: context.committedDiff ?? "",
-          cwd,
-          authStorage,
-          registry,
-        });
-        emit({ type: "result", title: draft.title, body: draft.body });
-        return 0;
-      }
-      case "login": {
-        const provider = flag(args, "provider");
-        if (!provider) throw new Error("--provider is required");
-        await runLogin(provider);
-        return 0;
-      }
-      default:
-        emitError(`Unknown command: ${command ?? "(none)"}`, "usage");
-        return 2;
-    }
+    return await dispatchCommand(command, args);
   } catch (error) {
-    if (error instanceof NoStagedChangesError) emitError(error, "no-staged");
-    else if (error instanceof NoCommittedChangesError) emitError(error, "no-committed");
-    else if (error instanceof NoWorktreeChangesError) emitError(error, "no-changes");
-    else emitError(error);
+    emitCommandError(error);
     return 1;
+  }
+}
+
+async function dispatchCommand(command: string | undefined, args: string[]): Promise<number> {
+  const handler = command ? COMMANDS[command] : undefined;
+  if (handler) {
+    return await handler(args);
+  }
+  emitError(`Unknown command: ${command ?? "(none)"}`, "usage");
+  return 2;
+}
+
+/** Maps a thrown error to its NDJSON `code` for the "nothing to do" cases. */
+function emitCommandError(error: unknown): void {
+  if (error instanceof NoStagedChangesError) {
+    emitError(error, "no-staged");
+  } else if (error instanceof NoCommittedChangesError) {
+    emitError(error, "no-committed");
+  } else if (error instanceof NoWorktreeChangesError) {
+    emitError(error, "no-changes");
+  } else {
+    emitError(error);
   }
 }
 

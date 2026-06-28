@@ -5,6 +5,7 @@ import { GitMerge, GitPullRequestCreate, Loader2, SquareArrowOutUpRight } from "
 import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma/constants";
 
 import { Button } from "@/components/ui/button";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { useKanban } from "@/state/kanban-context";
 
@@ -70,48 +71,46 @@ export function KanbanCompletionDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border bg-background p-5 shadow-xl">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Complete card</h2>
-          <p className="truncate text-sm text-muted-foreground">{card.branchName}</p>
-        </div>
+    <ModalShell>
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">Complete card</h2>
+        <p className="truncate text-sm text-muted-foreground">{card.branchName}</p>
+      </div>
 
-        {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
 
-        <div className="mt-5 space-y-2">
-          <CompletionOption
-            icon={<GitMerge className="size-4" />}
-            title="Commit all and merge"
-            description="Stage everything, generate a commit message, commit, and merge into the parent branch — runs in the background."
-            running={false}
-            disabled={manualRunning}
-            onClick={() => complete("commitMerge")}
-          />
-          <CompletionOption
-            icon={<GitPullRequestCreate className="size-4" />}
-            title="Commit all and open PR"
-            description="Commit everything, push the branch, and open a pull request — runs in the background."
-            running={false}
-            disabled={manualRunning}
-            onClick={() => complete("commitPr")}
-          />
-          <CompletionOption
-            icon={<SquareArrowOutUpRight className="size-4" />}
-            title="Go to worktree"
-            description="Mark complete and open the worktree in the normal workspace."
-            running={manualRunning}
-            disabled={manualRunning}
-            onClick={() => void goToWorktree()}
-          />
-          <div className="flex justify-end pt-2">
-            <Button variant="ghost" disabled={manualRunning} onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </div>
+      <div className="mt-5 space-y-2">
+        <CompletionOption
+          icon={<GitMerge className="size-4" />}
+          title="Commit all and merge"
+          description="Stage everything, generate a commit message, commit, and merge into the parent branch — runs in the background."
+          running={false}
+          disabled={manualRunning}
+          onClick={() => complete("commitMerge")}
+        />
+        <CompletionOption
+          icon={<GitPullRequestCreate className="size-4" />}
+          title="Commit all and open PR"
+          description="Commit everything, push the branch, and open a pull request — runs in the background."
+          running={false}
+          disabled={manualRunning}
+          onClick={() => complete("commitPr")}
+        />
+        <CompletionOption
+          icon={<SquareArrowOutUpRight className="size-4" />}
+          title="Go to worktree"
+          description="Mark complete and open the worktree in the normal workspace."
+          running={manualRunning}
+          disabled={manualRunning}
+          onClick={() => void goToWorktree()}
+        />
+        <div className="flex justify-end pt-2">
+          <Button variant="ghost" disabled={manualRunning} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 

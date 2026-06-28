@@ -19,7 +19,7 @@ packages/opencode-plugin/
 ```
 
 The built `dist/index.mjs` is **not** bundled by Pragma — `stage-daemon-sidecar.sh`
-stages only the daemon/`pragma-agent` sidecars and the bundled agent launcher configs
+stages only the server/`pragma-cli` sidecars and the bundled agent launcher configs
 (`pragma/agents/`). To use the plugin, register its absolute path in opencode's own
 `plugin` config (see _Installation_ below).
 

@@ -2,7 +2,7 @@
 # Pragma <-> Claude Code status bridge.
 #
 # Invoked by hooks/hooks.json on Claude Code lifecycle events (see the hook ->
-# status table in AGENTS.md). Each event is translated into a `pragma-agent`
+# status table in AGENTS.md). Each event is translated into a `pragma-cli`
 # status report for the current Pragma terminal tab. Outside a Pragma terminal
 # PRAGMA_DAEMON_SOCKET is unset and there is no daemon to talk to, so every
 # event is a silent no-op (exit 0).
@@ -26,17 +26,18 @@
 
 set -u
 
-# Outside Pragma there is no daemon to report to; every event is a silent no-op.
-[ -n "${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
+# Outside Pragma there is no server to report to; every event is a silent no-op.
+[ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
 
 agent="claude-code"
+pragma_cli="${PRAGMA_CLI:-pragma-cli}"
 tab="${PRAGMA_TAB_ID:-unknown}"
 state_dir="${TMPDIR:-/tmp}"
 # Per-tab files: the marker holds the active turn's token (presence = a turn is
 # in flight); the pidfile holds the current watcher's pid so a new turn (or a
 # normal end) can tear it down. Both are keyed on PRAGMA_TAB_ID.
-marker="${state_dir}/pragma-agent-${agent}-${tab}.active"
-pidfile="${state_dir}/pragma-agent-${agent}-${tab}.watcher"
+marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
+pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
@@ -45,9 +46,9 @@ interval="${PRAGMA_WATCH_INTERVAL:-1}"
 max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
-# a Claude Code session (e.g. when pragma-agent or the daemon is unavailable).
+# a Claude Code session (e.g. when pragma-cli or the server is unavailable).
 report() {
-  pragma-agent --agent "$agent" report "$@" >/dev/null 2>&1 || true
+  "$pragma_cli" --agent "$agent" report "$@" >/dev/null 2>&1 || true
 }
 
 # Reads the hook's stdin JSON and prints the `transcript_path` field, if any.

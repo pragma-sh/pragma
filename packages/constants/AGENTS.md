@@ -31,8 +31,9 @@ The Rust side parses `values.json` against the schema-generated types at startup
 
 - `app.name` / `app.identifier` — mirror in `src-tauri/tauri.conf.json` (Tauri reads
   its config statically; keep the two in sync if you change window defaults here).
-- `daemon.protocolVersion` — **bump whenever you change the daemon wire protocol or
-  PTY-stream handling**; see `crates/pragma-daemon/AGENTS.md`.
+- `daemon.protocolVersion` — protocol compatibility value for `pragma-server`; see
+  `crates/pragma-server/AGENTS.md`.
+- `protocol.*` — RPC method, event, and error names shared by Rust and TypeScript.
 - `github.*` — OAuth client id, scopes, endpoint URLs.
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and
   Rust (`keybindings::default_config`).

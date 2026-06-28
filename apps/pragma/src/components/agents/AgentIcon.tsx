@@ -14,6 +14,6 @@ export function AgentIcon({ agent, className }: { agent: AgentConfig; className?
       src={agent.iconDataUrl}
     />
   ) : (
-    <Bot className={cn("size-4 text-amber-200", className)} />
+    <Bot className={cn("size-4 text-skill", className)} />
   );
 }

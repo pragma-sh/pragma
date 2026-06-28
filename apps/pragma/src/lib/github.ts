@@ -510,6 +510,52 @@ export async function unresolveReviewThread(threadId: string): Promise<void> {
   );
 }
 
+/** Tallies one check run into the passed/failed/pending counters. */
+function tallyCheckRun(
+  run: { status: string; conclusion: string | null },
+  counts: ChecksCounts,
+): void {
+  if (run.status !== "completed") {
+    counts.pending += 1;
+  } else if (run.conclusion === "success" || run.conclusion === "neutral") {
+    counts.passed += 1;
+  } else if (run.conclusion === "failure" || run.conclusion === "timed_out") {
+    counts.failed += 1;
+  }
+}
+
+/** Tallies one commit status into the passed/failed/pending counters. */
+function tallyStatus(state: string, counts: ChecksCounts): void {
+  if (state === "success") {
+    counts.passed += 1;
+  } else if (state === "failure" || state === "error") {
+    counts.failed += 1;
+  } else {
+    counts.pending += 1;
+  }
+}
+
+interface ChecksCounts {
+  passed: number;
+  failed: number;
+  pending: number;
+}
+
+/** Derives the rollup state from counts: failure > pending > success > none. */
+function checksStateFromCounts(counts: ChecksCounts): ChecksStatus["state"] {
+  const total = counts.passed + counts.failed + counts.pending;
+  if (total === 0) {
+    return "none";
+  }
+  if (counts.failed > 0) {
+    return "failure";
+  }
+  if (counts.pending > 0) {
+    return "pending";
+  }
+  return "success";
+}
+
 /** Summarizes CI checks + commit statuses for a ref (the merge card). */
 export async function getChecksStatus(repo: GitHubRepoRef, ref: string): Promise<ChecksStatus> {
   const octokit = await client();
@@ -518,40 +564,20 @@ export async function getChecksStatus(repo: GitHubRepoRef, ref: string): Promise
     octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref }),
   ]);
 
-  let passed = 0;
-  let failed = 0;
-  let pending = 0;
+  const counts: ChecksCounts = { passed: 0, failed: 0, pending: 0 };
   for (const run of checks.data.check_runs) {
-    if (run.status !== "completed") {
-      pending += 1;
-    } else if (run.conclusion === "success" || run.conclusion === "neutral") {
-      passed += 1;
-    } else if (run.conclusion === "failure" || run.conclusion === "timed_out") {
-      failed += 1;
-    }
+    tallyCheckRun(run, counts);
   }
   for (const status of combined.data.statuses) {
-    if (status.state === "success") {
-      passed += 1;
-    } else if (status.state === "failure" || status.state === "error") {
-      failed += 1;
-    } else {
-      pending += 1;
-    }
+    tallyStatus(status.state, counts);
   }
 
-  const total = passed + failed + pending;
-  let state: ChecksStatus["state"] = "none";
-  if (total > 0) {
-    if (failed > 0) {
-      state = "failure";
-    } else if (pending > 0) {
-      state = "pending";
-    } else {
-      state = "success";
-    }
-  }
-  return { state, total, passed, failed };
+  return {
+    state: checksStateFromCounts(counts),
+    total: counts.passed + counts.failed + counts.pending,
+    passed: counts.passed,
+    failed: counts.failed,
+  };
 }
 
 /** Merges a pull request with the given strategy (default: a merge commit). */

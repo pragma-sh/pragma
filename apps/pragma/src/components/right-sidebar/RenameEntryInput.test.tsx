@@ -53,7 +53,7 @@ describe("RenameEntryInput", () => {
   it("rejects a duplicate sibling name with a red border and no commit", () => {
     const { input, onCommit } = setup({ initialName: "app.ts", siblings: ["app.ts", "other.ts"] });
     fireEvent.change(input, { target: { value: "other.ts" } });
-    expect(input.className).toContain("border-red-400/70");
+    expect(input.className).toContain("border-destructive/70");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onCommit).not.toHaveBeenCalled();
   });

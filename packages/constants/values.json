@@ -1,7 +1,37 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 6
+    "protocolVersion": 7
+  },
+  "protocol": {
+    "rpcMethods": [
+      "git",
+      "filesystem",
+      "database",
+      "kanban",
+      "worktrees",
+      "projects",
+      "tabs",
+      "settings",
+      "github",
+      "ai"
+    ],
+    "events": [
+      "agentStatus",
+      "worktreeChanged",
+      "kanbanChanged",
+      "tabsChanged",
+      "fileChanged",
+      "echoMode"
+    ],
+    "errors": [
+      "invalidPayload",
+      "unsupportedMethod",
+      "notFound",
+      "staleWrite",
+      "permissionDenied",
+      "internal"
+    ]
   },
   "scripts": {
     "maxConcurrentCommands": 4
@@ -23,7 +53,9 @@
     "defaultWidth": 1024,
     "defaultHeight": 768,
     "minWidth": 640,
-    "minHeight": 480
+    "minHeight": 480,
+    "titlebarHeight": 38,
+    "trafficLightInset": 12
   },
   "links": {
     "homepage": "https://pragma.example.com",

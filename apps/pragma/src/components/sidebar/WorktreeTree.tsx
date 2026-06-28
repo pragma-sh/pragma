@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Icon } from "@iconify/react";
 import { constants, type Worktree } from "@pragma/constants";
@@ -29,6 +38,7 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
+import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
@@ -126,6 +136,363 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   );
 }
 
+/** Copy a value to the clipboard and toast the result (or an error). */
+async function copyToClipboard(value: string, message: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(message);
+  } catch (cause) {
+    toast.error(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+/** Inline-rename state for a worktree row (focus/select, commit/cancel). */
+function useWorktreeRename(worktree: Worktree): {
+  renaming: boolean;
+  renameValue: string;
+  setRenameValue: (value: string) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+  startRename: () => void;
+  commitRename: () => void;
+  cancelRename: () => void;
+} {
+  const workspace = useWorkspace();
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(worktree.title ?? worktree.branch);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (renaming && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [renaming]);
+  const startRename = useCallback(() => {
+    setRenameValue(worktree.title ?? worktree.branch);
+    setRenaming(true);
+  }, [worktree.title, worktree.branch]);
+  const commitRename = useCallback(() => {
+    setRenaming(false);
+    const next = renameValue.trim();
+    const current = worktree.title ?? worktree.branch;
+    if (next === current) return;
+    void workspace.renameWorktree(worktree.id, next);
+  }, [worktree.id, worktree.title, worktree.branch, renameValue, workspace]);
+  const cancelRename = useCallback(() => setRenaming(false), []);
+  return {
+    renaming,
+    renameValue,
+    setRenameValue,
+    inputRef,
+    startRename,
+    commitRename,
+    cancelRename,
+  };
+}
+
+type RenameApi = ReturnType<typeof useWorktreeRename>;
+
+/** Resolve a worktree's display label (`main` for the main worktree). */
+function worktreeLabel(worktree: Worktree): string {
+  return worktree.isMain ? "main" : (worktree.title ?? worktree.branch);
+}
+
+interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
+  depth: number;
+  expanded: boolean;
+  hasChildren: boolean;
+  isMain: boolean;
+  label: string;
+  merged: boolean;
+  WorktreeIcon: typeof GitBranch;
+  agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
+  rename: RenameApi;
+  startRename: () => void;
+  toggleExpanded: () => void;
+  handleSelect: () => void;
+  handleCreateChild: () => void;
+  openDelete: () => void;
+  selected: boolean;
+}
+
+/** Class for a worktree row's container, highlighting the selected one. */
+function worktreeRowClass(selected: boolean): string {
+  return selected
+    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+    : "text-sidebar-foreground hover:bg-sidebar-accent/70";
+}
+
+/** The expand/collapse caret for a worktree row (or a spacer for childless rows). */
+function WorktreeExpandCaret({
+  hasChildren,
+  expanded,
+  label,
+  toggleExpanded,
+}: {
+  hasChildren: boolean;
+  expanded: boolean;
+  label: string;
+  toggleExpanded: () => void;
+}) {
+  if (!hasChildren) return <span className="w-3" />;
+  return (
+    <button
+      aria-expanded={expanded}
+      aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+      className="flex w-3 items-center justify-center"
+      onClick={toggleExpanded}
+    >
+      <ChevronRight className={cn("size-3 opacity-60", expanded && "rotate-90")} />
+    </button>
+  );
+}
+
+/** The worktree name: an inline rename input when renaming, otherwise the label. */
+function WorktreeNameField({ rename, label }: { rename: RenameApi; label: string }) {
+  if (!rename.renaming) return <span className="truncate">{label}</span>;
+  return (
+    <input
+      ref={rename.inputRef}
+      aria-label={`Rename ${label}`}
+      className="w-0 min-w-0 flex-1 rounded bg-muted px-1 text-left text-sm text-foreground outline-none ring-1 ring-ring"
+      value={rename.renameValue}
+      onBlur={rename.commitRename}
+      onChange={(event) => rename.setRenameValue(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
+    />
+  );
+}
+
+/** The clickable primary area: branch icon, name/rename field, agent status dot. */
+function WorktreeRowPrimaryButton({
+  isMain,
+  merged,
+  WorktreeIcon,
+  agentStatus,
+  handleSelect,
+  startRename,
+  rename,
+  label,
+}: {
+  isMain: boolean;
+  merged: boolean;
+  WorktreeIcon: typeof GitBranch;
+  agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
+  handleSelect: () => void;
+  startRename: () => void;
+  rename: RenameApi;
+  label: string;
+}) {
+  return (
+    <button
+      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      onClick={handleSelect}
+      onDoubleClick={isMain ? undefined : startRename}
+    >
+      <WorktreeIcon className={cn("size-3.5 shrink-0", merged && "text-success")} />
+      <WorktreeNameField label={label} rename={rename} />
+      <AgentStatusDot status={agentStatus} />
+    </button>
+  );
+}
+
+/** Row actions: an always-visible new-worktree button on main, hover-revealed
+ *  create-child and delete buttons on nested worktrees. */
+function WorktreeRowActions({
+  isMain,
+  label,
+  handleCreateChild,
+  openDelete,
+}: {
+  isMain: boolean;
+  label: string;
+  handleCreateChild: () => void;
+  openDelete: () => void;
+}) {
+  if (isMain) {
+    return (
+      <Button
+        aria-label={`New worktree from ${label}`}
+        className="ml-1 h-6 px-1.5 text-xs"
+        size="xs"
+        variant="secondary"
+        onClick={handleCreateChild}
+      >
+        <GitBranchPlus />
+        New
+      </Button>
+    );
+  }
+  return (
+    <>
+      <Button
+        aria-label={`Create child worktree from ${label}`}
+        className="opacity-0 group-hover:opacity-100"
+        size="icon-xs"
+        variant="ghost"
+        onClick={handleCreateChild}
+      >
+        <GitBranchPlus />
+      </Button>
+      <Button
+        aria-label={`Delete worktree ${label}`}
+        className="opacity-0 group-hover:opacity-100"
+        size="icon-xs"
+        variant="ghost"
+        onClick={openDelete}
+      >
+        <Trash2 className="text-destructive" />
+      </Button>
+    </>
+  );
+}
+
+/** The row's visible label: expand caret, branch icon, name/rename input, actions. */
+const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
+  function WorktreeRowLabel(
+    {
+      depth,
+      expanded,
+      hasChildren,
+      isMain,
+      label,
+      merged,
+      WorktreeIcon,
+      agentStatus,
+      rename,
+      startRename,
+      toggleExpanded,
+      handleSelect,
+      handleCreateChild,
+      openDelete,
+      selected,
+      className,
+      style,
+      ...props
+    },
+    ref,
+  ) {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
+          worktreeRowClass(selected),
+          className,
+        )}
+        style={{ ...style, paddingLeft: 8 + depth * 14 }}
+        {...props}
+      >
+        <WorktreeExpandCaret
+          expanded={expanded}
+          hasChildren={hasChildren}
+          label={label}
+          toggleExpanded={toggleExpanded}
+        />
+        <WorktreeRowPrimaryButton
+          agentStatus={agentStatus}
+          handleSelect={handleSelect}
+          isMain={isMain}
+          label={label}
+          merged={merged}
+          rename={rename}
+          startRename={startRename}
+          WorktreeIcon={WorktreeIcon}
+        />
+        <WorktreeRowActions
+          handleCreateChild={handleCreateChild}
+          isMain={isMain}
+          label={label}
+          openDelete={openDelete}
+        />
+      </div>
+    );
+  },
+);
+
+/** The row's right-click menu: rename, copy path/branch, open in editor, hide, delete. */
+function WorktreeContextMenu({
+  isMain,
+  worktree,
+  startRename,
+  openDelete,
+}: {
+  isMain: boolean;
+  worktree: Worktree;
+  startRename: () => void;
+  openDelete: () => void;
+}) {
+  const workspace = useWorkspace();
+  const copyPath = useCallback(
+    () => void copyToClipboard(worktree.path, "Copied worktree path"),
+    [worktree.path],
+  );
+  const copyBranch = useCallback(
+    () => void copyToClipboard(worktree.branch, "Copied branch name"),
+    [worktree.branch],
+  );
+  const hide = useCallback(
+    () => void workspace.hideWorktree(worktree.id, true),
+    [workspace, worktree.id],
+  );
+  const openEditor = useCallback(
+    (editorId: string) => void workspace.openWorktreeInEditor(worktree.id, editorId),
+    [workspace, worktree.id],
+  );
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem disabled={isMain} onSelect={isMain ? undefined : startRename}>
+        <Pencil />
+        Rename
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={copyPath}>
+        <Copy />
+        Copy worktree path
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={copyBranch}>
+        <Copy />
+        Copy branch name
+      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <Icon
+            className="size-4"
+            icon={editorLaunchers[0]?.brandIcon ?? "lucide:square-terminal"}
+            style={{ color: editorLaunchers[0]?.brandColor }}
+          />
+          Open in editor
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          {editorLaunchers.map((editor) => (
+            <ContextMenuItem key={editor.id} onSelect={() => openEditor(editor.id)}>
+              <Icon
+                className="size-4"
+                icon={editor.brandIcon}
+                style={{ color: editor.brandColor }}
+              />
+              {editor.name}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={hide}>
+        <EyeOff />
+        Hide
+      </ContextMenuItem>
+      {isMain ? null : (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={openDelete}>
+            <Trash2 />
+            Delete
+          </ContextMenuItem>
+        </>
+      )}
+    </ContextMenuContent>
+  );
+}
+
 function WorktreeRow({
   node,
   depth,
@@ -139,202 +506,58 @@ function WorktreeRow({
 }) {
   const workspace = useWorkspace();
   const kanban = useKanban();
-  const selected = workspace.selectedWorktreeId === node.worktree.id;
-  const label = node.worktree.isMain ? "main" : (node.worktree.title ?? node.worktree.branch);
+  const rename = useWorktreeRename(node.worktree);
   const [expanded, setExpanded] = useState(true);
-  const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(label);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const selected = workspace.selectedWorktreeId === node.worktree.id;
+  const label = worktreeLabel(node.worktree);
   const hasChildren = node.children.length > 0;
   const isMain = node.worktree.isMain;
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const WorktreeIcon = merged ? GitMerge : GitBranch;
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
 
-  useEffect(() => {
-    if (renaming && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [renaming]);
-
-  const startRename = useCallback(() => {
-    setRenameValue(node.worktree.title ?? node.worktree.branch);
-    setRenaming(true);
-  }, [node.worktree.title, node.worktree.branch]);
-
-  const commitRename = useCallback(() => {
-    setRenaming(false);
-    const next = renameValue.trim();
-    const current = node.worktree.title ?? node.worktree.branch;
-    if (next === current) {
-      return;
-    }
-    void workspace.renameWorktree(node.worktree.id, next);
-  }, [node.worktree.id, node.worktree.title, node.worktree.branch, renameValue, workspace]);
-
-  const cancelRename = useCallback(() => {
-    setRenaming(false);
-  }, []);
-
-  const copyToClipboard = useCallback(async (value: string, message: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(message);
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, []);
+  const handleSelect = useCallback(() => {
+    workspace.selectWorktree(node.worktree.id);
+    // Selecting a worktree always returns to the terminal view, even when the
+    // prompt board is the visible surface.
+    kanban.exitBoard();
+  }, [workspace, kanban, node.worktree.id]);
+  const handleCreateChild = useCallback(() => {
+    workspace.selectWorktree(node.worktree.id);
+    onCreateChild();
+  }, [workspace, node.worktree.id, onCreateChild]);
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const openDelete = useCallback(() => setDeleteOpen(true), []);
 
   return (
     <div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
-              selected
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent/70",
-            )}
-            style={{ paddingLeft: 8 + depth * 14 }}
-          >
-            {hasChildren ? (
-              <button
-                aria-expanded={expanded}
-                aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
-                className="flex w-3 items-center justify-center"
-                onClick={() => setExpanded((value) => !value)}
-              >
-                <ChevronRight className={cn("size-3 opacity-60", expanded && "rotate-90")} />
-              </button>
-            ) : (
-              <span className="w-3" />
-            )}
-            <button
-              className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              onClick={() => {
-                workspace.selectWorktree(node.worktree.id);
-                // Selecting a worktree always returns to the terminal view, even
-                // when the prompt board is the visible surface.
-                kanban.exitBoard();
-              }}
-              onDoubleClick={isMain ? undefined : startRename}
-            >
-              <WorktreeIcon className={cn("size-3.5 shrink-0", merged && "text-emerald-500")} />
-              {renaming ? (
-                <input
-                  ref={inputRef}
-                  aria-label={`Rename ${label}`}
-                  className="w-0 min-w-0 flex-1 rounded bg-white/10 px-1 text-left text-sm text-foreground outline-none ring-1 ring-ring"
-                  value={renameValue}
-                  onBlur={commitRename}
-                  onChange={(event) => setRenameValue(event.target.value)}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      commitRename();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      cancelRename();
-                    }
-                  }}
-                />
-              ) : (
-                <span className="truncate">{label}</span>
-              )}
-              <AgentStatusDot status={agentStatus} />
-            </button>
-            {isMain ? null : (
-              <Button
-                aria-label={`Create child worktree from ${label}`}
-                className="opacity-0 group-hover:opacity-100"
-                size="icon-xs"
-                variant="ghost"
-                onClick={() => {
-                  workspace.selectWorktree(node.worktree.id);
-                  onCreateChild();
-                }}
-              >
-                <GitBranchPlus />
-              </Button>
-            )}
-            {isMain ? null : (
-              <Button
-                aria-label={`Delete worktree ${label}`}
-                className="opacity-0 group-hover:opacity-100"
-                size="icon-xs"
-                variant="ghost"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="text-destructive" />
-              </Button>
-            )}
-          </div>
+          <WorktreeRowLabel
+            agentStatus={agentStatus}
+            depth={depth}
+            expanded={expanded}
+            handleCreateChild={handleCreateChild}
+            handleSelect={handleSelect}
+            hasChildren={hasChildren}
+            isMain={isMain}
+            label={label}
+            merged={merged}
+            openDelete={openDelete}
+            rename={rename}
+            selected={selected}
+            startRename={rename.startRename}
+            toggleExpanded={toggleExpanded}
+            WorktreeIcon={WorktreeIcon}
+          />
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem disabled={isMain} onSelect={isMain ? undefined : startRename}>
-            <Pencil />
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem
-            onSelect={() => {
-              void copyToClipboard(node.worktree.path, "Copied worktree path");
-            }}
-          >
-            <Copy />
-            Copy worktree path
-          </ContextMenuItem>
-          <ContextMenuItem
-            onSelect={() => {
-              void copyToClipboard(node.worktree.branch, "Copied branch name");
-            }}
-          >
-            <Copy />
-            Copy branch name
-          </ContextMenuItem>
-          <ContextMenuSub>
-            <ContextMenuSubTrigger>
-              <Icon
-                className="size-4"
-                icon={editorLaunchers[0]?.brandIcon ?? "lucide:square-terminal"}
-                style={{ color: editorLaunchers[0]?.brandColor }}
-              />
-              Open in editor
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent>
-              {editorLaunchers.map((editor) => (
-                <ContextMenuItem
-                  key={editor.id}
-                  onSelect={() => void workspace.openWorktreeInEditor(node.worktree.id, editor.id)}
-                >
-                  <Icon
-                    className="size-4"
-                    icon={editor.brandIcon}
-                    style={{ color: editor.brandColor }}
-                  />
-                  {editor.name}
-                </ContextMenuItem>
-              ))}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => void workspace.hideWorktree(node.worktree.id, true)}>
-            <EyeOff />
-            Hide
-          </ContextMenuItem>
-          {isMain ? null : (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-                <Trash2 />
-                Delete
-              </ContextMenuItem>
-            </>
-          )}
-        </ContextMenuContent>
+        <WorktreeContextMenu
+          isMain={isMain}
+          openDelete={openDelete}
+          startRename={rename.startRename}
+          worktree={node.worktree}
+        />
       </ContextMenu>
       {!isMain ? (
         <WorktreeDeleteDialog
@@ -373,7 +596,7 @@ function HiddenWorktreeRow({
   return (
     <div className="mt-1 flex items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-1.5">
-        <WorktreeIcon className={cn("size-3 shrink-0", merged && "text-emerald-500")} />
+        <WorktreeIcon className={cn("size-3 shrink-0", merged && "text-success")} />
         <span className="truncate">{label}</span>
       </div>
       <Button aria-label={`Show ${label}`} size="icon-xs" variant="ghost" onClick={onUnhide}>

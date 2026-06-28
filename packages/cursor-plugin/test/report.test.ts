@@ -21,7 +21,7 @@ beforeEach(() => {
   logPath = join(workdir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(tmpEnvDir, { recursive: true });
-  const fake = join(binDir, "pragma-agent");
+  const fake = join(binDir, "pragma-cli");
   writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
 });
 
@@ -30,15 +30,19 @@ afterEach(() => {
 });
 
 function markerPath(): string {
-  return join(tmpEnvDir, `pragma-agent-cursor-${TAB_ID}.active`);
+  return join(tmpEnvDir, `pragma-cli-cursor-${TAB_ID}.active`);
 }
 
-function run(event: string, { socket = true }: { socket?: boolean } = {}): string[] {
+function run(
+  event: string,
+  { env = {}, socket = true }: { env?: Record<string, string>; socket?: boolean } = {},
+): string[] {
   const runEnv: Record<string, string> = {
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     TMPDIR: tmpEnvDir,
     PRAGMA_TAB_ID: TAB_ID,
     PRAGMA_TEST_LOG: logPath,
+    ...env,
   };
   if (socket) {
     runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
@@ -65,6 +69,13 @@ describe("cursor report.sh", () => {
     run("started");
     expect(calls()).toEqual(["--agent cursor report started"]);
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("uses PRAGMA_CLI when it is set", () => {
+    run("started", {
+      env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
+    });
+    expect(calls()).toEqual(["--agent cursor report started"]);
   });
 
   it("reports stopped and clears marker", () => {

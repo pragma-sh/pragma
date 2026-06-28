@@ -3,14 +3,14 @@
 Static Cursor Agent CLI integration that reports agent status into Pragma. Cursor has
 **no in-process JS plugin API** for status — its extension point is **shell hooks**
 (`~/.cursor/hooks.json`) — so this is the **CLI route**: hooks invoke a single bundled
-`hooks/report.sh` that calls `pragma-agent`.
+`hooks/report.sh` that calls `pragma-cli`.
 
 ## File map
 
 ```
 packages/cursor-plugin/
 ├── hooks/
-│   ├── report.sh              # Event → pragma-agent translator
+│   ├── report.sh              # Event → pragma-cli translator
 │   └── hooks.fragment.json    # Hook entries merged by install-local.sh
 ├── scripts/install-local.sh   # Local install (hooks + cli-config defaults)
 ├── test/report.test.ts
@@ -119,7 +119,9 @@ Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is in
 ## Guard + non-Pragma sessions
 
 `report.sh` exits 0 when `PRAGMA_DAEMON_SOCKET` is unset. Hooks live in user-scope
-`~/.cursor/hooks.json`, so the env guard is mandatory.
+`~/.cursor/hooks.json`, so the env guard is mandatory. Inside Pragma, sessions export
+`PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; `report.sh` uses that absolute path before
+falling back to `pragma-cli` from `PATH`.
 
 ## Agent launcher config
 

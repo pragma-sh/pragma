@@ -29,9 +29,9 @@ beforeEach(() => {
   logPath = join(workdir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(tmpEnvDir, { recursive: true });
-  // A fake `pragma-agent` on PATH that records its arguments, one call per line,
+  // A fake `pragma-cli` on PATH that records its arguments, one call per line,
   // so the test can assert exactly which statuses report.sh emits.
-  const fake = join(binDir, "pragma-agent");
+  const fake = join(binDir, "pragma-cli");
   writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
 });
 
@@ -50,36 +50,38 @@ afterEach(() => {
 
 /** The marker file report.sh keys on PRAGMA_TAB_ID inside TMPDIR. */
 function markerPath(): string {
-  return join(tmpEnvDir, `pragma-agent-claude-code-${TAB_ID}.active`);
+  return join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.active`);
 }
 
-/** Runs report.sh for one event and returns the recorded pragma-agent calls. */
+/** Runs report.sh for one event and returns the recorded pragma-cli calls. */
 function run(
   event: string,
   {
+    env: extraEnv = {},
     socket = true,
     stdin = "",
     args = [],
-  }: { socket?: boolean; stdin?: string; args?: string[] } = {},
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string; args?: string[] } = {},
 ): string[] {
-  const env: Record<string, string> = {
+  const runEnv: Record<string, string> = {
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     TMPDIR: tmpEnvDir,
     PRAGMA_TAB_ID: TAB_ID,
     PRAGMA_TEST_LOG: logPath,
     // Poll fast so the background watcher's behavior is observable within a test.
     PRAGMA_WATCH_INTERVAL: "0.1",
+    ...extraEnv,
   };
   if (socket) {
-    env.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
+    runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
-  execFileSync("sh", [REPORT_SH, event, ...args], { env, input: stdin });
+  execFileSync("sh", [REPORT_SH, event, ...args], { env: runEnv, input: stdin });
   return calls();
 }
 
 /** The pid of the watcher report.sh spawned for the current tab, if any. */
 function watcherPid(): number | undefined {
-  const path = join(tmpEnvDir, `pragma-agent-claude-code-${TAB_ID}.watcher`);
+  const path = join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.watcher`);
   if (!existsSync(path)) {
     return undefined;
   }
@@ -132,7 +134,7 @@ const INTERRUPTED_TOOL = JSON.stringify({
   },
 });
 
-/** All pragma-agent invocations recorded so far, e.g. `--agent claude-code report started`. */
+/** All pragma-cli invocations recorded so far, e.g. `--agent claude-code report started`. */
 function calls(): string[] {
   if (!existsSync(logPath)) {
     return [];
@@ -149,6 +151,14 @@ describe("report.sh", () => {
   it("reports started and marks the turn in flight", () => {
     expect(run("started")).toEqual(["--agent claude-code report started"]);
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("uses PRAGMA_CLI when it is set", () => {
+    expect(
+      run("started", {
+        env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
+      }),
+    ).toEqual(["--agent claude-code report started"]);
   });
 
   it("reports stopped and clears the in-flight marker on normal completion", () => {

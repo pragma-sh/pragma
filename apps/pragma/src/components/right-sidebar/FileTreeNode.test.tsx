@@ -108,6 +108,16 @@ describe("FileTreeNode", () => {
     const ctrl = controller({ selectedFile: fileEntry.path });
     render(<FileTreeNode ctrl={ctrl} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />);
     const button = screen.getByText("app.ts").closest("button");
-    expect(button?.className).toContain("outline-cyan-400/60");
+    expect(button?.className).toContain("outline-primary/60");
+  });
+
+  it("opens the row context menu on right click", () => {
+    render(
+      <FileTreeNode ctrl={controller()} depth={0} entry={fileEntry} siblings={[fileEntry.name]} />,
+    );
+
+    fireEvent.contextMenu(screen.getByText("app.ts"));
+
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
   });
 });

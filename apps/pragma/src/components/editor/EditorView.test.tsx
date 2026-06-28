@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { FileChange, Tab } from "@pragma/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,15 @@ const writeFileMock = vi.fn();
 vi.mock("@/lib/tauri", () => ({
   readFile: (...args: unknown[]) => readFileMock(...args),
   writeFile: (...args: unknown[]) => writeFileMock(...args),
+}));
+
+// Capture the live-reload listener so tests can simulate watcher events without
+// going through the Tauri channel.
+let fileChangeListener: ((change: FileChange) => void) | null = null;
+vi.mock("@/lib/file-watch", () => ({
+  useWorktreeFileChange: (_worktreeId: string, onChange: (change: FileChange) => void) => {
+    fileChangeListener = onChange;
+  },
 }));
 vi.mock("@/lib/terminal-manager", () => ({ TERMINAL_FONT_FAMILY: "monospace" }));
 vi.mock("@codemirror/language-data", () => ({ languages: [] }));
@@ -47,6 +56,7 @@ function editorTab(): Tab {
 
 afterEach(cleanup);
 beforeEach(() => {
+  fileChangeListener = null;
   readFileMock.mockReset();
   writeFileMock.mockReset();
   readFileMock.mockResolvedValue({
@@ -89,6 +99,47 @@ describe("EditorView", () => {
     fireEvent.keyDown(textarea, { key: "s", ctrlKey: true });
     await waitFor(() => expect(writeFileMock).toHaveBeenCalled());
     expect(isTabDirty("editor-1")).toBe(true);
+  });
+
+  it("reloads when the watched file changes on disk and the tab is clean", async () => {
+    render(<EditorView tab={editorTab()} />);
+    await waitFor(() => expect(readFileMock).toHaveBeenCalledTimes(1));
+
+    readFileMock.mockResolvedValue({
+      path: "src/app.ts",
+      text: "updated on disk",
+      binary: false,
+      truncated: false,
+      byteSize: 15,
+    });
+    fileChangeListener?.({ path: "src/app.ts", kind: "modified" });
+
+    await waitFor(() => expect(readFileMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not reload when the tab has unsaved edits", async () => {
+    render(<EditorView tab={editorTab()} />);
+    const textarea = await screen.findByLabelText("editor");
+    await waitFor(() => expect(readFileMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(textarea, { target: { value: "local edit" } });
+    await waitFor(() => expect(isTabDirty("editor-1")).toBe(true));
+
+    fileChangeListener?.({ path: "src/app.ts", kind: "modified" });
+
+    // Give any erroneous reload a chance to fire before asserting it didn't.
+    await Promise.resolve();
+    expect(readFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores changes to other files", async () => {
+    render(<EditorView tab={editorTab()} />);
+    await waitFor(() => expect(readFileMock).toHaveBeenCalledTimes(1));
+
+    fileChangeListener?.({ path: "src/other.ts", kind: "modified" });
+
+    await Promise.resolve();
+    expect(readFileMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows a placeholder for binary files", async () => {

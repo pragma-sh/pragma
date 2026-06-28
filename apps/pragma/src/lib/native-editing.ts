@@ -70,6 +70,49 @@ export function isTextEditingContext(element: Element | null | undefined): boole
  * - Ctrl+Delete → ESC+D (delete word forward)
  * - Ctrl+Left/Right → ESC+B/F (back/forward word)
  */
+/** macOS Cmd-chord → readline control sequence (line motion + delete to line start). */
+const MAC_CMD_SEQUENCES: Record<string, string> = {
+  Backspace: "\x15", // Ctrl+U — delete to beginning of line
+  ArrowLeft: "\x01", // Ctrl+A — beginning of line
+  ArrowRight: "\x05", // Ctrl+E — end of line
+};
+
+/** macOS Option-chord → readline control sequence (word motion + delete word back). */
+const MAC_OPTION_SEQUENCES: Record<string, string> = {
+  Backspace: "\x17", // Ctrl+W — delete word backward
+  ArrowLeft: "\x1bb", // ESC+B — back word
+  ArrowRight: "\x1bf", // ESC+F — forward word
+};
+
+/** macOS native editing chords: Cmd for line motion/delete, Option for word. */
+function macEditingSequence(event: KeyboardEvent): string | null {
+  const { key, altKey, ctrlKey, metaKey } = event;
+  if (metaKey && !altKey && !ctrlKey) {
+    return MAC_CMD_SEQUENCES[key] ?? null;
+  }
+  if (altKey && !metaKey && !ctrlKey) {
+    return MAC_OPTION_SEQUENCES[key] ?? null;
+  }
+  return null;
+}
+
+/** Linux Ctrl-chord → readline control sequence (word motion + delete word back/forward). */
+const LINUX_CTRL_SEQUENCES: Record<string, string> = {
+  Backspace: "\x17", // Ctrl+W — delete word backward
+  Delete: "\x1bd", // ESC+D — delete word forward
+  ArrowLeft: "\x1bb", // ESC+B — back word
+  ArrowRight: "\x1bf", // ESC+F — forward word
+};
+
+/** Linux native editing chords: Ctrl for word motion/delete. */
+function linuxEditingSequence(event: KeyboardEvent): string | null {
+  const { key, altKey, ctrlKey, metaKey } = event;
+  if (ctrlKey && !altKey && !metaKey) {
+    return LINUX_CTRL_SEQUENCES[key] ?? null;
+  }
+  return null;
+}
+
 export function nativeEditingSequence(
   event: KeyboardEvent,
   platform: KeybindingPlatform,
@@ -77,44 +120,5 @@ export function nativeEditingSequence(
   if (event.type !== "keydown" || event.shiftKey) {
     return null;
   }
-  const { key, altKey, ctrlKey, metaKey } = event;
-
-  if (platform === "mac") {
-    if (metaKey && !altKey && !ctrlKey) {
-      switch (key) {
-        case "Backspace":
-          return "\x15"; // Ctrl+U — delete to beginning of line
-        case "ArrowLeft":
-          return "\x01"; // Ctrl+A — beginning of line
-        case "ArrowRight":
-          return "\x05"; // Ctrl+E — end of line
-      }
-    }
-    if (altKey && !metaKey && !ctrlKey) {
-      switch (key) {
-        case "Backspace":
-          return "\x17"; // Ctrl+W — delete word backward
-        case "ArrowLeft":
-          return "\x1bb"; // ESC+B — back word
-        case "ArrowRight":
-          return "\x1bf"; // ESC+F — forward word
-      }
-    }
-    return null;
-  }
-
-  // Linux
-  if (ctrlKey && !altKey && !metaKey) {
-    switch (key) {
-      case "Backspace":
-        return "\x17"; // Ctrl+W — delete word backward
-      case "Delete":
-        return "\x1bd"; // ESC+D — delete word forward
-      case "ArrowLeft":
-        return "\x1bb"; // ESC+B — back word
-      case "ArrowRight":
-        return "\x1bf"; // ESC+F — forward word
-    }
-  }
-  return null;
+  return platform === "mac" ? macEditingSequence(event) : linuxEditingSequence(event);
 }

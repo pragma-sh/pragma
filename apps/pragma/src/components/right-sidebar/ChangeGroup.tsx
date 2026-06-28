@@ -10,11 +10,11 @@ import { basename, dirname } from "@/lib/path";
 import { cn } from "@/lib/utils";
 
 const STATUS_META: Record<ChangeStatus, { letter: string; className: string }> = {
-  added: { letter: "A", className: "text-emerald-400" },
-  modified: { letter: "M", className: "text-amber-400" },
-  deleted: { letter: "D", className: "text-red-400" },
-  renamed: { letter: "R", className: "text-blue-400" },
-  untracked: { letter: "?", className: "text-slate-400" },
+  added: { letter: "A", className: "text-success" },
+  modified: { letter: "M", className: "text-warning" },
+  deleted: { letter: "D", className: "text-destructive" },
+  renamed: { letter: "R", className: "text-primary" },
+  untracked: { letter: "?", className: "text-muted-foreground" },
 };
 
 /** A per-file icon-button action (stage, unstage, discard, …). */
@@ -67,15 +67,7 @@ function groupByDirectory(files: ChangedFile[]): Array<[string, ChangedFile[]]> 
  * (stage / unstage / discard) and `headerActions` adds matching group-wide icon
  * buttons to the header (shown only when the group is non-empty).
  */
-export function ChangeGroup({
-  title,
-  files,
-  emptyLabel,
-  onOpen,
-  fileActions = NO_FILE_ACTIONS,
-  headerActions = NO_HEADER_ACTIONS,
-  fileBadge,
-}: {
+interface ChangeGroupProps {
   title: string;
   files: ChangedFile[];
   emptyLabel: string;
@@ -84,18 +76,28 @@ export function ChangeGroup({
   headerActions?: ChangeGroupAction[];
   /** Optional trailing badge per row (e.g. a PR's unresolved-comment count). */
   fileBadge?: (file: ChangedFile) => ReactNode;
-}) {
+}
+
+export function ChangeGroup({
+  title,
+  files,
+  emptyLabel,
+  onOpen,
+  fileActions = NO_FILE_ACTIONS,
+  headerActions = NO_HEADER_ACTIONS,
+  fileBadge,
+}: ChangeGroupProps) {
   const [open, setOpen] = useState(true);
   const groups = useMemo(() => groupByDirectory(files), [files]);
 
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
-      <div className="group/header flex w-full items-center hover:bg-white/5">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-xs text-slate-300">
+      <div className="group/header flex w-full items-center hover:bg-muted">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-xs text-muted-foreground">
           {open ? (
-            <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight className="size-3.5 shrink-0 text-slate-500" />
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
         </CollapsibleTrigger>
@@ -103,7 +105,7 @@ export function ChangeGroup({
           headerActions.map((action) => (
             <button
               aria-label={action.label}
-              className="mr-1 shrink-0 rounded p-1 text-slate-500 opacity-0 hover:bg-white/10 hover:text-slate-200 focus-visible:opacity-100 group-hover/header:opacity-100"
+              className="mr-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/header:opacity-100"
               key={action.label}
               onClick={() => action.onClick()}
               title={action.title}
@@ -112,18 +114,18 @@ export function ChangeGroup({
               <action.icon className="size-3.5" />
             </button>
           ))}
-        <span className="mr-2 shrink-0 rounded bg-white/10 px-1.5 text-[10px] text-slate-300">
+        <span className="mr-2 shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
           {files.length}
         </span>
       </div>
       <CollapsibleContent>
         {files.length === 0 ? (
-          <p className="px-4 py-1 text-[11px] text-slate-600">{emptyLabel}</p>
+          <p className="px-4 py-1 text-[11px] text-muted-foreground">{emptyLabel}</p>
         ) : (
           groups.map(([dir, items]) => (
             <div key={dir}>
               {dir && (
-                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-slate-500">
+                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
                   {dir}
                 </div>
               )}
@@ -131,7 +133,7 @@ export function ChangeGroup({
                 const meta = STATUS_META[file.status];
                 return (
                   <div
-                    className="group/row flex w-full items-center gap-2 px-4 py-0.5 text-xs hover:bg-white/5"
+                    className="group/row flex w-full items-center gap-2 px-4 py-0.5 text-xs hover:bg-muted"
                     key={`${file.path}:${file.status}`}
                   >
                     <button
@@ -140,14 +142,14 @@ export function ChangeGroup({
                       type="button"
                     >
                       <Icon className="size-4 shrink-0" icon={fileIconId(basename(file.path))} />
-                      <span className="min-w-0 flex-1 truncate text-slate-200">
+                      <span className="min-w-0 flex-1 truncate text-foreground">
                         {basename(file.path)}
                       </span>
                     </button>
                     {fileActions.map((action) => (
                       <button
                         aria-label={action.label(file)}
-                        className="shrink-0 rounded p-0.5 text-slate-500 opacity-0 hover:bg-white/10 hover:text-slate-200 focus-visible:opacity-100 group-hover/row:opacity-100"
+                        className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
                         key={action.title}
                         onClick={() => action.onClick(file)}
                         title={action.title}
@@ -165,7 +167,7 @@ export function ChangeGroup({
                       }
                       className={cn(
                         "shrink-0 font-mono tabular-nums",
-                        file.additions === null ? "text-slate-600" : "text-emerald-400",
+                        file.additions === null ? "text-muted-foreground" : "text-success",
                       )}
                     >
                       {file.additions === null ? "—" : `+${file.additions}`}
@@ -178,7 +180,7 @@ export function ChangeGroup({
                       }
                       className={cn(
                         "shrink-0 font-mono tabular-nums",
-                        file.deletions === null ? "text-slate-600" : "text-red-400",
+                        file.deletions === null ? "text-muted-foreground" : "text-destructive",
                       )}
                     >
                       {file.deletions === null ? "—" : `-${file.deletions}`}

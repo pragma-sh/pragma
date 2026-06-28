@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -230,6 +238,119 @@ function ApiKeyForm({
   );
 }
 
+/** React to a streamed OAuth event: open a browser, surface success, or surface an error. */
+function reactToLoginEvent(
+  event: AiLoginEvent,
+  onSuccess: () => void,
+  setError: (error: string | null) => void,
+): void {
+  if (event.type === "auth") {
+    void browserOpenExternal(event.url);
+  } else if (event.type === "device-code") {
+    void browserOpenExternal(event.verificationUri);
+  } else if (event.type === "result") {
+    onSuccess();
+  } else if (event.type === "error") {
+    setError(event.error);
+  }
+}
+
+/** Drives the streamed OAuth login, appending events and cleaning up on unmount. */
+function useOAuthLogin(
+  provider: string,
+  onSuccess: () => void,
+  setError: (error: string | null) => void,
+  idRef: RefObject<string>,
+  keyRef: RefObject<number>,
+  setEvents: Dispatch<SetStateAction<Array<{ key: number; event: AiLoginEvent }>>>,
+): void {
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = true;
+    const id = idRef.current;
+    aiLogin(id, provider, (event) => {
+      if (!activeRef.current) {
+        return;
+      }
+      setEvents((prev) => [...prev, { key: keyRef.current++, event }]);
+      reactToLoginEvent(event, onSuccess, setError);
+    }).catch((cause) => {
+      if (activeRef.current) {
+        setError(cause instanceof Error ? cause.message : "Login failed.");
+      }
+    });
+    return () => {
+      activeRef.current = false;
+      void aiLoginCancel(id);
+    };
+  }, [provider, onSuccess, setError, idRef, keyRef, setEvents]);
+}
+
+/** Derive the last event and whether we're awaiting a prompt/manual-code/select. */
+function deriveLastState(events: Array<{ key: number; event: AiLoginEvent }>): {
+  last: AiLoginEvent | undefined;
+  awaitingInput: boolean;
+  awaitingSelect: Extract<AiLoginEvent, { type: "select" }> | null;
+} {
+  const last = events.at(-1)?.event;
+  return {
+    last,
+    awaitingInput: last?.type === "prompt" || last?.type === "manual-code",
+    awaitingSelect: last?.type === "select" ? last : null,
+  };
+}
+
+/** The prompt/manual-code input + submit button. */
+function OAuthPromptInput({
+  last,
+  reply,
+  setReply,
+  sendReply,
+}: {
+  last: AiLoginEvent | undefined;
+  reply: string;
+  setReply: (value: string) => void;
+  sendReply: (value: string) => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      <Input
+        onChange={(event) => setReply(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            sendReply(reply);
+          }
+        }}
+        placeholder={last?.type === "prompt" ? (last.placeholder ?? "Enter value") : "Paste code"}
+        value={reply}
+      />
+      <Button onClick={() => sendReply(reply)} size="sm">
+        Submit
+      </Button>
+    </div>
+  );
+}
+
+/** The select-event option buttons. */
+function OAuthSelectOptions({
+  options,
+  sendReply,
+}: {
+  options: Extract<AiLoginEvent, { type: "select" }>["options"];
+  sendReply: (value: string) => void;
+}) {
+  return (
+    <>
+      {options.map((option) => (
+        <Button key={option.id} onClick={() => sendReply(option.id)} size="sm" variant="outline">
+          {option.label}
+        </Button>
+      ))}
+    </>
+  );
+}
+
 function OAuthFlow({
   method,
   onBack,
@@ -244,30 +365,10 @@ function OAuthFlow({
   const [events, setEvents] = useState<Array<{ key: number; event: AiLoginEvent }>>([]);
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const activeRef = useRef(true);
 
-  useEffect(() => {
-    activeRef.current = true;
-    const id = idRef.current;
-    aiLogin(id, method.provider, (event) => {
-      if (!activeRef.current) return;
-      setEvents((prev) => [...prev, { key: keyRef.current++, event }]);
-      if (event.type === "auth") void browserOpenExternal(event.url);
-      else if (event.type === "device-code") void browserOpenExternal(event.verificationUri);
-      else if (event.type === "result") onSuccess();
-      else if (event.type === "error") setError(event.error);
-    }).catch((cause) => {
-      if (activeRef.current) setError(cause instanceof Error ? cause.message : "Login failed.");
-    });
-    return () => {
-      activeRef.current = false;
-      void aiLoginCancel(id);
-    };
-  }, [method.provider, onSuccess]);
+  useOAuthLogin(method.provider, onSuccess, setError, idRef, keyRef, setEvents);
 
-  const last = events.at(-1)?.event;
-  const awaitingInput = last?.type === "prompt" || last?.type === "manual-code";
-  const awaitingSelect = last?.type === "select" ? last : null;
+  const { last, awaitingInput, awaitingSelect } = deriveLastState(events);
 
   const sendReply = useCallback((value: string) => {
     void aiLoginRespond(idRef.current, value, false);
@@ -285,38 +386,12 @@ function OAuthFlow({
       ))}
 
       {awaitingInput ? (
-        <div className="flex gap-2">
-          <Input
-            onChange={(event) => setReply(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                sendReply(reply);
-              }
-            }}
-            placeholder={
-              last?.type === "prompt" ? (last.placeholder ?? "Enter value") : "Paste code"
-            }
-            value={reply}
-          />
-          <Button onClick={() => sendReply(reply)} size="sm">
-            Submit
-          </Button>
-        </div>
+        <OAuthPromptInput last={last} reply={reply} sendReply={sendReply} setReply={setReply} />
       ) : null}
 
-      {awaitingSelect
-        ? awaitingSelect.options.map((option) => (
-            <Button
-              key={option.id}
-              onClick={() => sendReply(option.id)}
-              size="sm"
-              variant="outline"
-            >
-              {option.label}
-            </Button>
-          ))
-        : null}
+      {awaitingSelect ? (
+        <OAuthSelectOptions options={awaitingSelect.options} sendReply={sendReply} />
+      ) : null}
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 

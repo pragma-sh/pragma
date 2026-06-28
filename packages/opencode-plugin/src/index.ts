@@ -21,7 +21,7 @@ const DEFAULT_AGENT_ID = "opencode";
 export interface PragmaOpencodePluginOptions extends PluginOptions {
   /** Stable Pragma agent id. Defaults to `opencode`. */
   agent?: string;
-  /** Path or executable name for the Pragma agent CLI. Defaults to `pragma-agent`. */
+  /** Path or executable name for the Pragma CLI. Defaults to `pragma-cli`. */
   executable?: string;
   /** Extra environment values passed to the Pragma SDK helpers. */
   env?: Record<string, string | undefined>;

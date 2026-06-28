@@ -174,7 +174,7 @@ function ModelPinButton({ agent, model }: { agent: AgentConfig; model: AgentMode
   return (
     <button
       type="button"
-      className="rounded p-0.5 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.preventDefault();

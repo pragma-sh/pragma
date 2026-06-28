@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@iconify/react";
-import { constants, type EditorLauncher } from "@pragma/constants";
+import { constants, type EditorLauncher, type Tab } from "@pragma/constants";
 import {
   ArrowLeft,
   ChevronDown,
@@ -41,10 +41,13 @@ import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { isMacPlatform } from "@/lib/platform";
+import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { startWindowDrag } from "@/lib/window-drag";
 import { useTabAgentStatus } from "@/state/agent-status-store";
 import {
   type SplitDirection,
+  type SplitGroupNode,
   type SplitLayoutNode,
   type SplitPaneNode,
   useWorkspace,
@@ -109,16 +112,10 @@ function ProjectScriptButton({
       <TooltipTrigger asChild>
         <span className="inline-flex">
           <Button
-            className={cn(
-              "border shadow-sm hover:text-white",
-              activeState
-                ? "border-rose-400/30 bg-rose-400/12 text-rose-50 shadow-rose-950/30 hover:bg-rose-400/20"
-                : "border-emerald-400/25 bg-emerald-400/12 text-emerald-50 shadow-emerald-950/30 hover:bg-emerald-400/20",
-            )}
             disabled={disabled}
             onClick={() => void (activeState ? onStop() : onRun())}
             size="icon-sm"
-            variant="ghost"
+            variant={activeState ? "destructive" : "success"}
             aria-label={activeState ? labels.stop : labels.run}
           >
             {activeState ? <Square className="size-3.5" /> : <IdleIcon className="size-3.5" />}
@@ -186,7 +183,6 @@ function SplitButton({ direction, label, icon: IconComponent }: (typeof splitCon
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
-              className="text-slate-200 hover:bg-white/10 hover:text-white"
               disabled={!workspace.activeTabId || candidates.length === 0}
               size="icon-sm"
               variant="ghost"
@@ -216,30 +212,10 @@ function SplitButton({ direction, label, icon: IconComponent }: (typeof splitCon
   );
 }
 
-export function TerminalTabs() {
-  const workspace = useWorkspace();
-  const requestClose = useConfirmClose();
-  const { beginTabDrag, endTabDrag } = useTabDrag();
-  const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
-  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
-  const selectedEditor = editorFor(selectedEditorId);
-  const runState = workspace.runScriptsState;
-  const buildState = workspace.buildScriptsState;
-  const runDisabled = runState
-    ? runState.stopping
-    : !workspace.selectedWorktree || !workspace.runScriptsAvailable || (!runState && !!buildState);
-  const buildDisabled = buildState
-    ? buildState.stopping
-    : !workspace.selectedWorktree ||
-      !workspace.buildScriptsAvailable ||
-      (!buildState && !!runState);
+type Workspace = ReturnType<typeof useWorkspace>;
 
-  // A split collapses into a single "parent" entry in the top bar, named after
-  // its top-left pane. Its members are hidden from the bar (they live in the
-  // pane bars); every other tab stays a normal top-bar tab.
+/** Summarize the current split layout: which tabs appear in the top bar. */
+function useSplitSummary(workspace: Workspace) {
   const storedSplit = workspace.selectedWorktreeId
     ? (workspace.splitRootByWorktree[workspace.selectedWorktreeId] ?? null)
     : null;
@@ -252,29 +228,409 @@ export function TerminalTabs() {
     () => workspace.tabs.filter((tab) => !splitTabIds.has(tab.id) || tab.id === parentTabId),
     [workspace.tabs, splitTabIds, parentTabId],
   );
+  return { split, parentTabId, splitDirection, splitIsActive, topTabs };
+}
 
+/** The left side of the toolbar: agents menu, run/build script buttons, go-back. */
+function TerminalToolbar({
+  workspace,
+  runDisabled,
+  buildDisabled,
+}: {
+  workspace: Workspace;
+  runDisabled: boolean;
+  buildDisabled: boolean;
+}) {
+  const runState = workspace.runScriptsState;
+  const buildState = workspace.buildScriptsState;
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <AgentsMenu />
+      <ProjectScriptButton
+        activeState={runState}
+        available={workspace.runScriptsAvailable}
+        configError={workspace.runScriptsConfigError}
+        disabled={runDisabled}
+        idleIcon={Play}
+        labels={{
+          run: "Run project scripts",
+          stop: "Stop project scripts",
+          none: "No project run scripts",
+        }}
+        onRun={() => void workspace.runScripts()}
+        onStop={() => void workspace.stopRunScripts()}
+      />
+      <ProjectScriptButton
+        activeState={buildState}
+        available={workspace.buildScriptsAvailable}
+        configError={workspace.runScriptsConfigError}
+        disabled={buildDisabled}
+        idleIcon={Hammer}
+        labels={{
+          run: "Build project scripts",
+          stop: "Stop project scripts",
+          none: "No project build scripts",
+        }}
+        onRun={() => void workspace.buildScripts()}
+        onStop={() => void workspace.stopBuildScripts()}
+      />
+      {workspace.agentBackAvailable ? (
+        <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>
+          <ArrowLeft className="size-3.5" />
+          <span className="hidden sm:inline">Go back</span>
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Whether the "Run" project-script button is disabled given current run/build state. */
+function computeRunDisabled(
+  runState: Workspace["runScriptsState"],
+  buildState: Workspace["buildScriptsState"],
+  workspace: Workspace,
+): boolean {
+  if (runState) return runState.stopping;
+  return !workspace.selectedWorktree || !workspace.runScriptsAvailable || !!buildState;
+}
+
+/** Whether the "Build" project-script button is disabled given current build/run state. */
+function computeBuildDisabled(
+  buildState: Workspace["buildScriptsState"],
+  runState: Workspace["runScriptsState"],
+  workspace: Workspace,
+): boolean {
+  if (buildState) return buildState.stopping;
+  return !workspace.selectedWorktree || !workspace.buildScriptsAvailable || !!runState;
+}
+
+/** Shared inline-rename state for terminal tabs (only one tab renames at a time). */
+function useTabRename(workspace: Workspace): {
+  renamingTabId: string | null;
+  renameValue: string;
+  setRenameValue: (value: string) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+  startRename: (tabId: string, currentTitle: string) => void;
+  commitRename: () => void;
+  cancelRename: () => void;
+} {
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (renamingTabId && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
     }
   }, [renamingTabId]);
-
   const startRename = useCallback((tabId: string, currentTitle: string) => {
     setRenamingTabId(tabId);
     setRenameValue(currentTitle);
   }, []);
-
   const commitRename = useCallback(() => {
     if (renamingTabId && renameValue.trim()) {
       void workspace.renameTerminalTab(renamingTabId, renameValue.trim());
     }
     setRenamingTabId(null);
   }, [renamingTabId, renameValue, workspace]);
+  const cancelRename = useCallback(() => setRenamingTabId(null), []);
+  return {
+    renamingTabId,
+    renameValue,
+    setRenameValue,
+    inputRef,
+    startRename,
+    commitRename,
+    cancelRename,
+  };
+}
 
-  const cancelRename = useCallback(() => {
-    setRenamingTabId(null);
-  }, []);
+type TabRenameApi = ReturnType<typeof useTabRename>;
+
+/** The "parent" entry shown in the top bar for a collapsed split. */
+function SplitParentTab({
+  tab,
+  splitDirection,
+  splitIsActive,
+  setActiveTab,
+}: {
+  tab: Tab;
+  splitDirection: SplitDirection | null;
+  splitIsActive: boolean;
+  setActiveTab: (id: string) => void;
+}) {
+  const displayTitle = tabTitle(tab);
+  const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
+  return (
+    <button
+      className={cn(
+        "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border px-2 text-sm",
+        splitIsActive
+          ? "border-border bg-elevated text-foreground"
+          : "text-muted-foreground border-transparent bg-transparent hover:bg-muted",
+      )}
+      key="split-parent"
+      onClick={() => setActiveTab(tab.id)}
+      title={`Split: ${displayTitle}`}
+    >
+      <ParentIcon className="text-primary size-3.5 shrink-0" />
+      <TabAgentDot tabId={tab.id} />
+      <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
+    </button>
+  );
+}
+
+/** One regular top-bar tab: drag handle, rename input, close button, context menu. */
+function TerminalTabItem({
+  tab,
+  active,
+  rename,
+  requestClose,
+  beginTabDrag,
+  endTabDrag,
+  setActiveTab,
+}: {
+  tab: Tab;
+  active: boolean;
+  rename: TabRenameApi;
+  requestClose: (tab: Tab) => void;
+  beginTabDrag: (tabId: string) => void;
+  endTabDrag: () => void;
+  setActiveTab: (id: string) => void;
+}) {
+  const displayTitle = tabTitle(tab);
+  const isRenaming = tab.id === rename.renamingTabId;
+  const handleDragStart = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
+      event.dataTransfer.effectAllowed = "move";
+      beginTabDrag(tab.id);
+    },
+    [beginTabDrag, tab.id],
+  );
+  return (
+    <ContextMenu key={tab.id}>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border px-2 text-sm",
+            active
+              ? "border-border bg-elevated text-foreground"
+              : "text-muted-foreground border-transparent bg-transparent hover:bg-muted",
+          )}
+          draggable
+          onDragStart={handleDragStart}
+          onDragEnd={endTabDrag}
+        >
+          {isRenaming ? (
+            <input
+              ref={rename.inputRef}
+              aria-label="Rename tab"
+              className="text-foreground ring-ring w-0 min-w-0 flex-1 rounded bg-muted px-1 text-left text-sm outline-none ring-1"
+              value={rename.renameValue}
+              onChange={(e) => rename.setRenameValue(e.target.value)}
+              onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
+              onBlur={rename.commitRename}
+            />
+          ) : (
+            <button
+              className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
+              onClick={() => setActiveTab(tab.id)}
+              onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
+            >
+              <TabIcon tab={tab} />
+              <TabAgentDot tabId={tab.id} />
+              <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+            </button>
+          )}
+          <TabDirtyDot tabId={tab.id} />
+          <button
+            aria-label="Close tab"
+            className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
+            onClick={() => requestClose(tab)}
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => rename.startRename(tab.id, displayTitle)}>
+          <Pencil />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => requestClose(tab)}>
+          <X />
+          Close
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
+function TerminalTabEntry({
+  tab,
+  active,
+  split,
+  parentTabId,
+  splitDirection,
+  splitIsActive,
+  rename,
+  requestClose,
+  beginTabDrag,
+  endTabDrag,
+  setActiveTab,
+}: {
+  tab: Tab;
+  active: boolean;
+  split: SplitGroupNode | null;
+  parentTabId: string | null;
+  splitDirection: SplitDirection | null;
+  splitIsActive: boolean;
+  rename: TabRenameApi;
+  requestClose: (tab: Tab) => void;
+  beginTabDrag: (tabId: string) => void;
+  endTabDrag: () => void;
+  setActiveTab: (id: string) => void;
+}) {
+  if (split && tab.id === parentTabId) {
+    return (
+      <SplitParentTab
+        setActiveTab={setActiveTab}
+        splitDirection={splitDirection}
+        splitIsActive={splitIsActive}
+        tab={tab}
+      />
+    );
+  }
+  return (
+    <TerminalTabItem
+      active={active}
+      beginTabDrag={beginTabDrag}
+      endTabDrag={endTabDrag}
+      rename={rename}
+      requestClose={requestClose}
+      setActiveTab={setActiveTab}
+      tab={tab}
+    />
+  );
+}
+
+/** The "open worktree in editor" split button + editor chooser dropdown. */
+function EditorLauncherMenu({
+  selectedEditor,
+  disabled,
+  onSelect,
+}: {
+  selectedEditor: EditorLauncher;
+  disabled: boolean;
+  onSelect: (editor: EditorLauncher) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <div className="flex shrink-0 items-center">
+        <Button
+          className="max-w-44 rounded-r-none"
+          disabled={disabled}
+          onClick={() => onSelect(selectedEditor)}
+          size="sm"
+          variant="outline"
+          aria-label={`Open worktree in ${selectedEditor.name}`}
+        >
+          <Icon
+            className="size-3.5 shrink-0"
+            icon={selectedEditor.brandIcon}
+            style={{ color: selectedEditor.brandColor }}
+          />
+          <span className="hidden truncate sm:inline">{selectedEditor.name}</span>
+        </Button>
+        <DropdownMenuTrigger asChild>
+          <Button
+            className="rounded-l-none border-l border-l-border px-1"
+            disabled={disabled}
+            size="icon-sm"
+            variant="outline"
+            aria-label="Choose editor"
+          >
+            <ChevronDown className="size-4 opacity-70" />
+          </Button>
+        </DropdownMenuTrigger>
+      </div>
+      <DropdownMenuContent align="end" className="min-w-48">
+        {editorLaunchers.map((editor) => (
+          <DropdownMenuItem key={editor.id} onSelect={() => onSelect(editor)}>
+            <Icon className="size-4" icon={editor.brandIcon} style={{ color: editor.brandColor }} />
+            {editor.name}
+            {editor.id === selectedEditor.id ? (
+              <DropdownMenuShortcut>Default</DropdownMenuShortcut>
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The "new tab" dropdown for creating a terminal or browser tab. */
+function NewTabMenu({
+  shortcutModifier,
+  disabled,
+  onCreateTerminal,
+  onCreateBrowser,
+}: {
+  shortcutModifier: string;
+  disabled: boolean;
+  onCreateTerminal: () => void;
+  onCreateBrowser: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          className="mr-2"
+          disabled={disabled}
+          size="icon-sm"
+          variant="ghost"
+          aria-label="New tab"
+        >
+          <Plus />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onCreateTerminal}>
+          <SquareTerminal />
+          Terminal
+          <DropdownMenuShortcut>{shortcutModifier}T</DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onCreateBrowser}>
+          <Globe />
+          Browser
+          <DropdownMenuShortcut>{shortcutModifier}B</DropdownMenuShortcut>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function TerminalTabs() {
+  const workspace = useWorkspace();
+  const requestClose = useConfirmClose();
+  const { beginTabDrag, endTabDrag } = useTabDrag();
+  const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
+  const rename = useTabRename(workspace);
+  const { split, parentTabId, splitDirection, splitIsActive, topTabs } = useSplitSummary(workspace);
+  const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
+  const selectedEditor = editorFor(selectedEditorId);
+  const runDisabled = computeRunDisabled(
+    workspace.runScriptsState,
+    workspace.buildScriptsState,
+    workspace,
+  );
+  const buildDisabled = computeBuildDisabled(
+    workspace.buildScriptsState,
+    workspace.runScriptsState,
+    workspace,
+  );
 
   const openEditor = useCallback(
     (editor: EditorLauncher) => {
@@ -287,225 +643,56 @@ export function TerminalTabs() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <header className="flex shrink-0 flex-col border-b border-white/10 bg-[#11151b] text-slate-300">
-        <div className="flex h-9 items-center justify-between gap-2 border-b border-white/5 bg-[#151b24] px-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
-          <div className="flex min-w-0 items-center gap-1">
-            <AgentsMenu />
-            <ProjectScriptButton
-              activeState={runState}
-              available={workspace.runScriptsAvailable}
-              configError={workspace.runScriptsConfigError}
-              disabled={runDisabled}
-              idleIcon={Play}
-              labels={{
-                run: "Run project scripts",
-                stop: "Stop project scripts",
-                none: "No project run scripts",
-              }}
-              onRun={() => void workspace.runScripts()}
-              onStop={() => void workspace.stopRunScripts()}
-            />
-            <ProjectScriptButton
-              activeState={buildState}
-              available={workspace.buildScriptsAvailable}
-              configError={workspace.runScriptsConfigError}
-              disabled={buildDisabled}
-              idleIcon={Hammer}
-              labels={{
-                run: "Build project scripts",
-                stop: "Stop project scripts",
-                none: "No project build scripts",
-              }}
-              onRun={() => void workspace.buildScripts()}
-              onStop={() => void workspace.stopBuildScripts()}
-            />
-            {workspace.agentBackAvailable ? (
-              <Button
-                className="text-slate-200 hover:bg-white/10 hover:text-white"
-                size="sm"
-                variant="ghost"
-                onClick={() => void workspace.goBackFromAgent?.()}
-              >
-                <ArrowLeft className="size-3.5" />
-                <span className="hidden sm:inline">Go back</span>
-              </Button>
-            ) : null}
-          </div>
+      <header className="text-muted-foreground bg-sidebar flex shrink-0 flex-col">
+        {/* The toolbar doubles as the window drag handle on the content side. */}
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
+        <div
+          className="flex h-9 items-center justify-between gap-2 border-b border-sidebar-border px-2"
+          onMouseDown={startWindowDrag}
+        >
+          <TerminalToolbar
+            buildDisabled={buildDisabled}
+            runDisabled={runDisabled}
+            workspace={workspace}
+          />
           <div className="flex shrink-0 items-center justify-end">
-            <DropdownMenu>
-              <div className="flex shrink-0 items-center">
-                <Button
-                  className="max-w-44 rounded-r-none border border-cyan-400/25 bg-cyan-400/12 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
-                  disabled={!workspace.selectedWorktree}
-                  onClick={() => openEditor(selectedEditor)}
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Open worktree in ${selectedEditor.name}`}
-                >
-                  <Icon
-                    className="size-3.5 shrink-0"
-                    icon={selectedEditor.brandIcon}
-                    style={{ color: selectedEditor.brandColor }}
-                  />
-                  <span className="hidden truncate sm:inline">{selectedEditor.name}</span>
-                </Button>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="rounded-l-none border border-l-0 border-cyan-400/25 bg-cyan-400/12 px-1 text-cyan-50 shadow-sm shadow-cyan-950/30 hover:bg-cyan-400/20 hover:text-white"
-                    disabled={!workspace.selectedWorktree}
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Choose editor"
-                  >
-                    <ChevronDown className="size-3 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </div>
-              <DropdownMenuContent align="end" className="min-w-48">
-                {editorLaunchers.map((editor) => (
-                  <DropdownMenuItem key={editor.id} onSelect={() => openEditor(editor)}>
-                    <Icon
-                      className="size-4"
-                      icon={editor.brandIcon}
-                      style={{ color: editor.brandColor }}
-                    />
-                    {editor.name}
-                    {editor.id === selectedEditor.id ? (
-                      <DropdownMenuShortcut>Default</DropdownMenuShortcut>
-                    ) : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <EditorLauncherMenu
+              disabled={!workspace.selectedWorktree}
+              onSelect={openEditor}
+              selectedEditor={selectedEditor}
+            />
           </div>
         </div>
-        <div className="flex h-11 items-center">
+        <div className="bg-canvas flex h-11 items-center">
           <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
-            {topTabs.map((tab) => {
-              const displayTitle = tabTitle(tab);
-              if (split && tab.id === parentTabId) {
-                const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
-                return (
-                  <button
-                    className={cn(
-                      "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-lg border px-2 text-sm",
-                      splitIsActive
-                        ? "border-slate-600 bg-slate-800 text-white"
-                        : "border-transparent bg-transparent hover:bg-slate-900",
-                    )}
-                    key="split-parent"
-                    onClick={() => workspace.setActiveTab(tab.id)}
-                    title={`Split: ${displayTitle}`}
-                  >
-                    <ParentIcon className="size-3.5 shrink-0 text-cyan-300" />
-                    <TabAgentDot tabId={tab.id} />
-                    <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
-                  </button>
-                );
-              }
-              const active = tab.id === workspace.activeTabId;
-              const isRenaming = tab.id === renamingTabId;
-              return (
-                <ContextMenu key={tab.id}>
-                  <ContextMenuTrigger asChild>
-                    <div
-                      className={cn(
-                        "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-lg border px-2 text-sm",
-                        active
-                          ? "border-slate-600 bg-slate-800 text-white"
-                          : "border-transparent bg-transparent hover:bg-slate-900",
-                      )}
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        beginTabDrag(tab.id);
-                      }}
-                      onDragEnd={endTabDrag}
-                    >
-                      {isRenaming ? (
-                        <input
-                          ref={inputRef}
-                          aria-label="Rename tab"
-                          className="w-0 min-w-0 flex-1 rounded bg-white/10 px-1 text-left text-sm text-white outline-none ring-1 ring-slate-500"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              commitRename();
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelRename();
-                            }
-                          }}
-                          onBlur={commitRename}
-                        />
-                      ) : (
-                        <button
-                          className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
-                          onClick={() => workspace.setActiveTab(tab.id)}
-                          onDoubleClick={() => startRename(tab.id, displayTitle)}
-                        >
-                          <TabIcon tab={tab} />
-                          <TabAgentDot tabId={tab.id} />
-                          <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
-                        </button>
-                      )}
-                      <TabDirtyDot tabId={tab.id} />
-                      <button
-                        aria-label="Close tab"
-                        className="rounded p-0.5 opacity-60 hover:bg-white/10 hover:opacity-100"
-                        onClick={() => requestClose(tab)}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <ContextMenuItem onSelect={() => startRename(tab.id, displayTitle)}>
-                      <Pencil />
-                      Rename
-                    </ContextMenuItem>
-                    <ContextMenuItem onSelect={() => requestClose(tab)}>
-                      <X />
-                      Close
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenu>
-              );
-            })}
+            {topTabs.map((tab) => (
+              <TerminalTabEntry
+                key={tab.id}
+                active={tab.id === workspace.activeTabId}
+                beginTabDrag={beginTabDrag}
+                endTabDrag={endTabDrag}
+                parentTabId={parentTabId}
+                rename={rename}
+                requestClose={requestClose}
+                setActiveTab={workspace.setActiveTab}
+                split={split}
+                splitDirection={splitDirection}
+                splitIsActive={splitIsActive}
+                tab={tab}
+              />
+            ))}
           </div>
           <div className="mr-1 flex shrink-0 items-center gap-1">
             {splitControls.map((control) => (
               <SplitButton key={control.direction} {...control} />
             ))}
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                className="mr-2 text-slate-200 hover:bg-white/10 hover:text-white"
-                disabled={!workspace.selectedWorktree}
-                size="icon-sm"
-                variant="ghost"
-                aria-label="New tab"
-              >
-                <Plus />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => void workspace.createTerminalTab()}>
-                <SquareTerminal />
-                Terminal
-                <DropdownMenuShortcut>{shortcutModifier}T</DropdownMenuShortcut>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void workspace.createBrowserTab()}>
-                <Globe />
-                Browser
-                <DropdownMenuShortcut>{shortcutModifier}B</DropdownMenuShortcut>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <NewTabMenu
+            disabled={!workspace.selectedWorktree}
+            onCreateBrowser={() => void workspace.createBrowserTab()}
+            onCreateTerminal={() => void workspace.createTerminalTab()}
+            shortcutModifier={shortcutModifier}
+          />
         </div>
       </header>
     </TooltipProvider>

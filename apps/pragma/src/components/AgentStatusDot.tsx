@@ -16,9 +16,11 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
     <span
       className={cn(
         "inline-block size-2 shrink-0 rounded-full ring-1 ring-black/30",
-        status === "done" && "bg-green-500 shadow-[0_0_6px_#22c55e]",
-        status === "attention" && "animate-agent-attention bg-red-500 shadow-[0_0_8px_#ef4444]",
-        status === "running" && "animate-agent-running bg-yellow-400 shadow-[0_0_6px_#facc15]",
+        status === "done" && "bg-success shadow-[0_0_6px_var(--color-success)]",
+        status === "attention" &&
+          "animate-agent-attention bg-destructive shadow-[0_0_8px_var(--color-destructive)]",
+        status === "running" &&
+          "animate-agent-running bg-warning shadow-[0_0_6px_var(--color-warning)]",
         className,
       )}
       title={`Agent ${status}`}

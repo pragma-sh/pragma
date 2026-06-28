@@ -55,20 +55,27 @@ describe("startAgentInTab", () => {
   it("sends the start command after the launch delay", () => {
     startAgentInTab("tab-1", agent(["opencode"]));
     expect(ptyWriteMock).not.toHaveBeenCalled();
+    expect(writeWhenReadyMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
-    expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "opencode\r");
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "opencode\r");
+    expect(ptyWriteMock).not.toHaveBeenCalled();
   });
 
   it("does not prefill when no message is given", () => {
     startAgentInTab("tab-1", agent(["opencode"]));
     vi.advanceTimersByTime(10_000);
-    expect(writeWhenReadyMock).not.toHaveBeenCalled();
+    expect(writeWhenReadyMock).toHaveBeenCalledTimes(1);
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "opencode\r");
   });
 
   it("bracketed-pastes a trimmed prefill then submits separately after the TUI delay", () => {
     startAgentInTab("tab-1", agent(["claude"]), "Fix the bug");
     vi.advanceTimersByTime(500);
-    expect(writeWhenReadyMock).not.toHaveBeenCalled();
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "claude\r");
+    expect(writeWhenReadyMock).not.toHaveBeenCalledWith(
+      "tab-1",
+      `${ESC}[200~Fix the bug${ESC}[201~`,
+    );
     vi.advanceTimersByTime(2500);
     expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", `${ESC}[200~Fix the bug${ESC}[201~`);
     // The submit key is a separate, later write so the paste commits first.
@@ -88,7 +95,7 @@ describe("startAgentInTab", () => {
       "Fix the bug",
     );
     vi.advanceTimersByTime(500);
-    expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "agent\r");
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "agent\r");
     vi.advanceTimersByTime(999);
     expect(writeWhenReadyMock).not.toHaveBeenCalledWith("tab-1", "a\r");
     vi.advanceTimersByTime(1);
@@ -128,13 +135,14 @@ describe("startAgentInTab", () => {
     };
     startAgentInTab("tab-1", selected, undefined, { modelId: "sonnet", reasoningId: null });
     vi.advanceTimersByTime(500);
-    expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "agent --model sonnet\r");
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "agent --model sonnet\r");
   });
 
   it("skips a whitespace-only prefill", () => {
     startAgentInTab("tab-1", agent(["claude"]), "   \n  ");
     vi.advanceTimersByTime(10_000);
-    expect(writeWhenReadyMock).not.toHaveBeenCalled();
+    expect(writeWhenReadyMock).toHaveBeenCalledTimes(1);
+    expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "claude\r");
   });
 });
 
@@ -143,6 +151,7 @@ describe("startBackgroundAgentSession", () => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
     ptySpawnMock.mockReset();
+    writeWhenReadyMock.mockReset();
     ptySpawnMock.mockResolvedValue({ onmessage: vi.fn() });
   });
 

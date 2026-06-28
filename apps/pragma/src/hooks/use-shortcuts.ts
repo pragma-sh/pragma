@@ -37,6 +37,27 @@ interface ShortcutState {
   actionForEvent: (event: KeyboardEvent) => KeybindingAction | null;
 }
 
+/** Option keys whose handlers are zero-arg callbacks (no payload to forward). */
+type ZeroArgOptionKey = {
+  [K in keyof UseShortcutsOptions]: UseShortcutsOptions[K] extends () => void ? K : never;
+}[keyof UseShortcutsOptions];
+
+/** Simple actions that map 1:1 to a zero-arg option callback with preventDefault. */
+const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
+  nextTab: "onNextTab",
+  previousTab: "onPreviousTab",
+  closeTopTab: "onCloseTopTab",
+  newTerminalTab: "onNewTerminalTab",
+  newBrowserTab: "onNewBrowserTab",
+  clearTerminal: "onClearTerminal",
+  browserReload: "onBrowserReload",
+  browserDevtools: "onBrowserDevtools",
+  browserCopyUrl: "onBrowserCopyUrl",
+  splitHorizontal: "onSplitHorizontal",
+  splitVertical: "onSplitVertical",
+  scrollTerminalBottom: "onScrollTerminalBottom",
+};
+
 /** Registers window-level keyboard shortcuts driven by `~/.pragma/keybindings.json`. */
 export function useShortcuts(options: UseShortcutsOptions): void {
   const optionsRef = useRef(options);
@@ -83,79 +104,45 @@ export function useShortcuts(options: UseShortcutsOptions): void {
       }
 
       const current = optionsRef.current;
-      switch (action) {
-        case "nextTab":
-          event.preventDefault();
-          current.onNextTab();
-          break;
-        case "previousTab":
-          event.preventDefault();
-          current.onPreviousTab();
-          break;
-        case "closeTopTab":
-          event.preventDefault();
-          current.onCloseTopTab();
-          break;
-        case "newTerminalTab":
-          event.preventDefault();
-          current.onNewTerminalTab();
-          break;
-        case "newBrowserTab":
-          event.preventDefault();
-          current.onNewBrowserTab();
-          break;
-        case "clearTerminal":
-          event.preventDefault();
-          current.onClearTerminal();
-          break;
-        case "browserReload":
-          event.preventDefault();
-          current.onBrowserReload();
-          break;
-        case "browserDevtools":
-          event.preventDefault();
-          current.onBrowserDevtools();
-          break;
-        case "browserCopyUrl":
-          event.preventDefault();
-          current.onBrowserCopyUrl();
-          break;
-        case "splitHorizontal":
-          event.preventDefault();
-          current.onSplitHorizontal();
-          break;
-        case "splitVertical":
-          event.preventDefault();
-          current.onSplitVertical();
-          break;
-        case "deleteFile":
-          // Cmd/Ctrl+Delete is a native OS text-editing shortcut (delete to
-          // beginning of line) in inputs, the terminal, and the editor. Only
-          // treat it as "delete the selected file" when focus is outside a
-          // text-editing context (e.g. the file tree). Letting the event
-          // continue without preventDefault lets WebKit / xterm do the native
-          // thing.
-          if (isTextEditingContext(document.activeElement)) {
-            return;
-          }
-          event.preventDefault();
-          current.onDeleteSelectedFile();
-          break;
-        case "scrollTerminalBottom":
-          event.preventDefault();
-          current.onScrollTerminalBottom();
-          break;
-        default: {
-          const workspaceIndex = workspaceIndexForAction(action);
-          if (workspaceIndex !== null && workspaceIndex <= current.projectCount) {
-            event.preventDefault();
-            current.onProject(workspaceIndex - 1);
-          }
-        }
+      const simpleKey = SIMPLE_ACTIONS[action];
+      if (simpleKey) {
+        event.preventDefault();
+        current[simpleKey]();
+        return;
       }
+
+      if (action === "deleteFile") {
+        handleDeleteFileAction(event, current);
+        return;
+      }
+
+      handleWorkspaceIndexAction(event, action, current);
     }
 
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [shortcutState]);
+}
+
+/** `deleteFile` is a native OS text-editing chord in inputs/terminal/editor; only
+ * treat it as "delete the selected file" outside a text-editing context. */
+function handleDeleteFileAction(event: KeyboardEvent, current: UseShortcutsOptions): void {
+  if (isTextEditingContext(document.activeElement)) {
+    return;
+  }
+  event.preventDefault();
+  current.onDeleteSelectedFile();
+}
+
+/** Workspace-index actions (Cmd/Ctrl+1..N) switch to the Nth project, in bounds. */
+function handleWorkspaceIndexAction(
+  event: KeyboardEvent,
+  action: KeybindingAction,
+  current: UseShortcutsOptions,
+): void {
+  const workspaceIndex = workspaceIndexForAction(action);
+  if (workspaceIndex !== null && workspaceIndex <= current.projectCount) {
+    event.preventDefault();
+    current.onProject(workspaceIndex - 1);
+  }
 }

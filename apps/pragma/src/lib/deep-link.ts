@@ -113,22 +113,27 @@ function lastRawParam(search: string, name: string): string | null {
   const query = search.startsWith("?") ? search.slice(1) : search;
   const values: string[] = [];
   for (const part of query.split("&")) {
-    if (!part) {
-      continue;
-    }
-    const separatorIndex = part.indexOf("=");
-    const rawKey = separatorIndex === -1 ? part : part.slice(0, separatorIndex);
-    const key = decodeQueryComponent(rawKey);
-    if (key !== name) {
-      continue;
-    }
-    const rawValue = separatorIndex === -1 ? "" : part.slice(separatorIndex + 1);
-    const value = decodeQueryComponent(rawValue);
-    if (value !== null && value.length > 0) {
+    const value = rawParamValue(part, name);
+    if (value !== null) {
       values.push(value);
     }
   }
   return values.at(-1) ?? null;
+}
+
+/** Parses one `key=value` query part, returning the value when its key matches `name`. */
+function rawParamValue(part: string, name: string): string | null {
+  if (!part) {
+    return null;
+  }
+  const separatorIndex = part.indexOf("=");
+  const rawKey = separatorIndex === -1 ? part : part.slice(0, separatorIndex);
+  if (decodeQueryComponent(rawKey) !== name) {
+    return null;
+  }
+  const rawValue = separatorIndex === -1 ? "" : part.slice(separatorIndex + 1);
+  const value = decodeQueryComponent(rawValue);
+  return value !== null && value.length > 0 ? value : null;
 }
 
 /** Percent-decodes a query component without applying form-style `+` to space conversion. */

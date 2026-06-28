@@ -9,7 +9,7 @@ bottom **before** writing code. Two companion references go deeper on the two ro
 plugin can take:
 
 - **[SDK.md](./SDK.md)** — the preferred route: `@pragma/sdk`, a typed TS/JS wrapper.
-- **[CLI.md](./CLI.md)** — the fallback route: the raw `pragma-agent` CLI for tools with
+- **[CLI.md](./CLI.md)** — the fallback route: the raw `pragma-cli` CLI for tools with
   no in-process JS plugin API.
 
 Two real plugins exist; copy the one whose route matches your tool:
@@ -20,7 +20,7 @@ Two real plugins exist; copy the one whose route matches your tool:
 
 > **Plugins stay out of core.** A plugin package is self-contained data plus its own
 > bundled assets. It must **not** add or modify code in Pragma core (`apps/pragma`,
-> `src-tauri`), the daemon, the CLI, or the SDK without explicit owner permission. A
+> `src-tauri`), the server, the CLI, or the SDK without explicit owner permission. A
 > plugin installs itself through its **host tool's own plugin mechanism**, never through
 > per-plugin Pragma code. If you think you need new core behavior, **stop and ask first**.
 
@@ -43,10 +43,11 @@ only ever follow a `started`. `cleared` removes the dot because there is nothing
 at (quit / crash / abort). Conflating the two produces phantom "done" dots — the single
 most common bug in these plugins.
 
-The status reports reach the daemon through the `pragma-agent` CLI (directly, or via the
-SDK which shells out to it). The CLI reads three env vars that the Pragma terminal
-injects — `PRAGMA_DAEMON_SOCKET`, `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID` — connects to
-the daemon socket, writes one `AgentReport` frame, and exits.
+The status reports reach the server through the `pragma-cli` CLI (directly, or via the
+SDK which shells out to it). The CLI reads env vars that the Pragma terminal injects —
+`PRAGMA_SERVER_SOCKET` (falling back to legacy `PRAGMA_DAEMON_SOCKET`), `PRAGMA_TAB_ID`,
+and `PRAGMA_WORKTREE_ID` — connects to the server socket, writes one `AgentReport` frame,
+and exits.
 
 ---
 
@@ -94,7 +95,7 @@ If the tool can load a JS/TS plugin in-process, write one and report status thro
 - You react to **structured, typed events** instead of parsing stdin or scraping
   transcripts.
 - `@pragma/sdk` gives you typed `reportStarted` / `reportStopped` / `reportAttention` /
-  `reportCleared` helpers — **never hand-build `pragma-agent` argv**.
+  `reportCleared` helpers — **never hand-build `pragma-cli` argv**.
 - You get a real `dispose`/shutdown hook, so cleanup (`cleared`) is reliable.
 
 See **[SDK.md](./SDK.md)** for the full API. Model your package on
@@ -112,15 +113,15 @@ See **[SDK.md](./SDK.md)** for the full API. Model your package on
 ### Fallback: CLI route (shell hooks, for tools with no JS API)
 
 If the tool's only extension point is shell-command hooks, write a real plugin for that
-tool where every hook shells out to a single bundled script that calls `pragma-agent`
+tool where every hook shells out to a single bundled script that calls `pragma-cli`
 directly. See **[CLI.md](./CLI.md)** for the CLI contract. Model your package on
 `packages/claude-code-plugin/`:
 
 - A host-tool plugin manifest + hooks file that map each lifecycle hook to
   `sh "$PLUGIN_ROOT/hooks/report.sh" <event>`.
-- One `report.sh` that translates events → `pragma-agent report …`. Keeping the logic in
+- One `report.sh` that translates events → `pragma-cli report …`. Keeping the logic in
   one script (not inline JSON one-liners) is what makes it testable.
-- Tests that drive `report.sh` with a fake `pragma-agent` on `PATH`.
+- Tests that drive `report.sh` with a fake `pragma-cli` on `PATH`.
 
 Keep all logic in the shell script and keep it **POSIX `sh`**, invoked via `sh` so it
 works regardless of the executable bit.
@@ -137,18 +138,18 @@ Every plugin, regardless of route, **must** implement all of the following:
 
 2. **Guard on the Pragma environment.** The plugin must be a **silent no-op** outside a
    Pragma terminal — it will run in every session of the host tool, including ones the
-   user starts on their own. Check that `PRAGMA_DAEMON_SOCKET` (and ideally
-   `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`) are set before reporting. The SDK guards on
-   these for you; the CLI script must check explicitly (`[ -n "$PRAGMA_DAEMON_SOCKET" ]
-|| exit 0`).
+   user starts on their own. Check that `PRAGMA_SERVER_SOCKET` or legacy
+   `PRAGMA_DAEMON_SOCKET` (and ideally `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`) are set
+   before reporting. The SDK guards on these for you; the CLI script must check explicitly
+   (`[ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0`).
 
-3. **Never disrupt the host session.** A missing `pragma-agent`, a down daemon, or any
+3. **Never disrupt the host session.** A missing `pragma-cli`, a down server, or any
    reporting error must never break the user's tool. The SDK swallows errors (optionally
    logging in debug mode); the CLI script wraps every call `… >/dev/null 2>&1 || true`.
 
 4. **Clear a stale indicator on load.** Fire one `cleared` when the plugin starts up. A
    previous run in the same tab may have crashed without cleanup, leaving a stale dot in
-   the long-lived daemon; clearing up front guarantees a fresh session never inherits it.
+   the long-lived server; clearing up front guarantees a fresh session never inherits it.
    Genuine activity immediately re-raises the right status.
 
 5. **Clear on exit.** When the agent process quits (graceful dispose **and**, if
@@ -170,7 +171,7 @@ Every plugin, regardless of route, **must** implement all of the following:
    install command, and every non-obvious gotcha you discovered in Step 1.
 
 9. **Add tests.** SDK route: Vitest against the hooks state machine. CLI route: Vitest
-   (or a shell harness) driving `report.sh` with a fake `pragma-agent`.
+   (or a shell harness) driving `report.sh` with a fake `pragma-cli`.
 
 ---
 
@@ -200,7 +201,7 @@ packages/<your>-plugin/pragma/agents/<agent-id>/icon.svg
 }
 ```
 
-- `id` — stable agent id; this is the `--agent <id>` you pass to `pragma-agent`.
+- `id` — stable agent id; this is the `--agent <id>` you pass to `pragma-cli`.
 - `name` — display name in the launcher.
 - `icon` — must resolve **inside** this agent directory.
 - `start` — argv used to launch the tool in a Pragma terminal.

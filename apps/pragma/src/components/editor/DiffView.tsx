@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { errorMessage } from "@/lib/errors";
 
 import type { Tab } from "@pragma/constants";
 
 import { MergeDiff } from "@/components/editor/MergeDiff";
+import { useWorktreeFileChange } from "@/lib/file-watch";
 import { fileDiff } from "@/lib/tauri";
 
 type LoadState =
@@ -10,10 +12,6 @@ type LoadState =
   | { kind: "ready"; oldText: string; newText: string }
   | { kind: "binary" }
   | { kind: "error"; message: string };
-
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 /**
  * Read-only side-by-side diff for `diff` tabs, backed by `@codemirror/merge`.
@@ -24,6 +22,14 @@ function messageFor(cause: unknown): string {
 export function DiffView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath, diffSide } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  // Live preview: recompute the diff whenever the watched file changes on disk.
+  useWorktreeFileChange(worktreeId, (change) => {
+    if (change.path === filePath) {
+      setReloadNonce((nonce) => nonce + 1);
+    }
+  });
 
   useEffect(() => {
     if (!filePath || !diffSide) {
@@ -47,14 +53,14 @@ export function DiffView({ tab }: { tab: Tab }) {
         setState({ kind: "ready", oldText: diff.oldText, newText: diff.newText });
       } catch (cause) {
         if (!cancelled) {
-          setState({ kind: "error", message: messageFor(cause) });
+          setState({ kind: "error", message: errorMessage(cause) });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tabId, worktreeId, filePath, diffSide]);
+  }, [tabId, worktreeId, filePath, diffSide, reloadNonce]);
 
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;
@@ -73,7 +79,7 @@ export function DiffView({ tab }: { tab: Tab }) {
 
 function Placeholder({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center bg-[#0b0d10] p-6 text-center text-sm text-slate-400">
+    <div className="flex h-full items-center justify-center bg-canvas p-6 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );

@@ -40,7 +40,7 @@ describe("NewEntryInput", () => {
   it("keeps a red border and does not commit a duplicate name", () => {
     const { input, onCommit } = setup(["app.ts"]);
     fireEvent.change(input, { target: { value: "APP.TS" } });
-    expect(input.className).toContain("border-red-400/70");
+    expect(input.className).toContain("border-destructive/70");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onCommit).not.toHaveBeenCalled();
   });

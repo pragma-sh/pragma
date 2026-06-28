@@ -5,7 +5,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use pragma_constants::{AgentAttentionKind, AgentReportPayload, AgentStatus};
+pub use pragma_constants::{
+    AgentAttentionKind, AgentReportPayload, AgentStatus, ProtocolErrorCode, ProtocolEventKind,
+    ProtocolRpcMethod,
+};
 
 /// Channel name shared by every production build. It is stable so an installed
 /// app always resolves the same daemon socket and the same database, and so the
@@ -20,7 +23,7 @@ pub const PROD_CHANNEL: &str = "pragma";
 /// build never collides with production (`pragma`). The same worktree hashes
 /// identically across rebuilds, so its daemon and data dir persist. The app and
 /// the daemon compute this the same way (same `std` hasher over the same path),
-/// so a hand-run `cargo run -p pragma-daemon` in a worktree resolves the same
+/// so a hand-run `cargo run -p pragma-server` in a worktree resolves the same
 /// channel as that worktree's app even without the `PRAGMA_DAEMON_CHANNEL` env.
 #[must_use]
 pub fn dev_channel(workspace_root: &Path) -> String {
@@ -84,6 +87,10 @@ pub struct RequestFrame {
     pub cols: Option<u16>,
     pub rows: Option<u16>,
     pub data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpc: Option<RpcRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<SubscriptionRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -104,6 +111,28 @@ pub enum RequestKind {
     /// stops replaying them on the next subscriber reconnect. `sessionId` is the
     /// tab id; `running`/`attention` statuses are left untouched.
     MarkAgentsSeen,
+    /// Request/response business-logic RPC. `rpc` carries the method and payload.
+    Rpc,
+    /// Snapshot-then-delta event subscription. `subscription` carries the event kind.
+    Subscribe,
+}
+
+/// Request payload for generalized server-owned business-logic RPC.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcRequest {
+    pub method: ProtocolRpcMethod,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+/// Request payload for snapshot-then-delta subscriptions.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionRequest {
+    pub event: ProtocolEventKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -112,6 +141,26 @@ pub struct ResponseFrame {
     pub request_id: String,
     pub ok: bool,
     pub error: Option<String>,
+}
+
+/// Response frame for generalized RPC requests.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcResponseFrame {
+    pub request_id: String,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RpcError>,
+}
+
+/// Protocol-level RPC error.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcError {
+    pub code: ProtocolErrorCode,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -145,6 +194,24 @@ pub enum EventFrame {
         #[serde(rename = "attentionKind")]
         attention_kind: Option<AgentAttentionKind>,
     },
+    /// First message for a subscription, carrying the complete current state.
+    Snapshot {
+        subscription: ProtocolEventKind,
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
+    /// Incremental event after a subscription snapshot.
+    Delta {
+        subscription: ProtocolEventKind,
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
+    /// Terminal echo-mode update used by client-local predictive echo.
+    EchoMode {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        echo: bool,
+    },
 }
 
 /// Sent by the daemon as the first frame on every accepted connection.
@@ -159,6 +226,7 @@ pub struct HelloFrame {
 pub enum ServerFrame {
     Hello(HelloFrame),
     Response(ResponseFrame),
+    Rpc(RpcResponseFrame),
     Event(EventFrame),
 }
 
@@ -264,6 +332,8 @@ mod tests {
             cols: Some(80),
             rows: Some(24),
             data: None,
+            rpc: None,
+            subscription: None,
         };
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write frame");
@@ -304,7 +374,28 @@ mod tests {
         let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read hello");
         match decoded {
             ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 3),
-            ServerFrame::Response(_) | ServerFrame::Event(_) => panic!("expected hello"),
+            ServerFrame::Response(_) | ServerFrame::Rpc(_) | ServerFrame::Event(_) => {
+                panic!("expected hello")
+            }
+        }
+    }
+
+    #[test]
+    fn rpc_frame_round_trips() {
+        let frame = ServerFrame::Rpc(super::RpcResponseFrame {
+            request_id: "rpc-1".to_string(),
+            ok: true,
+            payload: Some(serde_json::json!({ "pong": true })),
+            error: None,
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write rpc");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read rpc");
+        match decoded {
+            ServerFrame::Rpc(response) => assert_eq!(response.request_id, "rpc-1"),
+            ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_) => {
+                panic!("expected rpc")
+            }
         }
     }
 
@@ -324,8 +415,14 @@ mod tests {
             }
             ServerFrame::Hello(_)
             | ServerFrame::Response(_)
+            | ServerFrame::Rpc(_)
             | ServerFrame::Event(
-                EventFrame::Output { .. } | EventFrame::Exit { .. } | EventFrame::Agent { .. },
+                EventFrame::Output { .. }
+                | EventFrame::Exit { .. }
+                | EventFrame::Agent { .. }
+                | EventFrame::Snapshot { .. }
+                | EventFrame::Delta { .. }
+                | EventFrame::EchoMode { .. },
             ) => {
                 panic!("expected title")
             }

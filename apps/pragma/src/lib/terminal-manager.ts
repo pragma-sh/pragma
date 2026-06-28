@@ -322,11 +322,26 @@ export class TerminalManager {
     }
     const cols = Math.max(2, Math.min(dimensions.cols, MAX_TERMINAL_COLS));
     const rows = Math.max(1, Math.min(dimensions.rows, MAX_TERMINAL_ROWS));
+    this.applyFit(managed, dimensions, cols, rows);
+    this.maybeResizePty(managed, tabId);
+  }
+
+  /** Applies the proposed dimensions to xterm, fitting when in bounds or resizing when clamped. */
+  private applyFit(
+    managed: ManagedTerminal,
+    dimensions: { cols: number; rows: number },
+    cols: number,
+    rows: number,
+  ): void {
     if (dimensions.cols === cols && dimensions.rows === rows) {
       managed.fit.fit();
     } else if (managed.terminal.cols !== cols || managed.terminal.rows !== rows) {
       managed.terminal.resize(cols, rows);
     }
+  }
+
+  /** Forwards the fitted grid to the PTY only when it actually changed. */
+  private maybeResizePty(managed: ManagedTerminal, tabId: string): void {
     const fittedCols = managed.terminal.cols;
     const fittedRows = managed.terminal.rows;
     if (managed.lastResizeCols === fittedCols && managed.lastResizeRows === fittedRows) {

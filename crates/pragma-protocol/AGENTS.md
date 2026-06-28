@@ -1,7 +1,7 @@
 # crates/pragma-protocol — Shared Wire Protocol
 
-Shared wire frame definitions and framing utilities used by the daemon, the Tauri app,
-and `pragma-agent`. This is the one crate all three share.
+Shared wire frame definitions and framing utilities used by `pragma-server`, native
+clients, and `pragma-cli`. This is the one crate all Rust protocol participants share.
 
 ## Frame format
 
@@ -9,7 +9,7 @@ Every frame: `[4-byte BE length][1-byte tag][body]`
 
 | Tag | Type   | Body format                                                       |
 | --- | ------ | ----------------------------------------------------------------- |
-| 0   | JSON   | Control frame: hello, requests, responses, title/exit events      |
+| 0   | JSON   | Control frame: hello, requests, responses, RPC, events            |
 | 1   | Binary | `[2-byte BE session-id length][session id bytes][raw PTY output]` |
 
 Helpers: `write_output_frame` / `Frame::Output` (write); `Frame::read` (read).
@@ -29,7 +29,7 @@ dependencies.
 
 - Any change to the frame layout, tag values, or the binary output format **must** bump
   `daemon.protocolVersion` in `packages/constants/values.json`. See
-  `crates/pragma-daemon/AGENTS.md`.
+  `crates/pragma-server/AGENTS.md`.
 - The app must **never** re-encode PTY output — relay `Vec<u8>` bytes straight through
   as `InvokeResponseBody::Raw`.
 - `EventFrame::Output` holds `Vec<u8>` — there is no UTF-8 decode on the hot path;

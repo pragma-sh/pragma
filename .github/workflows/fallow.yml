@@ -1,0 +1,32 @@
+name: Fallow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: fallow-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write # post the PR summary comment + inline annotations
+
+jobs:
+  fallow:
+    name: Fallow (code intelligence)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # audit diffs changed files against the PR base, so it needs history.
+          fetch-depth: 0
+      - uses: fallow-rs/fallow@v2
+        with:
+          # Combined dead-code + complexity + duplication on changed files.
+          # auto-changed-since (default) scopes to the PR diff, so this gates
+          # only issues the change introduces; fail-on-issues (default) blocks.
+          command: audit
+          comment: true

@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRequiredContext } from "@/lib/context";
 
 import type { GitHubAuthStatus } from "@pragma/constants";
 
@@ -95,9 +88,5 @@ export function GitHubProvider({ children }: { children: ReactNode }) {
 
 /** Accesses the GitHub authentication state and actions. */
 export function useGitHub(): GitHubContextValue {
-  const context = useContext(GitHubContext);
-  if (!context) {
-    throw new Error("useGitHub must be used inside GitHubProvider");
-  }
-  return context;
+  return useRequiredContext(GitHubContext, "useGitHub");
 }

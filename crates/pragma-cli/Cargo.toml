@@ -1,12 +1,12 @@
 [package]
-name = "pragma-agent-cli"
+name = "pragma-cli"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "CLI for external agents to report status into Pragma."
+description = "CLI for Pragma host/client utilities and external agent status reporting."
 
 [[bin]]
-name = "pragma-agent"
+name = "pragma-cli"
 path = "src/main.rs"
 
 [lints]

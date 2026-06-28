@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": ["src/index.{js,jsx,ts,tsx,mjs}", "src/main.{js,jsx,ts,tsx,mjs}"],
+  "workspaces": {
+    "packages": ["apps/*", "packages/*"],
+  },
+  // The shadcn/ui primitives in `components/ui` are our project's component
+  // library: a deliberate, full-API surface kept in sync with `shadcn add`. An
+  // unused variant we don't happen to render yet (e.g. some `Select*` parts) is
+  // intentional public API, not dead code, so don't report unused exports there.
+  // App code outside `ui/` is still held to the normal dead-code bar.
+  "ignoreExports": [
+    { "file": "**/components/ui/**", "exports": ["*"] },
+    // `lib/tauri.ts` is the typed IPC boundary: every backend `#[tauri::command]`
+    // gets exactly one named wrapper here so the app never touches raw command
+    // strings (see the file header). A few wrappers mirror commands no UI calls
+    // yet — that 1:1 contract is intentional, not dead code.
+    { "file": "**/lib/tauri.ts", "exports": ["getAppInfo", "saveKeybindings", "aiLogout"] },
+  ],
+  // `@google/design.md` is the DesignSync CLI that generates DESIGN.md — a
+  // tool invoked from the shell, intentionally never imported from source.
+  "ignoreDependencies": ["@google/design.md"],
+  // `@pragma/constants` imports generated TS types that may not exist before
+  // `bun run generate`; don't report that intentional generated edge.
+  "ignoreUnresolvedImports": ["./generated/constants"],
+  "duplicates": {
+    "mode": "semantic",
+    // Hide pair-only clones; focus on widespread copy-paste
+    // worth refactoring. Lower to 2 to report every duplicate pair.
+    "minOccurrences": 3,
+    "ignore": [
+      // shadcn/ui primitives are generated from a shared template, so the Radix
+      // wrapper boilerplate (forwardRef + cn(className) + data-slot) repeats by
+      // design across files. Refactoring it would fight the upstream generator
+      // and the `shadcn add` workflow, so it's intentional duplication.
+      "**/components/ui/**",
+      // `lib/tauri.ts` is the typed IPC boundary (see the matching `ignoreExports`
+      // entry above): every backend `#[tauri::command]` gets exactly one named
+      // `invoke<T>("cmd", { args })` wrapper with its own JSDoc. That 1:1
+      // boilerplate repeats by design — collapsing it into a factory would lose
+      // the per-command typing and the explicit contract AGENTS.md mandates
+      // ("Keep the IPC surface typed and centralized").
+      "**/lib/tauri.ts",
+    ],
+  },
+  "rules": {
+    "unused-component-props": "warn",
+    "prop-drilling": "warn",
+    "duplicate-prop-shape": "warn",
+  },
+}

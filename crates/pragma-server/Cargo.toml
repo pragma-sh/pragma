@@ -1,9 +1,9 @@
 [package]
-name = "pragma-daemon"
+name = "pragma-server"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "Detached PTY daemon for Pragma terminal sessions."
+description = "Persistent host-side server for Pragma terminal sessions and workspace state."
 
 [lints]
 workspace = true
@@ -13,6 +13,7 @@ anyhow = "1"
 daemonize = "0.5"
 portable-pty = "0.8"
 pragma-constants = { path = "../../packages/constants" }
+pragma-core = { path = "../pragma-core" }
 pragma-protocol = { path = "../pragma-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }

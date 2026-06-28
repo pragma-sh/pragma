@@ -1,6 +1,6 @@
 # `@pragma/sdk` — the preferred plugin route
 
-Typed Node/Bun wrapper around the `pragma-agent` CLI. **Use this in any JS/TS plugin or
+Typed Node/Bun wrapper around the `pragma-cli` CLI. **Use this in any JS/TS plugin or
 consumer that reports agent status.** It is the preferred route whenever the host tool
 has an in-process JS/TS plugin API — you react to structured, typed events and never
 hand-build CLI argv.
@@ -11,7 +11,7 @@ workflow, and [CLI.md](./CLI.md) for the underlying contract this wraps.
 
 ## What it does
 
-Shells out to the `pragma-agent` binary (installed to `~/.local/bin` by the app on
+Shells out to the `pragma-cli` binary (installed to `~/.local/bin` by the app on
 startup) with typed options, and returns the captured result or throws a typed error. It
 **guards on the Pragma environment** before spawning — `reportStarted` and friends are a
 no-op outside a Pragma terminal session — so you don't need your own env check around
@@ -64,7 +64,7 @@ All helpers share `PragmaAgentCommandOptions`:
 | Field        | Type                                  | Notes                                                       |
 | ------------ | ------------------------------------- | ----------------------------------------------------------- |
 | `agent`      | `string` (**required**)               | Stable agent id from your `config.json`. Maps to `--agent`. |
-| `executable` | `string`                              | Path/name of the CLI. Defaults to `pragma-agent`.           |
+| `executable` | `string`                              | Path/name of the CLI. Defaults to `pragma-cli`.             |
 | `cwd`        | `string \| URL`                       | Working directory for the spawned process.                  |
 | `env`        | `Record<string, string \| undefined>` | Merged over `process.env` for the spawned process.          |
 | `signal`     | `AbortSignal`                         | Cancels the spawned process.                                |
@@ -78,9 +78,10 @@ Helper-specific:
 
 ### Environment
 
-The spawned CLI reads `PRAGMA_DAEMON_SOCKET`, `PRAGMA_TAB_ID`, and `PRAGMA_WORKTREE_ID`
-from the provided `env` (or `process.env`). These are injected by the Pragma terminal.
-Outside a Pragma session they're absent and the call is a no-op.
+The spawned CLI reads `PRAGMA_SERVER_SOCKET` (falling back to legacy
+`PRAGMA_DAEMON_SOCKET`), `PRAGMA_TAB_ID`, and `PRAGMA_WORKTREE_ID` from the provided
+`env` (or `process.env`). These are injected by the Pragma terminal. Outside a Pragma
+session they're absent and the call is a no-op.
 
 ### Errors
 
@@ -91,7 +92,7 @@ host tool — see the reporter wrapper in `packages/opencode-plugin/src/index.ts
 
 ## Rules
 
-- **Never hand-build `pragma-agent` argv in a plugin** — always import from `@pragma/sdk`.
+- **Never hand-build `pragma-cli` argv in a plugin** — always import from `@pragma/sdk`.
 - The SDK is a no-op outside a Pragma terminal; rely on that, but still keep your plugin
   resilient (catch errors).
 - Derive status with a small state machine and emit only on change — don't map one event

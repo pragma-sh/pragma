@@ -12,6 +12,7 @@
     "editorLaunchers",
     "scripts",
     "daemon",
+    "protocol",
     "github"
   ],
   "properties": {
@@ -26,9 +27,77 @@
     "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
     "scripts": { "$ref": "#/definitions/Scripts" },
     "daemon": { "$ref": "#/definitions/Daemon" },
+    "protocol": { "$ref": "#/definitions/Protocol" },
     "github": { "$ref": "#/definitions/GitHub" }
   },
   "definitions": {
+    "ProtocolRpcMethod": {
+      "title": "ProtocolRpcMethod",
+      "description": "Top-level request/response RPC domains served by pragma-server over the Unix-socket frame protocol.",
+      "type": "string",
+      "enum": [
+        "git",
+        "filesystem",
+        "database",
+        "kanban",
+        "worktrees",
+        "projects",
+        "tabs",
+        "settings",
+        "github",
+        "ai"
+      ]
+    },
+    "ProtocolEventKind": {
+      "title": "ProtocolEventKind",
+      "description": "Snapshot-then-delta subscription event streams served by pragma-server.",
+      "type": "string",
+      "enum": [
+        "agentStatus",
+        "worktreeChanged",
+        "kanbanChanged",
+        "tabsChanged",
+        "fileChanged",
+        "echoMode"
+      ]
+    },
+    "ProtocolErrorCode": {
+      "title": "ProtocolErrorCode",
+      "description": "Stable protocol-level RPC error codes.",
+      "type": "string",
+      "enum": [
+        "invalidPayload",
+        "unsupportedMethod",
+        "notFound",
+        "staleWrite",
+        "permissionDenied",
+        "internal"
+      ]
+    },
+    "Protocol": {
+      "title": "Protocol",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared schema source of truth for the host-server RPC and subscription protocol. The frame codec itself lives in `pragma-protocol`; these values name the cross-language methods, events, and errors.",
+      "required": ["rpcMethods", "events", "errors"],
+      "properties": {
+        "rpcMethods": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolRpcMethod" },
+          "uniqueItems": true
+        },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolEventKind" },
+          "uniqueItems": true
+        },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProtocolErrorCode" },
+          "uniqueItems": true
+        }
+      }
+    },
     "GitHub": {
       "title": "GitHub",
       "type": "object",
@@ -190,12 +259,29 @@
       "title": "WindowDefaults",
       "type": "object",
       "additionalProperties": false,
-      "required": ["defaultWidth", "defaultHeight", "minWidth", "minHeight"],
+      "required": [
+        "defaultWidth",
+        "defaultHeight",
+        "minWidth",
+        "minHeight",
+        "titlebarHeight",
+        "trafficLightInset"
+      ],
       "properties": {
         "defaultWidth": { "type": "integer", "minimum": 1 },
         "defaultHeight": { "type": "integer", "minimum": 1 },
         "minWidth": { "type": "integer", "minimum": 1 },
-        "minHeight": { "type": "integer", "minimum": 1 }
+        "minHeight": { "type": "integer", "minimum": 1 },
+        "titlebarHeight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Height in px of the custom draggable titlebar strip the frontend reserves above the content. Must clear the inset macOS traffic lights."
+        },
+        "trafficLightInset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "macOS traffic-light button inset in px from the top-left window corner, applied via tauri-plugin-decorum so the controls center vertically within the custom titlebar."
+        }
       }
     },
     "Links": {
@@ -398,7 +484,7 @@
     },
     "AgentReportPayload": {
       "title": "AgentReportPayload",
-      "description": "Status report sent by pragma-agent through the daemon to the app.",
+      "description": "Status report sent by pragma-cli through pragma-server to native clients.",
       "type": "object",
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "status"],
@@ -554,6 +640,26 @@
           "type": "boolean",
           "description": "True when git reports the file as binary; old/new text are empty."
         }
+      }
+    },
+    "FileChangeKind": {
+      "title": "FileChangeKind",
+      "description": "How a watched entry changed on disk, as reported by the pragma-server worktree filesystem watcher.",
+      "type": "string",
+      "enum": ["created", "modified", "removed"]
+    },
+    "FileChange": {
+      "title": "FileChange",
+      "description": "A single filesystem change delivered over a `fileChanged` subscription by the pragma-server worktree watcher. Drives live file previews on the client.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path (forward slashes) of the changed entry."
+        },
+        "kind": { "$ref": "#/definitions/FileChangeKind" }
       }
     },
     "FileContents": {

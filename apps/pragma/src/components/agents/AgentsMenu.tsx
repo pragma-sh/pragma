@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Bot, ChevronDown, Pin, PinOff } from "lucide-react";
 
@@ -12,9 +12,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAgentsList } from "@/hooks/use-agents-list";
 import { startAgentInTab } from "@/lib/agent-launch";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
-import { type AgentConfig, listAgents } from "@/lib/tauri";
+import { type AgentConfig } from "@/lib/tauri";
 import { isAgentPinned, toggleAgentPin, useAgentPins } from "@/state/agent-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -22,28 +23,9 @@ import { useWorkspace } from "@/state/workspace-context";
 export function AgentsMenu() {
   const workspace = useWorkspace();
   const pins = useAgentPins();
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const agents = useAgentsList();
   const [open, setOpen] = useState(false);
   useSuppressNativeOverlayWhile(open);
-
-  useEffect(() => {
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) {
-          setAgents(Array.isArray(items) ? items : []);
-        }
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAgents([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const pinnedAgents = useMemo(() => agents.filter((agent) => pins.has(agent.id)), [agents, pins]);
 
@@ -80,7 +62,12 @@ export function AgentsMenu() {
       ) : null}
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button disabled={!workspace.selectedWorktree} size="sm" variant="outline">
+          <Button
+            className="text-foreground"
+            disabled={!workspace.selectedWorktree}
+            size="sm"
+            variant="outline"
+          >
             <Bot className="size-3.5" />
             <span>Open agent</span>
             <ChevronDown className="size-3 opacity-70" />
@@ -100,7 +87,7 @@ export function AgentsMenu() {
                 <AgentIcon agent={agent} />
                 <span className="min-w-0 flex-1 truncate">{agent.name}</span>
                 <button
-                  className="rounded p-1 text-muted-foreground hover:bg-white/10 hover:text-white"
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();

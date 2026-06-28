@@ -1,14 +1,14 @@
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 
-const DEFAULT_PRAGMA_AGENT_EXECUTABLE = "pragma-agent";
+const DEFAULT_PRAGMA_CLI_EXECUTABLE = "pragma-cli";
 
-/** Status attention types accepted by `pragma-agent report attention --kind`. */
+/** Status attention types accepted by `pragma-cli report attention --kind`. */
 export type AttentionKind = "question" | "command";
 
-/** Common options used to spawn the `pragma-agent` CLI. */
+/** Common options used to spawn the `pragma-cli` CLI. */
 export interface PragmaAgentSpawnOptions {
-  /** Path or executable name for the CLI. Defaults to `pragma-agent`. */
+  /** Path or executable name for the CLI. Defaults to `pragma-cli`. */
   executable?: string;
   /** Working directory for the spawned CLI process. */
   cwd?: string | URL;
@@ -18,28 +18,28 @@ export interface PragmaAgentSpawnOptions {
   signal?: AbortSignal;
 }
 
-/** Required global flags for every `pragma-agent` command. */
+/** Required global flags for every `pragma-cli` command. */
 export interface PragmaAgentCommandOptions extends PragmaAgentSpawnOptions {
   /** Stable agent id from the Pragma agent config. Maps to `--agent`. */
   agent: string;
 }
 
-/** Options for `pragma-agent report started`. */
+/** Options for `pragma-cli report started`. */
 export type ReportStartedOptions = PragmaAgentCommandOptions;
 
-/** Options for `pragma-agent report stopped`. */
+/** Options for `pragma-cli report stopped`. */
 export interface ReportStoppedOptions extends PragmaAgentCommandOptions {
   /** Override for `PRAGMA_WORKTREE_ID`. Maps to `--worktree-id`. */
   worktreeId?: string;
 }
 
-/** Options for `pragma-agent report attention`. */
+/** Options for `pragma-cli report attention`. */
 export interface ReportAttentionOptions extends PragmaAgentCommandOptions {
   /** Attention reason. Maps to `--kind`. */
   kind: AttentionKind;
 }
 
-/** Options for `pragma-agent report cleared`. */
+/** Options for `pragma-cli report cleared`. */
 export interface ReportClearedOptions extends PragmaAgentCommandOptions {
   /** Override for `PRAGMA_WORKTREE_ID`. Maps to `--worktree-id`. */
   worktreeId?: string;
@@ -97,7 +97,7 @@ export class PragmaCliError extends Error {
 }
 
 /**
- * Runs `pragma-agent report started` for the current Pragma terminal tab.
+ * Runs `pragma-cli report started` for the current Pragma terminal tab.
  *
  * The spawned CLI reads `PRAGMA_DAEMON_SOCKET`, `PRAGMA_TAB_ID`, and
  * `PRAGMA_WORKTREE_ID` from the provided environment or the current process
@@ -111,7 +111,7 @@ export function reportStarted(options: ReportStartedOptions): Promise<PragmaCliR
 }
 
 /**
- * Runs `pragma-agent report stopped` for the current Pragma terminal tab.
+ * Runs `pragma-cli report stopped` for the current Pragma terminal tab.
  *
  * Pass `worktreeId` to emit `--worktree-id`; otherwise the CLI falls back to
  * `PRAGMA_WORKTREE_ID`.
@@ -130,7 +130,7 @@ export function reportStopped(options: ReportStoppedOptions): Promise<PragmaCliR
 }
 
 /**
- * Runs `pragma-agent report attention --kind <kind>` for the current Pragma terminal tab.
+ * Runs `pragma-cli report attention --kind <kind>` for the current Pragma terminal tab.
  *
  * Use this when an external agent needs the Pragma UI to show that the tab is
  * waiting for a question or command confirmation.
@@ -150,7 +150,7 @@ export function reportAttention(options: ReportAttentionOptions): Promise<Pragma
 }
 
 /**
- * Runs `pragma-agent report cleared` for the current Pragma terminal tab.
+ * Runs `pragma-cli report cleared` for the current Pragma terminal tab.
  *
  * Unlike {@link reportStopped} (which leaves a green "done" indicator), this
  * removes the agent's indicator entirely. Use it when the agent process exits
@@ -174,13 +174,14 @@ function runPragmaAgent(
   args: readonly string[],
   options: PragmaAgentSpawnOptions,
 ): Promise<PragmaCliResult> {
-  const executable = options.executable ?? DEFAULT_PRAGMA_AGENT_EXECUTABLE;
+  const env = { ...process.env, ...options.env };
+  const executable = options.executable ?? env.PRAGMA_CLI ?? DEFAULT_PRAGMA_CLI_EXECUTABLE;
   return new Promise((resolve, reject) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const child = spawn(executable, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env,
       signal: options.signal,
       stdio: ["ignore", "pipe", "pipe"],
     });

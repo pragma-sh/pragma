@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { errorMessage } from "@/lib/errors";
 
 import type { Tab } from "@pragma/constants";
 import { EditorState } from "@codemirror/state";
@@ -14,10 +15,6 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "ready"; doc: string }
   | { kind: "error"; message: string };
-
-function messageFor(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false), pragmaEditorTheme];
 
@@ -37,11 +34,11 @@ export function LogView({ tab }: { tab: Tab }) {
       try {
         const doc = await readDaemonLog();
         if (!cancelled) {
-          setState({ kind: "ready", doc: doc || "The daemon log is empty." });
+          setState({ kind: "ready", doc: doc || "The server log is empty." });
         }
       } catch (cause) {
         if (!cancelled) {
-          setState({ kind: "error", message: messageFor(cause) });
+          setState({ kind: "error", message: errorMessage(cause) });
         }
       }
     })();
@@ -56,9 +53,9 @@ export function LogView({ tab }: { tab: Tab }) {
   const extensions = useMemo(() => READ_ONLY, []);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0b0d10]">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-1.5">
-        <span className="text-xs text-slate-400">Daemon log</span>
+    <div className="flex h-full min-h-0 flex-col bg-canvas">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
+        <span className="text-xs text-muted-foreground">Daemon log</span>
         <Button onClick={load} size="sm" variant="ghost">
           <RotateCw className="size-3.5" />
           Refresh
@@ -92,7 +89,7 @@ export function LogView({ tab }: { tab: Tab }) {
 
 function Placeholder({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center bg-[#0b0d10] p-6 text-center text-sm text-slate-400">
+    <div className="flex h-full flex-col items-center justify-center bg-canvas p-6 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );

@@ -55,8 +55,10 @@ export function FixCommentDialog({
         </DialogHeader>
 
         {comment ? (
-          <blockquote className="max-h-32 overflow-auto rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-            <p className="mb-1 font-mono text-[10px] text-slate-500">{commentLocation(comment)}</p>
+          <blockquote className="max-h-32 overflow-auto rounded-md border border-border bg-canvas px-3 py-2 text-xs text-muted-foreground">
+            <p className="mb-1 font-mono text-[10px] text-muted-foreground">
+              {commentLocation(comment)}
+            </p>
             <p className="whitespace-pre-wrap break-words">{comment.body}</p>
           </blockquote>
         ) : null}

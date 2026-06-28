@@ -10,7 +10,7 @@ export function defaultTabTitle(kind: TabKind): string {
     return "New tab";
   }
   if (kind === "log") {
-    return "Daemon Logs";
+    return "Server Logs";
   }
   if (kind === "pr-review") {
     return "PR Review";

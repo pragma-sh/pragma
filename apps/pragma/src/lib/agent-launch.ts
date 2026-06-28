@@ -61,7 +61,7 @@ export function startAgentInTab(
   const message = prefill?.trim() ? prefill : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
   window.setTimeout(() => {
-    void ptyWrite(tabId, `${command}\r`);
+    write(`${command}\r`);
     scheduleStartupInput(agent, write);
     if (message) {
       schedulePrefill(agent, message, write);

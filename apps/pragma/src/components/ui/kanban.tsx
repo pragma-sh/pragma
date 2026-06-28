@@ -126,6 +126,170 @@ const dropAnimationConfig: DropAnimation = {
   }),
 };
 
+/** Build the next column map for a cross-column item move, or `null` if no move. */
+function computeCrossColumnMove<T>(
+  columns: Record<string, T[]>,
+  activeContainer: string,
+  overContainer: string,
+  activeId: UniqueIdentifier,
+  overId: UniqueIdentifier,
+  getItemValue: (item: T) => string,
+  isColumn: (id: UniqueIdentifier) => boolean,
+): Record<string, T[]> | null {
+  const activeItems = columns[activeContainer] ?? [];
+  const overItems = columns[overContainer] ?? [];
+  const activeIndex = activeItems.findIndex((item) => getItemValue(item) === activeId);
+  // Dropping on the column itself appends to the end of the target column.
+  const overIndex = isColumn(overId)
+    ? overItems.length
+    : overItems.findIndex((item) => getItemValue(item) === overId);
+
+  const newActiveItems = [...activeItems];
+  const newOverItems = [...overItems];
+  const [movedItem] = newActiveItems.splice(activeIndex, 1);
+  if (movedItem === undefined) return null;
+  newOverItems.splice(overIndex, 0, movedItem);
+  return { ...columns, [activeContainer]: newActiveItems, [overContainer]: newOverItems };
+}
+
+/** Build the next column map for a same-column reorder, or `null` if indices match. */
+function computeSameColumnReorder<T>(
+  columns: Record<string, T[]>,
+  container: string,
+  activeId: UniqueIdentifier,
+  overId: UniqueIdentifier,
+  getItemValue: (item: T) => string,
+): Record<string, T[]> | null {
+  const items = columns[container] ?? [];
+  const activeIndex = items.findIndex((item) => getItemValue(item) === activeId);
+  const overIndex = items.findIndex((item) => getItemValue(item) === overId);
+  if (activeIndex === overIndex) return null;
+  return { ...columns, [container]: arrayMove(items, activeIndex, overIndex) };
+}
+
+/** Resolve the live-reorder result for a `DragOverEvent`, or `null` to skip. */
+function computeDragOverResult<T>(
+  event: DragOverEvent,
+  columns: Record<string, T[]>,
+  findContainer: (id: UniqueIdentifier) => string | undefined,
+  isColumn: (id: UniqueIdentifier) => boolean,
+  getItemValue: (item: T) => string,
+): Record<string, T[]> | null {
+  const { active, over } = event;
+  if (!over || isColumn(active.id)) return null;
+  const activeContainer = findContainer(active.id);
+  const overContainer = findContainer(over.id);
+  if (!activeContainer || !overContainer) return null;
+  if (activeContainer !== overContainer) {
+    return computeCrossColumnMove(
+      columns,
+      activeContainer,
+      overContainer,
+      active.id,
+      over.id,
+      getItemValue,
+      isColumn,
+    );
+  }
+  return computeSameColumnReorder(columns, activeContainer, active.id, over.id, getItemValue);
+}
+
+/** Build a reordered column map (columns themselves dragged), or `null` if unchanged. */
+function computeColumnReorder<T>(
+  columns: Record<string, T[]>,
+  columnIds: string[],
+  activeId: UniqueIdentifier,
+  overId: UniqueIdentifier,
+): Record<string, T[]> | null {
+  const activeIndex = columnIds.indexOf(activeId as string);
+  const overIndex = columnIds.indexOf(overId as string);
+  if (activeIndex === overIndex) return null;
+  const newColumns: Record<string, T[]> = {};
+  for (const key of arrayMove(Object.keys(columns), activeIndex, overIndex)) {
+    newColumns[key] = columns[key] ?? [];
+  }
+  return newColumns;
+}
+
+/** Resolve the (active/over container + indices) for a deferred item move. */
+function resolveDeferredMove<T>(
+  event: DragEndEvent,
+  columns: Record<string, T[]>,
+  findContainer: (id: UniqueIdentifier) => string | undefined,
+  isColumn: (id: UniqueIdentifier) => boolean,
+  getItemValue: (item: T) => string,
+): KanbanMoveEvent | null {
+  const { active, over } = event;
+  const activeContainer = findContainer(active.id);
+  const overContainer = over ? findContainer(over.id) : undefined;
+  if (!activeContainer || !overContainer || !over) return null;
+  const activeIndex = (columns[activeContainer] ?? []).findIndex(
+    (item) => getItemValue(item) === active.id,
+  );
+  const overIndex = isColumn(over.id)
+    ? (columns[overContainer] ?? []).length
+    : (columns[overContainer] ?? []).findIndex((item) => getItemValue(item) === over.id);
+  return { event, activeContainer, activeIndex, overContainer, overIndex };
+}
+
+interface DragHandlerContext<T> {
+  columns: Record<string, T[]>;
+  columnIds: string[];
+  findContainer: (id: UniqueIdentifier) => string | undefined;
+  isColumn: (id: UniqueIdentifier) => boolean;
+  getItemValue: (item: T) => string;
+  setColumns: (columns: Record<string, T[]>) => void;
+  onMove?: (event: KanbanMoveEvent) => void;
+}
+
+/** Route a deferred item move (caller-owned) to `onMove`. Returns true if handled. */
+function dispatchDeferredMove<T>(event: DragEndEvent, ctx: DragHandlerContext<T>): boolean {
+  if (!ctx.onMove || ctx.isColumn(event.active.id)) return false;
+  const move = resolveDeferredMove(
+    event,
+    ctx.columns,
+    ctx.findContainer,
+    ctx.isColumn,
+    ctx.getItemValue,
+  );
+  if (move) ctx.onMove(move);
+  return true;
+}
+
+/** Reorder columns when both active and over are columns. Returns true if handled. */
+function applyColumnReorder<T>(event: DragEndEvent, ctx: DragHandlerContext<T>): boolean {
+  const { active, over } = event;
+  if (!over || !ctx.isColumn(active.id) || !ctx.isColumn(over.id)) return false;
+  const next = computeColumnReorder(ctx.columns, ctx.columnIds, active.id, over.id);
+  if (next) ctx.setColumns(next);
+  return true;
+}
+
+/** Live-reorder an item within its same column (no caller `onMove`). */
+function applySameColumnItemReorder<T>(event: DragEndEvent, ctx: DragHandlerContext<T>): void {
+  const { active, over } = event;
+  if (!over) return;
+  const activeContainer = ctx.findContainer(active.id);
+  const overContainer = ctx.findContainer(over.id);
+  if (!activeContainer || !overContainer || activeContainer !== overContainer) return;
+  const next = computeSameColumnReorder(
+    ctx.columns,
+    activeContainer,
+    active.id,
+    over.id,
+    ctx.getItemValue,
+  );
+  if (next) ctx.setColumns(next);
+}
+
+/** Route a drop: deferred move → caller, column reorder, or live same-column reorder. */
+function applyDragEnd<T>(event: DragEndEvent, ctx: DragHandlerContext<T>): void {
+  if (!event.over) return;
+  if (dispatchDeferredMove(event, ctx)) return;
+  if (applyColumnReorder(event, ctx)) return;
+  applySameColumnItemReorder(event, ctx);
+}
+
 /** Details of a single item move, surfaced to `Kanban`'s `onMove` callback. */
 export interface KanbanMoveEvent {
   event: DragEndEvent;
@@ -146,6 +310,78 @@ export interface KanbanRootProps<T> extends HTMLAttributes<HTMLDivElement> {
   modifiers?: Modifiers;
 }
 
+/** Drag handlers for the board, derived from the controlled column state. */
+function useKanbanDragHandlers<T>({
+  columns,
+  columnIds,
+  findContainer,
+  isColumn,
+  getItemValue,
+  setColumns,
+  onMove,
+}: {
+  columns: Record<string, T[]>;
+  columnIds: string[];
+  findContainer: (id: UniqueIdentifier) => string | undefined;
+  isColumn: (id: UniqueIdentifier) => boolean;
+  getItemValue: (item: T) => string;
+  setColumns: (columns: Record<string, T[]>) => void;
+  onMove?: (event: KanbanMoveEvent) => void;
+}): {
+  handleDragStart: (event: DragStartEvent) => void;
+  handleDragOver: (event: DragOverEvent) => void;
+  handleDragEnd: (event: DragEndEvent) => void;
+  handleDragCancel: () => void;
+  activeId: UniqueIdentifier | null;
+  setActiveId: (id: UniqueIdentifier | null) => void;
+} {
+  const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(event.active.id);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      // When the caller owns moves, skip live cross-column reordering; the drop is
+      // routed through `onMove` in `handleDragEnd`.
+      if (onMove) return;
+      const next = computeDragOverResult(event, columns, findContainer, isColumn, getItemValue);
+      if (next) setColumns(next);
+    },
+    [columns, findContainer, isColumn, getItemValue, setColumns, onMove],
+  );
+
+  const handleDragCancel = useCallback(() => {
+    setActiveId(null);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveId(null);
+      applyDragEnd(event, {
+        columns,
+        columnIds,
+        findContainer,
+        isColumn,
+        getItemValue,
+        setColumns,
+        onMove,
+      });
+    },
+    [columns, columnIds, findContainer, isColumn, getItemValue, setColumns, onMove],
+  );
+
+  return {
+    handleDragStart,
+    handleDragOver,
+    handleDragEnd,
+    handleDragCancel,
+    activeId,
+    setActiveId,
+  };
+}
+
 /**
  * Root of a drag-and-drop board. Owns the dnd-kit context and routes drops either
  * into the controlled `value` (live reordering) or, when `onMove` is supplied,
@@ -164,7 +400,6 @@ function Kanban<T>({
 }: KanbanRootProps<T>) {
   const columns = value;
   const setColumns = onValueChange;
-  const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -198,140 +433,22 @@ function Kanban<T>({
     [columns, columnIds, getItemValue, isColumn],
   );
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveId(event.active.id);
-  }, []);
-
-  const handleDragOver = useCallback(
-    (event: DragOverEvent) => {
-      // When the caller owns moves, skip live cross-column reordering; the drop is
-      // routed through `onMove` in `handleDragEnd`.
-      if (onMove) {
-        return;
-      }
-
-      const { active, over } = event;
-      if (!over) return;
-
-      if (isColumn(active.id)) return;
-
-      const activeContainer = findContainer(active.id);
-      const overContainer = findContainer(over.id);
-
-      if (!activeContainer || !overContainer) {
-        return;
-      }
-
-      if (activeContainer !== overContainer) {
-        const activeItems = columns[activeContainer] ?? [];
-        const overItems = columns[overContainer] ?? [];
-
-        const activeIndex = activeItems.findIndex((item) => getItemValue(item) === active.id);
-        let overIndex = overItems.findIndex((item) => getItemValue(item) === over.id);
-
-        // If dropping on the column itself, not an item.
-        if (isColumn(over.id)) {
-          overIndex = overItems.length;
-        }
-
-        const newActiveItems = [...activeItems];
-        const newOverItems = [...overItems];
-        const [movedItem] = newActiveItems.splice(activeIndex, 1);
-        if (movedItem !== undefined) {
-          newOverItems.splice(overIndex, 0, movedItem);
-        }
-
-        setColumns({
-          ...columns,
-          [activeContainer]: newActiveItems,
-          [overContainer]: newOverItems,
-        });
-      } else {
-        const container = activeContainer;
-        const items = columns[container] ?? [];
-        const activeIndex = items.findIndex((item) => getItemValue(item) === active.id);
-        const overIndex = items.findIndex((item) => getItemValue(item) === over.id);
-
-        if (activeIndex !== overIndex) {
-          setColumns({
-            ...columns,
-            [container]: arrayMove(items, activeIndex, overIndex),
-          });
-        }
-      }
-    },
-    [findContainer, getItemValue, isColumn, setColumns, columns, onMove],
-  );
-
-  const handleDragCancel = useCallback(() => {
-    setActiveId(null);
-  }, []);
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      setActiveId(null);
-
-      if (!over) return;
-
-      // Hand item moves to the caller.
-      if (onMove && !isColumn(active.id)) {
-        const activeContainer = findContainer(active.id);
-        const overContainer = findContainer(over.id);
-
-        if (activeContainer && overContainer) {
-          const activeIndex = (columns[activeContainer] ?? []).findIndex(
-            (item) => getItemValue(item) === active.id,
-          );
-          const overIndex = isColumn(over.id)
-            ? (columns[overContainer] ?? []).length
-            : (columns[overContainer] ?? []).findIndex((item) => getItemValue(item) === over.id);
-
-          onMove({
-            event,
-            activeContainer,
-            activeIndex,
-            overContainer,
-            overIndex,
-          });
-        }
-        return;
-      }
-
-      // Handle column reordering.
-      if (isColumn(active.id) && isColumn(over.id)) {
-        const activeIndex = columnIds.indexOf(active.id as string);
-        const overIndex = columnIds.indexOf(over.id as string);
-        if (activeIndex !== overIndex) {
-          const newOrder = arrayMove(Object.keys(columns), activeIndex, overIndex);
-          const newColumns: Record<string, T[]> = {};
-          for (const key of newOrder) {
-            newColumns[key] = columns[key] ?? [];
-          }
-          setColumns(newColumns);
-        }
-        return;
-      }
-
-      const activeContainer = findContainer(active.id);
-      const overContainer = findContainer(over.id);
-
-      // Handle item reordering within the same column.
-      if (activeContainer && overContainer && activeContainer === overContainer) {
-        const items = columns[activeContainer] ?? [];
-        const activeIndex = items.findIndex((item) => getItemValue(item) === active.id);
-        const overIndex = items.findIndex((item) => getItemValue(item) === over.id);
-
-        if (activeIndex !== overIndex) {
-          setColumns({
-            ...columns,
-            [activeContainer]: arrayMove(items, activeIndex, overIndex),
-          });
-        }
-      }
-    },
-    [columnIds, columns, findContainer, getItemValue, isColumn, setColumns, onMove],
-  );
+  const {
+    handleDragStart,
+    handleDragOver,
+    handleDragEnd,
+    handleDragCancel,
+    activeId,
+    setActiveId,
+  } = useKanbanDragHandlers({
+    columns,
+    columnIds,
+    findContainer,
+    isColumn,
+    getItemValue,
+    setColumns,
+    onMove,
+  });
 
   const contextValue = useMemo<KanbanContextProps<unknown>>(
     () => ({
@@ -352,6 +469,7 @@ function Kanban<T>({
       getItemValue,
       columnIds,
       activeId,
+      setActiveId,
       findContainer,
       isColumn,
       modifiers,

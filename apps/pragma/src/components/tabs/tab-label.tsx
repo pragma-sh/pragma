@@ -48,19 +48,19 @@ export function TabIcon({ tab }: { tab: Tab }) {
   }
 
   if (tab.kind === "log") {
-    return <ScrollText className="size-3.5 shrink-0 text-slate-400" />;
+    return <ScrollText className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   if (tab.kind === "pr-review") {
-    return <GitPullRequest className="size-3.5 shrink-0 text-slate-400" />;
+    return <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   if (tab.kind !== "browser") {
-    return <SquareTerminal className="size-3.5 shrink-0 text-slate-400" />;
+    return <SquareTerminal className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   if (!favicon || failed) {
-    return <Globe className="size-3.5 shrink-0 text-slate-400" />;
+    return <Globe className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   return (
@@ -82,7 +82,7 @@ export function TabDirtyDot({ tabId }: { tabId: string }) {
   return (
     <output
       aria-label="Unsaved changes"
-      className="block size-2 shrink-0 rounded-full bg-cyan-400"
+      className="block size-2 shrink-0 rounded-full bg-primary"
     />
   );
 }
