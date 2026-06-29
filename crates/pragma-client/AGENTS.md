@@ -18,7 +18,8 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   using synchronous `UnixStream` frame code.
 - Client-local router DB mapping projects to hosts plus device-local preferences.
   The desktop app's `Hosts` registry owns this DB and resolves each project to
-  its host client.
+  its host client. SSH routes persist only non-secret connection preferences so
+  the app can reconnect agent-authenticated remotes on startup.
 
 ## Rules
 

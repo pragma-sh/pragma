@@ -470,7 +470,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");
     }
-    agent_events::start(app.handle().clone(), pty);
+    agent_events::start_for(app.handle().clone(), pty);
+    ssh_host::reconnect_remote_hosts(app.handle().clone());
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
         log::warn!("failed to load keybindings config: {error}");
     }

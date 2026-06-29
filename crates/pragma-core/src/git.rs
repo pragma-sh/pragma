@@ -17,6 +17,9 @@ use serde_json::Value;
 use crate::process_env;
 use crate::{CoreError, CoreResult};
 
+/// Git exclude entry that hides Pragma's worktree storage from the repo.
+const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
+
 /// One worktree's inputs for a merged-status batch check.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +92,24 @@ pub enum GitRequest {
         path: String,
         old_path: Option<String>,
     },
+    /// Ensures `.pragma/worktrees/` is git-excluded in the repo at `project_root`.
+    EnsurePragmaExcluded { project_root: String },
+    /// Creates a worktree at `path` on a new `branch`, forked from `parent_root`.
+    CreateWorktree {
+        parent_root: String,
+        branch: String,
+        path: String,
+    },
+    /// Removes the worktree at `worktree_path` from the repo at `repo_root`.
+    RemoveWorktree {
+        repo_root: String,
+        worktree_path: String,
+        force: bool,
+    },
+    /// Hard-deletes a branch ref from a worktree that doesn't have it checked out.
+    DeleteBranch { repo_root: String, branch: String },
+    /// True when the worktree at `root` has uncommitted/staged/untracked changes.
+    IsDirty { root: String },
 }
 
 /// Dispatches a `git` RPC payload to the matching operation and returns a JSON
@@ -165,6 +186,31 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             &path,
             old_path.as_deref(),
         )),
+        GitRequest::EnsurePragmaExcluded { project_root } => {
+            to_value(ensure_pragma_excluded(Path::new(&project_root))?)
+        }
+        GitRequest::CreateWorktree {
+            parent_root,
+            branch,
+            path,
+        } => to_value(create_worktree(
+            Path::new(&parent_root),
+            &branch,
+            Path::new(&path),
+        )?),
+        GitRequest::RemoveWorktree {
+            repo_root,
+            worktree_path,
+            force,
+        } => to_value(remove_worktree(
+            Path::new(&repo_root),
+            Path::new(&worktree_path),
+            force,
+        )?),
+        GitRequest::DeleteBranch { repo_root, branch } => {
+            to_value(delete_branch(Path::new(&repo_root), &branch)?)
+        }
+        GitRequest::IsDirty { root } => to_value(worktree_is_dirty(Path::new(&root))),
     }
 }
 
@@ -501,6 +547,120 @@ fn merge_worktree_to_parent(
         &output.stdout,
         &output.stderr,
     )))
+}
+
+/// Ensures `.pragma/worktrees/` is excluded via `.git/info/exclude`, migrating a
+/// legacy broad `.pragma/` entry to the narrower path. Idempotent.
+fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
+    let exclude = project_path.join(".git/info/exclude");
+    if let Some(parent) = exclude.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    let mut has_worktrees_exclude = false;
+    let mut changed = false;
+    let mut lines = Vec::new();
+    for line in existing.lines() {
+        match line.trim() {
+            ".pragma/" => changed = true,
+            PRAGMA_WORKTREES_EXCLUDE => {
+                has_worktrees_exclude = true;
+                lines.push(line.to_string());
+            }
+            _ => lines.push(line.to_string()),
+        }
+    }
+    if !has_worktrees_exclude {
+        lines.push(PRAGMA_WORKTREES_EXCLUDE.to_string());
+        changed = true;
+    }
+    if changed {
+        std::fs::write(exclude, format!("{}\n", lines.join("\n")))?;
+    }
+    Ok(())
+}
+
+/// Creates a worktree at `path` on a new `branch`, forked from `parent_root`.
+fn create_worktree(parent_root: &Path, branch: &str, path: &Path) -> CoreResult<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let output = process_env::command("git")
+        .args([
+            "-C",
+            &path_string(parent_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            &path_string(path),
+        ])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CoreError::Operation(stderr(&output.stderr)))
+    }
+}
+
+/// Removes a worktree, tolerating drifted admin state by pruning stale entries
+/// and deleting any orphaned directory so the caller can still drop its DB row.
+fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreResult<()> {
+    if !worktree_path.exists() {
+        return prune_worktrees(repo_root);
+    }
+    let mut args: Vec<String> = vec![
+        "-C".to_string(),
+        path_string(repo_root),
+        "worktree".to_string(),
+        "remove".to_string(),
+    ];
+    if force {
+        args.push("--force".to_string());
+    }
+    args.push(path_string(worktree_path));
+    let output = process_env::command("git").args(&args).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let message = String::from_utf8_lossy(&output.stderr);
+    if message.contains("not a working tree") || message.contains("not a git worktree") {
+        prune_worktrees(repo_root)?;
+        if worktree_path.exists() {
+            if let Err(error) = std::fs::remove_dir_all(worktree_path) {
+                eprintln!(
+                    "pragma-core: failed to remove orphaned worktree {}: {error}",
+                    worktree_path.display()
+                );
+            }
+        }
+        return Ok(());
+    }
+    Err(CoreError::Operation(message.trim().to_string()))
+}
+
+/// Prunes stale worktree administrative entries (`git worktree prune`).
+fn prune_worktrees(repo_root: &Path) -> CoreResult<()> {
+    let output = process_env::command("git")
+        .args(["-C", &path_string(repo_root), "worktree", "prune"])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CoreError::Operation(stderr(&output.stderr)))
+    }
+}
+
+/// Hard-deletes a branch ref via `git branch -D <name>`.
+fn delete_branch(repo_root: &Path, branch: &str) -> CoreResult<()> {
+    let output = process_env::command("git")
+        .args(["-C", &path_string(repo_root), "branch", "-D", branch])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CoreError::Operation(stderr(&output.stderr)))
+    }
 }
 
 /// True when the worktree has uncommitted, staged, or untracked changes.

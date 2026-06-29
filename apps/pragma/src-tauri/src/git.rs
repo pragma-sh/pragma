@@ -47,8 +47,10 @@ impl GitLocks {
 // Changes-view commands — forwarded to the project host via the `git` RPC.
 // ---------------------------------------------------------------------------
 
-/// Sends a `git` RPC and decodes its JSON response into `T`.
-fn git_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &GitRequest) -> AppResult<T> {
+/// Sends a `git` RPC to a project's host and decodes its JSON response into `T`.
+/// Public so worktree-lifecycle callers can issue requests against the resolved
+/// host client.
+pub fn host_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &GitRequest) -> AppResult<T> {
     let payload = serde_json::to_value(request)?;
     let value = pty.rpc(ProtocolRpcMethod::Git, payload)?;
     Ok(serde_json::from_value(value)?)
@@ -73,7 +75,7 @@ pub fn worktree_changes(
     let worktree = db.worktree(&worktree_id)?;
     let parent_branch = parent_branch(&db, &worktree)?;
     let pty = hosts.for_worktree(&db, &worktree_id)?;
-    git_rpc(
+    host_rpc(
         &pty,
         &GitRequest::WorktreeChanges {
             root: worktree.path,
@@ -113,7 +115,7 @@ pub fn worktrees_merged_status(
             parent_branch: parent,
         });
     }
-    git_rpc(&client, &GitRequest::MergedStatus { items }).unwrap_or_default()
+    host_rpc(&client, &GitRequest::MergedStatus { items }).unwrap_or_default()
 }
 
 /// Loads the old/new text for a single changed file on the given diff side.
@@ -129,7 +131,7 @@ pub fn file_diff(
     let worktree = db.worktree(&worktree_id)?;
     let parent_branch = parent_branch(&db, &worktree)?;
     let pty = hosts.for_worktree(&db, &worktree_id)?;
-    git_rpc(
+    host_rpc(
         &pty,
         &GitRequest::FileDiff {
             root: worktree.path,
@@ -149,7 +151,7 @@ pub fn pr_file_diff(
     path: &str,
     old_path: Option<&str>,
 ) -> AppResult<FileDiff> {
-    git_rpc(
+    host_rpc(
         pty,
         &GitRequest::PrFileDiff {
             root: path_string(root),
@@ -172,7 +174,7 @@ pub fn discard_unstaged_file(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(
+    host_rpc(
         &pty,
         &GitRequest::DiscardUnstagedFile {
             root,
@@ -192,7 +194,7 @@ pub fn discard_all_unstaged(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(&pty, &GitRequest::DiscardAllUnstaged { root })
+    host_rpc(&pty, &GitRequest::DiscardAllUnstaged { root })
 }
 
 /// Stages a single change into the index (`git add`).
@@ -205,7 +207,7 @@ pub fn stage_file(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(&pty, &GitRequest::StageFile { root, path })
+    host_rpc(&pty, &GitRequest::StageFile { root, path })
 }
 
 /// Stages every change in the worktree (`git add -A`).
@@ -213,7 +215,7 @@ pub fn stage_file(
 pub fn stage_all(db: State<'_, Db>, hosts: State<'_, Hosts>, worktree_id: String) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(&pty, &GitRequest::StageAll { root })
+    host_rpc(&pty, &GitRequest::StageAll { root })
 }
 
 /// Unstages a single change from the index, leaving the working tree untouched.
@@ -227,7 +229,7 @@ pub fn unstage_file(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(
+    host_rpc(
         &pty,
         &GitRequest::UnstageFile {
             root,
@@ -246,7 +248,7 @@ pub fn unstage_all(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(&pty, &GitRequest::UnstageAll { root })
+    host_rpc(&pty, &GitRequest::UnstageAll { root })
 }
 
 /// Creates a commit from the worktree's staged changes (`git commit -m`).
@@ -259,7 +261,7 @@ pub fn commit_staged(
 ) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
-    git_rpc(&pty, &GitRequest::CommitStaged { root, message })
+    host_rpc(&pty, &GitRequest::CommitStaged { root, message })
 }
 
 /// Merges a child worktree's branch into its recorded parent worktree. The
@@ -287,7 +289,7 @@ pub fn merge_worktree_to_parent(
     let lock = locks.lock_for(&worktree.project_id)?;
     let _guard = lock.lock()?;
     let pty = hosts.for_worktree(&db, &worktree_id)?;
-    git_rpc(
+    host_rpc(
         &pty,
         &GitRequest::MergeWorktreeToParent {
             parent_root: parent.path,
@@ -382,108 +384,6 @@ pub fn ensure_pragma_excluded(project_path: &Path) -> AppResult<()> {
     Ok(())
 }
 
-pub fn create_worktree(parent_path: &Path, branch: &str, path: &Path) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let output = Command::new("git")
-        .args([
-            "-C",
-            path_string(parent_path).as_str(),
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            path_string(path).as_str(),
-        ])
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(AppError::Git(stderr(output.stderr)))
-    }
-}
-
-/// True when the worktree has uncommitted changes, staged changes, or untracked
-/// files. Used by the delete confirmation dialog.
-pub fn worktree_is_dirty(path: &Path) -> bool {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            path_string(path).as_str(),
-            "status",
-            "--porcelain",
-            "--untracked-files=normal",
-        ])
-        .output();
-    match output {
-        Ok(out) if out.status.success() => !out.stdout.is_empty(),
-        _ => true,
-    }
-}
-
-/// Removes a worktree from disk via `git worktree remove`. Tolerates a worktree
-/// whose admin state drifted: prunes stale entries, removes any orphaned
-/// directory, and returns `Ok` so the caller can still delete the DB row.
-pub fn remove_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> AppResult<()> {
-    if !worktree_path.exists() {
-        prune_worktrees(repo_path)?;
-        return Ok(());
-    }
-    let mut args: Vec<String> = vec![
-        "-C".to_string(),
-        path_string(repo_path),
-        "worktree".to_string(),
-        "remove".to_string(),
-    ];
-    if force {
-        args.push("--force".to_string());
-    }
-    args.push(path_string(worktree_path));
-    let output = Command::new("git").args(&args).output()?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("not a working tree") || stderr.contains("not a git worktree") {
-        prune_worktrees(repo_path)?;
-        if worktree_path.exists() {
-            if let Err(error) = std::fs::remove_dir_all(worktree_path) {
-                log::warn!(
-                    "failed to remove orphaned worktree directory {}: {error}",
-                    worktree_path.display()
-                );
-            }
-        }
-        return Ok(());
-    }
-    Err(AppError::Git(stderr.trim().to_string()))
-}
-
-/// Prunes stale worktree administrative entries (`git worktree prune`).
-fn prune_worktrees(repo_path: &Path) -> AppResult<()> {
-    let output = Command::new("git")
-        .args(["-C", path_string(repo_path).as_str(), "worktree", "prune"])
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(AppError::Git(stderr(output.stderr)))
-    }
-}
-
-/// Hard-deletes a branch ref via `git branch -D <name>`.
-pub fn delete_branch(path: &Path, branch: &str) -> AppResult<()> {
-    let output = Command::new("git")
-        .args(["-C", path_string(path).as_str(), "branch", "-D", branch])
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(AppError::Git(stderr(output.stderr)))
-    }
-}
-
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -494,15 +394,12 @@ fn stderr(bytes: Vec<u8>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::process::Command;
 
     use tempfile::tempdir;
 
-    use super::{
-        current_branch, ensure_pragma_excluded, ensure_repo, remove_worktree, worktree_is_dirty,
-        PRAGMA_WORKTREES_EXCLUDE,
-    };
+    use super::{current_branch, ensure_pragma_excluded, ensure_repo, PRAGMA_WORKTREES_EXCLUDE};
 
     fn run(dir: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -512,35 +409,6 @@ mod tests {
             .output()
             .expect("git command");
         assert!(output.status.success(), "git {args:?} failed");
-    }
-
-    /// Builds a repo with one committed file plus a linked `feature` worktree and
-    /// returns `(main_path, child_path)`, leaking the temp guards for the test.
-    fn repo_with_worktree() -> (PathBuf, PathBuf) {
-        let main = tempdir().expect("tempdir");
-        let main_path = main.path().to_path_buf();
-        run(&main_path, &["init", "-b", "main"]);
-        run(&main_path, &["config", "user.email", "test@example.com"]);
-        run(&main_path, &["config", "user.name", "Test"]);
-        std::fs::write(main_path.join("base.txt"), "base\n").expect("write base");
-        run(&main_path, &["add", "-A"]);
-        run(&main_path, &["commit", "-m", "base"]);
-
-        let child_root = tempdir().expect("child tempdir");
-        let child_path = child_root.path().join("wt");
-        run(
-            &main_path,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "feature",
-                child_path.to_string_lossy().as_ref(),
-            ],
-        );
-        std::mem::forget(main);
-        std::mem::forget(child_root);
-        (main_path, child_path)
     }
 
     #[test]
@@ -583,30 +451,5 @@ mod tests {
             .lines()
             .any(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE));
         assert!(!exclude.lines().any(|line| line.trim() == ".pragma/"));
-    }
-
-    #[test]
-    fn dirty_signal_tracks_untracked_files() {
-        let dir = tempdir().expect("tempdir");
-        run(dir.path(), &["init", "-b", "main"]);
-        assert!(!worktree_is_dirty(dir.path()));
-        std::fs::write(dir.path().join("scratch.txt"), "todo").expect("write");
-        assert!(worktree_is_dirty(dir.path()));
-    }
-
-    #[test]
-    fn remove_worktree_succeeds_when_directory_already_gone() {
-        let (main_path, child_path) = repo_with_worktree();
-        std::fs::remove_dir_all(&child_path).expect("remove child dir");
-        remove_worktree(&main_path, &child_path, false).expect("remove should succeed");
-    }
-
-    #[test]
-    fn remove_worktree_succeeds_when_admin_state_drifted() {
-        let (main_path, child_path) = repo_with_worktree();
-        run(&main_path, &["worktree", "prune"]);
-        assert!(child_path.exists(), "child dir should still be on disk");
-        remove_worktree(&main_path, &child_path, false).expect("remove should succeed");
-        assert!(!child_path.exists(), "orphaned dir should be removed");
     }
 }

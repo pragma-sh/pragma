@@ -85,6 +85,12 @@ impl Hosts {
             .map_or_else(|| LOCAL_HOST.to_string(), |route| route.host_id)
     }
 
+    /// Resolves the client for a project.
+    pub fn for_project(&self, db: &Db, project_id: &str) -> AppResult<PtyClient> {
+        let project = db.project(project_id)?;
+        self.client_for_host(&self.host_id_for_project_path(&project.path))
+    }
+
     /// Resolves the host id for a worktree (via its project).
     pub fn host_id_for_worktree(&self, db: &Db, worktree_id: &str) -> AppResult<String> {
         let worktree = db.worktree(worktree_id)?;

@@ -129,6 +129,11 @@ The frontend stores runtime agent status in `state/agent-status-store.ts` via
 red, precedence **red > yellow > green** when aggregating a tab's agents or a
 worktree's tabs. Green is a "finished, go look" notification.
 
+The Rust event bridge subscribes once per connected host (`agent_events::start_for`):
+the local managed server at startup, and each SSH remote when it registers or
+agent-auth reconnects. All hosts emit the same `pragma:agent-report` /
+`pragma:agent-status-reset` Tauri event names so the frontend store is host-agnostic.
+
 `running`/`attention` persist through a focus; viewing a tab clears its `done` entries
 from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the stored
 `done`** (`markAgentsSeen`, `MarkAgentsSeen` request) — both when the tab becomes
@@ -211,6 +216,16 @@ release-built dev app keeps its own per-worktree instance.
   `<app_data_dir>/<channel>`. The app hands the channel to the server via
   `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
   `daemon.sock` for SSH streamlocal compatibility.
+
+**Remote projects use the same host-server protocol through an SSH streamlocal
+bridge.** `ssh_host::connect_remote_project` probes the remote project, ensures a
+protocol-compatible `pragma-server` is running under the production channel, registers
+the host in `Hosts`, records the project-path route in `router.db`, and inserts the
+client-local project metadata. Route preferences persist only non-secret SSH metadata
+(`host`, `port`, `user`, `authMethod`); agent-auth routes reconnect in the background
+on app startup, while password/key-passphrase routes stay disconnected until the user
+reconnects. Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown
+commands route through the owning host via `pragma-core` RPC.
 
 ## Native menubar + Troubleshooting menu
 

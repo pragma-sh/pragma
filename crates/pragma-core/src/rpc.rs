@@ -30,5 +30,6 @@ pub fn method_name(method: ProtocolRpcMethod) -> &'static str {
         ProtocolRpcMethod::Settings => "settings",
         ProtocolRpcMethod::Github => "github",
         ProtocolRpcMethod::Ai => "ai",
+        ProtocolRpcMethod::Exec => "exec",
     }
 }

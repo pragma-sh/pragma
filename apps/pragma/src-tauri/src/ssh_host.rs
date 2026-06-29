@@ -15,12 +15,13 @@ use pragma_client::{
     ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
 };
 use pragma_constants::{Project, CONSTANTS};
-use serde::Deserialize;
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
 
+use crate::agent_events;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::hosts::{Hosts, RemoteHost};
+use crate::hosts::{Hosts, RemoteHost, LOCAL_HOST};
 use crate::pty::PtyClient;
 
 /// Remote channel the host server runs under. Single source of truth so the
@@ -59,6 +60,24 @@ pub struct RemoteConnectRequest {
     pub path: String,
 }
 
+/// Non-secret connection metadata persisted in the client-local router DB.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteRoutePreferences {
+    host: String,
+    port: u16,
+    user: String,
+    auth_method: RemoteRouteAuthMethod,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum RemoteRouteAuthMethod {
+    Agent,
+    Key,
+    Password,
+}
+
 /// Connects to a remote host and registers the project found at `path`.
 ///
 /// The blocking SSH work (probe, bridge, version check) runs on the blocking
@@ -66,6 +85,7 @@ pub struct RemoteConnectRequest {
 /// insert project) run inline since `Db` is not `Send` across the pool.
 #[tauri::command]
 pub async fn connect_remote_project(
+    app: AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     request: RemoteConnectRequest,
@@ -83,56 +103,106 @@ pub async fn connect_remote_project(
             .map_err(|error| AppError::Daemon(format!("remote probe task failed: {error}")))??
     };
 
-    // 2. Open the streamlocal bridge (its bootstrap ensures the server is up).
-    let local_sock = local_socket_path(&id);
-    let bridge_config = SshBridgeConfig {
-        host: config.host.clone(),
-        port: config.port,
-        user: config.user.clone(),
-        auth: config.auth.clone(),
-        remote_socket_path: remote_socket_path(&probe.home),
-        local_socket_path: local_sock.clone(),
-        bootstrap_command: bootstrap_command(),
-    };
-    tauri::async_runtime::spawn_blocking(move || start_ssh_bridge(bridge_config))
-        .await
-        .map_err(|error| AppError::Daemon(format!("ssh bridge task failed: {error}")))?
-        .map_err(|error| AppError::Daemon(format!("ssh bridge: {error}")))?;
-
-    // 3. Version-check the remote server through the bridge before routing to it.
-    let client = PtyClient::new_socket(local_sock);
-    let probe_client = client.clone();
-    let version =
-        tauri::async_runtime::spawn_blocking(move || probe_client.server_protocol_version())
+    // 2. Open the streamlocal bridge (its bootstrap ensures the server is up)
+    //    and version-check the remote server before routing to it.
+    let client = {
+        let id = id.clone();
+        let config = config.clone();
+        let home = probe.home.clone();
+        tauri::async_runtime::spawn_blocking(move || connect_client(&id, &config, &home))
             .await
-            .map_err(|error| AppError::Daemon(format!("version probe task failed: {error}")))?
-            .map_err(|error| AppError::Daemon(format!("remote server unreachable: {error}")))?;
-    let expected = CONSTANTS.daemon.protocol_version.get();
-    if version != expected {
-        return Err(AppError::Daemon(format!(
-            "remote pragma-server speaks protocol v{version}, but this client requires v{expected}. \
-             Update pragma-server on the remote host to a matching version and reconnect."
-        )));
-    }
+            .map_err(|error| AppError::Daemon(format!("ssh bridge task failed: {error}")))??
+    };
 
-    // 4. Register the live host, persist the route, and insert the project.
+    // 3. Register the live host, persist the route, and insert the project.
     hosts.register_remote(
         id.clone(),
         RemoteHost {
-            client,
+            client: client.clone(),
             label: format!("{}@{}", request.user, request.host),
         },
     )?;
+    agent_events::start_for(app, client);
     hosts
         .router()
         .set_project_route(&ProjectRoute {
             project_key: probe.abs_path.clone(),
             host_id: id,
-            preferences: serde_json::json!({}),
+            preferences: serde_json::to_value(route_preferences(&request))?,
         })
         .map_err(|error| AppError::Daemon(format!("failed to record remote route: {error}")))?;
     let name = project_name(&probe.abs_path);
     db.insert_project_with_main_worktree(name, probe.abs_path, probe.branch)
+}
+
+/// Attempts to reconnect persisted agent-authenticated remote hosts in the
+/// background. Passwords and key passphrases are never persisted, so those routes
+/// intentionally remain disconnected until the user reconnects them.
+pub fn reconnect_remote_hosts(app: AppHandle) {
+    std::thread::spawn(move || {
+        let hosts = app.state::<Hosts>();
+        let routes = match hosts.router().project_routes() {
+            Ok(routes) => routes,
+            Err(error) => {
+                log::warn!("failed to load remote host routes: {error}");
+                return;
+            }
+        };
+        for route in routes {
+            if route.host_id == LOCAL_HOST {
+                continue;
+            }
+            let preferences =
+                match serde_json::from_value::<RemoteRoutePreferences>(route.preferences) {
+                    Ok(preferences) => preferences,
+                    Err(error) => {
+                        log::warn!(
+                            "skipping remote host '{}': invalid route preferences: {error}",
+                            route.host_id
+                        );
+                        continue;
+                    }
+                };
+            if preferences.auth_method != RemoteRouteAuthMethod::Agent {
+                log::info!(
+                    "remote host '{}' uses non-agent auth and will reconnect when credentials are supplied",
+                    route.host_id
+                );
+                continue;
+            }
+            let config = SshConnectConfig {
+                host: preferences.host.clone(),
+                port: preferences.port,
+                user: preferences.user.clone(),
+                auth: RemoteAuth::Agent,
+            };
+            match reconnect_remote_host(&route.host_id, &config) {
+                Ok(client) => {
+                    let label = format!("{}@{}", preferences.user, preferences.host);
+                    if let Err(error) = hosts.register_remote(
+                        route.host_id.clone(),
+                        RemoteHost {
+                            client: client.clone(),
+                            label,
+                        },
+                    ) {
+                        log::warn!(
+                            "failed to register remote host '{}': {error}",
+                            route.host_id
+                        );
+                        continue;
+                    }
+                    agent_events::start_for(app.clone(), client);
+                }
+                Err(error) => {
+                    log::warn!(
+                        "failed to reconnect remote host '{}': {error}",
+                        route.host_id
+                    );
+                }
+            }
+        }
+    });
 }
 
 /// Derives a project display name from the remote absolute path.
@@ -162,6 +232,62 @@ fn connect_config(request: &RemoteConnectRequest) -> SshConnectConfig {
         user: request.user.clone(),
         auth,
     }
+}
+
+fn route_preferences(request: &RemoteConnectRequest) -> RemoteRoutePreferences {
+    RemoteRoutePreferences {
+        host: request.host.clone(),
+        port: request.port,
+        user: request.user.clone(),
+        auth_method: match &request.auth {
+            RemoteAuthChoice::Agent => RemoteRouteAuthMethod::Agent,
+            RemoteAuthChoice::Key { .. } => RemoteRouteAuthMethod::Key,
+            RemoteAuthChoice::Password { .. } => RemoteRouteAuthMethod::Password,
+        },
+    }
+}
+
+fn reconnect_remote_host(host_id: &str, config: &SshConnectConfig) -> AppResult<PtyClient> {
+    let home = probe_remote_home(config)?;
+    connect_client(host_id, config, &home)
+}
+
+fn connect_client(host_id: &str, config: &SshConnectConfig, home: &str) -> AppResult<PtyClient> {
+    let local_sock = local_socket_path(host_id);
+    let bridge_config = SshBridgeConfig {
+        host: config.host.clone(),
+        port: config.port,
+        user: config.user.clone(),
+        auth: config.auth.clone(),
+        remote_socket_path: remote_socket_path(home),
+        local_socket_path: local_sock.clone(),
+        bootstrap_command: bootstrap_command(),
+    };
+    start_ssh_bridge(bridge_config)
+        .map_err(|error| AppError::Daemon(format!("ssh bridge: {error}")))?;
+    let client = PtyClient::new_socket(local_sock);
+    let version = client
+        .server_protocol_version()
+        .map_err(|error| AppError::Daemon(format!("remote server unreachable: {error}")))?;
+    let expected = CONSTANTS.daemon.protocol_version.get();
+    if version != expected {
+        return Err(AppError::Daemon(format!(
+            "remote pragma-server speaks protocol v{version}, but this client requires v{expected}. \
+             Update pragma-server on the remote host to a matching version and reconnect."
+        )));
+    }
+    Ok(client)
+}
+
+fn probe_remote_home(config: &SshConnectConfig) -> AppResult<String> {
+    let result = run_exec(config, "printf 'HOME=%s\\n' \"$HOME\"")?;
+    let home = line_value(&result.stdout, "HOME=").unwrap_or_default();
+    if home.is_empty() {
+        return Err(AppError::Daemon(
+            "could not resolve the remote home directory".to_string(),
+        ));
+    }
+    Ok(home)
 }
 
 /// Expands a leading `~` in a local path (for key files) using `$HOME`.

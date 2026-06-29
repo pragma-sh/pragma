@@ -13,17 +13,18 @@ Tauri or client presentation code.
 
 ## Status of the migration
 
-- **Done (host RPC):** `filesystem` (`fs.rs`) and `git` (`git.rs`) are fully
-  implemented behind `Core::handle_rpc`. The Tauri commands in `apps/pragma`
-  resolve the trusted absolute worktree root (and, for git, the DB-derived
-  parent branch) from the client DB, then forward via `PragmaClient::rpc`. The
-  host re-validates paths and runs the work on its own disk, so the same command
-  serves a local project and an SSH-bridged remote one.
+- **Done (host RPC):** `filesystem` (`fs.rs`), `git` (`git.rs`), and headless
+  lifecycle command execution (`exec.rs`) are implemented behind
+  `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
+  absolute project/worktree roots (and, for git, DB-derived parent branches)
+  from the client DB, then forward via `PragmaClient::rpc`. The host
+  re-validates paths and runs the work on its own disk, so the same command
+  serves a local project and an SSH-bridged remote one. Worktree lifecycle
+  operations (exclude setup, create/remove, branch delete, dirty check) and
+  setup/teardown scripts run on the owning host.
 - **Still client-local:** `database`, `projects`, `worktrees`, `tabs`, `kanban`,
   `settings` remain metadata in the client DB (`pragma.db`) and return
   `UnsupportedMethod` from core — by design (see `pragma-client/router.rs`).
-  Worktree git *operations* (create/remove) still run locally for now; routing
-  them per-host is the next slice.
 - `github`/`ai` are intentionally kept as local sidecars, not core RPC.
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`) are the client↔core
   contract; both sides depend on this crate to build/parse them.

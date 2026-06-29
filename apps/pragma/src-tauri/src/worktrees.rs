@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use pragma_constants::{Worktree, WorktreeStatus};
+use pragma_core::git::GitRequest;
 use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
-use crate::pty::PtyClient;
+use crate::hosts::Hosts;
 use crate::scripts;
 
 #[tauri::command]
@@ -17,6 +18,7 @@ pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Wo
 #[tauri::command]
 pub fn create_worktree(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
     project_id: String,
     parent_worktree_id: String,
@@ -30,34 +32,56 @@ pub fn create_worktree(
     let parent = db.worktree(&parent_worktree_id)?;
     let lock = locks.lock_for(&project_id)?;
     let _guard = lock.lock()?;
-    git::ensure_pragma_excluded(PathBuf::from(&project.path).as_path())?;
+    let pty = hosts.for_project(&db, &project_id)?;
+    git::host_rpc::<()>(
+        &pty,
+        &GitRequest::EnsurePragmaExcluded {
+            project_root: project.path.clone(),
+        },
+    )?;
     let worktree_id = uuid::Uuid::new_v4().to_string();
     let path = PathBuf::from(&project.path)
         .join(".pragma/worktrees")
         .join(&worktree_id);
-    git::create_worktree(PathBuf::from(&parent.path).as_path(), branch.trim(), &path)?;
+    let path = path.to_string_lossy().into_owned();
+    git::host_rpc::<()>(
+        &pty,
+        &GitRequest::CreateWorktree {
+            parent_root: parent.path.clone(),
+            branch: branch.trim().to_string(),
+            path: path.clone(),
+        },
+    )?;
     let worktree = db.insert_worktree(
         &worktree_id,
         &project_id,
         &parent_worktree_id,
         branch.trim(),
         title.filter(|value| !value.trim().is_empty()),
-        &path.to_string_lossy(),
+        &path,
     )?;
-    let config =
-        scripts::load_project_scripts_from_project_path(PathBuf::from(&project.path).as_path())?;
-    scripts::run_headless_commands(&project, &worktree, "setup", config.setup.as_slice())?;
+    let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
+    scripts::run_headless_commands(&pty, &project, &worktree, "setup", config.setup.as_slice())?;
     Ok(worktree)
 }
 
 /// True when the worktree has uncommitted, staged, or untracked changes.
 /// Used by the delete confirmation dialog to warn the user.
 #[tauri::command]
-pub fn worktree_status(worktree_id: String, db: State<'_, Db>) -> AppResult<WorktreeStatus> {
+pub fn worktree_status(
+    worktree_id: String,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+) -> AppResult<WorktreeStatus> {
     let worktree = db.worktree(&worktree_id)?;
-    Ok(WorktreeStatus {
-        dirty: git::worktree_is_dirty(PathBuf::from(&worktree.path).as_path()),
-    })
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let dirty = git::host_rpc(
+        &pty,
+        &GitRequest::IsDirty {
+            root: worktree.path,
+        },
+    )?;
+    Ok(WorktreeStatus { dirty })
 }
 
 /// Updates the optional display title for a worktree. An empty string clears
@@ -90,8 +114,8 @@ pub fn delete_worktree(
     delete_branch: bool,
     force: bool,
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
-    pty: State<'_, PtyClient>,
 ) -> AppResult<()> {
     let worktree = db.worktree(&worktree_id)?;
     if worktree.is_main {
@@ -102,10 +126,16 @@ pub fn delete_worktree(
     let project = db.project(&worktree.project_id)?;
     let lock = locks.lock_for(&worktree.project_id)?;
     let _guard = lock.lock()?;
+    let pty = hosts.for_project(&db, &worktree.project_id)?;
 
-    let config =
-        scripts::load_project_scripts_from_project_path(PathBuf::from(&project.path).as_path())?;
-    scripts::run_headless_commands(&project, &worktree, "teardown", config.teardown.as_slice())?;
+    let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
+    scripts::run_headless_commands(
+        &pty,
+        &project,
+        &worktree,
+        "teardown",
+        config.teardown.as_slice(),
+    )?;
 
     // Terminate any PTY sessions in this worktree so they don't keep an open
     // fd on the directory we're about to remove. Best-effort: a daemon hiccup
@@ -114,11 +144,13 @@ pub fn delete_worktree(
         log::warn!("failed to kill sessions for {}: {error}", worktree.path);
     }
 
-    let worktree_path = PathBuf::from(&worktree.path);
-    git::remove_worktree(
-        PathBuf::from(&project.path).as_path(),
-        &worktree_path,
-        force,
+    git::host_rpc::<()>(
+        &pty,
+        &GitRequest::RemoveWorktree {
+            repo_root: project.path.clone(),
+            worktree_path: worktree.path.clone(),
+            force,
+        },
     )?;
 
     if delete_branch {
@@ -130,9 +162,13 @@ pub fn delete_worktree(
             .iter()
             .find(|candidate| candidate.id != worktree_id && candidate.branch != worktree.branch);
         if let Some(candidate) = other {
-            if let Err(error) =
-                git::delete_branch(PathBuf::from(&candidate.path).as_path(), &worktree.branch)
-            {
+            if let Err(error) = git::host_rpc::<()>(
+                &pty,
+                &GitRequest::DeleteBranch {
+                    repo_root: candidate.path.clone(),
+                    branch: worktree.branch.clone(),
+                },
+            ) {
                 log::warn!(
                     "failed to delete branch {} from {}: {error}",
                     worktree.branch,

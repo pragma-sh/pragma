@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod exec;
 pub mod fs;
 pub mod git;
 pub(crate) mod process_env;
@@ -69,6 +70,7 @@ impl Core {
         match method {
             ProtocolRpcMethod::Filesystem => fs::handle(payload),
             ProtocolRpcMethod::Git => git::handle(payload),
+            ProtocolRpcMethod::Exec => exec::handle(payload),
             ProtocolRpcMethod::Database
             | ProtocolRpcMethod::Kanban
             | ProtocolRpcMethod::Worktrees

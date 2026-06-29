@@ -1,16 +1,17 @@
-use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::path::Path;
-use std::process::Command;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use pragma_constants::{Project, Worktree, CONSTANTS};
+use pragma_constants::{FileContents, Project, ProtocolRpcMethod, Worktree, CONSTANTS};
+use pragma_core::exec::{CommandResult, ExecRequest};
+use pragma_core::fs::FsRequest;
 use serde_json::Value;
 use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::hosts::Hosts;
+use crate::pty::PtyClient;
 
 const SCRIPT_CONFIG_PATH: &str = ".pragma/scripts.json";
 
@@ -40,141 +41,104 @@ impl HeadlessCommandResult {
     }
 }
 
+/// Loads a project's `.pragma/scripts.json` from its host (local or remote).
 #[tauri::command]
 pub fn load_project_scripts(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     project_id: String,
 ) -> AppResult<LoadedProjectScripts> {
     let project = db.project(&project_id)?;
-    load_project_scripts_from_project_path(Path::new(&project.path))
+    let pty = hosts.for_project(&db, &project_id)?;
+    load_project_scripts_on_host(&pty, &project.path)
 }
 
-pub fn load_project_scripts_from_project_path(
-    project_path: &Path,
+/// Reads + validates `.pragma/scripts.json` on `pty`'s host. A missing or
+/// unreadable file yields an empty config; malformed JSON surfaces as an error.
+pub fn load_project_scripts_on_host(
+    pty: &PtyClient,
+    project_root: &str,
 ) -> AppResult<LoadedProjectScripts> {
-    let path = project_path.join(SCRIPT_CONFIG_PATH);
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(empty_config()),
-        Err(error) => return Err(AppError::Io(error)),
+    let config_path = Path::new(project_root).join(SCRIPT_CONFIG_PATH);
+    match read_scripts_json(pty, project_root) {
+        Some(raw) => parse_config(&raw, &config_path),
+        None => Ok(LoadedProjectScripts::default()),
+    }
+}
+
+/// Reads `.pragma/scripts.json` via the host's `filesystem` RPC, returning its
+/// text or `None` when it is absent, unreadable, binary, or truncated.
+fn read_scripts_json(pty: &PtyClient, project_root: &str) -> Option<String> {
+    let request = FsRequest::ReadFile {
+        root: project_root.to_string(),
+        path: SCRIPT_CONFIG_PATH.to_string(),
     };
-    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+    let payload = serde_json::to_value(request).ok()?;
+    let value = pty.rpc(ProtocolRpcMethod::Filesystem, payload).ok()?;
+    let contents: FileContents = serde_json::from_value(value).ok()?;
+    if contents.binary || contents.truncated {
+        return None;
+    }
+    Some(contents.text)
+}
+
+/// Validates and parses a `scripts.json` body. `path` is used only for error
+/// messages.
+fn parse_config(raw: &str, path: &Path) -> AppResult<LoadedProjectScripts> {
+    let value: Value = serde_json::from_str(raw).map_err(|error| {
         AppError::InvalidInput(format!("{} is not valid JSON: {error}", path.display()))
     })?;
-    validate_config(&value, &path)?;
+    validate_config(&value, path)?;
     config_from_value(&value)
 }
 
+/// Runs a project's `setup`/`teardown` commands on the worktree's host and
+/// returns each command's result, erroring if any command failed.
 pub fn run_headless_commands(
+    pty: &PtyClient,
     project: &Project,
     worktree: &Worktree,
     kind: &str,
     commands: &[String],
-) -> AppResult<Vec<HeadlessCommandResult>> {
-    let limit =
-        usize::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).unwrap_or(usize::MAX);
-    run_headless_commands_with_limit(project, worktree, kind, commands, limit)
-}
-
-fn run_headless_commands_with_limit(
-    project: &Project,
-    worktree: &Worktree,
-    kind: &str,
-    commands: &[String],
-    limit: usize,
 ) -> AppResult<Vec<HeadlessCommandResult>> {
     if commands.is_empty() {
         return Ok(Vec::new());
     }
-    let worker_count = worker_count(commands.len(), limit);
-    let queue = Arc::new(Mutex::new(
-        commands
-            .iter()
-            .cloned()
-            .enumerate()
-            .collect::<VecDeque<(usize, String)>>(),
-    ));
-    let mut handles = Vec::with_capacity(worker_count);
-    for _ in 0..worker_count {
-        let queue = Arc::clone(&queue);
-        let project = project.clone();
-        let worktree = worktree.clone();
-        handles.push(std::thread::spawn(move || {
-            let mut results = Vec::new();
-            loop {
-                let next = queue
-                    .lock()
-                    .expect("script command queue not poisoned")
-                    .pop_front();
-                let Some((index, command)) = next else {
-                    break;
-                };
-                results.push((index, run_one_command(&project, &worktree, &command)));
-            }
-            results
-        }));
-    }
-
-    let mut indexed = vec![None; commands.len()];
-    for handle in handles {
-        let results = handle
-            .join()
-            .map_err(|_| AppError::Script(format!("{kind} script worker panicked")))?;
-        for (index, result) in results {
-            indexed[index] = Some(result);
-        }
-    }
-    let results = indexed
+    let request = ExecRequest {
+        cwd: worktree.path.clone(),
+        commands: commands.to_vec(),
+        env: vec![
+            ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
+            ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
+            ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
+        ],
+        max_concurrent: u32::try_from(CONSTANTS.scripts.max_concurrent_commands.get()).map_err(
+            |_| AppError::InvalidInput("script concurrency limit is too large".to_string()),
+        )?,
+    };
+    let payload = serde_json::to_value(request)?;
+    let value = pty.rpc(ProtocolRpcMethod::Exec, payload)?;
+    let results: Vec<CommandResult> = serde_json::from_value(value)?;
+    let results: Vec<HeadlessCommandResult> = results
         .into_iter()
-        .map(|result| result.expect("every script command must produce a result"))
-        .collect::<Vec<_>>();
+        .map(|result| HeadlessCommandResult {
+            command: result.command,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            status: result.status,
+            duration: Duration::from_millis(result.duration_ms),
+        })
+        .collect();
     let failures = results
         .iter()
         .filter(|result| !result.succeeded())
         .cloned()
         .collect::<Vec<_>>();
     if failures.is_empty() {
-        return Ok(results);
+        Ok(results)
+    } else {
+        Err(AppError::Script(format_failures(kind, &failures)))
     }
-    Err(AppError::Script(format_failures(kind, &failures)))
-}
-
-fn run_one_command(project: &Project, worktree: &Worktree, command: &str) -> HeadlessCommandResult {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let started = Instant::now();
-    let output = Command::new(shell)
-        .arg("-lc")
-        .arg(command)
-        .current_dir(&worktree.path)
-        .env("PRAGMA_WORKTREE_PATH", &worktree.path)
-        .env("PRAGMA_PROJECT_PATH", &project.path)
-        .env("PRAGMA_WORKTREE_ID", &worktree.id)
-        .output();
-    let duration = started.elapsed();
-    match output {
-        Ok(output) => HeadlessCommandResult {
-            command: command.to_string(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            status: output.status.code(),
-            duration,
-        },
-        Err(error) => HeadlessCommandResult {
-            command: command.to_string(),
-            stdout: String::new(),
-            stderr: format!("failed to spawn command: {error}"),
-            status: None,
-            duration,
-        },
-    }
-}
-
-fn worker_count(command_count: usize, limit: usize) -> usize {
-    limit.max(1).min(command_count)
-}
-
-fn empty_config() -> LoadedProjectScripts {
-    LoadedProjectScripts::default()
 }
 
 fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {
@@ -357,42 +321,17 @@ fn exit_label(status: Option<i32>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
 
-    fn project(path: &Path) -> Project {
-        Project {
-            id: "project".to_string(),
-            name: "Project".to_string(),
-            path: path.to_string_lossy().into_owned(),
-            order_index: 0,
-            created_at: "now".to_string(),
-        }
-    }
+    use super::parse_config;
 
-    fn worktree(path: &Path) -> Worktree {
-        Worktree {
-            id: "worktree".to_string(),
-            project_id: "project".to_string(),
-            parent_id: None,
-            branch: "feature".to_string(),
-            title: None,
-            path: path.to_string_lossy().into_owned(),
-            is_main: false,
-            hidden: false,
-            created_at: "now".to_string(),
-        }
-    }
-
-    fn write_scripts(root: &Path, contents: &str) {
-        let pragma = root.join(".pragma");
-        std::fs::create_dir_all(&pragma).expect("create .pragma");
-        std::fs::write(pragma.join("scripts.json"), contents).expect("write scripts");
+    fn parse(raw: &str) -> super::AppResult<super::LoadedProjectScripts> {
+        parse_config(raw, Path::new("/p/.pragma/scripts.json"))
     }
 
     #[test]
-    fn missing_config_is_empty() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let config = load_project_scripts_from_project_path(dir.path()).expect("load scripts");
+    fn empty_object_is_empty_config() {
+        let config = parse("{}").expect("parse");
         assert!(config.setup.is_empty());
         assert!(config.run.is_empty());
         assert!(config.build.is_empty());
@@ -401,105 +340,39 @@ mod tests {
 
     #[test]
     fn accepts_top_level_build_string_entries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_scripts(
-            dir.path(),
-            r#"{
-              "build": [
-                "cargo build",
-                { "left": "cargo build -p foo", "right": "cargo build -p bar" }
-              ]
-            }"#,
-        );
-
-        let config = load_project_scripts_from_project_path(dir.path()).expect("load scripts");
-
+        let config = parse(
+            r#"{ "build": ["cargo build", { "left": "cargo build -p foo", "right": "cargo build -p bar" }] }"#,
+        )
+        .expect("parse");
         assert_eq!(config.build.len(), 2);
         assert_eq!(config.build[0].as_str(), Some("cargo build"));
     }
 
     #[test]
     fn accepts_top_level_run_string_entries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_scripts(
-            dir.path(),
-            r#"{
-              "run": [
-                "npm test -- --runInBand",
-                { "left": "npm run dev", "right": "npm run test:watch" }
-              ]
-            }"#,
-        );
-
-        let config = load_project_scripts_from_project_path(dir.path()).expect("load scripts");
-
+        let config = parse(
+            r#"{ "run": ["npm test", { "left": "npm run dev", "right": "npm run test:watch" }] }"#,
+        )
+        .expect("parse");
         assert_eq!(config.run.len(), 2);
-        assert_eq!(config.run[0].as_str(), Some("npm test -- --runInBand"));
+        assert_eq!(config.run[0].as_str(), Some("npm test"));
     }
 
     #[test]
     fn rejects_invalid_run_split() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_scripts(dir.path(), r#"{ "run": [{ "left": "a", "top": "b" }] }"#);
-        let error = load_project_scripts_from_project_path(dir.path()).expect_err("invalid split");
+        let error = parse(r#"{ "run": [{ "left": "a", "top": "b" }] }"#).expect_err("invalid");
         assert!(error.to_string().contains("exactly one split axis"));
     }
 
     #[test]
     fn rejects_empty_commands() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_scripts(dir.path(), r#"{ "setup": [" "] }"#);
-        let error = load_project_scripts_from_project_path(dir.path()).expect_err("empty command");
+        let error = parse(r#"{ "setup": [" "] }"#).expect_err("empty");
         assert!(error.to_string().contains("setup[0] must not be empty"));
     }
 
     #[test]
-    fn headless_commands_receive_environment() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let project = project(dir.path());
-        let worktree = worktree(dir.path());
-        let results = run_headless_commands_with_limit(
-            &project,
-            &worktree,
-            "setup",
-            &["printf \"$PRAGMA_WORKTREE_ID:$PRAGMA_PROJECT_PATH:$PRAGMA_WORKTREE_PATH\"".into()],
-            1,
-        )
-        .expect("run command");
-        assert_eq!(
-            results[0].stdout,
-            format!("worktree:{}:{}", project.path, worktree.path)
-        );
-    }
-
-    #[test]
-    fn headless_command_failures_include_every_failure() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let project = project(dir.path());
-        let worktree = worktree(dir.path());
-        let error = run_headless_commands_with_limit(
-            &project,
-            &worktree,
-            "teardown",
-            &[
-                "printf one >&2; exit 3".into(),
-                "printf two >&2; exit 4".into(),
-            ],
-            2,
-        )
-        .expect_err("commands fail");
-        let message = error.to_string();
-        assert!(message.contains("teardown scripts failed"));
-        assert!(message.contains("exit 3"));
-        assert!(message.contains("exit 4"));
-        assert!(message.contains("one"));
-        assert!(message.contains("two"));
-    }
-
-    #[test]
-    fn worker_count_respects_limit() {
-        assert_eq!(worker_count(4, 2), 2);
-        assert_eq!(worker_count(4, 0), 1);
-        assert_eq!(worker_count(2, 8), 2);
+    fn rejects_unknown_keys() {
+        let error = parse(r#"{ "nope": [] }"#).expect_err("unknown");
+        assert!(error.to_string().contains("unknown key `nope`"));
     }
 }
