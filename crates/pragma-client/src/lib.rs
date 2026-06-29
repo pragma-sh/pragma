@@ -28,7 +28,9 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use ssh::{start_ssh_bridge, RemoteAuth, SshBridgeConfig};
+pub use ssh::{
+    ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
+};
 
 const SERVER_DETACH_FLAG: &str = "--detach";
 const SERVER_SOCKET_FILE: &str = "daemon.sock";
@@ -213,6 +215,26 @@ impl PragmaClient {
     pub fn mark_agents_seen(&self, tab_id: String) -> ClientResult<()> {
         let request = request_mark_agents_seen(tab_id);
         self.request(&request)
+    }
+
+    /// Reads the server's advertised protocol version from its `Hello` frame.
+    ///
+    /// For a socket endpoint (an SSH bridge) this just connects and reads the
+    /// first frame; for a managed-local endpoint it spawns the server first.
+    /// Used to verify a remote `pragma-server` matches the client's expected
+    /// protocol before a project is routed to it.
+    pub fn server_protocol_version(&self) -> ClientResult<u64> {
+        let mut stream = match &self.endpoint {
+            ClientEndpoint::Socket(path) => UnixStream::connect(path)?,
+            ClientEndpoint::ManagedLocal(_) => self.connect_with_spawn()?,
+        };
+        configure_stream(&stream)?;
+        match read_json_frame::<ServerFrame>(&mut stream)? {
+            ServerFrame::Hello(hello) => Ok(hello.protocol_version),
+            _ => Err(ClientError::Server(
+                "server did not send a hello frame".to_string(),
+            )),
+        }
     }
 
     /// Restarts a managed local server and confirms a compatible server is up.

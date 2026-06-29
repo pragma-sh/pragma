@@ -1,0 +1,320 @@
+//! Remote project connection over SSH.
+//!
+//! `connect_remote_project` is the entry point behind the Add-project "Remote"
+//! tab. It validates SSH credentials and a typed remote path, confirms the path
+//! is a git repo, ensures a protocol-compatible `pragma-server` is running on
+//! the host, opens an SSH streamlocal bridge for ongoing RPC/PTY, registers the
+//! host in [`Hosts`], records the project → host route, and inserts the project
+//! locally. Thereafter every filesystem/git/terminal operation for that project
+//! routes over the bridge to the remote server (see `hosts.rs`).
+
+use std::path::Path;
+
+use pragma_client::router::ProjectRoute;
+use pragma_client::{
+    ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
+};
+use pragma_constants::{Project, CONSTANTS};
+use serde::Deserialize;
+use tauri::State;
+
+use crate::db::Db;
+use crate::error::{AppError, AppResult};
+use crate::hosts::{Hosts, RemoteHost};
+use crate::pty::PtyClient;
+
+/// Remote channel the host server runs under. Single source of truth so the
+/// forwarded socket path is deterministic.
+const REMOTE_CHANNEL: &str = pragma_protocol::PROD_CHANNEL;
+
+/// How the user chose to authenticate. SSH agent is the default; key file and
+/// password are the alternatives surfaced under "More options".
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RemoteAuthChoice {
+    /// Keys from the running SSH agent.
+    Agent,
+    /// A private key file with optional passphrase.
+    Key {
+        path: String,
+        passphrase: Option<String>,
+    },
+    /// A password.
+    Password { password: String },
+}
+
+/// Credentials + target the Remote tab collects.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteConnectRequest {
+    /// SSH hostname or IP.
+    pub host: String,
+    /// SSH port (typically 22).
+    pub port: u16,
+    /// SSH username.
+    pub user: String,
+    /// Authentication method.
+    pub auth: RemoteAuthChoice,
+    /// Project path on the remote host, e.g. `~/projects/remote-project`.
+    pub path: String,
+}
+
+/// Connects to a remote host and registers the project found at `path`.
+///
+/// The blocking SSH work (probe, bridge, version check) runs on the blocking
+/// pool with owned data; the quick state mutations (register host, write route,
+/// insert project) run inline since `Db` is not `Send` across the pool.
+#[tauri::command]
+pub async fn connect_remote_project(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    request: RemoteConnectRequest,
+) -> AppResult<Project> {
+    let config = connect_config(&request);
+    let id = host_id(&request);
+    let path = request.path.clone();
+
+    // 1. Probe the remote: resolve the absolute path, confirm a git repo, read
+    //    the branch and home directory.
+    let probe = {
+        let config = config.clone();
+        tauri::async_runtime::spawn_blocking(move || probe_remote(&config, &path))
+            .await
+            .map_err(|error| AppError::Daemon(format!("remote probe task failed: {error}")))??
+    };
+
+    // 2. Open the streamlocal bridge (its bootstrap ensures the server is up).
+    let local_sock = local_socket_path(&id);
+    let bridge_config = SshBridgeConfig {
+        host: config.host.clone(),
+        port: config.port,
+        user: config.user.clone(),
+        auth: config.auth.clone(),
+        remote_socket_path: remote_socket_path(&probe.home),
+        local_socket_path: local_sock.clone(),
+        bootstrap_command: bootstrap_command(),
+    };
+    tauri::async_runtime::spawn_blocking(move || start_ssh_bridge(bridge_config))
+        .await
+        .map_err(|error| AppError::Daemon(format!("ssh bridge task failed: {error}")))?
+        .map_err(|error| AppError::Daemon(format!("ssh bridge: {error}")))?;
+
+    // 3. Version-check the remote server through the bridge before routing to it.
+    let client = PtyClient::new_socket(local_sock);
+    let probe_client = client.clone();
+    let version =
+        tauri::async_runtime::spawn_blocking(move || probe_client.server_protocol_version())
+            .await
+            .map_err(|error| AppError::Daemon(format!("version probe task failed: {error}")))?
+            .map_err(|error| AppError::Daemon(format!("remote server unreachable: {error}")))?;
+    let expected = CONSTANTS.daemon.protocol_version.get();
+    if version != expected {
+        return Err(AppError::Daemon(format!(
+            "remote pragma-server speaks protocol v{version}, but this client requires v{expected}. \
+             Update pragma-server on the remote host to a matching version and reconnect."
+        )));
+    }
+
+    // 4. Register the live host, persist the route, and insert the project.
+    hosts.register_remote(
+        id.clone(),
+        RemoteHost {
+            client,
+            label: format!("{}@{}", request.user, request.host),
+        },
+    )?;
+    hosts
+        .router()
+        .set_project_route(&ProjectRoute {
+            project_key: probe.abs_path.clone(),
+            host_id: id,
+            preferences: serde_json::json!({}),
+        })
+        .map_err(|error| AppError::Daemon(format!("failed to record remote route: {error}")))?;
+    let name = project_name(&probe.abs_path);
+    db.insert_project_with_main_worktree(name, probe.abs_path, probe.branch)
+}
+
+/// Derives a project display name from the remote absolute path.
+fn project_name(abs_path: &str) -> String {
+    abs_path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or("project")
+        .to_string()
+}
+
+/// Builds a one-shot SSH connection config from the request.
+fn connect_config(request: &RemoteConnectRequest) -> SshConnectConfig {
+    let auth = match &request.auth {
+        RemoteAuthChoice::Agent => RemoteAuth::Agent,
+        RemoteAuthChoice::Key { path, passphrase } => RemoteAuth::Key {
+            path: expand_local_tilde(path),
+            passphrase: passphrase.clone(),
+        },
+        RemoteAuthChoice::Password { password } => RemoteAuth::Password(password.clone()),
+    };
+    SshConnectConfig {
+        host: request.host.clone(),
+        port: request.port,
+        user: request.user.clone(),
+        auth,
+    }
+}
+
+/// Expands a leading `~` in a local path (for key files) using `$HOME`.
+fn expand_local_tilde(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return Path::new(&home).join(rest);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
+/// Rewrites a leading `~` to `$HOME` so it expands inside a double-quoted remote
+/// shell word. Rejects characters that would break out of the quoting.
+fn remote_shell_path(input: &str) -> AppResult<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput("remote path is empty".to_string()));
+    }
+    if trimmed.contains(['"', '`', '\\', '\n']) {
+        return Err(AppError::InvalidInput(
+            "remote path contains unsupported characters".to_string(),
+        ));
+    }
+    Ok(if trimmed == "~" {
+        "$HOME".to_string()
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        format!("$HOME/{rest}")
+    } else {
+        trimmed.to_string()
+    })
+}
+
+/// One probe of the remote: resolves the absolute path, confirms it's a git
+/// repo, reads the branch, and reports `$HOME` (for the server socket path).
+struct RemoteProbe {
+    abs_path: String,
+    branch: String,
+    home: String,
+}
+
+fn probe_remote(config: &SshConnectConfig, path: &str) -> AppResult<RemoteProbe> {
+    let shell_path = remote_shell_path(path)?;
+    // One round trip resolves everything we need. `pwd -P` canonicalizes; the
+    // git checks are best-effort and parsed from labelled lines.
+    let command = format!(
+        "abs=$(cd \"{shell_path}\" 2>/dev/null && pwd -P); \
+         if [ -z \"$abs\" ]; then echo 'ABS='; else \
+         echo \"ABS=$abs\"; \
+         echo \"GIT=$(git -C \"$abs\" rev-parse --is-inside-work-tree 2>/dev/null)\"; \
+         echo \"BRANCH=$(git -C \"$abs\" branch --show-current 2>/dev/null)\"; fi; \
+         echo \"HOME=$HOME\""
+    );
+    let result = run_exec(config, &command)?;
+    let abs_path = line_value(&result.stdout, "ABS=").unwrap_or_default();
+    if abs_path.is_empty() {
+        return Err(AppError::InvalidInput(format!(
+            "remote path '{path}' was not found on the host"
+        )));
+    }
+    if line_value(&result.stdout, "GIT=").as_deref() != Some("true") {
+        return Err(AppError::InvalidInput(format!(
+            "remote path '{abs_path}' is not a git repository"
+        )));
+    }
+    let branch = line_value(&result.stdout, "BRANCH=").unwrap_or_default();
+    let home = line_value(&result.stdout, "HOME=").unwrap_or_default();
+    if home.is_empty() {
+        return Err(AppError::Daemon(
+            "could not resolve the remote home directory".to_string(),
+        ));
+    }
+    Ok(RemoteProbe {
+        abs_path,
+        branch: if branch.is_empty() {
+            "HEAD".to_string()
+        } else {
+            branch
+        },
+        home,
+    })
+}
+
+/// Runs a remote command, mapping transport failures to `AppError`.
+fn run_exec(config: &SshConnectConfig, command: &str) -> AppResult<SshExecResult> {
+    ssh_exec(config, command).map_err(|error| AppError::Daemon(format!("ssh: {error}")))
+}
+
+/// Extracts the value of the first `prefix`-tagged line in `text`.
+fn line_value(text: &str, prefix: &str) -> Option<String> {
+    text.lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .map(|value| value.trim().to_string())
+}
+
+/// Stable host id for a connection, used as the router `host_id` and the remote
+/// map key.
+fn host_id(request: &RemoteConnectRequest) -> String {
+    format!("ssh://{}@{}:{}", request.user, request.host, request.port)
+}
+
+/// Local Unix socket path the bridge listens on for this host.
+fn local_socket_path(host_id: &str) -> std::path::PathBuf {
+    let sanitized: String = host_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    std::env::temp_dir().join(format!("pragma-remote-{sanitized}.sock"))
+}
+
+/// Bootstrap command that ensures a protocol-pinned `pragma-server` is running
+/// on the remote with a deterministic socket path. Forces `PRAGMA_APP_DATA_DIR`
+/// and unsets `XDG_RUNTIME_DIR` so the socket lands at
+/// `$HOME/.pragma/<channel>/daemon.sock` regardless of the login environment.
+fn bootstrap_command() -> String {
+    format!(
+        "PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\" \
+         env -u XDG_RUNTIME_DIR PRAGMA_APP_DATA_DIR=\"$HOME/.pragma\" \
+         PRAGMA_SERVER_CHANNEL={REMOTE_CHANNEL} PRAGMA_DAEMON_CHANNEL={REMOTE_CHANNEL} \
+         pragma-server --detach"
+    )
+}
+
+/// The remote `daemon.sock` path the bridge forwards.
+fn remote_socket_path(home: &str) -> String {
+    format!("{home}/.pragma/{REMOTE_CHANNEL}/daemon.sock")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{line_value, remote_shell_path};
+
+    #[test]
+    fn rewrites_tilde_for_remote_shell() {
+        assert_eq!(remote_shell_path("~").unwrap(), "$HOME");
+        assert_eq!(
+            remote_shell_path("~/projects/x").unwrap(),
+            "$HOME/projects/x"
+        );
+        assert_eq!(remote_shell_path("/abs/path").unwrap(), "/abs/path");
+    }
+
+    #[test]
+    fn rejects_quote_injection() {
+        assert!(remote_shell_path("~/a\"; rm -rf /").is_err());
+        assert!(remote_shell_path("").is_err());
+    }
+
+    #[test]
+    fn parses_labelled_lines() {
+        let out = "ABS=/home/u/p\nGIT=true\nBRANCH=main\nHOME=/home/u\n";
+        assert_eq!(line_value(out, "ABS=").as_deref(), Some("/home/u/p"));
+        assert_eq!(line_value(out, "BRANCH=").as_deref(), Some("main"));
+        assert_eq!(line_value(out, "MISSING=").as_deref(), None);
+    }
+}

@@ -16,6 +16,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
 /// Re-validates a worktree-relative path against escaping the worktree, returning
@@ -42,11 +43,12 @@ fn fs_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &FsRequest) -> AppResul
 #[tauri::command]
 pub fn list_dir_entries(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<Vec<DirEntry>> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::ListDir { root, path })
 }
 
@@ -54,11 +56,12 @@ pub fn list_dir_entries(
 #[tauri::command]
 pub fn create_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::CreateFile { root, path })
 }
 
@@ -66,11 +69,12 @@ pub fn create_file(
 #[tauri::command]
 pub fn create_folder(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::CreateFolder { root, path })
 }
 
@@ -78,11 +82,12 @@ pub fn create_folder(
 #[tauri::command]
 pub fn path_exists(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<bool> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::PathExists { root, path })
 }
 
@@ -90,11 +95,12 @@ pub fn path_exists(
 #[tauri::command]
 pub fn read_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<FileContents> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::ReadFile { root, path })
 }
 
@@ -102,12 +108,13 @@ pub fn read_file(
 #[tauri::command]
 pub fn write_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
     contents: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(
         &pty,
         &FsRequest::WriteFile {
@@ -122,12 +129,13 @@ pub fn write_file(
 #[tauri::command]
 pub fn rename_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     from_path: String,
     to_path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(
         &pty,
         &FsRequest::Rename {
@@ -142,10 +150,11 @@ pub fn rename_file(
 #[tauri::command]
 pub fn delete_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     fs_rpc(&pty, &FsRequest::Delete { root, path })
 }

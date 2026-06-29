@@ -52,6 +52,15 @@ impl PtyClient {
         }
     }
 
+    /// Builds a client over an already-listening Unix socket — the local end of
+    /// an SSH streamlocal bridge to a remote `pragma-server`. Unlike the
+    /// managed-local client, this never spawns or replaces the server.
+    pub fn new_socket(socket_path: PathBuf) -> Self {
+        Self {
+            inner: PragmaClient::new_socket(socket_path),
+        }
+    }
+
     pub fn spawn(
         &self,
         session_id: String,
@@ -133,6 +142,12 @@ impl PtyClient {
 
     pub fn restart(&self) -> AppResult<()> {
         Ok(self.inner.restart()?)
+    }
+
+    /// Reads the host server's advertised protocol version (used to verify a
+    /// remote `pragma-server` is compatible before routing a project to it).
+    pub fn server_protocol_version(&self) -> AppResult<u64> {
+        Ok(self.inner.server_protocol_version()?)
     }
 
     pub fn read_log(&self) -> AppResult<String> {

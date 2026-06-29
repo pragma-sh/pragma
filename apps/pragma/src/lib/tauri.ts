@@ -263,6 +263,30 @@ export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<
   return invoke<Project>("clone_project", { remoteUrl, intoDirectory });
 }
 
+/** How the user authenticates to a remote SSH host. SSH agent is the default. */
+export type RemoteAuthChoice =
+  | { kind: "agent" }
+  | { kind: "key"; path: string; passphrase: string | null }
+  | { kind: "password"; password: string };
+
+/** Credentials + target collected by the Add-project "Remote" tab. */
+export interface RemoteConnectRequest {
+  host: string;
+  port: number;
+  user: string;
+  auth: RemoteAuthChoice;
+  path: string;
+}
+
+/**
+ * Connects to a remote host over SSH, verifies the path is a git repo on a
+ * protocol-compatible `pragma-server`, and persists it as a project routed to
+ * that host. All of the project's files/changes/terminals then run remotely.
+ */
+export function connectRemoteProject(request: RemoteConnectRequest): Promise<Project> {
+  return invoke<Project>("connect_remote_project", { request });
+}
+
 /** Returns the default directory for native project pickers. */
 export function getProjectsDirectory(): Promise<string> {
   return invoke<string>("get_projects_directory");

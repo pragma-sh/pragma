@@ -531,7 +531,7 @@ pub async fn github_push_branch(db: State<'_, Db>, worktree_id: String) -> AppRe
 #[tauri::command]
 pub fn github_pr_file_diff(
     db: State<'_, Db>,
-    pty: State<'_, crate::pty::PtyClient>,
+    hosts: State<'_, crate::hosts::Hosts>,
     worktree_id: String,
     base: String,
     path: String,
@@ -540,6 +540,7 @@ pub fn github_pr_file_diff(
     let worktree = db.worktree(&worktree_id)?;
     let root = PathBuf::from(&worktree.path);
     crate::fs::resolve_in_worktree(&root, &path)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     crate::git::pr_file_diff(&pty, &root, &base, &path, old_path.as_deref())
 }
 

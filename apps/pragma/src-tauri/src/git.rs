@@ -24,6 +24,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
 const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
@@ -66,11 +67,12 @@ fn parent_branch(db: &Db, worktree: &Worktree) -> AppResult<Option<String>> {
 #[tauri::command]
 pub fn worktree_changes(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<WorktreeChanges> {
     let worktree = db.worktree(&worktree_id)?;
     let parent_branch = parent_branch(&db, &worktree)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     git_rpc(
         &pty,
         &GitRequest::WorktreeChanges {
@@ -86,9 +88,18 @@ pub fn worktree_changes(
 #[tauri::command]
 pub fn worktrees_merged_status(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_ids: Vec<String>,
 ) -> HashMap<String, bool> {
+    // The sidebar polls merged status per project, so every id in a batch shares
+    // a host; resolve once from the first id and fall back to local if its host
+    // is momentarily unreachable.
+    let client = match worktree_ids.first() {
+        Some(first) => hosts
+            .for_worktree(&db, first)
+            .unwrap_or_else(|_| hosts.local()),
+        None => return HashMap::new(),
+    };
     let mut items = Vec::new();
     for id in worktree_ids {
         let Ok(worktree) = db.worktree(&id) else {
@@ -102,14 +113,14 @@ pub fn worktrees_merged_status(
             parent_branch: parent,
         });
     }
-    git_rpc(&pty, &GitRequest::MergedStatus { items }).unwrap_or_default()
+    git_rpc(&client, &GitRequest::MergedStatus { items }).unwrap_or_default()
 }
 
 /// Loads the old/new text for a single changed file on the given diff side.
 #[tauri::command]
 pub fn file_diff(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
     side: DiffSide,
@@ -117,6 +128,7 @@ pub fn file_diff(
 ) -> AppResult<FileDiff> {
     let worktree = db.worktree(&worktree_id)?;
     let parent_branch = parent_branch(&db, &worktree)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     git_rpc(
         &pty,
         &GitRequest::FileDiff {
@@ -152,12 +164,13 @@ pub fn pr_file_diff(
 #[tauri::command]
 pub fn discard_unstaged_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
     status: ChangeStatus,
     old_path: Option<String>,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(
         &pty,
@@ -174,9 +187,10 @@ pub fn discard_unstaged_file(
 #[tauri::command]
 pub fn discard_all_unstaged(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(&pty, &GitRequest::DiscardAllUnstaged { root })
 }
@@ -185,21 +199,19 @@ pub fn discard_all_unstaged(
 #[tauri::command]
 pub fn stage_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(&pty, &GitRequest::StageFile { root, path })
 }
 
 /// Stages every change in the worktree (`git add -A`).
 #[tauri::command]
-pub fn stage_all(
-    db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
-    worktree_id: String,
-) -> AppResult<()> {
+pub fn stage_all(db: State<'_, Db>, hosts: State<'_, Hosts>, worktree_id: String) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(&pty, &GitRequest::StageAll { root })
 }
@@ -208,11 +220,12 @@ pub fn stage_all(
 #[tauri::command]
 pub fn unstage_file(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
     old_path: Option<String>,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(
         &pty,
@@ -228,9 +241,10 @@ pub fn unstage_file(
 #[tauri::command]
 pub fn unstage_all(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(&pty, &GitRequest::UnstageAll { root })
 }
@@ -239,10 +253,11 @@ pub fn unstage_all(
 #[tauri::command]
 pub fn commit_staged(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     message: String,
 ) -> AppResult<()> {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
     git_rpc(&pty, &GitRequest::CommitStaged { root, message })
 }
@@ -253,7 +268,7 @@ pub fn commit_staged(
 #[tauri::command]
 pub fn merge_worktree_to_parent(
     db: State<'_, Db>,
-    pty: State<'_, PtyClient>,
+    hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
     worktree_id: String,
 ) -> AppResult<()> {
@@ -271,6 +286,7 @@ pub fn merge_worktree_to_parent(
     let parent = db.worktree(parent_id)?;
     let lock = locks.lock_for(&worktree.project_id)?;
     let _guard = lock.lock()?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     git_rpc(
         &pty,
         &GitRequest::MergeWorktreeToParent {
