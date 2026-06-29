@@ -531,6 +531,7 @@ pub async fn github_push_branch(db: State<'_, Db>, worktree_id: String) -> AppRe
 #[tauri::command]
 pub fn github_pr_file_diff(
     db: State<'_, Db>,
+    pty: State<'_, crate::pty::PtyClient>,
     worktree_id: String,
     base: String,
     path: String,
@@ -539,12 +540,7 @@ pub fn github_pr_file_diff(
     let worktree = db.worktree(&worktree_id)?;
     let root = PathBuf::from(&worktree.path);
     crate::fs::resolve_in_worktree(&root, &path)?;
-    Ok(crate::git::pr_file_diff(
-        &root,
-        &base,
-        &path,
-        old_path.as_deref(),
-    ))
+    crate::git::pr_file_diff(&pty, &root, &base, &path, old_path.as_deref())
 }
 
 /// Deletes the worktree's branch on `origin` (post-merge cleanup).

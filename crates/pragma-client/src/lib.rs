@@ -19,11 +19,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, ProtocolEventKind, RequestFrame, RequestKind,
-    ServerFrame, SubscriptionRequest,
+    RpcRequest, ServerFrame, SubscriptionRequest,
 };
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -368,6 +369,56 @@ impl PragmaClient {
         Err(last_err.unwrap_or_else(|| ClientError::Server("server request failed".to_string())))
     }
 
+    /// Sends a business-logic RPC and returns its JSON response payload.
+    ///
+    /// This is the single entry point for the `git`/`filesystem`/… host methods.
+    /// For a remote project the same call travels the SSH streamlocal bridge and
+    /// executes on the remote `pragma-server` — the caller is endpoint-agnostic.
+    pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
+        let request = request_rpc(method, payload);
+        let mut guard = self.request_conn.lock()?;
+        let mut last_err: Option<ClientError> = None;
+        for _ in 0..2 {
+            if guard.is_none() {
+                *guard = Some(self.connect_with_spawn()?);
+            }
+            let stream = guard.as_mut().expect("connection just established");
+            match Self::rpc_on(stream, &request) {
+                Ok(result) => return result,
+                Err(transport_err) => {
+                    *guard = None;
+                    last_err = Some(transport_err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| ClientError::Server("server rpc failed".to_string())))
+    }
+
+    fn rpc_on(
+        stream: &mut UnixStream,
+        request: &RequestFrame,
+    ) -> Result<ClientResult<Value>, ClientError> {
+        write_json_frame(stream, request)?;
+        loop {
+            match read_json_frame::<ServerFrame>(stream)? {
+                ServerFrame::Rpc(response) if response.request_id == request.request_id => {
+                    return Ok(if response.ok {
+                        Ok(response.payload.unwrap_or(Value::Null))
+                    } else {
+                        Err(ClientError::Server(response.error.map_or_else(
+                            || "server rpc failed".to_string(),
+                            |error| error.message,
+                        )))
+                    });
+                }
+                ServerFrame::Hello(_)
+                | ServerFrame::Response(_)
+                | ServerFrame::Event(_)
+                | ServerFrame::Rpc(_) => {}
+            }
+        }
+    }
+
     fn request_on(
         stream: &mut UnixStream,
         request: &RequestFrame,
@@ -675,6 +726,23 @@ pub fn request_subscribe(
             event,
             cursor: None,
         }),
+    }
+}
+
+/// Builds an `Rpc` request frame carrying a business-logic method and payload.
+#[must_use]
+pub fn request_rpc(method: ProtocolRpcMethod, payload: Value) -> RequestFrame {
+    RequestFrame {
+        request_id: Uuid::new_v4().to_string(),
+        kind: RequestKind::Rpc,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: None,
+        rpc: Some(RpcRequest { method, payload }),
+        subscription: None,
     }
 }
 

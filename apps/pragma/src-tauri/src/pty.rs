@@ -119,6 +119,18 @@ impl PtyClient {
         Ok(self.inner.mark_agents_seen(tab_id)?)
     }
 
+    /// Sends a business-logic RPC to this project's host and returns the JSON
+    /// response. The host executes `filesystem`/`git`/… against its own disk —
+    /// the local managed server for local projects, the remote `pragma-server`
+    /// over the SSH bridge for remote ones.
+    pub fn rpc(
+        &self,
+        method: pragma_constants::ProtocolRpcMethod,
+        payload: serde_json::Value,
+    ) -> AppResult<serde_json::Value> {
+        Ok(self.inner.rpc(method, payload)?)
+    }
+
     pub fn restart(&self) -> AppResult<()> {
         Ok(self.inner.restart()?)
     }
