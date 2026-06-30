@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use daemonize::Daemonize;
 use pragma_constants::{ProtocolEventKind, CONSTANTS};
@@ -21,7 +20,7 @@ use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
 use pragma_protocol::{
-    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, ProtocolError,
+    read_frame, write_json_frame, write_output_frame, EventFrame, Frame, HelloFrame, ProtocolError,
     RequestFrame, RequestKind, ResponseFrame, RpcError, RpcResponseFrame, ServerFrame,
 };
 use registry::Registry;
@@ -85,27 +84,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let listener = UnixListener::bind(&paths.socket)?;
     set_socket_permissions(&paths.socket)?;
-    listener.set_nonblocking(true)?;
 
     let registry = Arc::new(Registry::new(paths.socket.clone()));
     let core = Arc::new(Core);
     loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                if stream.set_nonblocking(false).is_err() {
-                    continue;
-                }
-                let registry = Arc::clone(&registry);
-                let core = Arc::clone(&core);
-                thread::spawn(move || {
-                    handle_client(stream, &registry, &core);
-                });
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(err) => return Err(Box::new(err)),
-        }
+        let (stream, _) = listener.accept()?;
+        let registry = Arc::clone(&registry);
+        let core = Arc::clone(&core);
+        thread::spawn(move || {
+            handle_client(stream, &registry, &core);
+        });
     }
 }
 
@@ -125,7 +113,18 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
             return;
         }
     }
-    while let Ok(request) = read_json_frame::<RequestFrame>(&mut stream) {
+    while let Ok(frame) = read_frame(&mut stream) {
+        let bytes = match frame {
+            Frame::Json(bytes) => bytes,
+            Frame::Input { session_id, data } => {
+                let _ = registry.write_bytes(&session_id, &data);
+                continue;
+            }
+            Frame::Output { .. } => continue,
+        };
+        let Ok(request) = serde_json::from_slice::<RequestFrame>(&bytes) else {
+            break;
+        };
         let request_id = request.request_id.clone();
         let (response, rpc_response, event_stream) = match handle_request(request, registry, core) {
             Ok(event_stream) => (

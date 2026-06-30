@@ -45,7 +45,8 @@
         "tabs",
         "settings",
         "github",
-        "ai"
+        "ai",
+        "exec"
       ]
     },
     "ProtocolEventKind": {

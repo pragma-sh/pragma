@@ -52,6 +52,15 @@ impl PtyClient {
         }
     }
 
+    /// Builds a client over an already-listening Unix socket — the local end of
+    /// an SSH streamlocal bridge to a remote `pragma-server`. Unlike the
+    /// managed-local client, this never spawns or replaces the server.
+    pub fn new_socket(socket_path: PathBuf) -> Self {
+        Self {
+            inner: PragmaClient::new_socket(socket_path),
+        }
+    }
+
     pub fn spawn(
         &self,
         session_id: String,
@@ -119,8 +128,26 @@ impl PtyClient {
         Ok(self.inner.mark_agents_seen(tab_id)?)
     }
 
+    /// Sends a business-logic RPC to this project's host and returns the JSON
+    /// response. The host executes `filesystem`/`git`/… against its own disk —
+    /// the local managed server for local projects, the remote `pragma-server`
+    /// over the SSH bridge for remote ones.
+    pub fn rpc(
+        &self,
+        method: pragma_constants::ProtocolRpcMethod,
+        payload: serde_json::Value,
+    ) -> AppResult<serde_json::Value> {
+        Ok(self.inner.rpc(method, payload)?)
+    }
+
     pub fn restart(&self) -> AppResult<()> {
         Ok(self.inner.restart()?)
+    }
+
+    /// Reads the host server's advertised protocol version (used to verify a
+    /// remote `pragma-server` is compatible before routing a project to it).
+    pub fn server_protocol_version(&self) -> AppResult<u64> {
+        Ok(self.inner.server_protocol_version()?)
     }
 
     pub fn read_log(&self) -> AppResult<String> {
@@ -201,6 +228,7 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                     )
                     | Err(_) => {}
                 },
+                Frame::Input { .. } => {}
             }
         }
         let _ = stream.shutdown(Shutdown::Both);

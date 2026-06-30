@@ -590,7 +590,10 @@ impl Db {
             .map_err(AppError::from)
     }
 
-    fn tab(&self, tab_id: &str) -> AppResult<Tab> {
+    /// Looks up a tab by id. `pub(crate)` so session-keyed PTY routing
+    /// (`ssh_host::client_for_session`) can resolve a session id (== tab id)
+    /// back to its worktree when the in-memory host binding was lost.
+    pub(crate) fn tab(&self, tab_id: &str) -> AppResult<Tab> {
         self.0
             .lock()?
             .query_row(

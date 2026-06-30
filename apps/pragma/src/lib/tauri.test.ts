@@ -42,6 +42,7 @@ import {
   unstageAll,
   unstageFile,
   worktreeChanges,
+  worktreesAreRemote,
   worktreesMergedStatus,
   worktreeStatus,
   writeFile,
@@ -156,6 +157,13 @@ describe("browser IPC wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("open_worktree", {
       worktreeId: "wt-1",
       editorId: "vscode",
+    });
+  });
+
+  it("worktreesAreRemote forwards the worktree ids", () => {
+    void worktreesAreRemote(["wt-1", "wt-2"]);
+    expect(invokeMock).toHaveBeenCalledWith("worktrees_are_remote", {
+      worktreeIds: ["wt-1", "wt-2"],
     });
   });
 });

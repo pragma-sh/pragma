@@ -9,7 +9,6 @@
 pub mod router;
 mod ssh;
 
-use std::net::Shutdown;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -19,15 +18,18 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, ProtocolEventKind, RequestFrame, RequestKind,
-    ServerFrame, SubscriptionRequest,
+    read_json_frame, write_input_frame, write_json_frame, ProtocolEventKind, RequestFrame,
+    RequestKind, RpcRequest, ServerFrame, SubscriptionRequest,
 };
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use ssh::{start_ssh_bridge, RemoteAuth, SshBridgeConfig};
+pub use ssh::{
+    ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
+};
 
 const SERVER_DETACH_FLAG: &str = "--detach";
 const SERVER_SOCKET_FILE: &str = "daemon.sock";
@@ -110,7 +112,7 @@ pub struct PragmaClient {
 
 struct InputMsg {
     session_id: String,
-    data: String,
+    data: Vec<u8>,
 }
 
 impl PragmaClient {
@@ -181,7 +183,10 @@ impl PragmaClient {
         if guard.is_none() {
             *guard = Some(self.start_input_writer());
         }
-        let msg = InputMsg { session_id, data };
+        let msg = InputMsg {
+            session_id,
+            data: data.into_bytes(),
+        };
         if let Err(err) = guard.as_ref().expect("input writer present").send(msg) {
             let tx = self.start_input_writer();
             let _ = tx.send(err.0);
@@ -212,6 +217,26 @@ impl PragmaClient {
     pub fn mark_agents_seen(&self, tab_id: String) -> ClientResult<()> {
         let request = request_mark_agents_seen(tab_id);
         self.request(&request)
+    }
+
+    /// Reads the server's advertised protocol version from its `Hello` frame.
+    ///
+    /// For a socket endpoint (an SSH bridge) this just connects and reads the
+    /// first frame; for a managed-local endpoint it spawns the server first.
+    /// Used to verify a remote `pragma-server` matches the client's expected
+    /// protocol before a project is routed to it.
+    pub fn server_protocol_version(&self) -> ClientResult<u64> {
+        let mut stream = match &self.endpoint {
+            ClientEndpoint::Socket(path) => UnixStream::connect(path)?,
+            ClientEndpoint::ManagedLocal(_) => self.connect_with_spawn()?,
+        };
+        configure_stream(&stream)?;
+        match read_json_frame::<ServerFrame>(&mut stream)? {
+            ServerFrame::Hello(hello) => Ok(hello.protocol_version),
+            _ => Err(ClientError::Server(
+                "server did not send a hello frame".to_string(),
+            )),
+        }
     }
 
     /// Restarts a managed local server and confirms a compatible server is up.
@@ -323,27 +348,16 @@ impl PragmaClient {
         let client = self.clone();
         thread::spawn(move || {
             let mut conn: Option<UnixStream> = None;
-            for msg in rx {
-                let frame = request_write(msg.session_id, msg.data);
-                for _ in 0..2 {
-                    if conn.is_none() {
-                        let Ok(stream) = client.connect_with_spawn() else {
-                            break;
-                        };
-                        let _ = stream.set_read_timeout(None);
-                        if let Ok(reader) = stream.try_clone() {
-                            thread::spawn(move || discard_frames(reader));
-                        }
-                        conn = Some(stream);
+            while let Ok(mut msg) = rx.recv() {
+                while let Ok(next) = rx.try_recv() {
+                    if next.session_id == msg.session_id {
+                        msg.data.extend_from_slice(&next.data);
+                    } else {
+                        send_input_frame(&client, &mut conn, &msg);
+                        msg = next;
                     }
-                    let Some(stream) = conn.as_mut() else {
-                        break;
-                    };
-                    if write_json_frame(stream, &frame).is_ok() {
-                        break;
-                    }
-                    conn = None;
                 }
+                send_input_frame(&client, &mut conn, &msg);
             }
         });
         tx
@@ -366,6 +380,56 @@ impl PragmaClient {
             }
         }
         Err(last_err.unwrap_or_else(|| ClientError::Server("server request failed".to_string())))
+    }
+
+    /// Sends a business-logic RPC and returns its JSON response payload.
+    ///
+    /// This is the single entry point for the `git`/`filesystem`/… host methods.
+    /// For a remote project the same call travels the SSH streamlocal bridge and
+    /// executes on the remote `pragma-server` — the caller is endpoint-agnostic.
+    pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
+        let request = request_rpc(method, payload);
+        let mut guard = self.request_conn.lock()?;
+        let mut last_err: Option<ClientError> = None;
+        for _ in 0..2 {
+            if guard.is_none() {
+                *guard = Some(self.connect_with_spawn()?);
+            }
+            let stream = guard.as_mut().expect("connection just established");
+            match Self::rpc_on(stream, &request) {
+                Ok(result) => return result,
+                Err(transport_err) => {
+                    *guard = None;
+                    last_err = Some(transport_err);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| ClientError::Server("server rpc failed".to_string())))
+    }
+
+    fn rpc_on(
+        stream: &mut UnixStream,
+        request: &RequestFrame,
+    ) -> Result<ClientResult<Value>, ClientError> {
+        write_json_frame(stream, request)?;
+        loop {
+            match read_json_frame::<ServerFrame>(stream)? {
+                ServerFrame::Rpc(response) if response.request_id == request.request_id => {
+                    return Ok(if response.ok {
+                        Ok(response.payload.unwrap_or(Value::Null))
+                    } else {
+                        Err(ClientError::Server(response.error.map_or_else(
+                            || "server rpc failed".to_string(),
+                            |error| error.message,
+                        )))
+                    });
+                }
+                ServerFrame::Hello(_)
+                | ServerFrame::Response(_)
+                | ServerFrame::Event(_)
+                | ServerFrame::Rpc(_) => {}
+            }
+        }
     }
 
     fn request_on(
@@ -678,6 +742,23 @@ pub fn request_subscribe(
     }
 }
 
+/// Builds an `Rpc` request frame carrying a business-logic method and payload.
+#[must_use]
+pub fn request_rpc(method: ProtocolRpcMethod, payload: Value) -> RequestFrame {
+    RequestFrame {
+        request_id: Uuid::new_v4().to_string(),
+        kind: RequestKind::Rpc,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: None,
+        rpc: Some(RpcRequest { method, payload }),
+        subscription: None,
+    }
+}
+
 fn request_frame(
     kind: RequestKind,
     session_id: Option<String>,
@@ -718,9 +799,23 @@ fn configure_stream(stream: &UnixStream) -> ClientResult<()> {
     Ok(())
 }
 
-fn discard_frames(mut reader: UnixStream) {
-    while read_frame(&mut reader).is_ok() {}
-    let _ = reader.shutdown(Shutdown::Both);
+fn send_input_frame(client: &PragmaClient, conn: &mut Option<UnixStream>, msg: &InputMsg) {
+    for _ in 0..2 {
+        if conn.is_none() {
+            let Ok(stream) = client.connect_with_spawn() else {
+                break;
+            };
+            let _ = stream.set_read_timeout(None);
+            *conn = Some(stream);
+        }
+        let Some(stream) = conn.as_mut() else {
+            break;
+        };
+        if write_input_frame(stream, &msg.session_id, &msg.data).is_ok() {
+            break;
+        }
+        *conn = None;
+    }
 }
 
 #[cfg(test)]
