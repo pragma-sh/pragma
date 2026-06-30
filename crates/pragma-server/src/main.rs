@@ -21,10 +21,16 @@ use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
 use pragma_protocol::{
-    read_json_frame, write_json_frame, write_output_frame, EventFrame, HelloFrame, ProtocolError,
-    RequestFrame, RequestKind, ResponseFrame, RpcError, RpcResponseFrame, ServerFrame,
+    read_json_frame, write_json_frame, write_output_frame, ControlEnvelope, ControlResult,
+    EventFrame, HelloFrame, ProtocolError, RequestFrame, RequestKind, ResponseFrame, RpcError,
+    RpcResponseFrame, ServerFrame,
 };
 use registry::Registry;
+
+/// How long a brokered `Control` request waits for the app to reply before the
+/// server gives up and fails the CLI request. A crashed/hung app cannot wedge
+/// the CLI.
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DETACH_FLAG: &str = "--detach";
 
@@ -125,19 +131,74 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
             return;
         }
     }
+    // Peek the first request to decide whether this connection is the
+    // controller (RegisterController) or a normal client. The controller loop
+    // is structurally different: it only sends ControlResult replies.
+    let Ok(first) = read_json_frame::<RequestFrame>(&mut stream) else {
+        let _ = stream.shutdown(Shutdown::Both);
+        return;
+    };
+    if matches!(first.kind, RequestKind::RegisterController) {
+        // The app registered as the single controller. The controller's
+        // `ControlResult` replies are read on this same connection thread and
+        // routed to waiting CLI waiters by `request_id`.
+        let _ = registry.register_controller(Arc::clone(&writer));
+        controller_reply_loop(&mut stream, registry);
+        registry.clear_controller();
+        let _ = stream.shutdown(Shutdown::Both);
+        return;
+    }
+    handle_client_request(first, &writer, registry, core);
     while let Ok(request) = read_json_frame::<RequestFrame>(&mut stream) {
-        let request_id = request.request_id.clone();
-        let (response, rpc_response, event_stream) = match handle_request(request, registry, core) {
-            Ok(event_stream) => (
+        handle_client_request(request, &writer, registry, core);
+    }
+    let _ = stream.shutdown(Shutdown::Both);
+}
+
+/// Drains `ControlResult` replies from the controller connection and routes each
+/// to its waiting `request_id` in `Registry.pending`. Runs on the connection's
+/// own thread until the controller disconnects.
+fn controller_reply_loop(stream: &mut UnixStream, registry: &Arc<Registry>) {
+    while let Ok(request) = read_json_frame::<RequestFrame>(stream) {
+        if let RequestKind::ControlResult = request.kind {
+            if let Some(result) = request.control_result {
+                registry.route_control_result(&request.request_id, result);
+            }
+        }
+        // Other request kinds from the controller are unexpected and ignored.
+    }
+}
+
+/// Handles one request frame on a normal (non-controller) connection.
+fn handle_client_request(
+    request: RequestFrame,
+    writer: &Arc<Mutex<UnixStream>>,
+    registry: &Arc<Registry>,
+    core: &Arc<Core>,
+) {
+    let is_control = matches!(request.kind, RequestKind::Control);
+    let request_id = request.request_id.clone();
+    let (response, rpc_response, event_stream, control_rx) =
+        match handle_request(request, registry, core) {
+            Ok(outcome) => (
                 Some(ResponseFrame {
                     request_id: request_id.clone(),
                     ok: true,
                     error: None,
                 }),
                 None,
-                event_stream,
+                outcome.event_stream,
+                outcome.control_rx,
             ),
-            Err(HandledRequestError::Rpc(response)) => (None, Some(response), None),
+            Err(HandledRequestError::Rpc(response)) => (None, Some(response), None, None),
+            Err(HandledRequestError::Control(response)) => {
+                // Brokered request failed synchronously (e.g. no controller).
+                if let Ok(mut writer_guard) = writer.lock() {
+                    let _ =
+                        write_json_frame(&mut *writer_guard, &ServerFrame::ControlResult(response));
+                }
+                return;
+            }
             Err(error) => (
                 Some(ResponseFrame {
                     request_id: request_id.clone(),
@@ -146,37 +207,63 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
                 }),
                 None,
                 None,
+                None,
             ),
         };
-        if let Ok(mut writer_guard) = writer.lock() {
-            if let Some(response) = response {
-                if write_json_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
-                    break;
+    if is_control {
+        if let Some(rx) = control_rx {
+            // Wait for the controller's reply (bounded by CONTROL_TIMEOUT), then
+            // forward it to the CLI as a ServerFrame::ControlResult.
+            if let Ok(result) = rx.recv_timeout(CONTROL_TIMEOUT) {
+                if let Ok(mut writer_guard) = writer.lock() {
+                    let _ =
+                        write_json_frame(&mut *writer_guard, &ServerFrame::ControlResult(result));
                 }
-            }
-            if let Some(response) = rpc_response {
-                if write_json_frame(&mut *writer_guard, &ServerFrame::Rpc(response)).is_err() {
-                    break;
+            } else {
+                // Timed out or controller dropped — fail clearly and clear
+                // the pending slot so it does not leak.
+                registry.cancel_pending(&request_id);
+                if let Ok(mut writer_guard) = writer.lock() {
+                    let _ = write_json_frame(
+                        &mut *writer_guard,
+                        &ServerFrame::ControlResult(ControlResult {
+                            ok: false,
+                            payload: None,
+                            error: Some("Pragma is not running. Launch the app first.".to_string()),
+                        }),
+                    );
                 }
             }
         }
-        if let Some(stream) = event_stream {
-            forward_events(
-                stream.scrollback,
-                stream.rx,
-                Arc::clone(&writer),
-                Arc::clone(registry),
-            );
+        return;
+    }
+    if let Ok(mut writer_guard) = writer.lock() {
+        if let Some(response) = response {
+            if write_json_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
+                return;
+            }
+        }
+        if let Some(response) = rpc_response {
+            if write_json_frame(&mut *writer_guard, &ServerFrame::Rpc(response)).is_err() {
+                return;
+            }
         }
     }
-    let _ = stream.shutdown(Shutdown::Both);
+    if let Some(stream) = event_stream {
+        forward_events(
+            stream.scrollback,
+            stream.rx,
+            Arc::clone(writer),
+            Arc::clone(registry),
+        );
+    }
 }
 
 fn handle_request(
     request: RequestFrame,
     registry: &Registry,
     core: &Core,
-) -> Result<Option<EventStream>, HandledRequestError> {
+) -> Result<Outcome, HandledRequestError> {
     match request.kind {
         RequestKind::Spawn => {
             let session_id = required(request.session_id, "sessionId")?;
@@ -187,7 +274,10 @@ fn handle_request(
             let (scrollback, rx) = registry
                 .spawn(session_id, worktree_id, cwd, cols, rows)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
-            Ok(Some(EventStream { scrollback, rx }))
+            Ok(Outcome {
+                event_stream: Some(EventStream { scrollback, rx }),
+                control_rx: None,
+            })
         }
         RequestKind::Attach => {
             let session_id = required(request.session_id, "sessionId")?;
@@ -196,14 +286,17 @@ fn handle_request(
             let (scrollback, rx) = registry
                 .attach(&session_id, cols, rows)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
-            Ok(Some(EventStream { scrollback, rx }))
+            Ok(Outcome {
+                event_stream: Some(EventStream { scrollback, rx }),
+                control_rx: None,
+            })
         }
         RequestKind::Write => registry
             .write(
                 &required(request.session_id, "sessionId")?,
                 &required(request.data, "data")?,
             )
-            .map(|()| None)
+            .map(|()| Outcome::default())
             .map_err(|err| HandledRequestError::Request(err.to_string())),
         RequestKind::Resize => registry
             .resize(
@@ -211,66 +304,138 @@ fn handle_request(
                 request.cols.unwrap_or(80),
                 request.rows.unwrap_or(24),
             )
-            .map(|()| None)
+            .map(|()| Outcome::default())
             .map_err(|err| HandledRequestError::Request(err.to_string())),
         RequestKind::Kill => registry
             .kill(&required(request.session_id, "sessionId")?)
-            .map(|()| None)
+            .map(|()| Outcome::default())
             .map_err(|err| HandledRequestError::Request(err.to_string())),
         RequestKind::KillForCwd => registry
             .kill_for_cwd(&required(request.data, "data")?)
-            .map(|_count| None)
+            .map(|_count| Outcome::default())
             .map_err(|err| HandledRequestError::Request(err.to_string())),
         RequestKind::AgentReport => {
             let payload = serde_json::from_str(&required(request.data, "data")?)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
             registry
                 .report_agent(payload)
-                .map(|()| None)
+                .map(|()| Outcome::default())
                 .map_err(|err| HandledRequestError::Request(err.to_string()))
         }
         RequestKind::SubscribeAgents => {
             let (scrollback, rx) = registry
                 .subscribe_agents()
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
-            Ok(Some(EventStream { scrollback, rx }))
+            Ok(Outcome {
+                event_stream: Some(EventStream { scrollback, rx }),
+                control_rx: None,
+            })
         }
         RequestKind::MarkAgentsSeen => {
             registry.mark_agents_seen_for_tab(&required(request.session_id, "sessionId")?);
-            Ok(None)
+            Ok(Outcome::default())
         }
-        RequestKind::Rpc => {
-            let Some(rpc) = request.rpc else {
-                return Err(HandledRequestError::Request(
-                    "missing rpc payload".to_string(),
-                ));
-            };
-            let request_id = request.request_id;
-            match core.handle_rpc(rpc.method, rpc.payload) {
-                Ok(payload) => Err(HandledRequestError::Rpc(RpcResponseFrame {
-                    request_id,
-                    ok: true,
-                    payload: Some(payload),
-                    error: None,
-                })),
-                Err(error) => Err(HandledRequestError::Rpc(RpcResponseFrame {
-                    request_id,
-                    ok: false,
-                    payload: None,
-                    error: Some(RpcError {
-                        code: protocol_error_code(&error),
-                        message: error.to_string(),
-                    }),
-                })),
-            }
-        }
-        RequestKind::Subscribe => Ok(Some(subscription_snapshot(request, registry)?)),
+        RequestKind::Rpc => Err(HandledRequestError::Rpc(handle_rpc_request(request, core)?)),
+        RequestKind::Subscribe => Ok(Outcome {
+            event_stream: Some(subscription_snapshot(request, registry)?),
+            control_rx: None,
+        }),
+        // The controller registers on a connection whose loop is handled in
+        // `handle_client` before reaching here. A second `RegisterController`
+        // on a non-controller connection is a no-op acknowledgement.
+        RequestKind::RegisterController | RequestKind::ControlResult => Ok(Outcome::default()),
+        RequestKind::Control => handle_control_request(request, registry),
     }
+}
+
+fn handle_rpc_request(
+    request: RequestFrame,
+    core: &Core,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let Some(rpc) = request.rpc else {
+        return Err(HandledRequestError::Request(
+            "missing rpc payload".to_string(),
+        ));
+    };
+    let request_id = request.request_id;
+    Ok(match core.handle_rpc(rpc.method, rpc.payload) {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(error) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: protocol_error_code(&error),
+                message: error.to_string(),
+            }),
+        },
+    })
+}
+
+fn handle_control_request(
+    request: RequestFrame,
+    registry: &Registry,
+) -> Result<Outcome, HandledRequestError> {
+    let Some(control) = request.control else {
+        return Err(HandledRequestError::Request(
+            "missing control payload".to_string(),
+        ));
+    };
+    let request_id = request.request_id;
+    let Some(writer) = registry
+        .controller_writer()
+        .map_err(|err| HandledRequestError::Request(err.to_string()))?
+    else {
+        return Err(HandledRequestError::Control(app_not_running_result()));
+    };
+    let rx = registry
+        .pending_control(request_id.clone())
+        .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+    let envelope = ControlEnvelope {
+        request_id: request_id.clone(),
+        method: control.method,
+        payload: control.payload,
+    };
+    let forwarded = writer.lock().is_ok_and(|mut writer_guard| {
+        write_json_frame(&mut *writer_guard, &ServerFrame::Control(envelope)).is_ok()
+    });
+    if !forwarded {
+        registry.cancel_pending(&request_id);
+        return Err(HandledRequestError::Control(app_not_running_result()));
+    }
+    Ok(Outcome {
+        event_stream: None,
+        control_rx: Some(rx),
+    })
+}
+
+fn app_not_running_result() -> ControlResult {
+    ControlResult {
+        ok: false,
+        payload: None,
+        error: Some("Pragma is not running. Launch the app first.".to_string()),
+    }
+}
+
+/// Outcome of a normal client request: an event stream to forward, or a control
+/// reply channel to await.
+#[derive(Default)]
+struct Outcome {
+    event_stream: Option<EventStream>,
+    control_rx: Option<std::sync::mpsc::Receiver<ControlResult>>,
 }
 
 enum HandledRequestError {
     Request(String),
     Rpc(RpcResponseFrame),
+    /// A brokered control request failed synchronously (no controller, or the
+    /// forward write failed). The CLI receives this as a `ControlResult` frame.
+    Control(ControlResult),
 }
 
 impl From<String> for HandledRequestError {
@@ -284,6 +449,7 @@ impl std::fmt::Display for HandledRequestError {
         match self {
             Self::Request(message) => formatter.write_str(message),
             Self::Rpc(response) => write!(formatter, "rpc response {}", response.request_id),
+            Self::Control(_) => formatter.write_str("control failed"),
         }
     }
 }

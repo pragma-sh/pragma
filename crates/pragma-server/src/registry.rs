@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use pragma_constants::ProtocolEventKind;
 use pragma_core::watcher::WorktreeWatcher;
-use pragma_protocol::{AgentReportPayload, AgentStatus, EventFrame};
+use pragma_protocol::{AgentReportPayload, AgentStatus, ControlResult, EventFrame};
 use thiserror::Error;
 
 use crate::session::{Session, SessionError};
@@ -24,6 +24,12 @@ pub enum RegistryError {
     LockPoisoned,
 }
 
+/// The controller (the GUI app) reply forwarding is done on the controller's
+/// own connection thread (it reads `ControlResult` frames and calls
+/// `route_control_result`); this type is just the writer the server forwards
+/// `Control` envelopes to.
+pub type ControllerWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
+
 #[derive(Default)]
 pub struct Registry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
@@ -31,6 +37,12 @@ pub struct Registry {
     agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     file_watchers: Mutex<HashMap<String, WorktreeFileWatch>>,
+    /// The single registered controller (the GUI app). `None` while the app is
+    /// offline; on reconnect the new writer replaces the old one.
+    controller: Mutex<Option<ControllerWriter>>,
+    /// In-flight brokered control requests keyed by `request_id`, each waiting
+    /// for the controller's `ControlResult` reply.
+    pending: Mutex<HashMap<String, Sender<ControlResult>>>,
 }
 
 type AgentKey = (String, String, String);
@@ -53,6 +65,8 @@ impl Registry {
             agent_statuses: Mutex::new(HashMap::new()),
             agent_subscribers: Mutex::new(Vec::new()),
             file_watchers: Mutex::new(HashMap::new()),
+            controller: Mutex::new(None),
+            pending: Mutex::new(HashMap::new()),
         }
     }
 
@@ -309,6 +323,93 @@ impl Registry {
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))
     }
 
+    /// Registers the calling connection as the single controller (the GUI app).
+    /// Replaces any previously-registered controller and fails every in-flight
+    /// request still waiting on the old one. The controller's `ControlResult`
+    /// replies are read on its own connection thread in the server and routed
+    /// via [`Self::route_control_result`].
+    pub fn register_controller(&self, writer: ControllerWriter) -> Result<(), RegistryError> {
+        let mut controller = self
+            .controller
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let replaced = controller.is_some();
+        *controller = Some(writer);
+        drop(controller);
+        if replaced {
+            self.fail_pending();
+        }
+        Ok(())
+    }
+
+    /// Returns a clone of the controller writer, or `None` when no app is
+    /// registered. The CLI fails fast with a "Pragma is not running" error in
+    /// that case.
+    pub fn controller_writer(&self) -> Result<Option<ControllerWriter>, RegistryError> {
+        Ok(self
+            .controller
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .as_ref()
+            .map(Arc::clone))
+    }
+
+    /// Inserts a pending control waiter keyed by `request_id`. A
+    /// [`Registry::route_control_result`] call with the same id will deliver the
+    /// reply to the returned receiver.
+    pub fn pending_control(
+        &self,
+        request_id: String,
+    ) -> Result<Receiver<ControlResult>, RegistryError> {
+        let (tx, rx) = mpsc::channel();
+        self.pending
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .insert(request_id, tx);
+        Ok(rx)
+    }
+
+    /// Routes a controller reply to the waiting CLI waiter by `request_id`.
+    /// No-op when the waiter has already dropped (timed out / disconnected).
+    pub fn route_control_result(&self, request_id: &str, result: ControlResult) {
+        if let Ok(mut pending) = self.pending.lock() {
+            if let Some(sender) = pending.remove(request_id) {
+                let _ = sender.send(result);
+            }
+        }
+    }
+
+    /// Fails every in-flight pending request with an error message — used when
+    /// the controller drops or the server shuts down so the CLI never hangs.
+    fn fail_pending(&self) {
+        if let Ok(mut pending) = self.pending.lock() {
+            let waiters = std::mem::take(&mut *pending);
+            for (_id, sender) in waiters {
+                let _ = sender.send(ControlResult {
+                    ok: false,
+                    payload: None,
+                    error: Some("controller disconnected; request aborted".to_string()),
+                });
+            }
+        }
+    }
+
+    /// Clears the controller entry when its connection drops.
+    pub fn clear_controller(&self) {
+        if let Ok(mut controller) = self.controller.lock() {
+            *controller = None;
+        }
+        self.fail_pending();
+    }
+
+    /// Cancels a pending request when its CLI connection drops before the
+    /// reply arrives, so the server does not hold a dangling waiter.
+    pub fn cancel_pending(&self, request_id: &str) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(request_id);
+        }
+    }
+
     #[cfg(test)]
     fn is_empty(&self) -> bool {
         self.sessions
@@ -336,8 +437,9 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
 #[cfg(test)]
 mod tests {
     use std::process::Command;
+    use std::sync::{Arc, Mutex};
 
-    use pragma_protocol::{AgentReportPayload, AgentStatus};
+    use pragma_protocol::{AgentReportPayload, AgentStatus, ControlResult};
     use tempfile::tempdir;
 
     use super::Registry;
@@ -450,5 +552,87 @@ mod tests {
             .expect("kill should succeed");
         assert_eq!(killed, 0);
         assert!(!registry.is_empty());
+    }
+
+    /// Registers a controller using a throwaway socketpair writer so tests can
+    /// drive the broker without a real connection. Returns nothing — test code
+    /// simulates the controller replying by calling `route_control_result`.
+    fn register_fake_controller(registry: &Registry) {
+        let (a, _b) =
+            std::os::unix::net::UnixStream::pair().expect("socketpair for fake controller");
+        let writer = Arc::new(Mutex::new(a));
+        registry
+            .register_controller(writer)
+            .expect("register controller");
+    }
+
+    #[test]
+    fn control_result_routes_back_by_request_id() {
+        let registry = Registry::default();
+        register_fake_controller(&registry);
+        let rx = registry
+            .pending_control("req-1".to_string())
+            .expect("pending waiter");
+        registry.route_control_result(
+            "req-1",
+            ControlResult {
+                ok: true,
+                payload: Some(serde_json::json!({ "ok": true })),
+                error: None,
+            },
+        );
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("result routed");
+        assert!(result.ok);
+        assert_eq!(result.payload, Some(serde_json::json!({ "ok": true })));
+    }
+
+    #[test]
+    fn control_result_for_unknown_id_is_dropped() {
+        let registry = Registry::default();
+        register_fake_controller(&registry);
+        let _rx = registry
+            .pending_control("req-2".to_string())
+            .expect("pending waiter");
+        // A late/wrong reply is a no-op.
+        registry.route_control_result(
+            "not-known",
+            ControlResult {
+                ok: true,
+                payload: None,
+                error: None,
+            },
+        );
+        // No deadlock / no panic; the pending entry is still there until cancelled.
+        registry.cancel_pending("req-2");
+    }
+
+    #[test]
+    fn no_controller_is_reported_when_app_offline() {
+        let registry = Registry::default();
+        let writer = registry.controller_writer().expect("controller_writer");
+        assert!(writer.is_none(), "no controller should be registered");
+    }
+
+    #[test]
+    fn controller_reconnect_replaces_writer() {
+        let registry = Registry::default();
+        register_fake_controller(&registry);
+        // Old waiter from the replaced controller must be failed.
+        let rx = registry
+            .pending_control("req-old".to_string())
+            .expect("pending waiter");
+        register_fake_controller(&registry);
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("old waiter failed on replace");
+        assert!(!result.ok);
+        assert!(result.error.is_some());
+        // The new controller is now live.
+        assert!(registry
+            .controller_writer()
+            .expect("controller_writer")
+            .is_some());
     }
 }
