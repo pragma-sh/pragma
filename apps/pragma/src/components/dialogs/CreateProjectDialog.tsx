@@ -24,8 +24,6 @@ interface CreateProjectDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type AuthKind = "agent" | "key" | "password";
-
 export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjectDialogProps) {
   const [remoteUrl, setRemoteUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +123,47 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
   );
 }
 
+interface RemoteConnectionFields {
+  host: string;
+  port: string;
+  user: string;
+  path: string;
+}
+
+const INITIAL_CONNECTION: RemoteConnectionFields = { host: "", port: "22", user: "", path: "" };
+
+type RemoteAuthState =
+  | { kind: "agent" }
+  | { kind: "key"; path: string; passphrase: string }
+  | { kind: "password"; password: string };
+
+const INITIAL_AUTH: RemoteAuthState = { kind: "agent" };
+
+function isPortValid(port: string): boolean {
+  const portNumber = Number(port);
+  return Number.isInteger(portNumber) && portNumber > 0 && portNumber <= 65535;
+}
+
+function isAuthReady(auth: RemoteAuthState): boolean {
+  if (auth.kind === "key") {
+    return auth.path.trim() !== "";
+  }
+  if (auth.kind === "password") {
+    return auth.password !== "";
+  }
+  return true;
+}
+
+function toAuthChoice(auth: RemoteAuthState): RemoteAuthChoice {
+  if (auth.kind === "key") {
+    return { kind: "key", path: auth.path.trim(), passphrase: auth.passphrase || null };
+  }
+  if (auth.kind === "password") {
+    return { kind: "password", password: auth.password };
+  }
+  return { kind: "agent" };
+}
+
 interface RemoteProjectFormProps {
   onConnect: (load: () => Promise<{ id: string } | null>) => Promise<void>;
   onError: (message: string | null) => void;
@@ -133,38 +172,17 @@ interface RemoteProjectFormProps {
 /** SSH connection form for the Remote tab. Agent auth is the default; key file
  * and password live under a collapsible "More options". */
 function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("22");
-  const [user, setUser] = useState("");
-  const [path, setPath] = useState("");
-  const [authKind, setAuthKind] = useState<AuthKind>("agent");
-  const [keyPath, setKeyPath] = useState("");
-  const [passphrase, setPassphrase] = useState("");
-  const [password, setPassword] = useState("");
+  const [connection, setConnection] = useState<RemoteConnectionFields>(INITIAL_CONNECTION);
+  const [auth, setAuth] = useState<RemoteAuthState>(INITIAL_AUTH);
   const [connecting, setConnecting] = useState(false);
 
-  const portNumber = Number(port);
-  const portValid = Number.isInteger(portNumber) && portNumber > 0 && portNumber <= 65535;
-  const credentialsReady =
-    authKind === "agent" ||
-    (authKind === "key" && keyPath.trim() !== "") ||
-    (authKind === "password" && password !== "");
+  const { host, port, user, path } = connection;
   const canConnect =
-    host.trim() !== "" && user.trim() !== "" && path.trim() !== "" && portValid && credentialsReady;
-
-  function buildAuth(): RemoteAuthChoice {
-    if (authKind === "key") {
-      return {
-        kind: "key",
-        path: keyPath.trim(),
-        passphrase: passphrase === "" ? null : passphrase,
-      };
-    }
-    if (authKind === "password") {
-      return { kind: "password", password };
-    }
-    return { kind: "agent" };
-  }
+    host.trim() !== "" &&
+    user.trim() !== "" &&
+    path.trim() !== "" &&
+    isPortValid(port) &&
+    isAuthReady(auth);
 
   async function connect() {
     setConnecting(true);
@@ -173,9 +191,9 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
       await onConnect(() =>
         connectRemoteProject({
           host: host.trim(),
-          port: portNumber,
+          port: Number(port),
           user: user.trim(),
-          auth: buildAuth(),
+          auth: toAuthChoice(auth),
           path: path.trim(),
         }),
       );
@@ -186,6 +204,27 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
 
   return (
     <div className="space-y-4">
+      <RemoteConnectionFieldset value={connection} onChange={setConnection} />
+      <RemoteAuthFields value={auth} onChange={setAuth} />
+      <Button
+        className="w-full"
+        disabled={!canConnect || connecting}
+        onClick={() => void connect()}
+      >
+        {connecting ? "Connecting…" : "Connect"}
+      </Button>
+    </div>
+  );
+}
+
+interface RemoteConnectionFieldsetProps {
+  value: RemoteConnectionFields;
+  onChange: (next: RemoteConnectionFields) => void;
+}
+
+function RemoteConnectionFieldset({ value, onChange }: RemoteConnectionFieldsetProps) {
+  return (
+    <>
       <div className="grid grid-cols-[1fr_auto] gap-2">
         <div className="space-y-2">
           <Label htmlFor="ssh-host">Host</Label>
@@ -195,8 +234,8 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
             autoCapitalize="off"
             spellCheck="false"
             placeholder="example.com"
-            value={host}
-            onChange={(event) => setHost(event.target.value)}
+            value={value.host}
+            onChange={(event) => onChange({ ...value, host: event.target.value })}
           />
         </div>
         <div className="w-20 space-y-2">
@@ -204,8 +243,8 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
           <Input
             id="ssh-port"
             inputMode="numeric"
-            value={port}
-            onChange={(event) => setPort(event.target.value)}
+            value={value.port}
+            onChange={(event) => onChange({ ...value, port: event.target.value })}
           />
         </div>
       </div>
@@ -218,8 +257,8 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
           autoCapitalize="off"
           spellCheck="false"
           placeholder="ubuntu"
-          value={user}
-          onChange={(event) => setUser(event.target.value)}
+          value={value.user}
+          onChange={(event) => onChange({ ...value, user: event.target.value })}
         />
       </div>
 
@@ -231,89 +270,100 @@ function RemoteProjectForm({ onConnect, onError }: RemoteProjectFormProps) {
           autoCapitalize="off"
           spellCheck="false"
           placeholder="~/projects/remote-project"
-          value={path}
-          onChange={(event) => setPath(event.target.value)}
+          value={value.path}
+          onChange={(event) => onChange({ ...value, path: event.target.value })}
         />
         <p className="text-xs text-muted-foreground">
           Must be an existing git repository on the host.
         </p>
       </div>
-
-      <Collapsible>
-        <CollapsibleTrigger className="text-sm text-muted-foreground hover:text-foreground">
-          Authentication: {authLabel(authKind)} · More options
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-3 space-y-3">
-          <RadioGroup
-            value={authKind}
-            onValueChange={(value) => setAuthKind(value as AuthKind)}
-            className="space-y-2"
-          >
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="agent" id="auth-agent" />
-              <Label htmlFor="auth-agent" className="font-normal">
-                SSH agent (recommended)
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="key" id="auth-key" />
-              <Label htmlFor="auth-key" className="font-normal">
-                Private key file
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="password" id="auth-password" />
-              <Label htmlFor="auth-password" className="font-normal">
-                Password
-              </Label>
-            </div>
-          </RadioGroup>
-
-          {authKind === "key" ? (
-            <div className="space-y-2">
-              <Input
-                aria-label="Private key path"
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck="false"
-                placeholder="~/.ssh/id_ed25519"
-                value={keyPath}
-                onChange={(event) => setKeyPath(event.target.value)}
-              />
-              <Input
-                aria-label="Key passphrase"
-                type="password"
-                placeholder="Passphrase (if encrypted)"
-                value={passphrase}
-                onChange={(event) => setPassphrase(event.target.value)}
-              />
-            </div>
-          ) : null}
-
-          {authKind === "password" ? (
-            <Input
-              aria-label="SSH password"
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          ) : null}
-        </CollapsibleContent>
-      </Collapsible>
-
-      <Button
-        className="w-full"
-        disabled={!canConnect || connecting}
-        onClick={() => void connect()}
-      >
-        {connecting ? "Connecting…" : "Connect"}
-      </Button>
-    </div>
+    </>
   );
 }
 
-function authLabel(kind: AuthKind): string {
+interface RemoteAuthFieldsProps {
+  value: RemoteAuthState;
+  onChange: (next: RemoteAuthState) => void;
+}
+
+function RemoteAuthFields({ value, onChange }: RemoteAuthFieldsProps) {
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="text-sm text-muted-foreground hover:text-foreground">
+        Authentication: {authLabel(value.kind)} · More options
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-3 space-y-3">
+        <RadioGroup
+          value={value.kind}
+          onValueChange={(kind) => onChange(authStateForKind(kind, value))}
+          className="space-y-2"
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="agent" id="auth-agent" />
+            <Label htmlFor="auth-agent" className="font-normal">
+              SSH agent (recommended)
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="key" id="auth-key" />
+            <Label htmlFor="auth-key" className="font-normal">
+              Private key file
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="password" id="auth-password" />
+            <Label htmlFor="auth-password" className="font-normal">
+              Password
+            </Label>
+          </div>
+        </RadioGroup>
+
+        {value.kind === "key" ? (
+          <div className="space-y-2">
+            <Input
+              aria-label="Private key path"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck="false"
+              placeholder="~/.ssh/id_ed25519"
+              value={value.path}
+              onChange={(event) => onChange({ ...value, path: event.target.value })}
+            />
+            <Input
+              aria-label="Key passphrase"
+              type="password"
+              placeholder="Passphrase (if encrypted)"
+              value={value.passphrase}
+              onChange={(event) => onChange({ ...value, passphrase: event.target.value })}
+            />
+          </div>
+        ) : null}
+
+        {value.kind === "password" ? (
+          <Input
+            aria-label="SSH password"
+            type="password"
+            placeholder="Password"
+            value={value.password}
+            onChange={(event) => onChange({ ...value, password: event.target.value })}
+          />
+        ) : null}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function authStateForKind(kind: string, previous: RemoteAuthState): RemoteAuthState {
+  if (kind === "key") {
+    return previous.kind === "key" ? previous : { kind: "key", path: "", passphrase: "" };
+  }
+  if (kind === "password") {
+    return previous.kind === "password" ? previous : { kind: "password", password: "" };
+  }
+  return { kind: "agent" };
+}
+
+function authLabel(kind: RemoteAuthState["kind"]): string {
   if (kind === "key") {
     return "private key";
   }
