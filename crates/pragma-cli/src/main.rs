@@ -1,225 +1,62 @@
-use std::os::unix::net::UnixStream;
+//! pragma-cli — terminal control surface for Pragma.
+//!
+//! Plain text by default (`comfy-table` for lists, short human lines for
+//! single objects); `--json` emits structured JSON. `worktree list` and the
+//! GUI-driven commands need the app; `tab read`, `agent status`, and
+//! `agent report` are direct-to-server and work with the app closed.
+
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use pragma_constants::CONSTANTS;
-use pragma_protocol::{read_json_frame, write_json_frame, RequestFrame, RequestKind, ServerFrame};
+use clap::Parser;
 
-#[derive(Debug, Parser)]
-#[command(name = "pragma-cli", about = "Report external agent status to Pragma")]
-struct Cli {
-    /// Stable agent id from the agent config. Must be passed before the
-    /// subcommand (`pragma-cli --agent <id> report ...`). Not a clap `global`
-    /// arg: clap globals cannot be required, and marking a required arg global
-    /// makes clap re-demand it at every subcommand level even when it is given.
-    #[arg(long)]
-    agent: String,
-    #[command(subcommand)]
-    command: Command,
-}
+mod broker;
+mod cli;
+mod commands;
+mod direct;
+mod output;
+mod scrollback;
+mod server;
 
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Reports status for the current Pragma terminal tab.
-    Report {
-        #[command(subcommand)]
-        report: ReportCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum ReportCommand {
-    Started,
-    Stopped {
-        /// Overrides `PRAGMA_WORKTREE_ID`, useful when reporting final status from a parent process.
-        #[arg(long)]
-        worktree_id: Option<String>,
-    },
-    Attention {
-        /// Optional hint for the kind of attention needed. Omit it when the host
-        /// agent can't tell a question from a command (e.g. Claude Code's
-        /// `Notification` hook) so Pragma shows a generic attention indicator.
-        #[arg(long)]
-        kind: Option<AttentionKind>,
-    },
-    /// Clears the tab's indicator entirely instead of leaving a `done`/green dot.
-    /// Use when the agent process exits rather than finishing a turn.
-    Cleared {
-        /// Overrides `PRAGMA_WORKTREE_ID`, useful when clearing final status from a parent process.
-        #[arg(long)]
-        worktree_id: Option<String>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum AttentionKind {
-    Question,
-    Command,
-}
+use cli::{AgentCommand, Cli, TabCommand, TopCommand};
+use server::CliError;
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let out = output::Output { json: cli.json };
+    match run(&cli, &out) {
         Ok(()) => ExitCode::SUCCESS,
+        Err(CliError::AppNotRunning) => {
+            eprintln!("error: {CliError}", CliError = CliError::AppNotRunning);
+            ExitCode::FAILURE
+        }
+        Err(CliError::Config(message)) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
         Err(error) => {
-            eprintln!("pragma-cli: {error}");
+            eprintln!("error: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
-    let socket = env_any_required(["PRAGMA_SERVER_SOCKET", "PRAGMA_DAEMON_SOCKET"])?;
-    let tab_id = env_required("PRAGMA_TAB_ID")?;
-    let (status, attention_kind, worktree_override) = match cli.command {
-        Command::Report { report } => match report {
-            ReportCommand::Started => ("running", None, None),
-            ReportCommand::Stopped { worktree_id } => ("done", None, worktree_id),
-            ReportCommand::Attention { kind } => (
-                "attention",
-                kind.map(|kind| match kind {
-                    AttentionKind::Question => "question",
-                    AttentionKind::Command => "command",
-                }),
-                None,
-            ),
-            ReportCommand::Cleared { worktree_id } => ("cleared", None, worktree_id),
+fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
+    match &cli.command {
+        TopCommand::Worktree { worktree } => commands::worktree(worktree, out),
+        TopCommand::Tab { tab } => match tab {
+            TabCommand::List(args) => commands::tab_list(args, out),
+            TabCommand::Read(args) => direct::tab_read(args, out),
+            TabCommand::Open(args) => commands::tab_open(args, out),
+            TabCommand::Close { tab } => commands::tab_close(tab, out),
+            TabCommand::Rename { tab, title } => commands::tab_rename(tab, title, out),
+            TabCommand::Exec(args) => commands::tab_exec(args, out),
         },
-    };
-    let worktree_id = worktree_override.unwrap_or(env_required("PRAGMA_WORKTREE_ID")?);
-    let payload = serde_json::json!({
-        "agent": cli.agent,
-        "worktreeId": worktree_id,
-        "tabId": tab_id,
-        "status": status,
-        "attentionKind": attention_kind,
-    });
-    let frame = RequestFrame {
-        request_id: format!("agent-{}", std::process::id()),
-        kind: RequestKind::AgentReport,
-        session_id: None,
-        worktree_id: None,
-        cwd: None,
-        cols: None,
-        rows: None,
-        data: Some(payload.to_string()),
-        rpc: None,
-        subscription: None,
-    };
-    let mut stream = UnixStream::connect(&socket)
-        .map_err(|error| format!("failed to connect to server socket {socket}: {error}"))?;
-    let expected = CONSTANTS.daemon.protocol_version.get();
-    match read_json_frame::<ServerFrame>(&mut stream) {
-        Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {}
-        Ok(ServerFrame::Hello(hello)) => {
-            return Err(format!(
-                "server protocol mismatch: expected {expected}, got {}",
-                hello.protocol_version
-            ));
-        }
-        Ok(ServerFrame::Response(_) | ServerFrame::Event(_) | ServerFrame::Rpc(_)) => {
-            return Err("server did not send hello frame".to_string());
-        }
-        Err(error) => return Err(format!("failed to read server hello: {error}")),
-    }
-    write_json_frame(&mut stream, &frame)
-        .map_err(|error| format!("failed to report status: {error}"))
-}
-
-fn env_required(name: &str) -> Result<String, String> {
-    std::env::var(name)
-        .ok()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("missing {name}"))
-}
-
-fn env_any_required<const N: usize>(names: [&str; N]) -> Result<String, String> {
-    names
-        .iter()
-        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
-        .ok_or_else(|| format!("missing one of {}", names.join(", ")))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::CommandFactory;
-
-    /// `--agent` must be accepted before the subcommand. A regression guard for
-    /// when it was declared `global = true`: clap globals cannot be required, so
-    /// marking it global made clap re-demand `--agent` at the subcommand level
-    /// and **every** invocation failed even with `--agent` provided.
-    #[test]
-    fn agent_flag_is_accepted_before_subcommand() {
-        let cli = Cli::try_parse_from(["pragma-cli", "--agent", "mock", "report", "started"])
-            .expect("--agent before the subcommand should parse");
-        assert_eq!(cli.agent, "mock");
-        assert!(matches!(
-            cli.command,
-            Command::Report {
-                report: ReportCommand::Started
-            }
-        ));
-    }
-
-    #[test]
-    fn attention_accepts_a_kind() {
-        let cli = Cli::try_parse_from([
-            "pragma-cli",
-            "--agent",
-            "mock",
-            "report",
-            "attention",
-            "--kind",
-            "question",
-        ])
-        .expect("attention with a kind should parse");
-        assert_eq!(cli.agent, "mock");
-        assert!(matches!(
-            cli.command,
-            Command::Report {
-                report: ReportCommand::Attention {
-                    kind: Some(AttentionKind::Question)
-                }
-            }
-        ));
-    }
-
-    #[test]
-    fn attention_kind_is_optional() {
-        let cli = Cli::try_parse_from(["pragma-cli", "--agent", "mock", "report", "attention"])
-            .expect("attention without a kind should parse");
-        assert!(matches!(
-            cli.command,
-            Command::Report {
-                report: ReportCommand::Attention { kind: None }
-            }
-        ));
-    }
-
-    #[test]
-    fn cleared_accepts_optional_worktree_override() {
-        let cli = Cli::try_parse_from([
-            "pragma-cli",
-            "--agent",
-            "mock",
-            "report",
-            "cleared",
-            "--worktree-id",
-            "wt-1",
-        ])
-        .expect("cleared with a worktree override should parse");
-        assert!(matches!(
-            cli.command,
-            Command::Report {
-                report: ReportCommand::Cleared {
-                    worktree_id: Some(ref id)
-                }
-            } if id == "wt-1"
-        ));
-    }
-
-    #[test]
-    fn clap_definition_is_valid() {
-        Cli::command().debug_assert();
+        TopCommand::Split { split } => commands::split(split, out),
+        TopCommand::Browser { browser } => commands::browser(browser, out),
+        TopCommand::Agent { agent } => match agent {
+            AgentCommand::Start(args) => commands::agent_start(args, out),
+            AgentCommand::Status(args) => direct::agent_status(args, out),
+            AgentCommand::Report(args) => direct::agent_report(args, out),
+        },
     }
 }

@@ -3,7 +3,7 @@ name = "pragma-cli"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "CLI for Pragma host/client utilities and external agent status reporting."
+description = "Terminal control surface for Pragma: worktrees, tabs, splits, browser webviews, and agents."
 
 [[bin]]
 name = "pragma-cli"
@@ -14,6 +14,12 @@ workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+comfy-table = "7"
 pragma-constants = { path = "../../packages/constants" }
 pragma-protocol = { path = "../pragma-protocol" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

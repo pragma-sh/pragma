@@ -160,7 +160,7 @@ bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
-cargo run -p pragma-cli -- --agent dev report started # Manually send an agent report (inside a Pragma terminal env)
+cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
 ```
 
 ## Code standards (consistent across TypeScript & Rust)

@@ -24,7 +24,13 @@ describe("pragma-cli sdk", () => {
       env: { PRAGMA_SDK_ARGS_FILE: argsFile },
     });
 
-    await expect(readArgs(argsFile)).resolves.toEqual(["--agent", "mock", "report", "started"]);
+    await expect(readArgs(argsFile)).resolves.toEqual([
+      "agent",
+      "report",
+      "--agent",
+      "mock",
+      "started",
+    ]);
     expect(result.stdout).toBe("ok");
   });
 
@@ -39,9 +45,10 @@ describe("pragma-cli sdk", () => {
     });
 
     await expect(readArgs(argsFile)).resolves.toEqual([
+      "agent",
+      "report",
       "--agent",
       "mock",
-      "report",
       "stopped",
       "--worktree-id",
       "worktree-1",
@@ -59,9 +66,10 @@ describe("pragma-cli sdk", () => {
     });
 
     await expect(readArgs(argsFile)).resolves.toEqual([
+      "agent",
+      "report",
       "--agent",
       "mock",
-      "report",
       "attention",
       "--kind",
       "question",
@@ -79,9 +87,10 @@ describe("pragma-cli sdk", () => {
     });
 
     await expect(readArgs(argsFile)).resolves.toEqual([
+      "agent",
+      "report",
       "--agent",
       "mock",
-      "report",
       "cleared",
       "--worktree-id",
       "worktree-1",
@@ -92,7 +101,7 @@ describe("pragma-cli sdk", () => {
     const executable = await createExecutable("fail", "#!/bin/sh\nprintf 'nope' >&2\nexit 7\n");
 
     await expect(reportStarted({ agent: "mock", executable })).rejects.toMatchObject({
-      args: ["--agent", "mock", "report", "started"],
+      args: ["agent", "report", "--agent", "mock", "started"],
       exitCode: 7,
       stderr: "nope",
     } satisfies Partial<PragmaCliError>);
@@ -106,7 +115,13 @@ describe("pragma-cli sdk", () => {
       env: { PRAGMA_CLI: executable, PRAGMA_SDK_ARGS_FILE: argsFile },
     });
 
-    await expect(readArgs(argsFile)).resolves.toEqual(["--agent", "mock", "report", "started"]);
+    await expect(readArgs(argsFile)).resolves.toEqual([
+      "agent",
+      "report",
+      "--agent",
+      "mock",
+      "started",
+    ]);
   });
 });
 
