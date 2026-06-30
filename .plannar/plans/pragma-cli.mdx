@@ -1,0 +1,961 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# A fully-featured `pragma-cli`
+
+Grow `pragma-cli` from a single agent-status reporter into a control surface for Pragma:
+worktrees, tabs, splits, the browser, and agents — all driven from the terminal. Plain
+text by default, `--json` for scripting.
+
+The hard constraint shapes everything below: **most of Pragma's logic lives in the GUI app,
+not the server.** Persistent records (worktrees, tabs, splits) live in a SQLite DB owned by
+`apps/pragma/src-tauri` (`db.rs`); browser tabs are native `tauri::Webview`s that only exist
+while the window is open; `pragma-core::Core::handle_rpc` is still a stub. The CLI therefore
+**brokers** commands through `pragma-server` to the running app, which executes them with its
+existing Tauri commands and updates its UI live.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships, and the decisions behind it</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **Transport — broker via `pragma-server`.** A new `Control` request kind turns the server
+  into a request router. The app registers as the single **controller**; the CLI publishes
+  control commands; the server correlates the reply and ships it back. One socket, reuses
+  every existing Tauri command, live UI.
+- **Two operations skip the app entirely.** Reading a terminal tab's scrollback and viewing
+  agent statuses are already server-owned (`Session` scrollback + the agent registry), so the
+  CLI reads them straight from the server — they work even when the window is closed.
+- **Browser = drive Pragma's own webview tabs.** Thin wrapper over the existing `browser_*`
+  Tauri commands. **No browser-automation crate needed** (see _Crate choices_).
+- **Splits reuse the scripts schema.** The recursive `left`/`right` (horizontal) and
+  `top`/`bottom` (vertical) binary tree already in `@pragma/constants` (`RunScriptSplit`) becomes
+  the CLI's `--layout` input and the shared live-split type.
+- **GUI ops error clearly when the app is closed** — no auto-launch.
+
+</CardContent>
+</Card>
+
+<Alert className="my-4">
+  <AlertTitle>Reporting moves to `agent report` — plugins must be updated</AlertTitle>
+  <AlertDescription>
+
+The old top-level `pragma-cli --agent <id> report …` is **removed**. Reporting now lives at
+`pragma-cli agent report --agent <id> …`, nested under the `agent` group, with `--agent` a flag
+on that subcommand. Pragma has **not launched**, so there is no released plugin to keep
+compatible — instead the opencode / Claude Code / Cursor plugins are **updated to the new
+invocation and reinstalled** as part of this work (see _Phase 4_). The new `--json` flag is
+added globally.
+
+  </AlertDescription>
+</Alert>
+
+## Architecture: the broker
+
+The CLI never touches the DB or a webview directly. It speaks the existing framed protocol to
+`pragma-server`, which routes a `Control` request to whichever connection registered itself as
+the **controller** (the GUI app), waits for the matching `ControlResult`, and returns it.
+
+```
+                         ┌──────────────── pragma-server ────────────────┐
+  pragma-cli  ──Control──►  router: pending{requestId → reply channel}    │
+     ▲                   │  controller: Option<Writer>                    │
+     │                   └───────┬───────────────────────▲───────────────┘
+     │ RpcResponse               │ Control (forwarded)    │ ControlResult
+     └───────────────────────────┘                        │
+                                 ▼                         │
+                        apps/pragma/src-tauri  ───────────┘
+                        (registers as controller; runs the
+                         matching #[tauri::command]; UI updates live)
+```
+
+The app already maintains a persistent server connection in
+`apps/pragma/src-tauri/src/agent_events.rs` (a background thread that subscribes to agent
+events and re-connects on drop). The controller registration + command loop is a sibling of
+that bridge — same connection lifecycle, same `connect_with_spawn()` entry point.
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="round-trip">
+    <AccordionTrigger>Request round-trip, step by step</AccordionTrigger>
+    <AccordionContent>
+
+1. **App boot.** The new control bridge opens a connection, reads `Hello`, and sends a
+   `RegisterController` request. The server stores the connection's writer in
+   `Registry.controller` and starts reading `ControlResult` frames from it.
+2. **CLI invocation.** `pragma-cli tab list` builds a `Control` request: a `ControlMethod`
+   (`tabsList`) plus a JSON payload, with a fresh `requestId`.
+3. **Route out.** The server inserts `requestId → reply-channel` into `Registry.pending`, then
+   writes the `Control` frame to the controller's writer.
+4. **Execute.** The app's control loop matches `ControlMethod`, calls the existing Tauri
+   command (`list_tabs`), and writes a `ControlResult` (payload or error) tagged with the same
+   `requestId`.
+5. **Route back.** The server's controller-reader pops `requestId` from `pending` and sends the
+   result down the channel; the CLI's handler unblocks and writes an `RpcResponseFrame`.
+6. **Print.** The CLI renders plain text, or the raw payload under `--json`.
+
+If `Registry.controller` is `None`, the server fails the `Control` request immediately with a
+`NotFound`-class error → the CLI prints `error: Pragma is not running. Launch the app first.`
+(unless the command is one of the two direct-to-server reads below).
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+### What changes in each crate
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Crate / package</TableHead>
+      <TableHead>Change</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>@pragma/constants</code>
+      </TableCell>
+      <TableCell>
+        New <code>ControlMethod</code> enum (TS + Rust) listing every brokered op. Promote the live
+        split-tree type to a shared <code>SplitNode</code> (mirrors <code>RunScriptSplit</code>).
+        Single source of truth across the boundary.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>pragma-protocol</code>
+      </TableCell>
+      <TableCell>
+        Add <code>RequestKind::RegisterController</code> and <code>RequestKind::Control</code>; add
+        a <code>ControlResult</code> shape (reuse <code>RpcRequest</code>/
+        <code>RpcResponseFrame</code> carrying <code>ControlMethod</code> + payload +{" "}
+        <code>requestId</code>).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>pragma-server</code>
+      </TableCell>
+      <TableCell>
+        Add <code>controller</code> + <code>pending</code> to <code>Registry</code>; route{" "}
+        <code>Control</code> → controller; route <code>ControlResult</code> → pending waiter. Pure
+        router — no business logic.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>apps/pragma/src-tauri</code>
+      </TableCell>
+      <TableCell>
+        New control bridge (sibling of <code>agent_events.rs</code>) that registers as controller
+        and dispatches each <code>ControlMethod</code> to the existing Tauri command. One new
+        consolidated command: <code>start_agent</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>pragma-cli</code>
+      </TableCell>
+      <TableCell>
+        The whole new subcommand tree, the broker client helper, the direct-to-server readers, and
+        the plain/JSON output layer.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Alert className="my-4">
+  <AlertTitle>Plugin-into-core guardrail</AlertTitle>
+  <AlertDescription>
+
+This plan touches core (`apps/pragma`, `pragma-server`, `pragma-cli`, `constants`) — that is
+explicitly in scope because the owner requested a Pragma-control CLI. It adds **no** per-plugin
+core code. The agent plugins themselves change only in their own self-contained bundles — each
+updates its `report` call site to `agent report` and is reinstalled through its host tool's own
+plugin mechanism — which stays within the plugin guardrail.
+
+  </AlertDescription>
+</Alert>
+
+## Command surface
+
+`pragma-cli [--json] <group> <command> …`. Plain text by default; `--json` emits structured
+JSON. `--worktree <id>` defaults to `$PRAGMA_WORKTREE_ID` when omitted (already exported into
+every Pragma terminal).
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Command</TableHead>
+      <TableHead>Backend</TableHead>
+      <TableHead>Reuses</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>worktree list</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>list_worktrees</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>worktree create --parent --branch [--title]</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>create_worktree</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>worktree rename &lt;id&gt; &lt;title&gt;</code> · <code>hide/unhide &lt;id&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>rename_worktree</code> · <code>hide_worktree</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>worktree delete &lt;id&gt; [--delete-branch --force]</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>delete_worktree</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab list [--worktree]</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>list_tabs</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab read &lt;tab&gt; [--lines --offset --bytes --plain|--raw --watch]</code>
+      </TableCell>
+      <TableCell>
+        <Badge>direct</Badge>
+      </TableCell>
+      <TableCell>
+        <code>Session</code> scrollback + live output (attach)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab open --kind terminal|browser|editor […]</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>create_tab</code> (+ <code>pty_spawn</code>)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab close &lt;tab&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>close_tab</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab rename &lt;tab&gt; &lt;title&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>rename_tab</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>tab exec --worktree -- &lt;cmd…&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        new <code>exec_in_worktree</code> (uses scripts runner)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>split set --worktree --layout &lt;json|-&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>set_split_layout</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>split add-tab --worktree --side --kind …</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>set_split_layout</code> (read-modify-write)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>split clear --worktree</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>clear_split_layout</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>browser navigate|back|forward|reload|close &lt;tab&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        <code>browser_*</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>browser scroll &lt;tab&gt; [--x --y --to top|bottom]</code> ·{" "}
+        <code>focus &lt;tab&gt; &lt;selector&gt;</code> ·{" "}
+        <code>click &lt;tab&gt; &lt;selector&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        new <code>browser_scroll</code> / <code>browser_focus</code> / <code>browser_click</code>{" "}
+        (eval-backed)
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>browser screenshot &lt;tab&gt; [--out file.png]</code> ·{" "}
+        <code>exec &lt;tab&gt; &lt;js|-&gt;</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        new <code>browser_screenshot</code> / <code>browser_eval</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>agent start --worktree --agent [--model --prompt]</code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="secondary">broker</Badge>
+      </TableCell>
+      <TableCell>
+        new <code>start_agent</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>agent status [--worktree --watch]</code>
+      </TableCell>
+      <TableCell>
+        <Badge>direct</Badge>
+      </TableCell>
+      <TableCell>
+        <code>SubscribeAgents</code> snapshot + deltas
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>agent report --agent &lt;id&gt; …</code>{" "}
+        <Badge variant="outline">existing logic</Badge>
+      </TableCell>
+      <TableCell>
+        <Badge>direct</Badge>
+      </TableCell>
+      <TableCell>
+        <code>AgentReport</code> (unchanged)
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+### Per-group detail
+
+<Tabs defaultValue="worktree" className="my-4">
+  <TabsList>
+    <TabsTrigger value="worktree">Worktree</TabsTrigger>
+    <TabsTrigger value="tab">Tab</TabsTrigger>
+    <TabsTrigger value="split">Split</TabsTrigger>
+    <TabsTrigger value="browser">Browser</TabsTrigger>
+    <TabsTrigger value="agent">Agent</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="worktree">
+
+`list` resolves the project from the current worktree's `project_id` and prints
+`is_main`-first rows. `create` requires `--parent` (a worktree id) and `--branch`; the app's
+`create_worktree` handles the git worktree + DB row + setup scripts.
+
+```
+$ pragma-cli worktree list
+ID                                    BRANCH        TITLE        MAIN  HIDDEN
+b1e2…                                 main          —            yes   no
+2fb8…                                 cli           CLI work     no    no
+
+$ pragma-cli worktree create --parent b1e2… --branch feature/x --title "Feature X"
+created 9af0…  feature/x  → .pragma/worktrees/9af0…
+```
+
+`rename`, `hide`/`unhide`, and `delete` round out lifecycle management, each wrapping the
+matching Tauri command. `delete` mirrors the UI's guardrails: `--force` to proceed on a dirty
+tree, `--delete-branch` to drop the branch too — without `--force` a dirty worktree is refused
+with a clear message rather than destroyed.
+
+```
+$ pragma-cli worktree rename 9af0… "Renamed"
+$ pragma-cli worktree hide 9af0…
+$ pragma-cli worktree delete 9af0… --delete-branch --force
+```
+
+`--json` emits the full `Worktree` array / object straight from the Tauri command.
+
+  </TabsContent>
+
+  <TabsContent value="tab">
+
+`list` defaults to the current worktree; pass `--worktree <id>` (or `--all` for the whole
+project). `read` is the interesting one — it's **direct to the server**: attach to the
+session, collect the replayed scrollback frames, detach.
+
+- `--lines N` — tail the last N lines (default sensible cap, e.g. 1000).
+- `--offset N` — skip N lines from the chosen end.
+- `--bytes N` — raw byte budget instead of lines.
+- `--plain` (default) strips ANSI/OSC; `--raw` emits bytes verbatim for piping.
+- `--watch` — after printing the scrollback, **stay attached** and stream new output as it
+  arrives (`tail -f` style), until the session exits or you Ctrl-C. The attach already returns
+  a live receiver, so this is the same code path left open.
+
+`open --kind` maps to `create_tab` (+ `pty_spawn` for terminals); `--url` seeds a browser tab,
+`--file`/`--diff-side` an editor/diff tab. `close` wraps `close_tab`; `rename` wraps
+`rename_tab` to set a tab's display title (note: a live shell can later re-claim a terminal
+tab's title via OSC, exactly as in the UI). `exec` runs a command in the worktree **without a
+tab**, capturing stdout/stderr/exit — backed by a new `exec_in_worktree` that reuses the
+`scripts.rs` headless runner so it inherits the same shell + worktree cwd.
+
+```
+$ pragma-cli tab list
+TAB ID    KIND      TITLE              URL/FILE
+t-3f…     terminal  zsh                —
+t-9c…     browser   Pragma docs        https://…
+$ pragma-cli tab read t-3f… --lines 40 --plain
+$ pragma-cli tab rename t-3f… "build watch"
+$ pragma-cli tab exec --worktree 2fb8… -- bun run typecheck
+```
+
+  </TabsContent>
+
+  <TabsContent value="split">
+
+The split layout is the **same recursive binary tree as run scripts** — promoted to a shared
+`SplitNode` in `@pragma/constants`. A node is a leaf (a tab spec) or exactly one of a
+horizontal (`left`/`right`) or vertical (`top`/`bottom`) split:
+
+```jsonc
+// pragma-cli split set --worktree 2fb8… --layout - <<'JSON'
+{
+  "left":  { "kind": "terminal" },
+  "right": {
+    "top":    { "kind": "terminal", "command": "bun run dev" },
+    "bottom": { "kind": "browser", "url": "http://localhost:1420" }
+  }
+}
+JSON
+```
+
+`set` validates the tree against the schema, then calls `set_split_layout`. `add-tab` is a
+read-modify-write convenience: it loads the current layout and grafts a new pane on a
+`--side`. `clear` collapses back to a single pane (`clear_split_layout`). Leaves are tab specs
+(`kind` + optional `command`/`url`/`file`) rather than the script's bare command strings — the
+one deliberate divergence from the scripts schema.
+
+  </TabsContent>
+
+  <TabsContent value="browser">
+
+Wrappers over the existing and new `browser_*` Tauri commands, addressed by browser-tab id. All
+are broker ops and **require the app running** (a webview is a live native surface):
+
+```
+$ pragma-cli browser navigate t-9c… https://example.com
+$ pragma-cli browser back t-9c…
+$ pragma-cli browser reload t-9c…
+$ pragma-cli browser scroll t-9c… --to bottom
+$ pragma-cli browser focus t-9c… "input[name=q]"
+$ pragma-cli browser click t-9c… "button.submit"
+$ pragma-cli browser screenshot t-9c… --out page.png
+$ pragma-cli browser exec t-9c… "document.title"
+$ pragma-cli browser exec t-9c… - < script.js
+```
+
+**Navigation** (`navigate`/`back`/`forward`/`reload`/`close`) maps to the existing `browser_*`
+commands. The new **interaction** verbs are backed by new Tauri commands on the webview:
+
+- `scroll` — scroll by `--x`/`--y` deltas or jump `--to top|bottom`.
+- `focus <selector>` — move focus to the first element matching a CSS selector.
+- `click <selector>` — dispatch a click on the first matching element.
+- `exec <js|->` — **run arbitrary JavaScript in the page** (`-` reads the script from stdin)
+  and return its JSON-serialized result. `scroll`/`focus`/`click` are thin, ergonomic shorthands
+  built on the same `eval` plumbing.
+- `screenshot [--out file.png]` — capture the webview surface to a PNG (writes `--out`, else a
+  default path; `--json` returns the path). Uses the same `xcap` capture path Pragma already
+  depends on.
+
+**No `devtools` command** — opening devtools is not reliable to drive through the Tauri webview,
+so it is intentionally omitted; use `exec` for inspection instead.
+
+To create a browser tab use `tab open --kind browser --url …`. No external browser engine is
+involved — see _Crate choices_.
+
+  </TabsContent>
+
+  <TabsContent value="agent">
+
+`start` consolidates what the UI does today (read `~/.pragma/agents/<id>/config.json`, create a
+terminal tab, `pty_spawn` the start command with the model arg, send the prompt prefill) into
+one new `start_agent` Tauri command shared by the UI and the CLI. It returns the agent's tab id.
+
+`status` is **direct to the server**: open a `SubscribeAgents` subscription, take the snapshot,
+print one row per agent with its `tabId`, then disconnect. With `--watch` it keeps the
+subscription open and prints each delta as agents change state — a live dashboard for scripting
+or a status line.
+
+```
+$ pragma-cli agent start --worktree 2fb8… --agent claude-code \
+    --model claude-opus-4-8 --prompt "Fix the failing test"
+started claude-code in 2fb8…  tab=t-7a…
+
+$ pragma-cli agent status
+WORKTREE  AGENT        STATUS      TAB
+2fb8…     claude-code  running     t-7a…
+b1e2…     opencode     attention   t-1d…
+```
+
+`report` is the existing status-reporting verb, now nested under `agent` as `agent report` with
+`--agent` a flag on the subcommand. It is **direct to the server** (writes an `AgentReport`) and
+its reporting logic is unchanged — only the command path moved. The old top-level
+`pragma-cli --agent <id> report …` is removed; the opencode / Claude Code / Cursor plugins are
+updated to the new form and reinstalled (see _Phase 4_).
+
+```
+$ pragma-cli agent report --agent claude-code started
+```
+
+  </TabsContent>
+</Tabs>
+
+## Headless vs app-required
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Works with app closed</TableHead>
+      <TableHead>Requires the app</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>tab read</code> · <code>agent status</code> · <code>agent report</code>
+      </TableCell>
+      <TableCell>everything else (worktree/tab/split/browser/agent&nbsp;start)</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+The app-required commands fail fast with `Pragma is not running. Launch the app first.` and a
+non-zero exit. This matches the chosen "error clearly" behavior — no auto-launch.
+
+## Output: plain vs `--json`
+
+<Card className="my-4">
+  <CardContent className="text-sm space-y-2 pt-6">
+
+- **Default = plain text.** Lists render as aligned columns; single-object commands print a
+  short human line. Errors go to stderr, data to stdout, so piping stays clean.
+- **`--json` = structured.** Each command serializes its result type (the Tauri command's
+  return shape, or a small CLI-owned struct for direct reads) with `serde_json`. One object or
+  array per invocation — no log noise on stdout.
+- **Exit codes:** `0` success, `1` operation error, `2` usage error (clap), distinct from the
+  app-not-running case so scripts can branch.
+
+</CardContent>
+</Card>
+
+## Crate choices
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Need</TableHead>
+      <TableHead>Choice</TableHead>
+      <TableHead>Why</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Arg parsing</TableCell>
+      <TableCell>
+        <code>clap</code> (derive)
+      </TableCell>
+      <TableCell>Already a dependency; subcommands + value enums + global flags.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>--json</code> output
+      </TableCell>
+      <TableCell>
+        <code>serde_json</code>
+      </TableCell>
+      <TableCell>
+        Already in the workspace; serialize the shared/Tauri result types directly.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Plain-text tables</TableCell>
+      <TableCell>
+        <code>comfy-table</code>
+      </TableCell>
+      <TableCell>
+        Handles column alignment, wrapping, and Unicode width for every <code>list</code>/
+        <code>status</code> view; avoids hand-rolling (and re-fixing) a formatter. Used for all
+        default plain-text table output.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Browser control</TableCell>
+      <TableCell>
+        <strong>none</strong>
+      </TableCell>
+      <TableCell>
+        We drive Pragma's own webviews via <code>browser_*</code>. No engine to embed.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="browser-crate">
+    <AccordionTrigger>For the record: if you ever wanted a CLI-driven automation browser</AccordionTrigger>
+    <AccordionContent>
+
+Out of scope per the chosen "drive Pragma's webview tabs" answer, but if a separate
+scripting/scraping browser is ever wanted: **`chromiumoxide`** (async Chrome DevTools
+Protocol, spawns/attaches to Chromium — best for JS-heavy automation) or **`fantoccini`**
+(WebDriver client, needs a running geckodriver/chromedriver — simpler, more portable). Both
+would live behind a distinct `browser auto …` group and never touch Pragma's webviews.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+## Phases
+
+<Accordion type="multiple" className="my-4">
+  <AccordionItem value="p1">
+    <AccordionTrigger>Phase 1 — CLI scaffold + output layer (no new backend)</AccordionTrigger>
+    <AccordionContent>
+
+Restructure `main.rs`: replace the old top-level `--agent … report` with `agent report --agent
+
+<id> …` (the verb moves under the `agent` group, `--agent` becomes a flag on that subcommand);
+add global `--json`; introduce the subcommand tree as stubs. Build the plain/JSON output helper. Ship `tab read` and
+`agent status` first — they're **direct to the server** and need no app changes, so they prove
+the output layer end-to-end. Both ship with `--watch` (keep the attach receiver / subscription
+open and stream). Tests: clap parse guards (incl. `agent report --agent <id>` and rejection of the removed
+top-level form), output formatting, scrollback slicing, watch teardown on Ctrl-C / session exit.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="p2">
+    <AccordionTrigger>Phase 2 — Broker protocol + server router</AccordionTrigger>
+    <AccordionContent>
+
+Add `ControlMethod` to `@pragma/constants` (regenerate TS + Rust). Add `RegisterController` /
+`Control` request kinds + `ControlResult` to `pragma-protocol`. Extend `Registry` with
+`controller` + `pending` and route both directions in `pragma-server/src/main.rs`. Unit-test
+the router with a fake controller (register, send Control, assert the ControlResult routes back
+by `requestId`; assert "no controller" errors).
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="p3">
+    <AccordionTrigger>Phase 3 — App controller bridge</AccordionTrigger>
+    <AccordionContent>
+
+Add the control bridge in `src-tauri` (sibling of `agent_events.rs`): register as controller,
+loop on incoming `Control` frames, dispatch each `ControlMethod` to the matching Tauri command,
+write back `ControlResult`. Add the consolidated `start_agent` command, the
+`exec_in_worktree` command, and the new webview commands
+(`browser_scroll`/`browser_focus`/`browser_click`/`browser_eval`/`browser_screenshot`). Wire
+CLI's broker commands (`worktree list/create/rename/hide/delete`, `tab list/open/close/exec`,
+`split`, `browser navigate/back/forward/reload/close/scroll/focus/click/screenshot/exec`,
+`agent start`) to send `Control` and render the reply. The worktree mutations reuse `rename_worktree`/`hide_worktree`/`delete_worktree`, and
+`tab rename` reuses `rename_tab`, as-is.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="p4">
+    <AccordionTrigger>Phase 4 — Splits-as-shared-schema + docs</AccordionTrigger>
+    <AccordionContent>
+
+Promote the live split tree to a shared `SplitNode` in constants, refactor the frontend to
+consume it, and implement `split set/add-tab/clear` against it.
+
+**Migrate the agent plugins to `agent report` and reinstall them.** The opencode, Claude Code,
+and Cursor plugins each shell out to the old `pragma-cli --agent <id> report …`. Update each
+plugin's invocation to `pragma-cli agent report --agent <id> …` (`packages/opencode-plugin`,
+`packages/claude-code-plugin`, `packages/cursor-plugin` — search each for the `report` call
+site), rebuild their bundled assets, then **reinstall all three through their host tools' own
+plugin mechanisms** so the running agents emit the new command. Verify end-to-end that a live
+opencode / Claude Code / Cursor session reports status into `agent status` after reinstall. This
+stays within the plugin guardrail: only each plugin's own self-contained code changes — no
+per-plugin core code is added.
+
+Update `crates/pragma-cli/AGENTS.md` (replace the "no new subcommands" future-scope note with
+the real surface), the root `AGENTS.md` command list (the `pragma-cli … report` example), and
+the `pragma-architecture` skill. Add a CLI usage section.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+## Affected files
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Path</TableHead>
+      <TableHead>What</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        <code>crates/pragma-cli/src/</code>
+      </TableCell>
+      <TableCell>
+        Split <code>main.rs</code> into modules: <code>cli.rs</code> (clap), <code>broker.rs</code>{" "}
+        (Control client), <code>direct.rs</code> (scrollback + agent snapshot),{" "}
+        <code>output.rs</code>, command handlers.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>packages/constants/schema.json</code> · <code>values.json</code>
+      </TableCell>
+      <TableCell>
+        <code>ControlMethod</code> enum; shared <code>SplitNode</code>. Regenerate via{" "}
+        <code>bun run generate</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>crates/pragma-protocol/src/lib.rs</code>
+      </TableCell>
+      <TableCell>
+        <code>RegisterController</code> / <code>Control</code> kinds; <code>ControlResult</code>;
+        round-trip tests.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>crates/pragma-server/src/registry.rs</code> + <code>main.rs</code>
+      </TableCell>
+      <TableCell>controller + pending state; bidirectional routing.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>apps/pragma/src-tauri/src/</code>
+      </TableCell>
+      <TableCell>
+        new control bridge; <code>start_agent</code> + <code>exec_in_worktree</code> commands; new
+        webview commands <code>browser_scroll</code>/<code>browser_focus</code>/
+        <code>browser_click</code>/<code>browser_eval</code>/<code>browser_screenshot</code>;
+        register all in <code>generate_handler!</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>apps/pragma/src/…</code>
+      </TableCell>
+      <TableCell>
+        Refactor split layout to the shared <code>SplitNode</code>; share the agent-start helper
+        with <code>start_agent</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        <code>packages/opencode-plugin</code> · <code>claude-code-plugin</code> ·{" "}
+        <code>cursor-plugin</code>
+      </TableCell>
+      <TableCell>
+        Update each plugin's <code>report</code> call site to{" "}
+        <code>agent report --agent &lt;id&gt;</code>; rebuild bundled assets; reinstall through each
+        host tool.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>AGENTS.md (root + cli) · skills</TableCell>
+      <TableCell>Document the new surface; retire the stale future-scope note.</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Risks & edge cases
+
+<Accordion type="multiple" className="my-4">
+  <AccordionItem value="r1">
+    <AccordionTrigger>Single controller, reconnection, and dropped replies</AccordionTrigger>
+    <AccordionContent>
+
+Exactly one controller (the app). On reconnect (app restart) the new connection replaces the
+old controller writer. Any `pending` requests whose controller dropped must be failed with a
+clear error rather than hanging — every `Control` gets a **timeout** (e.g. a few seconds) so a
+crashed app can never wedge the CLI. Multiple app windows: only the main window's bridge
+registers.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="r2">
+    <AccordionTrigger>`tab read` is bytes/frames, not lines</AccordionTrigger>
+    <AccordionContent>
+
+The server's scrollback is a frame buffer of raw output, capped at `SCROLLBACK_LIMIT` — it is
+**not** the full terminal history and not line-addressed. The CLI assembles the bytes, then
+splits/strips for `--lines`/`--plain`. Document that `read` returns "as much as the server still
+holds," and that `--bytes`/`--lines` are best-effort over that window.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="r3">
+    <AccordionTrigger>Worktree/tab references are UUIDs</AccordionTrigger>
+    <AccordionContent>
+
+IDs are UUIDs — unfriendly to type. Mitigations: `--worktree` defaults to the current env id;
+accept a unique branch-name prefix as an alias in a follow-up; always print full ids in `list`
+so they can be copied. Keep the first cut id-only to avoid ambiguity bugs.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="r4">
+    <AccordionTrigger>Split add-tab races the UI</AccordionTrigger>
+    <AccordionContent>
+
+`add-tab` is read-modify-write on a layout the UI may also be editing. Route the mutation
+through the app (which owns the in-memory layout) rather than the DB so it serializes against
+live edits; the existing `set_split_layout` already persists frontend-owned JSON, so the app
+applies then persists in one step.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+## Acceptance
+
+<Card className="my-4">
+  <CardContent className="text-sm pt-6">
+
+- [ ] `pragma-cli agent report --agent x started` reports status; the old top-level
+      `pragma-cli --agent x report …` is removed (errors as an unknown invocation).
+- [ ] The opencode, Claude Code, and Cursor plugins are updated to call `agent report`, rebuilt,
+      and reinstalled; a live session of each reports status into `agent status`.
+- [ ] Every command supports `--json`; default output is plain text on stdout (tables via
+      `comfy-table`), errors on stderr.
+- [ ] `worktree list/create/rename/hide/delete`, `tab list/read/open/close/rename/exec`,
+      `split set/add-tab/clear`,
+      `browser navigate/back/forward/reload/close/scroll/focus/click/screenshot/exec`,
+      `agent start/status/report` all function with the app running.
+- [ ] `browser exec` runs JS in the page and returns its result; `browser screenshot` writes a
+      PNG; `scroll`/`focus`/`click` act on the live webview. No `browser devtools` command exists.
+- [ ] `worktree delete` refuses a dirty tree without `--force`; `--delete-branch` drops the branch.
+- [ ] `tab read`, `agent status`, and `agent report` (and its bare alias) work with the app
+      **closed**; every other GUI op errors with the "Pragma is not running" message and a non-zero
+      exit.
+- [ ] `agent status` reports a `tabId` per agent; `agent start` returns the new tab id.
+- [ ] `--watch` on `tab read` and `agent status` streams updates and tears down cleanly on
+      Ctrl-C / session exit.
+- [ ] `tab read` honors `--lines`, `--offset`, `--bytes`, `--plain`/`--raw`.
+- [ ] `split` accepts the shared `SplitNode` tree; invalid trees are rejected with a clear error.
+- [ ] Tests: clap parse guards, server router round-trip, scrollback slicing, output formatting.
+- [ ] `bun run check` (incl. clippy, fmt, both test suites) is green.
+- [ ] AGENTS.md (root + cli) and the relevant skill document the new surface.
+
+</CardContent>
+</Card>
+
+## Open for the owner
+
+Folded in at your request: **worktree `rename`/`hide`/`delete`**, **`tab rename`**, and a
+**`--watch`** streaming mode for `agent status` and `tab read`.
+
+Still optional, not yet in scope: `project list`, `kanban` commands, and shell completions
+(`clap_complete`). Say the word and they fold in too.
