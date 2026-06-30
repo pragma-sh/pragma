@@ -74,7 +74,7 @@ response, only flipping back at `Stop`. That stale attention is the perceived la
 "needs attention" and "in progress".
 
 `PostToolUse` fires the moment the approved tool finishes, so we use it to re-assert
-`running` (`report.sh running` → `pragma-cli report started`), dropping the tab back to
+`running` (`report.sh running` → `pragma-cli agent report --agent claude-code started`), dropping the tab back to
 "in progress" at once. It is **guarded on the turn marker** — a stray `PostToolUse`
 outside a turn reports nothing — and deliberately leaves the marker and abort watcher
 alone (same turn), so it re-asserts running on every tool without disturbing cancel
@@ -84,7 +84,7 @@ visible.
 
 `attention` reports a **generic** attention with no `--kind`: `PermissionRequest` gives no
 structured question-vs-command signal, so Pragma shows a neutral "needs attention"
-indicator. (`--kind` is optional in `pragma-cli`; opencode, which does know the kind,
+indicator. (`--kind` is optional in `pragma-cli agent report`; opencode, which does know the kind,
 still passes `question`/`command`.)
 
 **The `attention` report is guarded on the turn marker** (`[ -f "$marker" ] && report

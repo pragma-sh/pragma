@@ -67,7 +67,7 @@ describe("cursor report.sh", () => {
 
   it("reports started and sets marker", () => {
     run("started");
-    expect(calls()).toEqual(["--agent cursor report started"]);
+    expect(calls()).toEqual(["agent report --agent cursor started"]);
     expect(existsSync(markerPath())).toBe(true);
   });
 
@@ -75,20 +75,26 @@ describe("cursor report.sh", () => {
     run("started", {
       env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
     });
-    expect(calls()).toEqual(["--agent cursor report started"]);
+    expect(calls()).toEqual(["agent report --agent cursor started"]);
   });
 
   it("reports stopped and clears marker", () => {
     run("started");
     run("stopped");
-    expect(calls()).toEqual(["--agent cursor report started", "--agent cursor report stopped"]);
+    expect(calls()).toEqual([
+      "agent report --agent cursor started",
+      "agent report --agent cursor stopped",
+    ]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
   it("reports cleared", () => {
     run("started");
     run("cleared");
-    expect(calls()).toEqual(["--agent cursor report started", "--agent cursor report cleared"]);
+    expect(calls()).toEqual([
+      "agent report --agent cursor started",
+      "agent report --agent cursor cleared",
+    ]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
@@ -98,8 +104,8 @@ describe("cursor report.sh", () => {
     run("started");
     run("attention-command");
     expect(calls()).toEqual([
-      "--agent cursor report started",
-      "--agent cursor report attention --kind command",
+      "agent report --agent cursor started",
+      "agent report --agent cursor attention --kind command",
     ]);
   });
 
@@ -108,9 +114,9 @@ describe("cursor report.sh", () => {
     run("attention-command");
     run("running");
     expect(calls()).toEqual([
-      "--agent cursor report started",
-      "--agent cursor report attention --kind command",
-      "--agent cursor report started",
+      "agent report --agent cursor started",
+      "agent report --agent cursor attention --kind command",
+      "agent report --agent cursor started",
     ]);
   });
 });

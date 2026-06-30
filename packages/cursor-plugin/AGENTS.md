@@ -92,7 +92,7 @@ empirically against Cursor Agent CLI `2026.06.19` and the [Cursor hooks docs](ht
 
 **If Cursor ships a question hook** (e.g. `preToolUse` firing for AskQuestion, or a
 dedicated event), wire it in `hooks.fragment.json` to a new `report.sh` case that calls
-`report attention --kind command`-style with `--kind question`, guarded on the marker —
+`agent report --agent cursor attention --kind command`-style with `--kind question`, guarded on the marker —
 that is the whole fix at that point.
 
 **Abort/cancel handling:** also not bridged. Not yet verified empirically for Cursor
