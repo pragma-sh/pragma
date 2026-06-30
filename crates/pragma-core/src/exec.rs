@@ -22,7 +22,7 @@ use crate::{CoreError, CoreResult};
 pub struct ExecRequest {
     /// Working directory the commands run in (a worktree path on the host).
     pub cwd: String,
-    /// Commands to run, each via the login shell.
+    /// Commands to run, each via the user's shell.
     pub commands: Vec<String>,
     /// Extra environment variables exported to every command.
     pub env: Vec<(String, String)>,
@@ -117,7 +117,7 @@ fn run_one(cwd: &str, env: &[(String, String)], command: &str) -> CommandResult 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let started = Instant::now();
     let mut child = process_env::command(&shell);
-    child.arg("-lc").arg(command).current_dir(cwd);
+    child.arg("-c").arg(command).current_dir(cwd);
     for (key, value) in env {
         child.env(key, value);
     }
