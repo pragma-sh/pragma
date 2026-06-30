@@ -266,6 +266,30 @@ pub async fn client_for_worktree(
     client_for_host(app, hosts, &host_id).await
 }
 
+/// Resolves the client for a previously-spawned PTY session, keyed by session
+/// id (== tab id). The session→host binding only lives in memory
+/// (`Hosts::bind_session`), so it's lost on every app restart; `for_session`
+/// alone would then silently default a remote session to `local`, routing the
+/// request at the wrong daemon entirely. This falls back to the session's
+/// owning tab's worktree route — the same persisted lookup `pty_spawn` uses —
+/// reconnecting a remote host on demand, then re-binds the session so later
+/// ops on it (write/resize/kill) hit the cached host without another lookup.
+pub async fn client_for_session(
+    app: AppHandle,
+    db: &Db,
+    hosts: &Hosts,
+    session_id: &str,
+) -> AppResult<PtyClient> {
+    if let Some(host_id) = hosts.session_host_id(session_id) {
+        return client_for_host(app, hosts, &host_id).await;
+    }
+    let tab = db.tab(session_id)?;
+    let host_id = hosts.host_id_for_worktree(db, &tab.worktree_id)?;
+    let client = client_for_host(app, hosts, &host_id).await?;
+    hosts.bind_session(session_id.to_string(), host_id)?;
+    Ok(client)
+}
+
 fn remote_preferences_for_host(hosts: &Hosts, host_id: &str) -> AppResult<RemoteRoutePreferences> {
     let routes = hosts
         .router()

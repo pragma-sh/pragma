@@ -215,13 +215,22 @@ async fn pty_spawn(
 
 #[tauri::command]
 async fn pty_attach(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
     session_id: String,
     cols: u16,
     rows: u16,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
-    let client = hosts.for_session(&session_id)?;
+    // Resolve (and re-bind) the session's host the same way `pty_spawn` does,
+    // rather than `hosts.for_session`'s bare in-memory lookup: that binding is
+    // lost on every app restart and silently defaults to `local`, which sends
+    // a reconnecting remote session's attach at the wrong daemon. That attach
+    // then fails, the frontend falls back to `pty_spawn`, and `pty_spawn`
+    // (which does resolve the real remote host) collides with the session
+    // still alive there — surfacing as "session already exists".
+    let client = ssh_host::client_for_session(app, &db, &hosts, &session_id).await?;
     run_pty_task(move || client.attach(session_id, cols, rows, on_event)).await
 }
 

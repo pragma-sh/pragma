@@ -117,6 +117,12 @@ impl Hosts {
 
     /// Resolves the client for a previously-spawned session, defaulting to the
     /// local client when the session is unknown (e.g. spawned before a restart).
+    ///
+    /// Prefer [`ssh_host::client_for_session`](crate::ssh_host::client_for_session)
+    /// for session-keyed PTY commands: it falls back to the session's owning
+    /// worktree's persisted route (and reconnects a remote host on demand)
+    /// instead of silently defaulting to `local`, which is wrong for a remote
+    /// session whose binding was lost to an app restart.
     pub fn for_session(&self, session_id: &str) -> AppResult<PtyClient> {
         let host_id = self
             .sessions
@@ -125,6 +131,13 @@ impl Hosts {
             .cloned()
             .unwrap_or_else(|| LOCAL_HOST.to_string());
         self.client_for_host(&host_id)
+    }
+
+    /// Returns the host id a session was bound to, if its binding is still
+    /// live in this process (sessions are bound in-memory on spawn and lost
+    /// across an app restart — see `client_for_session`).
+    pub fn session_host_id(&self, session_id: &str) -> Option<String> {
+        self.sessions.lock().ok()?.get(session_id).cloned()
     }
 
     /// Every connected client (local + remotes), for broadcast operations like
