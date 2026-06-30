@@ -88,6 +88,27 @@ impl RouterDb {
         .transpose()
     }
 
+    /// Returns every stored project route.
+    pub fn project_routes(&self) -> RouterResult<Vec<ProjectRoute>> {
+        let conn = self.connection()?;
+        let mut statement = conn.prepare(
+            "SELECT project_key, host_id, preferences FROM project_routes ORDER BY project_key",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let preferences: String = row.get(2)?;
+            Ok((row.get(0)?, row.get(1)?, preferences))
+        })?;
+        rows.map(|row| {
+            let (project_key, host_id, preferences) = row?;
+            Ok(ProjectRoute {
+                project_key,
+                host_id,
+                preferences: serde_json::from_str(&preferences)?,
+            })
+        })
+        .collect()
+    }
+
     /// Inserts or replaces a route for a project.
     pub fn set_project_route(&self, route: &ProjectRoute) -> RouterResult<()> {
         let preferences = serde_json::to_string(&route.preferences)?;
@@ -141,5 +162,25 @@ mod tests {
         db.set_project_route(&route).expect("set route");
 
         assert_eq!(db.project_route("/repo").expect("load route"), Some(route),);
+    }
+
+    #[test]
+    fn lists_project_routes() {
+        let db = RouterDb::open_in_memory().expect("router db");
+        let first = ProjectRoute {
+            project_key: "/a".to_string(),
+            host_id: "local".to_string(),
+            preferences: json!({}),
+        };
+        let second = ProjectRoute {
+            project_key: "/b".to_string(),
+            host_id: "ssh://u@example.com:22".to_string(),
+            preferences: json!({ "authMethod": "agent" }),
+        };
+
+        db.set_project_route(&second).expect("set second");
+        db.set_project_route(&first).expect("set first");
+
+        assert_eq!(db.project_routes().expect("routes"), vec![first, second]);
     }
 }

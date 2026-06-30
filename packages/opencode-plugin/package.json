@@ -21,7 +21,7 @@
     "prebuild": "bun run --filter @pragma/sdk build",
     "build": "bunup src/index.ts --format esm --target node --dts --packages bundle && mv dist/index.js dist/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
   "dependencies": {

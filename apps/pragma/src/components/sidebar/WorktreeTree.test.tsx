@@ -36,6 +36,7 @@ let workspaceMock = {
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   worktrees: { p: [mainWorktree, childWorktree] },
+  remoteWorktrees: {},
   hideWorktree: hideWorktreeMock,
   openWorktreeInEditor: openWorktreeInEditorMock,
   renameWorktree: renameWorktreeMock,
@@ -74,6 +75,7 @@ afterEach(() => {
     selectedProjectId: "p",
     selectedWorktreeId: "main",
     worktrees: { p: [mainWorktree, childWorktree] },
+    remoteWorktrees: {},
     hideWorktree: hideWorktreeMock,
     openWorktreeInEditor: openWorktreeInEditorMock,
     renameWorktree: renameWorktreeMock,
@@ -111,6 +113,20 @@ describe("WorktreeTree", () => {
     fireEvent.contextMenu(rowLabel);
 
     expect(screen.getByRole("menuitem", { name: "Copy worktree path" })).toBeInTheDocument();
+  });
+
+  it("disables the editor submenu for remote worktrees", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    workspaceMock.remoteWorktrees = { main: true };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    const rowLabel = await screen.findByText("main");
+
+    fireEvent.contextMenu(rowLabel);
+
+    expect(screen.getByRole("menuitem", { name: "Open in editor" })).toHaveAttribute(
+      "data-disabled",
+    );
   });
 
   it("shows the new-worktree button on the main worktree row", async () => {

@@ -51,6 +51,8 @@ pub fn tab_read(args: &crate::cli::TabReadArgs, out: &output::Output) -> Result<
     loop {
         match read_frame(&mut stream) {
             Ok(Frame::Output { data, .. }) => acc.push_output(&data),
+            // The server never sends an `Input` frame back to a client.
+            Ok(Frame::Input { .. }) => {}
             Ok(Frame::Json(bytes)) => {
                 let Ok(server_frame) = serde_json::from_slice::<ServerFrame>(&bytes) else {
                     continue;

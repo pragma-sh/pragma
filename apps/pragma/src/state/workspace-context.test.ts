@@ -14,6 +14,7 @@ const baseState: WorkspaceState = {
   activeTabByWorktree: {},
   splitRootByWorktree: {},
   focusedPaneByWorktree: {},
+  remoteWorktrees: {},
   icons: {},
   loading: true,
   error: null,

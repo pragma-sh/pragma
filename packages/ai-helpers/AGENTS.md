@@ -78,10 +78,18 @@ Run from this directory (or via `turbo` at the root):
 
 ```sh
 bun run typecheck     # tsc --noEmit
-bun run test          # vitest run
+bun run test          # bun --bun vitest run (Bun runtime, see below)
 bun run lint          # oxlint .
 bun run build:sidecar # bun build src/cli.ts --compile → dist/pragma-ai
 ```
+
+Tests run with `bun --bun vitest run`, i.e. under **Bun's runtime**, not Node.
+The pi SDK pulls in `undici@8`, which initializes a `CacheStorage` at import
+time using `webidl.util.markAsUncloneable` — an API that only exists in Node
+`>=22.19`. Importing this package under an older Node (some CI runners ship one)
+throws `webidl.util.markAsUncloneable is not a function` before any test body
+runs. Running vitest under Bun sidesteps the system-Node version entirely, so
+all workspace `test` scripts use `bun --bun vitest run` for consistency.
 
 In a **debug** build the Rust app runs `src/cli.ts` directly via `bun`; a
 **release** build runs the compiled `dist/pragma-ai` staged beside the app

@@ -35,6 +35,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     activeTabByWorktree: {},
     splitRootByWorktree: {},
     focusedPaneByWorktree: {},
+    remoteWorktrees: {},
     icons: {},
     loading: false,
     error: null,

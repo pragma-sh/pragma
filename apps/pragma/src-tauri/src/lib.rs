@@ -16,6 +16,7 @@ mod error;
 mod fs;
 mod git;
 mod github;
+mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
@@ -23,6 +24,7 @@ mod process_env;
 mod projects;
 mod pty;
 mod scripts;
+mod ssh_host;
 mod window_chrome;
 mod worktrees;
 
@@ -38,6 +40,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
+use crate::hosts::{Hosts, LOCAL_HOST};
 use crate::pty::PtyClient;
 
 /// Menu item id for "Restart Server" in the Troubleshooting submenu.
@@ -191,8 +194,11 @@ fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> 
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // PTY spawn carries session + geometry + channel.
 async fn pty_spawn(
-    pty: tauri::State<'_, PtyClient>,
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
     session_id: String,
     worktree_id: String,
     cwd: String,
@@ -200,25 +206,38 @@ async fn pty_spawn(
     rows: u16,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
-    let client = pty.inner().clone();
+    // Resolve which host owns this worktree's project and pin the session to it,
+    // so later session-keyed ops (write/resize/kill) reach the same server.
+    let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
+    let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
+    hosts.bind_session(session_id.clone(), host_id)?;
     run_pty_task(move || client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)).await
 }
 
 #[tauri::command]
 async fn pty_attach(
-    pty: tauri::State<'_, PtyClient>,
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
     session_id: String,
     cols: u16,
     rows: u16,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
-    let client = pty.inner().clone();
+    // Resolve (and re-bind) the session's host the same way `pty_spawn` does,
+    // rather than `hosts.for_session`'s bare in-memory lookup: that binding is
+    // lost on every app restart and silently defaults to `local`, which sends
+    // a reconnecting remote session's attach at the wrong daemon. That attach
+    // then fails, the frontend falls back to `pty_spawn`, and `pty_spawn`
+    // (which does resolve the real remote host) collides with the session
+    // still alive there — surfacing as "session already exists".
+    let client = ssh_host::client_for_session(app, &db, &hosts, &session_id).await?;
     run_pty_task(move || client.attach(session_id, cols, rows, on_event)).await
 }
 
 #[tauri::command]
 async fn pty_write(
-    pty: tauri::State<'_, PtyClient>,
+    hosts: tauri::State<'_, Hosts>,
     session_id: String,
     data: String,
 ) -> AppResult<()> {
@@ -226,56 +245,95 @@ async fn pty_write(
     // the dedicated writer thread (no socket I/O, no daemon round-trip), so there
     // is nothing to offload — running it inline keeps every keystroke off the
     // blocking-pool scheduler entirely.
-    pty.write(session_id, data)
+    hosts.for_session(&session_id)?.write(session_id, data)
 }
 
 #[tauri::command]
 async fn pty_resize(
-    pty: tauri::State<'_, PtyClient>,
+    hosts: tauri::State<'_, Hosts>,
     session_id: String,
     cols: u16,
     rows: u16,
 ) -> AppResult<()> {
-    let client = pty.inner().clone();
+    let client = hosts.for_session(&session_id)?;
     run_pty_task(move || client.resize(session_id, cols, rows)).await
 }
 
 #[tauri::command]
-async fn pty_kill(pty: tauri::State<'_, PtyClient>, session_id: String) -> AppResult<()> {
-    let client = pty.inner().clone();
-    run_pty_task(move || client.kill(session_id)).await
+async fn pty_kill(hosts: tauri::State<'_, Hosts>, session_id: String) -> AppResult<()> {
+    let client = hosts.for_session(&session_id)?;
+    let sid = session_id.clone();
+    run_pty_task(move || client.kill(sid)).await?;
+    hosts.unbind_session(&session_id)
 }
 
-/// Asks the daemon to terminate every shell whose initial cwd is `path`.
-/// Used as a safety net when a worktree is deleted from disk so the user's
-/// running processes don't keep an open handle to a now-removed directory.
+/// Asks every connected host to terminate every shell whose initial cwd is
+/// `path`. Used as a safety net when a worktree is deleted from disk so the
+/// user's running processes don't keep an open handle to a now-removed
+/// directory. Broadcast because the deletion isn't tied to one resolved host.
 #[tauri::command]
-async fn pty_kill_for_path(pty: tauri::State<'_, PtyClient>, path: String) -> AppResult<()> {
-    let client = pty.inner().clone();
-    run_pty_task(move || client.kill_for_cwd(path)).await
+async fn pty_kill_for_path(hosts: tauri::State<'_, Hosts>, path: String) -> AppResult<()> {
+    let clients = hosts.all_clients()?;
+    run_pty_task(move || {
+        for client in clients {
+            let _ = client.kill_for_cwd(path.clone());
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Marks a tab's resolved (`done`) agent indicators as seen once the user views
 /// the tab, so the daemon drops them and a later subscriber reconnect doesn't
-/// replay (and re-notify) a completion the user already looked at.
+/// replay (and re-notify) a completion the user already looked at. Broadcast to
+/// every host since the tab's agent could be tracked by any of them.
 #[tauri::command]
-async fn mark_agents_seen(pty: tauri::State<'_, PtyClient>, tab_id: String) -> AppResult<()> {
-    let client = pty.inner().clone();
-    run_pty_task(move || client.mark_agents_seen(tab_id)).await
+async fn mark_agents_seen(hosts: tauri::State<'_, Hosts>, tab_id: String) -> AppResult<()> {
+    let clients = hosts.all_clients()?;
+    run_pty_task(move || {
+        for client in clients {
+            let _ = client.mark_agents_seen(tab_id.clone());
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Returns, for each given worktree id, whether it belongs to an SSH-routed
+/// remote project. Batched so the frontend can resolve many worktrees in one
+/// IPC round trip instead of fanning out a call per worktree. A worktree id
+/// that fails to resolve (e.g. already deleted) is reported as not remote.
+#[tauri::command]
+fn worktrees_are_remote(
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
+    worktree_ids: Vec<String>,
+) -> std::collections::HashMap<String, bool> {
+    worktree_ids
+        .into_iter()
+        .map(|worktree_id| {
+            let is_remote = hosts
+                .host_id_for_worktree(&db, &worktree_id)
+                .is_ok_and(|host_id| host_id != LOCAL_HOST);
+            (worktree_id, is_remote)
+        })
+        .collect()
 }
 
 /// Opens a live filesystem-change subscription for a worktree, streaming each
 /// change to the webview over `on_event`. The worktree's trusted absolute root
-/// is resolved from the DB here — no absolute path crosses IPC.
+/// is resolved from the DB here — no absolute path crosses IPC — and the watch
+/// runs on the worktree's host.
 #[tauri::command]
 async fn watch_worktree_files(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
-    pty: tauri::State<'_, PtyClient>,
+    hosts: tauri::State<'_, Hosts>,
     worktree_id: String,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let root = db.worktree(&worktree_id)?.path;
-    let client = pty.inner().clone();
+    let client = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     run_pty_task(move || client.watch_files(worktree_id, root, on_event)).await
 }
 
@@ -423,11 +481,15 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let channel = pty::instance_channel(app.config().product_name.as_deref());
     let data_dir = pty::instance_data_dir(&app_data_dir, &channel);
     std::fs::create_dir_all(&data_dir)?;
-    app.manage(RouterDb::open(data_dir.join("router.db"))?);
+    let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
     let pty = PtyClient::new(app_data_dir, channel);
+    // The local client stays managed for host-agnostic consumers (agent event
+    // bridge, server restart/logs); `Hosts` owns the project → host routing and
+    // the per-host clients, and is what the worktree/session commands resolve.
     app.manage(pty.clone());
+    app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(control::BrowserHistory::default());
@@ -442,8 +504,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");
     }
-    agent_events::start(app.handle().clone(), pty.clone());
+    agent_events::start_for(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty);
+    ssh_host::reconnect_remote_hosts(app.handle().clone());
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
         log::warn!("failed to load keybindings config: {error}");
     }
@@ -481,6 +544,7 @@ pub fn run() {
             pty_kill_for_path,
             watch_worktree_files,
             mark_agents_seen,
+            worktrees_are_remote,
             take_pending_deep_link,
             restart_daemon,
             read_daemon_log,
@@ -488,6 +552,7 @@ pub fn run() {
             projects::add_project,
             projects::clone_project,
             projects::get_projects_directory,
+            ssh_host::connect_remote_project,
             worktrees::list_worktrees,
             worktrees::create_worktree,
             worktrees::worktree_status,

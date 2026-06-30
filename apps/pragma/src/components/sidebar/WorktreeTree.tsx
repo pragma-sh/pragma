@@ -430,6 +430,7 @@ function WorktreeContextMenu({
   openDelete: () => void;
 }) {
   const workspace = useWorkspace();
+  const editorDisabled = workspace.remoteWorktrees[worktree.id] === true;
   const copyPath = useCallback(
     () => void copyToClipboard(worktree.path, "Copied worktree path"),
     [worktree.path],
@@ -461,7 +462,10 @@ function WorktreeContextMenu({
         Copy branch name
       </ContextMenuItem>
       <ContextMenuSub>
-        <ContextMenuSubTrigger>
+        <ContextMenuSubTrigger
+          className="data-disabled:pointer-events-none data-disabled:opacity-50"
+          disabled={editorDisabled}
+        >
           <Icon
             className="size-4"
             icon={editorLaunchers[0]?.brandIcon ?? "lucide:square-terminal"}
@@ -471,7 +475,11 @@ function WorktreeContextMenu({
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
           {editorLaunchers.map((editor) => (
-            <ContextMenuItem key={editor.id} onSelect={() => openEditor(editor.id)}>
+            <ContextMenuItem
+              disabled={editorDisabled}
+              key={editor.id}
+              onSelect={editorDisabled ? undefined : () => openEditor(editor.id)}
+            >
               <Icon
                 className="size-4"
                 icon={editor.brandIcon}

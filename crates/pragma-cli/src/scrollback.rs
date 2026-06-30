@@ -180,6 +180,8 @@ impl Watcher {
                     let _ = out.write_all(&data);
                     let _ = out.flush();
                 }
+                // The server never sends an `Input` frame back to a client.
+                Ok(Frame::Input { .. }) => {}
                 Ok(Frame::Json(bytes)) => {
                     if let Ok(ServerFrame::Event(EventFrame::Exit { .. })) =
                         serde_json::from_slice::<ServerFrame>(&bytes)

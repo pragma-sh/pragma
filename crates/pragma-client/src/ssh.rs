@@ -10,8 +10,10 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
-use russh::client::{self, Config, Handler};
-use russh::keys::PublicKey;
+use russh::client::{self, Config, Handle, Handler};
+use russh::keys::agent::client::AgentClient;
+use russh::keys::agent::AgentIdentity;
+use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, PublicKey};
 use russh::ChannelMsg;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -25,6 +27,42 @@ pub enum RemoteAuth {
     None,
     /// Authenticate with a password supplied by the native client shell/UI.
     Password(String),
+    /// Authenticate with keys held by the running SSH agent (`SSH_AUTH_SOCK`).
+    /// The default, most-convenient method.
+    Agent,
+    /// Authenticate with a private key file, optionally passphrase-protected.
+    Key {
+        /// Path to the private key on the local machine (e.g. `~/.ssh/id_ed25519`).
+        path: PathBuf,
+        /// Passphrase, if the key is encrypted.
+        passphrase: Option<String>,
+    },
+}
+
+/// Connection parameters for a remote SSH host, without bridge specifics. Used
+/// for one-shot [`ssh_exec`] probes (git/path/version checks) before the
+/// streamlocal bridge is established.
+#[derive(Clone, Debug)]
+pub struct SshConnectConfig {
+    /// SSH server hostname or IP.
+    pub host: String,
+    /// SSH server port.
+    pub port: u16,
+    /// SSH username.
+    pub user: String,
+    /// SSH authentication method.
+    pub auth: RemoteAuth,
+}
+
+/// Result of a one-shot remote command.
+#[derive(Clone, Debug)]
+pub struct SshExecResult {
+    /// Process exit status (`-1` if the remote closed without reporting one).
+    pub exit_code: i32,
+    /// Captured stdout.
+    pub stdout: String,
+    /// Captured stderr.
+    pub stderr: String,
 }
 
 /// Configuration for one remote host bridge.
@@ -58,6 +96,12 @@ pub enum SshBridgeError {
     /// Authentication did not succeed.
     #[error("ssh authentication failed")]
     AuthFailed,
+    /// A private key could not be loaded or decoded.
+    #[error("ssh key error: {0}")]
+    Key(String),
+    /// The SSH agent could not be reached or returned an error.
+    #[error("ssh agent error: {0}")]
+    Agent(String),
     /// The bootstrap command returned a non-zero status.
     #[error("remote bootstrap failed with status {0}")]
     BootstrapFailed(u32),
@@ -99,8 +143,8 @@ async fn run_bridge(
     config: SshBridgeConfig,
     ready_tx: mpsc::SyncSender<Result<(), SshBridgeError>>,
 ) -> Result<(), SshBridgeError> {
-    let mut handle = connect(&config).await?;
-    authenticate(&mut handle, &config).await?;
+    let mut handle = connect(&config.host, config.port).await?;
+    authenticate(&mut handle, &config.user, &config.auth).await?;
     bootstrap(&handle, &config.bootstrap_command).await?;
 
     let _ = std::fs::remove_file(&config.local_socket_path);
@@ -131,31 +175,102 @@ async fn run_bridge(
     }
 }
 
-async fn connect(
-    config: &SshBridgeConfig,
-) -> Result<client::Handle<TrustServerKey>, SshBridgeError> {
-    let ssh_config = Arc::new(Config::default());
-    let addr = (config.host.as_str(), config.port);
-    Ok(client::connect(ssh_config, addr, TrustServerKey).await?)
+async fn connect(host: &str, port: u16) -> Result<Handle<TrustServerKey>, SshBridgeError> {
+    let ssh_config = Arc::new(Config {
+        nodelay: true,
+        ..Config::default()
+    });
+    Ok(client::connect(ssh_config, (host, port), TrustServerKey).await?)
 }
 
 async fn authenticate(
-    handle: &mut client::Handle<TrustServerKey>,
-    config: &SshBridgeConfig,
+    handle: &mut Handle<TrustServerKey>,
+    user: &str,
+    auth: &RemoteAuth,
 ) -> Result<(), SshBridgeError> {
-    let result = match &config.auth {
-        RemoteAuth::None => handle.authenticate_none(&config.user).await?,
-        RemoteAuth::Password(password) => {
-            handle
-                .authenticate_password(&config.user, password.as_str())
-                .await?
+    let success = match auth {
+        RemoteAuth::None => handle.authenticate_none(user).await?.success(),
+        RemoteAuth::Password(password) => handle
+            .authenticate_password(user, password.as_str())
+            .await?
+            .success(),
+        RemoteAuth::Key { path, passphrase } => {
+            let key = load_secret_key(path, passphrase.as_deref())
+                .map_err(|error| SshBridgeError::Key(error.to_string()))?;
+            let key = PrivateKeyWithHashAlg::new(Arc::new(key), None);
+            handle.authenticate_publickey(user, key).await?.success()
         }
+        RemoteAuth::Agent => authenticate_agent(handle, user).await?,
     };
-    if result.success() {
+    if success {
         Ok(())
     } else {
         Err(SshBridgeError::AuthFailed)
     }
+}
+
+/// Tries each identity in the running SSH agent until one authenticates.
+async fn authenticate_agent(
+    handle: &mut Handle<TrustServerKey>,
+    user: &str,
+) -> Result<bool, SshBridgeError> {
+    let mut agent = AgentClient::connect_env()
+        .await
+        .map_err(|error| SshBridgeError::Agent(error.to_string()))?;
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|error| SshBridgeError::Agent(error.to_string()))?;
+    for identity in identities {
+        let AgentIdentity::PublicKey { key, .. } = identity else {
+            continue;
+        };
+        let result = handle
+            .authenticate_publickey_with(user, key, None, &mut agent)
+            .await
+            .map_err(|error| SshBridgeError::Agent(error.to_string()))?;
+        if result.success() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Runs a single command on the remote host over a fresh authenticated SSH
+/// session and returns its captured output. Synchronous wrapper around a private
+/// runtime so the desktop app can call it from a blocking command.
+pub fn ssh_exec(config: &SshConnectConfig, command: &str) -> Result<SshExecResult, SshBridgeError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()?;
+    runtime.block_on(async move {
+        let mut handle = connect(&config.host, config.port).await?;
+        authenticate(&mut handle, &config.user, &config.auth).await?;
+        let mut channel = handle.channel_open_session().await?;
+        channel.exec(true, command).await?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_code = -1;
+        while let Some(message) = channel.wait().await {
+            match message {
+                ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                ChannelMsg::ExtendedData { data, ext: 1 } => {
+                    stderr.extend_from_slice(&data);
+                }
+                ChannelMsg::ExitStatus { exit_status } => {
+                    exit_code = i32::try_from(exit_status).unwrap_or(-1);
+                }
+                _ => {}
+            }
+        }
+        Ok(SshExecResult {
+            exit_code,
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        })
+    })
 }
 
 async fn bootstrap(

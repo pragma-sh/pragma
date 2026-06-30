@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
+use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 use crate::{browser, scripts, worktrees};
 
@@ -324,6 +325,7 @@ fn worktree_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
     let project_id = project_from_worktree(app, &args.parent_worktree_id)?;
     let worktree = worktrees::create_worktree(
         app.state::<Db>(),
+        app.state::<Hosts>(),
         app.state::<GitLocks>(),
         project_id.clone(),
         args.parent_worktree_id,
@@ -396,8 +398,8 @@ fn worktree_delete(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
         args.delete_branch,
         args.force,
         app.state::<Db>(),
+        app.state::<Hosts>(),
         app.state::<GitLocks>(),
-        app.state::<PtyClient>(),
     )?;
     emit_worktree_changed(
         app,
@@ -413,6 +415,7 @@ fn worktree_status(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
     json(worktrees::worktree_status(
         args.worktree_id,
         app.state::<Db>(),
+        app.state::<Hosts>(),
     )?)
 }
 
@@ -529,10 +532,12 @@ pub struct ExecResult {
 
 fn tab_exec(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
     let args: TabExecPayload = parse(payload)?;
-    let worktree = app.state::<Db>().worktree(&args.worktree_id)?;
-    let project = app.state::<Db>().project(&worktree.project_id)?;
+    let db = app.state::<Db>();
+    let worktree = db.worktree(&args.worktree_id)?;
+    let project = db.project(&worktree.project_id)?;
+    let pty = app.state::<Hosts>().for_worktree(&db, &args.worktree_id)?;
     let command = args.command.join(" ");
-    let result = scripts::run_headless_command(&project, &worktree, &command);
+    let result = scripts::run_headless_command(&pty, &project, &worktree, &command)?;
     json(ExecResult {
         command: result.command,
         stdout: result.stdout,
@@ -997,13 +1002,15 @@ pub fn start_agent(
 #[tauri::command]
 pub fn exec_in_worktree(
     db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
     worktree_id: String,
     command: Vec<String>,
 ) -> AppResult<ExecResult> {
     let worktree = db.worktree(&worktree_id)?;
     let project = db.project(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     let command = command.join(" ");
-    let result = scripts::run_headless_command(&project, &worktree, &command);
+    let result = scripts::run_headless_command(&pty, &project, &worktree, &command)?;
     Ok(ExecResult {
         command: result.command,
         stdout: result.stdout,

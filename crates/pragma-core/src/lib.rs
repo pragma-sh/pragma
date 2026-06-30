@@ -10,6 +10,10 @@ use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod exec;
+pub mod fs;
+pub mod git;
+pub(crate) mod process_env;
 pub mod rpc;
 pub mod watcher;
 
@@ -37,6 +41,16 @@ pub enum CoreError {
     Operation(String),
 }
 
+impl From<std::io::Error> for CoreError {
+    fn from(error: std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Self::NotFound(error.to_string())
+        } else {
+            Self::Operation(error.to_string())
+        }
+    }
+}
+
 /// Minimal core router used by `pragma-server` for generalized RPC traffic.
 ///
 /// Business modules are moved behind this seam incrementally. Until a method is
@@ -47,9 +61,26 @@ pub struct Core;
 
 impl Core {
     /// Handles one JSON RPC payload and returns a JSON response payload.
-    pub fn handle_rpc(&self, method: ProtocolRpcMethod, _payload: Value) -> CoreResult<Value> {
-        Err(CoreError::UnsupportedMethod(
-            rpc::method_name(method).to_string(),
-        ))
+    ///
+    /// Path-based domains (`filesystem`, `git`) execute against the host's own
+    /// filesystem using the trusted absolute root carried in the payload, so the
+    /// same code serves a local project and an SSH-bridged remote one. Metadata
+    /// domains remain client-local for now and return an unsupported-method error.
+    pub fn handle_rpc(&self, method: ProtocolRpcMethod, payload: Value) -> CoreResult<Value> {
+        match method {
+            ProtocolRpcMethod::Filesystem => fs::handle(payload),
+            ProtocolRpcMethod::Git => git::handle(payload),
+            ProtocolRpcMethod::Exec => exec::handle(payload),
+            ProtocolRpcMethod::Database
+            | ProtocolRpcMethod::Kanban
+            | ProtocolRpcMethod::Worktrees
+            | ProtocolRpcMethod::Projects
+            | ProtocolRpcMethod::Tabs
+            | ProtocolRpcMethod::Settings
+            | ProtocolRpcMethod::Github
+            | ProtocolRpcMethod::Ai => Err(CoreError::UnsupportedMethod(
+                rpc::method_name(method).to_string(),
+            )),
+        }
     }
 }

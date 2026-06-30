@@ -133,6 +133,11 @@ impl Registry {
         Ok(())
     }
 
+    pub fn write_bytes(&self, session_id: &str, data: &[u8]) -> Result<(), RegistryError> {
+        self.session(session_id)?.write_bytes(data)?;
+        Ok(())
+    }
+
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), RegistryError> {
         self.session(session_id)?.resize(cols, rows)?;
         Ok(())

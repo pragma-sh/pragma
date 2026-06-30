@@ -12,10 +12,10 @@ use crate::pty::PtyClient;
 const AGENT_REPORT_EVENT: &str = "pragma:agent-report";
 const AGENT_STATUS_RESET_EVENT: &str = "pragma:agent-status-reset";
 
-/// Starts the long-lived daemon subscription that forwards agent status events to React.
-pub fn start(app: AppHandle, pty: PtyClient) {
+/// Starts a long-lived agent event subscription for one connected host client.
+pub fn start_for(app: AppHandle, client: PtyClient) {
     thread::spawn(move || loop {
-        if let Err(error) = subscribe_once(&app, &pty) {
+        if let Err(error) = subscribe_once(&app, &client) {
             log::warn!("agent event bridge disconnected: {error}");
             thread::sleep(Duration::from_millis(500));
         }
@@ -67,7 +67,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                 )
                 | Err(_) => {}
             },
-            Frame::Output { .. } => {}
+            Frame::Output { .. } | Frame::Input { .. } => {}
         }
     }
 }

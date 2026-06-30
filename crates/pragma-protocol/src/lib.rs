@@ -54,16 +54,22 @@ const FRAME_TAG_JSON: u8 = 0;
 /// Tag for a binary output frame. Terminal output is shipped raw — no JSON
 /// escaping and no UTF-8 decode/encode.
 const FRAME_TAG_OUTPUT: u8 = 1;
+/// Tag for a binary input frame. Terminal input is fire-and-forget on the hot
+/// path: no JSON request, UUID, or response frame per keystroke.
+const FRAME_TAG_INPUT: u8 = 2;
 /// Upper bound on a single frame's body. Guards against malformed lengths.
 const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 
-/// A decoded wire frame. Control traffic stays JSON; PTY output is binary.
+/// A decoded wire frame. Control traffic stays JSON; PTY input/output is binary.
 pub enum Frame {
     /// JSON body — deserialize with [`Frame::decode`] into the expected type.
     Json(Vec<u8>),
     /// Raw terminal output for `session_id`. Body layout after the tag is
     /// `[2-byte BE session-id length][session id UTF-8][raw output bytes]`.
     Output { session_id: String, data: Vec<u8> },
+    /// Raw terminal input for `session_id`. Body layout after the tag matches
+    /// [`Self::Output`].
+    Input { session_id: String, data: Vec<u8> },
 }
 
 impl Frame {
@@ -71,7 +77,7 @@ impl Frame {
     pub fn decode<T: for<'de> Deserialize<'de>>(self) -> Result<T, ProtocolError> {
         match self {
             Self::Json(bytes) => Ok(serde_json::from_slice(&bytes)?),
-            Self::Output { .. } => Err(ProtocolError::UnexpectedBinaryFrame),
+            Self::Output { .. } | Self::Input { .. } => Err(ProtocolError::UnexpectedBinaryFrame),
         }
     }
 }
@@ -312,21 +318,30 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
     match body[0] {
         FRAME_TAG_JSON => Ok(Frame::Json(body.split_off(1))),
         FRAME_TAG_OUTPUT => {
-            if body.len() < 3 {
-                return Err(ProtocolError::Malformed);
-            }
-            let sid_len = u16::from_be_bytes([body[1], body[2]]) as usize;
-            let sid_end = 3 + sid_len;
-            if body.len() < sid_end {
-                return Err(ProtocolError::Malformed);
-            }
-            let session_id = String::from_utf8(body[3..sid_end].to_vec())
-                .map_err(|_| ProtocolError::Malformed)?;
-            let data = body[sid_end..].to_vec();
+            let (session_id, data) = decode_session_data(&body)?;
             Ok(Frame::Output { session_id, data })
+        }
+        FRAME_TAG_INPUT => {
+            let (session_id, data) = decode_session_data(&body)?;
+            Ok(Frame::Input { session_id, data })
         }
         _ => Err(ProtocolError::Malformed),
     }
+}
+
+fn decode_session_data(body: &[u8]) -> Result<(String, Vec<u8>), ProtocolError> {
+    if body.len() < 3 {
+        return Err(ProtocolError::Malformed);
+    }
+    let sid_len = u16::from_be_bytes([body[1], body[2]]) as usize;
+    let sid_end = 3 + sid_len;
+    if body.len() < sid_end {
+        return Err(ProtocolError::Malformed);
+    }
+    let session_id =
+        String::from_utf8(body[3..sid_end].to_vec()).map_err(|_| ProtocolError::Malformed)?;
+    let data = body[sid_end..].to_vec();
+    Ok((session_id, data))
 }
 
 /// Reads one frame and decodes it as JSON `T`, erroring on a binary frame.
@@ -362,6 +377,24 @@ pub fn write_output_frame(
     session_id: &str,
     data: &[u8],
 ) -> Result<(), ProtocolError> {
+    write_session_data_frame(writer, FRAME_TAG_OUTPUT, session_id, data)
+}
+
+/// Writes a binary input frame carrying raw terminal input bytes for `session_id`.
+pub fn write_input_frame(
+    writer: &mut impl Write,
+    session_id: &str,
+    data: &[u8],
+) -> Result<(), ProtocolError> {
+    write_session_data_frame(writer, FRAME_TAG_INPUT, session_id, data)
+}
+
+fn write_session_data_frame(
+    writer: &mut impl Write,
+    tag: u8,
+    session_id: &str,
+    data: &[u8],
+) -> Result<(), ProtocolError> {
     let sid = session_id.as_bytes();
     let sid_len = u16::try_from(sid.len()).map_err(|_| ProtocolError::FrameTooLarge)?;
     let body_len = 1 + 2 + sid.len() + data.len();
@@ -371,7 +404,7 @@ pub fn write_output_frame(
     }
     let mut header = Vec::with_capacity(4 + 1 + 2 + sid.len());
     header.extend_from_slice(&len.to_be_bytes());
-    header.push(FRAME_TAG_OUTPUT);
+    header.push(tag);
     header.extend_from_slice(&sid_len.to_be_bytes());
     header.extend_from_slice(sid);
     writer.write_all(&header)?;
@@ -383,9 +416,9 @@ pub fn write_output_frame(
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, read_json_frame, write_json_frame, write_output_frame, ControlEnvelope,
-        ControlMethod, ControlRequest, ControlResult, EventFrame, Frame, HelloFrame, ProtocolError,
-        RequestFrame, RequestKind, ServerFrame,
+        read_frame, read_json_frame, write_input_frame, write_json_frame, write_output_frame,
+        ControlEnvelope, ControlMethod, ControlRequest, ControlResult, EventFrame, Frame,
+        HelloFrame, ProtocolError, RequestFrame, RequestKind, ServerFrame,
     };
 
     #[test]
@@ -421,7 +454,20 @@ mod tests {
                 assert_eq!(session_id, "tab-1");
                 assert_eq!(data, b"\x1b[31mred");
             }
-            Frame::Json(_) => panic!("expected output frame"),
+            Frame::Json(_) | Frame::Input { .. } => panic!("expected output frame"),
+        }
+    }
+
+    #[test]
+    fn round_trips_binary_input() {
+        let mut bytes = Vec::new();
+        write_input_frame(&mut bytes, "tab-1", b"hello\r").expect("write input");
+        match read_frame(&mut bytes.as_slice()).expect("read input") {
+            Frame::Input { session_id, data } => {
+                assert_eq!(session_id, "tab-1");
+                assert_eq!(data, b"hello\r");
+            }
+            Frame::Json(_) | Frame::Output { .. } => panic!("expected input frame"),
         }
     }
 

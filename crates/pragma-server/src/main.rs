@@ -21,9 +21,9 @@ use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
 use pragma_protocol::{
-    read_json_frame, write_json_frame, write_output_frame, ControlEnvelope, ControlResult,
-    EventFrame, HelloFrame, ProtocolError, RequestFrame, RequestKind, ResponseFrame, RpcError,
-    RpcResponseFrame, ServerFrame,
+    read_frame, read_json_frame, write_json_frame, write_output_frame, ControlEnvelope,
+    ControlResult, EventFrame, Frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
+    ResponseFrame, RpcError, RpcResponseFrame, ServerFrame,
 };
 use registry::Registry;
 
@@ -91,27 +91,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let listener = UnixListener::bind(&paths.socket)?;
     set_socket_permissions(&paths.socket)?;
-    listener.set_nonblocking(true)?;
 
     let registry = Arc::new(Registry::new(paths.socket.clone()));
     let core = Arc::new(Core);
     loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                if stream.set_nonblocking(false).is_err() {
-                    continue;
-                }
-                let registry = Arc::clone(&registry);
-                let core = Arc::clone(&core);
-                thread::spawn(move || {
-                    handle_client(stream, &registry, &core);
-                });
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(err) => return Err(Box::new(err)),
-        }
+        let (stream, _) = listener.accept()?;
+        let registry = Arc::clone(&registry);
+        let core = Arc::clone(&core);
+        thread::spawn(move || {
+            handle_client(stream, &registry, &core);
+        });
     }
 }
 
@@ -134,7 +123,7 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
     // Peek the first request to decide whether this connection is the
     // controller (RegisterController) or a normal client. The controller loop
     // is structurally different: it only sends ControlResult replies.
-    let Ok(first) = read_json_frame::<RequestFrame>(&mut stream) else {
+    let Some(first) = next_request(&mut stream, registry) else {
         let _ = stream.shutdown(Shutdown::Both);
         return;
     };
@@ -149,10 +138,30 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
         return;
     }
     handle_client_request(first, &writer, registry, core);
-    while let Ok(request) = read_json_frame::<RequestFrame>(&mut stream) {
+    while let Some(request) = next_request(&mut stream, registry) {
         handle_client_request(request, &writer, registry, core);
     }
     let _ = stream.shutdown(Shutdown::Both);
+}
+
+/// Reads frames off `stream` until a JSON request arrives. A binary `Input`
+/// frame is written straight to its session via `Registry::write_bytes` and
+/// skipped — input is fire-and-forget on the hot path, with no `RequestFrame`
+/// or response involved. `Output` frames are never sent by a client and are
+/// discarded. Returns `None` once the connection errors, closes, or sends a
+/// malformed JSON frame.
+fn next_request(stream: &mut UnixStream, registry: &Registry) -> Option<RequestFrame> {
+    loop {
+        let bytes = match read_frame(stream).ok()? {
+            Frame::Json(bytes) => bytes,
+            Frame::Input { session_id, data } => {
+                let _ = registry.write_bytes(&session_id, &data);
+                continue;
+            }
+            Frame::Output { .. } => continue,
+        };
+        return serde_json::from_slice(&bytes).ok();
+    }
 }
 
 /// Drains `ControlResult` replies from the controller connection and routes each

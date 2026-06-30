@@ -33,9 +33,12 @@ Terminal output is raw bytes end-to-end. Every frame is:
 - Tag `0` = JSON control/RPC/event frame.
 - Tag `1` = binary output frame:
   `[2-byte BE session-id length][session id][raw output bytes]`.
+- Tag `2` = binary input frame:
+  `[2-byte BE session-id length][session id][raw input bytes]`.
 
-`FRAME_TAG_OUTPUT` and `write_output_frame` are load-bearing. Never route PTY
-output through JSON, and never decode UTF-8 on the hot path.
+`FRAME_TAG_OUTPUT`, `FRAME_TAG_INPUT`, `write_output_frame`, and `write_input_frame`
+are load-bearing. Never route PTY input/output through JSON, and never decode UTF-8 on
+the hot path.
 
 ## Lifecycle
 

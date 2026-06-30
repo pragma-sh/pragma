@@ -88,6 +88,7 @@ import {
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
+  worktreesAreRemote,
   type WorkspaceChangedEvent,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
@@ -132,6 +133,8 @@ interface WorkspaceState {
   splitRootByWorktree: Record<string, SplitLayoutNode>;
   /** Focused split pane per worktree; tab shortcuts apply to this pane. */
   focusedPaneByWorktree: Record<string, string>;
+  /** True for worktrees whose project is routed through an SSH host. */
+  remoteWorktrees: Record<string, boolean>;
   icons: Record<string, ProjectIcon | null>;
   loading: boolean;
   error: string | null;
@@ -209,6 +212,7 @@ type WorkspaceAction =
   | { type: "set-auto-title"; tabId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
+  | { type: "set-worktree-remote"; worktreeId: string; isRemote: boolean }
   | { type: "remove-worktree"; worktreeId: string }
   | { type: "update-worktree"; worktree: Worktree }
   | { type: "clear-error" };
@@ -315,6 +319,7 @@ const initialState: WorkspaceState = {
   activeTabByWorktree: {},
   splitRootByWorktree: {},
   focusedPaneByWorktree: {},
+  remoteWorktrees: {},
   icons: {},
   loading: true,
   error: null,
@@ -1255,6 +1260,8 @@ function reduceRemoveWorktree(
     state,
     action.worktreeId,
   );
+  const remoteWorktrees = { ...state.remoteWorktrees };
+  delete remoteWorktrees[action.worktreeId];
   return {
     ...state,
     worktrees,
@@ -1262,6 +1269,7 @@ function reduceRemoveWorktree(
     tabs,
     splitRootByWorktree,
     focusedPaneByWorktree,
+    remoteWorktrees,
   };
 }
 
@@ -1423,6 +1431,16 @@ function reduceSetIcon(state: WorkspaceState, action: ActionOf<"set-icon">): Wor
   return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
 }
 
+function reduceSetWorktreeRemote(
+  state: WorkspaceState,
+  action: ActionOf<"set-worktree-remote">,
+): WorkspaceState {
+  return {
+    ...state,
+    remoteWorktrees: { ...state.remoteWorktrees, [action.worktreeId]: action.isRemote },
+  };
+}
+
 function reduceClearError(state: WorkspaceState, _action: ActionOf<"clear-error">): WorkspaceState {
   return { ...state, error: null };
 }
@@ -1456,6 +1474,7 @@ const REDUCERS: ReducerMap = {
   "set-auto-title": reduceSetAutoTitle,
   "set-tab-url": reduceSetTabUrl,
   "set-icon": reduceSetIcon,
+  "set-worktree-remote": reduceSetWorktreeRemote,
   "remove-worktree": reduceRemoveWorktree,
   "update-worktree": reduceUpdateWorktree,
   "clear-error": reduceClearError,
@@ -1674,6 +1693,7 @@ async function runManagedScriptPlan(
     splitSnapshot = applyRunScriptItemLayout(item, splitSnapshot, ctx, tabIdsByCommand);
     // oxlint-disable-next-line no-await-in-loop -- Each script entry needs one paint after its tabs/split are in state, then time for the PTY shell to start, before queued terminal input flushes.
     await nextAnimationFrame();
+    // oxlint-disable-next-line no-await-in-loop -- Same reasoning as above: must elapse before this entry's queued terminal input flushes.
     await delay(INTERACTIVE_SCRIPT_START_DELAY_MS);
     flushScriptCommands(item, plan, tabIdsByCommand);
   }
@@ -2909,6 +2929,44 @@ function useProjectLoading(
       );
     }
   }, [dispatch, state.icons, state.projects]);
+
+  useEffect(() => {
+    const unknownWorktreeIds = Object.values(state.worktrees)
+      .flat()
+      .map((worktree) => worktree.id)
+      .filter((worktreeId) => !(worktreeId in state.remoteWorktrees));
+    if (unknownWorktreeIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void worktreesAreRemote(unknownWorktreeIds)
+      .then((remoteByWorktreeId) => {
+        if (cancelled) {
+          return undefined;
+        }
+        for (const worktreeId of unknownWorktreeIds) {
+          dispatch({
+            type: "set-worktree-remote",
+            worktreeId,
+            isRemote: remoteByWorktreeId[worktreeId] ?? false,
+          });
+        }
+        return undefined;
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        for (const worktreeId of unknownWorktreeIds) {
+          dispatch({ type: "set-worktree-remote", worktreeId, isRemote: false });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, state.remoteWorktrees, state.worktrees]);
 }
 
 /** Persists split layouts so they survive project switches and app restarts. */

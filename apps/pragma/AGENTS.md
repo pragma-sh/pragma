@@ -91,7 +91,9 @@ builds re-prompt on every launch. The plaintext file has no signature check.
 
 Also in Rust: OAuth **Device Flow** polling (`reqwest` blocking, no client
 secret/PKCE), `gh` CLI detection/adoption, `origin`→`owner/repo`, fetch+ahead/behind,
-push, the local `base...HEAD` PR file diff, and remote-branch delete. The
+push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
+GitHub git operations must run through the owning host's `git` RPC so remote project
+paths are evaluated on the remote host, not the desktop client. The
 `oauthClientId`, scopes, and endpoint URLs are in `@pragma/constants` (`github` block);
 the setup-skip flag persists in the `settings` table (`github.setupDismissed`).
 
@@ -128,6 +130,11 @@ The frontend stores runtime agent status in `state/agent-status-store.ts` via
 `useSyncExternalStore`. Status dots: `done` = green, `running` = yellow, `attention` =
 red, precedence **red > yellow > green** when aggregating a tab's agents or a
 worktree's tabs. Green is a "finished, go look" notification.
+
+The Rust event bridge subscribes once per connected host (`agent_events::start_for`):
+the local managed server at startup, and each SSH remote when it registers or
+agent-auth reconnects. All hosts emit the same `pragma:agent-report` /
+`pragma:agent-status-reset` Tauri event names so the frontend store is host-agnostic.
 
 `running`/`attention` persist through a focus; viewing a tab clears its `done` entries
 from the store (`clearDoneStatusForTab`) **and tells the daemon to drop the stored
@@ -212,6 +219,17 @@ release-built dev app keeps its own per-worktree instance.
   `PRAGMA_SERVER_CHANNEL` + `PRAGMA_APP_DATA_DIR` env vars. The socket file remains
   `daemon.sock` for SSH streamlocal compatibility.
 
+**Remote projects use the same host-server protocol through an SSH streamlocal
+bridge.** `ssh_host::connect_remote_project` probes the remote project, ensures a
+protocol-compatible `pragma-server` is running under the production channel, registers
+the host in `Hosts`, records the project-path route in `router.db`, and inserts the
+client-local project metadata. Route preferences persist only non-secret SSH metadata
+(`host`, `port`, `user`, `authMethod`); agent-auth routes reconnect in the background
+on app startup and terminal spawn reconnects them on demand if the UI wins the startup
+race, while password/key-passphrase routes stay disconnected until the user reconnects.
+Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown commands
+route through the owning host via `pragma-core` RPC.
+
 ## Native menubar + Troubleshooting menu
 
 Built once in `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` plus a
@@ -254,10 +272,10 @@ parser/render pass. Scrollback is bounded to 500 lines (`TERMINAL_SCROLLBACK_LIN
 
 **Keystroke input is fire-and-forget and pipelined:** `onData` fires `ptyWrite` without
 awaiting; on the Rust side `pty_write` only _enqueues_ onto a dedicated writer thread
-(`input_tx` / `start_input_writer` in `src-tauri/src/pty.rs`) that owns its own daemon
-connection. Writes do **not** wait for the daemon's per-write `Response` (a companion
-`discard_frames` thread drains them). `resize`/`kill` use the separate pooled
-`request_conn`.
+(`input_tx` / `start_input_writer` in `pragma-client`) that owns its own daemon
+connection. The writer drains any already-queued same-session input into one frame and
+sends `write_input_frame` binary frames; there is no per-keystroke JSON request or
+daemon response. `resize`/`kill` use the separate pooled `request_conn`.
 
 **Native OS text-editing chords** (macOS Cmd+Backspace/Left/Right,
 Option+Left/Right/Backspace; Linux Ctrl+Left/Right/Backspace/Delete) are translated to
