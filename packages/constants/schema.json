@@ -74,6 +74,39 @@
         "internal"
       ]
     },
+    "ControlMethod": {
+      "title": "ControlMethod",
+      "description": "Brokered control operations routed by pragma-server to the running app (the single controller). The CLI publishes these; the app executes the matching Tauri command and returns a ControlResult. Direct-to-server reads (tab read, agent status, agent report) are not ControlMethods.",
+      "type": "string",
+      "enum": [
+        "worktreesList",
+        "worktreeCreate",
+        "worktreeRename",
+        "worktreeSetHidden",
+        "worktreeDelete",
+        "worktreeStatus",
+        "tabsList",
+        "tabOpen",
+        "tabClose",
+        "tabRename",
+        "tabExec",
+        "splitList",
+        "splitSet",
+        "splitAddTab",
+        "splitClear",
+        "browserNavigate",
+        "browserBack",
+        "browserForward",
+        "browserReload",
+        "browserClose",
+        "browserScroll",
+        "browserFocus",
+        "browserClick",
+        "browserEval",
+        "browserScreenshot",
+        "agentStart"
+      ]
+    },
     "Protocol": {
       "title": "Protocol",
       "type": "object",
@@ -408,6 +441,63 @@
         "top": { "$ref": "#/definitions/RunScriptNode" },
         "bottom": { "$ref": "#/definitions/RunScriptNode" }
       }
+    },
+    "SplitTabLeaf": {
+      "title": "SplitTabLeaf",
+      "description": "A leaf pane in a shared SplitNode tree: a tab spec. `kind` selects the tab type; `command` seeds a terminal tab, `url` a browser tab, `file` an editor/diff tab. This intentionally diverges from RunScriptSplit (whose leaves are bare command strings) so the CLI split tree describes tabs, not commands.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "$ref": "#/definitions/TabKind" },
+        "command": {
+          "type": ["string", "null"],
+          "description": "Start command for a terminal tab leaf."
+        },
+        "url": {
+          "type": ["string", "null"],
+          "description": "Starting URL for a browser tab leaf."
+        },
+        "file": {
+          "type": ["string", "null"],
+          "description": "Worktree-relative path for an editor/diff tab leaf."
+        }
+      }
+    },
+    "SplitHorizontal": {
+      "title": "SplitHorizontal",
+      "description": "A horizontal split node in a shared SplitNode tree (left/right panes).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "right"],
+      "properties": {
+        "left": { "$ref": "#/definitions/SplitNode" },
+        "right": { "$ref": "#/definitions/SplitNode" }
+      }
+    },
+    "SplitVertical": {
+      "title": "SplitVertical",
+      "description": "A vertical split node in a shared SplitNode tree (top/bottom panes).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "bottom"],
+      "properties": {
+        "top": { "$ref": "#/definitions/SplitNode" },
+        "bottom": { "$ref": "#/definitions/SplitNode" }
+      }
+    },
+    "SplitSplit": {
+      "title": "SplitSplit",
+      "description": "A binary split node: exactly one axis, horizontal (left/right) or vertical (top/bottom). Mirrors RunScriptSplit.",
+      "oneOf": [
+        { "$ref": "#/definitions/SplitHorizontal" },
+        { "$ref": "#/definitions/SplitVertical" }
+      ]
+    },
+    "SplitNode": {
+      "title": "SplitNode",
+      "description": "Shared recursive split-pane tree. A node is either a tab-spec leaf or a binary split (left/right for horizontal, top/bottom for vertical). The CLI split layout and the live frontend split layout both use this shape.",
+      "anyOf": [{ "$ref": "#/definitions/SplitTabLeaf" }, { "$ref": "#/definitions/SplitSplit" }]
     },
     "ScriptRunStatus": {
       "title": "ScriptRunStatus",

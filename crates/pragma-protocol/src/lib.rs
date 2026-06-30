@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use pragma_constants::{
-    AgentAttentionKind, AgentReportPayload, AgentStatus, ProtocolErrorCode, ProtocolEventKind,
-    ProtocolRpcMethod,
+    AgentAttentionKind, AgentReportPayload, AgentStatus, ControlMethod, ProtocolErrorCode,
+    ProtocolEventKind, ProtocolRpcMethod,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -91,6 +91,14 @@ pub struct RequestFrame {
     pub rpc: Option<RpcRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription: Option<SubscriptionRequest>,
+    /// Carries a brokered control request (CLI → server → controller app).
+    /// Present only for [`RequestKind::Control`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ControlRequest>,
+    /// Carries the controller app's reply to a forwarded control request
+    /// (app → server). Present only for [`RequestKind::ControlResult`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_result: Option<ControlResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -115,6 +123,19 @@ pub enum RequestKind {
     Rpc,
     /// Snapshot-then-delta event subscription. `subscription` carries the event kind.
     Subscribe,
+    /// The GUI app registers itself as the single controller so the server can
+    /// forward brokered [`Control`](Self::Control) requests to it. Sent once by
+    /// the app's control bridge right after the `Hello` frame. The server stores
+    /// the connection's writer in `Registry.controller`.
+    RegisterController,
+    /// A brokered control request from the CLI. `control` carries the
+    /// [`ControlMethod`] + JSON payload; `request_id` correlates the reply.
+    /// The server forwards it to the controller app and waits for the matching
+    /// [`ControlResult`](Self::ControlResult).
+    Control,
+    /// The controller app's reply to a forwarded `Control` request. `control_result`
+    /// carries the payload or error; `request_id` matches the forwarded request.
+    ControlResult,
 }
 
 /// Request payload for generalized server-owned business-logic RPC.
@@ -133,6 +154,43 @@ pub struct SubscriptionRequest {
     pub event: ProtocolEventKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
+}
+
+/// A brokered control request: the operation to run in the controller app plus a
+/// JSON payload of arguments. Carried in [`RequestFrame::control`] for
+/// [`RequestKind::Control`], and forwarded to the controller app inside a
+/// [`ControlEnvelope`] (which adds the `request_id`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlRequest {
+    pub method: ControlMethod,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+/// The forwarded control request the server writes to the controller app. Adds
+/// the `request_id` so the app can tag its [`ControlResult`] reply.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlEnvelope {
+    pub request_id: String,
+    pub method: ControlMethod,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+/// The controller app's reply to a `Control` request. Carried in
+/// [`RequestFrame::control_result`] (app → server) and in
+/// [`ServerFrame::ControlResult`] (server → CLI). `request_id` is taken from the
+/// frame that carries it, so it is omitted here.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlResult {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -228,6 +286,14 @@ pub enum ServerFrame {
     Response(ResponseFrame),
     Rpc(RpcResponseFrame),
     Event(EventFrame),
+    /// A brokered control request forwarded from a CLI connection to the
+    /// controller app. The app dispatches `method`, runs the matching Tauri
+    /// command, and writes back a [`RequestFrame`] with
+    /// [`RequestKind::ControlResult`].
+    Control(ControlEnvelope),
+    /// The result of a brokered control request, returned to the CLI. Carries
+    /// the JSON payload of the executed Tauri command, or an error.
+    ControlResult(ControlResult),
 }
 
 /// Reads one length-prefixed frame and splits it by tag.
@@ -317,8 +383,9 @@ pub fn write_output_frame(
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, read_json_frame, write_json_frame, write_output_frame, EventFrame, Frame,
-        HelloFrame, ProtocolError, RequestFrame, RequestKind, ServerFrame,
+        read_frame, read_json_frame, write_json_frame, write_output_frame, ControlEnvelope,
+        ControlMethod, ControlRequest, ControlResult, EventFrame, Frame, HelloFrame, ProtocolError,
+        RequestFrame, RequestKind, ServerFrame,
     };
 
     #[test]
@@ -334,6 +401,8 @@ mod tests {
             data: None,
             rpc: None,
             subscription: None,
+            control: None,
+            control_result: None,
         };
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write frame");
@@ -374,7 +443,11 @@ mod tests {
         let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read hello");
         match decoded {
             ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 3),
-            ServerFrame::Response(_) | ServerFrame::Rpc(_) | ServerFrame::Event(_) => {
+            ServerFrame::Response(_)
+            | ServerFrame::Rpc(_)
+            | ServerFrame::Event(_)
+            | ServerFrame::Control(_)
+            | ServerFrame::ControlResult(_) => {
                 panic!("expected hello")
             }
         }
@@ -393,9 +466,89 @@ mod tests {
         let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read rpc");
         match decoded {
             ServerFrame::Rpc(response) => assert_eq!(response.request_id, "rpc-1"),
-            ServerFrame::Hello(_) | ServerFrame::Response(_) | ServerFrame::Event(_) => {
+            ServerFrame::Hello(_)
+            | ServerFrame::Response(_)
+            | ServerFrame::Event(_)
+            | ServerFrame::Control(_)
+            | ServerFrame::ControlResult(_) => {
                 panic!("expected rpc")
             }
+        }
+    }
+
+    #[test]
+    fn control_request_round_trips() {
+        let frame = RequestFrame {
+            request_id: "ctrl-1".to_string(),
+            kind: RequestKind::Control,
+            session_id: None,
+            worktree_id: None,
+            cwd: None,
+            cols: None,
+            rows: None,
+            data: None,
+            rpc: None,
+            subscription: None,
+            control: Some(ControlRequest {
+                method: ControlMethod::TabsList,
+                payload: serde_json::json!({ "projectId": "p1" }),
+            }),
+            control_result: None,
+        };
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write control");
+        let decoded: RequestFrame = read_json_frame(&mut bytes.as_slice()).expect("read control");
+        assert_eq!(decoded.request_id, "ctrl-1");
+        assert!(matches!(decoded.kind, RequestKind::Control));
+        let control = decoded.control.expect("control payload");
+        assert!(matches!(control.method, ControlMethod::TabsList));
+        assert_eq!(control.payload, serde_json::json!({ "projectId": "p1" }));
+    }
+
+    #[test]
+    fn server_control_envelope_round_trips() {
+        let frame = ServerFrame::Control(ControlEnvelope {
+            request_id: "ctrl-2".to_string(),
+            method: ControlMethod::BrowserNavigate,
+            payload: serde_json::json!({ "tabId": "t1", "url": "https://example.com" }),
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write envelope");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read envelope");
+        match decoded {
+            ServerFrame::Control(envelope) => {
+                assert_eq!(envelope.request_id, "ctrl-2");
+                assert!(matches!(envelope.method, ControlMethod::BrowserNavigate));
+            }
+            ServerFrame::Hello(_)
+            | ServerFrame::Response(_)
+            | ServerFrame::Rpc(_)
+            | ServerFrame::Event(_)
+            | ServerFrame::ControlResult(_) => panic!("expected control envelope"),
+        }
+    }
+
+    #[test]
+    fn control_result_round_trips() {
+        let frame = ServerFrame::ControlResult(ControlResult {
+            ok: true,
+            payload: Some(serde_json::json!({ "tabId": "t9" })),
+            error: None,
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &frame).expect("write result");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read result");
+        match decoded {
+            ServerFrame::ControlResult(result) => {
+                assert!(result.ok);
+                assert_eq!(result.payload, Some(serde_json::json!({ "tabId": "t9" })));
+                assert!(result.error.is_none());
+            }
+            ServerFrame::Hello(_)
+            | ServerFrame::Response(_)
+            | ServerFrame::Rpc(_)
+            | ServerFrame::Event(_)
+            | ServerFrame::Control(_) => panic!("expected control result"),
         }
     }
 
@@ -416,6 +569,8 @@ mod tests {
             ServerFrame::Hello(_)
             | ServerFrame::Response(_)
             | ServerFrame::Rpc(_)
+            | ServerFrame::Control(_)
+            | ServerFrame::ControlResult(_)
             | ServerFrame::Event(
                 EventFrame::Output { .. }
                 | EventFrame::Exit { .. }

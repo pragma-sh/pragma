@@ -15,15 +15,16 @@ mod generated {
 
 pub use generated::{
     AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, AppInfo,
-    BranchSyncStatus, ChangeStatus, ChangedFile, Constants, Daemon, DiffSide, DirEntry,
-    EditorLauncher, EditorLaunchers, FileChange, FileChangeKind, FileContents, FileDiff, GitHub,
-    GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
+    BranchSyncStatus, ChangeStatus, ChangedFile, Constants, ControlMethod, Daemon, DiffSide,
+    DirEntry, EditorLauncher, EditorLaunchers, FileChange, FileChangeKind, FileContents, FileDiff,
+    GitHub, GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
     KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
     Keybindings, KeybindingsConfig, Links, PlatformChord, Project, ProjectIcon,
     ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
     RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScriptRunStatus, Scripts, Tab, TabKind, WindowDefaults, Worktree,
-    WorktreeChanges, WorktreeStatus,
+    RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit,
+    SplitTabLeaf, SplitVertical, Tab, TabKind, WindowDefaults, Worktree, WorktreeChanges,
+    WorktreeStatus,
 };
 
 /// The parsed, shared constants.
