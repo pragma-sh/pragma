@@ -86,7 +86,7 @@ import {
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
-  worktreeIsRemote,
+  worktreesAreRemote,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import {
@@ -1681,6 +1681,7 @@ async function runManagedScriptPlan(
     splitSnapshot = applyRunScriptItemLayout(item, splitSnapshot, ctx, tabIdsByCommand);
     // oxlint-disable-next-line no-await-in-loop -- Each script entry needs one paint after its tabs/split are in state, then time for the PTY shell to start, before queued terminal input flushes.
     await nextAnimationFrame();
+    // oxlint-disable-next-line no-await-in-loop -- Same reasoning as above: must elapse before this entry's queued terminal input flushes.
     await delay(INTERACTIVE_SCRIPT_START_DELAY_MS);
     flushScriptCommands(item, plan, tabIdsByCommand);
   }
@@ -2872,20 +2873,28 @@ function useProjectLoading(
     }
 
     let cancelled = false;
-    for (const worktreeId of unknownWorktreeIds) {
-      void worktreeIsRemote(worktreeId)
-        .then((isRemote) => {
-          if (!cancelled) {
-            dispatch({ type: "set-worktree-remote", worktreeId, isRemote });
-          }
+    void worktreesAreRemote(unknownWorktreeIds)
+      .then((remoteByWorktreeId) => {
+        if (cancelled) {
           return undefined;
-        })
-        .catch(() => {
-          if (!cancelled) {
-            dispatch({ type: "set-worktree-remote", worktreeId, isRemote: false });
-          }
-        });
-    }
+        }
+        for (const worktreeId of unknownWorktreeIds) {
+          dispatch({
+            type: "set-worktree-remote",
+            worktreeId,
+            isRemote: remoteByWorktreeId[worktreeId] ?? false,
+          });
+        }
+        return undefined;
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        for (const worktreeId of unknownWorktreeIds) {
+          dispatch({ type: "set-worktree-remote", worktreeId, isRemote: false });
+        }
+      });
 
     return () => {
       cancelled = true;

@@ -298,14 +298,25 @@ async fn mark_agents_seen(hosts: tauri::State<'_, Hosts>, tab_id: String) -> App
     .await
 }
 
-/// Returns whether a worktree belongs to an SSH-routed remote project.
+/// Returns, for each given worktree id, whether it belongs to an SSH-routed
+/// remote project. Batched so the frontend can resolve many worktrees in one
+/// IPC round trip instead of fanning out a call per worktree. A worktree id
+/// that fails to resolve (e.g. already deleted) is reported as not remote.
 #[tauri::command]
-fn worktree_is_remote(
+fn worktrees_are_remote(
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
-    worktree_id: String,
-) -> AppResult<bool> {
-    Ok(hosts.host_id_for_worktree(&db, &worktree_id)? != LOCAL_HOST)
+    worktree_ids: Vec<String>,
+) -> std::collections::HashMap<String, bool> {
+    worktree_ids
+        .into_iter()
+        .map(|worktree_id| {
+            let is_remote = hosts
+                .host_id_for_worktree(&db, &worktree_id)
+                .is_ok_and(|host_id| host_id != LOCAL_HOST);
+            (worktree_id, is_remote)
+        })
+        .collect()
 }
 
 /// Opens a live filesystem-change subscription for a worktree, streaming each
@@ -530,7 +541,7 @@ pub fn run() {
             pty_kill_for_path,
             watch_worktree_files,
             mark_agents_seen,
-            worktree_is_remote,
+            worktrees_are_remote,
             take_pending_deep_link,
             restart_daemon,
             read_daemon_log,

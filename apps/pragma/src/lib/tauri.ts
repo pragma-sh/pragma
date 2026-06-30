@@ -316,9 +316,12 @@ export function listWorktrees(projectId: string): Promise<Worktree[]> {
   return invoke<Worktree[]>("list_worktrees", { projectId });
 }
 
-/** Returns whether a worktree belongs to an SSH-routed remote project. */
-export function worktreeIsRemote(worktreeId: string): Promise<boolean> {
-  return invoke<boolean>("worktree_is_remote", { worktreeId });
+/**
+ * Returns, for each given worktree id, whether it belongs to an SSH-routed
+ * remote project. Batched to avoid one IPC round trip per worktree.
+ */
+export function worktreesAreRemote(worktreeIds: string[]): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("worktrees_are_remote", { worktreeIds });
 }
 
 /** Opens a worktree in an editor launcher, or the system file explorer. */

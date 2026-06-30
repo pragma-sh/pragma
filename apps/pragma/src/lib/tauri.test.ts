@@ -42,8 +42,8 @@ import {
   unstageAll,
   unstageFile,
   worktreeChanges,
+  worktreesAreRemote,
   worktreesMergedStatus,
-  worktreeIsRemote,
   worktreeStatus,
   writeFile,
 } from "./tauri";
@@ -160,9 +160,11 @@ describe("browser IPC wrappers", () => {
     });
   });
 
-  it("worktreeIsRemote forwards the worktree id", () => {
-    void worktreeIsRemote("wt-1");
-    expect(invokeMock).toHaveBeenCalledWith("worktree_is_remote", { worktreeId: "wt-1" });
+  it("worktreesAreRemote forwards the worktree ids", () => {
+    void worktreesAreRemote(["wt-1", "wt-2"]);
+    expect(invokeMock).toHaveBeenCalledWith("worktrees_are_remote", {
+      worktreeIds: ["wt-1", "wt-2"],
+    });
   });
 });
 
