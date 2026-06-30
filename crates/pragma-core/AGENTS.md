@@ -25,7 +25,9 @@ Tauri or client presentation code.
 - **Still client-local:** `database`, `projects`, `worktrees`, `tabs`, `kanban`,
   `settings` remain metadata in the client DB (`pragma.db`) and return
   `UnsupportedMethod` from core — by design (see `pragma-client/router.rs`).
-- `github`/`ai` are intentionally kept as local sidecars, not core RPC.
+- GitHub API/auth and AI are intentionally kept as local sidecars, not core RPC.
+  Worktree-scoped git operations that support the GitHub PR flow still belong in the
+  `git` RPC, because they must execute on the host that owns the worktree path.
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`) are the client↔core
   contract; both sides depend on this crate to build/parse them.
 - All `git` subprocess calls go through `process_env::command` so a GUI-launched

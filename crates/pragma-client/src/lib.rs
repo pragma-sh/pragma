@@ -9,7 +9,6 @@
 pub mod router;
 mod ssh;
 
-use std::net::Shutdown;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -21,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, ProtocolEventKind, RequestFrame, RequestKind,
-    RpcRequest, ServerFrame, SubscriptionRequest,
+    read_json_frame, write_input_frame, write_json_frame, ProtocolEventKind, RequestFrame,
+    RequestKind, RpcRequest, ServerFrame, SubscriptionRequest,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -113,7 +112,7 @@ pub struct PragmaClient {
 
 struct InputMsg {
     session_id: String,
-    data: String,
+    data: Vec<u8>,
 }
 
 impl PragmaClient {
@@ -184,7 +183,10 @@ impl PragmaClient {
         if guard.is_none() {
             *guard = Some(self.start_input_writer());
         }
-        let msg = InputMsg { session_id, data };
+        let msg = InputMsg {
+            session_id,
+            data: data.into_bytes(),
+        };
         if let Err(err) = guard.as_ref().expect("input writer present").send(msg) {
             let tx = self.start_input_writer();
             let _ = tx.send(err.0);
@@ -346,27 +348,16 @@ impl PragmaClient {
         let client = self.clone();
         thread::spawn(move || {
             let mut conn: Option<UnixStream> = None;
-            for msg in rx {
-                let frame = request_write(msg.session_id, msg.data);
-                for _ in 0..2 {
-                    if conn.is_none() {
-                        let Ok(stream) = client.connect_with_spawn() else {
-                            break;
-                        };
-                        let _ = stream.set_read_timeout(None);
-                        if let Ok(reader) = stream.try_clone() {
-                            thread::spawn(move || discard_frames(reader));
-                        }
-                        conn = Some(stream);
+            while let Ok(mut msg) = rx.recv() {
+                while let Ok(next) = rx.try_recv() {
+                    if next.session_id == msg.session_id {
+                        msg.data.extend_from_slice(&next.data);
+                    } else {
+                        send_input_frame(&client, &mut conn, &msg);
+                        msg = next;
                     }
-                    let Some(stream) = conn.as_mut() else {
-                        break;
-                    };
-                    if write_json_frame(stream, &frame).is_ok() {
-                        break;
-                    }
-                    conn = None;
                 }
+                send_input_frame(&client, &mut conn, &msg);
             }
         });
         tx
@@ -808,9 +799,23 @@ fn configure_stream(stream: &UnixStream) -> ClientResult<()> {
     Ok(())
 }
 
-fn discard_frames(mut reader: UnixStream) {
-    while read_frame(&mut reader).is_ok() {}
-    let _ = reader.shutdown(Shutdown::Both);
+fn send_input_frame(client: &PragmaClient, conn: &mut Option<UnixStream>, msg: &InputMsg) {
+    for _ in 0..2 {
+        if conn.is_none() {
+            let Ok(stream) = client.connect_with_spawn() else {
+                break;
+            };
+            let _ = stream.set_read_timeout(None);
+            *conn = Some(stream);
+        }
+        let Some(stream) = conn.as_mut() else {
+            break;
+        };
+        if write_input_frame(stream, &msg.session_id, &msg.data).is_ok() {
+            break;
+        }
+        *conn = None;
+    }
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
+use crate::ssh_host;
 
 /// Re-validates a worktree-relative path against escaping the worktree, returning
 /// the resolved absolute path. Used by callers that still touch the local disk
@@ -41,72 +42,78 @@ fn fs_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &FsRequest) -> AppResul
 
 /// Lists the immediate entries of a worktree-relative directory (`""` = root).
 #[tauri::command]
-pub fn list_dir_entries(
+pub async fn list_dir_entries(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<Vec<DirEntry>> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::ListDir { root, path })
 }
 
 /// Creates an empty file at a worktree-relative path.
 #[tauri::command]
-pub fn create_file(
+pub async fn create_file(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::CreateFile { root, path })
 }
 
 /// Creates a directory at a worktree-relative path.
 #[tauri::command]
-pub fn create_folder(
+pub async fn create_folder(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::CreateFolder { root, path })
 }
 
 /// Reports whether a worktree-relative path exists on disk.
 #[tauri::command]
-pub fn path_exists(
+pub async fn path_exists(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<bool> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::PathExists { root, path })
 }
 
 /// Reads a worktree-relative file.
 #[tauri::command]
-pub fn read_file(
+pub async fn read_file(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<FileContents> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::ReadFile { root, path })
 }
 
 /// Overwrites a worktree-relative file with UTF-8 text.
 #[tauri::command]
-pub fn write_file(
+pub async fn write_file(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
@@ -114,7 +121,7 @@ pub fn write_file(
     contents: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(
         &pty,
         &FsRequest::WriteFile {
@@ -127,7 +134,8 @@ pub fn write_file(
 
 /// Renames (or moves) a worktree-relative entry.
 #[tauri::command]
-pub fn rename_file(
+pub async fn rename_file(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
@@ -135,7 +143,7 @@ pub fn rename_file(
     to_path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(
         &pty,
         &FsRequest::Rename {
@@ -148,13 +156,14 @@ pub fn rename_file(
 
 /// Deletes a worktree-relative file or empty directory.
 #[tauri::command]
-pub fn delete_file(
+pub async fn delete_file(
+    app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     worktree_id: String,
     path: String,
 ) -> AppResult<()> {
     let root = worktree_root(&db, &worktree_id)?;
-    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::Delete { root, path })
 }

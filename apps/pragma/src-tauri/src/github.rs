@@ -18,10 +18,14 @@ use std::time::{Duration, Instant};
 use pragma_constants::{
     BranchSyncStatus, FileDiff, GitHubAuthStatus, GitHubRepoRef, GitHubUser, CONSTANTS,
 };
+use pragma_core::git::{GitRequest, GithubRepoInfo};
+use serde::de::DeserializeOwned;
 use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::hosts::Hosts;
+use crate::pty::PtyClient;
 
 /// Settings key holding the "user skipped GitHub setup" flag (persisted in the
 /// `settings` table — it isn't a secret).
@@ -426,14 +430,23 @@ fn poll_device_flow_impl(
 
 /// Parses `origin` into owner/repo plus the default and head branches.
 #[tauri::command]
-pub fn github_repo_ref(db: State<'_, Db>, worktree_id: String) -> AppResult<GitHubRepoRef> {
+pub fn github_repo_ref(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<GitHubRepoRef> {
     let worktree = db.worktree(&worktree_id)?;
-    let root = PathBuf::from(&worktree.path);
-    let remote = git_stdout(&root, &["remote", "get-url", "origin"])?;
-    let (owner, repo) = parse_remote_url(remote.trim()).ok_or_else(|| {
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    let info: GithubRepoInfo = host_git(
+        &pty,
+        &GitRequest::GithubRepoInfo {
+            root: worktree.path,
+        },
+    )?;
+    let (owner, repo) = parse_remote_url(info.remote_url.trim()).ok_or_else(|| {
         AppError::GitHub(format!(
             "could not parse origin remote URL: {}",
-            remote.trim()
+            info.remote_url.trim()
         ))
     })?;
     // The default PR base is the branch this worktree was created to merge back
@@ -447,8 +460,8 @@ pub fn github_repo_ref(db: State<'_, Db>, worktree_id: String) -> AppResult<GitH
     Ok(GitHubRepoRef {
         owner,
         repo,
-        default_branch: default_branch(&root),
-        head_branch: crate::git::current_branch(&root)?,
+        default_branch: info.default_branch,
+        head_branch: info.head_branch,
         parent_branch,
     })
 }
@@ -457,10 +470,19 @@ pub fn github_repo_ref(db: State<'_, Db>, worktree_id: String) -> AppResult<GitH
 /// --pretty=%s`), used to seed the create-PR form. Empty string when there are no
 /// commits yet, so the UI just shows an empty title input.
 #[tauri::command]
-pub fn github_default_pr_title(db: State<'_, Db>, worktree_id: String) -> AppResult<String> {
+pub fn github_default_pr_title(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<String> {
     let worktree = db.worktree(&worktree_id)?;
-    let root = PathBuf::from(&worktree.path);
-    Ok(git_stdout(&root, &["log", "-1", "--pretty=%s"]).unwrap_or_default())
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    host_git(
+        &pty,
+        &GitRequest::GithubDefaultPrTitle {
+            root: worktree.path,
+        },
+    )
 }
 
 /// Fetches `origin` and returns the branch's ahead/behind counts vs its
@@ -468,60 +490,40 @@ pub fn github_default_pr_title(db: State<'_, Db>, worktree_id: String) -> AppRes
 #[tauri::command]
 pub async fn github_fetch_and_sync(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<BranchSyncStatus> {
     let worktree = db.worktree(&worktree_id)?;
-    let root = PathBuf::from(&worktree.path);
-    tauri::async_runtime::spawn_blocking(move || fetch_and_sync_impl(&root))
-        .await
-        .map_err(|error| AppError::GitHub(format!("fetch task failed: {error}")))?
-}
-
-fn fetch_and_sync_impl(root: &Path) -> AppResult<BranchSyncStatus> {
-    let branch = crate::git::current_branch(root)?;
-    // Best-effort fetch: an offline launch still gets ahead/behind against the
-    // last-known `origin/<branch>` rather than erroring the whole pre-flight.
-    let _ = git_stdout(root, &["fetch", "origin"]);
-    let has_upstream = git_stdout(
-        root,
-        &[
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ],
-    )
-    .is_ok();
-    if !has_upstream {
-        return Ok(BranchSyncStatus {
-            branch,
-            ahead: 0,
-            behind: 0,
-            has_upstream: false,
-        });
-    }
-    let counts = git_stdout(
-        root,
-        &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
-    )?;
-    let (behind, ahead) = parse_ahead_behind(&counts);
-    Ok(BranchSyncStatus {
-        branch,
-        ahead,
-        behind,
-        has_upstream: true,
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        host_git(
+            &pty,
+            &GitRequest::GithubFetchAndSync {
+                root: worktree.path,
+            },
+        )
     })
+    .await
+    .map_err(|error| AppError::GitHub(format!("fetch task failed: {error}")))?
 }
 
 /// Pushes the worktree's branch to `origin`, setting upstream, before opening a
 /// PR (`git push -u origin <branch>`).
 #[tauri::command]
-pub async fn github_push_branch(db: State<'_, Db>, worktree_id: String) -> AppResult<()> {
+pub async fn github_push_branch(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<()> {
     let worktree = db.worktree(&worktree_id)?;
-    let root = PathBuf::from(&worktree.path);
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let branch = crate::git::current_branch(&root)?;
-        git_stdout(&root, &["push", "-u", "origin", &branch]).map(|_| ())
+        host_git(
+            &pty,
+            &GitRequest::GithubPushBranch {
+                root: worktree.path,
+            },
+        )
     })
     .await
     .map_err(|error| AppError::GitHub(format!("push task failed: {error}")))?
@@ -539,19 +541,26 @@ pub fn github_pr_file_diff(
 ) -> AppResult<FileDiff> {
     let worktree = db.worktree(&worktree_id)?;
     let root = PathBuf::from(&worktree.path);
-    crate::fs::resolve_in_worktree(&root, &path)?;
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     crate::git::pr_file_diff(&pty, &root, &base, &path, old_path.as_deref())
 }
 
 /// Deletes the worktree's branch on `origin` (post-merge cleanup).
 #[tauri::command]
-pub async fn github_delete_remote_branch(db: State<'_, Db>, worktree_id: String) -> AppResult<()> {
+pub async fn github_delete_remote_branch(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<()> {
     let worktree = db.worktree(&worktree_id)?;
-    let root = PathBuf::from(&worktree.path);
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let branch = crate::git::current_branch(&root)?;
-        git_stdout(&root, &["push", "origin", "--delete", &branch]).map(|_| ())
+        host_git(
+            &pty,
+            &GitRequest::GithubDeleteRemoteBranch {
+                root: worktree.path,
+            },
+        )
     })
     .await
     .map_err(|error| AppError::GitHub(format!("delete branch task failed: {error}")))?
@@ -561,34 +570,10 @@ pub async fn github_delete_remote_branch(db: State<'_, Db>, worktree_id: String)
 // Small git helpers (local to this module)
 // ---------------------------------------------------------------------------
 
-/// Runs `git -C <root> <args>` and returns trimmed stdout, mapping failures to a
-/// `GitHub` error so the UI surfaces them with the rest of the GitHub flow.
-fn git_stdout(root: &Path, args: &[&str]) -> AppResult<String> {
-    let output = crate::process_env::command("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map_err(|error| AppError::GitHub(format!("failed to run git: {error}")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(AppError::GitHub(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ))
-    }
-}
-
-/// Resolves the repo's default branch from the locally-recorded
-/// `refs/remotes/origin/HEAD`, falling back to `main`.
-fn default_branch(root: &Path) -> String {
-    git_stdout(
-        root,
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    )
-    .ok()
-    .and_then(|head| head.strip_prefix("origin/").map(str::to_string))
-    .unwrap_or_else(|| "main".to_string())
+/// Runs a host-side git RPC and maps transport/core failures into GitHub errors
+/// so the PR UI keeps a single error category.
+fn host_git<T: DeserializeOwned>(pty: &PtyClient, request: &GitRequest) -> AppResult<T> {
+    crate::git::host_rpc(pty, request).map_err(|error| AppError::GitHub(error.to_string()))
 }
 
 /// Parses owner/repo from an SSH or HTTPS GitHub remote URL.
@@ -616,20 +601,11 @@ fn parse_remote_url(url: &str) -> Option<(String, String)> {
     Some((owner, repo))
 }
 
-/// Parses `git rev-list --left-right --count` output ("<behind>\t<ahead>") into
-/// `(behind, ahead)`. Malformed input yields zeros.
-fn parse_ahead_behind(output: &str) -> (u64, u64) {
-    let mut fields = output.split_whitespace();
-    let behind = fields.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-    let ahead = fields.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-    (behind, ahead)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_ahead_behind, parse_device_code, parse_remote_url, parse_token_response, parse_user,
-        PollOutcome, TokenStore,
+        parse_device_code, parse_remote_url, parse_token_response, parse_user, PollOutcome,
+        TokenStore,
     };
 
     #[test]
@@ -692,13 +668,6 @@ mod tests {
     #[test]
     fn rejects_unparseable_remote() {
         assert_eq!(parse_remote_url("not-a-url"), None);
-    }
-
-    #[test]
-    fn parses_ahead_behind_counts() {
-        assert_eq!(parse_ahead_behind("3\t5"), (3, 5));
-        assert_eq!(parse_ahead_behind("0\t0"), (0, 0));
-        assert_eq!(parse_ahead_behind("garbage"), (0, 0));
     }
 
     #[test]

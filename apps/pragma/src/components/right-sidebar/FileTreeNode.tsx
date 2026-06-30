@@ -64,7 +64,7 @@ export function FileTree({
 
   useEffect(() => {
     let cancelled = false;
-    setState({ kind: "loading" });
+    setState((previous) => (previous.kind === "ready" ? previous : { kind: "loading" }));
     void (async () => {
       try {
         const entries = await listDirEntries(ctrl.worktreeId, path);

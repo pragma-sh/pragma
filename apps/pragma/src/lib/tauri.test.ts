@@ -43,6 +43,7 @@ import {
   unstageFile,
   worktreeChanges,
   worktreesMergedStatus,
+  worktreeIsRemote,
   worktreeStatus,
   writeFile,
 } from "./tauri";
@@ -157,6 +158,11 @@ describe("browser IPC wrappers", () => {
       worktreeId: "wt-1",
       editorId: "vscode",
     });
+  });
+
+  it("worktreeIsRemote forwards the worktree id", () => {
+    void worktreeIsRemote("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("worktree_is_remote", { worktreeId: "wt-1" });
   });
 });
 

@@ -176,7 +176,10 @@ async fn run_bridge(
 }
 
 async fn connect(host: &str, port: u16) -> Result<Handle<TrustServerKey>, SshBridgeError> {
-    let ssh_config = Arc::new(Config::default());
+    let ssh_config = Arc::new(Config {
+        nodelay: true,
+        ..Config::default()
+    });
     Ok(client::connect(ssh_config, (host, port), TrustServerKey).await?)
 }
 

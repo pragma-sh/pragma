@@ -8,6 +8,7 @@
 use std::path::{Component, Path};
 use std::time::Duration;
 
+use notify_debouncer_full::notify::event::{MetadataKind, ModifyKind};
 use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use pragma_constants::{FileChange, FileChangeKind};
@@ -48,7 +49,9 @@ impl WorktreeWatcher {
             };
             let mut changes: Vec<FileChange> = Vec::new();
             for event in events {
-                let kind = classify(event.kind);
+                let Some(kind) = classify(event.kind) else {
+                    continue;
+                };
                 for path in &event.paths {
                     if let Some(change) = to_change(&canonical_root, path, kind) {
                         changes.push(change);
@@ -71,17 +74,26 @@ impl WorktreeWatcher {
     }
 }
 
-/// Collapses a `notify` event kind onto the three preview-relevant outcomes.
-/// Anything that is not a create or a remove (rename, content/metadata change,
-/// or an `Any`/`Other` catch-all) is reported as a modification so the client
-/// re-reads the file.
-fn classify(kind: EventKind) -> FileChangeKind {
+/// Collapses a `notify` event kind onto the three preview-relevant outcomes,
+/// dropping read/access noise that would make previews reload themselves.
+/// Anything else that is not a create or a remove (rename, content/metadata
+/// change, or an `Any`/`Other` catch-all) is reported as a modification so the
+/// client re-reads the file.
+fn classify(kind: EventKind) -> Option<FileChangeKind> {
+    if kind.is_access()
+        || matches!(
+            kind,
+            EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime))
+        )
+    {
+        return None;
+    }
     if kind.is_create() {
-        FileChangeKind::Created
+        Some(FileChangeKind::Created)
     } else if kind.is_remove() {
-        FileChangeKind::Removed
+        Some(FileChangeKind::Removed)
     } else {
-        FileChangeKind::Modified
+        Some(FileChangeKind::Modified)
     }
 }
 
@@ -115,6 +127,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use notify_debouncer_full::notify::event::{AccessKind, AccessMode, CreateKind};
     use pragma_constants::FileChangeKind;
     use tempfile::tempdir;
 
@@ -169,6 +182,24 @@ mod tests {
         assert!(
             changes.iter().any(|change| change.path == "hello.txt"),
             "expected hello.txt in {changes:?}",
+        );
+    }
+
+    #[test]
+    fn ignores_read_only_access_events() {
+        assert_eq!(
+            super::classify(super::EventKind::Access(AccessKind::Open(AccessMode::Read))),
+            None
+        );
+        assert_eq!(
+            super::classify(super::EventKind::Modify(super::ModifyKind::Metadata(
+                super::MetadataKind::AccessTime
+            ))),
+            None
+        );
+        assert_eq!(
+            super::classify(super::EventKind::Create(CreateKind::File)),
+            Some(FileChangeKind::Created)
         );
     }
 }

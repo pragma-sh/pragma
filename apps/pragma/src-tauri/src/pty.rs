@@ -228,6 +228,7 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                     )
                     | Err(_) => {}
                 },
+                Frame::Input { .. } => {}
             }
         }
         let _ = stream.shutdown(Shutdown::Both);

@@ -28,3 +28,5 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   SSH exists.
 - Do not parse or reframe PTY output in the bridge. It copies raw socket bytes.
 - Keep terminal output on `write_output_frame` / binary frame fast path.
+- Keep terminal input on `write_input_frame` / binary fire-and-forget fast path. Do not
+  reintroduce per-keystroke JSON requests or response draining.

@@ -621,6 +621,9 @@ export function TerminalTabs() {
   const { split, parentTabId, splitDirection, splitIsActive, topTabs } = useSplitSummary(workspace);
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
   const selectedEditor = editorFor(selectedEditorId);
+  const editorDisabled =
+    !workspace.selectedWorktree ||
+    workspace.remoteWorktrees[workspace.selectedWorktree.id] === true;
   const runDisabled = computeRunDisabled(
     workspace.runScriptsState,
     workspace.buildScriptsState,
@@ -657,7 +660,7 @@ export function TerminalTabs() {
           />
           <div className="flex shrink-0 items-center justify-end">
             <EditorLauncherMenu
-              disabled={!workspace.selectedWorktree}
+              disabled={editorDisabled}
               onSelect={openEditor}
               selectedEditor={selectedEditor}
             />

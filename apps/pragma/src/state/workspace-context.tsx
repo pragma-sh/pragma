@@ -86,6 +86,7 @@ import {
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
+  worktreeIsRemote,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import {
@@ -129,6 +130,8 @@ interface WorkspaceState {
   splitRootByWorktree: Record<string, SplitLayoutNode>;
   /** Focused split pane per worktree; tab shortcuts apply to this pane. */
   focusedPaneByWorktree: Record<string, string>;
+  /** True for worktrees whose project is routed through an SSH host. */
+  remoteWorktrees: Record<string, boolean>;
   icons: Record<string, ProjectIcon | null>;
   loading: boolean;
   error: string | null;
@@ -206,6 +209,7 @@ type WorkspaceAction =
   | { type: "set-auto-title"; tabId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
+  | { type: "set-worktree-remote"; worktreeId: string; isRemote: boolean }
   | { type: "remove-worktree"; worktreeId: string }
   | { type: "update-worktree"; worktree: Worktree }
   | { type: "clear-error" };
@@ -312,6 +316,7 @@ const initialState: WorkspaceState = {
   activeTabByWorktree: {},
   splitRootByWorktree: {},
   focusedPaneByWorktree: {},
+  remoteWorktrees: {},
   icons: {},
   loading: true,
   error: null,
@@ -1243,6 +1248,8 @@ function reduceRemoveWorktree(
     state,
     action.worktreeId,
   );
+  const remoteWorktrees = { ...state.remoteWorktrees };
+  delete remoteWorktrees[action.worktreeId];
   return {
     ...state,
     worktrees,
@@ -1250,6 +1257,7 @@ function reduceRemoveWorktree(
     tabs,
     splitRootByWorktree,
     focusedPaneByWorktree,
+    remoteWorktrees,
   };
 }
 
@@ -1411,6 +1419,16 @@ function reduceSetIcon(state: WorkspaceState, action: ActionOf<"set-icon">): Wor
   return { ...state, icons: { ...state.icons, [action.projectId]: action.icon } };
 }
 
+function reduceSetWorktreeRemote(
+  state: WorkspaceState,
+  action: ActionOf<"set-worktree-remote">,
+): WorkspaceState {
+  return {
+    ...state,
+    remoteWorktrees: { ...state.remoteWorktrees, [action.worktreeId]: action.isRemote },
+  };
+}
+
 function reduceClearError(state: WorkspaceState, _action: ActionOf<"clear-error">): WorkspaceState {
   return { ...state, error: null };
 }
@@ -1444,6 +1462,7 @@ const REDUCERS: ReducerMap = {
   "set-auto-title": reduceSetAutoTitle,
   "set-tab-url": reduceSetTabUrl,
   "set-icon": reduceSetIcon,
+  "set-worktree-remote": reduceSetWorktreeRemote,
   "remove-worktree": reduceRemoveWorktree,
   "update-worktree": reduceUpdateWorktree,
   "clear-error": reduceClearError,
@@ -2842,6 +2861,36 @@ function useProjectLoading(
       );
     }
   }, [dispatch, state.icons, state.projects]);
+
+  useEffect(() => {
+    const unknownWorktreeIds = Object.values(state.worktrees)
+      .flat()
+      .map((worktree) => worktree.id)
+      .filter((worktreeId) => !(worktreeId in state.remoteWorktrees));
+    if (unknownWorktreeIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    for (const worktreeId of unknownWorktreeIds) {
+      void worktreeIsRemote(worktreeId)
+        .then((isRemote) => {
+          if (!cancelled) {
+            dispatch({ type: "set-worktree-remote", worktreeId, isRemote });
+          }
+          return undefined;
+        })
+        .catch(() => {
+          if (!cancelled) {
+            dispatch({ type: "set-worktree-remote", worktreeId, isRemote: false });
+          }
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, state.remoteWorktrees, state.worktrees]);
 }
 
 /** Persists split layouts so they survive project switches and app restarts. */

@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 7
+    "protocolVersion": 8
   },
   "protocol": {
     "rpcMethods": [

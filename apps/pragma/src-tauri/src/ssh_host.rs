@@ -9,6 +9,7 @@
 //! routes over the bridge to the remote server (see `hosts.rs`).
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use pragma_client::router::ProjectRoute;
 use pragma_client::{
@@ -27,6 +28,7 @@ use crate::pty::PtyClient;
 /// Remote channel the host server runs under. Single source of truth so the
 /// forwarded socket path is deterministic.
 const REMOTE_CHANNEL: &str = pragma_protocol::PROD_CHANNEL;
+static REMOTE_RECONNECT_LOCK: Mutex<()> = Mutex::new(());
 
 /// How the user chose to authenticate. SSH agent is the default; key file and
 /// password are the alternatives surfaced under "More options".
@@ -176,7 +178,11 @@ pub fn reconnect_remote_hosts(app: AppHandle) {
                 user: preferences.user.clone(),
                 auth: RemoteAuth::Agent,
             };
-            match reconnect_remote_host(&route.host_id, &config) {
+            let reconnect_result = REMOTE_RECONNECT_LOCK
+                .lock()
+                .map_err(|_| AppError::LockPoisoned)
+                .and_then(|_guard| reconnect_remote_host(&route.host_id, &config));
+            match reconnect_result {
                 Ok(client) => {
                     let label = format!("{}@{}", preferences.user, preferences.host);
                     if let Err(error) = hosts.register_remote(
@@ -203,6 +209,77 @@ pub fn reconnect_remote_hosts(app: AppHandle) {
             }
         }
     });
+}
+
+/// Resolves a host client, reconnecting a persisted agent-auth remote on demand.
+/// This avoids startup races where a terminal spawns before the background remote
+/// reconnect thread has registered the host in memory.
+pub async fn client_for_host(app: AppHandle, hosts: &Hosts, host_id: &str) -> AppResult<PtyClient> {
+    if let Ok(client) = hosts.client_for_host(host_id) {
+        return Ok(client);
+    }
+    if host_id == LOCAL_HOST {
+        return hosts.client_for_host(host_id);
+    }
+    let preferences = remote_preferences_for_host(hosts, host_id)?;
+    if preferences.auth_method != RemoteRouteAuthMethod::Agent {
+        return hosts.client_for_host(host_id);
+    }
+    let config = SshConnectConfig {
+        host: preferences.host.clone(),
+        port: preferences.port,
+        user: preferences.user.clone(),
+        auth: RemoteAuth::Agent,
+    };
+    let reconnect_host_id = host_id.to_string();
+    let client = tauri::async_runtime::spawn_blocking(move || {
+        let _guard = REMOTE_RECONNECT_LOCK
+            .lock()
+            .map_err(|_| AppError::LockPoisoned)?;
+        reconnect_remote_host(&reconnect_host_id, &config)
+    })
+    .await
+    .map_err(|error| AppError::Daemon(format!("remote reconnect task failed: {error}")))??;
+
+    hosts.register_remote(
+        host_id.to_string(),
+        RemoteHost {
+            client: client.clone(),
+            label: format!("{}@{}", preferences.user, preferences.host),
+        },
+    )?;
+    agent_events::start_for(app, client.clone());
+    Ok(client)
+}
+
+/// Resolves the client for a worktree's host, reconnecting a persisted remote
+/// on demand (see [`client_for_host`]). This is the helper worktree-scoped
+/// commands (filesystem, file watch) should use instead of `Hosts::for_worktree`,
+/// so they don't race the background remote-reconnect thread on first load.
+pub async fn client_for_worktree(
+    app: AppHandle,
+    db: &Db,
+    hosts: &Hosts,
+    worktree_id: &str,
+) -> AppResult<PtyClient> {
+    let host_id = hosts.host_id_for_worktree(db, worktree_id)?;
+    client_for_host(app, hosts, &host_id).await
+}
+
+fn remote_preferences_for_host(hosts: &Hosts, host_id: &str) -> AppResult<RemoteRoutePreferences> {
+    let routes = hosts
+        .router()
+        .project_routes()
+        .map_err(|error| AppError::Daemon(format!("failed to load remote routes: {error}")))?;
+    routes
+        .into_iter()
+        .find(|route| route.host_id == host_id)
+        .ok_or_else(|| AppError::Daemon(format!("remote host '{host_id}' is not connected")))
+        .and_then(|route| {
+            Ok(serde_json::from_value::<RemoteRoutePreferences>(
+                route.preferences,
+            )?)
+        })
 }
 
 /// Derives a project display name from the remote absolute path.

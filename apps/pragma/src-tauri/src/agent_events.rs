@@ -65,7 +65,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                 )
                 | Err(_) => {}
             },
-            Frame::Output { .. } => {}
+            Frame::Output { .. } | Frame::Input { .. } => {}
         }
     }
 }

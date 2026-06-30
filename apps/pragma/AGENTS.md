@@ -91,7 +91,9 @@ builds re-prompt on every launch. The plaintext file has no signature check.
 
 Also in Rust: OAuth **Device Flow** polling (`reqwest` blocking, no client
 secret/PKCE), `gh` CLI detection/adoption, `origin`→`owner/repo`, fetch+ahead/behind,
-push, the local `base...HEAD` PR file diff, and remote-branch delete. The
+push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
+GitHub git operations must run through the owning host's `git` RPC so remote project
+paths are evaluated on the remote host, not the desktop client. The
 `oauthClientId`, scopes, and endpoint URLs are in `@pragma/constants` (`github` block);
 the setup-skip flag persists in the `settings` table (`github.setupDismissed`).
 
@@ -223,9 +225,10 @@ protocol-compatible `pragma-server` is running under the production channel, reg
 the host in `Hosts`, records the project-path route in `router.db`, and inserts the
 client-local project metadata. Route preferences persist only non-secret SSH metadata
 (`host`, `port`, `user`, `authMethod`); agent-auth routes reconnect in the background
-on app startup, while password/key-passphrase routes stay disconnected until the user
-reconnects. Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown
-commands route through the owning host via `pragma-core` RPC.
+on app startup and terminal spawn reconnects them on demand if the UI wins the startup
+race, while password/key-passphrase routes stay disconnected until the user reconnects.
+Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown commands
+route through the owning host via `pragma-core` RPC.
 
 ## Native menubar + Troubleshooting menu
 
@@ -269,10 +272,10 @@ parser/render pass. Scrollback is bounded to 500 lines (`TERMINAL_SCROLLBACK_LIN
 
 **Keystroke input is fire-and-forget and pipelined:** `onData` fires `ptyWrite` without
 awaiting; on the Rust side `pty_write` only _enqueues_ onto a dedicated writer thread
-(`input_tx` / `start_input_writer` in `src-tauri/src/pty.rs`) that owns its own daemon
-connection. Writes do **not** wait for the daemon's per-write `Response` (a companion
-`discard_frames` thread drains them). `resize`/`kill` use the separate pooled
-`request_conn`.
+(`input_tx` / `start_input_writer` in `pragma-client`) that owns its own daemon
+connection. The writer drains any already-queued same-session input into one frame and
+sends `write_input_frame` binary frames; there is no per-keystroke JSON request or
+daemon response. `resize`/`kill` use the separate pooled `request_conn`.
 
 **Native OS text-editing chords** (macOS Cmd+Backspace/Left/Right,
 Option+Left/Right/Backspace; Linux Ctrl+Left/Right/Backspace/Delete) are translated to

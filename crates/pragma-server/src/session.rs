@@ -65,6 +65,7 @@ enum OutputMsg {
     Output(Vec<u8>),
     Title(String),
     Exit(Option<i32>),
+    Flush,
 }
 
 /// Accumulates consecutive PTY output so a burst can be broadcast as a single
@@ -106,6 +107,7 @@ pub struct Session {
     child: Mutex<Option<PtyChild>>,
     scrollback: Mutex<Scrollback>,
     subscribers: Mutex<Vec<Sender<EventFrame>>>,
+    output_tx: Sender<OutputMsg>,
 }
 
 impl Session {
@@ -140,6 +142,7 @@ impl Session {
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
         drop(pair.slave);
+        let (output_tx, output_rx) = mpsc::channel::<OutputMsg>();
 
         let session = Arc::new(Self {
             id,
@@ -149,7 +152,9 @@ impl Session {
             child: Mutex::new(Some(child)),
             scrollback: Mutex::new(Scrollback::new(SCROLLBACK_LIMIT)),
             subscribers: Mutex::new(Vec::new()),
+            output_tx,
         });
+        Self::start_coalescer(Arc::clone(&session), output_rx);
         Self::start_reader(Arc::clone(&session), reader);
         Ok(session)
     }
@@ -173,8 +178,13 @@ impl Session {
     }
 
     pub fn write(&self, data: &str) -> Result<(), SessionError> {
+        self.write_bytes(data.as_bytes())
+    }
+
+    pub fn write_bytes(&self, data: &[u8]) -> Result<(), SessionError> {
+        let _ = self.output_tx.send(OutputMsg::Flush);
         let mut writer = self.writer.lock().map_err(|_| SessionError::LockPoisoned)?;
-        writer.write_all(data.as_bytes())?;
+        writer.write_all(data)?;
         writer.flush()?;
         Ok(())
     }
@@ -215,8 +225,7 @@ impl Session {
         // frame instead of many (see OUTPUT_COALESCE_INTERVAL). Output stays raw
         // bytes the whole way — no UTF-8 decode — and xterm handles any partial
         // multi-byte sequence split across frames itself.
-        let (tx, rx) = mpsc::channel::<OutputMsg>();
-        Self::start_coalescer(Arc::clone(&session), rx);
+        let tx = session.output_tx.clone();
         thread::spawn(move || {
             let mut osc = OscParser::default();
             let mut buf = vec![0_u8; READ_BUFFER_BYTES].into_boxed_slice();
@@ -266,9 +275,7 @@ impl Session {
         thread::spawn(move || {
             let mut coalescer = OutputCoalescer::default();
             // Seed `last_flush` in the past so the first output flushes at once.
-            let mut last_flush = Instant::now()
-                .checked_sub(OUTPUT_COALESCE_INTERVAL)
-                .unwrap_or_else(Instant::now);
+            let mut last_flush = instant_before_coalesce_window();
             loop {
                 let msg = if coalescer.pending_len() == 0 {
                     // Nothing buffered — block until there is output to send.
@@ -326,6 +333,10 @@ impl Session {
                         });
                         break;
                     }
+                    OutputMsg::Flush => {
+                        session.broadcast_output(coalescer.flush());
+                        last_flush = instant_before_coalesce_window();
+                    }
                 }
             }
         });
@@ -350,6 +361,12 @@ impl Session {
             subscribers.retain(|tx| tx.send(event.clone()).is_ok());
         }
     }
+}
+
+fn instant_before_coalesce_window() -> Instant {
+    Instant::now()
+        .checked_sub(OUTPUT_COALESCE_INTERVAL)
+        .unwrap_or_else(Instant::now)
 }
 
 /// One chunk produced by [`OscParser`]. `Output` is raw terminal output bytes

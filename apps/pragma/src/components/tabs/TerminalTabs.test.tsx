@@ -54,6 +54,7 @@ const mockWorkspace: WorkspaceContextValue = {
   activeTabByWorktree: { worktree: "one" },
   splitRootByWorktree: {},
   focusedPaneByWorktree: { worktree: "pane-right" },
+  remoteWorktrees: {},
   icons: {},
   loading: false,
   error: null,
@@ -114,6 +115,7 @@ afterEach(() => {
   cleanup();
   mockWorkspace.splitRootByWorktree = {};
   mockWorkspace.selectedWorktree = null;
+  mockWorkspace.remoteWorktrees = {};
   mockWorkspace.runScriptsAvailable = false;
   mockWorkspace.runScriptsState = null;
   vi.clearAllMocks();
@@ -160,6 +162,28 @@ describe("TerminalTabs", () => {
     await userEvent.click(screen.getByLabelText("Run project scripts"));
 
     expect(mockWorkspace.runScripts).toHaveBeenCalled();
+  });
+
+  it("disables the editor launcher for remote worktrees", async () => {
+    mockWorkspace.selectedWorktree = {
+      id: "worktree",
+      projectId: "project",
+      parentId: null,
+      branch: "main",
+      title: null,
+      path: "/tmp/project",
+      isMain: true,
+      hidden: false,
+      createdAt: "now",
+    };
+    mockWorkspace.remoteWorktrees = { worktree: true };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText(/Open worktree in/));
+
+    expect(screen.getByLabelText(/Open worktree in/)).toBeDisabled();
+    expect(screen.getByLabelText("Choose editor")).toBeDisabled();
+    expect(mockWorkspace.openSelectedWorktree).not.toHaveBeenCalled();
   });
 
   it("runs project build scripts from the header hammer button", async () => {

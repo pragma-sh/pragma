@@ -10,7 +10,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use pragma_constants::{ChangeStatus, ChangedFile, DiffSide, FileDiff, WorktreeChanges};
+use pragma_constants::{
+    BranchSyncStatus, ChangeStatus, ChangedFile, DiffSide, FileDiff, WorktreeChanges,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -32,6 +34,18 @@ pub struct MergedStatusItem {
     pub branch: String,
     /// The parent worktree's branch, or `None` for a parentless/main worktree.
     pub parent_branch: Option<String>,
+}
+
+/// Host-computed git metadata needed by the GitHub PR flow.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRepoInfo {
+    /// The repo's `origin` remote URL.
+    pub remote_url: String,
+    /// The locally-known default branch from `origin/HEAD`, or `main`.
+    pub default_branch: String,
+    /// The current branch checked out in the worktree.
+    pub head_branch: String,
 }
 
 /// One git operation request. `root` is always the trusted absolute worktree
@@ -92,6 +106,16 @@ pub enum GitRequest {
         path: String,
         old_path: Option<String>,
     },
+    /// Reads git metadata needed to identify the GitHub repository.
+    GithubRepoInfo { root: String },
+    /// Reads the last commit subject used as the default PR title.
+    GithubDefaultPrTitle { root: String },
+    /// Fetches `origin` and reports ahead/behind against the branch upstream.
+    GithubFetchAndSync { root: String },
+    /// Pushes the current branch to `origin`, setting the upstream.
+    GithubPushBranch { root: String },
+    /// Deletes the current branch from `origin`.
+    GithubDeleteRemoteBranch { root: String },
     /// Ensures `.pragma/worktrees/` is git-excluded in the repo at `project_root`.
     EnsurePragmaExcluded { project_root: String },
     /// Creates a worktree at `path` on a new `branch`, forked from `parent_root`.
@@ -117,6 +141,12 @@ pub enum GitRequest {
 pub fn handle(payload: Value) -> CoreResult<Value> {
     let request: GitRequest = serde_json::from_value(payload)
         .map_err(|error| CoreError::InvalidPayload(error.to_string()))?;
+    if let Some(value) = handle_github_request(&request)? {
+        return Ok(value);
+    }
+    if let Some(value) = handle_lifecycle_request(&request)? {
+        return Ok(value);
+    }
     match request {
         GitRequest::WorktreeChanges {
             root,
@@ -185,33 +215,59 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             &base,
             &path,
             old_path.as_deref(),
-        )),
+        )?),
+        _ => unreachable!(),
+    }
+}
+
+fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
+    let value = match request {
+        GitRequest::GithubRepoInfo { root } => to_value(github_repo_info(Path::new(root))?)?,
+        GitRequest::GithubDefaultPrTitle { root } => {
+            to_value(github_default_pr_title(Path::new(root)))?
+        }
+        GitRequest::GithubFetchAndSync { root } => {
+            to_value(github_fetch_and_sync(Path::new(root))?)?
+        }
+        GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
+        GitRequest::GithubDeleteRemoteBranch { root } => {
+            to_value(github_delete_remote_branch(Path::new(root))?)?
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
+}
+
+fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
+    let value = match request {
         GitRequest::EnsurePragmaExcluded { project_root } => {
-            to_value(ensure_pragma_excluded(Path::new(&project_root))?)
+            to_value(ensure_pragma_excluded(Path::new(project_root))?)?
         }
         GitRequest::CreateWorktree {
             parent_root,
             branch,
             path,
         } => to_value(create_worktree(
-            Path::new(&parent_root),
-            &branch,
-            Path::new(&path),
-        )?),
+            Path::new(parent_root),
+            branch,
+            Path::new(path),
+        )?)?,
         GitRequest::RemoveWorktree {
             repo_root,
             worktree_path,
             force,
         } => to_value(remove_worktree(
-            Path::new(&repo_root),
-            Path::new(&worktree_path),
-            force,
-        )?),
+            Path::new(repo_root),
+            Path::new(worktree_path),
+            *force,
+        )?)?,
         GitRequest::DeleteBranch { repo_root, branch } => {
-            to_value(delete_branch(Path::new(&repo_root), &branch)?)
+            to_value(delete_branch(Path::new(repo_root), branch)?)?
         }
-        GitRequest::IsDirty { root } => to_value(worktree_is_dirty(Path::new(&root))),
-    }
+        GitRequest::IsDirty { root } => to_value(worktree_is_dirty(Path::new(root)))?,
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
 }
 
 fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
@@ -421,20 +477,87 @@ fn file_diff(
 }
 
 /// Loads old/new text for one file in a PR-style three-dot range `base...HEAD`.
-fn pr_file_diff(root: &Path, base: &str, path: &str, old_path: Option<&str>) -> FileDiff {
+fn pr_file_diff(
+    root: &Path,
+    base: &str,
+    path: &str,
+    old_path: Option<&str>,
+) -> CoreResult<FileDiff> {
+    crate::fs::resolve_in_worktree(root, path)?;
     let merge_base = merge_base(root, base, "HEAD").unwrap_or_else(|| base.to_string());
     if diff_is_binary(root, &[&merge_base, "HEAD"], path) {
-        return binary_diff(path.to_string());
+        return Ok(binary_diff(path.to_string()));
     }
     let old_ref_path = old_path.unwrap_or(path);
     let old_text = git_show(root, &format!("{merge_base}:{old_ref_path}")).unwrap_or_default();
     let new_text = git_show(root, &format!("HEAD:{path}")).unwrap_or_default();
-    FileDiff {
+    Ok(FileDiff {
         path: path.to_string(),
         old_text,
         new_text,
         binary: false,
+    })
+}
+
+/// Reads the remote/default/head metadata used by the GitHub PR flow.
+fn github_repo_info(root: &Path) -> CoreResult<GithubRepoInfo> {
+    Ok(GithubRepoInfo {
+        remote_url: git_stdout(root, &["remote", "get-url", "origin"])?,
+        default_branch: default_branch(root),
+        head_branch: current_branch(root)?,
+    })
+}
+
+/// Reads the latest commit subject, returning an empty title if the repo has no commits.
+fn github_default_pr_title(root: &Path) -> String {
+    git_stdout(root, &["log", "-1", "--pretty=%s"]).unwrap_or_default()
+}
+
+/// Fetches origin and reports the current branch's ahead/behind status.
+fn github_fetch_and_sync(root: &Path) -> CoreResult<BranchSyncStatus> {
+    let branch = current_branch(root)?;
+    let _ = git_stdout(root, &["fetch", "origin"]);
+    let has_upstream = git_stdout(
+        root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )
+    .is_ok();
+    if !has_upstream {
+        return Ok(BranchSyncStatus {
+            branch,
+            ahead: 0,
+            behind: 0,
+            has_upstream: false,
+        });
     }
+    let counts = git_stdout(
+        root,
+        &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    )?;
+    let (behind, ahead) = parse_ahead_behind(&counts);
+    Ok(BranchSyncStatus {
+        branch,
+        ahead,
+        behind,
+        has_upstream: true,
+    })
+}
+
+/// Pushes the current branch to origin and sets its upstream.
+fn github_push_branch(root: &Path) -> CoreResult<()> {
+    let branch = current_branch(root)?;
+    git_stdout(root, &["push", "-u", "origin", &branch]).map(|_| ())
+}
+
+/// Deletes the current branch from origin.
+fn github_delete_remote_branch(root: &Path) -> CoreResult<()> {
+    let branch = current_branch(root)?;
+    git_stdout(root, &["push", "origin", "--delete", &branch]).map(|_| ())
 }
 
 /// Discards a single unstaged change, reverting the working tree to the index.
@@ -909,6 +1032,31 @@ fn git_show(root: &Path, spec: &str) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+fn current_branch(root: &Path) -> CoreResult<String> {
+    let branch = git_stdout(root, &["branch", "--show-current"])?;
+    Ok(if branch.is_empty() {
+        "HEAD".to_string()
+    } else {
+        branch
+    })
+}
+
+fn default_branch(root: &Path) -> String {
+    git_stdout(
+        root,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+    .and_then(|head| head.strip_prefix("origin/").map(str::to_string))
+    .unwrap_or_else(|| "main".to_string())
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
+    Ok(String::from_utf8_lossy(&run_git(root, args)?)
+        .trim()
+        .to_string())
+}
+
 fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
     let output = process_env::command("git")
         .arg("-C")
@@ -954,6 +1102,13 @@ fn command_output(stdout: &[u8], stderr_bytes: &[u8]) -> String {
         return stderr_text;
     }
     String::from_utf8_lossy(stdout).trim().to_string()
+}
+
+fn parse_ahead_behind(output: &str) -> (u64, u64) {
+    let mut fields = output.split_whitespace();
+    let behind = fields.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let ahead = fields.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    (behind, ahead)
 }
 
 #[cfg(test)]

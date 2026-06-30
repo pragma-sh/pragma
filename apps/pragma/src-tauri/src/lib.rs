@@ -39,7 +39,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use crate::db::{Db, SplitLayout};
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
-use crate::hosts::Hosts;
+use crate::hosts::{Hosts, LOCAL_HOST};
 use crate::pty::PtyClient;
 
 /// Menu item id for "Restart Server" in the Troubleshooting submenu.
@@ -195,6 +195,7 @@ fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // PTY spawn carries session + geometry + channel.
 async fn pty_spawn(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
     session_id: String,
@@ -207,7 +208,7 @@ async fn pty_spawn(
     // Resolve which host owns this worktree's project and pin the session to it,
     // so later session-keyed ops (write/resize/kill) reach the same server.
     let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
-    let client = hosts.client_for_host(&host_id)?;
+    let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
     hosts.bind_session(session_id.clone(), host_id)?;
     run_pty_task(move || client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)).await
 }
@@ -288,19 +289,30 @@ async fn mark_agents_seen(hosts: tauri::State<'_, Hosts>, tab_id: String) -> App
     .await
 }
 
+/// Returns whether a worktree belongs to an SSH-routed remote project.
+#[tauri::command]
+fn worktree_is_remote(
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<bool> {
+    Ok(hosts.host_id_for_worktree(&db, &worktree_id)? != LOCAL_HOST)
+}
+
 /// Opens a live filesystem-change subscription for a worktree, streaming each
 /// change to the webview over `on_event`. The worktree's trusted absolute root
 /// is resolved from the DB here — no absolute path crosses IPC — and the watch
 /// runs on the worktree's host.
 #[tauri::command]
 async fn watch_worktree_files(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
     worktree_id: String,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let root = db.worktree(&worktree_id)?.path;
-    let client = hosts.for_worktree(&db, &worktree_id)?;
+    let client = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     run_pty_task(move || client.watch_files(worktree_id, root, on_event)).await
 }
 
@@ -509,6 +521,7 @@ pub fn run() {
             pty_kill_for_path,
             watch_worktree_files,
             mark_agents_seen,
+            worktree_is_remote,
             take_pending_deep_link,
             restart_daemon,
             read_daemon_log,

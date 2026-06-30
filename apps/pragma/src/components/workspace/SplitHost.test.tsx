@@ -42,6 +42,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       activeTabByWorktree: {},
       splitRootByWorktree: {},
       focusedPaneByWorktree: {},
+      remoteWorktrees: {},
       icons: {},
       loading: false,
       error: null,
