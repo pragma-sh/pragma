@@ -76,6 +76,17 @@ pub fn run_headless_commands(
     run_headless_commands_with_limit(project, worktree, kind, commands, limit)
 }
 
+/// Runs one headless command from a worktree and returns stdout/stderr/status
+/// regardless of exit code. Used by `pragma-cli tab exec` so non-zero exits are
+/// captured instead of converted into a Tauri command error.
+pub fn run_headless_command(
+    project: &Project,
+    worktree: &Worktree,
+    command: &str,
+) -> HeadlessCommandResult {
+    run_one_command(project, worktree, command)
+}
+
 fn run_headless_commands_with_limit(
     project: &Project,
     worktree: &Worktree,

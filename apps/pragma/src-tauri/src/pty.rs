@@ -3,8 +3,12 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::thread;
 
+use pragma_client::request_spawn;
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
-use pragma_protocol::{read_frame, EventFrame, Frame, ProtocolEventKind, ServerFrame};
+use pragma_protocol::{
+    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolEventKind,
+    ServerFrame,
+};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
@@ -66,6 +70,43 @@ impl PtyClient {
             .spawn_stream(session_id, worktree_id, cwd, cols, rows)?;
         forward_stream(stream, on_event);
         Ok(())
+    }
+
+    /// Spawns a PTY session without forwarding its output to a Tauri IPC
+    /// channel. Used by brokered CLI operations (`tab open`, `agent start`) so
+    /// the session exists and accumulates daemon scrollback until the frontend
+    /// attaches to the tab.
+    pub fn spawn_detached(
+        &self,
+        session_id: String,
+        worktree_id: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+    ) -> AppResult<()> {
+        let request = request_spawn(session_id, worktree_id, cwd, cols, rows);
+        let mut stream = self.connect_with_spawn()?;
+        write_json_frame(&mut stream, &request)?;
+        loop {
+            match read_json_frame::<ServerFrame>(&mut stream)? {
+                ServerFrame::Response(response) if response.request_id == request.request_id => {
+                    if response.ok {
+                        return Ok(());
+                    }
+                    return Err(AppError::Daemon(
+                        response
+                            .error
+                            .unwrap_or_else(|| "spawn rejected".to_string()),
+                    ));
+                }
+                ServerFrame::Hello(_)
+                | ServerFrame::Response(_)
+                | ServerFrame::Rpc(_)
+                | ServerFrame::Event(_)
+                | ServerFrame::Control(_)
+                | ServerFrame::ControlResult(_) => {}
+            }
+        }
     }
 
     pub fn attach(
@@ -191,6 +232,8 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                         ServerFrame::Hello(_)
                         | ServerFrame::Response(_)
                         | ServerFrame::Rpc(_)
+                        | ServerFrame::Control(_)
+                        | ServerFrame::ControlResult(_)
                         | ServerFrame::Event(
                             EventFrame::Output { .. }
                             | EventFrame::Agent { .. }
