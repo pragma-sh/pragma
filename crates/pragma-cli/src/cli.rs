@@ -1,14 +1,14 @@
 //! clap definitions for the whole `pragma-cli` subcommand tree.
 //!
-//! Global form: `pragma-cli [--json] <group> <command> ...`.
+//! Global form: `pragma-cli [--json|--toon] <group> <command> ...`.
 //! `--worktree <id>` and `worktree create --parent <id>` default to
 //! `$PRAGMA_WORKTREE_ID` when omitted.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-/// Top-level CLI. Every command supports `--json`; `--worktree` hosts its own
-/// per-subcommand flag (clap globals cannot be required, so we surface
-/// `--worktree` exactly where it is meaningful instead).
+/// Top-level CLI. Every command supports `--json`/`--toon`; `--worktree` hosts
+/// its own per-subcommand flag (clap globals cannot be required, so we
+/// surface `--worktree` exactly where it is meaningful instead).
 #[derive(Debug, Parser)]
 #[command(
     name = "pragma-cli",
@@ -17,12 +17,32 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 pub struct Cli {
     /// Emit structured JSON for scripting. Default is plain text (lists render
     /// as aligned columns; single objects as a short human line). Data goes to
-    /// stdout, errors to stderr.
-    #[arg(long, global = true)]
+    /// stdout, errors to stderr. Mutually exclusive with `--toon`.
+    #[arg(long, global = true, conflicts_with = "toon")]
     pub json: bool,
+
+    /// Emit structured TOON (Token-Oriented Object Notation) instead of JSON:
+    /// a token-efficient format meant for LLM contexts. Mutually exclusive
+    /// with `--json`.
+    #[arg(long, global = true, conflicts_with = "json")]
+    pub toon: bool,
 
     #[command(subcommand)]
     pub command: TopCommand,
+}
+
+impl Cli {
+    /// Resolves the `--json`/`--toon` flags to the output format to render
+    /// under. clap's `conflicts_with` guarantees at most one is set.
+    pub fn format(&self) -> crate::output::Format {
+        if self.json {
+            crate::output::Format::Json
+        } else if self.toon {
+            crate::output::Format::Toon
+        } else {
+            crate::output::Format::Text
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -558,6 +578,30 @@ mod tests {
         let cli = Cli::try_parse_from(["pragma-cli", "agent", "--json", "status"])
             .expect("--json after group works");
         assert!(cli.json);
+    }
+
+    #[test]
+    fn global_toon_flag_parses_and_resolves_format() {
+        let cli = Cli::try_parse_from(["pragma-cli", "--toon", "agent", "status"])
+            .expect("--toon before group works");
+        assert!(cli.toon);
+        assert_eq!(cli.format(), crate::output::Format::Toon);
+        let cli = Cli::try_parse_from(["pragma-cli", "agent", "--toon", "status"])
+            .expect("--toon after group works");
+        assert!(cli.toon);
+    }
+
+    #[test]
+    fn json_and_toon_are_mutually_exclusive() {
+        let result = Cli::try_parse_from(["pragma-cli", "--json", "--toon", "agent", "status"]);
+        assert!(result.is_err(), "--json and --toon together must not parse");
+    }
+
+    #[test]
+    fn default_format_is_text() {
+        let cli = Cli::try_parse_from(["pragma-cli", "agent", "status"])
+            .expect("plain invocation parses");
+        assert_eq!(cli.format(), crate::output::Format::Text);
     }
 
     #[test]

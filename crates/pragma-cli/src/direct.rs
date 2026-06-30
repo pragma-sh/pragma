@@ -72,7 +72,7 @@ pub fn tab_read(args: &crate::cli::TabReadArgs, out: &output::Output) -> Result<
             Err(_) => break,
         }
     }
-    if out.json {
+    if out.is_structured() {
         let bytes = acc.finish_bytes();
         let text = String::from_utf8_lossy(&bytes).into_owned();
         out.line(

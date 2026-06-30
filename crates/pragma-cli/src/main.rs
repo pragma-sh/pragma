@@ -1,9 +1,10 @@
 //! pragma-cli — terminal control surface for Pragma.
 //!
 //! Plain text by default (`comfy-table` for lists, short human lines for
-//! single objects); `--json` emits structured JSON. `worktree list` and the
-//! GUI-driven commands need the app; `tab read`, `agent status`, and
-//! `agent report` are direct-to-server and work with the app closed.
+//! single objects); `--json` emits structured JSON, `--toon` emits
+//! token-efficient TOON. `worktree list` and the GUI-driven commands need the
+//! app; `tab read`, `agent status`, and `agent report` are direct-to-server
+//! and work with the app closed.
 
 use std::process::ExitCode;
 
@@ -22,7 +23,9 @@ use server::CliError;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let out = output::Output { json: cli.json };
+    let out = output::Output {
+        format: cli.format(),
+    };
     match run(&cli, &out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(CliError::AppNotRunning) => {

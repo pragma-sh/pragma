@@ -10,6 +10,21 @@ crate's debug binary).
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 ```
 
+Every command renders plain text (aligned tables / short human lines) by
+default. Two mutually exclusive global flags switch to structured output for
+scripting:
+
+- `--json` — `serde_json`-serialized output.
+- `--toon` — [TOON](https://toonformat.dev) (Token-Oriented Object Notation)
+  output via the `toon-format` crate, a token-efficient JSON alternative
+  meant for LLM contexts (e.g. piping `pragma-cli tab list --all --toon`
+  into an agent prompt instead of `--json`).
+
+Both go through `crate::output::Output`, which serializes the same
+`serde_json::Value`/`Serialize` payload either as JSON or, for `--toon`, by
+converting it to a `serde_json::Value` and encoding that with
+`toon_format::encode_default`.
+
 | Status      | Dot color | Meaning                          |
 | ----------- | --------- | -------------------------------- |
 | `started`   | yellow    | Agent is running                 |

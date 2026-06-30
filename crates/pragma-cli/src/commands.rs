@@ -99,7 +99,7 @@ fn worktree_delete(args: &WorktreeDeleteArgs, out: &Output) -> Result<(), CliErr
 }
 
 fn render_worktrees(value: &serde_json::Value, out: &Output) -> Result<(), CliError> {
-    if out.json {
+    if out.is_structured() {
         out.line("", value);
         return Ok(());
     }
@@ -272,7 +272,7 @@ pub fn tab_exec(args: &TabExecArgs, out: &Output) -> Result<(), CliError> {
             "command": args.command,
         }),
     )?;
-    if out.json {
+    if out.is_structured() {
         out.line("", &value);
         return Ok(());
     }
@@ -463,7 +463,7 @@ fn browser_exec(tab: &str, js: &str, out: &Output) -> Result<(), CliError> {
         ControlMethod::BrowserEval,
         serde_json::json!({ "tabId": tab, "script": script }),
     )?;
-    if out.json {
+    if out.is_structured() {
         out.line("", &value);
     } else {
         let result = value
