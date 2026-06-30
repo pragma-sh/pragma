@@ -10,7 +10,7 @@
     "predev": "bun run --filter @pragma/constants generate",
     "prebuild": "bun run --filter @pragma/constants generate",
     "typecheck": "tsc -b --noEmit",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "lint": "oxlint .",
     "tauri": "tauri",
     "sidecar:server": "bash src-tauri/scripts/stage-daemon-sidecar.sh",

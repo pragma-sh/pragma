@@ -13,7 +13,7 @@
     "build": "bun run generate",
     "typecheck": "tsc --noEmit",
     "pretypecheck": "bun run generate",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "pretest": "bun run generate",
     "lint": "oxlint ."
   },
