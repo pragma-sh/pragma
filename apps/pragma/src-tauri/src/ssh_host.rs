@@ -408,7 +408,7 @@ fn remote_shell_path(input: &str) -> AppResult<String> {
     if trimmed.is_empty() {
         return Err(AppError::InvalidInput("remote path is empty".to_string()));
     }
-    if trimmed.contains(['"', '`', '\\', '\n']) {
+    if trimmed.contains(['"', '`', '\\', '\n', '(']) {
         return Err(AppError::InvalidInput(
             "remote path contains unsupported characters".to_string(),
         ));
@@ -443,6 +443,13 @@ fn probe_remote(config: &SshConnectConfig, path: &str) -> AppResult<RemoteProbe>
          echo \"HOME=$HOME\""
     );
     let result = run_exec(config, &command)?;
+    if result.exit_code != 0 {
+        return Err(AppError::Daemon(format!(
+            "remote probe failed (exit {}): {}",
+            result.exit_code,
+            result.stderr.trim()
+        )));
+    }
     let abs_path = line_value(&result.stdout, "ABS=").unwrap_or_default();
     if abs_path.is_empty() {
         return Err(AppError::InvalidInput(format!(
@@ -535,6 +542,11 @@ mod tests {
     fn rejects_quote_injection() {
         assert!(remote_shell_path("~/a\"; rm -rf /").is_err());
         assert!(remote_shell_path("").is_err());
+    }
+
+    #[test]
+    fn rejects_command_substitution() {
+        assert!(remote_shell_path("~/x/$(touch /tmp/pwned)").is_err());
     }
 
     #[test]
