@@ -16,7 +16,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "lint": "oxlint .",
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-ai"
   },

@@ -11,7 +11,7 @@
   "scripts": {
     "install:local": "sh scripts/install-local.sh",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
   "devDependencies": {
