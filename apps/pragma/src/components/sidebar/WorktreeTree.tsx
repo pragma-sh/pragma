@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
+import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
@@ -86,12 +87,18 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     }
 
     void refreshMergedStatus();
+    const unwatch = worktrees.map((worktree) =>
+      subscribeToWorktreeFiles(worktree.id, () => void refreshMergedStatus()),
+    );
     const interval = setInterval(
       () => void refreshMergedStatus(),
       MERGED_STATUS_REFRESH_INTERVAL_MS,
     );
     return () => {
       cancelled = true;
+      for (const stop of unwatch) {
+        stop();
+      }
       clearInterval(interval);
     };
   }, [worktrees]);

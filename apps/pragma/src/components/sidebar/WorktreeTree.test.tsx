@@ -7,6 +7,7 @@ const hideWorktreeMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const renameWorktreeMock = vi.fn();
 const openWorktreeInEditorMock = vi.fn();
+const subscribeToWorktreeFilesMock = vi.fn((_worktreeId: string, _listener: unknown) => vi.fn());
 
 const mainWorktree: Worktree = {
   id: "main",
@@ -45,6 +46,11 @@ vi.mock("@/lib/tauri", () => ({
   worktreesMergedStatus: (...args: unknown[]) => worktreesMergedStatusMock(...args),
 }));
 
+vi.mock("@/lib/file-watch", () => ({
+  subscribeToWorktreeFiles: (worktreeId: string, listener: unknown) =>
+    subscribeToWorktreeFilesMock(worktreeId, listener),
+}));
+
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
 }));
@@ -63,6 +69,7 @@ afterEach(() => {
   openWorktreeInEditorMock.mockReset();
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
+  subscribeToWorktreeFilesMock.mockClear();
   workspaceMock = {
     selectedProjectId: "p",
     selectedWorktreeId: "main",
