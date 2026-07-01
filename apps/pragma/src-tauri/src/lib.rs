@@ -7,6 +7,7 @@ mod agent_notifications;
 mod agents;
 mod ai;
 mod browser;
+mod control;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
 mod dev_bridge;
@@ -491,6 +492,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
+    app.manage(control::BrowserHistory::default());
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
@@ -502,7 +504,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");
     }
-    agent_events::start_for(app.handle().clone(), pty);
+    agent_events::start_for(app.handle().clone(), pty.clone());
+    control::start(app.handle().clone(), pty);
     ssh_host::reconnect_remote_hosts(app.handle().clone());
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
         log::warn!("failed to load keybindings config: {error}");
@@ -561,6 +564,8 @@ pub fn run() {
             agents::list_agents,
             agents::resolve_agent_models,
             agent_notifications::show_agent_notification,
+            control::start_agent,
+            control::exec_in_worktree,
             project_icon,
             list_tabs,
             create_tab,
@@ -635,6 +640,11 @@ pub fn run() {
             browser::browser_clear_data,
             browser::browser_open_external,
             browser::browser_close,
+            browser::browser_scroll,
+            browser::browser_focus_element,
+            browser::browser_click,
+            browser::browser_eval,
+            browser::browser_screenshot_tab,
             browser::browser_screenshot,
             browser::browser_snapshot,
             dev_bridge::__dev_bridge_result

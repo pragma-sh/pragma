@@ -73,6 +73,8 @@ import {
   onAgentStatusReset,
   onDeepLink,
   onMenuAction,
+  onTabsChanged,
+  onWorktreeChanged,
   takePendingDeepLink,
   openWorktree as openWorktreeCommand,
   projectIcon,
@@ -87,6 +89,7 @@ import {
   setWorktreeHidden as setWorktreeHiddenCommand,
   worktreeStatus as worktreeStatusCommand,
   worktreesAreRemote,
+  type WorkspaceChangedEvent,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import {
@@ -178,7 +181,7 @@ type WorkspaceAction =
     }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
-  | { type: "set-splits"; worktreeRoots: Record<string, SplitLayoutNode> }
+  | { type: "set-splits"; projectId: string; worktreeRoots: Record<string, SplitLayoutNode> }
   | { type: "select-project"; projectId: string | null }
   | { type: "select-worktree"; projectId: string; worktreeId: string }
   | { type: "set-active-tab"; worktreeId: string; tabId: string }
@@ -700,8 +703,17 @@ function reduceSetWorktrees(
 function reduceSetSplits(state: WorkspaceState, action: ActionOf<"set-splits">): WorkspaceState {
   // Merge persisted layouts for the loaded project's worktrees over whatever is
   // in memory, reconciling each against the current tabs (a tab may have been
-  // closed in another window/session). Other worktrees are untouched.
+  // closed in another window/session). Missing rows clear that project's stale
+  // in-memory roots; other projects are untouched.
   const splitRootByWorktree = { ...state.splitRootByWorktree };
+  const refreshedWorktreeIds = new Set(
+    (state.worktrees[action.projectId] ?? []).map((worktree) => worktree.id),
+  );
+  for (const worktreeId of refreshedWorktreeIds) {
+    if (!(worktreeId in action.worktreeRoots)) {
+      delete splitRootByWorktree[worktreeId];
+    }
+  }
   for (const [worktreeId, root] of Object.entries(action.worktreeRoots)) {
     const normalized = normalizeRoot(
       root,
@@ -1747,7 +1759,7 @@ async function loadProjectWorkspace(
   ]);
   dispatch({ type: "set-worktrees", projectId, worktrees });
   dispatch({ type: "set-tabs", tabs });
-  dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+  dispatch({ type: "set-splits", projectId, worktreeRoots: parseStoredSplits(splits) });
 }
 
 /** Resolves the owning project for a new tab from an explicit worktree, then the selection. */
@@ -2314,7 +2326,11 @@ function useProjectSelection(
         }
         dispatch({ type: "set-worktrees", projectId: targetProjectId, worktrees });
         dispatch({ type: "set-tabs", tabs });
-        dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+        dispatch({
+          type: "set-splits",
+          projectId: targetProjectId,
+          worktreeRoots: parseStoredSplits(splits),
+        });
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
       }
@@ -2796,6 +2812,57 @@ function useMenuActionListener(openDaemonLogTab: () => Promise<void>): void {
   }, []);
 }
 
+/** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
+function useWorkspaceChangedListener(
+  dispatch: WorkspaceDispatch,
+  refreshProject: (projectId?: string | null) => Promise<void>,
+): void {
+  const refreshProjectRef = useRef(refreshProject);
+  refreshProjectRef.current = refreshProject;
+  const handleChanged = useCallback(
+    (payload: WorkspaceChangedEvent) => {
+      if (payload.action === "tabOpened" && payload.worktreeId && payload.tabId) {
+        dispatch({
+          type: "select-worktree",
+          projectId: payload.projectId,
+          worktreeId: payload.worktreeId,
+        });
+        dispatch({ type: "set-active-tab", worktreeId: payload.worktreeId, tabId: payload.tabId });
+      }
+      void refreshProjectRef.current(payload.projectId);
+    },
+    [dispatch],
+  );
+  const handleChangedRef = useRef(handleChanged);
+  handleChangedRef.current = handleChanged;
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenWorktrees: (() => void) | null = null;
+    let unlistenTabs: (() => void) | null = null;
+    void onWorktreeChanged((payload) => handleChangedRef.current(payload)).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenWorktrees = unlisten;
+      return undefined;
+    });
+    void onTabsChanged((payload) => handleChangedRef.current(payload)).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenTabs = unlisten;
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+      unlistenWorktrees?.();
+      unlistenTabs?.();
+    };
+  }, []);
+}
+
 /** Mount-time + selection-driven project loading (reload, agents, details, icons). */
 function useProjectLoading(
   state: WorkspaceState,
@@ -2838,7 +2905,7 @@ function useProjectLoading(
         if (!cancelled) {
           dispatch({ type: "set-worktrees", projectId, worktrees });
           dispatch({ type: "set-tabs", tabs });
-          dispatch({ type: "set-splits", worktreeRoots: parseStoredSplits(splits) });
+          dispatch({ type: "set-splits", projectId, worktreeRoots: parseStoredSplits(splits) });
         }
       } catch (cause) {
         if (!cancelled) {
@@ -3630,16 +3697,19 @@ function useWorkspaceListeners({
   terminalTabIdsKey,
   setActiveTabRef,
   openDaemonLogTab,
+  refreshProject,
 }: {
   state: WorkspaceState;
   dispatch: WorkspaceDispatch;
   reload: () => Promise<void>;
+  refreshProject: (projectId?: string | null) => Promise<void>;
   tabsRef: RefObject<Tab[]>;
   terminalTabIdsKey: string;
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
   openDaemonLogTab: () => Promise<void>;
 }): void {
   useProjectLoading(state, dispatch, reload);
+  useWorkspaceChangedListener(dispatch, refreshProject);
   useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
   useMenuActionListener(openDaemonLogTab);
 }
@@ -3867,6 +3937,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     state,
     dispatch,
     reload,
+    refreshProject,
     tabsRef,
     terminalTabIdsKey,
     setActiveTabRef,

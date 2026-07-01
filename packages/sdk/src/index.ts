@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 
 const DEFAULT_PRAGMA_CLI_EXECUTABLE = "pragma-cli";
 
-/** Status attention types accepted by `pragma-cli report attention --kind`. */
+/** Status attention types accepted by `pragma-cli agent report attention --kind`. */
 export type AttentionKind = "question" | "command";
 
 /** Common options used to spawn the `pragma-cli` CLI. */
@@ -24,22 +24,22 @@ export interface PragmaAgentCommandOptions extends PragmaAgentSpawnOptions {
   agent: string;
 }
 
-/** Options for `pragma-cli report started`. */
+/** Options for `pragma-cli agent report started`. */
 export type ReportStartedOptions = PragmaAgentCommandOptions;
 
-/** Options for `pragma-cli report stopped`. */
+/** Options for `pragma-cli agent report stopped`. */
 export interface ReportStoppedOptions extends PragmaAgentCommandOptions {
   /** Override for `PRAGMA_WORKTREE_ID`. Maps to `--worktree-id`. */
   worktreeId?: string;
 }
 
-/** Options for `pragma-cli report attention`. */
+/** Options for `pragma-cli agent report attention`. */
 export interface ReportAttentionOptions extends PragmaAgentCommandOptions {
   /** Attention reason. Maps to `--kind`. */
   kind: AttentionKind;
 }
 
-/** Options for `pragma-cli report cleared`. */
+/** Options for `pragma-cli agent report cleared`. */
 export interface ReportClearedOptions extends PragmaAgentCommandOptions {
   /** Override for `PRAGMA_WORKTREE_ID`. Maps to `--worktree-id`. */
   worktreeId?: string;
@@ -97,7 +97,7 @@ export class PragmaCliError extends Error {
 }
 
 /**
- * Runs `pragma-cli report started` for the current Pragma terminal tab.
+ * Runs `pragma-cli agent report --agent <id> started` for the current Pragma terminal tab.
  *
  * The spawned CLI reads `PRAGMA_DAEMON_SOCKET`, `PRAGMA_TAB_ID`, and
  * `PRAGMA_WORKTREE_ID` from the provided environment or the current process
@@ -105,13 +105,13 @@ export class PragmaCliError extends Error {
  */
 export function reportStarted(options: ReportStartedOptions): Promise<PragmaCliResult> {
   return runPragmaAgent(
-    ["--agent", requiredFlag("agent", options.agent), "report", "started"],
+    ["agent", "report", "--agent", requiredFlag("agent", options.agent), "started"],
     options,
   );
 }
 
 /**
- * Runs `pragma-cli report stopped` for the current Pragma terminal tab.
+ * Runs `pragma-cli agent report --agent <id> stopped` for the current Pragma terminal tab.
  *
  * Pass `worktreeId` to emit `--worktree-id`; otherwise the CLI falls back to
  * `PRAGMA_WORKTREE_ID`.
@@ -119,9 +119,10 @@ export function reportStarted(options: ReportStartedOptions): Promise<PragmaCliR
 export function reportStopped(options: ReportStoppedOptions): Promise<PragmaCliResult> {
   return runPragmaAgent(
     [
+      "agent",
+      "report",
       "--agent",
       requiredFlag("agent", options.agent),
-      "report",
       "stopped",
       ...optionalFlag("--worktree-id", options.worktreeId),
     ],
@@ -130,7 +131,7 @@ export function reportStopped(options: ReportStoppedOptions): Promise<PragmaCliR
 }
 
 /**
- * Runs `pragma-cli report attention --kind <kind>` for the current Pragma terminal tab.
+ * Runs `pragma-cli agent report --agent <id> attention --kind <kind>` for the current Pragma terminal tab.
  *
  * Use this when an external agent needs the Pragma UI to show that the tab is
  * waiting for a question or command confirmation.
@@ -138,9 +139,10 @@ export function reportStopped(options: ReportStoppedOptions): Promise<PragmaCliR
 export function reportAttention(options: ReportAttentionOptions): Promise<PragmaCliResult> {
   return runPragmaAgent(
     [
+      "agent",
+      "report",
       "--agent",
       requiredFlag("agent", options.agent),
-      "report",
       "attention",
       "--kind",
       options.kind,
@@ -150,7 +152,7 @@ export function reportAttention(options: ReportAttentionOptions): Promise<Pragma
 }
 
 /**
- * Runs `pragma-cli report cleared` for the current Pragma terminal tab.
+ * Runs `pragma-cli agent report --agent <id> cleared` for the current Pragma terminal tab.
  *
  * Unlike {@link reportStopped} (which leaves a green "done" indicator), this
  * removes the agent's indicator entirely. Use it when the agent process exits
@@ -160,9 +162,10 @@ export function reportAttention(options: ReportAttentionOptions): Promise<Pragma
 export function reportCleared(options: ReportClearedOptions): Promise<PragmaCliResult> {
   return runPragmaAgent(
     [
+      "agent",
+      "report",
       "--agent",
       requiredFlag("agent", options.agent),
-      "report",
       "cleared",
       ...optionalFlag("--worktree-id", options.worktreeId),
     ],

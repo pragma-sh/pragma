@@ -15,14 +15,14 @@ UI if that directory isn't on `$PATH`).
 ## Usage
 
 ```sh
-pragma-cli --agent <id> report started
-pragma-cli --agent <id> report stopped
-pragma-cli --agent <id> report attention [--kind question|command]
-pragma-cli --agent <id> report cleared
+pragma-cli agent report --agent <id> started
+pragma-cli agent report --agent <id> stopped
+pragma-cli agent report --agent <id> attention [--kind question|command]
+pragma-cli agent report --agent <id> cleared
 ```
 
-`--agent <id>` comes **before** the `report` subcommand. `<id>` is the stable agent id
-from your `pragma/agents/<id>/config.json`.
+`--agent <id>` belongs to the `agent report` command. `<id>` is the stable agent id from
+your `pragma/agents/<id>/config.json`.
 
 | Status      | Dot color | Meaning                          |
 | ----------- | --------- | -------------------------------- |
@@ -48,7 +48,7 @@ and should only follow a `started`.
 The CLI reads `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`, and `PRAGMA_SERVER_SOCKET` (falling
 back to legacy `PRAGMA_DAEMON_SOCKET`) from the environment injected into Pragma terminal
 sessions. It connects to the existing server socket, reads the `Hello` frame, writes one
-`AgentReport` frame, and exits without waiting for an ack.
+`AgentReport` frame, and exits after the frame is sent.
 
 ## Writing a CLI-route plugin
 
@@ -68,7 +68,7 @@ Keep all logic in **one POSIX `sh` script** that your tool's hooks invoke as
 
    ```sh
    report() {
-     pragma-cli --agent "$agent" report "$@" >/dev/null 2>&1 || true
+     pragma-cli agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
    }
    ```
 

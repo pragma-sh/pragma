@@ -1,9 +1,16 @@
+import { constants } from "@pragma/constants";
+
 import { modelLaunchArgs } from "@/lib/agent-model-selection";
 import { type AgentConfig, type AgentModelSelection, ptySpawn, ptyWrite } from "@/lib/tauri";
 import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, terminalManager } from "@/lib/terminal-manager";
 
-/** Delay before sending an agent's start command to a freshly created tab. */
-const AGENT_START_DELAY_MS = 500;
+/**
+ * Delay before sending an agent's start command to a freshly created tab.
+ * Shared with the Rust CLI/broker launch path (`control.rs`) via
+ * `CONSTANTS.agents.startDelayMs` so both sides wait the same amount of time
+ * for the shell to become ready.
+ */
+const AGENT_START_DELAY_MS = constants.agents.startDelayMs;
 /**
  * Extra delay after the start command before a prefill is pasted, giving the
  * agent's TUI time to boot and mount its input box. Best-effort: there is no

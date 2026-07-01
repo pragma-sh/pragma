@@ -603,6 +603,24 @@ impl Db {
             )
             .map_err(AppError::from)
     }
+
+    /// Resolves a full tab id or the unique prefix printed by `pragma-cli tab list`.
+    pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at
+             FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
+        )?;
+        let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
+        let tabs = rows.collect::<Result<Vec<_>, _>>()?;
+        match tabs.as_slice() {
+            [] => Err(AppError::InvalidInput(format!("unknown tab id: {tab_id}"))),
+            [tab] => Ok(tab.clone()),
+            _ => Err(AppError::InvalidInput(format!(
+                "ambiguous tab id prefix: {tab_id}"
+            ))),
+        }
+    }
 }
 
 /// Serializes a tab kind to the lowercase string stored in the `tabs.kind` column.
@@ -835,6 +853,40 @@ mod tests {
         let listed = db.list_tabs(&project.id).expect("tabs should list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].kind, TabKind::Browser);
+    }
+
+    #[test]
+    fn tab_by_id_or_prefix_resolves_cli_short_ids() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktrees = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list");
+        let tab = db
+            .create_tab(
+                &project.id,
+                &worktrees[0].id,
+                TabKind::Browser,
+                None,
+                Some("https://example.com".to_string()),
+                None,
+                None,
+                None,
+            )
+            .expect("browser tab should insert");
+        let short_id = &tab.id[..8];
+
+        let resolved = db
+            .tab_by_id_or_prefix(short_id)
+            .expect("short id should resolve");
+
+        assert_eq!(resolved.id, tab.id);
     }
 
     #[test]

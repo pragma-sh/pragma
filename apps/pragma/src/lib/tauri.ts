@@ -139,6 +139,28 @@ export function onAgentCliPathWarning(handler: (path: string) => void): Promise<
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
 
+/** Workspace metadata event emitted after a brokered CLI mutation. */
+export interface WorkspaceChangedEvent {
+  action: string;
+  projectId: string;
+  worktreeId?: string | null;
+  tabId?: string | null;
+}
+
+/** Subscribes to CLI-driven worktree mutations routed through the app controller. */
+export function onWorktreeChanged(
+  handler: (payload: WorkspaceChangedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<WorkspaceChangedEvent>("worktreeChanged", (event) => handler(event.payload));
+}
+
+/** Subscribes to CLI-driven tab mutations routed through the app controller. */
+export function onTabsChanged(
+  handler: (payload: WorkspaceChangedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<WorkspaceChangedEvent>("tabsChanged", (event) => handler(event.payload));
+}
+
 /** Destination emitted when the user clicks a native agent notification. */
 export interface AgentNotificationClick {
   projectId: string;

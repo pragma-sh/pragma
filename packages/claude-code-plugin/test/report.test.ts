@@ -134,7 +134,7 @@ const INTERRUPTED_TOOL = JSON.stringify({
   },
 });
 
-/** All pragma-cli invocations recorded so far, e.g. `--agent claude-code report started`. */
+/** All pragma-cli invocations recorded so far, e.g. `agent report --agent claude-code started`. */
 function calls(): string[] {
   if (!existsSync(logPath)) {
     return [];
@@ -149,7 +149,7 @@ describe("report.sh", () => {
   });
 
   it("reports started and marks the turn in flight", () => {
-    expect(run("started")).toEqual(["--agent claude-code report started"]);
+    expect(run("started")).toEqual(["agent report --agent claude-code started"]);
     expect(existsSync(markerPath())).toBe(true);
   });
 
@@ -158,14 +158,14 @@ describe("report.sh", () => {
       run("started", {
         env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
       }),
-    ).toEqual(["--agent claude-code report started"]);
+    ).toEqual(["agent report --agent claude-code started"]);
   });
 
   it("reports stopped and clears the in-flight marker on normal completion", () => {
     run("started");
     expect(run("stopped", { stdin: transcript([ASSISTANT_DONE]) })).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report stopped",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
@@ -173,8 +173,8 @@ describe("report.sh", () => {
   it("reports stopped when Stop carries no transcript (older Claude Code)", () => {
     run("started");
     expect(run("stopped")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report stopped",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
@@ -184,8 +184,8 @@ describe("report.sh", () => {
     // Stop fires after an interrupt; the transcript's trailing user message is
     // the abort marker -> drop the indicator rather than leave a green done dot.
     expect(run("stopped", { stdin: transcript([ASSISTANT_DONE, INTERRUPTED]) })).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report cleared",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
@@ -193,8 +193,8 @@ describe("report.sh", () => {
   it("clears on a tool-use abort marker too", () => {
     run("started");
     expect(run("stopped", { stdin: transcript([ASSISTANT_DONE, INTERRUPTED_TOOL]) })).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report cleared",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code cleared",
     ]);
   });
 
@@ -204,8 +204,8 @@ describe("report.sh", () => {
     // so the marker is no longer in the transcript tail -> still a done dot.
     const old = Array.from({ length: 8 }, () => ASSISTANT_DONE);
     expect(run("stopped", { stdin: transcript([INTERRUPTED, ...old]) })).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report stopped",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
     ]);
   });
 
@@ -215,8 +215,8 @@ describe("report.sh", () => {
     // this only guards a hypothetical build that emits idle with the marker still
     // present -> treat it as a turn that never ended and clear the stuck indicator.
     expect(run("idle")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report cleared",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
@@ -226,16 +226,16 @@ describe("report.sh", () => {
     run("stopped");
     // Idle after a normal completion must NOT clear the green done dot.
     expect(run("idle")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report stopped",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
     ]);
   });
 
   it("reports a generic attention for permission/elicitation prompts in flight", () => {
     run("started");
     expect(run("attention")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report attention",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code attention",
     ]);
   });
 
@@ -252,9 +252,9 @@ describe("report.sh", () => {
     // but the tool's PostToolUse does -> we report running again at once.
     run("attention");
     expect(run("running")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report attention",
-      "--agent claude-code report started",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code attention",
+      "agent report --agent claude-code started",
     ]);
     // Same turn: the marker and its abort watcher must survive.
     expect(existsSync(markerPath())).toBe(true);
@@ -268,8 +268,8 @@ describe("report.sh", () => {
   it("reports cleared and removes the marker on session start/end", () => {
     run("started");
     expect(run("cleared")).toEqual([
-      "--agent claude-code report started",
-      "--agent claude-code report cleared",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
@@ -280,14 +280,16 @@ describe("report.sh", () => {
   describe("abort watcher", () => {
     it("clears the indicator when a turn is cancelled with no hook", async () => {
       const t = transcriptFile([ASSISTANT_DONE]);
-      expect(run("started", { stdin: t.stdin })).toEqual(["--agent claude-code report started"]);
+      expect(run("started", { stdin: t.stdin })).toEqual([
+        "agent report --agent claude-code started",
+      ]);
       expect(watcherPid()).toBeDefined();
       // The cancel surfaces only in the transcript, never as a hook.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(600);
       expect(calls()).toEqual([
-        "--agent claude-code report started",
-        "--agent claude-code report cleared",
+        "agent report --agent claude-code started",
+        "agent report --agent claude-code cleared",
       ]);
       expect(existsSync(markerPath())).toBe(false);
     });
@@ -299,7 +301,7 @@ describe("report.sh", () => {
       const t = transcriptFile([ASSISTANT_DONE, INTERRUPTED]);
       run("started", { stdin: t.stdin });
       await sleep(400);
-      expect(calls()).toEqual(["--agent claude-code report started"]);
+      expect(calls()).toEqual(["agent report --agent claude-code started"]);
       expect(existsSync(markerPath())).toBe(true);
     });
 
@@ -310,8 +312,8 @@ describe("report.sh", () => {
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(400);
       expect(calls()).toEqual([
-        "--agent claude-code report started",
-        "--agent claude-code report cleared",
+        "agent report --agent claude-code started",
+        "agent report --agent claude-code cleared",
       ]);
       expect(existsSync(markerPath())).toBe(false);
     });
@@ -326,8 +328,8 @@ describe("report.sh", () => {
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(300);
       expect(calls()).toEqual([
-        "--agent claude-code report started",
-        "--agent claude-code report stopped",
+        "agent report --agent claude-code started",
+        "agent report --agent claude-code stopped",
       ]);
     });
 
@@ -340,8 +342,8 @@ describe("report.sh", () => {
       appendFileSync(first.path, `${INTERRUPTED}\n`);
       await sleep(600);
       expect(calls()).toEqual([
-        "--agent claude-code report started",
-        "--agent claude-code report started",
+        "agent report --agent claude-code started",
+        "agent report --agent claude-code started",
       ]);
       expect(existsSync(markerPath())).toBe(true);
     });
@@ -359,7 +361,7 @@ describe("report.sh", () => {
       writeFileSync(markerPath(), "my-token");
       const t = transcriptFile([ASSISTANT_DONE, INTERRUPTED]);
       expect(run("__watch", { args: [t.path, "my-token"] })).toEqual([
-        "--agent claude-code report cleared",
+        "agent report --agent claude-code cleared",
       ]);
       expect(existsSync(markerPath())).toBe(false);
     });

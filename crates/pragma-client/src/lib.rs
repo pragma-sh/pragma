@@ -338,7 +338,9 @@ impl PragmaClient {
                 ServerFrame::Hello(_)
                 | ServerFrame::Response(_)
                 | ServerFrame::Event(_)
-                | ServerFrame::Rpc(_) => {}
+                | ServerFrame::Rpc(_)
+                | ServerFrame::Control(_)
+                | ServerFrame::ControlResult(_) => {}
             }
         }
     }
@@ -427,7 +429,9 @@ impl PragmaClient {
                 ServerFrame::Hello(_)
                 | ServerFrame::Response(_)
                 | ServerFrame::Event(_)
-                | ServerFrame::Rpc(_) => {}
+                | ServerFrame::Rpc(_)
+                | ServerFrame::Control(_)
+                | ServerFrame::ControlResult(_) => {}
             }
         }
     }
@@ -453,7 +457,9 @@ impl PragmaClient {
                 ServerFrame::Hello(_)
                 | ServerFrame::Response(_)
                 | ServerFrame::Event(_)
-                | ServerFrame::Rpc(_) => {}
+                | ServerFrame::Rpc(_)
+                | ServerFrame::Control(_)
+                | ServerFrame::ControlResult(_) => {}
             }
         }
     }
@@ -739,6 +745,8 @@ pub fn request_subscribe(
             event,
             cursor: None,
         }),
+        control: None,
+        control_result: None,
     }
 }
 
@@ -756,6 +764,8 @@ pub fn request_rpc(method: ProtocolRpcMethod, payload: Value) -> RequestFrame {
         data: None,
         rpc: Some(RpcRequest { method, payload }),
         subscription: None,
+        control: None,
+        control_result: None,
     }
 }
 
@@ -779,6 +789,8 @@ fn request_frame(
         data,
         rpc: None,
         subscription: None,
+        control: None,
+        control_result: None,
     }
 }
 

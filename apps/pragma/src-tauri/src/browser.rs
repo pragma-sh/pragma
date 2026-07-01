@@ -13,6 +13,12 @@
 //! Tauri's native `on_document_title_changed` / `on_navigation` hooks, so we never
 //! expose the IPC surface to arbitrary remote pages.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use base64::Engine;
 use tauri::webview::WebviewBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, Webview, WebviewUrl,
@@ -36,6 +42,29 @@ const FOCUS_REQUEST_EVENT: &str = "browser-focus-request";
 /// surface to arbitrary remote pages — `window.__TAURI_INTERNALS__` is not
 /// available on remote origins, so an IPC `emit` would silently no-op there.
 const FOCUS_SENTINEL_SCHEME: &str = "pragma-focus";
+/// URL scheme the eval wrapper navigates to with a serialized result. The
+/// navigation hook cancels the load and delivers the payload to the waiting Rust
+/// caller. This avoids exposing Tauri IPC to arbitrary remote pages.
+const EVAL_SENTINEL_SCHEME: &str = "pragma-eval";
+const BROWSER_EVAL_TIMEOUT: Duration = Duration::from_secs(5);
+
+type BrowserEvalResult = Result<serde_json::Value, String>;
+
+#[derive(Default)]
+struct BrowserEvalPending {
+    results: Mutex<HashMap<String, BrowserEvalResult>>,
+    notify: Condvar,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserEvalCallbackPayload {
+    ok: bool,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+static BROWSER_EVAL_PENDING: OnceLock<BrowserEvalPending> = OnceLock::new();
 
 /// Page-focus ping reported to the frontend so split-pane focus can follow a
 /// click into a native browser webview's content.
@@ -65,6 +94,10 @@ fn webview_label(tab_id: &str) -> String {
     format!("browser-{tab_id}")
 }
 
+pub(crate) fn has_webview(app: &AppHandle, tab_id: &str) -> bool {
+    app.get_webview(&webview_label(tab_id)).is_some()
+}
+
 /// Injects a small script into every browser page so that interacting with the
 /// native webview surface is forwarded to the React frontend, which can then move
 /// split-pane focus to the correct pane.
@@ -91,6 +124,120 @@ fn focus_script() -> String {
 }})();
 "
     )
+}
+
+fn eval_pending() -> &'static BrowserEvalPending {
+    BROWSER_EVAL_PENDING.get_or_init(BrowserEvalPending::default)
+}
+
+fn build_eval_callback_script(script: &str, request_id: &str) -> AppResult<String> {
+    let script = serde_json::to_string(script)?;
+    let request_id = serde_json::to_string(request_id)?;
+    let scheme = serde_json::to_string(EVAL_SENTINEL_SCHEME)?;
+    Ok(format!(
+        r"
+(async function() {{
+  const requestId = {request_id};
+  const scheme = {scheme};
+  function encodeUtf8Base64Url(value) {{
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }}
+  function send(payload) {{
+    const encoded = encodeUtf8Base64Url(JSON.stringify(payload));
+    window.location.href = `${{scheme}}://${{requestId}}/${{encoded}}`;
+  }}
+  try {{
+    const result = await (0, eval)({script});
+    send({{ ok: true, result: typeof result === 'undefined' ? null : result }});
+  }} catch (error) {{
+    const message = error && typeof error === 'object' && 'message' in error
+      ? String(error.message)
+      : String(error);
+    try {{
+      send({{ ok: false, error: message }});
+    }} catch (serializeError) {{
+      const serializeMessage = serializeError && typeof serializeError === 'object' && 'message' in serializeError
+        ? String(serializeError.message)
+        : String(serializeError);
+      send({{ ok: false, error: `failed to serialize browser eval result: ${{serializeMessage}}` }});
+    }}
+  }}
+}})();
+"
+    ))
+}
+
+fn browser_eval_callback_payload(encoded: &str) -> BrowserEvalResult {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|error| format!("invalid browser eval callback encoding: {error}"))?;
+    let json = String::from_utf8(bytes)
+        .map_err(|error| format!("invalid browser eval callback text: {error}"))?;
+    let payload: BrowserEvalCallbackPayload = serde_json::from_str(&json)
+        .map_err(|error| format!("invalid browser eval callback payload: {error}"))?;
+    if payload.ok {
+        Ok(payload.result.unwrap_or(serde_json::Value::Null))
+    } else {
+        Err(payload
+            .error
+            .unwrap_or_else(|| "browser eval failed".to_string()))
+    }
+}
+
+fn record_eval_result(request_id: String, result: BrowserEvalResult) {
+    let pending = eval_pending();
+    if let Ok(mut results) = pending.results.lock() {
+        results.insert(request_id, result);
+        pending.notify.notify_all();
+    }
+}
+
+fn receive_eval_navigation(url: &Url) {
+    let Some(request_id) = url.host_str() else {
+        log::warn!("browser eval callback missing request id");
+        return;
+    };
+    let encoded = url.path().trim_start_matches('/');
+    if encoded.is_empty() {
+        record_eval_result(
+            request_id.to_string(),
+            Err("browser eval callback missing payload".to_string()),
+        );
+        return;
+    }
+    record_eval_result(
+        request_id.to_string(),
+        browser_eval_callback_payload(encoded),
+    );
+}
+
+fn wait_for_eval_result(request_id: &str) -> AppResult<serde_json::Value> {
+    let pending = eval_pending();
+    let mut results = pending.results.lock()?;
+    let start = Instant::now();
+    loop {
+        if let Some(result) = results.remove(request_id) {
+            return result.map_err(AppError::Browser);
+        }
+        let elapsed = start.elapsed();
+        if elapsed >= BROWSER_EVAL_TIMEOUT {
+            results.remove(request_id);
+            return Err(AppError::Browser("browser eval timed out".to_string()));
+        }
+        let Some(remaining) = BROWSER_EVAL_TIMEOUT.checked_sub(elapsed) else {
+            results.remove(request_id);
+            return Err(AppError::Browser("browser eval timed out".to_string()));
+        };
+        let (guard, timeout) = pending.notify.wait_timeout(results, remaining)?;
+        results = guard;
+        if timeout.timed_out() && !results.contains_key(request_id) {
+            results.remove(request_id);
+            return Err(AppError::Browser("browser eval timed out".to_string()));
+        }
+    }
 }
 
 /// Returns the main window (the multiwebview host for all browser tabs).
@@ -123,7 +270,7 @@ fn require_webview(app: &AppHandle, tab_id: &str) -> AppResult<Webview> {
 
 /// Normalizes address-bar text into a URL, defaulting to `https://` when the
 /// user omits a scheme (so typing `example.com` just works).
-fn parse_url(input: &str) -> AppResult<Url> {
+pub(crate) fn parse_url(input: &str) -> AppResult<Url> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(AppError::Browser("empty url".to_string()));
@@ -135,6 +282,56 @@ fn parse_url(input: &str) -> AppResult<Url> {
     };
     Url::parse(&candidate)
         .map_err(|error| AppError::Browser(format!("invalid url '{input}': {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine;
+
+    use super::{browser_eval_callback_payload, build_eval_callback_script, parse_url};
+
+    fn encoded_payload(json: &str) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
+    }
+
+    #[test]
+    fn parse_url_defaults_to_https() {
+        let url = parse_url("moveinready.casa").expect("url should parse");
+
+        assert_eq!(url.as_str(), "https://moveinready.casa/");
+    }
+
+    #[test]
+    fn parse_url_preserves_existing_scheme() {
+        let url = parse_url("http://example.com/path").expect("url should parse");
+
+        assert_eq!(url.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn browser_eval_callback_decodes_result() {
+        let encoded = encoded_payload(r#"{"ok":true,"result":{"answer":42}}"#);
+        let value = browser_eval_callback_payload(&encoded).expect("payload should decode");
+
+        assert_eq!(value["answer"], 42);
+    }
+
+    #[test]
+    fn browser_eval_callback_decodes_error() {
+        let encoded = encoded_payload(r#"{"ok":false,"error":"boom"}"#);
+        let error = browser_eval_callback_payload(&encoded).expect_err("payload should fail");
+
+        assert_eq!(error, "boom");
+    }
+
+    #[test]
+    fn eval_callback_script_embeds_script_as_json() {
+        let script = build_eval_callback_script("'quoted' + \" value\"", "request-1")
+            .expect("script should build");
+
+        assert!(script.contains("pragma-eval"));
+        assert!(script.contains(r#""'quoted' + \" value\""#));
+    }
 }
 
 /// Emits page metadata to the frontend, ignoring the (benign) error when the
@@ -184,6 +381,10 @@ pub fn browser_create(
             );
         })
         .on_navigation(move |url| {
+            if url.scheme() == EVAL_SENTINEL_SCHEME {
+                receive_eval_navigation(url);
+                return false;
+            }
             // A focus ping, not a real navigation: report it and cancel the load.
             if url.scheme() == FOCUS_SENTINEL_SCHEME {
                 let _ = nav_app.emit(
@@ -257,7 +458,10 @@ pub fn browser_focus(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
 /// Navigates a browser webview to a new URL (address-bar submit).
 #[tauri::command]
 pub fn browser_navigate(app: tauri::AppHandle, tab_id: String, url: String) -> AppResult<()> {
-    require_webview(&app, &tab_id)?.navigate(parse_url(&url)?)?;
+    let url = parse_url(&url)?;
+    if let Some(webview) = app.get_webview(&webview_label(&tab_id)) {
+        webview.navigate(url)?;
+    }
     Ok(())
 }
 
@@ -317,6 +521,114 @@ pub fn browser_close(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
         webview.close()?;
     }
     Ok(())
+}
+
+/// Runs JavaScript in a browser webview and returns its JSON-serializable result.
+#[tauri::command]
+pub fn browser_eval(
+    app: tauri::AppHandle,
+    tab_id: String,
+    script: String,
+) -> AppResult<serde_json::Value> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let callback_script = build_eval_callback_script(&script, &request_id)?;
+    require_webview(&app, &tab_id)?.eval(&callback_script)?;
+    wait_for_eval_result(&request_id)
+}
+
+/// Scrolls the page by deltas or to a top/bottom anchor.
+#[tauri::command]
+pub fn browser_scroll(
+    app: tauri::AppHandle,
+    tab_id: String,
+    x: i64,
+    y: i64,
+    to: Option<String>,
+) -> AppResult<()> {
+    let script = match to.as_deref() {
+        Some("top") => "window.scrollTo({ top: 0, left: window.scrollX, behavior: 'auto' });"
+            .to_string(),
+        Some("bottom") => "window.scrollTo({ top: document.documentElement.scrollHeight, left: window.scrollX, behavior: 'auto' });".to_string(),
+        Some(other) => return Err(AppError::Browser(format!("unknown scroll anchor: {other}"))),
+        None => format!("window.scrollBy({{ left: {x}, top: {y}, behavior: 'auto' }});"),
+    };
+    require_webview(&app, &tab_id)?.eval(&script)?;
+    Ok(())
+}
+
+/// Focuses the first element matching a CSS selector inside the page.
+#[tauri::command]
+pub fn browser_focus_element(
+    app: tauri::AppHandle,
+    tab_id: String,
+    selector: String,
+) -> AppResult<()> {
+    let script = selector_eval(&selector, "el.focus(); true")?;
+    require_webview(&app, &tab_id)?.eval(&script)?;
+    Ok(())
+}
+
+/// Clicks the first element matching a CSS selector inside the page.
+#[tauri::command]
+pub fn browser_click(app: tauri::AppHandle, tab_id: String, selector: String) -> AppResult<()> {
+    let script = selector_eval(&selector, "el.click(); true")?;
+    require_webview(&app, &tab_id)?.eval(&script)?;
+    Ok(())
+}
+
+fn selector_eval(selector: &str, body: &str) -> AppResult<String> {
+    let selector = serde_json::to_string(selector)?;
+    Ok(format!(
+        "(() => {{ const el = document.querySelector({selector}); if (!el) throw new Error('selector not found'); {body}; }})();"
+    ))
+}
+
+/// CLI-oriented tab screenshot. Unlike [`browser_screenshot`], which needs the
+/// frontend's placeholder rect (there is no frontend in a brokered CLI
+/// request), this computes the webview's on-screen bounds directly: the
+/// window's desktop-relative top-left ([`Window::outer_position`]) plus the
+/// webview's window-relative position ([`Webview::position`]), both already in
+/// physical pixels. Saves straight to disk — no save dialog — defaulting to a
+/// timestamped path under the system temp dir when `out` is omitted.
+#[tauri::command]
+pub fn browser_screenshot_tab(
+    app: tauri::AppHandle,
+    tab_id: String,
+    out: Option<String>,
+) -> AppResult<serde_json::Value> {
+    let webview = require_webview(&app, &tab_id)?;
+    let window_origin = main_window(&app)?.outer_position()?;
+    let webview_position = webview.position()?;
+    let webview_size = webview.size()?;
+
+    let image = capture_region(
+        f64::from(window_origin.x + webview_position.x),
+        f64::from(window_origin.y + webview_position.y),
+        f64::from(webview_size.width),
+        f64::from(webview_size.height),
+    )?;
+
+    let path = out.map_or_else(default_screenshot_path, PathBuf::from);
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    image
+        .save(&path)
+        .map_err(|error| AppError::Browser(format!("failed to save screenshot: {error}")))?;
+
+    Ok(serde_json::json!({ "path": path.display().to_string() }))
+}
+
+/// Default save location for a CLI-requested screenshot when `--out` is omitted.
+fn default_screenshot_path() -> PathBuf {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("pragma-screenshot-{timestamp}.png"))
 }
 
 /// Screenshots the page region and saves it via a native save dialog.

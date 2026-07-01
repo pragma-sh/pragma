@@ -311,6 +311,12 @@ out via `onTitle(tabId, listener)`; workspace context dispatches `set-auto-title
 Tauri command, which sets `user_renamed = 1` server-side), the title is permanently
 locked against future shell pushes.
 
+**CLI-driven tab/worktree mutations:** brokered `pragma-cli` commands are executed by
+`src-tauri/src/control.rs`, then emit `worktreeChanged` / `tabsChanged` Tauri events.
+`workspace-context.tsx` listens for those events and refreshes the selected project's
+SQLite snapshot; `tabOpened` also selects the target worktree/tab so CLI-opened tabs are
+visible immediately.
+
 ## Drag-and-drop
 
 **HTML5 drag-and-drop requires `"dragDropEnabled": false`** on the window in
@@ -385,7 +391,8 @@ per-row `fileActions` and per-header `headerActions`. Staging is reversible
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
 lifecycle actions: committed changes show `merge_worktree_to_parent`; a fully
 merged/no-change child shows `WorktreeDeleteDialog`. The left sidebar polls
-`worktrees_merged_status` for the merge glyph.
+`worktrees_merged_status` for the merge glyph as a fallback, and also subscribes to the
+shared per-worktree file watcher so filesystem changes refresh the glyph immediately.
 
 **Editor/diff tabs** — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and
 `diff` (read-only `@codemirror/merge`) as `TabKind`s, opened via `openFileTab` /

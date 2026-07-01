@@ -61,6 +61,8 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                     ServerFrame::Hello(_)
                     | ServerFrame::Response(_)
                     | ServerFrame::Rpc(_)
+                    | ServerFrame::Control(_)
+                    | ServerFrame::ControlResult(_)
                     | ServerFrame::Event(_),
                 )
                 | Err(_) => {}

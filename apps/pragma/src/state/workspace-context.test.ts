@@ -1,4 +1,4 @@
-import type { Project, Tab } from "@pragma/constants";
+import type { Project, Tab, Worktree } from "@pragma/constants";
 import { describe, expect, it } from "vitest";
 
 import { type SplitLayoutNode, workspaceReducer } from "./workspace-context";
@@ -37,6 +37,20 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     prNumber: null,
     userRenamed: false,
     orderIndex: 0,
+    createdAt: "now",
+  };
+}
+
+function worktree(id: string, projectId = "project"): Worktree {
+  return {
+    id,
+    projectId,
+    parentId: null,
+    branch: id,
+    title: null,
+    path: `/tmp/${id}`,
+    isMain: true,
+    hidden: false,
     createdAt: "now",
   };
 }
@@ -495,6 +509,7 @@ describe("workspaceReducer", () => {
       },
       {
         type: "set-splits",
+        projectId: "project",
         worktreeRoots: {
           worktree: {
             kind: "split",
@@ -513,6 +528,41 @@ describe("workspaceReducer", () => {
     const root = state.splitRootByWorktree.worktree;
     expect(root?.kind).toBe("split");
     expect(tabIdsInLayout(root).toSorted()).toEqual(["one", "two"]);
+  });
+
+  it("clears refreshed project splits when the persisted row is gone", () => {
+    const otherProjectSplit: SplitLayoutNode = {
+      kind: "split",
+      id: "split-other",
+      direction: "horizontal",
+      children: [
+        { kind: "pane", id: "pane-a", tabIds: ["a"], activeTabId: "a" },
+        { kind: "pane", id: "pane-b", tabIds: ["b"], activeTabId: "b" },
+      ],
+    };
+    const state = workspaceReducer(
+      {
+        ...baseState,
+        worktrees: { project: [worktree("worktree")], other: [worktree("other", "other")] },
+        tabs: [tab("one")],
+        splitRootByWorktree: {
+          worktree: {
+            kind: "split",
+            id: "split-stale",
+            direction: "vertical",
+            children: [
+              { kind: "pane", id: "pane-one", tabIds: ["one"], activeTabId: "one" },
+              { kind: "pane", id: "pane-two", tabIds: ["two"], activeTabId: "two" },
+            ],
+          },
+          other: otherProjectSplit,
+        },
+      },
+      { type: "set-splits", projectId: "project", worktreeRoots: {} },
+    );
+
+    expect(state.splitRootByWorktree.worktree).toBeUndefined();
+    expect(state.splitRootByWorktree.other).toEqual(otherProjectSplit);
   });
 
   it("merges new tabs into a single-pane root when tabs are loaded", () => {

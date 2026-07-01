@@ -7,8 +7,23 @@ crate's debug binary).
 ## Current Usage
 
 ```sh
-pragma-cli --agent <id> report started|stopped|attention|cleared
+pragma-cli agent report --agent <id> started|stopped|attention|cleared
 ```
+
+Every command renders plain text (aligned tables / short human lines) by
+default. Two mutually exclusive global flags switch to structured output for
+scripting:
+
+- `--json` — `serde_json`-serialized output.
+- `--toon` — [TOON](https://toonformat.dev) (Token-Oriented Object Notation)
+  output via the `toon-format` crate, a token-efficient JSON alternative
+  meant for LLM contexts (e.g. piping `pragma-cli tab list --all --toon`
+  into an agent prompt instead of `--json`).
+
+Both go through `crate::output::Output`, which serializes the same
+`serde_json::Value`/`Serialize` payload either as JSON or, for `--toon`, by
+converting it to a `serde_json::Value` and encoding that with
+`toon_format::encode_default`.
 
 | Status      | Dot color | Meaning                          |
 | ----------- | --------- | -------------------------------- |
@@ -25,8 +40,8 @@ meaningful result to show.
 The CLI reads `PRAGMA_SERVER_SOCKET` first, falling back to the legacy
 `PRAGMA_DAEMON_SOCKET` during the transition. It also reads `PRAGMA_TAB_ID` and
 `PRAGMA_WORKTREE_ID`, connects to the existing `pragma-server` Unix socket,
-reads the `Hello` frame, writes one `AgentReport` frame, and exits without
-waiting for an ack.
+reads the `Hello` frame, writes one `AgentReport` frame, and exits after the
+frame is sent.
 
 ## Staging
 
@@ -37,6 +52,6 @@ sidecar. The app installs/updates it to `~/.local/bin/pragma-cli` on startup.
 
 ## Future Scope
 
-This crate is also the future home for general-purpose Pragma CLI functions such
-as router DB management, host management, connect, and bootstrap. Do not add new
-subcommands for the remote-server rearchitecture unless explicitly requested.
+Most GUI-required commands broker through the running app via `pragma-server`.
+Commands that do not need the app (`tab read`, `agent status`, and
+`agent report`) talk directly to the server.

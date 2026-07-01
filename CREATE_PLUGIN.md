@@ -119,7 +119,7 @@ directly. See **[CLI.md](./CLI.md)** for the CLI contract. Model your package on
 
 - A host-tool plugin manifest + hooks file that map each lifecycle hook to
   `sh "$PLUGIN_ROOT/hooks/report.sh" <event>`.
-- One `report.sh` that translates events → `pragma-cli report …`. Keeping the logic in
+- One `report.sh` that translates events → `pragma-cli agent report …`. Keeping the logic in
   one script (not inline JSON one-liners) is what makes it testable.
 - Tests that drive `report.sh` with a fake `pragma-cli` on `PATH`.
 

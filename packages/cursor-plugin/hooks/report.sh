@@ -31,7 +31,7 @@ marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Cursor session (e.g. when pragma-cli or the server is unavailable).
 report() {
-  "$pragma_cli" --agent "$agent" report "$@" >/dev/null 2>&1 || true
+  "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in

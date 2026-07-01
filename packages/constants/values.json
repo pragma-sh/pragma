@@ -37,6 +37,9 @@
   "scripts": {
     "maxConcurrentCommands": 4
   },
+  "agents": {
+    "startDelayMs": 500
+  },
   "github": {
     "oauthClientId": "Ov23li1WfY05SeQNp5tk",
     "scopes": ["repo"],

@@ -141,6 +141,41 @@ pub fn run_headless_commands(
     }
 }
 
+/// Runs one ad-hoc command in a worktree on its host and returns
+/// stdout/stderr/status regardless of exit code. Used by `pragma-cli tab exec`
+/// and `exec_in_worktree` so a non-zero exit is reported back to the caller
+/// instead of being converted into a Tauri command error.
+pub fn run_headless_command(
+    pty: &PtyClient,
+    project: &Project,
+    worktree: &Worktree,
+    command: &str,
+) -> AppResult<HeadlessCommandResult> {
+    let request = ExecRequest {
+        cwd: worktree.path.clone(),
+        commands: vec![command.to_string()],
+        env: vec![
+            ("PRAGMA_WORKTREE_PATH".to_string(), worktree.path.clone()),
+            ("PRAGMA_PROJECT_PATH".to_string(), project.path.clone()),
+            ("PRAGMA_WORKTREE_ID".to_string(), worktree.id.clone()),
+        ],
+        max_concurrent: 1,
+    };
+    let payload = serde_json::to_value(request)?;
+    let value = pty.rpc(ProtocolRpcMethod::Exec, payload)?;
+    let mut results: Vec<CommandResult> = serde_json::from_value(value)?;
+    let result = results
+        .pop()
+        .ok_or_else(|| AppError::Script("command produced no result".to_string()))?;
+    Ok(HeadlessCommandResult {
+        command: result.command,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        status: result.status,
+        duration: Duration::from_millis(result.duration_ms),
+    })
+}
+
 fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {
     let object = value.as_object().ok_or_else(|| {
         AppError::InvalidInput("project script config must contain a JSON object".to_string())
