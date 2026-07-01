@@ -199,7 +199,7 @@ fn handle_client_request(
                 outcome.event_stream,
                 outcome.control_rx,
             ),
-            Err(HandledRequestError::Rpc(response)) => (None, Some(response), None, None),
+            Err(HandledRequestError::Rpc(response)) => (None, Some(*response), None, None),
             Err(HandledRequestError::Control(response)) => {
                 // Brokered request failed synchronously (e.g. no controller).
                 if let Ok(mut writer_guard) = writer.lock() {
@@ -344,7 +344,9 @@ fn handle_request(
             registry.mark_agents_seen_for_tab(&required(request.session_id, "sessionId")?);
             Ok(Outcome::default())
         }
-        RequestKind::Rpc => Err(HandledRequestError::Rpc(handle_rpc_request(request, core)?)),
+        RequestKind::Rpc => Err(HandledRequestError::Rpc(Box::new(handle_rpc_request(
+            request, core,
+        )?))),
         RequestKind::Subscribe => Ok(Outcome {
             event_stream: Some(subscription_snapshot(request, registry)?),
             control_rx: None,
@@ -441,7 +443,7 @@ struct Outcome {
 
 enum HandledRequestError {
     Request(String),
-    Rpc(RpcResponseFrame),
+    Rpc(Box<RpcResponseFrame>),
     /// A brokered control request failed synchronously (no controller, or the
     /// forward write failed). The CLI receives this as a `ControlResult` frame.
     Control(ControlResult),
