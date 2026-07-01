@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ControlMethod, DiffSide, Tab, TabKind, Worktree};
+use pragma_constants::{ControlMethod, DiffSide, Tab, TabKind, Worktree, CONSTANTS};
 use pragma_protocol::{
     read_json_frame, write_json_frame, ControlEnvelope, ControlResult, RequestFrame, RequestKind,
     ServerFrame,
@@ -536,7 +536,7 @@ fn tab_exec(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
     let worktree = db.worktree(&args.worktree_id)?;
     let project = db.project(&worktree.project_id)?;
     let pty = app.state::<Hosts>().for_worktree(&db, &args.worktree_id)?;
-    let command = args.command.join(" ");
+    let command = shell_join(&args.command);
     let result = scripts::run_headless_command(&pty, &project, &worktree, &command)?;
     json(ExecResult {
         command: result.command,
@@ -991,6 +991,11 @@ pub fn start_agent(
         command.push_str(" --model ");
         command.push_str(&shell_quote(&model));
     }
+    // Mirror the frontend's fixed startup delay (see agent-launch.ts) so the
+    // shell has time to become ready before we write to it. There is no
+    // readiness signal from the PTY, so both sides use the same shared,
+    // best-effort delay.
+    thread::sleep(Duration::from_millis(CONSTANTS.agents.start_delay_ms));
     let _ = pty.write(tab.id.clone(), format!("{command}\r"));
     if let Some(prompt) = prompt {
         let _ = pty.write(tab.id.clone(), format!("{prompt}\r"));
@@ -1009,7 +1014,7 @@ pub fn exec_in_worktree(
     let worktree = db.worktree(&worktree_id)?;
     let project = db.project(&worktree.project_id)?;
     let pty = hosts.for_worktree(&db, &worktree_id)?;
-    let command = command.join(" ");
+    let command = shell_join(&command);
     let result = scripts::run_headless_command(&pty, &project, &worktree, &command)?;
     Ok(ExecResult {
         command: result.command,
@@ -1053,9 +1058,46 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// Joins an argv vector into a single shell command line, quoting each
+/// argument so a `sh -c` re-parse reconstructs the original argument
+/// boundaries instead of splitting on embedded spaces or shell metacharacters.
+fn shell_join(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::BrowserHistory;
+    use super::{shell_join, BrowserHistory};
+
+    #[test]
+    fn shell_join_preserves_argv_boundaries_through_a_shell_reparse() {
+        let argv = vec![
+            "git".to_string(),
+            "log".to_string(),
+            "--format=%s %ad".to_string(),
+        ];
+        let joined = shell_join(&argv);
+
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\n' {joined}"))
+            .output()
+            .expect("sh should run");
+        let lines: Vec<&str> = std::str::from_utf8(&output.stdout)
+            .expect("utf8 output")
+            .lines()
+            .collect();
+
+        assert_eq!(lines, vec!["git", "log", "--format=%s %ad"]);
+    }
+
+    #[test]
+    fn shell_join_single_plain_argument_is_unquoted() {
+        assert_eq!(shell_join(&["status".to_string()]), "status");
+    }
 
     #[test]
     fn browser_history_tracks_offscreen_navigation_back_and_forward() {

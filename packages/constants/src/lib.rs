@@ -14,7 +14,7 @@ mod generated {
 }
 
 pub use generated::{
-    AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, AppInfo,
+    AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, Agents, AppInfo,
     BranchSyncStatus, ChangeStatus, ChangedFile, Constants, ControlMethod, Daemon, DiffSide,
     DirEntry, EditorLauncher, EditorLaunchers, FileChange, FileChangeKind, FileContents, FileDiff,
     GitHub, GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,

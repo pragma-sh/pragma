@@ -11,6 +11,7 @@
     "links",
     "editorLaunchers",
     "scripts",
+    "agents",
     "daemon",
     "protocol",
     "github"
@@ -26,6 +27,7 @@
     "links": { "$ref": "#/definitions/Links" },
     "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
     "scripts": { "$ref": "#/definitions/Scripts" },
+    "agents": { "$ref": "#/definitions/Agents" },
     "daemon": { "$ref": "#/definitions/Daemon" },
     "protocol": { "$ref": "#/definitions/Protocol" },
     "github": { "$ref": "#/definitions/GitHub" }
@@ -374,6 +376,20 @@
           "type": "integer",
           "minimum": 1,
           "description": "Maximum number of headless project script commands Pragma runs at once. Interactive run scripts create terminal tabs and are not limited by this value."
+        }
+      }
+    },
+    "Agents": {
+      "title": "Agents",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared agent-launch timing used by both the frontend's terminal-write scheduling and the Rust CLI/broker launch path.",
+      "required": ["startDelayMs"],
+      "properties": {
+        "startDelayMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delay before writing an agent's start command to a freshly spawned PTY, giving the shell time to become ready. There is no readiness signal from the PTY, so this is a best-effort fixed delay."
         }
       }
     },
