@@ -182,7 +182,10 @@ discovery with cwd set to the installed agent directory, and validates only the 
 JSON array (`[{ id, name, reasoning? }]`). Host-specific CLI parsing belongs in
 plugin-owned scripts under `pragma/agents/<id>/scripts/`; core must not learn Cursor,
 opencode, or other host output formats. There is no provider-level Auto model; when a
-model has reasoning entries, the model-only choice is shown as Auto reasoning.
+model has reasoning entries, the model-only choice is shown as Auto reasoning. Model
+commands run through `process_env::command`, which extends GUI-launched packaged apps'
+minimal `$PATH` with common user/tool bins such as `~/.opencode/bin`, version-manager
+shims, Homebrew, and macOS Python.framework.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 

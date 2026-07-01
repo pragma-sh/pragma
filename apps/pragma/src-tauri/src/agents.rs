@@ -586,7 +586,7 @@ mod tests {
             original: std::env::var_os("PATH"),
         };
         let temp = tempfile::tempdir().unwrap();
-        let home_bin = temp.path().join(".local/bin");
+        let home_bin = temp.path().join(".opencode/bin");
         std::fs::create_dir_all(&home_bin).unwrap();
         let helper = home_bin.join("test-models");
         std::fs::write(

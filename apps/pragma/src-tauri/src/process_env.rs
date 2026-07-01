@@ -21,12 +21,19 @@ fn user_path_from(current: OsString, home: Option<&Path>) -> OsString {
     let mut entries: Vec<PathBuf> = env::split_paths(&current).collect();
 
     if let Some(home) = home {
+        push_path(&mut entries, home.join(".opencode/bin"));
         push_path(&mut entries, home.join(".bun/bin"));
         push_path(&mut entries, home.join(".local/bin"));
         push_path(&mut entries, home.join(".cargo/bin"));
+        push_path(&mut entries, home.join(".volta/bin"));
+        push_path(&mut entries, home.join(".mise/shims"));
+        push_path(&mut entries, home.join(".local/share/mise/shims"));
+        push_path(&mut entries, home.join(".asdf/shims"));
+        push_path(&mut entries, home.join(".local/share/pnpm"));
     }
 
     for path in [
+        "/Library/Frameworks/Python.framework/Versions/Current/bin",
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
@@ -56,9 +63,18 @@ mod tests {
         let entries: Vec<PathBuf> = env::split_paths(&path).collect();
 
         assert_eq!(entries.first(), Some(&PathBuf::from("/usr/bin")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.opencode/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.bun/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.local/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.cargo/bin")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.volta/bin")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.mise/shims")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.local/share/mise/shims")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.asdf/shims")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.local/share/pnpm")));
+        assert!(entries.contains(&PathBuf::from(
+            "/Library/Frameworks/Python.framework/Versions/Current/bin"
+        )));
         assert!(entries.contains(&PathBuf::from("/opt/homebrew/bin")));
         assert!(entries.contains(&PathBuf::from("/usr/local/bin")));
     }
