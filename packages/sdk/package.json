@@ -25,6 +25,7 @@
     "lint": "oxlint ."
   },
   "devDependencies": {
+    "@pragma/constants": "workspace:*",
     "@types/node": "^24.10.1",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",
