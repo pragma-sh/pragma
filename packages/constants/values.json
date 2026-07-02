@@ -3,6 +3,10 @@
   "daemon": {
     "protocolVersion": 8
   },
+  "gateway": {
+    "discoveryFile": "gateway.json",
+    "tokenHeader": "authorization"
+  },
   "protocol": {
     "rpcMethods": [
       "git",

@@ -5355,6 +5355,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pragma-gateway"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "pragma-client",
+ "pragma-constants",
+ "pragma-protocol",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tiny_http",
+ "uuid",
+]
+
+[[package]]
 name = "pragma-protocol"
 version = "0.0.0"
 dependencies = [

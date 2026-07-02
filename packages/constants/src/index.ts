@@ -10,6 +10,7 @@ export type {
   EditorLauncher,
   Scripts,
   Agents,
+  Gateway,
   Protocol,
   ProtocolRpcMethod,
   ProtocolEventKind,

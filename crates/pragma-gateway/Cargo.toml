@@ -1,0 +1,29 @@
+[package]
+name = "pragma-gateway"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Localhost HTTP gateway for the Pragma Unix-socket server protocol."
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+pragma-client = { path = "../pragma-client", default-features = false }
+pragma-constants = { path = "../../packages/constants" }
+pragma-protocol = { path = "../pragma-protocol" }
+rand = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tiny_http = "0.12"
+uuid = { workspace = true }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "json",
+  "rustls-tls",
+] }
+tempfile = "3"

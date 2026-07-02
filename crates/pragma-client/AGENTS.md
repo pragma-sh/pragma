@@ -21,6 +21,15 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   its host client. SSH routes persist only non-secret connection preferences so
   the app can reconnect agent-authenticated remotes on startup.
 
+## Cargo features
+
+- Default features are `ssh` and `router`, matching the desktop app's full native
+  client needs.
+- `ssh` gates the `russh`/`tokio` SSH streamlocal bridge and remote exec helpers.
+- `router` gates the `rusqlite` client-local router database.
+- `cargo build -p pragma-client --no-default-features` must keep compiling for
+  lightweight consumers such as `pragma-gateway`, which only need Unix-socket frame I/O.
+
 ## Rules
 
 - No TCP listener, TLS, pairing, tokens, or custom auth layer.

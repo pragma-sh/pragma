@@ -6,7 +6,9 @@
 //! Unix socket. PTY output stays on the raw binary frame path defined by
 //! `pragma-protocol`.
 
+#[cfg(feature = "router")]
 pub mod router;
+#[cfg(feature = "ssh")]
 mod ssh;
 
 #[cfg(unix)]
@@ -18,15 +20,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
+use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
-    read_json_frame, write_input_frame, write_json_frame, ProtocolEventKind, RequestFrame,
-    RequestKind, RpcRequest, ServerFrame, SubscriptionRequest,
+    read_json_frame, write_input_frame, write_json_frame, AgentReportPayload, ProtocolEventKind,
+    RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame, SubscriptionRequest,
 };
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
+#[cfg(feature = "ssh")]
 pub use ssh::{
     ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
 };
@@ -51,6 +54,12 @@ pub enum ClientError {
     /// The server rejected a request.
     #[error("server error: {0}")]
     Server(String),
+    /// The server rejected an RPC request with a protocol-level code.
+    #[error("rpc error {code:?}: {message}")]
+    Rpc {
+        code: ProtocolErrorCode,
+        message: String,
+    },
     /// A mutex protecting shared client state was poisoned.
     #[error("lock poisoned")]
     LockPoisoned,
@@ -178,14 +187,14 @@ impl PragmaClient {
     }
 
     /// Enqueues terminal input on a dedicated writer connection.
-    pub fn write(&self, session_id: String, data: String) -> ClientResult<()> {
+    pub fn write(&self, session_id: String, data: impl Into<Vec<u8>>) -> ClientResult<()> {
         let mut guard = self.input_tx.lock()?;
         if guard.is_none() {
             *guard = Some(self.start_input_writer());
         }
         let msg = InputMsg {
             session_id,
-            data: data.into_bytes(),
+            data: data.into(),
         };
         if let Err(err) = guard.as_ref().expect("input writer present").send(msg) {
             let tx = self.start_input_writer();
@@ -217,6 +226,18 @@ impl PragmaClient {
     pub fn mark_agents_seen(&self, tab_id: String) -> ClientResult<()> {
         let request = request_mark_agents_seen(tab_id);
         self.request(&request)
+    }
+
+    /// Reports an agent status update to the server.
+    pub fn report_agent(&self, payload: &AgentReportPayload) -> ClientResult<()> {
+        let request = request_agent_report(payload)?;
+        self.request(&request)
+    }
+
+    /// Opens a daemon-wide agent event stream positioned after the success response.
+    pub fn subscribe_agents_stream(&self) -> ClientResult<UnixStream> {
+        let request = request_subscribe_agents();
+        self.open_event_stream(&request)
     }
 
     /// Reads the server's advertised protocol version from its `Hello` frame.
@@ -420,10 +441,10 @@ impl PragmaClient {
                     return Ok(if response.ok {
                         Ok(response.payload.unwrap_or(Value::Null))
                     } else {
-                        Err(ClientError::Server(response.error.map_or_else(
-                            || "server rpc failed".to_string(),
-                            |error| error.message,
-                        )))
+                        Err(response.error.map_or_else(
+                            || ClientError::Server("server rpc failed".to_string()),
+                            rpc_error,
+                        ))
                     });
                 }
                 ServerFrame::Hello(_)
@@ -724,6 +745,21 @@ pub fn request_subscribe_agents() -> RequestFrame {
     )
 }
 
+/// Builds an `AgentReport` request frame.
+pub fn request_agent_report(payload: &AgentReportPayload) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&payload).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentReport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
 /// Builds a `Subscribe` request frame for a snapshot-then-delta event stream.
 #[must_use]
 pub fn request_subscribe(
@@ -827,6 +863,13 @@ fn send_input_frame(client: &PragmaClient, conn: &mut Option<UnixStream>, msg: &
             break;
         }
         *conn = None;
+    }
+}
+
+fn rpc_error(error: RpcError) -> ClientError {
+    ClientError::Rpc {
+        code: error.code,
+        message: error.message,
     }
 }
 
