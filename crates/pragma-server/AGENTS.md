@@ -53,7 +53,7 @@ neither balloon in memory nor wedge on a dead client — keep them when touching
 session/connection code:
 
 - **All per-session memory is byte-bounded.** Scrollback is capped by frame
-  count *and* total output bytes (`SCROLLBACK_MAX_BYTES`); a frame-count cap
+  count _and_ total output bytes (`SCROLLBACK_MAX_BYTES`); a frame-count cap
   alone is not a bound because coalesced frames are up to 256 KiB each.
 - **Every write to a client socket is timeout-bounded** (`CLIENT_WRITE_TIMEOUT`
   via `SO_SNDTIMEO`). A client that stops draining must never pin a thread (or
@@ -63,7 +63,7 @@ session/connection code:
   a partial frame on the wire; the connection's framing is untrustworthy and it
   must be shut down (`write_or_hang_up` / `write_frame_or_hang_up`).
 - **Exited sessions are reaped wherever their `Exit` frame is observed** — on
-  the live event path *and* on scrollback replay (`Registry::remove_exited`),
+  the live event path _and_ on scrollback replay (`Registry::remove_exited`),
   so a session that dies while no client is attached is cleaned up on the next
   attach instead of leaking its PTY fd and scrollback.
 
