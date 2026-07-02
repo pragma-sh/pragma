@@ -1,19 +1,14 @@
 import type { Plugin, PluginInput, PluginOptions } from "@opencode-ai/plugin";
 import {
+  hasPragmaEnvironment,
   reportAttention,
   reportCleared,
   reportStarted,
   reportStopped,
-  type AttentionKind,
-  type PragmaAgentSpawnOptions,
+  type AgentAttentionKind,
 } from "@pragma/sdk";
 
-import {
-  type Environment,
-  type PragmaReporter,
-  PRAGMA_ENV_KEYS,
-  createPragmaOpencodeHooks,
-} from "./hooks";
+import { type Environment, type PragmaReporter, createPragmaOpencodeHooks } from "./hooks";
 
 const DEFAULT_AGENT_ID = "opencode";
 
@@ -21,19 +16,18 @@ const DEFAULT_AGENT_ID = "opencode";
 export interface PragmaOpencodePluginOptions extends PluginOptions {
   /** Stable Pragma agent id. Defaults to `opencode`. */
   agent?: string;
-  /** Path or executable name for the Pragma CLI. Defaults to `pragma-cli`. */
-  executable?: string;
   /** Extra environment values passed to the Pragma SDK helpers. */
   env?: Record<string, string | undefined>;
-  /** Working directory for the Pragma SDK helper process. */
-  cwd?: string;
   /** Suppress debug logging even when `PRAGMA_OPENCODE_PLUGIN_DEBUG` is set. */
   quiet?: boolean;
 }
 
 /** Pragma opencode plugin — reports agent status to Pragma. */
-export const PragmaOpencodePlugin: Plugin = async (input: PluginInput, options?: PluginOptions) => {
-  const reporter = createSdkReporter(input, parseOptions(options));
+export const PragmaOpencodePlugin: Plugin = async (
+  _input: PluginInput,
+  options?: PluginOptions,
+) => {
+  const reporter = createSdkReporter(parseOptions(options));
   // Opening opencode must not inherit a stale indicator from a previous run in
   // this same Pragma tab that exited without cleanup — e.g. killed with SIGINT
   // or crashed, where the `dispose` hook never runs to report `cleared`, so its
@@ -49,28 +43,19 @@ function parseOptions(options: PluginOptions | undefined): PragmaOpencodePluginO
   return options ?? {};
 }
 
-function createSdkReporter(
-  input: PluginInput,
-  options: PragmaOpencodePluginOptions,
-): PragmaReporter {
+function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter {
   const agent = nonEmpty(options.agent) ?? DEFAULT_AGENT_ID;
   const env: Environment = { ...process.env, ...options.env };
-  const spawnOptions: PragmaAgentSpawnOptions = {
-    cwd: options.cwd ?? input.directory,
-    env,
-    executable: options.executable,
-  };
   const debug = options.quiet === true ? false : env.PRAGMA_OPENCODE_PLUGIN_DEBUG === "1";
 
   // The hooks state machine already deduplicates and orders status changes; this
-  // reporter only guards on the Pragma environment and shells out to the CLI.
+  // reporter only guards on the Pragma gateway environment and sends HTTP reports.
   return {
     env,
-    started: () => report(() => reportStarted({ ...spawnOptions, agent })),
-    stopped: () => report(() => reportStopped({ ...spawnOptions, agent })),
-    attention: (kind: AttentionKind) =>
-      report(() => reportAttention({ ...spawnOptions, agent, kind })),
-    cleared: () => report(() => reportCleared({ ...spawnOptions, agent })),
+    started: () => report(() => reportStarted({ agent, env })),
+    stopped: () => report(() => reportStopped({ agent, env })),
+    attention: (kind: AgentAttentionKind) => report(() => reportAttention({ agent, env, kind })),
+    cleared: () => report(() => reportCleared({ agent, env })),
   };
 
   async function report(run: () => Promise<unknown>): Promise<void> {
@@ -85,10 +70,6 @@ function createSdkReporter(
       }
     }
   }
-}
-
-function hasPragmaEnvironment(env: Environment): boolean {
-  return PRAGMA_ENV_KEYS.every((key) => Boolean(env[key]));
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

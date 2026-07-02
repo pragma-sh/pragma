@@ -87,6 +87,11 @@ front** so opening opencode never inherits a stale indicator from a previous run
 same tab that exited without cleanup (`dispose` only runs on a graceful quit; a crash
 leaves the last status lingering in the long-lived daemon).
 
+Reporting uses the fetch-based `@pragma/sdk` gateway helpers. Plugin options no longer
+accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` unless
+`PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
+`PRAGMA_WORKTREE_ID` are present.
+
 ## Agent launcher config
 
 `pragma/agents/opencode/config.json` — fields: `id`, `name`, `icon`, `start`, and

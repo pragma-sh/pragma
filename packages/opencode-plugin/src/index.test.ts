@@ -6,6 +6,13 @@ const reportStoppedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
 const reportAttentionMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
 
 vi.mock("@pragma/sdk", () => ({
+  hasPragmaEnvironment: (env: Record<string, string | undefined>) =>
+    Boolean(
+      env.PRAGMA_GATEWAY_URL &&
+      env.PRAGMA_GATEWAY_TOKEN &&
+      env.PRAGMA_TAB_ID &&
+      env.PRAGMA_WORKTREE_ID,
+    ),
   reportCleared: (...args: unknown[]) => reportClearedMock(...args),
   reportStarted: (...args: unknown[]) => reportStartedMock(...args),
   reportStopped: (...args: unknown[]) => reportStoppedMock(...args),
@@ -21,6 +28,8 @@ function testHooks() {
   const reports: Report[] = [];
   const hooks = createPragmaOpencodeHooks({
     env: {
+      PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
+      PRAGMA_GATEWAY_TOKEN: "token",
       PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
       PRAGMA_TAB_ID: "tab-1",
       PRAGMA_WORKTREE_ID: "worktree-1",
@@ -299,6 +308,8 @@ describe("Pragma opencode plugin", () => {
     await hooks["shell.env"]?.({ cwd: "/tmp/project" }, output);
 
     expect(output.env).toEqual({
+      PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
+      PRAGMA_GATEWAY_TOKEN: "token",
       PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
       PRAGMA_TAB_ID: "tab-1",
       PRAGMA_WORKTREE_ID: "worktree-1",
@@ -366,6 +377,8 @@ describe("Pragma opencode plugin", () => {
 
 describe("PragmaOpencodePlugin initialization", () => {
   const pragmaEnv = {
+    PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
+    PRAGMA_GATEWAY_TOKEN: "token",
     PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
     PRAGMA_TAB_ID: "tab-1",
     PRAGMA_WORKTREE_ID: "worktree-1",
@@ -387,6 +400,8 @@ describe("PragmaOpencodePlugin initialization", () => {
     await PragmaOpencodePlugin(input, {
       env: {
         PRAGMA_DAEMON_SOCKET: undefined,
+        PRAGMA_GATEWAY_URL: undefined,
+        PRAGMA_GATEWAY_TOKEN: undefined,
         PRAGMA_TAB_ID: undefined,
         PRAGMA_WORKTREE_ID: undefined,
       },
