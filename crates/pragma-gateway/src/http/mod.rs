@@ -1,7 +1,9 @@
 pub mod response;
 pub mod router;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use tiny_http::{Request, ResponseBox, Server};
@@ -14,6 +16,9 @@ use crate::routes;
 
 use self::router::gateway_router;
 
+/// Spawn event streams held until the client opens the real events endpoint.
+pub type PendingSpawnStreams = Arc<Mutex<HashMap<String, UnixStream>>>;
+
 /// Shared HTTP application state.
 #[derive(Clone)]
 pub struct AppState {
@@ -23,6 +28,8 @@ pub struct AppState {
     pub token: String,
     /// Gateway package version.
     pub gateway_version: &'static str,
+    /// Recently spawned session streams, kept briefly to cover race-to-attach.
+    pub pending_spawn_streams: PendingSpawnStreams,
 }
 
 /// Runs the blocking `tiny_http` accept loop.

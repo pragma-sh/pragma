@@ -5,7 +5,9 @@ mod error;
 mod http;
 mod routes;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use auth::{generate_token, remove_stale_or_refuse, write_discovery, GatewayDiscovery};
 use clap::Parser;
@@ -69,6 +71,7 @@ fn run(args: Args) -> GatewayResult<()> {
         client,
         token: config.token,
         gateway_version: env!("CARGO_PKG_VERSION"),
+        pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
     };
     serve(&server, &state);
     Ok(())

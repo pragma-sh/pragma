@@ -1,3 +1,7 @@
+use std::os::unix::net::UnixStream;
+use std::thread;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tiny_http::Request;
 use uuid::Uuid;
@@ -35,10 +39,7 @@ struct ResizeRequest {
     rows: u16,
 }
 
-#[derive(Serialize)]
-struct KillForCwdResponse {
-    killed: u8,
-}
+const SPAWN_STREAM_HOLD_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Handles `POST /v1/sessions`.
 pub fn spawn(
@@ -51,13 +52,14 @@ pub fn spawn(
     }
     let session_id = Uuid::new_v4().to_string();
     let worktree_id = payload.worktree_id.unwrap_or_else(|| session_id.clone());
-    let _stream = state.client.spawn_stream(
+    let stream = state.client.spawn_stream(
         session_id.clone(),
         worktree_id.clone(),
         payload.cwd.clone(),
         payload.cols,
         payload.rows,
     )?;
+    hold_spawn_stream(state, session_id.clone(), stream);
     json_response(
         201,
         &SpawnResponse {
@@ -84,9 +86,9 @@ pub fn events(
         .get("rows")
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or_else(default_rows);
-    Ok(ndjson_response(
-        state.client.attach_stream(session_id, cols, rows)?,
-    ))
+    let stream = state.client.attach_stream(session_id.clone(), cols, rows)?;
+    drop_pending_spawn_stream(state, &session_id);
+    Ok(ndjson_response(stream))
 }
 
 /// Handles `POST /v1/sessions/{id}/input`.
@@ -134,7 +136,26 @@ pub fn kill_for_cwd(
         .cloned()
         .ok_or_else(|| GatewayError::InvalidPayload("cwd is required".to_string()))?;
     state.client.kill_for_cwd(cwd)?;
-    json_response(200, &KillForCwdResponse { killed: 0 })
+    Ok(empty_response(204))
+}
+
+fn hold_spawn_stream(state: &AppState, session_id: String, stream: UnixStream) {
+    if let Ok(mut streams) = state.pending_spawn_streams.lock() {
+        streams.insert(session_id.clone(), stream);
+    }
+    let pending = state.pending_spawn_streams.clone();
+    thread::spawn(move || {
+        thread::sleep(SPAWN_STREAM_HOLD_TIMEOUT);
+        if let Ok(mut streams) = pending.lock() {
+            streams.remove(&session_id);
+        }
+    });
+}
+
+fn drop_pending_spawn_stream(state: &AppState, session_id: &str) {
+    if let Ok(mut streams) = state.pending_spawn_streams.lock() {
+        streams.remove(session_id);
+    }
 }
 
 fn default_cols() -> u16 {

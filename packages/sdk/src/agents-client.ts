@@ -80,7 +80,14 @@ async function reportWithStatus(
   if (!options.client && !hasPragmaEnvironment(options.env)) {
     return;
   }
-  const agents = options.client?.agents ?? new AgentsClient(new Transport());
+  const agents =
+    options.client?.agents ??
+    new AgentsClient(
+      new Transport({
+        baseUrl: readEnv(PRAGMA_ENV_KEYS.gatewayUrl, options.env),
+        token: readEnv(PRAGMA_ENV_KEYS.gatewayToken, options.env),
+      }),
+    );
   await reportWithClient(agents, options, status, attentionKind);
 }
 

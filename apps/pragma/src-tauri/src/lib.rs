@@ -209,9 +209,18 @@ async fn pty_spawn(
     // Resolve which host owns this worktree's project and pin the session to it,
     // so later session-keyed ops (write/resize/kill) reach the same server.
     let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
+    let is_local_host = host_id == LOCAL_HOST;
     let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
     hosts.bind_session(session_id.clone(), host_id)?;
-    run_pty_task(move || client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)).await
+    run_pty_task(move || {
+        if is_local_host {
+            if let Err(error) = client.ensure_gateway() {
+                log::warn!("failed to ensure pragma-gateway before PTY spawn: {error}");
+            }
+        }
+        client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -505,9 +514,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
         log::warn!("failed to install pragma-cli: {error}");
     }
-    if let Err(error) = pty.ensure_gateway() {
-        log::warn!("failed to start pragma-gateway: {error}");
-    }
+    ensure_gateway_in_background(pty.clone());
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");
     }
@@ -527,6 +534,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         CONSTANTS.max_parallel_agents
     );
     Ok(())
+}
+
+fn ensure_gateway_in_background(pty: PtyClient) {
+    std::thread::spawn(move || {
+        if let Err(error) = pty.ensure_gateway() {
+            log::warn!("failed to start pragma-gateway: {error}");
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
