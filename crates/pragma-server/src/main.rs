@@ -128,6 +128,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(accepted) => accepted,
             Err(err) => {
                 eprintln!("accept failed: {err}");
+                // Bound the spin rate on a persistent accept error (e.g.
+                // EMFILE from fd exhaustion): without a delay this would log
+                // and retry at full CPU speed until an fd is freed elsewhere.
+                thread::sleep(Duration::from_millis(100));
                 continue;
             }
         };

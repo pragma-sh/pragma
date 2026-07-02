@@ -341,7 +341,17 @@ impl Registry {
                 // trying to join a thread that is, transitively, itself.
                 thread::spawn(move || {
                     if let Ok(mut watchers) = file_watchers.lock() {
-                        watchers.remove(&worktree_id);
+                        // Re-check under the lock: a concurrent
+                        // `subscribe_files` call may have added a new
+                        // subscriber between when the callback saw the list
+                        // empty and now, so only remove if it is still empty.
+                        let still_empty = watchers
+                            .get(&worktree_id)
+                            .and_then(|w| w.subscribers.lock().ok())
+                            .is_none_or(|subs| subs.is_empty());
+                        if still_empty {
+                            watchers.remove(&worktree_id);
+                        }
                     }
                 });
             }
