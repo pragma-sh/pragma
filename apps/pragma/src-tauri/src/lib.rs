@@ -348,7 +348,11 @@ async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> 
 #[tauri::command]
 async fn restart_daemon(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
     let client = pty.inner().clone();
-    run_pty_task(move || client.restart()).await
+    run_pty_task(move || {
+        client.restart()?;
+        client.ensure_gateway()
+    })
+    .await
 }
 
 /// Returns the current contents of the server log file (empty if not yet
@@ -500,6 +504,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     install_deep_links(app);
     if let Err(error) = agent_cli::ensure_installed(app.handle()) {
         log::warn!("failed to install pragma-cli: {error}");
+    }
+    if let Err(error) = pty.ensure_gateway() {
+        log::warn!("failed to start pragma-gateway: {error}");
     }
     if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
         log::warn!("failed to install bundled agent configs: {error}");

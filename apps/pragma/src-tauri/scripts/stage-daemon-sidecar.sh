@@ -30,9 +30,11 @@ fi
 
 if [[ "$profile" == "release" ]]; then
   cargo build -p pragma-server --release
+  cargo build -p pragma-gateway --release
   cargo build -p pragma-cli --release
 else
   cargo build -p pragma-server
+  cargo build -p pragma-gateway
   cargo build -p pragma-cli
 fi
 
@@ -50,6 +52,8 @@ bun --filter @pragma/github-helpers build:sidecar
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-server" \
   "$src_tauri_dir/binaries/pragma-server-$triple"
+cp "$repo_root/target/$profile/pragma-gateway" \
+  "$src_tauri_dir/binaries/pragma-gateway-$triple"
 cp "$repo_root/target/$profile/pragma-cli" \
   "$src_tauri_dir/binaries/pragma-cli-$triple"
 cp "$repo_root/packages/ai-helpers/dist/pragma-ai" \
@@ -77,6 +81,7 @@ cp -R "$repo_root/packages/cursor-plugin/pragma/agents/." \
   "$src_tauri_dir/resources/pragma/agents"
 
 echo "staged pragma-server ($profile) -> src-tauri/binaries/pragma-server-$triple"
+echo "staged pragma-gateway ($profile) -> src-tauri/binaries/pragma-gateway-$triple"
 echo "staged pragma-cli ($profile) -> src-tauri/binaries/pragma-cli-$triple"
 echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"

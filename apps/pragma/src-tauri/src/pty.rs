@@ -1,12 +1,16 @@
 use std::collections::HashMap;
-use std::net::Shutdown;
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use pragma_client::request_spawn;
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
+use pragma_constants::CONSTANTS;
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolEventKind,
     ServerFrame,
@@ -15,6 +19,9 @@ use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::error::{AppError, AppResult};
+
+const GATEWAY_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const GATEWAY_READY_POLL: Duration = Duration::from_millis(100);
 
 /// Live per-session event-stream connections, tracked so a disposed or
 /// re-attached terminal can have its Rust-side `UnixStream` shut down
@@ -241,6 +248,22 @@ impl PtyClient {
         Ok(self.inner.restart()?)
     }
 
+    /// Ensures the local HTTP gateway is running for this managed-local server.
+    ///
+    /// The gateway writes `gateway.json` beside `daemon.sock`; `pragma-server`
+    /// reads that file when spawning shells and injects `PRAGMA_GATEWAY_*` only
+    /// into Pragma-owned terminal sessions.
+    pub fn ensure_gateway(&self) -> AppResult<()> {
+        let _stream = self.inner.connect_with_spawn()?;
+        let socket_path = self.inner.socket_path();
+        let discovery_path = gateway_discovery_path(&socket_path);
+        if gateway_discovery_healthy(&discovery_path) {
+            return Ok(());
+        }
+        Self::spawn_gateway(&socket_path)?;
+        wait_for_gateway_ready(&discovery_path)
+    }
+
     /// Reads the host server's advertised protocol version (used to verify a
     /// remote `pragma-server` is compatible before routing a project to it).
     pub fn server_protocol_version(&self) -> AppResult<u64> {
@@ -253,6 +276,37 @@ impl PtyClient {
 
     pub(crate) fn connect_with_spawn(&self) -> AppResult<UnixStream> {
         Ok(self.inner.connect_with_spawn()?)
+    }
+
+    fn spawn_gateway(socket_path: &Path) -> AppResult<()> {
+        let mut command = if cfg!(debug_assertions) {
+            let mut command = Command::new(cargo_executable());
+            command.args(["run", "-p", "pragma-gateway", "--", "--socket"]);
+            command.arg(socket_path);
+            command.current_dir(workspace_root());
+            command
+        } else {
+            let mut command = Command::new(sidecar_executable("pragma-gateway"));
+            command.arg("--socket").arg(socket_path);
+            command
+        };
+        command.stdin(Stdio::null());
+        if let Ok(log_file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(gateway_log_path(socket_path))
+        {
+            if let Ok(stderr) = log_file.try_clone() {
+                command.stdout(log_file).stderr(stderr);
+            }
+        } else {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        let mut child = command.spawn()?;
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
     }
 
     #[cfg(test)]
@@ -282,6 +336,69 @@ pub(crate) fn sidecar_executable(name: &str) -> PathBuf {
 
 pub(crate) fn cargo_executable() -> PathBuf {
     pragma_client::cargo_executable()
+}
+
+fn gateway_discovery_path(socket_path: &Path) -> PathBuf {
+    socket_path.with_file_name(CONSTANTS.gateway.discovery_file.as_str())
+}
+
+fn gateway_log_path(socket_path: &Path) -> PathBuf {
+    socket_path.with_file_name("gateway.log")
+}
+
+fn wait_for_gateway_ready(path: &Path) -> AppResult<()> {
+    let deadline = Instant::now() + GATEWAY_READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if gateway_discovery_healthy(path) {
+            return Ok(());
+        }
+        thread::sleep(GATEWAY_READY_POLL);
+    }
+    Err(AppError::Daemon(format!(
+        "gateway did not write discovery file at {}",
+        path.display()
+    )))
+}
+
+fn gateway_discovery_healthy(path: &Path) -> bool {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return false;
+    };
+    let Some(port) = value
+        .get("port")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|port| u16::try_from(port).ok())
+    else {
+        return false;
+    };
+    let protocol_matches = value
+        .get("protocolVersion")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|version| version == CONSTANTS.daemon.protocol_version.get());
+    let has_token = value
+        .get("token")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|token| !token.is_empty());
+    protocol_matches && has_token && gateway_health_probe(port)
+}
+
+fn gateway_health_probe(port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(GATEWAY_READY_POLL));
+    let _ = stream.set_write_timeout(Some(GATEWAY_READY_POLL));
+    if stream
+        .write_all(b"GET /v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = String::new();
+    stream.read_to_string(&mut response).is_ok() && response.starts_with("HTTP/1.1 200")
 }
 
 pub(crate) fn workspace_root() -> PathBuf {
@@ -379,9 +496,14 @@ impl From<ClientError> for AppError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::Path;
+    use std::thread;
 
-    use super::{instance_channel, instance_data_dir, PtyClient};
+    use pragma_constants::CONSTANTS;
+
+    use super::{gateway_discovery_healthy, instance_channel, instance_data_dir, PtyClient};
 
     #[test]
     fn log_path_sits_beside_socket() {
@@ -426,6 +548,46 @@ mod tests {
             instance_data_dir(base, "pragma-dev-abc123"),
             base.join("pragma-dev-abc123"),
         );
+    }
+
+    #[test]
+    fn gateway_discovery_healthy_requires_live_gateway() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept health probe");
+            let mut request = [0; 256];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .expect("write response");
+        });
+        let dir = tempfile::tempdir().expect("temp dir");
+        let discovery_path = dir.path().join(CONSTANTS.gateway.discovery_file.as_str());
+        std::fs::write(
+            &discovery_path,
+            format!(
+                r#"{{"port":{port},"token":"secret","pid":123,"protocolVersion":{}}}"#,
+                CONSTANTS.daemon.protocol_version.get()
+            ),
+        )
+        .expect("write discovery");
+
+        assert!(gateway_discovery_healthy(&discovery_path));
+        handle.join().expect("health server joined");
+    }
+
+    #[test]
+    fn gateway_discovery_healthy_rejects_stale_protocol() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let discovery_path = dir.path().join(CONSTANTS.gateway.discovery_file.as_str());
+        std::fs::write(
+            &discovery_path,
+            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":0}"#,
+        )
+        .expect("write discovery");
+
+        assert!(!gateway_discovery_healthy(&discovery_path));
     }
 
     #[test]
