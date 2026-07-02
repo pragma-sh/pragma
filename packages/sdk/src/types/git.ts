@@ -1,12 +1,6 @@
-import type {
-  BranchSyncStatus,
-  ChangeStatus,
-  DiffSide,
-  FileDiff,
-  WorktreeChanges,
-} from "@pragma/constants";
+import type { BranchSyncStatus, FileDiff, WorktreeChanges } from "@pragma/constants";
 
-export type { BranchSyncStatus, ChangeStatus, DiffSide, FileDiff, WorktreeChanges };
+export type { BranchSyncStatus, FileDiff, WorktreeChanges };
 
 export interface MergedStatusItem {
   id: string;

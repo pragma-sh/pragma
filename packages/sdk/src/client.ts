@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import { AgentsClient } from "./agents-client";
 import { EventsClient } from "./events-client";
 import { ExecClient } from "./exec-client";

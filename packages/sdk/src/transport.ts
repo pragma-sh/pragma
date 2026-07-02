@@ -25,16 +25,11 @@ export class Transport {
   readonly headers: Record<string, string>;
 
   constructor(config: PragmaClientConfig = {}) {
-    this.baseUrl = stripTrailingSlash(config.baseUrl ?? readEnv(PRAGMA_ENV_KEYS.gatewayUrl) ?? "");
-    this.token = config.token ?? readEnv(PRAGMA_ENV_KEYS.gatewayToken) ?? "";
-    this.fetch = config.fetch ?? globalThis.fetch?.bind(globalThis);
+    const { baseUrl, token } = requireGatewayConfig(config);
+    this.baseUrl = baseUrl;
+    this.token = token;
+    this.fetch = requireFetch(config.fetch);
     this.headers = config.headers ?? {};
-    if (!this.baseUrl || !this.token) {
-      throw new PragmaTransportError("Pragma gateway baseUrl and token are required");
-    }
-    if (!this.fetch) {
-      throw new PragmaTransportError("global fetch is not available");
-    }
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -74,6 +69,23 @@ export class Transport {
     }
     return response;
   }
+}
+
+function requireGatewayConfig(config: PragmaClientConfig): { baseUrl: string; token: string } {
+  const baseUrl = stripTrailingSlash(config.baseUrl ?? readEnv(PRAGMA_ENV_KEYS.gatewayUrl) ?? "");
+  const token = config.token ?? readEnv(PRAGMA_ENV_KEYS.gatewayToken) ?? "";
+  if (!baseUrl || !token) {
+    throw new PragmaTransportError("Pragma gateway baseUrl and token are required");
+  }
+  return { baseUrl, token };
+}
+
+function requireFetch(fetch: FetchLike | undefined): FetchLike {
+  const resolved = fetch ?? globalThis.fetch?.bind(globalThis);
+  if (!resolved) {
+    throw new PragmaTransportError("global fetch is not available");
+  }
+  return resolved;
 }
 
 export function urlFor(baseUrl: string, path: string): string {

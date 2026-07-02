@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type { AgentReportPayload } from "@pragma/constants";
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";

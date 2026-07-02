@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type { ProtocolEventKind } from "@pragma/constants";
 
 import { routes } from "./routes";

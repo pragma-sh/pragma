@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import { routes } from "./routes";
 import type { Transport } from "./transport";
 import type {
