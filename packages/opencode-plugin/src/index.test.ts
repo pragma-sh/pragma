@@ -1,39 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const reportClearedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
-const reportStartedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
-const reportStoppedMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
-const reportAttentionMock = vi.fn((..._args: unknown[]) => Promise.resolve({}));
-
-vi.mock("@pragma/sdk", () => ({
-  hasPragmaEnvironment: (env: Record<string, string | undefined>) =>
-    Boolean(
-      env.PRAGMA_GATEWAY_URL &&
-      env.PRAGMA_GATEWAY_TOKEN &&
-      env.PRAGMA_TAB_ID &&
-      env.PRAGMA_WORKTREE_ID,
-    ),
-  reportCleared: (...args: unknown[]) => reportClearedMock(...args),
-  reportStarted: (...args: unknown[]) => reportStartedMock(...args),
-  reportStopped: (...args: unknown[]) => reportStoppedMock(...args),
-  reportAttention: (...args: unknown[]) => reportAttentionMock(...args),
+const sdkMocks = vi.hoisted(() => ({
+  reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
 }));
+
+function forwardReportMock(mock: (...args: unknown[]) => Promise<object>) {
+  return (...args: unknown[]) => mock(...args);
+}
+
+vi.mock("@pragma/sdk", () => {
+  return {
+    hasPragmaEnvironment: (env: Record<string, string | undefined>) =>
+      ["PRAGMA_GATEWAY_URL", "PRAGMA_GATEWAY_TOKEN", "PRAGMA_TAB_ID", "PRAGMA_WORKTREE_ID"].every(
+        (key) => Boolean(env[key]),
+      ),
+    reportAttention: forwardReportMock(sdkMocks.reportAttention),
+    reportCleared: forwardReportMock(sdkMocks.reportCleared),
+    reportStarted: forwardReportMock(sdkMocks.reportStarted),
+    reportStopped: forwardReportMock(sdkMocks.reportStopped),
+  };
+});
 
 import { createPragmaOpencodeHooks } from "./hooks";
 import PragmaOpencodePlugin from "./index";
 
 type Report = "started" | "stopped" | "cleared" | `attention:${string}`;
 
+const pragmaEnv = {
+  PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
+  PRAGMA_GATEWAY_TOKEN: "token",
+  PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
+  PRAGMA_TAB_ID: "tab-1",
+  PRAGMA_WORKTREE_ID: "worktree-1",
+};
+
 function testHooks() {
   const reports: Report[] = [];
   const hooks = createPragmaOpencodeHooks({
-    env: {
-      PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
-      PRAGMA_GATEWAY_TOKEN: "token",
-      PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
-      PRAGMA_TAB_ID: "tab-1",
-      PRAGMA_WORKTREE_ID: "worktree-1",
-    },
+    env: pragmaEnv,
     async started() {
       reports.push("started");
     },
@@ -50,143 +57,149 @@ function testHooks() {
   return { hooks, reports };
 }
 
+function runtimeEvent(type: string, properties: Record<string, unknown>) {
+  return { event: { type, properties } as never };
+}
+
 function sessionStatus(type: "busy" | "idle" | "retry") {
-  return {
-    event: {
-      type: "session.status",
-      properties: {
-        sessionID: "s1",
-        status:
-          type === "retry" ? { type, attempt: 1, message: "rate limited", next: 0 } : { type },
-      },
-    } as never,
-  };
+  const status =
+    type === "retry" ? { type, attempt: 1, message: "rate limited", next: 0 } : { type };
+  return runtimeEvent("session.status", { sessionID: "s1", status });
 }
 
 function questionPart(status: string) {
-  return {
-    event: {
-      type: "message.part.updated",
-      properties: {
-        part: {
-          id: "p1",
-          sessionID: "s1",
-          messageID: "m1",
-          type: "tool",
-          callID: "c1",
-          tool: "question",
-          state: { status },
-        },
-      },
-    } as never,
-  };
+  return runtimeEvent("message.part.updated", {
+    part: {
+      id: "p1",
+      sessionID: "s1",
+      messageID: "m1",
+      type: "tool",
+      callID: "c1",
+      tool: "question",
+      state: { status },
+    },
+  });
+}
+
+function sessionIdleEvent() {
+  return runtimeEvent("session.idle", { sessionID: "s1" });
+}
+
+function abortErrorEvent() {
+  return runtimeEvent("session.error", {
+    sessionID: "s1",
+    error: { name: "MessageAbortedError", data: { message: "aborted" } },
+  });
+}
+
+function permissionEvent(type: "permission.asked" | "permission.updated") {
+  return runtimeEvent(type, {
+    id: "perm-1",
+    type: "bash",
+    sessionID: "s1",
+    messageID: "m1",
+    title: "Run command",
+    metadata: {},
+    time: { created: 0 },
+  });
+}
+
+async function expectReports(
+  action: (hooks: ReturnType<typeof testHooks>["hooks"]) => Promise<void>,
+  expected: Report[],
+): Promise<void> {
+  const { hooks, reports } = testHooks();
+  await action(hooks);
+  expect(reports).toEqual(expected);
+}
+
+async function expectEventReports(
+  input: ReturnType<typeof runtimeEvent>,
+  expected: Report[],
+): Promise<void> {
+  await expectReports(async (hooks) => {
+    await hooks.event?.(input);
+  }, expected);
+}
+
+async function expectBusyThen(input: ReturnType<typeof runtimeEvent>): Promise<void> {
+  await expectReports(
+    async (hooks) => {
+      await hooks.event?.(sessionStatus("busy"));
+      await hooks.event?.(input);
+    },
+    ["started", "cleared"],
+  );
 }
 
 describe("Pragma opencode plugin", () => {
   it("reports busy then idle session status", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.(sessionStatus("busy"));
-    await hooks.event?.(sessionStatus("idle"));
-
-    expect(reports).toEqual(["started", "stopped"]);
+    await expectReports(
+      async (hooks) => {
+        await hooks.event?.(sessionStatus("busy"));
+        await hooks.event?.(sessionStatus("idle"));
+      },
+      ["started", "stopped"],
+    );
   });
 
   it("reports started on retry session status", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.(sessionStatus("retry"));
-
-    expect(reports).toEqual(["started"]);
+    await expectEventReports(sessionStatus("retry"), ["started"]);
   });
 
   it("reports started on a user chat message", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
-
-    expect(reports).toEqual(["started"]);
+    await expectReports(
+      async (hooks) => {
+        await hooks["chat.message"]?.({ sessionID: "s1" }, { message: {} as never, parts: [] });
+      },
+      ["started"],
+    );
   });
 
-  async function expectStoppedAfter(terminal: { type: string; properties: unknown }) {
+  async function expectStoppedAfter(input: ReturnType<typeof runtimeEvent>) {
     const { hooks, reports } = testHooks();
     await hooks.event?.(sessionStatus("busy"));
-    await hooks.event?.({ event: terminal as never });
+    await hooks.event?.(input);
     expect(reports).toEqual(["started", "stopped"]);
   }
 
   it("reports stopped after a running turn idles", async () => {
-    await expectStoppedAfter({ type: "session.idle", properties: { sessionID: "s1" } });
+    await expectStoppedAfter(sessionIdleEvent());
   });
 
   it("reports stopped after a running turn is deleted", async () => {
-    await expectStoppedAfter({ type: "session.deleted", properties: { info: { id: "s1" } } });
+    await expectStoppedAfter(runtimeEvent("session.deleted", { info: { id: "s1" } }));
   });
 
   it("reports stopped after a running turn errors (non-abort)", async () => {
-    await expectStoppedAfter({ type: "session.error", properties: { sessionID: "s1" } });
+    await expectStoppedAfter(runtimeEvent("session.error", { sessionID: "s1" }));
   });
 
   it("does not report a phantom stopped for a bare idle with no prior activity", async () => {
     const { hooks, reports } = testHooks();
 
-    await hooks.event?.({
-      event: { type: "session.idle", properties: { sessionID: "s1" } } as never,
-    });
+    await hooks.event?.(sessionIdleEvent());
 
     expect(reports).toEqual([]);
   });
 
   it("clears (resets) on an aborted turn instead of reporting finished", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.(sessionStatus("busy"));
-    await hooks.event?.({
-      event: {
-        type: "session.error",
-        properties: {
-          sessionID: "s1",
-          error: { name: "MessageAbortedError", data: { message: "aborted" } },
-        },
-      } as never,
-    });
-
-    expect(reports).toEqual(["started", "cleared"]);
+    await expectBusyThen(abortErrorEvent());
   });
 
   it("does not resurrect a finished dot from the idle that trails an abort", async () => {
     const { hooks, reports } = testHooks();
 
     await hooks.event?.(sessionStatus("busy"));
-    await hooks.event?.({
-      event: {
-        type: "session.error",
-        properties: {
-          sessionID: "s1",
-          error: { name: "MessageAbortedError", data: { message: "aborted" } },
-        },
-      } as never,
-    });
+    await hooks.event?.(abortErrorEvent());
     // opencode may emit a trailing idle after the abort; it must stay cleared.
-    await hooks.event?.({
-      event: { type: "session.idle", properties: { sessionID: "s1" } } as never,
-    });
+    await hooks.event?.(sessionIdleEvent());
 
     expect(reports).toEqual(["started", "cleared"]);
   });
 
   it("clears on server instance disposal even without the dispose hook", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.(sessionStatus("busy"));
-    await hooks.event?.({
-      event: {
-        type: "server.instance.disposed",
-        properties: { directory: "/tmp/project" },
-      } as never,
-    });
-
-    expect(reports).toEqual(["started", "cleared"]);
+    await expectBusyThen(runtimeEvent("server.instance.disposed", { directory: "/tmp/project" }));
   });
 
   it("coalesces repeated busy events into a single started report", async () => {
@@ -229,9 +242,7 @@ describe("Pragma opencode plugin", () => {
 
     await hooks.event?.(questionPart("pending"));
     // opencode reports the session idle while it waits for the answer; red must hold.
-    await hooks.event?.({
-      event: { type: "session.idle", properties: { sessionID: "s1" } } as never,
-    });
+    await hooks.event?.(sessionIdleEvent());
 
     expect(reports).toEqual(["attention:question"]);
   });
@@ -246,59 +257,26 @@ describe("Pragma opencode plugin", () => {
   });
 
   it("resumes when a question tool errors", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.(questionPart("error"));
-
-    expect(reports).toEqual(["started"]);
+    await expectEventReports(questionPart("error"), ["started"]);
   });
 
   it("reports permission attention for documented asked event then resumes when replied", async () => {
     const { hooks, reports } = testHooks();
 
-    await hooks.event?.({
-      event: {
-        type: "permission.asked",
-        properties: {
-          id: "perm-1",
-          type: "bash",
-          sessionID: "s1",
-          messageID: "m1",
-          title: "Run command",
-          metadata: {},
-          time: { created: 0 },
-        },
-      } as never,
-    });
-    await hooks.event?.({
-      event: {
-        type: "permission.replied",
-        properties: { sessionID: "s1", permissionID: "perm-1", response: "allow" },
-      } as never,
-    });
+    await hooks.event?.(permissionEvent("permission.asked"));
+    await hooks.event?.(
+      runtimeEvent("permission.replied", {
+        sessionID: "s1",
+        permissionID: "perm-1",
+        response: "allow",
+      }),
+    );
 
     expect(reports).toEqual(["attention:command", "started"]);
   });
 
   it("keeps supporting the older typed permission updated event", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks.event?.({
-      event: {
-        type: "permission.updated",
-        properties: {
-          id: "perm-1",
-          type: "bash",
-          sessionID: "s1",
-          messageID: "m1",
-          title: "Run command",
-          metadata: {},
-          time: { created: 0 },
-        },
-      } as never,
-    });
-
-    expect(reports).toEqual(["attention:command"]);
+    await expectEventReports(permissionEvent("permission.updated"), ["attention:command"]);
   });
 
   it("forwards pragma env vars to opencode shell commands", async () => {
@@ -345,14 +323,15 @@ describe("Pragma opencode plugin", () => {
   });
 
   it("reports started for a non-question tool via tool.execute.before", async () => {
-    const { hooks, reports } = testHooks();
-
-    await hooks["tool.execute.before"]?.(
-      { tool: "bash", sessionID: "s1", callID: "c1" },
-      { args: {} },
+    await expectReports(
+      async (hooks) => {
+        await hooks["tool.execute.before"]?.(
+          { tool: "bash", sessionID: "s1", callID: "c1" },
+          { args: {} },
+        );
+      },
+      ["started"],
     );
-
-    expect(reports).toEqual(["started"]);
   });
 
   it("reports attention for permission via permission.ask hook", async () => {
@@ -376,24 +355,19 @@ describe("Pragma opencode plugin", () => {
 });
 
 describe("PragmaOpencodePlugin initialization", () => {
-  const pragmaEnv = {
-    PRAGMA_GATEWAY_URL: "http://127.0.0.1:1234",
-    PRAGMA_GATEWAY_TOKEN: "token",
-    PRAGMA_DAEMON_SOCKET: "/tmp/pragma.sock",
-    PRAGMA_TAB_ID: "tab-1",
-    PRAGMA_WORKTREE_ID: "worktree-1",
-  };
   const input = { directory: "/tmp/project" } as never;
 
   beforeEach(() => {
-    reportClearedMock.mockClear();
+    sdkMocks.reportCleared.mockClear();
   });
 
   it("clears any stale status when opencode opens, so a fresh open shows nothing", async () => {
     await PragmaOpencodePlugin(input, { env: pragmaEnv });
 
-    expect(reportClearedMock).toHaveBeenCalledTimes(1);
-    expect(reportClearedMock).toHaveBeenCalledWith(expect.objectContaining({ agent: "opencode" }));
+    expect(sdkMocks.reportCleared).toHaveBeenCalledTimes(1);
+    expect(sdkMocks.reportCleared).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "opencode" }),
+    );
   });
 
   it("does not report on init outside a Pragma terminal", async () => {
@@ -407,6 +381,6 @@ describe("PragmaOpencodePlugin initialization", () => {
       },
     });
 
-    expect(reportClearedMock).not.toHaveBeenCalled();
+    expect(sdkMocks.reportCleared).not.toHaveBeenCalled();
   });
 });

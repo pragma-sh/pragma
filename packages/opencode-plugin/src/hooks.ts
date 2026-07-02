@@ -9,7 +9,7 @@ type RuntimeEvent = OpencodeEvent | { type: string; properties?: Record<string, 
 /** What a runtime event asks the reporter to do: re-derive status, reset, or nothing. */
 type EventAction = "sync" | "clear" | "none";
 
-export const PRAGMA_ENV_KEYS = [
+const PRAGMA_ENV_KEYS = [
   "PRAGMA_GATEWAY_URL",
   "PRAGMA_GATEWAY_TOKEN",
   "PRAGMA_DAEMON_SOCKET",
@@ -244,8 +244,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   }
 }
 
-// Re-exported for index.ts to use in createSdkReporter.
-export type { ReportKey, Environment };
+export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
