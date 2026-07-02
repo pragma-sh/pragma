@@ -45,6 +45,28 @@ the hot path.
 The server is persistent. Do not reintroduce empty-idle self-exit behavior.
 Lifecycle is owned by a host service manager or client-side bootstrap.
 
+## Stability invariants
+
+The release profile builds with `panic = "abort"`, so a panic on **any** thread
+kills every session at once. These invariants exist so long-running servers
+neither balloon in memory nor wedge on a dead client — keep them when touching
+session/connection code:
+
+- **All per-session memory is byte-bounded.** Scrollback is capped by frame
+  count *and* total output bytes (`SCROLLBACK_MAX_BYTES`); a frame-count cap
+  alone is not a bound because coalesced frames are up to 256 KiB each.
+- **Every write to a client socket is timeout-bounded** (`CLIENT_WRITE_TIMEOUT`
+  via `SO_SNDTIMEO`). A client that stops draining must never pin a thread (or
+  the writer mutex it holds) forever, and must not let its unbounded subscriber
+  channel grow while the session keeps producing output.
+- **Never keep writing after a failed write.** A timed-out write may have left
+  a partial frame on the wire; the connection's framing is untrustworthy and it
+  must be shut down (`write_or_hang_up` / `write_frame_or_hang_up`).
+- **Exited sessions are reaped wherever their `Exit` frame is observed** — on
+  the live event path *and* on scrollback replay (`Registry::remove_exited`),
+  so a session that dies while no client is attached is cleaned up on the next
+  attach instead of leaking its PTY fd and scrollback.
+
 ## Agent Status
 
 The server keeps runtime-only agent status keyed by `(worktreeId, tabId, agent)`.
