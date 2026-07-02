@@ -14,7 +14,9 @@
         "reasoning": [
           { "id": "low", "name": "Low" },
           { "id": "medium", "name": "Medium" },
-          { "id": "high", "name": "High" }
+          { "id": "high", "name": "High" },
+          { "id": "xhigh", "name": "Extra High" },
+          { "id": "max", "name": "Max" }
         ]
       },
       {
@@ -24,6 +26,17 @@
           { "id": "low", "name": "Low" },
           { "id": "medium", "name": "Medium" },
           { "id": "high", "name": "High" }
+        ]
+      },
+      {
+        "id": "fable",
+        "name": "Fable",
+        "reasoning": [
+          { "id": "low", "name": "Low" },
+          { "id": "medium", "name": "Medium" },
+          { "id": "high", "name": "High" },
+          { "id": "xhigh", "name": "Extra High" },
+          { "id": "max", "name": "Max" }
         ]
       },
       {
