@@ -1,7 +1,7 @@
 import type { Hooks } from "@opencode-ai/plugin";
-import { type AttentionKind } from "@pragma/sdk";
+import { type AgentAttentionKind } from "@pragma/sdk";
 
-type ReportKey = "started" | "stopped" | "cleared" | `attention:${AttentionKind}`;
+type ReportKey = "started" | "stopped" | "cleared" | `attention:${AgentAttentionKind}`;
 type Environment = Record<string, string | undefined>;
 type OpencodeEvent = Parameters<NonNullable<Hooks["event"]>>[0]["event"];
 type RuntimeEvent = OpencodeEvent | { type: string; properties?: Record<string, unknown> };
@@ -9,7 +9,9 @@ type RuntimeEvent = OpencodeEvent | { type: string; properties?: Record<string, 
 /** What a runtime event asks the reporter to do: re-derive status, reset, or nothing. */
 type EventAction = "sync" | "clear" | "none";
 
-export const PRAGMA_ENV_KEYS = [
+const PRAGMA_ENV_KEYS = [
+  "PRAGMA_GATEWAY_URL",
+  "PRAGMA_GATEWAY_TOKEN",
   "PRAGMA_DAEMON_SOCKET",
   "PRAGMA_TAB_ID",
   "PRAGMA_WORKTREE_ID",
@@ -19,7 +21,7 @@ export interface PragmaReporter {
   readonly env: Environment;
   started(): Promise<void>;
   stopped(): Promise<void>;
-  attention(kind: AttentionKind): Promise<void>;
+  attention(kind: AgentAttentionKind): Promise<void>;
   /** Removes the tab's indicator entirely (agent process exited), not a green "done". */
   cleared(): Promise<void>;
 }
@@ -38,7 +40,7 @@ export interface PragmaReporter {
 export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   let busy = false;
   let attention = false;
-  let attentionKind: AttentionKind = "command";
+  let attentionKind: AgentAttentionKind = "command";
   let lastReported: ReportKey | null = null;
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
@@ -97,7 +99,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     },
   };
 
-  function raiseAttention(kind: AttentionKind): void {
+  function raiseAttention(kind: AgentAttentionKind): void {
     attention = true;
     attentionKind = kind;
   }
@@ -242,8 +244,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   }
 }
 
-// Re-exported for index.ts to use in createSdkReporter.
-export type { ReportKey, Environment };
+export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

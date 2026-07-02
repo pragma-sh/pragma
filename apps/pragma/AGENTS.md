@@ -196,13 +196,15 @@ server/client internals. App-side notes:
 
 **The server ships as a Tauri sidecar.** A release app launches it from beside its own
 executable (`pragma-client::sidecar_executable("pragma-server")`); a debug app spawns it via
-`cargo run -p pragma-server`. The sidecar is staged by
-`scripts/stage-daemon-sidecar.sh` (`cargo build -p pragma-server` + copy with host
+`cargo run -p pragma-server`. The local HTTP gateway ships the same way: debug builds
+run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run the
+`pragma-gateway` sidecar. The sidecars are staged by `scripts/stage-daemon-sidecar.sh`
+(`cargo build -p pragma-server`, `cargo build -p pragma-gateway`, plus copy with host
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
-`--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook
-runs it before `cargo check` because Tauri validates `externalBin` paths during
-compilation. The server is spawned directly with `std::process::Command`, **not** the
-shell plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and the bundled agent launcher
+`--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
+it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+The server/gateway are spawned directly with `std::process::Command`, **not** the shell
+plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and the bundled agent launcher
 configs (`resources/pragma/agents/`) are staged by the same script; plugin JS itself is
 **not** bundled by Pragma. `binaries/` is git-ignored.
 

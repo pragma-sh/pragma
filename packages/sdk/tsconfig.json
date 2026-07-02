@@ -3,8 +3,7 @@
   "compilerOptions": {
     "declaration": true,
     "isolatedDeclarations": true,
-    "noEmit": true,
-    "types": ["node"]
+    "noEmit": true
   },
   "include": ["src/**/*"]
 }

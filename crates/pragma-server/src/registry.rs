@@ -96,13 +96,14 @@ impl Registry {
         {
             return Err(RegistryError::AlreadyExists(session_id));
         }
+        let socket_path = self.socket_path.to_string_lossy();
         let session = Session::spawn(
             session_id.clone(),
             worktree_id,
             cwd,
             cols,
             rows,
-            self.socket_path.to_string_lossy().into_owned(),
+            &socket_path,
         )?;
         let attach = session.attach()?;
         let mut sessions = self

@@ -13,6 +13,7 @@
     "scripts",
     "agents",
     "daemon",
+    "gateway",
     "protocol",
     "github"
   ],
@@ -29,6 +30,7 @@
     "scripts": { "$ref": "#/definitions/Scripts" },
     "agents": { "$ref": "#/definitions/Agents" },
     "daemon": { "$ref": "#/definitions/Daemon" },
+    "gateway": { "$ref": "#/definitions/Gateway" },
     "protocol": { "$ref": "#/definitions/Protocol" },
     "github": { "$ref": "#/definitions/GitHub" }
   },
@@ -277,6 +279,23 @@
           "type": "integer",
           "minimum": 1,
           "description": "Wire-protocol version negotiated between the app and the detached PTY daemon. The daemon greets every connection with this version; the app replaces a daemon whose version does not match (or that sends no greeting). Bump it whenever the daemon protocol or its PTY-stream handling changes so a stale long-lived daemon is restarted instead of silently serving old behavior."
+        }
+      }
+    },
+    "Gateway": {
+      "title": "Gateway",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discoveryFile", "tokenHeader"],
+      "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
+      "properties": {
+        "discoveryFile": {
+          "type": "string",
+          "description": "Filename written beside daemon.sock with gateway port, token, pid, and protocol version."
+        },
+        "tokenHeader": {
+          "type": "string",
+          "description": "HTTP authorization header name used for bearer-token authentication."
         }
       }
     },

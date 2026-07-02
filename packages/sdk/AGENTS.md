@@ -1,24 +1,34 @@
 # packages/sdk — @pragma/sdk
 
-Typed Node/Bun wrapper around the `pragma-cli` CLI. JS/TS consumers should use this
-instead of hand-building `pragma-cli` argv.
+Portable fetch-based TypeScript client for the local Pragma HTTP gateway
+(`crates/pragma-gateway`). JS/TS consumers should use this instead of shelling out to
+`pragma-cli` or hand-building HTTP requests.
 
 ## What it does
 
-Shells out to the `pragma-cli` binary (installed to `~/.local/bin` by the app on
-startup) with typed options. When `executable` is not passed, the SDK uses
-`PRAGMA_CLI` from the merged environment before falling back to `pragma-cli`. Bundled by
-Bunup as ESM, CJS, and `.d.ts`.
+Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
+`agents`, and `events`. `client.rpc(method, payload)` is the low-level escape hatch for
+not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
+
+Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL` and
+`PRAGMA_GATEWAY_TOKEN`. The SDK must not read discovery files; only the gateway owns
+`gateway.json` beside `daemon.sock`.
 
 ## When to use it
 
-Use `@pragma/sdk` in any JS/TS plugin or consumer that needs to report agent status
-(started / stopped / attention / cleared). See `packages/opencode-plugin` for a
-real-world example.
+Use `@pragma/sdk` in any JS/TS plugin or consumer that needs gateway access or agent
+status reporting. The top-level `reportStarted` / `reportStopped` / `reportAttention` /
+`reportCleared` helpers return `Promise<void>` and no-op unless
+`hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
 
 ## Rules
 
-- Never hand-build `pragma-cli` argv in a plugin — import from `@pragma/sdk`.
-- The SDK guards on the Pragma env vars (`PRAGMA_DAEMON_SOCKET`, etc.) before shelling
-  out; it is a no-op outside a Pragma terminal session.
-- See `crates/pragma-cli/AGENTS.md` for the underlying CLI contract.
+- Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.
+- No `node:` imports in SDK source; keep it fetch/ReadableStream/TextDecoder based.
+- `env.ts` is the only SDK file that touches process env, and it must use guarded
+  `globalThis.process?.env` access.
+- Streaming uses NDJSON over `fetch`/`ReadableStream`, not SSE or WebSockets.
+- Future follow-up: `pragma-cli` could target the gateway later, but today it still
+  talks directly to `pragma-server`.
+- Follow-up not implemented without owner sign-off: Pragma terminal sessions do not yet
+  inject `PRAGMA_GATEWAY_URL` / `PRAGMA_GATEWAY_TOKEN`.

@@ -33,6 +33,9 @@ The Rust side parses `values.json` against the schema-generated types at startup
   its config statically; keep the two in sync if you change window defaults here).
 - `daemon.protocolVersion` — protocol compatibility value for `pragma-server`; see
   `crates/pragma-server/AGENTS.md`.
+- `gateway.discoveryFile` / `gateway.tokenHeader` — local HTTP gateway discovery file
+  name and bearer auth header. The gateway port is intentionally runtime-assigned and
+  must not be added as a constant.
 - `protocol.*` — RPC method, event, and error names shared by Rust and TypeScript.
 - `github.*` — OAuth client id, scopes, endpoint URLs.
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and

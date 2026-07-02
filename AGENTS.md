@@ -95,6 +95,7 @@ than no guide.
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
 │   ├── pragma-core/             # Host business logic boundary → see crates/pragma-core/AGENTS.md
+│   ├── pragma-gateway/          # Localhost HTTP gateway → see crates/pragma-gateway/AGENTS.md
 │   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
 │   └── pragma-server/           # Persistent Unix-socket host server → see crates/pragma-server/AGENTS.md
 ├── packages/
@@ -131,8 +132,9 @@ than no guide.
 - GitHub REST/GraphQL → `apps/pragma/src/lib/github.ts` only (never instantiate Octokit
   in components). See `apps/pragma/AGENTS.md`.
 - PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH bridge →
-  `crates/pragma-client`; host business logic → `crates/pragma-core`; wire framing →
-  `crates/pragma-protocol`; CLI/status reporting → `crates/pragma-cli`.
+  `crates/pragma-client`; localhost HTTP/JSON translation → `crates/pragma-gateway`;
+  host business logic → `crates/pragma-core`; wire framing → `crates/pragma-protocol`;
+  CLI/status reporting → `crates/pragma-cli`.
 
 ## Common commands
 
@@ -160,6 +162,7 @@ bun run check              # Everything CI checks, in one shot
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
+cargo run -p pragma-gateway -- --socket /path/to/daemon.sock # Run the localhost HTTP gateway
 cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
 ```
 

@@ -7,6 +7,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use pragma_constants::CONSTANTS;
+use serde::Deserialize;
 use thiserror::Error;
 
 use pragma_protocol::EventFrame;
@@ -129,7 +131,7 @@ impl Session {
         cwd: String,
         cols: u16,
         rows: u16,
-        server_socket: String,
+        server_socket: &str,
     ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
             rows,
@@ -144,8 +146,12 @@ impl Session {
         command.env("COLORTERM", "truecolor");
         command.env("PRAGMA_TAB_ID", &id);
         command.env("PRAGMA_WORKTREE_ID", worktree_id);
-        command.env("PRAGMA_DAEMON_SOCKET", &server_socket);
+        command.env("PRAGMA_DAEMON_SOCKET", server_socket);
         command.env("PRAGMA_SERVER_SOCKET", server_socket);
+        if let Some(gateway) = gateway_env(server_socket) {
+            command.env("PRAGMA_GATEWAY_URL", gateway.url);
+            command.env("PRAGMA_GATEWAY_TOKEN", gateway.token);
+        }
         if let Some(cli_path) = pragma_cli_path() {
             command.env("PRAGMA_CLI", &cli_path);
             command.env("PATH", path_with_cli_dir(&cli_path));
@@ -641,6 +647,35 @@ fn frame_output_bytes(frame: &EventFrame) -> usize {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GatewayDiscovery {
+    port: u16,
+    token: String,
+    protocol_version: u64,
+}
+
+struct GatewayEnv {
+    url: String,
+    token: String,
+}
+
+fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
+    let discovery_path =
+        Path::new(server_socket).with_file_name(CONSTANTS.gateway.discovery_file.as_str());
+    let discovery: GatewayDiscovery =
+        serde_json::from_str(&std::fs::read_to_string(discovery_path).ok()?).ok()?;
+    if discovery.protocol_version != CONSTANTS.daemon.protocol_version.get()
+        || discovery.token.is_empty()
+    {
+        return None;
+    }
+    Some(GatewayEnv {
+        url: format!("http://127.0.0.1:{}", discovery.port),
+        token: discovery.token,
+    })
+}
+
 fn shell_path() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| {
         if cfg!(target_os = "macos") {
@@ -683,7 +718,10 @@ fn path_with_cli_dir_from(cli_path: &Path, existing: Option<std::ffi::OsString>)
 mod tests {
     use std::path::Path;
 
-    use super::{path_with_cli_dir_from, OscChunk, OscParser, OutputCoalescer, Scrollback};
+    use super::{
+        gateway_env, path_with_cli_dir_from, OscChunk, OscParser, OutputCoalescer, Scrollback,
+    };
+    use pragma_constants::CONSTANTS;
     use pragma_protocol::EventFrame;
 
     #[test]
@@ -698,6 +736,38 @@ mod tests {
         assert_eq!(coalescer.flush(), Some(b"foobar".to_vec()));
         // A flush drains the buffer.
         assert_eq!(coalescer.flush(), None);
+    }
+
+    #[test]
+    fn gateway_env_reads_discovery_beside_socket() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("daemon.sock");
+        std::fs::write(
+            socket.with_file_name(CONSTANTS.gateway.discovery_file.as_str()),
+            format!(
+                r#"{{"port":4567,"token":"secret","pid":123,"protocolVersion":{}}}"#,
+                CONSTANTS.daemon.protocol_version.get()
+            ),
+        )
+        .expect("write discovery");
+
+        let env = gateway_env(&socket.to_string_lossy()).expect("gateway env");
+
+        assert_eq!(env.url, "http://127.0.0.1:4567");
+        assert_eq!(env.token, "secret");
+    }
+
+    #[test]
+    fn gateway_env_rejects_stale_protocol() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("daemon.sock");
+        std::fs::write(
+            socket.with_file_name(CONSTANTS.gateway.discovery_file.as_str()),
+            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":0}"#,
+        )
+        .expect("write discovery");
+
+        assert!(gateway_env(&socket.to_string_lossy()).is_none());
     }
 
     #[test]

@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bun run --filter pragma tauri:dev",
+    "gateway:smoke": "bun scripts/gateway-sdk-smoke.ts",
     "generate": "turbo run generate",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

@@ -8,14 +8,25 @@ description = "Rust client transport and frame I/O library for Pragma native cli
 [lints]
 workspace = true
 
+[features]
+default = ["router", "ssh"]
+router = ["dep:rusqlite"]
+ssh = ["dep:russh", "dep:tokio"]
+
 [dependencies]
 pragma-constants = { path = "../../packages/constants" }
 pragma-protocol = { path = "../pragma-protocol" }
-rusqlite = { version = "0.32", features = ["bundled"] }
-russh = "0.61.2"
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+russh = { version = "0.61.2", optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = [
+  "io-util",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+], optional = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

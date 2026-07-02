@@ -20,6 +20,9 @@ scrollback, raw output, and agent-status strengths.
 - The socket mode is explicitly set to `0600`; Unix filesystem permissions are
   the access control boundary.
 - Do not add TCP, TLS, pairing, tokens, or a custom auth layer.
+- The HTTP gateway is deliberately separate (`crates/pragma-gateway`): SDKs talk HTTP
+  to the gateway, and the gateway talks to this server over the existing Unix socket.
+  Server invariants stay unchanged.
 - SSH is client-side only. The server must not know SSH exists.
 
 ## Wire Protocol

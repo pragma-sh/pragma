@@ -1,0 +1,116 @@
+mod auth;
+mod client;
+mod config;
+mod error;
+mod http;
+mod routes;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use auth::{generate_token, remove_stale_or_refuse, write_discovery, GatewayDiscovery};
+use clap::Parser;
+use config::GatewayConfig;
+use error::{GatewayError, GatewayResult};
+use http::{serve, AppState};
+use pragma_constants::CONSTANTS;
+use tiny_http::Server;
+
+const SOCKET_FILE: &str = "daemon.sock";
+
+#[derive(Debug, Parser)]
+#[command(about = "Localhost HTTP gateway for pragma-server")]
+struct Args {
+    /// Existing pragma-server Unix socket path.
+    #[arg(long, env = "PRAGMA_SERVER_SOCKET")]
+    socket: Option<PathBuf>,
+    /// App data directory used to resolve the channel socket when --socket is absent.
+    #[arg(long, env = "PRAGMA_APP_DATA_DIR")]
+    app_data_dir: Option<PathBuf>,
+    /// Instance channel used to resolve the socket when --socket is absent.
+    #[arg(long, env = "PRAGMA_SERVER_CHANNEL")]
+    channel: Option<String>,
+    /// Port to bind on 127.0.0.1; 0 means ephemeral.
+    #[arg(long, default_value_t = 0)]
+    port: u16,
+    /// Bearer token. A random token is generated when omitted.
+    #[arg(long)]
+    token: Option<String>,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    run(args).map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
+}
+
+fn run(args: Args) -> GatewayResult<()> {
+    let socket_path = resolve_socket_path(&args)?;
+    let discovery_path = socket_path.with_file_name(CONSTANTS.gateway.discovery_file.as_str());
+    let token = args.token.unwrap_or_else(generate_token);
+    let config = GatewayConfig::new(socket_path, args.port, token, discovery_path);
+
+    remove_stale_or_refuse(&config.discovery_path)?;
+    let client = client::GatewayClient::new(config.socket_path.clone());
+    client.ensure_protocol()?;
+
+    let server = Server::http(("127.0.0.1", config.port))
+        .map_err(|error| GatewayError::Http(error.to_string()))?;
+    let port = bound_port(&server)?;
+    write_discovery(
+        &config.discovery_path,
+        &GatewayDiscovery {
+            port,
+            token: config.token.clone(),
+            pid: std::process::id(),
+            protocol_version: client.protocol_version(),
+        },
+    )?;
+
+    let state = AppState {
+        client,
+        token: config.token,
+        gateway_version: env!("CARGO_PKG_VERSION"),
+        pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
+    };
+    serve(&server, &state);
+    Ok(())
+}
+
+fn resolve_socket_path(args: &Args) -> GatewayResult<PathBuf> {
+    if let Some(socket) = &args.socket {
+        return Ok(socket.clone());
+    }
+    if let Some(socket) = std::env::var_os("PRAGMA_DAEMON_SOCKET") {
+        return Ok(PathBuf::from(socket));
+    }
+    let app_data_dir = args.app_data_dir.as_ref().ok_or_else(|| {
+        GatewayError::InvalidPayload("--socket or --app-data-dir is required".to_string())
+    })?;
+    let channel = args
+        .channel
+        .as_deref()
+        .unwrap_or(pragma_protocol::PROD_CHANNEL);
+    Ok(server_dir(app_data_dir, channel).join(SOCKET_FILE))
+}
+
+fn server_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        std::env::var_os("XDG_RUNTIME_DIR").map_or_else(
+            || app_data_dir.join(channel),
+            |dir| PathBuf::from(dir).join(channel),
+        )
+    } else if channel == pragma_protocol::PROD_CHANNEL {
+        app_data_dir.to_path_buf()
+    } else {
+        app_data_dir.join(channel)
+    }
+}
+
+fn bound_port(server: &Server) -> GatewayResult<u16> {
+    let address = server.server_addr().to_string();
+    address
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse::<u16>().ok())
+        .ok_or_else(|| GatewayError::Http(format!("could not read bound port from {address}")))
+}
