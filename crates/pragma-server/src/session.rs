@@ -13,6 +13,18 @@ use pragma_protocol::EventFrame;
 
 const SCROLLBACK_LIMIT: usize = 10_000;
 
+/// Hard cap on the total bytes of buffered `Output` data a session's scrollback
+/// may hold, independent of the frame-count limit. The frame-count cap alone is
+/// not a memory bound: output coalescing means a single frame can carry up to
+/// [`OUTPUT_COALESCE_MAX_BYTES`] (256 KiB), so 10 000 frames could legally pin
+/// ~2.5 GiB per session. A long-lived, output-heavy session (an agent run
+/// flooding the terminal for hours) really does accumulate that, and the
+/// server — a daemonized process built with `panic = "abort"` — then dies to
+/// macOS memory pressure or an allocation failure, taking every other session
+/// with it. 8 MiB is far more history than a terminal ever replays on attach
+/// while keeping worst-case scrollback memory per session small.
+const SCROLLBACK_MAX_BYTES: usize = 8 * 1024 * 1024;
+
 /// Size of the buffer used to read raw bytes from the PTY master. A full-screen
 /// redraw from a TUI (e.g. a mouse-tracking app repainting its whole grid on a
 /// scroll report) is tens of KB; reading it in one syscall instead of many small
@@ -577,26 +589,55 @@ impl OscParser {
 
 pub struct Scrollback {
     limit: usize,
+    max_bytes: usize,
+    /// Total bytes of `Output` frame data currently buffered — kept in sync
+    /// with `frames` so eviction never has to rescan the deque.
+    output_bytes: usize,
     frames: VecDeque<EventFrame>,
 }
 
 impl Scrollback {
     pub fn new(limit: usize) -> Self {
+        Self::with_max_bytes(limit, SCROLLBACK_MAX_BYTES)
+    }
+
+    fn with_max_bytes(limit: usize, max_bytes: usize) -> Self {
         Self {
             limit,
+            max_bytes,
+            output_bytes: 0,
             frames: VecDeque::new(),
         }
     }
 
     pub fn push(&mut self, frame: EventFrame) {
-        if self.frames.len() == self.limit {
-            self.frames.pop_front();
-        }
+        self.output_bytes += frame_output_bytes(&frame);
         self.frames.push_back(frame);
+        // Evict from the front until both budgets hold, but never evict the
+        // frame that was just pushed — a single oversized frame stays until
+        // the next push rotates it out.
+        while self.frames.len() > 1
+            && (self.frames.len() > self.limit || self.output_bytes > self.max_bytes)
+        {
+            if let Some(evicted) = self.frames.pop_front() {
+                self.output_bytes = self
+                    .output_bytes
+                    .saturating_sub(frame_output_bytes(&evicted));
+            }
+        }
     }
 
     pub fn frames(&self) -> Vec<EventFrame> {
         self.frames.iter().cloned().collect()
+    }
+}
+
+/// Bytes of terminal output a frame pins in memory. Non-output frames (title,
+/// exit, agent, …) are small and already bounded by the frame-count limit.
+fn frame_output_bytes(frame: &EventFrame) -> usize {
+    match frame {
+        EventFrame::Output { data, .. } => data.len(),
+        _ => 0,
     }
 }
 
@@ -669,6 +710,48 @@ mod tests {
             });
         }
         assert_eq!(scrollback.frames().len(), 2);
+    }
+
+    /// Regression test for unbounded scrollback memory: the frame-count cap
+    /// alone let coalesced output frames (up to 256 KiB each) pin gigabytes
+    /// per long-lived session. The byte budget must evict old output even
+    /// when the frame count is nowhere near its limit.
+    #[test]
+    fn scrollback_is_bounded_by_bytes() {
+        let mut scrollback = Scrollback::with_max_bytes(100, 10);
+        for data in [b"aaaa".to_vec(), b"bbbb".to_vec(), b"cccc".to_vec()] {
+            scrollback.push(EventFrame::Output {
+                session_id: "s".to_string(),
+                data,
+            });
+        }
+        // 12 bytes pushed against a 10-byte budget: the oldest frame is gone.
+        let frames = scrollback.frames();
+        assert_eq!(frames.len(), 2);
+        assert!(matches!(
+            &frames[0],
+            EventFrame::Output { data, .. } if data == b"bbbb"
+        ));
+    }
+
+    /// Non-output frames must not be starved out by the byte budget, and a
+    /// single frame larger than the whole budget must still be kept until the
+    /// next push (never evict the frame just pushed).
+    #[test]
+    fn scrollback_byte_budget_keeps_control_frames_and_oversized_frames() {
+        let mut scrollback = Scrollback::with_max_bytes(100, 10);
+        scrollback.push(EventFrame::Output {
+            session_id: "s".to_string(),
+            data: vec![0_u8; 64],
+        });
+        assert_eq!(scrollback.frames().len(), 1, "oversized frame is kept");
+        scrollback.push(EventFrame::Title {
+            session_id: "s".to_string(),
+            title: "t".to_string(),
+        });
+        let frames = scrollback.frames();
+        assert_eq!(frames.len(), 1, "oversized output rotates out");
+        assert!(matches!(&frames[0], EventFrame::Title { .. }));
     }
 
     fn feed(bytes: &[u8]) -> Vec<OscChunk> {

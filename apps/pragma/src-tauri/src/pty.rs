@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use pragma_client::request_spawn;
@@ -14,12 +16,24 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::error::{AppError, AppResult};
 
+/// Live per-session event-stream connections, tracked so a disposed or
+/// re-attached terminal can have its Rust-side `UnixStream` shut down
+/// explicitly rather than relying on the server to notice.
+///
+/// Without this, a connection abandoned without an explicit kill (a dev HMR
+/// reload, the webview sleeping/reloading, an SSH bridge reconnect) leaves
+/// its `forward_stream` reader thread — and the matching server-side thread +
+/// fd — blocked forever: the server only releases a connection when the
+/// client closes its end, and nothing here ever did.
+type SessionStreams = Arc<Mutex<HashMap<String, UnixStream>>>;
+
 /// Tauri-facing PTY adapter. Transport, bootstrap, and frame request logic live
 /// in `pragma-client`; this wrapper only bridges raw server frames to the
 /// webview channel shape expected by the frontend.
 #[derive(Clone)]
 pub struct PtyClient {
     inner: PragmaClient,
+    session_streams: SessionStreams,
 }
 
 /// Control events forwarded to the webview as JSON over the PTY channel.
@@ -53,6 +67,7 @@ impl PtyClient {
                 workspace_root(),
                 cfg!(debug_assertions),
             )),
+            session_streams: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -62,6 +77,40 @@ impl PtyClient {
     pub fn new_socket(socket_path: PathBuf) -> Self {
         Self {
             inner: PragmaClient::new_socket(socket_path),
+            session_streams: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Records `stream` as the live event-stream connection for `session_id`,
+    /// shutting down and replacing whatever connection was previously tracked
+    /// for it. A prior connection here means the client re-attached (or
+    /// re-spawned) without ever disposing the old one — the exact leak this
+    /// tracking exists to close.
+    fn track_stream(&self, session_id: &str, stream: &UnixStream) {
+        let Ok(cloned) = stream.try_clone() else {
+            return;
+        };
+        let previous = self
+            .session_streams
+            .lock()
+            .ok()
+            .and_then(|mut streams| streams.insert(session_id.to_string(), cloned));
+        if let Some(previous) = previous {
+            let _ = previous.shutdown(Shutdown::Both);
+        }
+    }
+
+    /// Shuts down and forgets the tracked event-stream connection for
+    /// `session_id`, if any. Called on dispose/kill so the connection closes
+    /// immediately instead of waiting on the server to notice.
+    fn close_stream(&self, session_id: &str) {
+        let removed = self
+            .session_streams
+            .lock()
+            .ok()
+            .and_then(|mut streams| streams.remove(session_id));
+        if let Some(stream) = removed {
+            let _ = stream.shutdown(Shutdown::Both);
         }
     }
 
@@ -76,7 +125,8 @@ impl PtyClient {
     ) -> AppResult<()> {
         let stream = self
             .inner
-            .spawn_stream(session_id, worktree_id, cwd, cols, rows)?;
+            .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows)?;
+        self.track_stream(&session_id, &stream);
         forward_stream(stream, on_event);
         Ok(())
     }
@@ -125,7 +175,8 @@ impl PtyClient {
         rows: u16,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
-        let stream = self.inner.attach_stream(session_id, cols, rows)?;
+        let stream = self.inner.attach_stream(session_id.clone(), cols, rows)?;
+        self.track_stream(&session_id, &stream);
         forward_stream(stream, on_event);
         Ok(())
     }
@@ -158,6 +209,11 @@ impl PtyClient {
     }
 
     pub fn kill(&self, session_id: String) -> AppResult<()> {
+        // Close our side of the event-stream connection unconditionally, not
+        // just when the server's Exit-driven cleanup happens to run: this is
+        // the client's only guaranteed chance to release the thread + fd it
+        // holds for this session.
+        self.close_stream(&session_id);
         Ok(self.inner.kill(session_id)?)
     }
 

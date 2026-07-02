@@ -10,7 +10,8 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -31,6 +32,28 @@ use registry::Registry;
 /// server gives up and fails the CLI request. A crashed/hung app cannot wedge
 /// the CLI.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often `forward_events` checks whether its connection has been closed,
+/// when the session it is streaming has otherwise gone quiet. A connection
+/// abandoned without the session producing any further output (an idle shell
+/// sitting at a prompt) would otherwise block on `rx.recv()` forever — the
+/// disconnect is only ever discovered by an actual write failing, and if no
+/// further event ever arrives, that write never happens. This bounds how
+/// long the thread (and the fd its writer holds) can outlive the client that
+/// dropped it. See `session_streams` in `apps/pragma/src-tauri/src/pty.rs`
+/// for the client-side half of this cleanup.
+const EVENT_STREAM_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Upper bound on how long a single write to a client socket may stall before
+/// the connection is declared dead. A client that stops draining its socket
+/// (a wedged webview, a half-dead SSH bridge that never RSTs) otherwise blocks
+/// the writing thread forever *while it holds the connection's writer mutex*,
+/// and — because `Session::broadcast` never blocks — the abandoned subscriber's
+/// event channel then grows without bound for as long as the session keeps
+/// producing output. A healthy local client drains the socket in microseconds;
+/// ten seconds of zero progress means the peer is gone. Applies to the shared
+/// socket fd, so response, event, and brokered-control writes are all covered.
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DETACH_FLAG: &str = "--detach";
 
@@ -95,7 +118,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(Registry::new(paths.socket.clone()));
     let core = Arc::new(Core);
     loop {
-        let (stream, _) = listener.accept()?;
+        // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
+        // must not take the whole process down with it: every other
+        // already-connected terminal's socket would die alongside it, turning
+        // one resource hiccup into a total, silent freeze. Log and keep
+        // serving; a transient failure (like EMFILE) is often self-resolving
+        // once some existing connections close.
+        let (stream, _) = match listener.accept() {
+            Ok(accepted) => accepted,
+            Err(err) => {
+                eprintln!("accept failed: {err}");
+                // Bound the spin rate on a persistent accept error (e.g.
+                // EMFILE from fd exhaustion): without a delay this would log
+                // and retry at full CPU speed until an fd is freed elsewhere.
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+        };
         let registry = Arc::clone(&registry);
         let core = Arc::clone(&core);
         thread::spawn(move || {
@@ -105,6 +144,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Core>) {
+    // Bound every write to this client so a peer that stops reading cannot
+    // pin a writer thread (and the mutex it holds) forever — see
+    // `CLIENT_WRITE_TIMEOUT`. Reads stay blocking: an idle connection is fine.
+    let _ = stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT));
     let writer = match stream.try_clone() {
         Ok(stream) => Arc::new(Mutex::new(stream)),
         Err(_) => return,
@@ -137,10 +180,15 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
         let _ = stream.shutdown(Shutdown::Both);
         return;
     }
-    handle_client_request(first, &writer, registry, core);
+    // Shared with any `forward_events` thread spawned for this connection so
+    // it can stop polling as soon as we notice the client is gone, instead of
+    // only noticing on its next write attempt (see `EVENT_STREAM_POLL_INTERVAL`).
+    let closed = Arc::new(AtomicBool::new(false));
+    handle_client_request(first, &writer, registry, core, &closed);
     while let Some(request) = next_request(&mut stream, registry) {
-        handle_client_request(request, &writer, registry, core);
+        handle_client_request(request, &writer, registry, core, &closed);
     }
+    closed.store(true, Ordering::Relaxed);
     let _ = stream.shutdown(Shutdown::Both);
 }
 
@@ -184,6 +232,7 @@ fn handle_client_request(
     writer: &Arc<Mutex<UnixStream>>,
     registry: &Arc<Registry>,
     core: &Arc<Core>,
+    closed: &Arc<AtomicBool>,
 ) {
     let is_control = matches!(request.kind, RequestKind::Control);
     let request_id = request.request_id.clone();
@@ -203,8 +252,10 @@ fn handle_client_request(
             Err(HandledRequestError::Control(response)) => {
                 // Brokered request failed synchronously (e.g. no controller).
                 if let Ok(mut writer_guard) = writer.lock() {
-                    let _ =
-                        write_json_frame(&mut *writer_guard, &ServerFrame::ControlResult(response));
+                    write_frame_or_hang_up(
+                        &mut writer_guard,
+                        &ServerFrame::ControlResult(response),
+                    );
                 }
                 return;
             }
@@ -225,16 +276,15 @@ fn handle_client_request(
             // forward it to the CLI as a ServerFrame::ControlResult.
             if let Ok(result) = rx.recv_timeout(CONTROL_TIMEOUT) {
                 if let Ok(mut writer_guard) = writer.lock() {
-                    let _ =
-                        write_json_frame(&mut *writer_guard, &ServerFrame::ControlResult(result));
+                    write_frame_or_hang_up(&mut writer_guard, &ServerFrame::ControlResult(result));
                 }
             } else {
                 // Timed out or controller dropped — fail clearly and clear
                 // the pending slot so it does not leak.
                 registry.cancel_pending(&request_id);
                 if let Ok(mut writer_guard) = writer.lock() {
-                    let _ = write_json_frame(
-                        &mut *writer_guard,
+                    write_frame_or_hang_up(
+                        &mut writer_guard,
                         &ServerFrame::ControlResult(ControlResult {
                             ok: false,
                             payload: None,
@@ -248,12 +298,12 @@ fn handle_client_request(
     }
     if let Ok(mut writer_guard) = writer.lock() {
         if let Some(response) = response {
-            if write_json_frame(&mut *writer_guard, &ServerFrame::Response(response)).is_err() {
+            if !write_frame_or_hang_up(&mut writer_guard, &ServerFrame::Response(response)) {
                 return;
             }
         }
         if let Some(response) = rpc_response {
-            if write_json_frame(&mut *writer_guard, &ServerFrame::Rpc(response)).is_err() {
+            if !write_frame_or_hang_up(&mut writer_guard, &ServerFrame::Rpc(response)) {
                 return;
             }
         }
@@ -264,6 +314,7 @@ fn handle_client_request(
             stream.rx,
             Arc::clone(writer),
             Arc::clone(registry),
+            Arc::clone(closed),
         );
     }
 }
@@ -412,8 +463,11 @@ fn handle_control_request(
         method: control.method,
         payload: control.payload,
     };
+    // A failed forward also hangs the controller connection up: its reply loop
+    // then unblocks and clears the controller, so the server converges on the
+    // "app offline" state instead of brokering onto a corrupt stream.
     let forwarded = writer.lock().is_ok_and(|mut writer_guard| {
-        write_json_frame(&mut *writer_guard, &ServerFrame::Control(envelope)).is_ok()
+        write_frame_or_hang_up(&mut writer_guard, &ServerFrame::Control(envelope))
     });
     if !forwarded {
         registry.cancel_pending(&request_id);
@@ -506,24 +560,74 @@ fn forward_events(
     rx: Receiver<EventFrame>,
     writer: Arc<Mutex<UnixStream>>,
     registry: Arc<Registry>,
+    closed: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         for event in scrollback {
-            if let Ok(mut writer) = writer.lock() {
-                let _ = write_event(&mut writer, event);
+            // A replayed `Exit` means we attached to a session whose process
+            // already ended with no forwarder around to observe it (the app
+            // was closed when the shell exited). Reap it now, exactly as the
+            // live path below does, so it doesn't sit in the registry forever.
+            if let EventFrame::Exit { session_id, .. } = &event {
+                registry.remove_exited(session_id);
+            }
+            if !write_or_hang_up(&writer, event) {
+                return;
             }
         }
-        for event in rx {
-            if let EventFrame::Exit { session_id, .. } = &event {
-                registry.clear_agents_for_tab(session_id);
+        loop {
+            if closed.load(Ordering::Relaxed) {
+                break;
             }
-            if let Ok(mut writer) = writer.lock() {
-                if write_event(&mut writer, event).is_err() {
-                    break;
-                }
+            // Poll rather than block on `rx.recv()` so a connection whose
+            // client has already disconnected doesn't wait indefinitely on a
+            // session that has otherwise gone quiet — see
+            // `EVENT_STREAM_POLL_INTERVAL`.
+            let event = match rx.recv_timeout(EVENT_STREAM_POLL_INTERVAL) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            };
+            if let EventFrame::Exit { session_id, .. } = &event {
+                // The session's process exited on its own (no `Kill` request
+                // ever ran): drop it from the registry now so its PTY master
+                // fd and scrollback don't outlive it.
+                registry.remove_exited(session_id);
+            }
+            if !write_or_hang_up(&writer, event) {
+                break;
             }
         }
     });
+}
+
+/// Writes one event to the client, and on failure shuts the whole connection
+/// down. A failed write here is either a dead peer or a timed-out one (see
+/// `CLIENT_WRITE_TIMEOUT`); in the timeout case part of a frame may already be
+/// on the wire, so the stream's framing can no longer be trusted — no other
+/// thread may keep writing responses onto it. Returns whether the write
+/// succeeded.
+fn write_or_hang_up(writer: &Arc<Mutex<UnixStream>>, event: EventFrame) -> bool {
+    let Ok(mut writer) = writer.lock() else {
+        return false;
+    };
+    if write_event(&mut writer, event).is_err() {
+        let _ = writer.shutdown(Shutdown::Both);
+        return false;
+    }
+    true
+}
+
+/// Writes one JSON frame to the client, and on failure shuts the connection
+/// down for the same reason as [`write_or_hang_up`]: after a timed-out partial
+/// write the stream's framing cannot be trusted. Returns whether the write
+/// succeeded.
+fn write_frame_or_hang_up(writer: &mut UnixStream, frame: &ServerFrame) -> bool {
+    if write_json_frame(writer, frame).is_err() {
+        let _ = writer.shutdown(Shutdown::Both);
+        return false;
+    }
+    true
 }
 
 /// Writes one event to the client: output goes out as a binary frame (raw bytes,
