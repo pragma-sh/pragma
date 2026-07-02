@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use pragma_constants::ProtocolEventKind;
 use pragma_core::watcher::WorktreeWatcher;
@@ -36,7 +37,10 @@ pub struct Registry {
     socket_path: PathBuf,
     agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
-    file_watchers: Mutex<HashMap<String, WorktreeFileWatch>>,
+    // `Arc`-wrapped (rather than a bare `Mutex`) so a watcher's own callback
+    // can hold a handle back to this map and remove its own entry once its
+    // last subscriber disconnects — see `start_file_watcher`.
+    file_watchers: Arc<Mutex<HashMap<String, WorktreeFileWatch>>>,
     /// The single registered controller (the GUI app). `None` while the app is
     /// offline; on reconnect the new writer replaces the old one.
     controller: Mutex<Option<ControllerWriter>>,
@@ -53,6 +57,9 @@ type AgentKey = (String, String, String);
 /// the registry lock.
 struct WorktreeFileWatch {
     subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+    /// The trusted absolute path the watcher is rooted at, so a worktree
+    /// deletion (`kill_for_cwd`) can find and tear down the matching watcher.
+    root: String,
     // Kept alive for the worktree's watch lifetime; dropping it stops watching.
     _watcher: WorktreeWatcher,
 }
@@ -64,7 +71,7 @@ impl Registry {
             socket_path,
             agent_statuses: Mutex::new(HashMap::new()),
             agent_subscribers: Mutex::new(Vec::new()),
-            file_watchers: Mutex::new(HashMap::new()),
+            file_watchers: Arc::new(Mutex::new(HashMap::new())),
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
         }
@@ -188,7 +195,23 @@ impl Registry {
                 killed += 1;
             }
         }
+        drop(sessions);
+        self.remove_file_watchers_for_cwd(path);
         Ok(killed)
+    }
+
+    /// Drops a session from the registry once its process has exited on its
+    /// own (a `Kill` request never happened). Called from the server's event
+    /// forwarder when it observes the session's `Exit` frame, so the
+    /// `Session` — and the PTY master fd + scrollback memory it holds —
+    /// doesn't outlive the shell process it wrapped. Unlike [`Self::kill`],
+    /// the process is already reaped by the session's own reader thread, so
+    /// this only needs to drop our reference.
+    pub fn remove_exited(&self, session_id: &str) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(session_id);
+        }
+        self.clear_agents_for_tab(session_id);
     }
 
     pub fn report_agent(&self, payload: AgentReportPayload) -> Result<(), RegistryError> {
@@ -252,11 +275,17 @@ impl Registry {
                 .push(tx);
         } else {
             let subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>> = Arc::new(Mutex::new(vec![tx]));
-            let watcher = Self::start_file_watcher(&worktree_id, root, Arc::clone(&subscribers))?;
+            let watcher = Self::start_file_watcher(
+                &worktree_id,
+                root,
+                Arc::clone(&subscribers),
+                Arc::clone(&self.file_watchers),
+            )?;
             watchers.insert(
                 worktree_id,
                 WorktreeFileWatch {
                     subscribers,
+                    root: root.to_string(),
                     _watcher: watcher,
                 },
             );
@@ -271,11 +300,18 @@ impl Registry {
     }
 
     /// Builds a watcher whose callback broadcasts each batch of changes to the
-    /// worktree's subscribers, pruning any that have disconnected.
+    /// worktree's subscribers, pruning any that have disconnected. When a
+    /// batch prunes the subscriber list to empty, the watcher also removes
+    /// its own entry from `file_watchers` — otherwise a worktree that is
+    /// never explicitly torn down via [`Self::kill_for_cwd`] (its tab closed
+    /// without the worktree itself being deleted) would keep its recursive
+    /// OS-level watch (an inotify watch group on Linux, a limited per-user
+    /// kernel resource) running for the rest of the server's life.
     fn start_file_watcher(
         worktree_id: &str,
         root: &str,
         subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+        file_watchers: Arc<Mutex<HashMap<String, WorktreeFileWatch>>>,
     ) -> Result<WorktreeWatcher, RegistryError> {
         let worktree_id = worktree_id.to_string();
         WorktreeWatcher::new(Path::new(root), move |changes| {
@@ -295,8 +331,35 @@ impl Registry {
                 };
                 subscribers.retain(|tx| tx.send(event.clone()).is_ok());
             }
+            if subscribers.is_empty() {
+                let file_watchers = Arc::clone(&file_watchers);
+                let worktree_id = worktree_id.clone();
+                // Tear the watcher down from a fresh thread rather than here:
+                // this closure runs on the debouncer's own background thread,
+                // and dropping the `WorktreeWatcher` (which owns that
+                // debouncer) from inside its own callback risks the drop
+                // trying to join a thread that is, transitively, itself.
+                thread::spawn(move || {
+                    if let Ok(mut watchers) = file_watchers.lock() {
+                        watchers.remove(&worktree_id);
+                    }
+                });
+            }
         })
         .map_err(|err| RegistryError::Watcher(err.to_string()))
+    }
+
+    /// Removes any filesystem watcher rooted at `path` or a descendant of it.
+    /// Called alongside session teardown in [`Self::kill_for_cwd`] so a
+    /// deleted worktree's watch doesn't outlive the directory it watches even
+    /// when no further filesystem events ever arrive to trigger the reactive
+    /// cleanup in [`Self::start_file_watcher`].
+    fn remove_file_watchers_for_cwd(&self, path: &str) {
+        if let Ok(mut watchers) = self.file_watchers.lock() {
+            watchers.retain(|_, watch| {
+                watch.root != path && !watch.root.starts_with(format!("{path}/").as_str())
+            });
+        }
     }
 
     pub fn clear_agents_for_tab(&self, tab_id: &str) {
@@ -420,6 +483,13 @@ impl Registry {
         self.sessions
             .lock()
             .is_ok_and(|sessions| sessions.is_empty())
+    }
+
+    #[cfg(test)]
+    fn file_watcher_count(&self) -> usize {
+        self.file_watchers
+            .lock()
+            .map_or(0, |watchers| watchers.len())
     }
 
     fn broadcast_agent(&self, event: &EventFrame) {
@@ -559,6 +629,60 @@ mod tests {
         assert!(!registry.is_empty());
     }
 
+    /// Regression test for a filesystem-watcher leak: watchers were only ever
+    /// inserted into `file_watchers`, never removed, so a worktree's watch
+    /// outlived the worktree itself once it was deleted.
+    #[test]
+    fn kill_for_cwd_removes_the_matching_file_watcher() {
+        let dir = tempdir().expect("tempdir");
+        let registry = Registry::default();
+        let root = dir.path().to_string_lossy().into_owned();
+        let _stream = registry
+            .subscribe_files("worktree-1".to_string(), &root)
+            .expect("subscribe_files should succeed");
+        assert_eq!(registry.file_watcher_count(), 1);
+
+        registry
+            .kill_for_cwd(&root)
+            .expect("kill_for_cwd should succeed");
+
+        assert_eq!(
+            registry.file_watcher_count(),
+            0,
+            "watcher should be torn down along with its worktree"
+        );
+    }
+
+    /// Regression test for the same leak in the more common case: a worktree
+    /// tab is closed (its subscriber disconnects) without the worktree itself
+    /// ever being deleted, so `kill_for_cwd` never runs. The watcher must
+    /// still tear itself down reactively once its last subscriber is gone.
+    #[test]
+    fn watcher_is_torn_down_once_its_last_subscriber_disconnects() {
+        let dir = tempdir().expect("tempdir");
+        let registry = Registry::default();
+        let root = dir.path().to_string_lossy().into_owned();
+        let (_scrollback, rx) = registry
+            .subscribe_files("worktree-1".to_string(), &root)
+            .expect("subscribe_files should succeed");
+        drop(rx);
+
+        std::fs::write(dir.path().join("hello.txt"), "hi").expect("write file");
+
+        let mut torn_down = false;
+        for _ in 0..100 {
+            if registry.file_watcher_count() == 0 {
+                torn_down = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            torn_down,
+            "watcher should be removed once its last subscriber disconnects"
+        );
+    }
+
     /// Registers a controller using a throwaway socketpair writer so tests can
     /// drive the broker without a real connection. Returns nothing — test code
     /// simulates the controller replying by calling `route_control_result`.
@@ -611,6 +735,36 @@ mod tests {
         );
         // No deadlock / no panic; the pending entry is still there until cancelled.
         registry.cancel_pending("req-2");
+    }
+
+    /// Regression test for a session leak: a session whose process exited on
+    /// its own (no `Kill` request) used to stay in the registry forever,
+    /// leaking its PTY master fd and scrollback. `remove_exited` is what the
+    /// server's event forwarder calls on an `Exit` frame to close that gap.
+    #[test]
+    fn remove_exited_drops_the_session_and_its_agent_status() {
+        let (registry, id, _dir) = spawn_session();
+        registry
+            .report_agent(AgentReportPayload {
+                agent: "opencode".to_string(),
+                worktree_id: "worktree-1".to_string(),
+                tab_id: id.clone(),
+                status: AgentStatus::Running,
+                attention_kind: None,
+            })
+            .expect("report agent");
+
+        registry.remove_exited(&id);
+
+        assert!(
+            registry.is_empty(),
+            "session should be removed once its process exits on its own"
+        );
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            snapshot.is_empty(),
+            "agent status for the exited tab should be cleared too"
+        );
     }
 
     #[test]
