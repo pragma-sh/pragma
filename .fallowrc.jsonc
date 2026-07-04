@@ -24,10 +24,9 @@
   // `@google/design.md` is the DesignSync CLI that generates DESIGN.md — a
   // tool invoked from the shell, intentionally never imported from source.
   "ignoreDependencies": ["@google/design.md"],
-  // `@pragma/constants` and `@pragma/plugin` import generated TS modules that
-  // may not exist before `bun run generate` (fallow's CI job installs deps but
-  // runs no codegen); don't report those intentional generated edges.
-  "ignoreUnresolvedImports": ["./generated/constants", "./generated/version"],
+  // `@pragma/constants` imports generated TS types that may not exist before
+  // `bun run generate`; don't report that intentional generated edge.
+  "ignoreUnresolvedImports": ["./generated/constants"],
   "duplicates": {
     "mode": "semantic",
     // Hide pair-only clones; focus on widespread copy-paste
