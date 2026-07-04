@@ -23,6 +23,10 @@ jobs:
         with:
           # audit diffs changed files against the PR base, so it needs history.
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - uses: fallow-rs/fallow@v2
         with:
           # Combined dead-code + complexity + duplication on changed files.
