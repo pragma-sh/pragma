@@ -66,7 +66,7 @@ fn parent_branch(db: &Db, worktree: &Worktree) -> AppResult<Option<String>> {
 }
 
 /// Lists a worktree's committed/staged/unstaged changes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_changes(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -87,7 +87,7 @@ pub fn worktree_changes(
 /// Reports, for each requested worktree, whether it is fully merged & clean. A
 /// transport failure yields an empty map so a momentarily-unreachable host never
 /// fails the sidebar's polling batch.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktrees_merged_status(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -119,7 +119,7 @@ pub fn worktrees_merged_status(
 }
 
 /// Loads the old/new text for a single changed file on the given diff side.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_diff(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -163,7 +163,7 @@ pub fn pr_file_diff(
 }
 
 /// Discards a single unstaged change. **Destructive and irreversible.**
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_unstaged_file(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -186,7 +186,7 @@ pub fn discard_unstaged_file(
 }
 
 /// Discards every unstaged change in the worktree. **Destructive.**
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_all_unstaged(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -198,7 +198,7 @@ pub fn discard_all_unstaged(
 }
 
 /// Stages a single change into the index (`git add`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stage_file(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -211,7 +211,7 @@ pub fn stage_file(
 }
 
 /// Stages every change in the worktree (`git add -A`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stage_all(db: State<'_, Db>, hosts: State<'_, Hosts>, worktree_id: String) -> AppResult<()> {
     let pty = hosts.for_worktree(&db, &worktree_id)?;
     let root = db.worktree(&worktree_id)?.path;
@@ -219,7 +219,7 @@ pub fn stage_all(db: State<'_, Db>, hosts: State<'_, Hosts>, worktree_id: String
 }
 
 /// Unstages a single change from the index, leaving the working tree untouched.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unstage_file(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -240,7 +240,7 @@ pub fn unstage_file(
 }
 
 /// Unstages every staged change, resetting the index to HEAD (`git reset`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unstage_all(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -252,7 +252,7 @@ pub fn unstage_all(
 }
 
 /// Creates a commit from the worktree's staged changes (`git commit -m`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn commit_staged(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -267,7 +267,7 @@ pub fn commit_staged(
 /// Merges a child worktree's branch into its recorded parent worktree. The
 /// per-project lock is held client-side so concurrent merges on the same project
 /// serialize even though the merge itself runs on the host.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn merge_worktree_to_parent(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,

@@ -429,7 +429,7 @@ fn poll_device_flow_impl(
 // ---------------------------------------------------------------------------
 
 /// Parses `origin` into owner/repo plus the default and head branches.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn github_repo_ref(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -469,7 +469,7 @@ pub fn github_repo_ref(
 /// The default PR title — the worktree branch's last commit subject (`git log -1
 /// --pretty=%s`), used to seed the create-PR form. Empty string when there are no
 /// commits yet, so the UI just shows an empty title input.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn github_default_pr_title(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -530,7 +530,7 @@ pub async fn github_push_branch(
 }
 
 /// Produces the local `base...HEAD` diff for a single PR file (review tab).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn github_pr_file_diff(
     db: State<'_, Db>,
     hosts: State<'_, crate::hosts::Hosts>,

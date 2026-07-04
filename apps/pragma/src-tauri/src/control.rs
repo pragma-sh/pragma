@@ -971,7 +971,7 @@ pub fn start_agent(
 }
 
 /// Runs a command in a worktree without creating a tab.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn exec_in_worktree(
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,

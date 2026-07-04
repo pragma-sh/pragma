@@ -589,7 +589,7 @@ fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
 /// `prompt`, `select`, `result`, `error`) stream over `on_event`; answer prompts
 /// with [`ai_login_respond`] and abort with [`ai_login_cancel`], both keyed by
 /// `id`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ai_login(
     registry: State<'_, LoginRegistry>,
     id: String,

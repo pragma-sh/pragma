@@ -42,7 +42,7 @@ impl HeadlessCommandResult {
 }
 
 /// Loads a project's `.pragma/scripts.json` from its host (local or remote).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_project_scripts(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
