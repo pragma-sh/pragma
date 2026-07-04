@@ -118,8 +118,3 @@ const globalRef = globalThis as unknown as { __PRAGMA__?: PragmaBridge };
 export function setBridge(handle: BridgeHandle): void {
   globalRef.__PRAGMA__ = handle.bridge;
 }
-
-/** Clears `globalThis.__PRAGMA__`. */
-export function clearBridge(): void {
-  globalRef.__PRAGMA__ = undefined;
-}

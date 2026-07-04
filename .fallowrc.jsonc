@@ -49,6 +49,10 @@
       // reading top-to-bottom). Semantic clone detection over them reports
       // idiomatic repetition, not copy-paste worth refactoring.
       "**/*.test.{ts,tsx}",
+      // React/ReactDOM plugin shims must spell each host-bridge export out
+      // individually for `isolatedDeclarations`; generated-looking one-line
+      // exports are intentional API surface, not extractable logic.
+      "packages/plugin/src/react*.ts",
     ],
   },
   "rules": {

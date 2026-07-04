@@ -8,13 +8,10 @@ import { isTerminalEditingContext, isTextEditingContext } from "@/lib/native-edi
 import {
   clearActivePluginCommandKeybindings,
   commandForEvent,
-  platformModifier,
   setActivePluginCommandKeybindings,
 } from "./command-keybindings";
 import { notifyFromPlugin, usePluginRuntimeState } from "./host-hooks";
 import { useActivePlugins, type PluginRecord } from "./registry";
-
-export { platformModifier };
 
 export interface PluginCommandBinding {
   commandId: string;

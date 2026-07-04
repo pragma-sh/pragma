@@ -32,6 +32,61 @@ export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 2;
 
 export type TitleListener = (title: string) => void;
 
+type TerminalPlatform = "mac" | "linux";
+
+function currentTerminalPlatform(): TerminalPlatform {
+  return isMacPlatform() ? "mac" : "linux";
+}
+
+function handleTerminalKeyEvent(tabId: string, event: KeyboardEvent): boolean {
+  const platform = currentTerminalPlatform();
+  if (handleSoftNewline(tabId, event)) {
+    return false;
+  }
+  if (handleNativeEditingSequence(tabId, event, platform)) {
+    return false;
+  }
+  // Let configured Pragma/plugin shortcuts bubble to the window listener even
+  // when xterm owns focus.
+  return (
+    actionForEvent(event, getKeybindingsConfig(), platform) === null &&
+    !hasPluginCommandForEvent(event)
+  );
+}
+
+function handleSoftNewline(tabId: string, event: KeyboardEvent): boolean {
+  // Shift+Enter is a soft newline: xterm maps Enter to CR, so rewrite it to
+  // ESC+CR for TUI REPLs that treat that as multiline continuation.
+  if (!isPlainShiftEnter(event)) {
+    return false;
+  }
+  event.preventDefault();
+  void ptyWrite(tabId, "\x1b\r");
+  return true;
+}
+
+function isPlainShiftEnter(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+  );
+}
+
+function handleNativeEditingSequence(
+  tabId: string,
+  event: KeyboardEvent,
+  platform: TerminalPlatform,
+): boolean {
+  // Native OS text-editing chords map to readline control characters before app
+  // shortcuts, so terminal editing wins over global actions like delete-file.
+  const sequence = nativeEditingSequence(event, platform);
+  if (sequence === null) {
+    return false;
+  }
+  event.preventDefault();
+  void ptyWrite(tabId, sequence);
+  return true;
+}
+
 interface ManagedTerminal {
   terminal: Terminal;
   fit: FitAddon;
@@ -140,48 +195,7 @@ export class TerminalManager {
         });
       }),
     );
-    terminal.attachCustomKeyEventHandler((event) => {
-      const platform = isMacPlatform() ? "mac" : "linux";
-      // Shift+Enter is a soft newline: a literal LF that does not submit the
-      // line. xterm maps Enter to CR, so a bare Shift+Enter would submit just
-      // like Enter; we rewrite it to ESC+CR, which TUI REPLs (Claude Code,
-      // opencode, Codex) interpret as a multi-line continuation. For a plain
-      // shell that ignores the ESC, the CR still ends the line — at worst the
-      // shift key behaves like Enter. We swallow the event so xterm's own CR
-      // send doesn't fire on top of ours.
-      if (
-        event.key === "Enter" &&
-        event.shiftKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey
-      ) {
-        event.preventDefault();
-        void ptyWrite(tab.id, "\x1b\r");
-        return false;
-      }
-      // Native OS text-editing chords (Cmd+Delete, Option+arrows, etc.) map to
-      // readline control characters so the shell does what the OS keybinding
-      // promises. Handle these before app shortcuts so Cmd+Backspace in the
-      // terminal deletes the line (Ctrl+U) instead of bubbling up to the
-      // delete-file action.
-      const sequence = nativeEditingSequence(event, platform);
-      if (sequence !== null) {
-        event.preventDefault();
-        void ptyWrite(tab.id, sequence);
-        return false;
-      }
-      // Let any configured Pragma shortcut bubble up to the window listener so
-      // it works even when xterm has focus. The current config may be the
-      // default or a user-edited `~/.pragma/keybindings.json`.
-      if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
-        return false;
-      }
-      if (hasPluginCommandForEvent(event)) {
-        return false;
-      }
-      return true;
-    });
+    terminal.attachCustomKeyEventHandler((event) => handleTerminalKeyEvent(tab.id, event));
     // Throttle wheel-driven mouse reports while a TUI is consuming them so a fast
     // trackpad flick can't flood the PTY input with reports it can't keep up with.
     // See MOUSE_WHEEL_REPORT_INTERVAL_MS. Returning false drops the event before

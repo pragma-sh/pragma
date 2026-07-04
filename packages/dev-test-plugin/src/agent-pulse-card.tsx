@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useEvent, useProject, useSdk } from "@pragma/plugin";
 
 /** Snapshot of a single agent's live status, surfaced by the SDK event stream. */
-export interface AgentPulseEntry {
+interface AgentPulseEntry {
   agent: string;
   status: string;
 }

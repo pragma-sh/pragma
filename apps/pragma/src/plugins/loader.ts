@@ -167,7 +167,7 @@ function validateConfig(definition: PluginDefinition, config: unknown): Outcome<
 
 /** Builds the scope/identity fields shared by success and failure records. */
 function recordBase(entry: PluginEntryResult, context: PluginLoadContext): PluginRecord {
-  const record: PluginRecord = {
+  return {
     pluginId: entry.manifest?.name ?? entry.specifier,
     version: entry.manifest?.version ?? null,
     dir: entry.manifest?.dir,
@@ -175,15 +175,19 @@ function recordBase(entry: PluginEntryResult, context: PluginLoadContext): Plugi
     status: "failed",
     config: entry.config ?? undefined,
     modifiedMs: entry.manifest?.modifiedMs ?? null,
+    ...projectRecordFields(entry.projectPath, context),
   };
-  if (entry.projectPath !== null) {
-    record.projectPath = entry.projectPath;
-    const projectId = context.projectIdByPath?.(entry.projectPath);
-    if (projectId !== undefined) {
-      record.projectId = projectId;
-    }
+}
+
+function projectRecordFields(
+  projectPath: string | null,
+  context: PluginLoadContext,
+): Pick<PluginRecord, "projectPath"> | Pick<PluginRecord, "projectPath" | "projectId"> | object {
+  if (projectPath === null) {
+    return {};
   }
-  return record;
+  const projectId = context.projectIdByPath?.(projectPath);
+  return projectId === undefined ? { projectPath } : { projectPath, projectId };
 }
 
 async function importCached(

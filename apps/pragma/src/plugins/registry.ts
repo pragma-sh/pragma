@@ -125,9 +125,7 @@ function subscribe(listener: Listener): () => void {
   };
 }
 
-/** React hook: every known plugin record. */
-// fallow-ignore-next-line unused-exports -- Phase 2's plugin settings UI reads this.
-export function usePlugins(): PluginRecord[] {
+function usePlugins(): PluginRecord[] {
   return useSyncExternalStore(subscribe, getAllPlugins, getAllPlugins);
 }
 

@@ -154,29 +154,38 @@ function parseOpenCodeModels(output: string): AgentModelEntry[] {
 function parseCursorModels(output: string): AgentModelEntry[] {
   const byId = new Map<string, AgentModelEntry>();
   for (const line of output.split("\n")) {
-    if (!line.includes(" - ")) {
+    const model = parseCursorModelLine(line);
+    if (!model) {
       continue;
     }
-    const [rawId, rawName] = line.split(" - ", 2);
-    const id = rawId?.trim();
-    const name = rawName?.trim();
-    if (!id || id === "auto" || !name || /\s/.test(id)) {
-      continue;
-    }
-    const { baseId, effort } = splitCursorEffort(id);
-    const entry = byId.get(baseId) ?? {
-      id: baseId,
-      name: cleanCursorName(name, effort),
+    const entry = byId.get(model.baseId) ?? {
+      id: model.baseId,
+      name: cleanCursorName(model.name, model.effort),
       reasoning: [],
     };
-    if (effort && entry.reasoning?.every((item) => item.id !== effort)) {
-      entry.reasoning.push({ id: effort, name: effortName(effort) });
+    if (model.effort && entry.reasoning?.every((item) => item.id !== model.effort)) {
+      entry.reasoning.push({ id: model.effort, name: effortName(model.effort) });
     }
-    byId.set(baseId, entry);
+    byId.set(model.baseId, entry);
   }
   return [...byId.values()].map((model) =>
     model.reasoning?.length ? model : { id: model.id, name: model.name },
   );
+}
+
+function parseCursorModelLine(
+  line: string,
+): { baseId: string; name: string; effort: string | null } | null {
+  if (!line.includes(" - ")) {
+    return null;
+  }
+  const [rawId, rawName] = line.split(" - ", 2);
+  const id = rawId?.trim();
+  const name = rawName?.trim();
+  if (!id || id === "auto" || !name || /\s/.test(id)) {
+    return null;
+  }
+  return { ...splitCursorEffort(id), name };
 }
 
 function parseJsonModels(output: string): AgentModelEntry[] {
@@ -195,17 +204,32 @@ function walk(value: unknown, models: AgentModelEntry[]): void {
     for (const child of value) walk(child, models);
     return;
   }
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return;
   }
-  const record = value as Record<string, unknown>;
+  const model = modelFromRecord(value);
+  if (model) {
+    models.push(model);
+  }
+  for (const child of Object.values(value)) walk(child, models);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function modelFromRecord(record: Record<string, unknown>): AgentModelEntry | null {
   const id = stringValue(record.id) ?? stringValue(record.model);
   const name =
     stringValue(record.name) ?? stringValue(record.displayName) ?? stringValue(record.label) ?? id;
-  if (id && name && (record.provider || record.cost || record.limits || record.modalities)) {
-    models.push({ id, name: withProvider(id, name, stringValue(record.provider)) });
+  if (!id || !name || !hasModelMetadata(record)) {
+    return null;
   }
-  for (const child of Object.values(record)) walk(child, models);
+  return { id, name: withProvider(id, name, stringValue(record.provider)) };
+}
+
+function hasModelMetadata(record: Record<string, unknown>): boolean {
+  return Boolean(record.provider || record.cost || record.limits || record.modalities);
 }
 
 function uniqueModels(models: AgentModelEntry[]): AgentModelEntry[] {

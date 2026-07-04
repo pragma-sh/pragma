@@ -10,10 +10,21 @@ interface PluginCommandKeybindingRecord {
   bindings: readonly PluginCommandKeybinding[];
 }
 
+const MODIFIER_ALIASES: Readonly<Record<string, Modifier>> = {
+  alt: "alt",
+  cmd: "cmd",
+  command: "cmd",
+  control: "ctrl",
+  ctrl: "ctrl",
+  meta: "cmd",
+  option: "alt",
+  shift: "shift",
+};
+
 let activePluginCommands: readonly PluginCommandKeybindingRecord[] = [];
 
 /** Returns the platform-specific modifier name plugin docs should display for `mod`. */
-export function platformModifier(): "cmd" | "ctrl" {
+function platformModifier(): "cmd" | "ctrl" {
   return isMacPlatform() ? "cmd" : "ctrl";
 }
 
@@ -79,22 +90,7 @@ function modifiersFromParts(parts: string[]): Set<Modifier> | null {
 }
 
 function normalizeModifier(modifier: string): Modifier | null {
-  if (modifier === "mod") {
-    return platformModifier();
-  }
-  if (modifier === "command" || modifier === "meta") {
-    return "cmd";
-  }
-  if (modifier === "control") {
-    return "ctrl";
-  }
-  if (modifier === "option") {
-    return "alt";
-  }
-  if (modifier === "cmd" || modifier === "ctrl" || modifier === "alt" || modifier === "shift") {
-    return modifier;
-  }
-  return null;
+  return modifier === "mod" ? platformModifier() : (MODIFIER_ALIASES[modifier] ?? null);
 }
 
 function keyMatches(event: KeyboardEvent, key: string): boolean {

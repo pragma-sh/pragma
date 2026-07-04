@@ -99,7 +99,6 @@ const PluginBoundaryContext = createContext<PluginBoundaryValue | null>(null);
  * Wraps a plugin-contributed component subtree so per-plugin hooks
  * (`usePluginConfig`, `useStoredState`) know which plugin is rendering.
  */
-// fallow-ignore-next-line unused-exports -- Phase 2 wraps rendered plugin components with this.
 export function PluginBoundary(props: {
   pluginId: string;
   config: unknown;
@@ -170,7 +169,6 @@ function useNotifyImpl(): (message: string, options?: PluginNotifyOptions) => vo
 }
 
 /** Shows a plugin-originated notification (also used for `PluginContext.notify`). */
-// fallow-ignore-next-line unused-exports -- Phase 2's PluginContext.notify uses this.
 export function notifyFromPlugin(message: string, options?: PluginNotifyOptions): void {
   const variant = options?.variant ?? "info";
   const description = options?.description;

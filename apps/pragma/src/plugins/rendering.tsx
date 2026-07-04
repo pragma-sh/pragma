@@ -6,7 +6,6 @@ import type {
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
-  WebViewDefinition,
 } from "@pragma/plugin";
 
 import { PluginBoundary, notifyFromPlugin, usePluginRuntimeState } from "./host-hooks";
@@ -41,13 +40,6 @@ export function usePluginSidebarCards(
   activeProjectId: string | null,
 ): VisiblePluginContribution<SidebarCardDefinition>[] {
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarCards);
-}
-
-/** Returns visible workspace web view contributions for the active project. */
-export function usePluginWebViews(
-  activeProjectId: string | null,
-): VisiblePluginContribution<WebViewDefinition>[] {
-  return useVisibleContributions(activeProjectId, (definition) => definition.ui?.webViews);
 }
 
 function useVisibleContributions<TContribution extends object>(
