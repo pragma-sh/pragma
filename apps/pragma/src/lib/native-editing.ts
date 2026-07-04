@@ -32,7 +32,7 @@ export function isTextEditingContext(element: Element | null | undefined): boole
   }
   // xterm.js focuses a hidden <textarea> inside `.xterm` (caught above), but the
   // active element can also be the terminal's canvas/container.
-  if (element.closest(".xterm")) {
+  if (isTerminalEditingContext(element)) {
     return true;
   }
   // CodeMirror 6 mounts under `.cm-editor`.
@@ -43,6 +43,11 @@ export function isTextEditingContext(element: Element | null | undefined): boole
     return true;
   }
   return false;
+}
+
+/** Returns true when `element` belongs to xterm's focused terminal DOM. */
+export function isTerminalEditingContext(element: Element | null | undefined): boolean {
+  return Boolean(element?.closest(".xterm"));
 }
 
 /**

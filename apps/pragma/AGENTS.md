@@ -47,9 +47,8 @@ apps/pragma/
     ├── src/main.rs              # Thin entrypoint
     ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
     ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
-    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, sidecars, bundled agent configs
+    ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
-    ├── resources/pragma/agents/ # Staged bundled agent configs (git-ignored)
     ├── icons/                   # Production app icons
     └── icons-dev/               # Dev icons
 ```
@@ -158,34 +157,36 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 `workspace-context` routes that through `navigateToAgentLocation`. Non-macOS falls back
 to the regular plugin notification.
 
-Agent launcher configs live in `~/.pragma/agents/<id>/config.json` with fields `id`,
-`name`, `icon`, `start`, optional `models`, optional `prefillDelayMs`, optional
-`startupInput` (`[{ delayMs, data }]`, sent after `start` and before the prompt prefill),
-and optional prefill controls (`prefillMode: "bracketed" | "plain"`, `prefillSubmit`,
-`prefillSubmitDelayMs`). The prompt body and its submit key are always sent as two
-separate PTY writes (`prefillSubmitDelayMs` apart, default 200ms) so a paste-aware TUI
-commits the text before the submit keypress lands — this is why Kanban background launches
-and foreground launches both submit reliably across agents. Use these only for generic
-pre-TUI gates / input semantics owned by that agent config; core must not hard-code
-per-agent keystrokes. Bundled configs live in
-`apps/pragma/src-tauri/resources/pragma/agents/` (staged by
-`scripts/stage-daemon-sidecar.sh`) and are installed/updated into `~/.pragma/agents`
-on app startup. `pragma-cli` is installed/updated to `~/.local/bin` on startup; daemon
+Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
+plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor are
+defined by the built-in plugin in `src/plugins/builtin-agents.ts`. Agent definitions
+carry `id`, `name`, optional `iconPath`, `launch.command`, optional model providers, optional
+`prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
+before prompt prefill), and optional prefill controls (`prefillMode: "bracketed" |
+"plain"`, `prefillSubmit`, `prefillSubmitDelayMs`). The prompt body and its submit key
+are always sent as two separate PTY writes (`prefillSubmitDelayMs` apart, default 200ms)
+so a paste-aware TUI commits the text before the submit keypress lands — this is why
+Kanban background launches and foreground launches both submit reliably across agents.
+Use these only for generic pre-TUI gates / input semantics owned by that agent
+definition; core must not hard-code per-agent keystrokes. `pragma-cli` is
+installed/updated to `~/.local/bin` on startup; daemon
 terminal sessions export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
 directory to `PATH` so bundled plugins can report status even when the user's shell
 doesn't include it. The app still emits a UI warning if that directory is not on the
 app's startup `$PATH`.
 
-`models` may be `static` or `command` backed. Pragma resolves model lists lazily when the
-selector submenu is hovered/focused, caches the last result, executes command-backed
-discovery with cwd set to the installed agent directory, and validates only the generic
-JSON array (`[{ id, name, reasoning? }]`). Host-specific CLI parsing belongs in
-plugin-owned scripts under `pragma/agents/<id>/scripts/`; core must not learn Cursor,
-opencode, or other host output formats. There is no provider-level Auto model; when a
-model has reasoning entries, the model-only choice is shown as Auto reasoning. Model
-commands run through `process_env::command`, which extends GUI-launched packaged apps'
-minimal `$PATH` with common user/tool bins such as `~/.opencode/bin`, version-manager
-shims, Homebrew, and macOS Python.framework.
+Model providers may be static arrays or async plugin functions. Pragma resolves model
+lists lazily when the selector submenu is hovered/focused and caches the last result.
+Host-specific CLI parsing belongs in the plugin agent's model provider, not Rust/Tauri
+IPC. There is no provider-level Auto model; when a model has reasoning entries, the
+model-only choice is shown as Auto reasoning. Built-in agents use the plugin SDK exec
+service, which runs in the active project/worktree context.
+
+Built-in agent icons live in each agent plugin package's `assets/` directory and are
+referenced as Vite asset URLs passed through `iconPath`; do not store these host-tool
+brand assets in `apps/pragma`. External plugin agents may pass a browser URL, an
+absolute filesystem path, or a plugin-dir-relative icon path; relative paths resolve
+against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
@@ -204,9 +205,8 @@ triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
-plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and the bundled agent launcher
-configs (`resources/pragma/agents/`) are staged by the same script; plugin JS itself is
-**not** bundled by Pragma. `binaries/` is git-ignored.
+plugin. `pragma-cli`, `pragma-ai`, and `pragma-github` are staged by the same script;
+plugin JS itself is **not** bundled by Pragma. `binaries/` is git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build

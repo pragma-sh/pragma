@@ -28,7 +28,8 @@ import {
 } from "@/lib/agent-model-selection";
 import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 import { isMacPlatform } from "@/lib/platform";
-import { type AgentConfig, type AgentModelSelection, listAgents } from "@/lib/tauri";
+import type { AgentConfig, AgentModelSelection } from "@/lib/tauri";
+import { listPluginAgents } from "@/plugins/agents";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface NewAgentSessionDialogProps {
@@ -92,18 +93,7 @@ type WorktreeLike = { id: string; isMain: boolean; title: string | null; branch:
 function useAgentSessionAgents(isOpen: boolean, setAgents: (agents: AgentConfig[]) => void): void {
   useEffect(() => {
     if (!isOpen) return;
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) setAgents(Array.isArray(items) ? items : []);
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) setAgents([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setAgents(listPluginAgents());
   }, [isOpen, setAgents]);
 }
 

@@ -164,8 +164,8 @@ Every plugin, regardless of route, **must** implement all of the following:
    Whatever the mechanism, an aborted turn must never leave the tab stuck on
    yellow/red, and must never produce a phantom green "done".
 
-7. **Ship an agent launcher config** so the tool appears in Pragma's launcher (next
-   section).
+7. **Expose a Pragma plugin agent** with `defineAgent` if the tool should appear in
+   Pragma's launcher (next section). Do not ship `pragma/agents` JSON.
 
 8. **Add an `AGENTS.md`** to your package documenting the event→status mapping, the
    install command, and every non-obvious gotcha you discovered in Step 1.
@@ -175,37 +175,37 @@ Every plugin, regardless of route, **must** implement all of the following:
 
 ---
 
-## The agent launcher config
+## The launcher agent definition
 
-So the tool shows up as a launchable agent in Pragma, ship a bundled config at:
+So the tool shows up as a launchable agent in Pragma, contribute an agent through the
+`@pragma/plugin` API:
 
-```
-packages/<your>-plugin/pragma/agents/<agent-id>/config.json
-packages/<your>-plugin/pragma/agents/<agent-id>/icon.svg
-```
+```ts
+import { defineAgent, definePlugin } from "@pragma/plugin";
 
-`config.json` fields (see the existing examples):
-
-```json
-{
-  "id": "claude-code",
-  "name": "Claude Code",
-  "icon": "icon.svg",
-  "start": ["claude", "--permission-mode", "auto"],
-  "models": {
-    "source": "static",
-    "modelArg": ["--model", "{model}"],
-    "reasoningArg": ["--effort", "{reasoning}"],
-    "items": [{ "id": "sonnet", "name": "Sonnet" }]
-  }
-}
+export default definePlugin({
+  name: "Example Agent",
+  agents: [
+    defineAgent({
+      id: "example",
+      name: "Example",
+      launch: { command: ["example", "--interactive"] },
+      models: [{ id: "default", name: "Default" }],
+      args: {
+        model: (modelId) => ["--model", modelId],
+        reasoning: (reasoningId) => ["--effort", reasoningId],
+        permissionMode: () => [],
+      },
+    }),
+  ],
+});
 ```
 
 - `id` — stable agent id; this is the `--agent <id>` you pass to `pragma-cli`.
 - `name` — display name in the launcher.
-- `icon` — must resolve **inside** this agent directory.
-- `start` — argv used to launch the tool in a Pragma terminal.
-- `models` — optional model discovery and model/reasoning launch-argument metadata.
+- `launch.command` — argv used to launch the tool in a Pragma terminal.
+- `models` — optional static array or async model provider.
+- `args` — optional model/reasoning/permission-mode launch-argument builders.
 
 ### Optional model discovery
 
@@ -213,40 +213,9 @@ Do not emit a provider-level Auto model in static `items` or script output. If a
 model has reasoning entries, Pragma shows an Auto reasoning choice for model-only launch;
 that appends `modelArg` and no reasoning arguments.
 
-Dynamic model discovery must be implemented by plugin-owned scripts under:
-
-```
-packages/<your>-plugin/pragma/agents/<agent-id>/scripts/
-```
-
-Pragma executes the configured command directly, with no implicit shell. If you need a
-shell, say so explicitly in config (`["sh", "scripts/list-models.sh"]`). The command cwd
-is the installed agent directory (`~/.pragma/agents/<agent-id>`), which is the only
-location Pragma can rely on at runtime.
-
-Command-backed config:
-
-```json
-"models": {
-  "source": "command",
-  "command": ["sh", "scripts/list-models.sh"],
-  "modelArg": ["--model", "{model}"],
-  "reasoningArg": ["--effort", "{reasoning}"],
-  "modelReasoningArg": ["--model", "{model}[effort={reasoning}]"]
-}
-```
-
-Static config is acceptable when the host tool has no supported model-list command:
-
-```json
-"models": {
-  "source": "static",
-  "modelArg": ["--model", "{model}"],
-  "items": [{ "id": "sonnet", "name": "Sonnet" }]
-}
-```
-
-Scripts must emit this generic JSON array on stdout:
+Dynamic model discovery should be implemented in the plugin agent's async `models`
+provider. Use `ctx.sdk.exec.run` if you need to call the host CLI from the active
+project/worktree context. Providers return this generic shape:
 
 ```json
 [
@@ -264,27 +233,13 @@ Scripts must emit this generic JSON array on stdout:
 
 `reasoning` is optional. Omit it when the host does not support reasoning or when levels
 cannot be exposed reliably for that model. Fast variants must be emitted as separate model
-entries, not collapsed into a fast toggle. Model discovery is lazy: Pragma runs the
-command when the selector submenu is hovered/focused, shows cached results immediately
+entries, not collapsed into a fast toggle. Model discovery is lazy: Pragma calls the
+provider when the selector submenu is hovered/focused, shows cached results immediately
 when available, then updates the menu with the refreshed result.
 
-Argument interpolation supports `{model}` and `{reasoning}` only. Launch rules:
-
-- Model selected, no reasoning: append `modelArg`.
-- Model and reasoning selected: prefer `modelReasoningArg` when present.
-- Model and reasoning selected, no `modelReasoningArg`: append `modelArg` then `reasoningArg`.
-
 Core must never learn host-specific model output formats. Keep parsing in your plugin's
-script and prefer supported host CLI/API model-list surfaces over private databases or
-internal caches.
-
-This is the **only** Pragma-side install. `apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh`
-copies every plugin package's `pragma/agents/*` into the bundle's
-`resources/pragma/agents`, and the app's generic `agents::ensure_bundled_installed`
-installs those into `~/.pragma/agents` on startup. There are deliberately **no**
-per-plugin core files. When you add a plugin, add the matching `cp -R …/pragma/agents/.`
-line to that staging script (this is the one allowed core touch — the generic launcher
-step) and update the repo `AGENTS.md` repository-structure table.
+model provider and prefer supported host CLI/API model-list surfaces over private
+databases or internal caches.
 
 ---
 
@@ -318,8 +273,8 @@ the env guard (Required functionality #2) is mandatory.
 - [ ] Reporting errors can never disrupt the host session.
 - [ ] Fires `cleared` on load and on exit.
 - [ ] Aborted turns reliably resolve to `cleared`.
-- [ ] `pragma/agents/<id>/config.json` + icon shipped, optional model script documented, and staging script updated.
+- [ ] Launch agent exposed with `defineAgent`, if applicable.
 - [ ] `AGENTS.md` written (mapping, install, gotchas).
 - [ ] Tests added; `bun run check` passes.
-- [ ] Updated the repo-root `AGENTS.md` structure table.
-- [ ] Did **not** modify Pragma core/daemon/CLI/SDK (beyond the generic staging line).
+- [ ] Updated the repo-root `AGENTS.md` structure table if package layout changed.
+- [ ] Did **not** modify Pragma core/daemon/CLI/SDK without explicit owner approval.

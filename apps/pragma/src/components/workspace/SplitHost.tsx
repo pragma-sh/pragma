@@ -8,6 +8,7 @@ import { DiffView } from "@/components/editor/DiffView";
 import { EditorView } from "@/components/editor/EditorView";
 import { LogView } from "@/components/editor/LogView";
 import { ReviewTab } from "@/components/github/ReviewTab";
+import { PluginWebViewTab } from "@/plugins/PluginWebViewTab";
 import { Button } from "@/components/ui/button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import {
@@ -110,6 +111,7 @@ const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string
   diff: (tab) => <DiffView key={tab.id} tab={tab} />,
   log: (tab) => <LogView key={tab.id} tab={tab} />,
   "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,
+  "plugin-webview": (tab) => <PluginWebViewTab key={tab.id} tab={tab} />,
 };
 
 /** Render a pane's active tab, defaulting unknown kinds to a terminal view. */

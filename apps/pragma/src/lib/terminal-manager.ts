@@ -11,6 +11,7 @@ import { nativeEditingSequence } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { ptyAttach, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMessage } from "@/lib/tauri";
 import { createFileLinkProvider, getTerminalLinkHandler } from "@/lib/terminal-links";
+import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 
 const RESIZE_DEBOUNCE_MS = 75;
 export const MAX_TERMINAL_COLS = 240;
@@ -174,6 +175,9 @@ export class TerminalManager {
       // it works even when xterm has focus. The current config may be the
       // default or a user-edited `~/.pragma/keybindings.json`.
       if (actionForEvent(event, getKeybindingsConfig(), platform) !== null) {
+        return false;
+      }
+      if (hasPluginCommandForEvent(event)) {
         return false;
       }
       return true;

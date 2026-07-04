@@ -4,7 +4,6 @@
 mod agent_cli;
 mod agent_events;
 mod agent_notifications;
-mod agents;
 mod ai;
 mod browser;
 mod control;
@@ -20,6 +19,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod plugins;
 mod process_env;
 mod projects;
 mod pty;
@@ -191,6 +191,34 @@ fn load_keybindings(app_handle: tauri::AppHandle) -> AppResult<KeybindingsConfig
 #[tauri::command]
 fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> AppResult<()> {
     keybindings::save(app_handle.path().home_dir()?, &config)
+}
+
+/// Reads plugin entries from `~/.pragma/config.json` plus the active project's
+/// `.pragma/config.json`, resolving each to a manifest or a per-entry error.
+#[tauri::command]
+fn read_plugin_manifests(
+    app_handle: tauri::AppHandle,
+    project_path: Option<String>,
+) -> AppResult<Vec<plugins::PluginEntryResult>> {
+    let home = app_handle.path().home_dir()?;
+    Ok(plugins::read_manifests(
+        home,
+        project_path.as_deref().map(std::path::Path::new),
+    ))
+}
+
+/// Reads the JavaScript source of a resolved plugin bundle file.
+#[tauri::command]
+fn read_plugin_bundle(main_path: String) -> AppResult<String> {
+    plugins::read_bundle(std::path::Path::new(&main_path))
+}
+
+/// Ensures the local HTTP gateway is running and returns its base URL + token.
+#[tauri::command]
+async fn gateway_connection_info(
+    pty: tauri::State<'_, PtyClient>,
+) -> AppResult<pty::GatewayConnectionInfo> {
+    pty.gateway_connection_info()
 }
 
 #[tauri::command]
@@ -408,6 +436,30 @@ fn create_tab(
     )
 }
 
+// A plugin webview tab carries plugin locator fields plus an opaque payload string.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn create_plugin_webview_tab(
+    db: tauri::State<'_, Db>,
+    project_id: String,
+    worktree_id: String,
+    title: Option<String>,
+    plugin_id: String,
+    plugin_view_id: String,
+    plugin_payload: Option<String>,
+    plugin_dedupe_key: Option<String>,
+) -> AppResult<Tab> {
+    db.create_plugin_webview_tab(
+        &project_id,
+        &worktree_id,
+        title,
+        Some(plugin_id),
+        Some(plugin_view_id),
+        plugin_payload,
+        plugin_dedupe_key,
+    )
+}
+
 #[tauri::command]
 fn close_tab(db: tauri::State<'_, Db>, tab_id: String) -> AppResult<()> {
     db.delete_tab(&tab_id)
@@ -473,6 +525,27 @@ fn set_active_selection(db: tauri::State<'_, Db>, value: String) -> AppResult<()
     db.set_setting(ACTIVE_SELECTION_KEY, &value)
 }
 
+/// Reads one plugin-owned storage value as opaque JSON, or `None` if unset.
+#[tauri::command]
+fn plugin_storage_get(
+    db: tauri::State<'_, Db>,
+    plugin_id: String,
+    key: String,
+) -> AppResult<Option<String>> {
+    db.plugin_storage_get(&plugin_id, &key)
+}
+
+/// Writes one plugin-owned storage value as opaque JSON.
+#[tauri::command]
+fn plugin_storage_set(
+    db: tauri::State<'_, Db>,
+    plugin_id: String,
+    key: String,
+    value: String,
+) -> AppResult<()> {
+    db.plugin_storage_set(&plugin_id, &key, &value)
+}
+
 /// Wires the app's managed state, menu, and dev-only plugins during Tauri setup.
 /// Extracted from `run` so the builder chain stays readable (and within the
 /// per-function line budget).
@@ -515,9 +588,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         log::warn!("failed to install pragma-cli: {error}");
     }
     ensure_gateway_in_background(pty.clone());
-    if let Err(error) = agents::ensure_bundled_installed(app.handle()) {
-        log::warn!("failed to install bundled agent configs: {error}");
-    }
     agent_events::start_for(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty);
     ssh_host::reconnect_remote_hosts(app.handle().clone());
@@ -558,6 +628,9 @@ pub fn run() {
             platform_name,
             load_keybindings,
             save_keybindings,
+            read_plugin_manifests,
+            read_plugin_bundle,
+            gateway_connection_info,
             pty_spawn,
             pty_attach,
             pty_write,
@@ -583,14 +656,13 @@ pub fn run() {
             worktrees::delete_worktree,
             scripts::load_project_scripts,
             editors::open_worktree,
-            agents::list_agents,
-            agents::resolve_agent_models,
             agent_notifications::show_agent_notification,
             control::start_agent,
             control::exec_in_worktree,
             project_icon,
             list_tabs,
             create_tab,
+            create_plugin_webview_tab,
             close_tab,
             rename_tab,
             set_tab_title,
@@ -600,6 +672,8 @@ pub fn run() {
             clear_split_layout,
             get_active_selection,
             set_active_selection,
+            plugin_storage_get,
+            plugin_storage_set,
             kanban::list_kanban_cards,
             kanban::create_kanban_card,
             kanban::update_kanban_card,

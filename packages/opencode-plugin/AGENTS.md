@@ -9,19 +9,16 @@ through `@pragma/sdk`.
 
 ```
 packages/opencode-plugin/
+├── assets/             # OpenCode brand assets used by the built-in launcher
 ├── src/
 │   ├── index.ts         # PragmaOpencodePlugin entry point
 │   └── hooks.ts         # Two-flag state machine (busy + attention)
-├── pragma/agents/opencode/
-│   ├── config.json      # Bundled launcher config + model metadata
-│   └── scripts/list-models.sh  # opencode model listing → generic Pragma JSON
 └── dist/index.mjs       # Built output (Bunup; git-ignored)
 ```
 
 The built `dist/index.mjs` is **not** bundled by Pragma — `stage-daemon-sidecar.sh`
-stages only the server/`pragma-cli` sidecars and the bundled agent launcher configs
-(`pragma/agents/`). To use the plugin, register its absolute path in opencode's own
-`plugin` config (see _Installation_ below).
+stages only the server/`pragma-cli` sidecars. To use the plugin, register its absolute
+path in opencode's own `plugin` config (see _Installation_ below).
 
 ## Installation
 
@@ -92,29 +89,18 @@ accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` un
 `PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
 `PRAGMA_WORKTREE_ID` are present.
 
-## Agent launcher config
+## Built-in launcher
 
-`pragma/agents/opencode/config.json` — fields: `id`, `name`, `icon`, `start`, and
-optional `models` / launch timing. Icons must resolve inside that agent directory. Staged to
-`apps/pragma/src-tauri/resources/pragma/agents/` by `stage-daemon-sidecar.sh`.
-
-The `models` block is command-backed and runs with cwd set to the installed agent
-directory (`~/.pragma/agents/opencode`):
-
-```json
-"models": {
-  "source": "command",
-  "command": ["sh", "scripts/list-models.sh"],
-  "modelArg": ["--model", "{model}"]
-}
-```
+The launchable OpenCode entry is defined by the built-in agent in
+`apps/pragma/src/plugins/builtin-agents.ts`.
+Its icon asset stays in this package under `assets/`, not in Pragma core.
 
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.
 
-`scripts/list-models.sh` owns all opencode-specific parsing. It tries supported opencode
-model-list surfaces (`opencode models --json`, then `--verbose`, then plain
-`opencode models`) and emits Pragma's generic JSON array. Each model's display name
+The built-in model provider owns all opencode-specific parsing. It tries supported
+opencode model-list surfaces (`opencode models --json`, then `--verbose`, then plain
+`opencode models`) and returns Pragma's generic model entries. Each model's display name
 gets its provider appended in parentheses (e.g. `Claude Sonnet 4 (anthropic)`), derived
 from the `provider` field or the `provider/model` id prefix. Fast variants stay separate
 model entries when opencode exposes separate IDs. Reasoning is omitted unless opencode

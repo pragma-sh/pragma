@@ -19,6 +19,7 @@ import {
   clearSplitLayout,
   createFile,
   createFolder,
+  createPluginWebViewTab,
   createTab,
   deleteFile,
   deleteWorktree,
@@ -33,7 +34,6 @@ import {
   readFile,
   renameFile,
   renameWorktree,
-  resolveAgentModels,
   setSplitLayout,
   setTabTitle,
   setWorktreeHidden,
@@ -106,6 +106,27 @@ describe("browser IPC wrappers", () => {
     });
   });
 
+  it("createPluginWebViewTab forwards plugin locator metadata", () => {
+    void createPluginWebViewTab({
+      projectId: "p",
+      worktreeId: "w",
+      title: "Report",
+      pluginId: "plugin-a",
+      pluginViewId: "report",
+      pluginPayload: '{"ok":true}',
+      pluginDedupeKey: "latest",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("create_plugin_webview_tab", {
+      projectId: "p",
+      worktreeId: "w",
+      title: "Report",
+      pluginId: "plugin-a",
+      pluginViewId: "report",
+      pluginPayload: '{"ok":true}',
+      pluginDedupeKey: "latest",
+    });
+  });
+
   it("browserCreate spreads bounds alongside the tab id and url", () => {
     void browserCreate("tab-1", "https://example.com", { x: 1, y: 2, width: 3, height: 4 });
     expect(invokeMock).toHaveBeenCalledWith("browser_create", {
@@ -145,11 +166,6 @@ describe("browser IPC wrappers", () => {
       width: 3,
       height: 4,
     });
-  });
-
-  it("resolveAgentModels passes the agent id", () => {
-    void resolveAgentModels("cursor");
-    expect(invokeMock).toHaveBeenCalledWith("resolve_agent_models", { agentId: "cursor" });
   });
 
   it("openWorktree passes the worktree id and editor id", () => {

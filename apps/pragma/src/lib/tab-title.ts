@@ -15,5 +15,8 @@ export function defaultTabTitle(kind: TabKind): string {
   if (kind === "pr-review") {
     return "PR Review";
   }
+  if (kind === "plugin-webview") {
+    return "Plugin";
+  }
   return "Shell";
 }

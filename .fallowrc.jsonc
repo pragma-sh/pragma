@@ -1,6 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": ["src/index.{js,jsx,ts,tsx,mjs}", "src/main.{js,jsx,ts,tsx,mjs}"],
+  // `test-fixtures/**` plugin bundles are loaded at runtime (blob-URL dynamic
+  // import by the plugin loader; path resolution by Rust tests), never
+  // statically imported — they are not dead files.
+  "dynamicallyLoaded": ["**/test-fixtures/**"],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],
   },
@@ -41,6 +45,10 @@
       // the per-command typing and the explicit contract AGENTS.md mandates
       // ("Keep the IPC surface typed and centralized").
       "**/lib/tauri.ts",
+      // Test suites repeat arrange/assert shapes by design (table-like cases
+      // reading top-to-bottom). Semantic clone detection over them reports
+      // idiomatic repetition, not copy-paste worth refactoring.
+      "**/*.test.{ts,tsx}",
     ],
   },
   "rules": {

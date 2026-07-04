@@ -36,3 +36,4 @@ coverage/
 !.env.example
 .fallow/
 .tokensave
+.playwright-mcp.greptile/

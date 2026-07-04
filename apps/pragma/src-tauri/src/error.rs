@@ -24,6 +24,8 @@ pub enum AppError {
     Ai(String),
     #[error("script error: {0}")]
     Script(String),
+    #[error("plugin error: {0}")]
+    Plugin(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("lock poisoned")]

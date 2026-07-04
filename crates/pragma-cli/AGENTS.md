@@ -10,6 +10,10 @@ crate's debug binary).
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 ```
 
+`pragma-cli agent start` is brokered through the app but is not supported for
+plugin-defined agents; launch agents from the Pragma UI so the frontend can run JS
+plugin model/argument builders.
+
 Every command renders plain text (aligned tables / short human lines) by
 default. Two mutually exclusive global flags switch to structured output for
 scripting:

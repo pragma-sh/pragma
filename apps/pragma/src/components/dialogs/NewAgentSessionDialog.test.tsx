@@ -7,13 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NewSessionDeepLinkDetail } from "@/lib/deep-link";
 
-const listAgentsMock = vi.fn();
-const resolveAgentModelsMock = vi.fn();
+const listPluginAgentsMock = vi.fn();
+const resolvePluginAgentModelsMock = vi.fn();
 const startSessionMock = vi.fn();
 
-vi.mock("@/lib/tauri", () => ({
-  listAgents: () => listAgentsMock(),
-  resolveAgentModels: (agentId: string) => resolveAgentModelsMock(agentId),
+vi.mock("@/plugins/agents", () => ({
+  listPluginAgents: () => listPluginAgentsMock(),
+  resolvePluginAgentModels: (agentId: string) => resolvePluginAgentModelsMock(agentId),
 }));
 
 // The TipTap editor is unrelated to dialog seeding; a textarea keeps the test focused.
@@ -95,11 +95,13 @@ const deepLinkInitial: NewSessionDeepLinkDetail = {
 
 describe("NewAgentSessionDialog", () => {
   beforeEach(() => {
-    listAgentsMock.mockResolvedValue([
+    listPluginAgentsMock.mockReturnValue([
       { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);
-    resolveAgentModelsMock.mockResolvedValue([{ id: "sonnet", name: "Sonnet", reasoning: [] }]);
+    resolvePluginAgentModelsMock.mockResolvedValue([
+      { id: "sonnet", name: "Sonnet", reasoning: [] },
+    ]);
   });
 
   afterEach(() => {

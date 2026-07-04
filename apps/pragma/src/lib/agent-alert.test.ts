@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const isFocusedMock = vi.fn();
 const isPermissionGrantedMock = vi.fn();
-const listAgentsMock = vi.fn();
+const listPluginAgentsMock = vi.fn();
 const requestPermissionMock = vi.fn();
 const sendNotificationMock = vi.fn();
 const showAgentNotificationMock = vi.fn();
@@ -16,8 +16,11 @@ const originalAudioContext = audioWindow.AudioContext;
 const originalWebkitAudioContext = audioWindow.webkitAudioContext;
 
 vi.mock("@/lib/tauri", () => ({
-  listAgents: () => listAgentsMock(),
   showAgentNotification: (...args: unknown[]) => showAgentNotificationMock(...args),
+}));
+
+vi.mock("@/plugins/agents", () => ({
+  listPluginAgents: () => listPluginAgentsMock(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -118,14 +121,14 @@ describe("alertAgent", () => {
   beforeEach(() => {
     isFocusedMock.mockReset();
     isPermissionGrantedMock.mockReset();
-    listAgentsMock.mockReset();
+    listPluginAgentsMock.mockReset();
     requestPermissionMock.mockReset();
     sendNotificationMock.mockReset();
     showAgentNotificationMock.mockReset();
 
     isFocusedMock.mockResolvedValue(false);
     isPermissionGrantedMock.mockResolvedValue(true);
-    listAgentsMock.mockResolvedValue([
+    listPluginAgentsMock.mockReturnValue([
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);
     showAgentNotificationMock.mockResolvedValue(false);

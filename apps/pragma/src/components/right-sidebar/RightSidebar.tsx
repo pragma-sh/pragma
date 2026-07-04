@@ -18,6 +18,12 @@ import {
 import { useAi } from "@/state/ai-context";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import {
+  RenderPluginContribution,
+  usePluginSidebarTabs,
+  type VisiblePluginContribution,
+} from "@/plugins/rendering";
+import type { SidebarTabDefinition } from "@pragma/plugin";
 
 const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
 
@@ -154,6 +160,7 @@ interface RightSidebarHeaderProps {
   aiAvailable: boolean;
   commitPrRunning: boolean;
   hasUncommittedChanges: boolean;
+  pluginTabs: VisiblePluginContribution<SidebarTabDefinition>[];
   worktreeId: string | null;
   onCommitPr: () => void;
   onCollapse: () => void;
@@ -165,6 +172,7 @@ function RightSidebarHeader({
   aiAvailable,
   commitPrRunning,
   hasUncommittedChanges,
+  pluginTabs,
   worktreeId,
   onCommitPr,
   onCollapse,
@@ -181,20 +189,33 @@ function RightSidebarHeader({
         <PanelRightClose />
       </Button>
       <Tabs
-        className="min-w-0 flex-1"
+        className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         onValueChange={(value) => setActiveSubtab(value as RightSidebarSubtab)}
         value={activeSubtab}
       >
-        <TabsList className="h-7 group-data-horizontal/tabs:h-7">
-          <TabsTrigger className="text-xs" value="files">
+        <TabsList className="h-7 min-w-full w-max justify-start group-data-horizontal/tabs:h-7">
+          <TabsTrigger className="shrink-0 text-xs" value="files">
             Files
           </TabsTrigger>
-          <TabsTrigger className="text-xs" value="changes">
+          <TabsTrigger className="shrink-0 text-xs" value="changes">
             Changes
           </TabsTrigger>
-          <TabsTrigger className="text-xs" value="pullRequest">
+          <TabsTrigger className="shrink-0 text-xs" value="pullRequest">
             Pull Request
           </TabsTrigger>
+          {pluginTabs.map((tab) => {
+            const PluginIcon = tab.contribution.icon;
+            return (
+              <TabsTrigger
+                className="shrink-0 gap-1.5 text-xs"
+                key={tab.key}
+                value={pluginTabValue(tab)}
+              >
+                {PluginIcon ? <PluginIcon className="size-3.5" /> : null}
+                <span>{tab.contribution.title}</span>
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
       </Tabs>
       {aiAvailable ? (
@@ -222,15 +243,28 @@ function RightSidebarHeader({
 function RightSidebarBody({
   activeSubtab,
   generatedPrDraft,
+  pluginTabs,
 }: {
   activeSubtab: RightSidebarSubtab;
   generatedPrDraft: { key: number; draft: AiPullRequestDraft } | undefined;
+  pluginTabs: VisiblePluginContribution<SidebarTabDefinition>[];
 }) {
   if (activeSubtab === "files") {
     return <FilesTab />;
   }
   if (activeSubtab === "changes") {
     return <ChangesTab />;
+  }
+  const pluginTab = pluginTabs.find((tab) => pluginTabValue(tab) === activeSubtab);
+  if (pluginTab) {
+    return (
+      <RenderPluginContribution
+        component={pluginTab.contribution.component}
+        config={pluginTab.record.config}
+        pluginId={pluginTab.pluginId}
+        resetKey={pluginTab.key}
+      />
+    );
   }
   return (
     <PullRequestTab
@@ -240,11 +274,16 @@ function RightSidebarBody({
   );
 }
 
+function pluginTabValue(tab: VisiblePluginContribution<SidebarTabDefinition>): RightSidebarSubtab {
+  return `plugin:${tab.pluginId}:${tab.contribution.id}`;
+}
+
 export function RightSidebar() {
   const { collapsed, activeSubtab, width, toggleCollapsed, setActiveSubtab, setWidth } =
     useRightSidebar();
   const workspace = useWorkspace();
   const { available: aiAvailable } = useAi();
+  const pluginTabs = usePluginSidebarTabs(workspace.selectedProjectId);
   const worktreeId = workspace.selectedWorktreeId;
   const { hasUncommittedChanges, setHasUncommittedChanges, availabilityWorktree } =
     useCommitPrAvailability(worktreeId, aiAvailable);
@@ -256,6 +295,15 @@ export function RightSidebar() {
     setHasUncommittedChanges,
     availabilityWorktree,
   );
+
+  useEffect(() => {
+    if (
+      activeSubtab.startsWith("plugin:") &&
+      !pluginTabs.some((tab) => pluginTabValue(tab) === activeSubtab)
+    ) {
+      setActiveSubtab("files");
+    }
+  }, [activeSubtab, pluginTabs, setActiveSubtab]);
 
   if (collapsed) {
     return <CollapsedRightSidebar onExpand={toggleCollapsed} />;
@@ -274,11 +322,16 @@ export function RightSidebar() {
         hasUncommittedChanges={hasUncommittedChanges}
         onCollapse={toggleCollapsed}
         onCommitPr={() => void runCommitAndPr()}
+        pluginTabs={pluginTabs}
         setActiveSubtab={setActiveSubtab}
         worktreeId={worktreeId}
       />
       <div className="bg-canvas min-h-0 flex-1 overflow-hidden">
-        <RightSidebarBody activeSubtab={activeSubtab} generatedPrDraft={generatedPrDraft} />
+        <RightSidebarBody
+          activeSubtab={activeSubtab}
+          generatedPrDraft={generatedPrDraft}
+          pluginTabs={pluginTabs}
+        />
       </div>
     </div>
   );

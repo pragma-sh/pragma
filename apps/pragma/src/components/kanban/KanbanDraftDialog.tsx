@@ -17,12 +17,8 @@ import {
   validateModelSelection,
 } from "@/lib/agent-model-selection";
 import { isMacPlatform } from "@/lib/platform";
-import {
-  type AgentConfig,
-  type AgentModel,
-  type AgentModelSelection,
-  listAgents,
-} from "@/lib/tauri";
+import { type AgentConfig, type AgentModel, type AgentModelSelection } from "@/lib/tauri";
+import { listPluginAgents } from "@/plugins/agents";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -90,18 +86,7 @@ function submitOnModEnter(event: SubmitKeyEvent, canSubmit: boolean, submit: () 
 function useDraftAgents(open: boolean, setAgents: (agents: AgentConfig[]) => void) {
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
-    listAgents()
-      .then((items) => {
-        if (!cancelled) setAgents(Array.isArray(items) ? items : []);
-        return undefined;
-      })
-      .catch(() => {
-        if (!cancelled) setAgents([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setAgents(listPluginAgents());
   }, [open, setAgents]);
 }
 

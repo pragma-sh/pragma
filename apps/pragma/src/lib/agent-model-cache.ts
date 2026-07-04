@@ -1,4 +1,5 @@
-import { type AgentModel, resolveAgentModels } from "@/lib/tauri";
+import type { AgentModel } from "@/lib/tauri";
+import { resolvePluginAgentModels } from "@/plugins/agents";
 
 const cache = new Map<string, AgentModel[]>();
 const inFlight = new Map<string, Promise<AgentModel[]>>();
@@ -28,7 +29,8 @@ export function refreshAgentModels(agentId: string, force = false): Promise<Agen
   if (existing) {
     return existing;
   }
-  const request = resolveAgentModels(agentId)
+  const request = resolvePluginAgentModels(agentId)
+    .then((pluginModels) => pluginModels ?? [])
     .then((models) => {
       const next = Array.isArray(models) ? models : [];
       cache.set(agentId, next);

@@ -2,6 +2,7 @@ import { AiSetupModal } from "@/components/ai/AiSetupModal";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { GitHubSetupModal } from "@/components/github/GitHubSetupModal";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { PluginProvider } from "@/plugins/PluginProvider";
 import { AiProvider } from "@/state/ai-context";
 import { GitHubProvider } from "@/state/github-context";
 import { KanbanProvider } from "@/state/kanban-context";
@@ -12,13 +13,15 @@ function App() {
     <AiProvider>
       <GitHubProvider>
         <WorkspaceProvider>
-          <KanbanProvider>
-            <ConfirmCloseProvider>
-              <WorkspaceShell />
-              <GitHubSetupModal />
-              <AiSetupModal />
-            </ConfirmCloseProvider>
-          </KanbanProvider>
+          <PluginProvider>
+            <KanbanProvider>
+              <ConfirmCloseProvider>
+                <WorkspaceShell />
+                <GitHubSetupModal />
+                <AiSetupModal />
+              </ConfirmCloseProvider>
+            </KanbanProvider>
+          </PluginProvider>
         </WorkspaceProvider>
       </GitHubProvider>
     </AiProvider>

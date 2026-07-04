@@ -1,0 +1,33 @@
+{
+  "name": "@pragma/dev-test-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lightweight dev/test Pragma plugin: random sidebar tab, sidebar card, and an SDK event hook.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/constants": "workspace:*",
+    "@pragma/plugin": "workspace:*",
+    "@pragma/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
+  }
+}

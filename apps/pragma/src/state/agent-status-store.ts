@@ -159,7 +159,7 @@ export function tabStatus(tabId: string | null): AgentStatus | null {
 }
 
 /** Returns the highest-priority agent status for all tabs in a worktree. */
-export function worktreeStatus(worktreeId: string | null): AgentStatus | null {
+export function worktreeAgentStatus(worktreeId: string | null): AgentStatus | null {
   if (!worktreeId) {
     return null;
   }
@@ -172,6 +172,28 @@ export function worktreeStatus(worktreeId: string | null): AgentStatus | null {
     values.push(...agents.values());
   }
   return aggregate(values);
+}
+
+/** Returns every stored agent entry for a worktree (used by the plugin hooks bridge). */
+export function agentEntriesForWorktree(
+  worktreeId: string | null,
+): Array<{ agent: string; status: AgentStatus }> {
+  if (!worktreeId) {
+    return [];
+  }
+  const entries: Array<{ agent: string; status: AgentStatus }> = [];
+  const tabs = statuses.get(worktreeId);
+  for (const agents of tabs?.values() ?? []) {
+    for (const [agent, status] of agents) {
+      entries.push({ agent, status });
+    }
+  }
+  return entries;
+}
+
+/** Subscribes to any agent-status change (used by the plugin hooks bridge). */
+export function subscribeAgentStatuses(listener: () => void): () => void {
+  return subscribe(listener);
 }
 
 /** React hook for a tab's aggregate agent status. */
@@ -187,7 +209,7 @@ export function useTabAgentStatus(tabId: string | null): AgentStatus | null {
 export function useWorktreeAgentStatus(worktreeId: string | null): AgentStatus | null {
   return useSyncExternalStore(
     subscribe,
-    () => worktreeStatus(worktreeId),
+    () => worktreeAgentStatus(worktreeId),
     () => null,
   );
 }

@@ -28,11 +28,16 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
 - `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
+- `packages/plugin/` — `@pragma/plugin`, the public TS API/runtime stub for pure Pragma
+  plugins loaded from `.pragma/config.json`.
+- `packages/create-pragma-plugin/` — `create-pragma-plugin` scaffolder CLI for
+  single-bundle plugin projects.
 - `packages/github-helpers/` — `@pragma/github-helpers`, the `pragma-github` host-side sidecar scaffold.
 - `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
 - `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
-  status via `@pragma/sdk` and owns its bundled Pragma launcher config/model scripts under `pragma/agents/`.
+  status via `@pragma/sdk`. Launchable Pragma agents are `defineAgent` plugin contributions,
+  not bundled `pragma/agents` JSON.
   Pragma does **not** bundle, install, or register the plugin — you register its built
   `dist/index.mjs` absolute path in opencode's own `plugin` config array yourself (opencode does
   **not** auto-load plugins from a directory; a file-path array entry is the only thing that loads,
@@ -46,6 +51,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                                   |
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                               |
 | Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                           |
+| Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                     |
+| Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                          |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)              |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                               |
 | Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                           |
@@ -67,9 +74,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 4. **No magic values across the boundary.** Put them in `@pragma/constants`.
 5. **Never route terminal output through React state.** Workspace state tracks metadata only.
 6. **Agent status is runtime-only.** Daemon snapshots live in memory; frontend status uses `useSyncExternalStore`; pins use localStorage; no SQLite migration.
-7. **Agent model discovery parsing belongs to plugins.** Core executes configured commands from
-   `~/.pragma/agents/<id>` and validates generic JSON only; host-specific parsers live under
-   `packages/*-plugin/pragma/agents/<id>/scripts/`.
+7. **Agent model discovery parsing belongs to plugins.** Plugin agents provide static models or
+   async model providers; host-specific parsing must not be added to Rust/Tauri IPC.
 8. **Sweeping refactors for clarity are welcome** — this project is early.
 
 Full details: see `AGENTS.md` at the repo root.

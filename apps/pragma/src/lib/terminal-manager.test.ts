@@ -107,6 +107,10 @@ import {
   TerminalManager,
 } from "./terminal-manager";
 import { defaultKeybindingsConfig, setLoadedKeybindingsConfig } from "./keybindings";
+import {
+  clearActivePluginCommandKeybindings,
+  setActivePluginCommandKeybindings,
+} from "../plugins/command-keybindings";
 
 const tab = { id: "tab-1", worktreeId: "wt-1" } as Tab;
 
@@ -452,6 +456,7 @@ describe("TerminalManager key passthrough", () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
     terminalClear.mockClear();
+    clearActivePluginCommandKeybindings();
   });
 
   it("bubbles configured split shortcuts so they reach the window listener", async () => {
@@ -517,6 +522,33 @@ describe("TerminalManager key passthrough", () => {
     });
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "h" }))).toBe(false);
     expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "/" }))).toBe(true);
+  });
+
+  it("bubbles active plugin command shortcuts so they reach the window listener", async () => {
+    setActivePluginCommandKeybindings([{ bindings: [{ chord: "cmd+y" }] }]);
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const instances = (
+      Terminal as unknown as {
+        instances: Array<{ attachCustomKeyEventHandler: Mock<(...args: unknown[]) => unknown> }>;
+      }
+    ).instances;
+    const handler = instances.at(-1)?.attachCustomKeyEventHandler;
+    const passthrough = handler!.mock.calls[0]![0] as (event: KeyboardEvent) => boolean;
+
+    Object.defineProperty(window.navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "y" }))).toBe(false);
+    expect(passthrough(new KeyboardEvent("keydown", { metaKey: true, key: "u" }))).toBe(true);
   });
 });
 

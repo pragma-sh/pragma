@@ -8,7 +8,7 @@ import {
   clearDoneStatusForTab,
   removeAgentStatusForTab,
   tabStatus,
-  worktreeStatus,
+  worktreeAgentStatus,
 } from "@/state/agent-status-store";
 
 function report(
@@ -34,17 +34,17 @@ describe("agent status store", () => {
     applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
 
     expect(tabStatus("tab-a")).toBe("done");
-    expect(worktreeStatus("wt-1")).toBe("done");
+    expect(worktreeAgentStatus("wt-1")).toBe("done");
   });
 
   it("clears the worktree indicator when the closed tab held the only agent", () => {
     applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
-    expect(worktreeStatus("wt-1")).toBe("running");
+    expect(worktreeAgentStatus("wt-1")).toBe("running");
 
     removeAgentStatusForTab("tab-a");
 
     expect(tabStatus("tab-a")).toBeNull();
-    expect(worktreeStatus("wt-1")).toBeNull();
+    expect(worktreeAgentStatus("wt-1")).toBeNull();
   });
 
   it("keeps the worktree indicator when another tab still has a running agent", () => {
@@ -54,7 +54,7 @@ describe("agent status store", () => {
     removeAgentStatusForTab("tab-a");
 
     expect(tabStatus("tab-a")).toBeNull();
-    expect(worktreeStatus("wt-1")).toBe("running");
+    expect(worktreeAgentStatus("wt-1")).toBe("running");
   });
 
   it("removes even a running status, unlike the view-clear path", () => {
@@ -67,12 +67,12 @@ describe("agent status store", () => {
 
   it("clears a done indicator when the tab is viewed", () => {
     applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
-    expect(worktreeStatus("wt-1")).toBe("done");
+    expect(worktreeAgentStatus("wt-1")).toBe("done");
 
     clearDoneStatusForTab("tab-a");
 
     expect(tabStatus("tab-a")).toBeNull();
-    expect(worktreeStatus("wt-1")).toBeNull();
+    expect(worktreeAgentStatus("wt-1")).toBeNull();
   });
 
   it("keeps running and attention indicators through a view-clear", () => {
@@ -89,13 +89,13 @@ describe("agent status store", () => {
   it("drops worktree green only once every finished tab is viewed", () => {
     applyAgentReport(report("wt-1", "tab-a", "claude", "done"));
     applyAgentReport(report("wt-1", "tab-b", "codex", "done"));
-    expect(worktreeStatus("wt-1")).toBe("done");
+    expect(worktreeAgentStatus("wt-1")).toBe("done");
 
     clearDoneStatusForTab("tab-a");
-    expect(worktreeStatus("wt-1")).toBe("done");
+    expect(worktreeAgentStatus("wt-1")).toBe("done");
 
     clearDoneStatusForTab("tab-b");
-    expect(worktreeStatus("wt-1")).toBeNull();
+    expect(worktreeAgentStatus("wt-1")).toBeNull();
   });
 
   it("removes an agent entirely on a cleared report, unlike done", () => {
@@ -106,7 +106,7 @@ describe("agent status store", () => {
 
     expect(previous).toBe("running");
     expect(tabStatus("tab-a")).toBeNull();
-    expect(worktreeStatus("wt-1")).toBeNull();
+    expect(worktreeAgentStatus("wt-1")).toBeNull();
   });
 
   it("clears only the reporting agent, leaving other agents on the tab", () => {
@@ -139,6 +139,6 @@ describe("agent status store", () => {
 
     expect(tabStatus("tab-a")).toBeNull();
     expect(tabStatus("tab-b")).toBeNull();
-    expect(worktreeStatus("wt-1")).toBeNull();
+    expect(worktreeAgentStatus("wt-1")).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { KeybindingsConfig } from "@pragma/constants";
 
@@ -12,6 +12,11 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { useShortcuts } from "./use-shortcuts";
+
+import {
+  clearActivePluginCommandKeybindings,
+  setActivePluginCommandKeybindings,
+} from "@/plugins/command-keybindings";
 
 function config(): KeybindingsConfig {
   return {
@@ -143,6 +148,10 @@ async function flushLoad() {
 }
 
 describe("useShortcuts", () => {
+  afterEach(() => {
+    clearActivePluginCommandKeybindings();
+  });
+
   it("fires onClearTerminal for cmd+k on mac", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
@@ -168,6 +177,21 @@ describe("useShortcuts", () => {
     dispatchKeydown({ ctrlKey: true, key: "k" });
 
     expect(onClearTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers to an active plugin command binding that collides with a built-in shortcut", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onClearTerminal = vi.fn();
+
+    setActivePluginCommandKeybindings([{ bindings: [{ chord: "cmd+k" }] }]);
+    renderHook(() => useShortcuts(options({ onClearTerminal })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "k" });
+
+    expect(onClearTerminal).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("fires onNewBrowserTab for cmd+b on mac", async () => {
