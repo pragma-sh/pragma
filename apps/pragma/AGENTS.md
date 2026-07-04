@@ -62,6 +62,13 @@ apps/pragma/
    `export function myCommand(...): Promise<T> { return invoke<T>("my_command", ...) }`.
 3. **Components** import the wrapper — never call `invoke()` directly.
 4. Add a Vitest that mocks `@tauri-apps/api/core` and a `cargo test` for the Rust logic.
+5. **Never block the main thread.** A plain sync `#[tauri::command]` executes inline in
+   the webview IPC handler on the macOS main thread; while it runs, painting and every
+   queued IPC call (terminal keystrokes included) stall — this was the cause of
+   app-wide typing lag. Any command doing a daemon RPC (`host_rpc`), subprocess,
+   network, or file I/O must be `async fn` (+ `spawn_blocking` for blocking work, see
+   `run_pty_task`) or at least `#[tauri::command(async)]`. Only trivially fast work
+   (in-memory state, one SQLite row, native window calls) may stay plain sync.
 
 ## UI: Tailwind v4 + shadcn/ui
 
