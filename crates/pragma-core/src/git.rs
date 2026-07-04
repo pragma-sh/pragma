@@ -378,7 +378,8 @@ fn merged_status(items: &[MergedStatusItem]) -> HashMap<String, bool> {
             .collect();
         handles
             .into_iter()
-            .filter_map(|handle| handle.join().ok())
+            .zip(items)
+            .map(|(handle, item)| handle.join().unwrap_or_else(|_| (item.id.clone(), false)))
             .collect()
     })
 }
