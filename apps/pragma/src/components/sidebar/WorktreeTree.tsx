@@ -47,6 +47,18 @@ import { useWorkspace } from "@/state/workspace-context";
 
 const editorLaunchers = constants.editorLaunchers.options;
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
+// Trailing debounce for file-watch-triggered merged-status refreshes. An agent
+// or build writing files emits a continuous stream of change events; refreshing
+// per event floods the daemon with git batches. One refresh per window is
+// plenty — the 2s interval poll is the backstop anyway.
+const MERGED_STATUS_FILE_EVENT_DEBOUNCE_MS = 500;
+
+/** True when both maps hold exactly the same worktree-id → merged entries. */
+function sameMergedStatus(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
+}
 
 interface WorktreeTreeProps {
   onCreateChild: () => void;
@@ -72,32 +84,51 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       try {
         const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
         if (!cancelled) {
-          setMergedByWorktreeId(merged);
+          // Keep the previous object when nothing changed so the steady-state
+          // poll doesn't re-render the whole tree every tick.
+          setMergedByWorktreeId((previous) =>
+            sameMergedStatus(previous, merged) ? previous : merged,
+          );
         }
       } catch {
         if (!cancelled) {
-          setMergedByWorktreeId({});
+          setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
         }
       }
     }
 
     if (childWorktrees.length === 0) {
-      setMergedByWorktreeId({});
+      setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
       return;
     }
 
+    let debounceTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (debounceTimer !== null) {
+        return;
+      }
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        void refreshMergedStatus();
+      }, MERGED_STATUS_FILE_EVENT_DEBOUNCE_MS);
+    };
+
     void refreshMergedStatus();
     const unwatch = worktrees.map((worktree) =>
-      subscribeToWorktreeFiles(worktree.id, () => void refreshMergedStatus()),
+      subscribeToWorktreeFiles(worktree.id, scheduleRefresh),
     );
-    const interval = setInterval(
-      () => void refreshMergedStatus(),
-      MERGED_STATUS_REFRESH_INTERVAL_MS,
-    );
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        void refreshMergedStatus();
+      }
+    }, MERGED_STATUS_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       for (const stop of unwatch) {
         stop();
+      }
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
       }
       clearInterval(interval);
     };

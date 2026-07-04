@@ -17,6 +17,18 @@ pub fn command(program: &str) -> Command {
     command
 }
 
+/// Creates a `git` command with optional locks disabled.
+///
+/// Host git queries (status/diff/merged-status batches) now run concurrently —
+/// across worktrees and within one — and `GIT_OPTIONAL_LOCKS=0` stops read-only
+/// commands from taking `index.lock` for opportunistic index refreshes, which
+/// would otherwise make parallel queries on the same worktree fail spuriously.
+pub fn git() -> Command {
+    let mut command = command("git");
+    command.env("GIT_OPTIONAL_LOCKS", "0");
+    command
+}
+
 fn user_path() -> OsString {
     let current = env::var_os("PATH").unwrap_or_default();
     let home = env::var_os("HOME").map(PathBuf::from);

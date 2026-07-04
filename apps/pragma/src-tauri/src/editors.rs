@@ -13,7 +13,7 @@ use crate::error::{AppError, AppResult};
 /// from the frontend), keeping this consistent with the worktree-scoped `fs`/`git`
 /// commands: the IPC surface can only launch an editor on a known worktree, not an
 /// arbitrary directory.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_worktree(
     db: State<'_, Db>,
     worktree_id: String,

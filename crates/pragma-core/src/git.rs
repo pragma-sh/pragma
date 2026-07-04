@@ -278,36 +278,73 @@ fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
 /// with the parent branch), **staged** (HEAD → index) and **unstaged** (working
 /// tree + untracked).
 fn worktree_changes(root: &Path, parent_branch: Option<&str>) -> CoreResult<WorktreeChanges> {
-    let committed = match base_merge_base(root, parent_branch)? {
-        Some(merge_base) => {
-            let args = [
-                "diff",
-                "--name-status",
-                "-z",
-                "--find-renames",
-                &merge_base,
-                "HEAD",
-            ];
-            let name_status = run_git(root, &args)?;
-            let mut changes = parse_name_status(&name_status, DiffSide::Committed);
-            let numstat = run_git(root, &numstat_args(&args))?;
-            attach_numstat(&mut changes, &parse_numstat(&numstat));
-            changes
-        }
-        None => Vec::new(),
+    // The three sections are independent read-only git queries (~8 subprocess
+    // spawns total), and this request is polled every couple of seconds per
+    // worktree — run them concurrently so the RPC returns in the time of the
+    // slowest query instead of their sum.
+    let (committed, staged, unstaged) = std::thread::scope(|scope| {
+        let committed = scope.spawn(|| committed_changes(root, parent_branch));
+        let staged = scope.spawn(|| staged_changes(root));
+        let unstaged = scope.spawn(|| unstaged_changes(root));
+        (
+            join_changes(committed),
+            join_changes(staged),
+            join_changes(unstaged),
+        )
+    });
+    Ok(WorktreeChanges {
+        committed: committed?,
+        staged: staged?,
+        unstaged: unstaged?,
+    })
+}
+
+/// Unwraps a scoped changes task, mapping a panic to an operation error.
+fn join_changes(
+    handle: std::thread::ScopedJoinHandle<'_, CoreResult<Vec<ChangedFile>>>,
+) -> CoreResult<Vec<ChangedFile>> {
+    handle
+        .join()
+        .map_err(|_| CoreError::Operation("git query task panicked".to_string()))?
+}
+
+/// Lists changes committed since the fork point with the parent branch.
+fn committed_changes(root: &Path, parent_branch: Option<&str>) -> CoreResult<Vec<ChangedFile>> {
+    let Some(merge_base) = base_merge_base(root, parent_branch)? else {
+        return Ok(Vec::new());
     };
+    let args = [
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames",
+        &merge_base,
+        "HEAD",
+    ];
+    let name_status = run_git(root, &args)?;
+    let mut changes = parse_name_status(&name_status, DiffSide::Committed);
+    let numstat = run_git(root, &numstat_args(&args))?;
+    attach_numstat(&mut changes, &parse_numstat(&numstat));
+    Ok(changes)
+}
 
-    let staged_args = ["diff", "--name-status", "-z", "--find-renames", "--cached"];
-    let staged_name_status = run_git(root, &staged_args)?;
-    let mut staged = parse_name_status(&staged_name_status, DiffSide::Staged);
-    let staged_numstat = run_git(root, &numstat_args(&staged_args))?;
-    attach_numstat(&mut staged, &parse_numstat(&staged_numstat));
+/// Lists HEAD → index (staged) changes.
+fn staged_changes(root: &Path) -> CoreResult<Vec<ChangedFile>> {
+    let args = ["diff", "--name-status", "-z", "--find-renames", "--cached"];
+    let name_status = run_git(root, &args)?;
+    let mut staged = parse_name_status(&name_status, DiffSide::Staged);
+    let numstat = run_git(root, &numstat_args(&args))?;
+    attach_numstat(&mut staged, &parse_numstat(&numstat));
+    Ok(staged)
+}
 
-    let unstaged_args = ["diff", "--name-status", "-z", "--find-renames"];
-    let unstaged_name_status = run_git(root, &unstaged_args)?;
-    let mut unstaged = parse_name_status(&unstaged_name_status, DiffSide::Unstaged);
-    let unstaged_numstat = run_git(root, &numstat_args(&unstaged_args))?;
-    attach_numstat(&mut unstaged, &parse_numstat(&unstaged_numstat));
+/// Lists working-tree (unstaged) changes plus untracked files.
+fn unstaged_changes(root: &Path) -> CoreResult<Vec<ChangedFile>> {
+    let args = ["diff", "--name-status", "-z", "--find-renames"];
+    let name_status = run_git(root, &args)?;
+    let mut unstaged = parse_name_status(&name_status, DiffSide::Unstaged);
+    let numstat = run_git(root, &numstat_args(&args))?;
+    attach_numstat(&mut unstaged, &parse_numstat(&numstat));
 
     let untracked = run_git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     for path in untracked.split(|byte| *byte == 0).filter(|s| !s.is_empty()) {
@@ -322,24 +359,29 @@ fn worktree_changes(root: &Path, parent_branch: Option<&str>) -> CoreResult<Work
             deletions: Some(0),
         });
     }
-
-    Ok(WorktreeChanges {
-        committed,
-        staged,
-        unstaged,
-    })
+    Ok(unstaged)
 }
 
 /// Batch merged-status: returns `id -> merged` for each item. A worktree that
 /// errors is reported as not-merged so one bad checkout never fails the batch.
 fn merged_status(items: &[MergedStatusItem]) -> HashMap<String, bool> {
-    items
-        .iter()
-        .map(|item| {
-            let merged = worktree_is_merged(item).unwrap_or(false);
-            (item.id.clone(), merged)
-        })
-        .collect()
+    // Each item targets its own worktree (own index, own checkout), and each
+    // check runs up to three git subprocesses. The sidebar polls this batch, so
+    // check the worktrees concurrently: the batch costs one worktree's latency
+    // instead of the sum across all of them.
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .iter()
+            .map(|item| {
+                scope.spawn(move || (item.id.clone(), worktree_is_merged(item).unwrap_or(false)))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .zip(items)
+            .map(|(handle, item)| handle.join().unwrap_or_else(|_| (item.id.clone(), false)))
+            .collect()
+    })
 }
 
 /// True when a worktree's work is in its parent branch and its tree is clean.
@@ -355,7 +397,7 @@ fn worktree_is_merged(item: &MergedStatusItem) -> CoreResult<bool> {
     if !branch_has_commits(root, &item.branch)? {
         return Ok(false);
     }
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(root),
@@ -378,7 +420,7 @@ fn worktree_is_merged(item: &MergedStatusItem) -> CoreResult<bool> {
 /// True when the branch has at least one commit beyond its creation entry.
 /// Falls back to `true` when the reflog is unavailable.
 fn branch_has_commits(root: &Path, branch: &str) -> CoreResult<bool> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(root),
@@ -398,6 +440,27 @@ fn branch_has_commits(root: &Path, branch: &str) -> CoreResult<bool> {
     Ok(count > 1)
 }
 
+/// Loads a diff's two sides concurrently — each side is an independent git
+/// subprocess (or file read), so opening a diff costs the slower side instead
+/// of both in sequence.
+fn load_diff_sides(
+    old: impl FnOnce() -> String + Send,
+    new: impl FnOnce() -> String + Send,
+) -> (String, String) {
+    std::thread::scope(|scope| {
+        let old = scope.spawn(old);
+        let new_text = new();
+        (old.join().unwrap_or_default(), new_text)
+    })
+}
+
+/// Reads a worktree file as lossy UTF-8, or empty when missing/unreadable.
+fn read_worktree_text(root: &Path, path: &str) -> String {
+    std::fs::read(root.join(path))
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default()
+}
+
 /// Loads old/new text for one changed file on the given diff side.
 fn file_diff(
     root: &Path,
@@ -415,9 +478,10 @@ fn file_diff(
                 return Ok(binary_diff(path));
             }
             let old_ref_path = old_path.unwrap_or(&path);
-            let old_text =
-                git_show(root, &format!("{merge_base}:{old_ref_path}")).unwrap_or_default();
-            let new_text = git_show(root, &format!("HEAD:{path}")).unwrap_or_default();
+            let (old_text, new_text) = load_diff_sides(
+                || git_show(root, &format!("{merge_base}:{old_ref_path}")).unwrap_or_default(),
+                || git_show(root, &format!("HEAD:{path}")).unwrap_or_default(),
+            );
             Ok(FileDiff {
                 path,
                 old_text,
@@ -430,8 +494,10 @@ fn file_diff(
                 return Ok(binary_diff(path));
             }
             let old_ref_path = old_path.unwrap_or(&path);
-            let old_text = git_show(root, &format!("HEAD:{old_ref_path}")).unwrap_or_default();
-            let new_text = git_show(root, &format!(":{path}")).unwrap_or_default();
+            let (old_text, new_text) = load_diff_sides(
+                || git_show(root, &format!("HEAD:{old_ref_path}")).unwrap_or_default(),
+                || git_show(root, &format!(":{path}")).unwrap_or_default(),
+            );
             Ok(FileDiff {
                 path,
                 old_text,
@@ -443,10 +509,10 @@ fn file_diff(
             if diff_is_binary(root, &[], &path) {
                 return Ok(binary_diff(path));
             }
-            let old_text = git_show(root, &format!(":{path}")).unwrap_or_default();
-            let new_text = std::fs::read(root.join(&path))
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                .unwrap_or_default();
+            let (old_text, new_text) = load_diff_sides(
+                || git_show(root, &format!(":{path}")).unwrap_or_default(),
+                || read_worktree_text(root, &path),
+            );
             Ok(FileDiff {
                 path,
                 old_text,
@@ -461,11 +527,10 @@ fn file_diff(
                 return Ok(binary_diff(path));
             }
             let old_ref_path = old_path.unwrap_or(&path);
-            let old_text =
-                git_show(root, &format!("{base_ref}:{old_ref_path}")).unwrap_or_default();
-            let new_text = std::fs::read(root.join(&path))
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                .unwrap_or_default();
+            let (old_text, new_text) = load_diff_sides(
+                || git_show(root, &format!("{base_ref}:{old_ref_path}")).unwrap_or_default(),
+                || read_worktree_text(root, &path),
+            );
             Ok(FileDiff {
                 path,
                 old_text,
@@ -648,7 +713,7 @@ fn merge_worktree_to_parent(
         ));
     }
 
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(parent_root),
@@ -708,7 +773,7 @@ fn create_worktree(parent_root: &Path, branch: &str, path: &Path) -> CoreResult<
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(parent_root),
@@ -742,7 +807,7 @@ fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreR
         args.push("--force".to_string());
     }
     args.push(path_string(worktree_path));
-    let output = process_env::command("git").args(&args).output()?;
+    let output = process_env::git().args(&args).output()?;
     if output.status.success() {
         return Ok(());
     }
@@ -764,7 +829,7 @@ fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreR
 
 /// Prunes stale worktree administrative entries (`git worktree prune`).
 fn prune_worktrees(repo_root: &Path) -> CoreResult<()> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args(["-C", &path_string(repo_root), "worktree", "prune"])
         .output()?;
     if output.status.success() {
@@ -776,7 +841,7 @@ fn prune_worktrees(repo_root: &Path) -> CoreResult<()> {
 
 /// Hard-deletes a branch ref via `git branch -D <name>`.
 fn delete_branch(repo_root: &Path, branch: &str) -> CoreResult<()> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args(["-C", &path_string(repo_root), "branch", "-D", branch])
         .output()?;
     if output.status.success() {
@@ -788,7 +853,7 @@ fn delete_branch(repo_root: &Path, branch: &str) -> CoreResult<()> {
 
 /// True when the worktree has uncommitted, staged, or untracked changes.
 fn worktree_is_dirty(path: &Path) -> bool {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(path),
@@ -826,7 +891,7 @@ fn remove_untracked(root: &Path, path: &str) -> CoreResult<()> {
 }
 
 fn has_unmerged_paths(root: &Path) -> CoreResult<bool> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .args([
             "-C",
             &path_string(root),
@@ -848,7 +913,7 @@ fn base_merge_base(root: &Path, parent_branch: Option<&str>) -> CoreResult<Optio
     let Some(parent_branch) = parent_branch else {
         return Ok(None);
     };
-    let output = process_env::command("git")
+    let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
         .args(["merge-base", "HEAD", parent_branch])
@@ -861,7 +926,7 @@ fn base_merge_base(root: &Path, parent_branch: Option<&str>) -> CoreResult<Optio
 }
 
 fn merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
         .args(["merge-base", a, b])
@@ -1002,7 +1067,7 @@ fn status_from_code(code: u8) -> ChangeStatus {
 }
 
 fn diff_is_binary(root: &Path, revs: &[&str], path: &str) -> bool {
-    let mut command = process_env::command("git");
+    let mut command = process_env::git();
     command
         .arg("-C")
         .arg(path_string(root))
@@ -1020,7 +1085,7 @@ fn diff_is_binary(root: &Path, revs: &[&str], path: &str) -> bool {
 }
 
 fn git_show(root: &Path, spec: &str) -> Option<String> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
         .args(["show", spec])
@@ -1058,7 +1123,7 @@ fn git_stdout(root: &Path, args: &[&str]) -> CoreResult<String> {
 }
 
 fn run_git(root: &Path, args: &[&str]) -> CoreResult<Vec<u8>> {
-    let output = process_env::command("git")
+    let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
         .args(args)
@@ -1121,7 +1186,8 @@ mod tests {
 
     use super::{
         commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
-        merge_worktree_to_parent, stage_file, unstage_file, worktree_changes, worktree_is_dirty,
+        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
+        worktree_is_dirty, MergedStatusItem,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1306,5 +1372,31 @@ mod tests {
             .expect_err("merge should conflict")
             .to_string();
         assert!(message.contains("Merge conflicts detected"));
+    }
+
+    #[test]
+    fn merged_status_reports_every_item_in_the_batch() {
+        let (child_path, main_path) = project_with_child();
+        std::fs::write(child_path.join("feature.txt"), "feature\n").expect("write feature");
+        commit_all(&child_path, "feature commit");
+        run(&main_path, &["merge", "--no-ff", "feature"]);
+
+        let items = vec![
+            MergedStatusItem {
+                id: "merged-child".to_string(),
+                root: child_path.to_string_lossy().into_owned(),
+                branch: "feature".to_string(),
+                parent_branch: Some("main".to_string()),
+            },
+            MergedStatusItem {
+                id: "missing".to_string(),
+                root: "/nonexistent/worktree".to_string(),
+                branch: "ghost".to_string(),
+                parent_branch: Some("main".to_string()),
+            },
+        ];
+        let merged = merged_status(&items);
+        assert_eq!(merged.get("merged-child"), Some(&true));
+        assert_eq!(merged.get("missing"), Some(&false));
     }
 }

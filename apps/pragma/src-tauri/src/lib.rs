@@ -195,7 +195,7 @@ fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> 
 
 /// Reads plugin entries from `~/.pragma/config.json` plus the active project's
 /// `.pragma/config.json`, resolving each to a manifest or a per-entry error.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_plugin_manifests(
     app_handle: tauri::AppHandle,
     project_path: Option<String>,
@@ -208,7 +208,7 @@ fn read_plugin_manifests(
 }
 
 /// Reads the JavaScript source of a resolved plugin bundle file.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_plugin_bundle(main_path: String) -> AppResult<String> {
     plugins::read_bundle(std::path::Path::new(&main_path))
 }
@@ -394,7 +394,7 @@ async fn restart_daemon(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
 
 /// Returns the current contents of the server log file (empty if not yet
 /// created). Backs the Troubleshooting menu's "Open Server Logs" tab.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_daemon_log(pty: tauri::State<'_, PtyClient>) -> AppResult<String> {
     pty.read_log()
 }

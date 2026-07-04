@@ -57,6 +57,11 @@ type StagingOp = (worktreeId: string) => Promise<void>;
  */
 const CHANGES_REFRESH_INTERVAL_MS = 2000;
 
+/** True when two polled change sets are identical, so state can be kept as-is. */
+function sameChanges(a: WorktreeChanges, b: WorktreeChanges): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Run a single discard target (one file or all unstaged), surfacing the toast. */
 async function applyDiscard(worktreeId: string, target: PendingDiscard): Promise<void> {
   if (target.kind === "all") {
@@ -191,7 +196,15 @@ function useChangesRefresh(worktreeId: string | null): {
     if (!worktreeId) return;
     try {
       const changes = await worktreeChanges(worktreeId);
-      if (activeWorktree.current === worktreeId) setState({ kind: "ready", changes });
+      if (activeWorktree.current === worktreeId) {
+        // Keep the previous state object when nothing changed so the 2s poll
+        // doesn't re-render the whole tab every tick.
+        setState((previous) =>
+          previous.kind === "ready" && sameChanges(previous.changes, changes)
+            ? previous
+            : { kind: "ready", changes },
+        );
+      }
     } catch (cause) {
       if (activeWorktree.current === worktreeId)
         setState({ kind: "error", message: errorMessage(cause) });

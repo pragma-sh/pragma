@@ -14,12 +14,12 @@ pub fn list_projects(db: State<'_, Db>) -> AppResult<Vec<Project>> {
     db.list_projects()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_project(db: State<'_, Db>, path: String) -> AppResult<Project> {
     add_project_path(&db, PathBuf::from(path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clone_project(
     db: State<'_, Db>,
     remote_url: String,

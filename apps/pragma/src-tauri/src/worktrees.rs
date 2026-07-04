@@ -15,7 +15,7 @@ pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Wo
     db.list_worktrees(&project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_worktree(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
@@ -67,7 +67,7 @@ pub fn create_worktree(
 
 /// True when the worktree has uncommitted, staged, or untracked changes.
 /// Used by the delete confirmation dialog to warn the user.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_status(
     worktree_id: String,
     db: State<'_, Db>,
@@ -108,7 +108,7 @@ pub fn hide_worktree(worktree_id: String, hidden: bool, db: State<'_, Db>) -> Ap
 ///
 /// Sequence matters: we tear down the PTY sessions *before* removing the
 /// directory so the shells don't have an open handle to a now-vanished cwd.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_worktree(
     worktree_id: String,
     delete_branch: bool,
