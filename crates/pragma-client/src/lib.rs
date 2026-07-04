@@ -110,12 +110,23 @@ pub enum ClientEndpoint {
     Socket(PathBuf),
 }
 
+/// Cap on idle pooled request/RPC connections retained between calls.
+///
+/// Concurrent callers above the cap still work — they open a fresh connection
+/// and it is simply dropped instead of pooled on return.
+const REQUEST_POOL_MAX_IDLE: usize = 4;
+
 /// Synchronous client for Pragma server requests and PTY streams.
 #[derive(Clone)]
 pub struct PragmaClient {
     endpoint: ClientEndpoint,
     launch_lock: Arc<Mutex<()>>,
-    request_conn: Arc<Mutex<Option<UnixStream>>>,
+    /// Idle request/RPC connections. A connection is checked out per call and
+    /// returned afterwards, so concurrent RPCs (file reads, diffs, git polls)
+    /// run in parallel on their own connections instead of serializing behind
+    /// one shared stream — the server handles each connection on its own
+    /// thread.
+    request_pool: Arc<Mutex<Vec<UnixStream>>>,
     input_tx: Arc<Mutex<Option<Sender<InputMsg>>>>,
 }
 
@@ -141,7 +152,7 @@ impl PragmaClient {
         Self {
             endpoint,
             launch_lock: Arc::new(Mutex::new(())),
-            request_conn: Arc::new(Mutex::new(None)),
+            request_pool: Arc::new(Mutex::new(Vec::new())),
             input_tx: Arc::new(Mutex::new(None)),
         }
     }
@@ -262,7 +273,7 @@ impl PragmaClient {
 
     /// Restarts a managed local server and confirms a compatible server is up.
     pub fn restart(&self) -> ClientResult<()> {
-        *self.request_conn.lock()? = None;
+        self.request_pool.lock()?.clear();
         *self.input_tx.lock()? = None;
         {
             let _guard = self.launch_lock.lock()?;
@@ -387,22 +398,9 @@ impl PragmaClient {
     }
 
     fn request(&self, request: &RequestFrame) -> ClientResult<()> {
-        let mut guard = self.request_conn.lock()?;
-        let mut last_err: Option<ClientError> = None;
-        for _ in 0..2 {
-            if guard.is_none() {
-                *guard = Some(self.connect_with_spawn()?);
-            }
-            let stream = guard.as_mut().expect("connection just established");
-            match Self::request_on(stream, request) {
-                Ok(result) => return result,
-                Err(transport_err) => {
-                    *guard = None;
-                    last_err = Some(transport_err);
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| ClientError::Server("server request failed".to_string())))
+        self.with_request_conn("server request failed", |stream| {
+            Self::request_on(stream, request)
+        })
     }
 
     /// Sends a business-logic RPC and returns its JSON response payload.
@@ -412,22 +410,43 @@ impl PragmaClient {
     /// executes on the remote `pragma-server` — the caller is endpoint-agnostic.
     pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
         let request = request_rpc(method, payload);
-        let mut guard = self.request_conn.lock()?;
+        self.with_request_conn("server rpc failed", |stream| Self::rpc_on(stream, &request))
+    }
+
+    /// Runs `op` on a checked-out request connection, returning the connection
+    /// to the pool on success. A transport error retries exactly once on a
+    /// fresh connection (a pooled stream may be stale after a server restart);
+    /// the stale pool is discarded so other callers don't retry through it too.
+    fn with_request_conn<T>(
+        &self,
+        failure: &str,
+        op: impl Fn(&mut UnixStream) -> Result<ClientResult<T>, ClientError>,
+    ) -> ClientResult<T> {
         let mut last_err: Option<ClientError> = None;
-        for _ in 0..2 {
-            if guard.is_none() {
-                *guard = Some(self.connect_with_spawn()?);
-            }
-            let stream = guard.as_mut().expect("connection just established");
-            match Self::rpc_on(stream, &request) {
-                Ok(result) => return result,
+        for attempt in 0..2 {
+            let mut stream = if attempt == 0 {
+                match self.request_pool.lock()?.pop() {
+                    Some(stream) => stream,
+                    None => self.connect_with_spawn()?,
+                }
+            } else {
+                self.request_pool.lock()?.clear();
+                self.connect_with_spawn()?
+            };
+            match op(&mut stream) {
+                Ok(result) => {
+                    let mut pool = self.request_pool.lock()?;
+                    if pool.len() < REQUEST_POOL_MAX_IDLE {
+                        pool.push(stream);
+                    }
+                    return result;
+                }
                 Err(transport_err) => {
-                    *guard = None;
                     last_err = Some(transport_err);
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| ClientError::Server("server rpc failed".to_string())))
+        Err(last_err.unwrap_or_else(|| ClientError::Server(failure.to_string())))
     }
 
     fn rpc_on(

@@ -9,6 +9,10 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   `PragmaClient::rpc(method, payload)` is the single entry for the host
   business-logic methods (`filesystem`, `git`); `server_protocol_version()`
   reads the `Hello` frame to verify a remote server before routing to it.
+  Requests/RPCs check a connection out of a small idle pool
+  (`REQUEST_POOL_MAX_IDLE`) so concurrent calls run in parallel on their own
+  connections — never funnel them back through one shared stream, or file
+  reads and diffs will queue behind slow git polls again.
 - Local managed-server bootstrap for development and packaged native clients.
 - Remote SSH bridge using `russh` and `channel_open_direct_streamlocal`, with
   agent (default), key-file, and password auth (`RemoteAuth`). `ssh_exec` runs
