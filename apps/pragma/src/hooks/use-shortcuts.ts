@@ -9,6 +9,7 @@ import {
 } from "@/lib/keybindings";
 import { isTextEditingContext } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
+import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 import { getPlatform, loadKeybindings } from "@/lib/tauri";
 
 interface UseShortcutsOptions {
@@ -100,6 +101,13 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     function onKeyDown(event: KeyboardEvent) {
       const action = state.actionForEvent(event);
       if (!action) {
+        return;
+      }
+
+      // Defer to active plugin command bindings (e.g. a plugin command bound to
+      // `cmd+k`) so the plugin handler owns the chord instead of the built-in
+      // app shortcut. Mirrors the bubble check in `terminal-manager.ts`.
+      if (hasPluginCommandForEvent(event)) {
         return;
       }
 

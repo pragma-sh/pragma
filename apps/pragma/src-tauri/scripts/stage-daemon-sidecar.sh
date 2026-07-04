@@ -38,10 +38,6 @@ else
   cargo build -p pragma-cli
 fi
 
-# Build the opencode plugin dist so it can be staged as a resource and
-# installed into the user's opencode config on app startup.
-bun --filter @pragma/opencode-plugin build
-
 # Build the `pragma-ai` sidecar (a Bun-compiled standalone that runs the
 # Node-only pi coding-agent SDK out of process for the AI features). A debug app
 # runs it from source via `bun`, but the binary must still exist so the Tauri
@@ -67,22 +63,10 @@ cp "$repo_root/packages/github-helpers/dist/pragma-github" \
 # bundled, so delete it here.
 rm -rf "$src_tauri_dir/resources/pragma/plugins"
 
-# Stage the bundled agent launcher configs (config.json + icon) for every plugin
-# package. These are installed into ~/.pragma/agents by `agents::ensure_bundled_installed`
-# so the agents appear in the launcher. Plugins themselves (opencode's .mjs, Claude
-# Code's hooks.json) are installed into each tool's own config separately, not by Pragma.
 rm -rf "$src_tauri_dir/resources/pragma/agents"
-mkdir -p "$src_tauri_dir/resources/pragma/agents"
-cp -R "$repo_root/packages/opencode-plugin/pragma/agents/." \
-  "$src_tauri_dir/resources/pragma/agents"
-cp -R "$repo_root/packages/claude-code-plugin/pragma/agents/." \
-  "$src_tauri_dir/resources/pragma/agents"
-cp -R "$repo_root/packages/cursor-plugin/pragma/agents/." \
-  "$src_tauri_dir/resources/pragma/agents"
 
 echo "staged pragma-server ($profile) -> src-tauri/binaries/pragma-server-$triple"
 echo "staged pragma-gateway ($profile) -> src-tauri/binaries/pragma-gateway-$triple"
 echo "staged pragma-cli ($profile) -> src-tauri/binaries/pragma-cli-$triple"
 echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
-echo "staged bundled agent configs -> src-tauri/resources/pragma/agents"

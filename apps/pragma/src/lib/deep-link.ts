@@ -33,8 +33,17 @@ export interface NewSessionDeepLinkDetail {
   message: string | null;
 }
 
+/** Parsed plugin deep link: `pragma://plugin/<pluginId>/<path>?...`. */
+export interface PluginDeepLinkDetail {
+  pluginId: string;
+  path: string;
+  url: string;
+  params: Record<string, string[]>;
+}
+
 /** Window event name carrying a {@link NewSessionDeepLinkDetail}. */
 export const NEW_SESSION_EVENT = "pragma:new-session";
+export const PLUGIN_DEEP_LINK_EVENT = "pragma:plugin-deep-link";
 
 /**
  * Buffer for the most recent new-session request. A cold-start deep link is handled
@@ -61,10 +70,16 @@ export function consumePendingNewSession(): NewSessionDeepLinkDetail | null {
   return detail;
 }
 
+/** Dispatches a parsed plugin deep link for the plugin runtime to forward. */
+export function requestPluginDeepLink(detail: PluginDeepLinkDetail): void {
+  window.dispatchEvent(new CustomEvent<PluginDeepLinkDetail>(PLUGIN_DEEP_LINK_EVENT, { detail }));
+}
+
 /** The single deep-link scheme Pragma owns. */
 const DEEP_LINK_SCHEME = "pragma:";
 /** The only deep-link host/action currently supported: open the new-session flow. */
 const DEEP_LINK_OPEN_HOST = "open";
+const DEEP_LINK_PLUGIN_HOST = "plugin";
 
 /**
  * Parses a `pragma://open?...` deep link into a {@link NewSessionDeepLink}, or
@@ -94,6 +109,32 @@ export function parseNewSessionDeepLink(raw: string): NewSessionDeepLink | null 
     worktreeId: lastParam(params, "worktree"),
     autoSubmit: isTruthy(lastParam(params, "autoSubmit")),
   };
+}
+
+/** Parses `pragma://plugin/<pluginId>/<path>?...` links for plugin event routing. */
+export function parsePluginDeepLink(raw: string): PluginDeepLinkDetail | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== DEEP_LINK_SCHEME || url.hostname !== DEEP_LINK_PLUGIN_HOST) {
+    return null;
+  }
+  const segments = url.pathname
+    .split("/")
+    .map((segment) => decodeQueryComponent(segment))
+    .filter((segment): segment is string => segment !== null && segment.length > 0);
+  const pluginId = segments[0];
+  if (!pluginId) {
+    return null;
+  }
+  const params: Record<string, string[]> = {};
+  for (const [key, value] of url.searchParams) {
+    params[key] = [...(params[key] ?? []), value];
+  }
+  return { pluginId, path: segments.slice(1).join("/"), url: raw, params };
 }
 
 /** Returns the last non-empty value for a query param, making duplicate params deterministic. */

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { isTextEditingContext, nativeEditingSequence } from "./native-editing";
+import {
+  isTerminalEditingContext,
+  isTextEditingContext,
+  nativeEditingSequence,
+} from "./native-editing";
 
 describe("isTextEditingContext", () => {
   it("returns false for null or undefined", () => {
@@ -46,6 +50,15 @@ describe("isTextEditingContext", () => {
     const xterm = document.createElement("div");
     xterm.className = "xterm";
     expect(isTextEditingContext(xterm)).toBe(true);
+  });
+
+  it("detects terminal editing contexts separately from other text contexts", () => {
+    const xterm = document.createElement("div");
+    xterm.className = "xterm";
+    const helperTextarea = document.createElement("textarea");
+    xterm.appendChild(helperTextarea);
+    expect(isTerminalEditingContext(helperTextarea)).toBe(true);
+    expect(isTerminalEditingContext(document.createElement("textarea"))).toBe(false);
   });
 
   it("returns true for an element inside .cm-editor", () => {

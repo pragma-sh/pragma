@@ -8,7 +8,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createElement } from "react";
 import { toast } from "sonner";
 
-import { listAgents, showAgentNotification } from "@/lib/tauri";
+import { showAgentNotification } from "@/lib/tauri";
+import { listPluginAgents } from "@/plugins/agents";
 
 let lastChime = 0;
 const CHIME_DEBOUNCE_MS = 750;
@@ -118,8 +119,8 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
 
 async function displayNameForAgent(agentId: string): Promise<string> {
   try {
-    agentNameByIdPromise ??= listAgents().then(
-      (agents) => new Map(agents.map((agent) => [agent.id, agent.name])),
+    agentNameByIdPromise ??= Promise.resolve(
+      new Map(listPluginAgents().map((agent) => [agent.id, agent.name])),
     );
     const names = await agentNameByIdPromise;
     return names.get(agentId) ?? agentId;

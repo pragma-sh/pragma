@@ -7,6 +7,10 @@
     "discoveryFile": "gateway.json",
     "tokenHeader": "authorization"
   },
+  "plugins": {
+    "configFileName": ".pragma/config.json",
+    "storageScopes": ["global", "project"]
+  },
   "protocol": {
     "rpcMethods": [
       "git",

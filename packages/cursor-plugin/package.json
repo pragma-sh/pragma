@@ -4,6 +4,7 @@
   "private": true,
   "description": "Cursor Agent CLI plugin that reports agent status to Pragma via shell hooks.",
   "files": [
+    "assets",
     "hooks",
     "scripts",
     "pragma"

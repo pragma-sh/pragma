@@ -1,0 +1,7 @@
+{
+  "name": "sample-pragma-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hand-written fixture plugin bundle used by Rust config-resolution tests and the frontend loader tests.",
+  "main": "index.js"
+}

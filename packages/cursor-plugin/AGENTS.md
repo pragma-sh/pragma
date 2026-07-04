@@ -9,14 +9,13 @@ Static Cursor Agent CLI integration that reports agent status into Pragma. Curso
 
 ```
 packages/cursor-plugin/
+├── assets/
+│   └── cursor.svg            # Cursor brand asset used by the built-in launcher
 ├── hooks/
 │   ├── report.sh              # Event → pragma-cli translator
 │   └── hooks.fragment.json    # Hook entries merged by install-local.sh
 ├── scripts/install-local.sh   # Local install (hooks + cli-config defaults)
-├── test/report.test.ts
-└── pragma/agents/cursor/
-    ├── config.json            # Bundled agent launcher config + model metadata
-    └── scripts/list-models.sh # Cursor `agent models` → generic Pragma JSON
+└── test/report.test.ts
 ```
 
 ## Why plain `agent` (no wrapper CLI)
@@ -106,15 +105,15 @@ which has not been confirmed).
 bun run --filter @pragma/cursor-plugin install:local
 ```
 
-This copies hooks to `~/.pragma/agents/cursor/`, merges hook entries into
+This copies hooks to `~/.pragma/plugins/cursor/hooks/`, merges hook entries into
 `~/.cursor/hooks.json`, and updates CLI + permissions settings (see above).
 Re-run after updating the package. Removes legacy launcher assets if present.
 
 If install fails with "cannot write" inside a sandboxed agent, run the same command
 in a normal terminal (writes go to `~/.pragma` and `~/.cursor`).
 
-Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is installed
-(app startup), or run `agent --force --approve-mcps` in a Pragma terminal.
+Launch from Pragma's agent menu via the built-in Cursor agent, or run
+`agent --force --approve-mcps` in a Pragma terminal.
 
 ## Guard + non-Pragma sessions
 
@@ -123,11 +122,12 @@ Launch from Pragma's agent menu once `~/.pragma/agents/cursor/config.json` is in
 `PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; `report.sh` uses that absolute path before
 falling back to `pragma-cli` from `PATH`.
 
-## Agent launcher config
+## Built-in launcher
 
-`pragma/agents/cursor/config.json` — staged by `stage-daemon-sidecar.sh`.
+The built-in Cursor agent in `apps/pragma/src/plugins/builtin-agents.ts` uses Pragma's
+generic launch timing fields:
 
-The config uses Pragma's generic launch timing fields:
+Its icon asset stays in this package under `assets/`, not in Pragma core.
 
 - `startupInput: [{ delayMs: 5000, data: "a" }]` accepts Cursor's TUI workspace-trust
   gate for new git worktree paths.
@@ -141,26 +141,10 @@ The config uses Pragma's generic launch timing fields:
   An earlier Ctrl+Enter sequence (`\\u001b[13;5u`) was **not** decoded as `return`, so the
   prompt pasted but never sent.
 
-These are config-owned keystrokes/timing, not Pragma core Cursor branches. User-defined
-agents can use the same fields for their own pre-TUI gates.
-
-The optional `models` block is command-backed and runs with cwd set to the installed
-agent directory (`~/.pragma/agents/cursor`):
-
-```json
-"models": {
-  "source": "command",
-  "command": ["sh", "scripts/list-models.sh"],
-  "modelArg": ["--model", "{model}"],
-  "modelReasoningArg": ["--model", "{model}[effort={reasoning}]"]
-}
-```
-
-`scripts/list-models.sh` owns Cursor-specific parsing. It runs `agent models`, parses
-model lines shaped like `id - Display Name`, strips reasoning levels from display names
-into per-model `reasoning`, ignores headers/footers/tips, and emits the generic Pragma
-JSON array. Cursor fast variants are emitted as separate model entries because Cursor
-exposes them as separate IDs. Reasoning is only emitted when Cursor exposes it reliably.
+These are agent-owned keystrokes/timing, not Pragma core Cursor branches. User-defined
+agents can use the same fields for their own pre-TUI gates. Model discovery runs
+`agent models` from the built-in plugin model provider and parses Cursor-specific output
+there, not in Rust/Tauri IPC.
 
 ## Known gotchas
 

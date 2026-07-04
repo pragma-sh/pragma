@@ -21,8 +21,8 @@ pragma-cli agent report --agent <id> attention [--kind question|command]
 pragma-cli agent report --agent <id> cleared
 ```
 
-`--agent <id>` belongs to the `agent report` command. `<id>` is the stable agent id from
-your `pragma/agents/<id>/config.json`.
+`--agent <id>` belongs to the `agent report` command. `<id>` is the stable id from the
+matching Pragma plugin agent definition.
 
 | Status      | Dot color | Meaning                          |
 | ----------- | --------- | -------------------------------- |

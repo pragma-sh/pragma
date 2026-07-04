@@ -1,0 +1,36 @@
+{
+  "name": "create-pragma-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scaffolder CLI for pure TypeScript Pragma plugins.",
+  "bin": {
+    "create-pragma-plugin": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "bunup src/index.ts src/cli.ts --format esm,cjs --target node --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "bunup": "^0.16.32",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

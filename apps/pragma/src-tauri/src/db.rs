@@ -88,7 +88,7 @@ impl Db {
                layout      TEXT NOT NULL,
                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
              );
-             CREATE TABLE IF NOT EXISTS kanban_cards (
+              CREATE TABLE IF NOT EXISTS kanban_cards (
                id                  TEXT PRIMARY KEY,
                project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                worktree_id         TEXT,
@@ -107,8 +107,15 @@ impl Db {
                updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
                started_at          TEXT,
                completed_at        TEXT
-             );
-             CREATE INDEX IF NOT EXISTS idx_kanban_project ON kanban_cards(project_id);",
+              );
+              CREATE INDEX IF NOT EXISTS idx_kanban_project ON kanban_cards(project_id);
+              CREATE TABLE IF NOT EXISTS plugin_storage (
+                plugin_id TEXT NOT NULL,
+                key       TEXT NOT NULL,
+                value     TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (plugin_id, key)
+              );",
         )?;
 
         // Versioned migrations. v2 adds browser-tab columns to `tabs`. Running the
@@ -204,6 +211,29 @@ impl Db {
         // fresh DBs; the version bump keeps upgraded DBs marked consistently.
         if version < 8 {
             conn.execute_batch("PRAGMA user_version = 8;")?;
+        }
+        // v9 adds plugin-owned key/value storage. Values are opaque JSON strings
+        // owned by the frontend/plugin runtime; Rust only scopes by plugin id + key.
+        if version < 9 {
+            conn.execute_batch("PRAGMA user_version = 9;")?;
+        }
+        // v10 adds plugin web view tab metadata. Payload is an opaque JSON string
+        // owned by the frontend/plugin runtime; Rust stores and returns it verbatim.
+        if version < 10 {
+            let has_plugin_id: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'plugin_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_plugin_id == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE tabs ADD COLUMN plugin_id TEXT;
+                     ALTER TABLE tabs ADD COLUMN plugin_view_id TEXT;
+                     ALTER TABLE tabs ADD COLUMN plugin_payload TEXT;
+                     ALTER TABLE tabs ADD COLUMN plugin_dedupe_key TEXT;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 10;")?;
         }
         Ok(())
     }
@@ -348,10 +378,31 @@ impl Db {
         Ok(())
     }
 
+    pub fn plugin_storage_get(&self, plugin_id: &str, key: &str) -> AppResult<Option<String>> {
+        self.0
+            .lock()?
+            .query_row(
+                "SELECT value FROM plugin_storage WHERE plugin_id = ?1 AND key = ?2",
+                params![plugin_id, key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(AppError::from)
+    }
+
+    pub fn plugin_storage_set(&self, plugin_id: &str, key: &str, value: &str) -> AppResult<()> {
+        self.0.lock()?.execute(
+            "INSERT INTO plugin_storage (plugin_id, key, value, updated_at) VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![plugin_id, key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -372,6 +423,69 @@ impl Db {
         diff_side: Option<DiffSide>,
         pr_number: Option<i64>,
     ) -> AppResult<Tab> {
+        self.create_tab_record(
+            project_id,
+            worktree_id,
+            kind,
+            title,
+            url,
+            file_path,
+            diff_side,
+            pr_number,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    // A tab row carries enough locating data that insertion exceeds clippy's
+    // default argument ceiling; the columns are all genuinely independent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_plugin_webview_tab(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+        title: Option<String>,
+        plugin_id: Option<String>,
+        plugin_view_id: Option<String>,
+        plugin_payload: Option<String>,
+        plugin_dedupe_key: Option<String>,
+    ) -> AppResult<Tab> {
+        self.create_tab_record(
+            project_id,
+            worktree_id,
+            TabKind::PluginWebview,
+            title,
+            None,
+            None,
+            None,
+            None,
+            plugin_id,
+            plugin_view_id,
+            plugin_payload,
+            plugin_dedupe_key,
+        )
+    }
+
+    // A tab row carries enough locating data that insertion exceeds clippy's
+    // default argument ceiling; the columns are all genuinely independent.
+    #[allow(clippy::too_many_arguments)]
+    fn create_tab_record(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+        kind: TabKind,
+        title: Option<String>,
+        url: Option<String>,
+        file_path: Option<String>,
+        diff_side: Option<DiffSide>,
+        pr_number: Option<i64>,
+        plugin_id: Option<String>,
+        plugin_view_id: Option<String>,
+        plugin_payload: Option<String>,
+        plugin_dedupe_key: Option<String>,
+    ) -> AppResult<Tab> {
         let id = Uuid::new_v4().to_string();
         {
             let conn = self.0.lock()?;
@@ -381,8 +495,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     id,
                     project_id,
@@ -393,6 +507,10 @@ impl Db {
                     file_path,
                     diff_side.map(diff_side_as_str),
                     pr_number,
+                    plugin_id,
+                    plugin_view_id,
+                    plugin_payload,
+                    plugin_dedupe_key,
                     order_index
                 ],
             )?;
@@ -597,7 +715,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -608,7 +726,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -632,6 +750,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Diff => "diff",
         TabKind::Log => "log",
         TabKind::PrReview => "pr-review",
+        TabKind::PluginWebview => "plugin-webview",
     }
 }
 
@@ -643,6 +762,7 @@ fn kind_from_str(value: &str) -> TabKind {
         "diff" => TabKind::Diff,
         "log" => TabKind::Log,
         "pr-review" => TabKind::PrReview,
+        "plugin-webview" => TabKind::PluginWebview,
         _ => TabKind::Terminal,
     }
 }
@@ -766,9 +886,13 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         file_path: row.get(6)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
         pr_number: row.get::<_, Option<i64>>(8)?,
-        user_renamed: row.get::<_, i64>(9)? == 1,
-        order_index: row.get::<_, i64>(10)?,
-        created_at: row.get(11)?,
+        plugin_id: row.get(9)?,
+        plugin_view_id: row.get(10)?,
+        plugin_payload: row.get(11)?,
+        plugin_dedupe_key: row.get(12)?,
+        user_renamed: row.get::<_, i64>(13)? == 1,
+        order_index: row.get::<_, i64>(14)?,
+        created_at: row.get(15)?,
     })
 }
 
@@ -814,6 +938,35 @@ mod tests {
             .list_tabs(&project.id)
             .expect("tabs should list")
             .is_empty());
+    }
+
+    #[test]
+    fn plugin_storage_is_scoped_and_upserts_values() {
+        let db = Db::in_memory().expect("db should open");
+        assert_eq!(db.plugin_storage_get("plugin-a", "count").unwrap(), None);
+
+        db.plugin_storage_set("plugin-a", "count", "1").unwrap();
+        db.plugin_storage_set("plugin-b", "count", "2").unwrap();
+        assert_eq!(
+            db.plugin_storage_get("plugin-a", "count")
+                .unwrap()
+                .as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            db.plugin_storage_get("plugin-b", "count")
+                .unwrap()
+                .as_deref(),
+            Some("2")
+        );
+
+        db.plugin_storage_set("plugin-a", "count", "3").unwrap();
+        assert_eq!(
+            db.plugin_storage_get("plugin-a", "count")
+                .unwrap()
+                .as_deref(),
+            Some("3")
+        );
     }
 
     #[test]

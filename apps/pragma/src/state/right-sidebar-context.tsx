@@ -1,7 +1,9 @@
 import { createContext, useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRequiredContext } from "@/lib/context";
 
-export type RightSidebarSubtab = "files" | "changes" | "pullRequest";
+export type BuiltinRightSidebarSubtab = "files" | "changes" | "pullRequest";
+export type PluginRightSidebarSubtab = `plugin:${string}:${string}`;
+export type RightSidebarSubtab = BuiltinRightSidebarSubtab | PluginRightSidebarSubtab;
 
 interface RightSidebarContextValue {
   collapsed: boolean;
@@ -29,7 +31,10 @@ function clampWidth(width: number): number {
 
 /** Narrows a stored string to a known subtab, or null for the default fallback. */
 function parseSubtab(raw: string): RightSidebarSubtab | null {
-  return raw === "changes" || raw === "pullRequest" ? raw : raw === "files" ? "files" : null;
+  if (raw === "changes" || raw === "pullRequest" || raw === "files") {
+    return raw;
+  }
+  return raw.startsWith("plugin:") ? (raw as PluginRightSidebarSubtab) : null;
 }
 
 function readStored<T>(key: string, parse: (raw: string) => T | null, fallback: T): T {

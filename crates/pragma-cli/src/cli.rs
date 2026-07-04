@@ -405,7 +405,7 @@ pub struct AgentStartArgs {
     /// Target worktree. Defaults to `$PRAGMA_WORKTREE_ID`.
     #[arg(long, value_name = "ID")]
     pub worktree: Option<String>,
-    /// Agent id (from `~/.pragma/agents/<id>/config.json`).
+    /// Agent id from a Pragma plugin agent definition.
     #[arg(long)]
     pub agent: String,
     /// Model id to launch with (optional).
@@ -428,7 +428,7 @@ pub struct AgentStatusArgs {
 
 #[derive(Debug, Args)]
 pub struct AgentReportArgs {
-    /// Stable agent id from the agent config.
+    /// Stable agent id from the plugin agent definition.
     #[arg(long)]
     pub agent: String,
     #[command(subcommand)]

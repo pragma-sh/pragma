@@ -29,17 +29,19 @@ across TypeScript and Rust**. When you write code:
   and error-handled the same way in TypeScript and Rust. See _Code standards_ below.
 - **Suggest sweeping changes.** This project is early. If you see a cleaner structure,
   propose and make it — restructuring for clarity is welcome, not discouraged.
-- **Plugins stay out of core — ask first.** A plugin/agent package (`packages/*-plugin`)
-  is **self-contained data plus its own bundled assets**. It must **not** add or modify
-  code in pragma core (`apps/pragma`, including `src-tauri`), the server
+- **Host-tool plugins stay out of core — ask first.** A host-tool plugin/agent package
+  (`packages/*-plugin`, such as opencode/Claude/Cursor integrations) is
+  **self-contained data plus its own bundled assets**. It must **not** add or modify code
+  in pragma core (`apps/pragma`, including `src-tauri`), the server
   (`crates/pragma-server`), the UI, the CLI (`crates/pragma-cli`), or the SDK
-  (`packages/sdk`) **without explicit owner permission**. A plugin **installs itself
-  through its host tool's own plugin mechanism**, never through per-plugin Pragma code.
-  The only Pragma-side install is the **generic** launcher step
-  (`agents::ensure_bundled_installed` copies `pragma/agents/*` into `~/.pragma/agents`).
-  There are deliberately **no** per-plugin core files: the old `opencode_plugin.rs` /
-  `claude_plugin.rs` installers were **removed**. If a plugin genuinely needs new core
-  behavior, **stop and ask** first.
+  (`packages/sdk`) **without explicit owner permission**. A host-tool plugin installs
+  itself through its host tool's own plugin mechanism, never through per-plugin Pragma
+  code. Launchable Pragma agents are contributed through the `@pragma/plugin`
+  `defineAgent` API (or the built-in Pragma plugin), not per-tool JSON files copied by
+  core. There are deliberately **no** per-tool core installers: the old
+  `opencode_plugin.rs` / `claude_plugin.rs` installers were **removed**. The generic
+  Pragma plugin runtime is the exception: infrastructure for `.pragma/config.json` plugins lives in
+  `packages/plugin`, `apps/pragma/src/plugins`, and `apps/pragma/src-tauri/src/plugins.rs`.
 
 ## Keeping this guide current (self-improvement)
 
@@ -101,15 +103,18 @@ than no guide.
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
+│   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
+│   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
-│   └── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
+│   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
+│   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
 │   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-cli`
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
-│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode plugin + bundled Pragma agent config
+│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -126,6 +131,10 @@ than no guide.
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
+- Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma/plugin`).
+- Plugin templates/scaffolding → `packages/create-pragma-plugin`.
+- A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
+  `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).

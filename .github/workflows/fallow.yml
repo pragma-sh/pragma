@@ -23,6 +23,16 @@ jobs:
         with:
           # audit diffs changed files against the PR base, so it needs history.
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # Materialize codegen'd modules (@pragma/constants types, @pragma/plugin
+      # version) before auditing. fallow resolves imports statically, and these
+      # generated files live under gitignored src/generated/**, so without this
+      # step it flags their importers as unresolved. Every other check gets these
+      # for free via the pretypecheck/pretest/prebuild hooks; the audit doesn't.
+      - run: bun run generate
       - uses: fallow-rs/fallow@v2
         with:
           # Combined dead-code + complexity + duplication on changed files.

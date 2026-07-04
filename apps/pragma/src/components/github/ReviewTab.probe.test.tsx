@@ -18,8 +18,11 @@ vi.mock("@/lib/tauri", () => ({
     defaultBranch: "main",
   })),
   githubPrFileDiff: vi.fn(async () => ({ oldText: "a\n", newText: "a\nb\n", binary: false })),
+}));
+
+vi.mock("@/plugins/agents", () => ({
   // The fix dialogs load agents via `useAgentSelection` once opened.
-  listAgents: vi.fn(async () => []),
+  usePluginAgents: vi.fn(() => []),
 }));
 
 vi.mock("@/lib/github", () => ({

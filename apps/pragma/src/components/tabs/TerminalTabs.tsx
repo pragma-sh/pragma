@@ -44,6 +44,11 @@ import { isMacPlatform } from "@/lib/platform";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { startWindowDrag } from "@/lib/window-drag";
+import {
+  RenderPluginContribution,
+  usePluginTopperItems,
+  type VisiblePluginContribution,
+} from "@/plugins/rendering";
 import { useTabAgentStatus } from "@/state/agent-status-store";
 import {
   type SplitDirection,
@@ -52,6 +57,7 @@ import {
   type SplitPaneNode,
   useWorkspace,
 } from "@/state/workspace-context";
+import type { TopperItemDefinition } from "@pragma/plugin";
 
 const SELECTED_EDITOR_STORAGE_KEY = "pragma.selectedEditorLauncher";
 const editorLaunchers = constants.editorLaunchers.options;
@@ -236,10 +242,12 @@ function TerminalToolbar({
   workspace,
   runDisabled,
   buildDisabled,
+  topperItems,
 }: {
   workspace: Workspace;
   runDisabled: boolean;
   buildDisabled: boolean;
+  topperItems: VisiblePluginContribution<TopperItemDefinition>[];
 }) {
   const runState = workspace.runScriptsState;
   const buildState = workspace.buildScriptsState;
@@ -274,6 +282,7 @@ function TerminalToolbar({
         onRun={() => void workspace.buildScripts()}
         onStop={() => void workspace.stopBuildScripts()}
       />
+      <PluginTopperItems items={topperItems} />
       {workspace.agentBackAvailable ? (
         <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>
           <ArrowLeft className="size-3.5" />
@@ -282,6 +291,22 @@ function TerminalToolbar({
       ) : null}
     </div>
   );
+}
+
+function PluginTopperItems({
+  items,
+}: {
+  items: VisiblePluginContribution<TopperItemDefinition>[];
+}) {
+  return items.map((item) => (
+    <RenderPluginContribution
+      key={item.key}
+      component={item.contribution.component}
+      config={item.record.config}
+      pluginId={item.pluginId}
+      resetKey={item.key}
+    />
+  ));
 }
 
 /** Whether the "Run" project-script button is disabled given current run/build state. */
@@ -619,6 +644,8 @@ export function TerminalTabs() {
   const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
   const rename = useTabRename(workspace);
   const { split, parentTabId, splitDirection, splitIsActive, topTabs } = useSplitSummary(workspace);
+  const leftTopperItems = usePluginTopperItems(workspace.selectedProjectId, "left");
+  const rightTopperItems = usePluginTopperItems(workspace.selectedProjectId, "right");
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
   const selectedEditor = editorFor(selectedEditorId);
   const editorDisabled =
@@ -655,10 +682,12 @@ export function TerminalTabs() {
         >
           <TerminalToolbar
             buildDisabled={buildDisabled}
+            topperItems={leftTopperItems}
             runDisabled={runDisabled}
             workspace={workspace}
           />
-          <div className="flex shrink-0 items-center justify-end">
+          <div className="flex shrink-0 items-center justify-end gap-1">
+            <PluginTopperItems items={rightTopperItems} />
             <EditorLauncherMenu
               disabled={editorDisabled}
               onSelect={openEditor}

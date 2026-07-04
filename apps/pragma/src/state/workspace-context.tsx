@@ -39,7 +39,12 @@ import {
   type AgentAlertOptions,
 } from "@/lib/agent-alert";
 import { startAgentInTab } from "@/lib/agent-launch";
-import { parseNewSessionDeepLink, requestNewSession } from "@/lib/deep-link";
+import {
+  parseNewSessionDeepLink,
+  parsePluginDeepLink,
+  requestNewSession,
+  requestPluginDeepLink,
+} from "@/lib/deep-link";
 import { basename } from "@/lib/path";
 import {
   planInteractiveScripts,
@@ -55,12 +60,12 @@ import {
   pathExists,
   clearSplitLayout as clearSplitLayoutCommand,
   closeTab as closeTabCommand,
+  createPluginWebViewTab,
   createTab as createTabCommand,
   deleteWorktree as deleteWorktreeCommand,
   getActiveSelection,
   listProjects,
   loadProjectScripts,
-  listAgents,
   listSplits,
   listTabs,
   listWorktrees,
@@ -81,7 +86,6 @@ import {
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
   restartDaemon as restartDaemonCommand,
-  resolveAgentModels,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
@@ -92,6 +96,8 @@ import {
   type WorkspaceChangedEvent,
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
+import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
   agentStatusesForTab,
   applyAgentReport,
@@ -253,6 +259,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   /** Opens (or focuses) the read-only daemon-log tab (Troubleshooting menu). */
   openDaemonLogTab: () => Promise<void>;
+  /** Opens (or focuses) a plugin-defined web view tab. */
+  openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
@@ -1527,8 +1535,8 @@ function resolveDeepLinkTargetWorktree(
 async function autoSubmitDeepLink(
   link: DeepLink,
   targetWorktreeId: string | null,
-  listAgentsFn: () => Promise<AgentConfig[]>,
-  resolveAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
+  listPluginAgentsFn: () => Promise<AgentConfig[]>,
+  resolvePluginAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
   startSession: (
     worktreeId: string,
     agent: AgentConfig,
@@ -1539,7 +1547,7 @@ async function autoSubmitDeepLink(
   if (!link.autoSubmit || !targetWorktreeId || !link.message?.trim()) {
     return false;
   }
-  const agents = await listAgentsFn().catch(() => [] as AgentConfig[]);
+  const agents = await listPluginAgentsFn().catch(() => [] as AgentConfig[]);
   const agent = resolveAutoSubmitAgent(link, agents);
   if (!agent) {
     return false;
@@ -1549,7 +1557,7 @@ async function autoSubmitDeepLink(
     targetWorktreeId,
     agent,
     agents,
-    resolveAgentModelsFn,
+    resolvePluginAgentModelsFn,
     startSession,
   );
   return true;
@@ -1569,7 +1577,7 @@ async function startAutoSubmitSession(
   targetWorktreeId: string,
   agent: AgentConfig,
   agents: AgentConfig[],
-  resolveAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
+  resolvePluginAgentModelsFn: (agentId: string) => Promise<AgentModelOptions[string]>,
   startSession: (
     worktreeId: string,
     agent: AgentConfig,
@@ -1577,7 +1585,7 @@ async function startAutoSubmitSession(
     modelSelection?: AgentModelSelection,
   ) => Promise<unknown>,
 ): Promise<void> {
-  const models = await resolveAgentModelsFn(agent.id).catch(() => []);
+  const models = await resolvePluginAgentModelsFn(agent.id).catch(() => []);
   const resolved = resolveDeepLinkAgentSelection(link, agents, { [agent.id]: models });
   await startSession(
     targetWorktreeId,
@@ -2504,6 +2512,10 @@ function useDeepLinkHandler(
     async (rawUrl: string) => {
       const link = parseNewSessionDeepLink(rawUrl);
       if (!link) {
+        const pluginLink = parsePluginDeepLink(rawUrl);
+        if (pluginLink) {
+          requestPluginDeepLink(pluginLink);
+        }
         return;
       }
       const worktreeId = await resolveDeepLinkWorktreeSelection(
@@ -2517,8 +2529,8 @@ function useDeepLinkHandler(
         await autoSubmitDeepLink(
           link,
           targetWorktreeId,
-          listAgents,
-          resolveAgentModels,
+          () => Promise.resolve(listPluginAgents()),
+          async (agentId) => (await resolvePluginAgentModels(agentId)) ?? [],
           startSession,
         )
       ) {
@@ -2610,6 +2622,7 @@ function useTabOpeners(
   openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   openDaemonLogTab: () => Promise<void>;
+  openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
 } {
   const openLocatorTab = useCallback(
     async (
@@ -2661,6 +2674,46 @@ function useTabOpeners(
     (path: string, side: DiffSide, opts?: { paneId?: string }) =>
       openLocatorTab("diff", path, side, opts?.paneId),
     [openLocatorTab],
+  );
+
+  const openPluginWebView = useCallback(
+    async (request: OpenPluginWebViewRequest) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        throw new Error("Cannot open plugin web view without an active worktree");
+      }
+      const existing = request.dedupeKey
+        ? state.tabs.find(
+            (tab) =>
+              tab.kind === "plugin-webview" &&
+              tab.worktreeId === worktreeId &&
+              tab.pluginId === request.pluginId &&
+              tab.pluginViewId === request.pluginViewId &&
+              tab.pluginDedupeKey === request.dedupeKey,
+          )
+        : undefined;
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await createPluginWebViewTab({
+          projectId,
+          worktreeId,
+          title: request.title,
+          pluginId: request.pluginId,
+          pluginViewId: request.pluginViewId,
+          pluginPayload: request.payloadJson,
+          pluginDedupeKey: request.dedupeKey,
+        });
+        dispatch({ type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+        throw cause;
+      }
+    },
+    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
   );
 
   const openReviewTab = useCallback(
@@ -2716,7 +2769,7 @@ function useTabOpeners(
     }
   }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
 
-  return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab };
+  return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView };
 }
 
 /** Closes/renames/activates tabs and drops them from the managed-scripts set. */
@@ -2875,7 +2928,7 @@ function useProjectLoading(
 
   useEffect(() => {
     let cancelled = false;
-    listAgents()
+    Promise.resolve(listPluginAgents())
       .then((agents) => {
         if (!cancelled) {
           for (const agent of agents) {
@@ -3654,10 +3707,8 @@ function useTabManagement({
     tabsRef,
   );
   useTerminalLinkHandler(openFromTerminalLink);
-  const { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab } = useTabOpeners(
-    state,
-    dispatch,
-  );
+  const { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView } =
+    useTabOpeners(state, dispatch);
   const { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef } = useTabLifecycle(
     state,
     dispatch,
@@ -3680,6 +3731,7 @@ function useTabManagement({
     openDiffTab,
     openReviewTab,
     openDaemonLogTab,
+    openPluginWebView,
     closeTab,
     renameTerminalTab,
     setActiveTab,
@@ -3915,6 +3967,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     openDiffTab,
     openReviewTab,
     openDaemonLogTab,
+    openPluginWebView,
     closeTab,
     renameTerminalTab,
     setActiveTab,
@@ -3982,6 +4035,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDiffTab,
       openReviewTab,
       openDaemonLogTab,
+      openPluginWebView,
       closeTab,
       renameTerminalTab,
       setActiveTab,
@@ -4008,6 +4062,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openDiffTab,
       openReviewTab,
       openDaemonLogTab,
+      openPluginWebView,
       closeTab,
       renameTerminalTab,
       setActiveTab,

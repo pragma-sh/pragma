@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ControlMethod, DiffSide, Tab, TabKind, Worktree, CONSTANTS};
+use pragma_constants::{ControlMethod, DiffSide, Tab, TabKind, Worktree};
 use pragma_protocol::{
     read_json_frame, write_json_frame, ControlEnvelope, ControlResult, RequestFrame, RequestKind,
     ServerFrame,
@@ -952,55 +952,22 @@ fn agent_start(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_j
     )?)
 }
 
-/// Consolidated Tauri command for starting an agent from UI or CLI.
+/// Brokered CLI agent starts are unsupported now that agents are plugin-defined
+/// JavaScript. The frontend owns plugin arg builders/model providers and starts
+/// agents through `agent-launch.ts`.
 #[tauri::command]
 pub fn start_agent(
-    app: AppHandle,
-    db: tauri::State<'_, Db>,
-    pty: tauri::State<'_, PtyClient>,
-    worktree_id: String,
+    _app: AppHandle,
+    _db: tauri::State<'_, Db>,
+    _pty: tauri::State<'_, PtyClient>,
+    _worktree_id: String,
     agent: String,
-    model: Option<String>,
-    prompt: Option<String>,
+    _model: Option<String>,
+    _prompt: Option<String>,
 ) -> AppResult<AgentStartResult> {
-    let agents = crate::agents::list_agents(app)?;
-    let config = agents
-        .into_iter()
-        .find(|candidate| candidate.id == agent)
-        .ok_or_else(|| AppError::InvalidInput(format!("unknown agent: {agent}")))?;
-    let worktree = db.worktree(&worktree_id)?;
-    let tab = db.create_tab(
-        &worktree.project_id,
-        &worktree.id,
-        TabKind::Terminal,
-        Some(config.name.clone()),
-        None,
-        None,
-        None,
-        None,
-    )?;
-    pty.spawn_detached(
-        tab.id.clone(),
-        worktree.id.clone(),
-        worktree.path.clone(),
-        DEFAULT_COLS,
-        DEFAULT_ROWS,
-    )?;
-    let mut command = config.start.join(" ");
-    if let Some(model) = model {
-        command.push_str(" --model ");
-        command.push_str(&shell_quote(&model));
-    }
-    // Mirror the frontend's fixed startup delay (see agent-launch.ts) so the
-    // shell has time to become ready before we write to it. There is no
-    // readiness signal from the PTY, so both sides use the same shared,
-    // best-effort delay.
-    thread::sleep(Duration::from_millis(CONSTANTS.agents.start_delay_ms));
-    let _ = pty.write(tab.id.clone(), format!("{command}\r"));
-    if let Some(prompt) = prompt {
-        let _ = pty.write(tab.id.clone(), format!("{prompt}\r"));
-    }
-    Ok(AgentStartResult { tab_id: tab.id })
+    Err(AppError::InvalidInput(format!(
+        "agent start for '{agent}' must be launched from the Pragma UI; agents are now plugin-defined JavaScript"
+    )))
 }
 
 /// Runs a command in a worktree without creating a tab.

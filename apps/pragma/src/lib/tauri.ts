@@ -51,10 +51,11 @@ export type PtyMessage = ArrayBuffer | PtyEvent;
 
 export type PtyEventHandler = (message: PtyMessage) => void;
 
-/** Agent launcher config loaded from each `~/.pragma/agents/<id>/config.json`. */
+/** Agent launcher definition exposed by a Pragma plugin. */
 export interface AgentConfig {
   id: string;
   name: string;
+  iconPath?: string | null;
   iconDataUrl: string | null;
   start: string[];
   startupInput?: AgentStartupInput[] | null;
@@ -88,7 +89,7 @@ export type AgentModelsConfig =
       modelReasoningArg?: string[] | null;
     };
 
-/** Model entry returned by `resolveAgentModels`. */
+/** Model entry returned by a plugin agent's model provider. */
 export interface AgentModel {
   id: string;
   name: string;
@@ -112,16 +113,6 @@ export interface RawAgentModel {
 export interface AgentModelSelection {
   modelId: string | null;
   reasoningId: string | null;
-}
-
-/** Lists configured external agents. */
-export function listAgents(): Promise<AgentConfig[]> {
-  return invoke<AgentConfig[]>("list_agents");
-}
-
-/** Resolves one agent's model list. */
-export function resolveAgentModels(agentId: string): Promise<AgentModel[]> {
-  return invoke<AgentModel[]>("resolve_agent_models", { agentId });
 }
 
 /** Subscribes to daemon-forwarded agent status reports. */
@@ -428,6 +419,19 @@ export function createTab(
     // stable for the common non-PR case (an explicit null is still forwarded).
     ...(prNumber !== undefined && { prNumber }),
   });
+}
+
+/** Creates a persisted plugin web view tab. `pluginPayload` is JSON-encoded. */
+export function createPluginWebViewTab(args: {
+  projectId: string;
+  worktreeId: string;
+  title?: string;
+  pluginId: string;
+  pluginViewId: string;
+  pluginPayload?: string | null;
+  pluginDedupeKey?: string | null;
+}): Promise<Tab> {
+  return invoke<Tab>("create_plugin_webview_tab", args);
 }
 
 /** Closes a persisted tab. */
@@ -1034,4 +1038,71 @@ export function aiLoginRespond(
 /** Aborts an in-flight login and drops its session. */
 export function aiLoginCancel(id: string): Promise<void> {
   return invoke("ai_login_cancel", { id });
+}
+
+// ---------------------------------------------------------------------------
+// Plugins
+// ---------------------------------------------------------------------------
+
+/** Resolved metadata for a plugin directory, read from its `package.json`. */
+export interface PluginManifest {
+  name: string;
+  version: string;
+  /** Absolute path of the plugin directory. */
+  dir: string;
+  /** Absolute path of the bundle file `main` points at. */
+  mainPath: string;
+  /** Bundle mtime in ms since the epoch (dev hot-reload polling), if known. */
+  modifiedMs: number | null;
+}
+
+/** One `.pragma/config.json` plugin entry: a manifest or a per-entry error. */
+export interface PluginEntryResult {
+  /** The original `path` specifier from the config file. */
+  specifier: string;
+  /** Which config file declared this entry. */
+  scope: "global" | "project";
+  /** Project root path for `scope: "project"` entries. */
+  projectPath: string | null;
+  /** The entry's `config` object, validated by the plugin's zod schema. */
+  config: Record<string, unknown> | null;
+  manifest: PluginManifest | null;
+  error: string | null;
+}
+
+/**
+ * Reads plugin entries from `~/.pragma/config.json` plus the given project's
+ * `.pragma/config.json`, in declaration order (global first). Entries that
+ * fail to resolve are returned with `error` set — never silently skipped.
+ */
+export function readPluginManifests(projectPath: string | null): Promise<PluginEntryResult[]> {
+  return invoke<PluginEntryResult[]>("read_plugin_manifests", { projectPath });
+}
+
+/** Reads the JavaScript source of a resolved plugin bundle file. */
+export function readPluginBundle(mainPath: string): Promise<string> {
+  return invoke<string>("read_plugin_bundle", { mainPath });
+}
+
+/** Connection details for the local Pragma HTTP gateway. */
+export interface GatewayConnectionInfo {
+  /** Gateway HTTP origin, e.g. `http://127.0.0.1:49152`. */
+  baseUrl: string;
+  /** Bearer token expected by the gateway. */
+  token: string;
+}
+
+/** Ensures the local HTTP gateway is running and returns its base URL + token. */
+export function gatewayConnectionInfo(): Promise<GatewayConnectionInfo> {
+  return invoke<GatewayConnectionInfo>("gateway_connection_info");
+}
+
+/** Reads one plugin-owned durable storage value as an opaque JSON string. */
+export function pluginStorageGet(pluginId: string, key: string): Promise<string | null> {
+  return invoke<string | null>("plugin_storage_get", { pluginId, key });
+}
+
+/** Writes one plugin-owned durable storage value as an opaque JSON string. */
+export function pluginStorageSet(pluginId: string, key: string, value: string): Promise<void> {
+  return invoke("plugin_storage_set", { pluginId, key, value });
 }

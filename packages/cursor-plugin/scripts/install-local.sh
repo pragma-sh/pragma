@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Install @pragma/cursor-plugin for local use:
-# - Copies hooks into ~/.pragma/agents/cursor/
+# - Copies hooks into ~/.pragma/plugins/cursor/hooks/
 # - Merges Pragma hook entries into ~/.cursor/hooks.json
 # - Merges Run Everything defaults into ~/.cursor/cli-config.json and
 #   ~/.cursor/permissions.json (IDE + CLI share permissions.json since 2026-03)
@@ -10,14 +10,15 @@
 set -eu
 
 ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
-AGENT_DIR="${PRAGMA_CURSOR_AGENT_DIR:-$HOME/.pragma/agents/cursor}"
-HOOKS_DIR="$AGENT_DIR/hooks"
+PLUGIN_DIR="${PRAGMA_CURSOR_PLUGIN_DIR:-$HOME/.pragma/plugins/cursor}"
+HOOKS_DIR="$PLUGIN_DIR/hooks"
 REPORT_SH="$HOOKS_DIR/report.sh"
 CURSOR_DIR="$HOME/.cursor"
 CURSOR_HOOKS="$CURSOR_DIR/hooks.json"
 CURSOR_CLI_CONFIG="$CURSOR_DIR/cli-config.json"
 CURSOR_PERMISSIONS="$CURSOR_DIR/permissions.json"
 LEGACY_LAUNCHER="$HOME/.local/bin/pragma-cursor-agent"
+LEGACY_AGENT_DIR="$HOME/.pragma/agents/cursor"
 GIT_ROOT="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
 
 fail() {
@@ -47,16 +48,16 @@ require_write "$CURSOR_CLI_CONFIG"
 require_write "$CURSOR_PERMISSIONS"
 
 cp "$ROOT/hooks/report.sh" "$REPORT_SH" || fail "failed to copy report.sh to $REPORT_SH"
-cp "$ROOT/pragma/agents/cursor/config.json" "$AGENT_DIR/config.json" || fail "failed to copy config.json"
-cp "$ROOT/pragma/agents/cursor/icon.svg" "$AGENT_DIR/icon.svg" || fail "failed to copy icon.svg"
 chmod +x "$REPORT_SH"
 
-rm -f "$AGENT_DIR/launch.expect" "$AGENT_DIR/pragma-cursor-agent.sh" 2>/dev/null || true
+rm -f "$LEGACY_AGENT_DIR/config.json" "$LEGACY_AGENT_DIR/icon.svg" 2>/dev/null || true
+rm -rf "$LEGACY_AGENT_DIR/scripts" 2>/dev/null || true
+rm -f "$LEGACY_AGENT_DIR/launch.expect" "$LEGACY_AGENT_DIR/pragma-cursor-agent.sh" 2>/dev/null || true
 if [ -f "$LEGACY_LAUNCHER" ]; then
   rm -f "$LEGACY_LAUNCHER"
 fi
 
-export ROOT AGENT_DIR REPORT_SH CURSOR_HOOKS CURSOR_CLI_CONFIG CURSOR_PERMISSIONS GIT_ROOT
+export ROOT PLUGIN_DIR REPORT_SH CURSOR_HOOKS CURSOR_CLI_CONFIG CURSOR_PERMISSIONS GIT_ROOT
 export REPORT_CMD="sh \"$REPORT_SH\""
 python3 <<'PY'
 import json
@@ -196,6 +197,7 @@ def merge_hooks() -> None:
             if report_sh not in e.get("command", "")
             and "/cursor-plugin/hooks/report.sh" not in e.get("command", "")
             and ".pragma/agents/cursor/hooks/report.sh" not in e.get("command", "")
+            and ".pragma/plugins/cursor/hooks/report.sh" not in e.get("command", "")
         ]
         if kept:
             hooks[event] = kept
@@ -224,18 +226,16 @@ if git_root:
     )
     merge_project_cli(os.path.join(project_cursor, "cli.json"), "project CLI permissions")
 
-agent_dir = os.environ["AGENT_DIR"]
-for required in ("config.json", "hooks/report.sh", "icon.svg"):
-    path = os.path.join(agent_dir, required)
-    if not os.path.isfile(path):
-        raise SystemExit(f"install verification failed: missing {path}")
+report_sh = os.environ["REPORT_SH"]
+if not os.path.isfile(report_sh):
+    raise SystemExit(f"install verification failed: missing {report_sh}")
 
-print(f"Installed agent launcher config -> {agent_dir}")
+print(f"Installed Cursor hook bridge -> {report_sh}")
 PY
 
 echo ""
 echo "Installed:"
-echo "  Agent:       $AGENT_DIR"
+echo "  Plugin:      $PLUGIN_DIR"
 echo "  Hooks:       $CURSOR_HOOKS"
 echo "  CLI config:  $CURSOR_CLI_CONFIG"
 echo "  Permissions: $CURSOR_PERMISSIONS"

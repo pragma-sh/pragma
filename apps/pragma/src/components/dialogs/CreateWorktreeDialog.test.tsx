@@ -4,8 +4,8 @@ import type { Worktree } from "@pragma/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const listAgentsMock = vi.fn();
-const resolveAgentModelsMock = vi.fn();
+const listPluginAgentsMock = vi.fn();
+const resolvePluginAgentModelsMock = vi.fn();
 const createWorktreeMock = vi.fn();
 const startSessionMock = vi.fn();
 const refreshProjectMock = vi.fn();
@@ -13,9 +13,12 @@ const selectWorktreeMock = vi.fn();
 const createTerminalTabMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
-  listAgents: () => listAgentsMock(),
-  resolveAgentModels: (agentId: string) => resolveAgentModelsMock(agentId),
   createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
+}));
+
+vi.mock("@/plugins/agents", () => ({
+  usePluginAgents: () => listPluginAgentsMock(),
+  resolvePluginAgentModels: (agentId: string) => resolvePluginAgentModelsMock(agentId),
 }));
 
 // The TipTap editor is unrelated to this behavior; a textarea keeps it focused.
@@ -68,10 +71,12 @@ import { CreateWorktreeDialog } from "./CreateWorktreeDialog";
 
 describe("CreateWorktreeDialog", () => {
   beforeEach(() => {
-    listAgentsMock.mockResolvedValue([
+    listPluginAgentsMock.mockReturnValue([
       { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
     ]);
-    resolveAgentModelsMock.mockResolvedValue([{ id: "sonnet", name: "Sonnet", reasoning: [] }]);
+    resolvePluginAgentModelsMock.mockResolvedValue([
+      { id: "sonnet", name: "Sonnet", reasoning: [] },
+    ]);
     createWorktreeMock.mockResolvedValue(newWorktree);
     refreshProjectMock.mockResolvedValue(undefined);
     startSessionMock.mockResolvedValue({ id: "tab" });
@@ -96,7 +101,7 @@ describe("CreateWorktreeDialog", () => {
   });
 
   it("opens the agent selector", async () => {
-    listAgentsMock.mockResolvedValue([
+    listPluginAgentsMock.mockReturnValue([
       { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);

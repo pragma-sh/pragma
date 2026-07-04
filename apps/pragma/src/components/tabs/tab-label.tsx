@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { GitPullRequest, Globe, ScrollText, SquareTerminal } from "lucide-react";
+import { GitPullRequest, Globe, PanelsTopLeft, ScrollText, SquareTerminal } from "lucide-react";
 
 import { fileIconId } from "@/lib/file-icons";
 import { basename } from "@/lib/path";
@@ -53,6 +53,10 @@ export function TabIcon({ tab }: { tab: Tab }) {
 
   if (tab.kind === "pr-review") {
     return <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+
+  if (tab.kind === "plugin-webview") {
+    return <PanelsTopLeft className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   if (tab.kind !== "browser") {

@@ -14,11 +14,11 @@ packages/claude-code-plugin/
 ├── .claude-plugin/
 │   ├── plugin.json          # Plugin manifest (do NOT set hooks here — see gotcha below)
 │   └── marketplace.json     # For `claude plugin marketplace add`
+├── assets/                  # Claude Code brand assets used by the built-in launcher
 ├── hooks/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
 │   └── report.sh            # Event → pragma-cli translator (the actual logic)
-├── test/report.test.ts      # Drives report.sh with a fake pragma-cli on PATH
-└── pragma/agents/claude-code/config.json  # Bundled launcher config + static models
+└── test/report.test.ts      # Drives report.sh with a fake pragma-cli on PATH
 ```
 
 Each hook in `hooks.json` invokes `sh "$CLAUDE_PLUGIN_ROOT/hooks/report.sh" <event>`.
@@ -183,15 +183,14 @@ that absolute path before falling back to `pragma-cli` from `PATH`. Every call i
 `… >/dev/null 2>&1 || true` so a missing CLI or down daemon can never disrupt a Claude
 session.
 
-## Agent launcher config
+## Built-in launcher
 
-`pragma/agents/claude-code/config.json` starts Claude Code with
-`claude --permission-mode auto`. Staged to
-`apps/pragma/src-tauri/resources/pragma/agents/` by `stage-daemon-sidecar.sh`.
-
+The launchable Claude Code entry is defined by the built-in agent in
+`apps/pragma/src/plugins/builtin-agents.ts`; it starts `claude --permission-mode auto`.
+Its icon asset stays in this package under `assets/`, not in Pragma core.
 Claude Code supports `--model` and `--effort` but does not expose a supported model-list
-command, so `config.json` uses static `models.items`. Reasoning efforts are listed per
-model and are appended as `--effort {reasoning}` when selected; choosing a model with
+command, so the built-in agent uses static model metadata. Reasoning efforts are listed
+per model and are appended as `--effort {reasoning}` when selected; choosing a model with
 Auto reasoning appends only `--model`. If Claude Code changes its supported surface,
 prefer an official CLI/API model-list command before using private databases or internal
 caches.

@@ -34,6 +34,17 @@ const GATEWAY_READY_POLL: Duration = Duration::from_millis(100);
 /// client closes its end, and nothing here ever did.
 type SessionStreams = Arc<Mutex<HashMap<String, UnixStream>>>;
 
+/// Connection details for the local HTTP gateway, returned to the frontend so
+/// in-webview clients (e.g. the plugin SDK bridge) can call the HTTP API.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayConnectionInfo {
+    /// Gateway HTTP origin, e.g. `http://127.0.0.1:49152`.
+    pub base_url: String,
+    /// Bearer token expected in the gateway's authorization header.
+    pub token: String,
+}
+
 /// Tauri-facing PTY adapter. Transport, bootstrap, and frame request logic live
 /// in `pragma-client`; this wrapper only bridges raw server frames to the
 /// webview channel shape expected by the frontend.
@@ -262,6 +273,30 @@ impl PtyClient {
         }
         Self::spawn_gateway(&socket_path)?;
         wait_for_gateway_ready(&discovery_path)
+    }
+
+    /// Ensures the gateway is running and returns its connection info so the
+    /// frontend (e.g. the plugin SDK bridge) can talk to the local HTTP API.
+    pub fn gateway_connection_info(&self) -> AppResult<GatewayConnectionInfo> {
+        self.ensure_gateway()?;
+        let discovery_path = gateway_discovery_path(&self.inner.socket_path());
+        let contents = std::fs::read_to_string(&discovery_path)?;
+        let value: serde_json::Value = serde_json::from_str(&contents)?;
+        let port = value
+            .get("port")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+            .ok_or_else(|| AppError::Daemon("gateway discovery file has no port".to_string()))?;
+        let token = value
+            .get("token")
+            .and_then(serde_json::Value::as_str)
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| AppError::Daemon("gateway discovery file has no token".to_string()))?
+            .to_string();
+        Ok(GatewayConnectionInfo {
+            base_url: format!("http://127.0.0.1:{port}"),
+            token,
+        })
     }
 
     /// Reads the host server's advertised protocol version (used to verify a

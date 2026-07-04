@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentModel, AgentModelSelection } from "@/lib/tauri";
+import { pluginAgentLaunchArgs } from "@/plugins/agents";
 
 const STORAGE_PREFIX = "pragma:agent-model-selection:";
 
@@ -63,6 +64,10 @@ export function modelLaunchArgs(
   agent: AgentConfig,
   selection: AgentModelSelection | null | undefined,
 ): string[] {
+  const pluginArgs = pluginAgentLaunchArgs(agent.id, selection);
+  if (pluginArgs !== null) {
+    return pluginArgs;
+  }
   if (!selection?.modelId || !agent.models) {
     return [];
   }

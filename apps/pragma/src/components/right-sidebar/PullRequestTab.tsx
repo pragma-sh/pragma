@@ -6,6 +6,7 @@ import type { GitHubRepoRef } from "@pragma/constants";
 import { CreatePullRequestView } from "@/components/github/CreatePullRequestView";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { ViewPullRequestView } from "@/components/github/ViewPullRequestView";
+import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { findPullRequestForBranch, type PullRequestSummary } from "@/lib/github";
 import { type AiPullRequestDraft, githubRepoRef } from "@/lib/tauri";
 import { useGitHub } from "@/state/github-context";
@@ -105,14 +106,10 @@ function PullRequestResolver({
 
   useEffect(() => {
     active.current = true;
-    void refresh();
-    const interval = setInterval(() => void refresh(), PR_REFRESH_INTERVAL_MS);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
+    const stopRefresh = startRefreshLoop(refresh, PR_REFRESH_INTERVAL_MS);
     return () => {
       active.current = false;
-      clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
+      stopRefresh();
     };
   }, [refresh]);
 

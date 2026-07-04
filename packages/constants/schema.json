@@ -15,7 +15,8 @@
     "daemon",
     "gateway",
     "protocol",
-    "github"
+    "github",
+    "plugins"
   ],
   "properties": {
     "maxParallelAgents": {
@@ -32,7 +33,8 @@
     "daemon": { "$ref": "#/definitions/Daemon" },
     "gateway": { "$ref": "#/definitions/Gateway" },
     "protocol": { "$ref": "#/definitions/Protocol" },
-    "github": { "$ref": "#/definitions/GitHub" }
+    "github": { "$ref": "#/definitions/GitHub" },
+    "plugins": { "$ref": "#/definitions/Plugins" }
   },
   "definitions": {
     "ProtocolRpcMethod": {
@@ -279,6 +281,25 @@
           "type": "integer",
           "minimum": 1,
           "description": "Wire-protocol version negotiated between the app and the detached PTY daemon. The daemon greets every connection with this version; the app replaces a daemon whose version does not match (or that sends no greeting). Bump it whenever the daemon protocol or its PTY-stream handling changes so a stale long-lived daemon is restarted instead of silently serving old behavior."
+        }
+      }
+    },
+    "Plugins": {
+      "title": "Plugins",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configFileName", "storageScopes"],
+      "description": "Plugin-system constants shared by the Rust config reader and the TypeScript loader.",
+      "properties": {
+        "configFileName": {
+          "type": "string",
+          "description": "Relative path of the Pragma config file that declares plugin entries. Resolved against the home directory for global plugins and against the project root for project plugins."
+        },
+        "storageScopes": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["global", "project"] },
+          "uniqueItems": true,
+          "description": "Plugin storage scopes supported by the host runtime. v1 persists global plugin key/value state; project scope is reserved for project-addressed plugin config/storage layers."
         }
       }
     },
@@ -586,9 +607,9 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, the read-only daemon log viewer, or a pull-request review.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
       "type": "string",
-      "enum": ["terminal", "browser", "editor", "diff", "log", "pr-review"]
+      "enum": ["terminal", "browser", "editor", "diff", "log", "pr-review", "plugin-webview"]
     },
     "AgentStatus": {
       "title": "AgentStatus",
@@ -638,6 +659,10 @@
         "filePath",
         "diffSide",
         "prNumber",
+        "pluginId",
+        "pluginViewId",
+        "pluginPayload",
+        "pluginDedupeKey",
         "userRenamed",
         "orderIndex",
         "createdAt"
@@ -663,6 +688,22 @@
         "prNumber": {
           "type": ["integer", "null"],
           "description": "Pull-request number a pr-review tab reviews; null for non-PR tabs."
+        },
+        "pluginId": {
+          "type": ["string", "null"],
+          "description": "Owning plugin id for plugin-webview tabs; null for non-plugin tabs."
+        },
+        "pluginViewId": {
+          "type": ["string", "null"],
+          "description": "Plugin-defined web view id for plugin-webview tabs; null for non-plugin tabs."
+        },
+        "pluginPayload": {
+          "type": ["string", "null"],
+          "description": "JSON-encoded payload supplied when opening a plugin-webview tab; null when omitted or for non-plugin tabs."
+        },
+        "pluginDedupeKey": {
+          "type": ["string", "null"],
+          "description": "Optional dedupe key used to focus an existing plugin-webview tab instead of opening another."
         },
         "userRenamed": {
           "type": "boolean",

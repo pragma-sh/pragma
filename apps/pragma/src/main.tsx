@@ -4,6 +4,7 @@ import { constants } from "@pragma/constants";
 import { Toaster } from "@/components/ui/sonner";
 import { primeNotificationPermission } from "@/lib/agent-alert";
 import { isMacPlatform } from "@/lib/platform";
+import "@/plugins/bootstrap-bridge";
 import "@/lib/brand-icons";
 import "./index.css";
 import App from "./App.tsx";
