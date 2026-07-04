@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ChangesTab } from "@/components/right-sidebar/ChangesTab";
 import { FilesTab } from "@/components/right-sidebar/FilesTab";
 import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
+import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -64,14 +65,7 @@ function useCommitPrAvailability(worktreeId: string | null, aiAvailable: boolean
     if (!aiAvailable) {
       return;
     }
-    void refresh();
-    const interval = setInterval(() => void refresh(), COMMIT_PR_REFRESH_INTERVAL_MS);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
+    return startRefreshLoop(refresh, COMMIT_PR_REFRESH_INTERVAL_MS);
   }, [worktreeId, aiAvailable, refresh]);
 
   return { hasUncommittedChanges, setHasUncommittedChanges, availabilityWorktree };

@@ -11,6 +11,7 @@ import {
   type ChangeFileAction,
   type ChangeGroupAction,
 } from "@/components/right-sidebar/ChangeGroup";
+import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -206,14 +207,7 @@ function useChangesRefresh(worktreeId: string | null): {
     // Reset to loading only when the worktree changes; subsequent polls and
     // focus-driven refreshes replace the lists in place.
     setState({ kind: "loading" });
-    void refresh();
-    const interval = setInterval(() => void refresh(), CHANGES_REFRESH_INTERVAL_MS);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
+    return startRefreshLoop(refresh, CHANGES_REFRESH_INTERVAL_MS);
   }, [worktreeId, refresh]);
 
   return { state, refresh };
