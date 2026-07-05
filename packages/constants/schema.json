@@ -629,6 +629,87 @@
       "type": "string",
       "enum": ["question", "command"]
     },
+    "AgentMessageKind": {
+      "title": "AgentMessageKind",
+      "description": "Agent event stream message frame kind.",
+      "type": "string",
+      "enum": ["message"]
+    },
+    "AgentMessageRole": {
+      "title": "AgentMessageRole",
+      "description": "Role/source for one rich agent message entry.",
+      "type": "string",
+      "enum": ["assistant", "tool", "user", "system"]
+    },
+    "AgentToolCallStatus": {
+      "title": "AgentToolCallStatus",
+      "description": "Lifecycle status for a tool call reported inside an AgentMessage.",
+      "type": "string",
+      "enum": ["running", "done", "error"]
+    },
+    "AgentFileChangeKind": {
+      "title": "AgentFileChangeKind",
+      "description": "File interaction kind reported inside an AgentMessage.",
+      "type": "string",
+      "enum": ["read", "edited", "created", "deleted"]
+    },
+    "AgentToolCall": {
+      "title": "AgentToolCall",
+      "description": "One tool call surfaced by an agent message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "$ref": "#/definitions/AgentToolCallStatus" },
+        "summary": { "type": "string" }
+      }
+    },
+    "AgentFileChange": {
+      "title": "AgentFileChange",
+      "description": "A path touched by an agent, without file contents.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "change"],
+      "properties": {
+        "path": { "type": "string" },
+        "change": { "$ref": "#/definitions/AgentFileChangeKind" }
+      }
+    },
+    "AgentMessage": {
+      "title": "AgentMessage",
+      "description": "Append-only rich message entry reported by an agent. Consumers upsert by id when tool-call state changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "id", "role", "subAgentsActive", "ts"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "id": { "type": "string" },
+        "role": { "$ref": "#/definitions/AgentMessageRole" },
+        "text": { "type": "string" },
+        "toolCalls": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentToolCall" }
+        },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentFileChange" }
+        },
+        "subAgentsActive": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of active sub-agents visible to the reporting plugin; no nested transcript is carried."
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Emitter timestamp in milliseconds since Unix epoch."
+        }
+      }
+    },
     "AgentReportPayload": {
       "title": "AgentReportPayload",
       "description": "Status report sent by pragma-cli through pragma-server to native clients.",
