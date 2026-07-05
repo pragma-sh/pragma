@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use pragma_constants::{
-    AgentAttentionKind, AgentReportPayload, AgentStatus, ControlMethod, ProtocolErrorCode,
-    ProtocolEventKind, ProtocolRpcMethod,
+    AgentAttentionKind, AgentMessage, AgentReportPayload, AgentStatus, ControlMethod,
+    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -119,6 +119,8 @@ pub enum RequestKind {
     KillForCwd,
     /// Reports agent status. `data` carries a JSON [`AgentReportPayload`].
     AgentReport,
+    /// Reports one rich agent message. `data` carries a JSON [`AgentMessage`].
+    AgentMessage,
     /// Subscribes to daemon-wide agent status events.
     SubscribeAgents,
     /// Marks a tab's resolved (`done`) agent statuses as seen so the daemon
@@ -257,6 +259,9 @@ pub enum EventFrame {
         status: AgentStatus,
         #[serde(rename = "attentionKind")]
         attention_kind: Option<AgentAttentionKind>,
+    },
+    AgentMessage {
+        message: AgentMessage,
     },
     /// First message for a subscription, carrying the complete current state.
     Snapshot {
@@ -621,6 +626,7 @@ mod tests {
                 EventFrame::Output { .. }
                 | EventFrame::Exit { .. }
                 | EventFrame::Agent { .. }
+                | EventFrame::AgentMessage { .. }
                 | EventFrame::Snapshot { .. }
                 | EventFrame::Delta { .. }
                 | EventFrame::EchoMode { .. },

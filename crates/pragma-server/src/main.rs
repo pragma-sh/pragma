@@ -382,6 +382,12 @@ fn handle_request(
                 .map(|()| Outcome::default())
                 .map_err(|err| HandledRequestError::Request(err.to_string()))
         }
+        RequestKind::AgentMessage => {
+            let message = serde_json::from_str(&required(request.data, "data")?)
+                .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+            registry.report_agent_message(message);
+            Ok(Outcome::default())
+        }
         RequestKind::SubscribeAgents => {
             let (scrollback, rx) = registry
                 .subscribe_agents()

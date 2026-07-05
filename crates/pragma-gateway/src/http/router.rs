@@ -72,6 +72,7 @@ pub fn gateway_router() -> Router {
         .route("DELETE", "/v1/sessions/{id}", "sessions.kill")
         .route("DELETE", "/v1/sessions", "sessions.killForCwd")
         .route("POST", "/v1/agents/reports", "agents.reports")
+        .route("POST", "/v1/agents/messages", "agents.messages")
         .route("GET", "/v1/agents/events", "agents.events")
         .route("POST", "/v1/tabs/{tabId}/agents/seen", "agents.seen")
         .route("GET", "/v1/subscriptions/{event}", "subscriptions.events")

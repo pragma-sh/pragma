@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use pragma_client::PragmaClient;
 use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
-use pragma_protocol::AgentReportPayload;
+use pragma_protocol::{AgentMessage, AgentReportPayload};
 use serde_json::Value;
 
 use crate::error::{GatewayError, GatewayResult};
@@ -114,6 +114,14 @@ impl GatewayClient {
         self.ensure_protocol()?;
         self.client
             .report_agent(payload)
+            .map_err(GatewayError::from)
+    }
+
+    /// Reports one rich agent message.
+    pub fn report_agent_message(&self, message: &AgentMessage) -> GatewayResult<()> {
+        self.ensure_protocol()?;
+        self.client
+            .report_agent_message(message)
             .map_err(GatewayError::from)
     }
 

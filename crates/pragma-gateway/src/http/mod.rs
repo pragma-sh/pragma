@@ -69,6 +69,7 @@ fn dispatch(request: &mut Request, state: &AppState) -> GatewayResult<ResponseBo
         "sessions.kill" => routes::sessions::kill(state, &matched)?.boxed(),
         "sessions.killForCwd" => routes::sessions::kill_for_cwd(state, &matched)?.boxed(),
         "agents.reports" => routes::agents::report(request, state)?.boxed(),
+        "agents.messages" => routes::agents::message(request, state)?.boxed(),
         "agents.events" => routes::agents::events(state)?.boxed(),
         "agents.seen" => routes::agents::mark_seen(state, &matched)?.boxed(),
         "subscriptions.events" => routes::subscriptions::events(state, &matched)?.boxed(),

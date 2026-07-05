@@ -85,6 +85,10 @@ pub fn event_json(event: EventFrame) -> Value {
             "status": status,
             "attentionKind": attention_kind,
         }),
+        EventFrame::AgentMessage { message } => json!({
+            "type": "agentMessage",
+            "message": message,
+        }),
         EventFrame::Snapshot {
             subscription,
             payload,

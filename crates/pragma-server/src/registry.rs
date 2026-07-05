@@ -6,7 +6,7 @@ use std::thread;
 
 use pragma_constants::ProtocolEventKind;
 use pragma_core::watcher::WorktreeWatcher;
-use pragma_protocol::{AgentReportPayload, AgentStatus, ControlResult, EventFrame};
+use pragma_protocol::{AgentMessage, AgentReportPayload, AgentStatus, ControlResult, EventFrame};
 use thiserror::Error;
 
 use crate::session::{Session, SessionError};
@@ -237,6 +237,10 @@ impl Registry {
         drop(statuses);
         self.broadcast_agent(&event);
         Ok(())
+    }
+
+    pub fn report_agent_message(&self, message: AgentMessage) {
+        self.broadcast_agent(&EventFrame::AgentMessage { message });
     }
 
     pub fn subscribe_agents(

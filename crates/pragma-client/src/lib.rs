@@ -22,8 +22,9 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
-    read_json_frame, write_input_frame, write_json_frame, AgentReportPayload, ProtocolEventKind,
-    RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame, SubscriptionRequest,
+    read_json_frame, write_input_frame, write_json_frame, AgentMessage, AgentReportPayload,
+    ProtocolEventKind, RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame,
+    SubscriptionRequest,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -242,6 +243,12 @@ impl PragmaClient {
     /// Reports an agent status update to the server.
     pub fn report_agent(&self, payload: &AgentReportPayload) -> ClientResult<()> {
         let request = request_agent_report(payload)?;
+        self.request(&request)
+    }
+
+    /// Reports one rich agent message to the server.
+    pub fn report_agent_message(&self, message: &AgentMessage) -> ClientResult<()> {
+        let request = request_agent_message(message)?;
         self.request(&request)
     }
 
@@ -770,6 +777,21 @@ pub fn request_agent_report(payload: &AgentReportPayload) -> ClientResult<Reques
         serde_json::to_string(&payload).map_err(|error| ClientError::Server(error.to_string()))?;
     Ok(request_frame(
         RequestKind::AgentReport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds an `AgentMessage` request frame.
+pub fn request_agent_message(message: &AgentMessage) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&message).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentMessage,
         None,
         None,
         None,
