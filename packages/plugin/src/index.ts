@@ -38,6 +38,7 @@ export {
 export { PLUGIN_API_VERSION } from "./generated/version";
 export {
   useAgentStatuses,
+  useAgentMessages,
   useBranchStatus,
   useDirEntries,
   useEvent,
@@ -65,6 +66,8 @@ export type {
   PluginUiContributions,
 } from "./plugin";
 export { definePlugin } from "./plugin";
+export type { WatcherContext, WatcherDefinition } from "./watcher";
+export { defineWatcher } from "./watcher";
 export type {
   PluginAgentStatusEntry,
   PluginContext,

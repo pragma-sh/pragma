@@ -11,6 +11,7 @@ packages/plugin/
 ├── src/index.ts         # Public exports
 ├── src/plugin.ts        # definePlugin + API-version stamp
 ├── src/agent.ts         # defineAgent and agent types
+├── src/watcher.ts       # defineWatcher and watcher context types
 ├── src/contributions.ts # UI slot, web view, and command contribution helpers
 ├── src/hooks.ts         # Hook delegates onto __PRAGMA__.hooks
 ├── src/bridge.ts        # __PRAGMA__ bridge/action contract

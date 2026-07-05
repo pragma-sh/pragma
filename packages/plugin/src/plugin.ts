@@ -12,6 +12,7 @@ import type {
 import { PLUGIN_API_VERSION } from "./generated/version";
 import type { PluginContext } from "./types";
 import type { PluginDeepLinkEvent } from "./types";
+import type { WatcherDefinition } from "./watcher";
 
 /** Infers a config schema's parsed output type, defaulting to `unknown` when no schema is given. */
 export type InferConfig<TConfigSchema extends ZodTypeAny> =
@@ -54,6 +55,7 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   config?: TConfigSchema;
   ui?: PluginUiContributions<InferConfig<TConfigSchema>>;
   agents?: AgentDefinition<InferConfig<TConfigSchema>>[];
+  watchers?: WatcherDefinition<InferConfig<TConfigSchema>>[];
   commands?: CommandDefinition<InferConfig<TConfigSchema>>[];
   settings?: PluginSettingsContributions;
   keybindings?: PluginKeybindingsContributions;
