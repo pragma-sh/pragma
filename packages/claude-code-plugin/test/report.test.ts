@@ -76,7 +76,7 @@ function run(
     runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
   execFileSync("sh", [REPORT_SH, event, ...args], { env: runEnv, input: stdin });
-  return calls();
+  return reportCalls();
 }
 
 /** The pid of the watcher report.sh spawned for the current tab, if any. */
@@ -140,6 +140,11 @@ function calls(): string[] {
     return [];
   }
   return readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
+}
+
+/** Only `agent report` calls — filters out `agent message` calls (those carry non-deterministic ids/ts). */
+function reportCalls(): string[] {
+  return calls().filter((line) => line.startsWith("agent report "));
 }
 
 describe("report.sh", () => {
@@ -287,7 +292,7 @@ describe("report.sh", () => {
       // The cancel surfaces only in the transcript, never as a hook.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(600);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code cleared",
       ]);
@@ -301,7 +306,7 @@ describe("report.sh", () => {
       const t = transcriptFile([ASSISTANT_DONE, INTERRUPTED]);
       run("started", { stdin: t.stdin });
       await sleep(400);
-      expect(calls()).toEqual(["agent report --agent claude-code started"]);
+      expect(reportCalls()).toEqual(["agent report --agent claude-code started"]);
       expect(existsSync(markerPath())).toBe(true);
     });
 
@@ -311,7 +316,7 @@ describe("report.sh", () => {
       // This turn's own cancel is appended past where the watcher was pinned.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(400);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code cleared",
       ]);
@@ -327,7 +332,7 @@ describe("report.sh", () => {
       // A late transcript line must not resurrect a clear after a normal end.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(300);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code stopped",
       ]);
@@ -341,7 +346,7 @@ describe("report.sh", () => {
       // Cancelling the *old* turn must not clear: its watcher was replaced.
       appendFileSync(first.path, `${INTERRUPTED}\n`);
       await sleep(600);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code started",
       ]);

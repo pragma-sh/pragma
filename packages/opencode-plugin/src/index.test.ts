@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({
   reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportMessage: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
 }));
@@ -19,6 +20,7 @@ vi.mock("@pragma/sdk", () => {
       ),
     reportAttention: forwardReportMock(sdkMocks.reportAttention),
     reportCleared: forwardReportMock(sdkMocks.reportCleared),
+    reportMessage: forwardReportMock(sdkMocks.reportMessage),
     reportStarted: forwardReportMock(sdkMocks.reportStarted),
     reportStopped: forwardReportMock(sdkMocks.reportStopped),
   };
@@ -50,6 +52,7 @@ function testHooks() {
     async attention(kind) {
       reports.push(`attention:${kind}`);
     },
+    async message() {},
     async cleared() {
       reports.push("cleared");
     },

@@ -51,6 +51,17 @@ report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
+# Reports a coarse rich message. Hook payloads are intentionally not parsed here
+# beyond existing transcript handling; this keeps hooks fail-open and portable.
+message() {
+  role="$1"
+  text="$2"
+  id="${agent}-${tab}-$(date +%s)-$$-$role"
+  ts=$(date +%s)
+  payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
+  "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
 # Reads the hook's stdin JSON and prints the `transcript_path` field, if any.
 # Claude Code passes a JSON payload on stdin to every command hook.
 transcript_path_from_stdin() {
@@ -130,6 +141,7 @@ case "${1:-}" in
     token="$$-$(date +%s)"
     printf '%s' "$token" >"$marker"
     report started
+    message assistant "Claude Code turn started"
     stop_watcher
     tp="$(transcript_path_from_stdin)"
     if [ -n "$tp" ]; then
@@ -151,14 +163,17 @@ case "${1:-}" in
     rm -f "$marker"
     if turn_interrupted "$(transcript_path_from_stdin)"; then
       report cleared
+      message system "Claude Code turn interrupted"
     else
       report stopped
+      message assistant "Claude Code turn completed"
     fi
     ;;
   cleared)
     stop_watcher
     rm -f "$marker"
     report cleared
+    message system "Claude Code session cleared"
     ;;
   running)
     # PostToolUse: a tool just finished mid-turn. If a turn is in flight, re-assert
@@ -168,7 +183,10 @@ case "${1:-}" in
     # deliberately leave the marker and the abort watcher untouched: this is the same
     # turn `started` set up, so its cancel detection must keep running. Guarded on the
     # marker so a stray PostToolUse outside a turn can't flash a phantom "running".
-    [ -f "$marker" ] && report started
+    if [ -f "$marker" ]; then
+      report started
+      message tool "Claude Code tool finished"
+    fi
     ;;
   attention)
     # Only raise attention while a turn is actually in flight. The fast
@@ -179,7 +197,10 @@ case "${1:-}" in
     # longer wire the *debounced* `Notification permission_prompt` (~3-5s late):
     # after an approval the marker is still present, so that stale notification
     # would re-raise a phantom attention over a turn that is already running.
-    [ -f "$marker" ] && report attention
+    if [ -f "$marker" ]; then
+      report attention
+      message system "Claude Code needs attention"
+    fi
     ;;
   idle)
     # Idle-prompt notification. After a normal completion the marker is already
@@ -190,6 +211,7 @@ case "${1:-}" in
       stop_watcher
       rm -f "$marker"
       report cleared
+      message system "Claude Code turn cleared"
     fi
     ;;
 esac

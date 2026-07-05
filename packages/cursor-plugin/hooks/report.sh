@@ -34,31 +34,50 @@ report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
+# Reports a coarse rich message without depending on jq or hook-specific JSON.
+message() {
+  role="$1"
+  text="$2"
+  id="${agent}-${tab}-$(date +%s)-$$-$role"
+  ts=$(date +%s)
+  payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
+  "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
 case "${1:-}" in
   started)
     # A new turn is in flight: tag the marker and report running.
     printf '%s' "$$-$(date +%s)" >"$marker"
     report started
+    message assistant "Cursor Agent turn started"
     ;;
   stopped)
     rm -f "$marker"
     report stopped
+    message assistant "Cursor Agent turn completed"
     ;;
   cleared)
     rm -f "$marker"
     report cleared
+    message system "Cursor Agent session cleared"
     ;;
   running)
     # PostToolUse: a tool finished mid-turn. Re-assert running so a lingering
     # command-approval `attention` drops back to "in progress" at once instead
     # of staying stuck until `stop`. Guarded on the marker so a stray
     # PostToolUse outside a turn can't flash a phantom "running".
-    [ -f "$marker" ] && report started
+    if [ -f "$marker" ]; then
+      report started
+      message tool "Cursor Agent tool finished"
+    fi
     ;;
   attention-command)
     # beforeShellExecution / beforeMCPExecution: a command/MCP call is awaiting
     # approval. Only raise attention while a turn is actually in flight.
-    [ -f "$marker" ] && report attention --kind command
+    if [ -f "$marker" ]; then
+      report attention --kind command
+      message tool "Cursor Agent command needs approval"
+    fi
     ;;
 esac
 

@@ -1,5 +1,5 @@
 import type { Hooks } from "@opencode-ai/plugin";
-import { type AgentAttentionKind } from "@pragma/sdk";
+import { type AgentAttentionKind, type AgentMessage } from "@pragma/sdk";
 
 type ReportKey = "started" | "stopped" | "cleared" | `attention:${AgentAttentionKind}`;
 type Environment = Record<string, string | undefined>;
@@ -22,6 +22,7 @@ export interface PragmaReporter {
   started(): Promise<void>;
   stopped(): Promise<void>;
   attention(kind: AgentAttentionKind): Promise<void>;
+  message(message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">): Promise<void>;
   /** Removes the tab's indicator entirely (agent process exited), not a green "done". */
   cleared(): Promise<void>;
 }
@@ -64,12 +65,22 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
         await sync();
       }
     },
-    "chat.message": async () => {
+    "chat.message": async (input) => {
       busy = true;
+      await reporter.message({
+        id: messageId("chat"),
+        role: "user",
+        text: textFromRecord(input as Record<string, unknown>),
+        subAgentsActive: 0,
+        ts: Date.now(),
+      });
       await sync();
     },
-    "command.execute.before": async () => {
+    "command.execute.before": async (input) => {
       busy = true;
+      await reporter.message(
+        toolMessage("command", summaryFromRecord(input as Record<string, unknown>)),
+      );
       await sync();
     },
     "tool.execute.before": async (input) => {
@@ -78,6 +89,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       } else {
         busy = true;
       }
+      await reporter.message(
+        toolMessage(input.tool, summaryFromRecord(input as Record<string, unknown>)),
+      );
       await sync();
     },
     "permission.ask": async () => {
@@ -248,4 +262,45 @@ export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function toolMessage(
+  name: string,
+  summary: string | undefined,
+): Omit<AgentMessage, "agent" | "worktreeId" | "tabId"> {
+  const id = messageId(`tool:${name}`);
+  return {
+    id,
+    role: "tool",
+    toolCalls: [{ id, name, status: "running", ...(summary ? { summary } : {}) }],
+    subAgentsActive: /(?:task|agent)/i.test(name) ? 1 : 0,
+    ts: Date.now(),
+  };
+}
+
+function messageId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`}`;
+}
+
+function summaryFromRecord(record: Record<string, unknown>): string | undefined {
+  return textFromRecord(record) ?? compactJson(record);
+}
+
+function textFromRecord(record: Record<string, unknown>): string | undefined {
+  for (const key of ["text", "message", "command", "description", "summary"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function compactJson(value: unknown): string | undefined {
+  try {
+    const json = JSON.stringify(value);
+    return json.length > 240 ? `${json.slice(0, 237)}...` : json;
+  } catch {
+    return undefined;
+  }
 }

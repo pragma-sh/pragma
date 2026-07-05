@@ -48,7 +48,7 @@ function run(
     runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
   execFileSync("sh", [REPORT_SH, event], { env: runEnv });
-  return calls();
+  return reportCalls();
 }
 
 function calls(): string[] {
@@ -58,16 +58,21 @@ function calls(): string[] {
   return readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
 }
 
+/** Only `agent report` calls — filters out `agent message` calls (those carry non-deterministic ids/ts). */
+function reportCalls(): string[] {
+  return calls().filter((line) => line.startsWith("agent report "));
+}
+
 describe("cursor report.sh", () => {
   it("no-ops outside Pragma", () => {
     run("started", { socket: false });
-    expect(calls()).toEqual([]);
+    expect(reportCalls()).toEqual([]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
   it("reports started and sets marker", () => {
     run("started");
-    expect(calls()).toEqual(["agent report --agent cursor started"]);
+    expect(reportCalls()).toEqual(["agent report --agent cursor started"]);
     expect(existsSync(markerPath())).toBe(true);
   });
 
@@ -75,13 +80,13 @@ describe("cursor report.sh", () => {
     run("started", {
       env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
     });
-    expect(calls()).toEqual(["agent report --agent cursor started"]);
+    expect(reportCalls()).toEqual(["agent report --agent cursor started"]);
   });
 
   it("reports stopped and clears marker", () => {
     run("started");
     run("stopped");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor stopped",
     ]);
@@ -91,7 +96,7 @@ describe("cursor report.sh", () => {
   it("reports cleared", () => {
     run("started");
     run("cleared");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor cleared",
     ]);
@@ -100,10 +105,10 @@ describe("cursor report.sh", () => {
 
   it("reports command attention only during a turn", () => {
     run("attention-command");
-    expect(calls()).toEqual([]);
+    expect(reportCalls()).toEqual([]);
     run("started");
     run("attention-command");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor attention --kind command",
     ]);
@@ -113,7 +118,7 @@ describe("cursor report.sh", () => {
     run("started");
     run("attention-command");
     run("running");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor attention --kind command",
       "agent report --agent cursor started",
