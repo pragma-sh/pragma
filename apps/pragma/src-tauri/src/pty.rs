@@ -472,6 +472,7 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                         | ServerFrame::Event(
                             EventFrame::Output { .. }
                             | EventFrame::Agent { .. }
+                            | EventFrame::AgentMessage { .. }
                             | EventFrame::Snapshot { .. }
                             | EventFrame::Delta { .. }
                             | EventFrame::EchoMode { .. },

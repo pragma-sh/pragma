@@ -1,13 +1,18 @@
 import { useSyncExternalStore } from "react";
 
-import type { AgentReportPayload, AgentStatus } from "@pragma/constants";
+import type { AgentMessage, AgentReportPayload, AgentStatus } from "@pragma/constants";
 
 type AgentMap = Map<string, AgentStatus>;
 type TabMap = Map<string, AgentMap>;
 type WorktreeMap = Map<string, TabMap>;
+type AgentMessageMap = Map<string, AgentMessage[]>;
+type AgentTabMessageMap = Map<string, AgentMessageMap>;
+type AgentWorktreeMessageMap = Map<string, AgentTabMessageMap>;
 
 const listeners = new Set<() => void>();
+const messageListeners = new Set<() => void>();
 const statuses: WorktreeMap = new Map();
+const messages: AgentWorktreeMessageMap = new Map();
 
 const priority: Record<AgentStatus, number> = {
   cleared: 0,
@@ -41,6 +46,29 @@ export function applyAgentReport(payload: AgentReportPayload): AgentStatus | nul
   agents.set(payload.agent, payload.status);
   emit();
   return previous;
+}
+
+/** Stores one rich agent message, upserting by message id within that agent/tab. */
+export function applyAgentMessage(message: AgentMessage): void {
+  let tabs = messages.get(message.worktreeId);
+  if (!tabs) {
+    tabs = new Map();
+    messages.set(message.worktreeId, tabs);
+  }
+  let agents = tabs.get(message.tabId);
+  if (!agents) {
+    agents = new Map();
+    tabs.set(message.tabId, agents);
+  }
+  const current = agents.get(message.agent) ?? [];
+  const index = current.findIndex((item) => item.id === message.id);
+  if (index >= 0) {
+    current[index] = message;
+  } else {
+    current.push(message);
+  }
+  agents.set(message.agent, current);
+  emitMessages();
 }
 
 /** Drops a single agent's entry, pruning empty tab/worktree maps. Returns its previous status. */
@@ -111,6 +139,22 @@ export function removeAgentStatusForTab(tabId: string): void {
   }
   if (changed) {
     emit();
+  }
+  removeAgentMessagesForTab(tabId);
+}
+
+function removeAgentMessagesForTab(tabId: string): void {
+  let changed = false;
+  for (const [worktreeId, tabs] of messages) {
+    if (tabs.delete(tabId)) {
+      changed = true;
+    }
+    if (tabs.size === 0) {
+      messages.delete(worktreeId);
+    }
+  }
+  if (changed) {
+    emitMessages();
   }
 }
 
@@ -191,9 +235,33 @@ export function agentEntriesForWorktree(
   return entries;
 }
 
+/** Returns rich agent messages for a worktree, optionally scoped to a tab. */
+export function agentMessagesForWorktree(
+  worktreeId: string | null,
+  tabId?: string | null,
+): AgentMessage[] {
+  if (!worktreeId) {
+    return [];
+  }
+  const tabs = messages.get(worktreeId);
+  if (!tabs) {
+    return [];
+  }
+  const selectedTabs = tabId ? [tabs.get(tabId)] : [...tabs.values()];
+  return selectedTabs
+    .flatMap((agents) => [...(agents?.values() ?? [])].flat())
+    .toSorted((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
+}
+
 /** Subscribes to any agent-status change (used by the plugin hooks bridge). */
 export function subscribeAgentStatuses(listener: () => void): () => void {
   return subscribe(listener);
+}
+
+/** Subscribes to rich agent message changes. */
+export function subscribeAgentMessages(listener: () => void): () => void {
+  messageListeners.add(listener);
+  return () => messageListeners.delete(listener);
 }
 
 /** React hook for a tab's aggregate agent status. */
@@ -221,6 +289,12 @@ function subscribe(listener: () => void): () => void {
 
 function emit(): void {
   for (const listener of listeners) {
+    listener();
+  }
+}
+
+function emitMessages(): void {
+  for (const listener of messageListeners) {
     listener();
   }
 }

@@ -21,6 +21,7 @@ import type {
   WorktreeChanges,
   Worktree,
   WorktreeStatus,
+  AgentMessage,
   AgentReportPayload,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
@@ -120,6 +121,11 @@ export function onAgentReport(handler: (payload: AgentReportPayload) => void): P
   return listen<AgentReportPayload>("pragma:agent-report", (event) => handler(event.payload));
 }
 
+/** Subscribes to daemon-forwarded rich agent messages. */
+export function onAgentMessage(handler: (payload: AgentMessage) => void): Promise<UnlistenFn> {
+  return listen<AgentMessage>("pragma:agent-message", (event) => handler(event.payload));
+}
+
 /** Fires before the daemon replays its current agent-status snapshot. */
 export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("pragma:agent-status-reset", () => handler());
@@ -128,6 +134,25 @@ export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
 /** Warns once when `~/.local/bin` is not on PATH after installing `pragma-cli`. */
 export function onAgentCliPathWarning(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
+}
+
+/** Request to start one host-side plugin watcher instance. */
+export interface StartPluginWatcherRequest {
+  pluginId: string;
+  pluginMain: string;
+  agentId: string;
+  watcherAgent: string;
+  config: unknown;
+  sessionId: string;
+  tabId: string;
+  worktreeId: string;
+  gatewayUrl: string;
+  gatewayToken: string;
+}
+
+/** Starts a detached watcher sidecar for a plugin-owned agent session. */
+export function startPluginWatcher(request: StartPluginWatcherRequest): Promise<void> {
+  return invoke("start_plugin_watcher", { request });
 }
 
 /** Workspace metadata event emitted after a brokered CLI mutation. */

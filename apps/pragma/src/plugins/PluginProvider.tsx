@@ -19,6 +19,7 @@ import { syncPluginCss } from "./css";
 import { PluginCommandKeybindings } from "./commands";
 import { setPluginAgents } from "./agents";
 import { builtinAgentRecords } from "./builtin-agents";
+import { setPluginWatchers } from "./watchers";
 import { setPluginWebViewOpener, setPluginWebViews } from "./webviews";
 
 /** How often dev mode polls plugin bundles for changes (hot-reload). */
@@ -143,6 +144,9 @@ function usePluginContributionRegistries(
   useEffect(() => {
     setPluginAgents(activePlugins, runtime);
   }, [activePlugins, runtime]);
+  useEffect(() => {
+    setPluginWatchers(activePlugins);
+  }, [activePlugins]);
   useEffect(() => {
     setPluginWebViews(activePlugins);
   }, [activePlugins]);

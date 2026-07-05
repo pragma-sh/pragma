@@ -73,6 +73,7 @@ import {
   onBrowserFocusRequest,
   onBrowserMeta,
   onAgentCliPathWarning,
+  onAgentMessage,
   onAgentNotificationClick,
   onAgentReport,
   onAgentStatusReset,
@@ -97,9 +98,11 @@ import {
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import { startWatcherForAgentSession } from "@/plugins/watchers";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
   agentStatusesForTab,
+  applyAgentMessage,
   applyAgentReport,
   clearAllAgentStatuses,
   clearDoneStatusForTab,
@@ -2193,6 +2196,7 @@ function useAgentStatusListeners(
   useEffect(() => {
     let cancelled = false;
     let unlistenReport: (() => void) | null = null;
+    let unlistenMessage: (() => void) | null = null;
     let unlistenReset: (() => void) | null = null;
     let unlistenPath: (() => void) | null = null;
     let unlistenNotificationClick: (() => void) | null = null;
@@ -2217,6 +2221,16 @@ function useAgentStatusListeners(
         return undefined;
       }
       unlistenReport = unlisten;
+      return undefined;
+    });
+    void onAgentMessage((payload) => {
+      applyAgentMessage(payload);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return undefined;
+      }
+      unlistenMessage = unlisten;
       return undefined;
     });
     void onAgentCliPathWarning((path) => {
@@ -2244,6 +2258,7 @@ function useAgentStatusListeners(
     return () => {
       cancelled = true;
       unlistenReport?.();
+      unlistenMessage?.();
       unlistenReset?.();
       unlistenPath?.();
       unlistenNotificationClick?.();
@@ -2489,6 +2504,14 @@ function useSessionLaunch(
         return null;
       }
       startAgentInTab(tab.id, agent, message, modelSelection);
+      void startWatcherForAgentSession({
+        agentId: agent.id,
+        sessionId: tab.id,
+        tabId: tab.id,
+        worktreeId,
+      }).catch((cause: unknown) => {
+        console.warn(`failed to start watcher for ${agent.id}`, cause);
+      });
       return tab;
     },
     [createTerminalTab, selectWorktree],

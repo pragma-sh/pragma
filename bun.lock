@@ -236,6 +236,21 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/watcher": {
+      "name": "@pragma/watcher",
+      "version": "0.0.0",
+      "bin": {
+        "pragma-watch": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@pragma/sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
@@ -889,6 +904,8 @@
     "@pragma/plugin": ["@pragma/plugin@workspace:packages/plugin"],
 
     "@pragma/sdk": ["@pragma/sdk@workspace:packages/sdk"],
+
+    "@pragma/watcher": ["@pragma/watcher@workspace:packages/watcher"],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 

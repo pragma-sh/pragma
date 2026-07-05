@@ -12,6 +12,8 @@
 //! "not supported yet" error until remote fetching lands.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use pragma_constants::CONSTANTS;
 
 use crate::error::{AppError, AppResult};
+use crate::pty::workspace_root;
 
 /// One `plugins[]` entry in a `.pragma/config.json` file.
 #[derive(Debug, Clone, Deserialize)]
@@ -85,6 +88,22 @@ pub struct PluginEntryResult {
     pub error: Option<String>,
 }
 
+/// Request to start one host-side plugin watcher instance.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWatcherRequest {
+    pub plugin_id: String,
+    pub plugin_main: String,
+    pub agent_id: String,
+    pub watcher_agent: String,
+    pub config: serde_json::Value,
+    pub session_id: String,
+    pub tab_id: String,
+    pub worktree_id: String,
+    pub gateway_url: String,
+    pub gateway_token: String,
+}
+
 /// Minimal `package.json` shape for plugin manifests.
 #[derive(Debug, Deserialize)]
 struct PackageJson {
@@ -127,6 +146,54 @@ pub fn read_bundle(main_path: &Path) -> AppResult<String> {
             main_path.display()
         ))
     })
+}
+
+/// Starts a detached `pragma-watch` sidecar for one plugin watcher.
+pub fn start_watcher(request: StartWatcherRequest) -> AppResult<()> {
+    let mut command = watcher_command();
+    command
+        .args([
+            "--pluginId",
+            &request.plugin_id,
+            "--pluginMain",
+            &request.plugin_main,
+            "--agentId",
+            &request.agent_id,
+            "--watcherAgent",
+            &request.watcher_agent,
+            "--config",
+            &request.config.to_string(),
+            "--sessionId",
+            &request.session_id,
+            "--tabId",
+            &request.tab_id,
+            "--worktreeId",
+            &request.worktree_id,
+            "--gatewayUrl",
+            &request.gateway_url,
+            "--gatewayToken",
+            &request.gateway_token,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+    let mut child = command.spawn()?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+fn watcher_command() -> Command {
+    if cfg!(debug_assertions) {
+        let mut command = crate::process_env::command("bun");
+        command.arg(workspace_root().join("packages/watcher/src/cli.ts"));
+        command.current_dir(workspace_root());
+        command
+    } else {
+        let path = pragma_client::sidecar_executable("pragma-watch");
+        crate::process_env::command(&path.to_string_lossy())
+    }
 }
 
 /// Reads one scope's config file and resolves every declared entry.

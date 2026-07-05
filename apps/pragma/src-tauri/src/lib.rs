@@ -213,6 +213,12 @@ fn read_plugin_bundle(main_path: String) -> AppResult<String> {
     plugins::read_bundle(std::path::Path::new(&main_path))
 }
 
+/// Starts a host-side watcher sidecar for a plugin-owned agent session.
+#[tauri::command(async)]
+fn start_plugin_watcher(request: plugins::StartWatcherRequest) -> AppResult<()> {
+    plugins::start_watcher(request)
+}
+
 /// Ensures the local HTTP gateway is running and returns its base URL + token.
 #[tauri::command]
 async fn gateway_connection_info(
@@ -630,6 +636,7 @@ pub fn run() {
             save_keybindings,
             read_plugin_manifests,
             read_plugin_bundle,
+            start_plugin_watcher,
             gateway_connection_info,
             pty_spawn,
             pty_attach,

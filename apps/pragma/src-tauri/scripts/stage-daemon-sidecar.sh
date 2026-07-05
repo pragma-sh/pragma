@@ -44,6 +44,7 @@ fi
 # CLI's externalBin copy step succeeds.
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
+bun --filter @pragma/watcher build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-server" \
@@ -56,6 +57,8 @@ cp "$repo_root/packages/ai-helpers/dist/pragma-ai" \
   "$src_tauri_dir/binaries/pragma-ai-$triple"
 cp "$repo_root/packages/github-helpers/dist/pragma-github" \
   "$src_tauri_dir/binaries/pragma-github-$triple"
+cp "$repo_root/packages/watcher/dist/pragma-watch" \
+  "$src_tauri_dir/binaries/pragma-watch-$triple"
 
 # Remove any plugin JS left over from a previous staging layout. Pragma no longer
 # bundles plugin dist (opencode's .mjs) as a Tauri resource; since tauri.conf.json
@@ -70,3 +73,4 @@ echo "staged pragma-gateway ($profile) -> src-tauri/binaries/pragma-gateway-$tri
 echo "staged pragma-cli ($profile) -> src-tauri/binaries/pragma-cli-$triple"
 echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
+echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"

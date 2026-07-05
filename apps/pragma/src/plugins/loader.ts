@@ -171,6 +171,7 @@ function recordBase(entry: PluginEntryResult, context: PluginLoadContext): Plugi
     pluginId: entry.manifest?.name ?? entry.specifier,
     version: entry.manifest?.version ?? null,
     dir: entry.manifest?.dir,
+    mainPath: entry.manifest?.mainPath,
     scope: entry.scope,
     status: "failed",
     config: entry.config ?? undefined,

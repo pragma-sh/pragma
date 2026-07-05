@@ -135,7 +135,7 @@ function toAgentConfig(
   };
 }
 
-function pluginAgentId(pluginId: string, agentId: string): string {
+export function pluginAgentId(pluginId: string, agentId: string): string {
   if (pluginId === "pragma.builtin-agents") {
     return agentId;
   }

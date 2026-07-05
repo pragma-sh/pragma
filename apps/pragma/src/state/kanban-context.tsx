@@ -21,6 +21,7 @@ import type {
 
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { startBackgroundAgentSession } from "@/lib/agent-launch";
+import { startWatcherForAgentSession } from "@/plugins/watchers";
 import { createPullRequest } from "@/lib/github";
 import { defaultTabTitle } from "@/lib/tab-title";
 import {
@@ -379,6 +380,14 @@ function useKanbanCardLifecycle(
       await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
         modelId: card.modelId ?? null,
         reasoningId: null,
+      });
+      void startWatcherForAgentSession({
+        agentId: agent.id,
+        sessionId: tab.id,
+        tabId: tab.id,
+        worktreeId: worktree.id,
+      }).catch((cause: unknown) => {
+        console.warn(`failed to start watcher for ${agent.id}`, cause);
       });
       await updateKanbanCard({
         ...card,

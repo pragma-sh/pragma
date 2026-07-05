@@ -16,6 +16,8 @@ export interface PluginRecord {
   version: string | null;
   /** Absolute plugin directory when resolved from a manifest. */
   dir?: string;
+  /** Absolute plugin bundle path when resolved from a manifest. */
+  mainPath?: string;
   scope: PluginScope;
   /** Owning project id for `scope: "project"` records. */
   projectId?: string;

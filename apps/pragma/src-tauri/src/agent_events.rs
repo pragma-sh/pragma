@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter};
 use crate::pty::PtyClient;
 
 const AGENT_REPORT_EVENT: &str = "pragma:agent-report";
+const AGENT_MESSAGE_EVENT: &str = "pragma:agent-message";
 const AGENT_STATUS_RESET_EVENT: &str = "pragma:agent-status-reset";
 
 /// Starts a long-lived agent event subscription for one connected host client.
@@ -56,6 +57,9 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                         attention_kind,
                     };
                     let _ = app.emit(AGENT_REPORT_EVENT, payload);
+                }
+                Ok(ServerFrame::Event(EventFrame::AgentMessage { message })) => {
+                    let _ = app.emit(AGENT_MESSAGE_EVENT, message);
                 }
                 Ok(
                     ServerFrame::Hello(_)
