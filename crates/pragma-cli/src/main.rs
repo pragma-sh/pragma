@@ -3,7 +3,7 @@
 //! Plain text by default (`comfy-table` for lists, short human lines for
 //! single objects); `--json` emits structured JSON, `--toon` emits
 //! token-efficient TOON. `worktree list` and the GUI-driven commands need the
-//! app; `tab read`, `agent status`, and `agent report` are direct-to-server
+//! app; `tab read`, `agent status`, `agent report`, and `agent message` are direct-to-server
 //! and work with the app closed.
 
 use std::process::ExitCode;
@@ -60,6 +60,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Start(args) => commands::agent_start(args, out),
             AgentCommand::Status(args) => direct::agent_status(args, out),
             AgentCommand::Report(args) => direct::agent_report(args, out),
+            AgentCommand::Message(args) => direct::agent_message(args, out),
         },
     }
 }

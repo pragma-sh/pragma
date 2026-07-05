@@ -398,6 +398,8 @@ pub enum AgentCommand {
     /// Report an external agent's status to the server. Direct to the server;
     /// the reporting logic is the same as before, only the command path moved.
     Report(AgentReportArgs),
+    /// Report a rich agent message to the server. Direct to the server.
+    Message(AgentMessageArgs),
 }
 
 #[derive(Debug, Args)]
@@ -433,6 +435,19 @@ pub struct AgentReportArgs {
     pub agent: String,
     #[command(subcommand)]
     pub report: AgentReportCommand,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentMessageArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// `AgentMessage` JSON payload. Routing keys are filled from env/--agent.
+    #[arg(long, conflicts_with = "stdin")]
+    pub payload: Option<String>,
+    /// Read `AgentMessage` JSON payload from stdin. Routing keys are filled from env/--agent.
+    #[arg(long)]
+    pub stdin: bool,
 }
 
 #[derive(Debug, Subcommand)]

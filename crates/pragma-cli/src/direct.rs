@@ -6,7 +6,7 @@
 //! - `agent report` — write one `AgentReport` frame and exit (unchanged
 //!   logic, only the command path moved).
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
@@ -329,6 +329,64 @@ pub fn agent_report(
     );
     let _ = std::io::stdout().flush();
     Ok(())
+}
+
+/// Rich message sent by an external agent through the server.
+pub fn agent_message(
+    args: &crate::cli::AgentMessageArgs,
+    out: &output::Output,
+) -> Result<(), CliError> {
+    let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let worktree_id = report_worktree(None)?;
+    let raw = message_payload(args)?;
+    let mut value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| CliError::config(format!("invalid AgentMessage JSON: {error}")))?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(CliError::config("AgentMessage JSON must be an object"));
+    };
+    object.insert(
+        "agent".to_string(),
+        serde_json::Value::String(args.agent.clone()),
+    );
+    object.insert(
+        "worktreeId".to_string(),
+        serde_json::Value::String(worktree_id),
+    );
+    object.insert("tabId".to_string(), serde_json::Value::String(tab_id));
+    let frame = RequestFrame {
+        request_id: format!("agent-message-{}", std::process::id()),
+        kind: RequestKind::AgentMessage,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: Some(value.to_string()),
+        rpc: None,
+        subscription: None,
+        control: None,
+        control_result: None,
+    };
+    let Server { mut stream } = server::connect()?;
+    write_json_frame(&mut stream, &frame)?;
+    out.line(
+        "reported",
+        &serde_json::json!({ "ok": true, "agent": args.agent, "messageId": value["id"] }),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+fn message_payload(args: &crate::cli::AgentMessageArgs) -> Result<String, CliError> {
+    if let Some(payload) = &args.payload {
+        return Ok(payload.clone());
+    }
+    if args.stdin {
+        let mut payload = String::new();
+        std::io::stdin().read_to_string(&mut payload)?;
+        return Ok(payload);
+    }
+    Err(CliError::config("pass --payload JSON or --stdin"))
 }
 
 fn report_fields(
