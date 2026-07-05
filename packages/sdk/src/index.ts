@@ -2,13 +2,23 @@ export { PragmaClient } from "./client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 export { PragmaGatewayError, PragmaTransportError } from "./errors";
-export { reportAttention, reportCleared, reportStarted, reportStopped } from "./agents-client";
+export {
+  reportAttention,
+  reportCleared,
+  reportMessage,
+  reportStarted,
+  reportStopped,
+} from "./agents-client";
 export type { PragmaClientConfig } from "./transport";
 export type {
   AgentAttentionKind,
   AgentEvent,
+  AgentMessage,
+  AgentMessageEvent,
   AgentReportPayload,
+  AgentStreamEvent,
   AgentStatus,
+  ReportMessageOptions,
   ReportOptions,
 } from "./types/agents";
 export type { CommandResult, ExecRunRequest } from "./types/exec";

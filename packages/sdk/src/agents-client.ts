@@ -1,11 +1,11 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
-import type { AgentReportPayload } from "@pragma/constants";
+import type { AgentMessage, AgentReportPayload } from "@pragma/constants";
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 import { routes } from "./routes";
 import { ndjsonStream } from "./streaming";
 import { Transport } from "./transport";
-import type { AgentEvent, ReportOptions } from "./types/agents";
+import type { AgentStreamEvent, ReportMessageOptions, ReportOptions } from "./types/agents";
 
 /** Agent status gateway namespace. */
 export class AgentsClient {
@@ -13,6 +13,14 @@ export class AgentsClient {
 
   report(payload: AgentReportPayload, options: { signal?: AbortSignal } = {}): Promise<void> {
     return this.transport.request<void>(routes.agentReports, {
+      method: "POST",
+      body: payload,
+      signal: options.signal,
+    });
+  }
+
+  reportMessage(payload: AgentMessage, options: { signal?: AbortSignal } = {}): Promise<void> {
+    return this.transport.request<void>(routes.agentMessages, {
       method: "POST",
       body: payload,
       signal: options.signal,
@@ -46,9 +54,9 @@ export class AgentsClient {
     });
   }
 
-  async *subscribe(options: { signal?: AbortSignal } = {}): AsyncGenerator<AgentEvent> {
+  async *subscribe(options: { signal?: AbortSignal } = {}): AsyncGenerator<AgentStreamEvent> {
     const response = await this.transport.raw(routes.agentEvents, { signal: options.signal });
-    yield* ndjsonStream<AgentEvent>(response, options.signal);
+    yield* ndjsonStream<AgentStreamEvent>(response, options.signal);
   }
 }
 
@@ -70,6 +78,22 @@ export function reportAttention(options: ReportOptions): Promise<void> {
 /** Reports an agent cleared status. */
 export function reportCleared(options: ReportOptions): Promise<void> {
   return reportWithStatus(options, "cleared", null);
+}
+
+/** Reports one rich agent message. No-ops unless Pragma gateway env is present. */
+export async function reportMessage(options: ReportMessageOptions): Promise<void> {
+  if (!options.client && !hasPragmaEnvironment(options.env)) {
+    return;
+  }
+  const agents =
+    options.client?.agents ??
+    new AgentsClient(
+      new Transport({
+        baseUrl: readEnv(PRAGMA_ENV_KEYS.gatewayUrl, options.env),
+        token: readEnv(PRAGMA_ENV_KEYS.gatewayToken, options.env),
+      }),
+    );
+  await reportMessageWithClient(agents, options);
 }
 
 async function reportWithStatus(
@@ -109,6 +133,29 @@ async function reportWithClient(
       tabId,
       status,
       attentionKind,
+    },
+    { signal: options.signal },
+  );
+}
+
+async function reportMessageWithClient(
+  agents: AgentsClient,
+  options: ReportMessageOptions,
+): Promise<void> {
+  const worktreeId =
+    options.message.worktreeId ??
+    options.worktreeId ??
+    readEnv(PRAGMA_ENV_KEYS.worktreeId, options.env);
+  const tabId = options.message.tabId ?? readEnv(PRAGMA_ENV_KEYS.tabId, options.env);
+  if (!worktreeId || !tabId) {
+    return;
+  }
+  await agents.reportMessage(
+    {
+      ...options.message,
+      agent: options.message.agent ?? options.agent,
+      worktreeId,
+      tabId,
     },
     { signal: options.signal },
   );

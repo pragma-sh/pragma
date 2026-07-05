@@ -9,6 +9,7 @@ export const routes = {
   sessionResize: (id: string): string => `/v1/sessions/${encodeURIComponent(id)}/resize`,
   session: (id: string): string => `/v1/sessions/${encodeURIComponent(id)}`,
   agentReports: "/v1/agents/reports",
+  agentMessages: "/v1/agents/messages",
   agentEvents: "/v1/agents/events",
   agentsSeen: (tabId: string): string => `/v1/tabs/${encodeURIComponent(tabId)}/agents/seen`,
   subscription: (event: string): string => `/v1/subscriptions/${encodeURIComponent(event)}`,
