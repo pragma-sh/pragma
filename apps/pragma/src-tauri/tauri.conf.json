@@ -46,7 +46,8 @@
       "binaries/pragma-gateway",
       "binaries/pragma-cli",
       "binaries/pragma-ai",
-      "binaries/pragma-github"
+      "binaries/pragma-github",
+      "binaries/pragma-automations"
     ],
     "resources": ["resources/**/*"],
     "icon": [

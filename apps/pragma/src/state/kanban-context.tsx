@@ -43,8 +43,8 @@ import {
 } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
-/** Which surface the workspace is showing: the normal shell or the Kanban board. */
-export type WorkspaceMode = "normal" | "kanban";
+/** Which surface the workspace is showing: normal shell, Kanban board, or automations. */
+export type WorkspaceMode = "normal" | "kanban" | "automations";
 
 /** Fields a draft card carries when created or edited. */
 export interface KanbanDraftInput {
@@ -59,6 +59,8 @@ interface KanbanContextValue {
   mode: WorkspaceMode;
   /** Opens the board for the selected project (clears any return affordance). */
   openBoard: () => void;
+  /** Opens the host automations workspace. */
+  openAutomations: () => void;
   /** Exits the board to the normal shell without leaving a return affordance. */
   exitBoard: () => void;
   /** Returns to the board (the "Back to Kanban" control). */
@@ -469,6 +471,7 @@ function useKanbanBoardMode(projectId: string | null): {
   mode: WorkspaceMode;
   backToKanbanAvailable: boolean;
   openBoard: () => void;
+  openAutomations: () => void;
   exitBoard: () => void;
   returnToKanban: () => void;
   setBackToKanbanAvailable: (value: boolean) => void;
@@ -479,6 +482,10 @@ function useKanbanBoardMode(projectId: string | null): {
   const openBoard = useCallback(() => {
     setBackToKanbanAvailable(false);
     setMode("kanban");
+  }, []);
+  const openAutomations = useCallback(() => {
+    setBackToKanbanAvailable(false);
+    setMode("automations");
   }, []);
   const exitBoard = useCallback(() => {
     setBackToKanbanAvailable(false);
@@ -497,6 +504,7 @@ function useKanbanBoardMode(projectId: string | null): {
     mode,
     backToKanbanAvailable,
     openBoard,
+    openAutomations,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -521,6 +529,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     mode,
     backToKanbanAvailable,
     openBoard,
+    openAutomations,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -545,8 +554,9 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<KanbanContextValue>(
     () => ({
-      mode: projectId ? mode : "normal",
+      mode: projectId || mode === "automations" ? mode : "normal",
       openBoard,
+      openAutomations,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,
@@ -567,6 +577,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
       projectId,
       mode,
       openBoard,
+      openAutomations,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,

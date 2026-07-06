@@ -31,6 +31,7 @@ import {
   mergeWorktreeToParent,
   openWorktree,
   pathExists,
+  readAutomationSource,
   readFile,
   renameFile,
   renameWorktree,
@@ -45,6 +46,7 @@ import {
   worktreesAreRemote,
   worktreesMergedStatus,
   worktreeStatus,
+  writeAutomationSource,
   writeFile,
 } from "./tauri";
 
@@ -315,12 +317,27 @@ describe("filesystem IPC wrappers", () => {
     });
   });
 
+  it("readAutomationSource forwards automation id", () => {
+    void readAutomationSource("automation-1");
+    expect(invokeMock).toHaveBeenCalledWith("read_automation_source", {
+      id: "automation-1",
+    });
+  });
+
   it("writeFile forwards worktree id, path, and contents", () => {
     void writeFile("wt-1", "src/app.ts", "const x = 1;");
     expect(invokeMock).toHaveBeenCalledWith("write_file", {
       worktreeId: "wt-1",
       path: "src/app.ts",
       contents: "const x = 1;",
+    });
+  });
+
+  it("writeAutomationSource forwards automation id and contents", () => {
+    void writeAutomationSource("automation-1", "export default {};");
+    expect(invokeMock).toHaveBeenCalledWith("write_automation_source", {
+      id: "automation-1",
+      contents: "export default {};",
     });
   });
 

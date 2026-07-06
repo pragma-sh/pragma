@@ -4,6 +4,7 @@ import { LayoutGrid } from "lucide-react";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
 import type { Tab } from "@pragma/constants";
+import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
 import { Button } from "@/components/ui/button";
@@ -185,18 +186,27 @@ export function WorkspaceShell() {
           className="bg-background flex h-full overflow-hidden text-foreground"
           onContextMenu={preventNativeContextMenu}
         >
-          <ProjectSidebar />
+          {/* Automations mode takes the full frame: its own sidebar + code view
+              replace the project sidebar, so the project sidebar is unmounted.
+              Kanban and the normal shell keep the project sidebar mounted. */}
+          {kanban.mode === "automations" ? (
+            <AutomationsWorkspace />
+          ) : (
+            <>
+              <ProjectSidebar />
+              {/* Kanban mode replaces the shell rather than overlaying it: native
+                  browser webviews float above HTML, so an overlay would be clipped.
+                  The sidebar stays; only the terminal/right-sidebar area is swapped. */}
+              {kanban.mode === "kanban" ? (
+                <ProjectKanbanWorkspace />
+              ) : (
+                <WorkspaceContent kanban={kanban} workspace={workspace} />
+              )}
+            </>
+          )}
           {/* Always-mounted dialogs (new-session / deep links) so they work in
               both the normal shell and the Kanban board. */}
           <WorkspaceDialogs />
-          {/* Kanban mode replaces the shell rather than overlaying it: native
-              browser webviews float above HTML, so an overlay would be clipped.
-              The sidebar stays; only the terminal/right-sidebar area is swapped. */}
-          {kanban.mode === "kanban" ? (
-            <ProjectKanbanWorkspace />
-          ) : (
-            <WorkspaceContent kanban={kanban} workspace={workspace} />
-          )}
         </main>
       </TabDragProvider>
     </RightSidebarProvider>

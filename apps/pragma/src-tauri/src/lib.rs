@@ -5,6 +5,7 @@ mod agent_cli;
 mod agent_events;
 mod agent_notifications;
 mod ai;
+mod automations;
 mod browser;
 mod control;
 mod db;
@@ -589,6 +590,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
+    automations::start(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty);
     ssh_host::reconnect_remote_hosts(app.handle().clone());
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
@@ -723,6 +725,13 @@ pub fn run() {
             ai::ai_login,
             ai::ai_login_respond,
             ai::ai_login_cancel,
+            automations::register_automation_roots,
+            automations::list_automations,
+            automations::approve_automation,
+            automations::reject_automation,
+            automations::run_automation_now,
+            automations::read_automation_source,
+            automations::write_automation_source,
             browser::browser_create,
             browser::browser_frame_height,
             browser::browser_set_bounds,
