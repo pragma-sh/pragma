@@ -52,7 +52,8 @@
         "settings",
         "github",
         "ai",
-        "exec"
+        "exec",
+        "automations"
       ]
     },
     "ProtocolEventKind": {
@@ -65,7 +66,9 @@
         "kanbanChanged",
         "tabsChanged",
         "fileChanged",
-        "echoMode"
+        "echoMode",
+        "automationPending",
+        "automationsChanged"
       ]
     },
     "ProtocolErrorCode": {
@@ -135,6 +138,132 @@
           "type": "array",
           "items": { "$ref": "#/definitions/ProtocolErrorCode" },
           "uniqueItems": true
+        }
+      }
+    },
+    "AutomationScope": {
+      "title": "AutomationScope",
+      "description": "Where an automation file was discovered.",
+      "type": "string",
+      "enum": ["global", "local"]
+    },
+    "AutomationTrust": {
+      "title": "AutomationTrust",
+      "description": "Server trust state for an automation file.",
+      "type": "string",
+      "enum": ["trusted", "approved", "pending", "rejected"]
+    },
+    "AutomationTriggerKind": {
+      "title": "AutomationTriggerKind",
+      "description": "Automation trigger family.",
+      "type": "string",
+      "enum": ["cron", "event", "unknown"]
+    },
+    "AutomationStatus": {
+      "title": "AutomationStatus",
+      "description": "Runtime load/run state surfaced by the host automation runner.",
+      "type": "string",
+      "enum": ["pending", "loaded", "running", "idle", "rejected", "error"]
+    },
+    "AutomationInfo": {
+      "title": "AutomationInfo",
+      "description": "Automation metadata shared by the server and app UI.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "description",
+        "path",
+        "relativePath",
+        "sourceVersion",
+        "scope",
+        "trust",
+        "triggerKind",
+        "status",
+        "projectId",
+        "worktreeId",
+        "worktreeLabel",
+        "lastRunAt",
+        "nextRunAt",
+        "error"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "path": {
+          "type": "string",
+          "description": "Absolute host path to the automation source file."
+        },
+        "relativePath": {
+          "type": "string",
+          "description": "Path relative to the automation root, suitable for editor tabs when local."
+        },
+        "sourceVersion": {
+          "type": "string",
+          "description": "Changes whenever the automation source file contents change."
+        },
+        "scope": { "$ref": "#/definitions/AutomationScope" },
+        "trust": { "$ref": "#/definitions/AutomationTrust" },
+        "triggerKind": { "$ref": "#/definitions/AutomationTriggerKind" },
+        "status": { "$ref": "#/definitions/AutomationStatus" },
+        "projectId": { "type": ["string", "null"] },
+        "worktreeId": { "type": ["string", "null"] },
+        "worktreeLabel": { "type": ["string", "null"] },
+        "lastRunAt": { "type": ["string", "null"] },
+        "nextRunAt": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "AutomationRootRegistration": {
+      "title": "AutomationRootRegistration",
+      "description": "Project/worktree roots the app registers with the host server so local automations can run while the app is closed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "projectPath", "worktrees"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "projectPath": { "type": "string" },
+        "worktrees": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AutomationWorktreeRoot" }
+        }
+      }
+    },
+    "AutomationWorktreeRoot": {
+      "title": "AutomationWorktreeRoot",
+      "description": "One worktree path registered for automation discovery.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "path", "label", "isMain"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "path": { "type": "string" },
+        "label": { "type": "string" },
+        "isMain": { "type": "boolean" }
+      }
+    },
+    "AutomationPendingPayload": {
+      "title": "AutomationPendingPayload",
+      "description": "Delta payload broadcast when a local automation needs approval.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automation"],
+      "properties": {
+        "automation": { "$ref": "#/definitions/AutomationInfo" }
+      }
+    },
+    "AutomationsChangedPayload": {
+      "title": "AutomationsChangedPayload",
+      "description": "Delta payload broadcast when automation list or runtime state changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automations"],
+      "properties": {
+        "automations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AutomationInfo" }
         }
       }
     },

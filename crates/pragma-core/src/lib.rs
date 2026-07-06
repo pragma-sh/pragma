@@ -78,7 +78,8 @@ impl Core {
             | ProtocolRpcMethod::Tabs
             | ProtocolRpcMethod::Settings
             | ProtocolRpcMethod::Github
-            | ProtocolRpcMethod::Ai => Err(CoreError::UnsupportedMethod(
+            | ProtocolRpcMethod::Ai
+            | ProtocolRpcMethod::Automations => Err(CoreError::UnsupportedMethod(
                 rpc::method_name(method).to_string(),
             )),
         }
