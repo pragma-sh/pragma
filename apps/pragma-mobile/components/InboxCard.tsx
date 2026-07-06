@@ -60,7 +60,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
 
   function handleSwipeOpen(direction: "left" | "right"): void {
     // Swiping right reveals the LEFT action (accept); swiping left the right (deny).
-    if (direction === "left") {
+    if (direction === "right") {
       accept();
     } else {
       deny();
