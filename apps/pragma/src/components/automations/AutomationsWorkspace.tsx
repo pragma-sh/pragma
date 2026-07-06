@@ -33,7 +33,7 @@ type SourceState =
 
 export function AutomationsWorkspace() {
   const kanban = useKanban();
-  const { automations, loading, approve, reject, runNow } = useAutomations();
+  const { automations, loading } = useAutomations();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected =
     automations.find((automation) => automation.id === selectedId) ?? automations[0] ?? null;
@@ -95,12 +95,7 @@ export function AutomationsWorkspace() {
         </aside>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           {selected ? (
-            <AutomationEditor
-              automation={selected}
-              onApprove={approve}
-              onReject={reject}
-              onRunNow={runNow}
-            />
+            <AutomationEditor automation={selected} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               No automations found. Add a <code className="mx-1">.ts</code> file under{" "}
@@ -113,19 +108,9 @@ export function AutomationsWorkspace() {
   );
 }
 
-function AutomationEditor({
-  automation,
-  onApprove,
-  onReject,
-  onRunNow,
-}: {
-  automation: AutomationInfo;
-  onApprove: (id: string) => Promise<void>;
-  onReject: (id: string) => Promise<void>;
-  onRunNow: (id: string) => Promise<void>;
-}) {
+/** Editor source state plus the save/change handlers, extracted from the view. */
+function useAutomationSource(automation: AutomationInfo) {
   const [state, setState] = useState<SourceState>({ kind: "loading" });
-  const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
   const [dirty, setDirty] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const savedDocRef = useRef("");
@@ -134,24 +119,16 @@ function AutomationEditor({
   useEffect(() => {
     let cancelled = false;
     if (dirty) return;
-    setDirty(false);
     setState({ kind: "loading" });
     void (async () => {
       try {
         const contents: FileContents = await readAutomationSource(automation.id);
         if (cancelled) return;
-        if (contents.truncated) {
-          setState({ kind: "unsupported", reason: "This automation source is too large to show." });
-          return;
+        setState(sourceStateFor(contents));
+        if (!contents.truncated && !contents.binary) {
+          savedDocRef.current = contents.text;
+          currentDocRef.current = contents.text;
         }
-        if (contents.binary) {
-          setState({ kind: "unsupported", reason: "This automation source is binary." });
-          return;
-        }
-        savedDocRef.current = contents.text;
-        currentDocRef.current = contents.text;
-        setDirty(false);
-        setState({ kind: "ready", doc: contents.text });
       } catch (cause) {
         if (!cancelled) setState({ kind: "error", message: errorMessage(cause) });
       }
@@ -176,28 +153,28 @@ function AutomationEditor({
     [automation.id],
   );
 
-  const saveKeymap = useMemo(
-    () =>
-      Prec.high(
-        keymap.of([
-          {
-            key: "Mod-s",
-            preventDefault: true,
-            run: (view) => {
-              void saveSource(view.state.doc.toString());
-              return true;
-            },
-          },
-        ]),
-      ),
-    [saveSource],
-  );
-
   const onChange = useCallback((value: string) => {
     currentDocRef.current = value;
     setDirty(value !== savedDocRef.current);
     setState((previous) => (previous.kind === "ready" ? { ...previous, doc: value } : previous));
   }, []);
+
+  const retry = useCallback(() => setReloadNonce((nonce) => nonce + 1), []);
+
+  return { state, dirty, currentDocRef, saveSource, onChange, retry };
+}
+
+/** Maps a fetched file's contents to the editor's source state. */
+function sourceStateFor(contents: FileContents): SourceState {
+  if (contents.truncated)
+    return { kind: "unsupported", reason: "This automation source is too large to show." };
+  if (contents.binary) return { kind: "unsupported", reason: "This automation source is binary." };
+  return { kind: "ready", doc: contents.text };
+}
+
+function AutomationEditor({ automation }: { automation: AutomationInfo }) {
+  const { state, dirty, currentDocRef, saveSource, onChange, retry } =
+    useAutomationSource(automation);
 
   const handleSaveShortcut = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -208,8 +185,107 @@ function AutomationEditor({
         void saveSource(currentDocRef.current);
       }
     },
-    [saveSource, state.kind],
+    [saveSource, state.kind, currentDocRef],
   );
+
+  return (
+    <>
+      <EditorToolbar
+        automation={automation}
+        dirty={dirty}
+        canSave={state.kind === "ready"}
+        onSave={() => void saveSource(currentDocRef.current)}
+      />
+      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- keydown relay only */}
+      <div className="relative min-h-0 flex-1" onKeyDown={handleSaveShortcut}>
+        <EditorBody
+          automation={automation}
+          state={state}
+          onChange={onChange}
+          onSave={saveSource}
+          onRetry={retry}
+        />
+      </div>
+    </>
+  );
+}
+
+function EditorToolbar({
+  automation,
+  dirty,
+  canSave,
+  onSave,
+}: {
+  automation: AutomationInfo;
+  dirty: boolean;
+  canSave: boolean;
+  onSave: () => void;
+}) {
+  const { approve, reject, runNow } = useAutomations();
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-sidebar-border bg-sidebar px-4 py-3">
+      <h2 className="text-lg font-semibold">{automation.name}</h2>
+      <StatusBadge automation={automation} />
+      <Pill>{automation.triggerKind}</Pill>
+      <p className="basis-full text-xs text-muted-foreground">
+        {automation.description || "No description."}
+      </p>
+      <p className="basis-full break-all font-mono text-xs text-muted-foreground">
+        {automation.path}
+      </p>
+      <div className="flex flex-1 justify-end gap-2">
+        {automation.trust === "pending" ? (
+          <>
+            <Button size="sm" variant="outline" onClick={() => void reject(automation.id)}>
+              Reject
+            </Button>
+            <Button size="sm" onClick={() => void approve(automation.id)}>
+              Trust
+            </Button>
+          </>
+        ) : null}
+        {dirty ? <Pill>unsaved</Pill> : null}
+        <Button disabled={!dirty || !canSave} size="sm" variant="outline" onClick={onSave}>
+          Save
+        </Button>
+        <Button
+          disabled={automation.trust === "pending" || automation.trust === "rejected"}
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            void runNow(automation.id).then(
+              () => toast.success("Automation started"),
+              (cause) => toast.error(errorMessage(cause)),
+            );
+          }}
+        >
+          <Play className="size-3.5" />
+          Run now
+        </Button>
+      </div>
+      {automation.error ? (
+        <div className="basis-full rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          {automation.error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EditorBody({
+  automation,
+  state,
+  onChange,
+  onSave,
+  onRetry,
+}: {
+  automation: AutomationInfo;
+  state: SourceState;
+  onChange: (value: string) => void;
+  onSave: (doc: string) => void;
+  onRetry: () => void;
+}) {
+  const [languageExtension, setLanguageExtension] = useState<Extension | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,93 +300,47 @@ function AutomationEditor({
   }, [automation.relativePath, automation.path]);
 
   const extensions = useMemo(() => {
-    const base = [pragmaEditorTheme, pragmaSyntaxHighlighting, saveKeymap];
+    const base = [pragmaEditorTheme, pragmaSyntaxHighlighting, saveKeymap(onSave)];
     return languageExtension ? [...base, languageExtension] : base;
-  }, [languageExtension, saveKeymap]);
+  }, [languageExtension, onSave]);
 
+  if (state.kind === "loading") return <Placeholder>Loading source…</Placeholder>;
+  if (state.kind === "unsupported") return <Placeholder>{state.reason}</Placeholder>;
+  if (state.kind === "error") {
+    return (
+      <Placeholder>
+        <p className="text-destructive">{state.message}</p>
+        <Button className="mt-3" onClick={onRetry} size="sm" variant="ghost">
+          Retry
+        </Button>
+      </Placeholder>
+    );
+  }
   return (
-    <>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-sidebar-border bg-sidebar px-4 py-3">
-        <h2 className="text-lg font-semibold">{automation.name}</h2>
-        <StatusBadge automation={automation} />
-        <Pill>{automation.triggerKind}</Pill>
-        <p className="basis-full text-xs text-muted-foreground">
-          {automation.description || "No description."}
-        </p>
-        <p className="basis-full break-all font-mono text-xs text-muted-foreground">
-          {automation.path}
-        </p>
-        <div className="flex flex-1 justify-end gap-2">
-          {automation.trust === "pending" ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => void onReject(automation.id)}>
-                Reject
-              </Button>
-              <Button size="sm" onClick={() => void onApprove(automation.id)}>
-                Trust
-              </Button>
-            </>
-          ) : null}
-          {dirty ? <Pill>unsaved</Pill> : null}
-          <Button
-            disabled={!dirty || state.kind !== "ready"}
-            size="sm"
-            variant="outline"
-            onClick={() => void saveSource(currentDocRef.current)}
-          >
-            Save
-          </Button>
-          <Button
-            disabled={automation.trust === "pending" || automation.trust === "rejected"}
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              void onRunNow(automation.id).then(
-                () => toast.success("Automation started"),
-                (cause) => toast.error(errorMessage(cause)),
-              );
-            }}
-          >
-            <Play className="size-3.5" />
-            Run now
-          </Button>
-        </div>
-        {automation.error ? (
-          <div className="basis-full rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            {automation.error}
-          </div>
-        ) : null}
-      </div>
-      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- keydown relay only */}
-      <div className="relative min-h-0 flex-1" onKeyDown={handleSaveShortcut}>
-        {state.kind === "loading" ? (
-          <Placeholder>Loading source…</Placeholder>
-        ) : state.kind === "unsupported" ? (
-          <Placeholder>{state.reason}</Placeholder>
-        ) : state.kind === "error" ? (
-          <Placeholder>
-            <p className="text-destructive">{state.message}</p>
-            <Button
-              className="mt-3"
-              onClick={() => setReloadNonce((nonce) => nonce + 1)}
-              size="sm"
-              variant="ghost"
-            >
-              Retry
-            </Button>
-          </Placeholder>
-        ) : (
-          <CodeMirror
-            className="h-full"
-            extensions={extensions}
-            height="100%"
-            onChange={onChange}
-            theme="none"
-            value={state.doc}
-          />
-        )}
-      </div>
-    </>
+    <CodeMirror
+      className="h-full"
+      extensions={extensions}
+      height="100%"
+      onChange={onChange}
+      theme="none"
+      value={state.doc}
+    />
+  );
+}
+
+/** Mod-S keymap that saves the current editor document. */
+function saveKeymap(onSave: (doc: string) => void): Extension {
+  return Prec.high(
+    keymap.of([
+      {
+        key: "Mod-s",
+        preventDefault: true,
+        run: (view) => {
+          onSave(view.state.doc.toString());
+          return true;
+        },
+      },
+    ]),
   );
 }
 

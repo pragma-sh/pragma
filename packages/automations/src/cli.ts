@@ -64,26 +64,23 @@ function packageName(specifier: string): string {
   return specifier.split("/")[0] ?? specifier;
 }
 
+const IMPORT_PATTERNS = [
+  /import\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/g,
+  /export\s+[^"']+\s+from\s+["']([^"']+)["']/g,
+  /import\(\s*["']([^"']+)["']\s*\)/g,
+];
+
+function isExternalSpecifier(specifier: string | undefined): specifier is string {
+  if (!specifier || specifier === "@pragma/automations") return false;
+  if (/^[./]/.test(specifier)) return false;
+  return !builtins.has(specifier);
+}
+
 function bareImports(source: string): string[] {
   const imports = new Set<string>();
-  const patterns = [
-    /import\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/g,
-    /export\s+[^"']+\s+from\s+["']([^"']+)["']/g,
-    /import\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-  for (const pattern of patterns) {
+  for (const pattern of IMPORT_PATTERNS) {
     for (const match of source.matchAll(pattern)) {
-      const specifier = match[1];
-      if (
-        !specifier ||
-        specifier.startsWith(".") ||
-        specifier.startsWith("/") ||
-        builtins.has(specifier)
-      ) {
-        continue;
-      }
-      if (specifier === "@pragma/automations") continue;
-      imports.add(packageName(specifier));
+      if (isExternalSpecifier(match[1])) imports.add(packageName(match[1]));
     }
   }
   return [...imports];
@@ -138,20 +135,28 @@ async function ensurePackages(root: string, specifiers: string[]): Promise<void>
   }
 }
 
+function hasValidTrigger(definition: AutomationDefinition): boolean {
+  const trigger = definition.trigger;
+  return Boolean(trigger) && (trigger.type === "cron" || trigger.type === "event");
+}
+
+/** Returns the first failing validation message for a definition, or null when valid. */
+function automationProblem(definition: AutomationDefinition): string | null {
+  const checks: Array<[boolean, string]> = [
+    [definition.pragmaAutomation === true, "default export must use defineAutomation"],
+    [Boolean(definition.name.trim()), "automation name is required"],
+    [Boolean(definition.description.trim()), "automation description is required"],
+    [hasValidTrigger(definition), "automation trigger must be cron or event"],
+    [typeof definition.run === "function", "automation run must be a function"],
+  ];
+  return checks.find(([ok]) => !ok)?.[1] ?? null;
+}
+
 function validateAutomation(value: unknown): AutomationDefinition {
   if (!value || typeof value !== "object") throw new Error("default export is not an automation");
   const definition = value as AutomationDefinition;
-  if (definition.pragmaAutomation !== true)
-    throw new Error("default export must use defineAutomation");
-  if (!definition.name.trim()) throw new Error("automation name is required");
-  if (!definition.description.trim()) throw new Error("automation description is required");
-  if (
-    !definition.trigger ||
-    (definition.trigger.type !== "cron" && definition.trigger.type !== "event")
-  ) {
-    throw new Error("automation trigger must be cron or event");
-  }
-  if (typeof definition.run !== "function") throw new Error("automation run must be a function");
+  const problem = automationProblem(definition);
+  if (problem) throw new Error(problem);
   return definition;
 }
 
@@ -173,37 +178,51 @@ function within(root: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
+interface FindOptions {
+  name?: string;
+  minBytes?: number;
+}
+
+// Missing or unreadable paths (ENOENT, EPERM, …) are skipped, not fatal —
+// a watcher polling for a file that does not exist yet must not throw.
+async function statSafe(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
+  try {
+    return await stat(path);
+  } catch {
+    return null;
+  }
+}
+
+async function readdirSafe(path: string): Promise<string[]> {
+  try {
+    return await readdir(path);
+  } catch {
+    return [];
+  }
+}
+
+function fileMatches(path: string, size: number | bigint, options: FindOptions): boolean {
+  if (options.name !== undefined && basename(path) !== options.name) return false;
+  return options.minBytes === undefined || size >= options.minBytes;
+}
+
 async function findFiles(
   root: string,
   start: string,
-  options?: { name?: string; minBytes?: number },
+  options: FindOptions = {},
 ): Promise<string[]> {
   const base = resolve(root, start);
   if (!within(root, base)) throw new Error("path escapes automation root");
   const result: string[] = [];
   async function walk(path: string): Promise<void> {
-    // Missing or unreadable paths (ENOENT, EPERM, …) are skipped, not fatal —
-    // a watcher polling for a file that does not exist yet must not throw.
-    let info;
-    try {
-      info = await stat(path);
-    } catch {
-      return;
-    }
+    const info = await statSafe(path);
+    if (!info) return;
     if (info.isDirectory()) {
-      let entries: string[];
-      try {
-        entries = await readdir(path);
-      } catch {
-        return;
-      }
+      const entries = await readdirSafe(path);
       await Promise.all(entries.map((entry) => walk(join(path, entry))));
       return;
     }
-    if (options?.name !== undefined && basename(path) !== options.name) return;
-    if (options?.minBytes === undefined || info.size >= options.minBytes) {
-      result.push(relative(root, path));
-    }
+    if (fileMatches(path, info.size, options)) result.push(relative(root, path));
   }
   await walk(base);
   return result;
@@ -282,17 +301,22 @@ async function load(command: LoadCommand): Promise<void> {
   emit({ type: "status", id: command.id, status: "idle" });
 }
 
+async function reload(id: string): Promise<void> {
+  const existing = loaded.get(id);
+  if (!existing) throw new Error(`automation not loaded: ${id}`);
+  await load(existing.command);
+}
+
 async function handle(command: Command): Promise<void> {
-  if (command.type === "load") {
-    await load(command);
-  } else if (command.type === "unload") {
-    await unload(command.id);
-  } else if (command.type === "reload") {
-    const existing = loaded.get(command.id);
-    if (!existing) throw new Error(`automation not loaded: ${command.id}`);
-    await load(existing.command);
-  } else {
-    await runAutomation(command.id);
+  switch (command.type) {
+    case "load":
+      return load(command);
+    case "unload":
+      return unload(command.id);
+    case "reload":
+      return reload(command.id);
+    default:
+      return runAutomation(command.id);
   }
 }
 

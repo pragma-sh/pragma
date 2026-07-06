@@ -44,10 +44,10 @@ import {
 import { useWorkspace } from "@/state/workspace-context";
 
 /** Which surface the workspace is showing: normal shell, Kanban board, or automations. */
-export type WorkspaceMode = "normal" | "kanban" | "automations";
+type WorkspaceMode = "normal" | "kanban" | "automations";
 
 /** Fields a draft card carries when created or edited. */
-export interface KanbanDraftInput {
+interface KanbanDraftInput {
   branchName: string;
   prompt: string;
   agentId: string;
