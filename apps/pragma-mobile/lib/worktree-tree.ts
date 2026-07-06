@@ -17,6 +17,13 @@ export function buildWorktreeTree(worktrees: Worktree[]): WorktreeNode[] {
     nodes.set(worktree.id, { worktree, children: [] });
   }
 
+  const roots = linkRoots(nodes);
+  sortNodes(roots);
+  return roots;
+}
+
+/** Hang each node off its parent's `children`; return the parentless roots. */
+function linkRoots(nodes: Map<string, WorktreeNode>): WorktreeNode[] {
   const roots: WorktreeNode[] = [];
   for (const node of nodes.values()) {
     const parent = node.worktree.parentId ? nodes.get(node.worktree.parentId) : undefined;
@@ -26,8 +33,6 @@ export function buildWorktreeTree(worktrees: Worktree[]): WorktreeNode[] {
       roots.push(node);
     }
   }
-
-  sortNodes(roots);
   return roots;
 }
 

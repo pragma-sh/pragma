@@ -84,12 +84,15 @@ export function useWorktreeTree(projectId: string): WorktreeNode[] {
 /** Direct child worktrees of a given worktree (one nesting level). */
 export function useChildWorktrees(worktreeId: string): WorktreeNode[] {
   const { worktrees } = useData();
-  return useMemo(() => {
-    const projectId = worktrees.find((w) => w.id === worktreeId)?.projectId;
-    if (!projectId) return [];
-    const tree = buildWorktreeTree(worktrees.filter((w) => w.projectId === projectId));
-    return findNode(tree, worktreeId)?.children ?? [];
-  }, [worktrees, worktreeId]);
+  return useMemo(() => childWorktreesOf(worktrees, worktreeId), [worktrees, worktreeId]);
+}
+
+/** The direct children of `worktreeId` within its own project's tree. */
+function childWorktreesOf(worktrees: Worktree[], worktreeId: string): WorktreeNode[] {
+  const worktree = worktrees.find((w) => w.id === worktreeId);
+  if (!worktree) return [];
+  const siblings = worktrees.filter((w) => w.projectId === worktree.projectId);
+  return findNode(buildWorktreeTree(siblings), worktreeId)?.children ?? [];
 }
 
 /** Agent tabs hosted by a worktree. */

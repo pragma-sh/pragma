@@ -12,7 +12,7 @@ import { IconSymbol } from "./IconSymbol";
  * top-level/home navigation shortcut — the stack's native back button handles
  * escaping the drill-down.
  */
-export function NewWorktreeButton() {
+function NewWorktreeButton() {
   const [open, setOpen] = useState(false);
   return (
     <>

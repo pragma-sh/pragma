@@ -8,6 +8,7 @@ import {
   MOCK_AGENTS,
   type AgentModelSelection,
   type MockAgent,
+  type MockAgentModel,
 } from "@/lib/data/agents";
 import { hapticSelection } from "@/lib/haptics";
 
@@ -83,34 +84,30 @@ export function AgentModelSelector({
 
 /** Build the nested native-menu action tree from the agent fixtures. */
 function buildActions(agents: MockAgent[], value: AgentModelSelection | null): MenuAction[] {
+  const selectedLeaf = value ? leafId(value.agentId, value.modelId, value.reasoningId) : null;
   return agents.map((agent) => ({
     id: agent.id,
     title: `${agent.icon}  ${agent.name}`,
-    subactions: agent.models.map((model) => {
-      if (model.reasoning.length > 0) {
-        return {
-          id: model.id,
-          title: model.name,
-          subactions: model.reasoning.map((reasoning) => ({
-            id: leafId(agent.id, model.id, reasoning.id),
-            title: reasoning.name,
-            state:
-              value?.agentId === agent.id &&
-              value.modelId === model.id &&
-              value.reasoningId === reasoning.id
-                ? "on"
-                : "off",
-          })),
-        } satisfies MenuAction;
-      }
-      return {
-        id: leafId(agent.id, model.id, null),
-        title: model.name,
-        state:
-          value?.agentId === agent.id && value.modelId === model.id && !value.reasoningId
-            ? "on"
-            : "off",
-      } satisfies MenuAction;
-    }),
+    subactions: agent.models.map((model) => modelAction(agent.id, model, selectedLeaf)),
   }));
+}
+
+/** A single model row: a leaf item, or a submenu of reasoning-level leaves. */
+function modelAction(
+  agentId: string,
+  model: MockAgentModel,
+  selectedLeaf: string | null,
+): MenuAction {
+  if (model.reasoning.length > 0) {
+    return {
+      id: model.id,
+      title: model.name,
+      subactions: model.reasoning.map((reasoning) => {
+        const id = leafId(agentId, model.id, reasoning.id);
+        return { id, title: reasoning.name, state: id === selectedLeaf ? "on" : "off" };
+      }),
+    } satisfies MenuAction;
+  }
+  const id = leafId(agentId, model.id, null);
+  return { id, title: model.name, state: id === selectedLeaf ? "on" : "off" } satisfies MenuAction;
 }

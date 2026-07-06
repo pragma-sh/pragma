@@ -10,16 +10,17 @@ const PRIORITY: Record<AgentStatus, number> = {
   cleared: 0,
 };
 
+/** Sort rank for a status; `cleared`/absent rank below every real status. */
+function rankOf(status: AgentStatus | null): number {
+  return status && status !== "cleared" ? PRIORITY[status] : -1;
+}
+
 /** Roll a set of statuses up to the single most-urgent one, or null. */
-export function aggregateStatus(statuses: AgentStatus[]): AgentStatus | null {
-  let best: AgentStatus | null = null;
-  for (const status of statuses) {
-    if (status === "cleared") continue;
-    if (best === null || PRIORITY[status] > PRIORITY[best]) {
-      best = status;
-    }
-  }
-  return best;
+function aggregateStatus(statuses: AgentStatus[]): AgentStatus | null {
+  return statuses.reduce<AgentStatus | null>(
+    (best, status) => (rankOf(status) > rankOf(best) ? status : best),
+    null,
+  );
 }
 
 /** The aggregate status for a worktree from its agent tabs. */

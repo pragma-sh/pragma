@@ -54,6 +54,34 @@ export interface NavRowProps {
   onPress?: () => void;
 }
 
+/** A leading/trailing accessory slot — renders nothing when empty. */
+function Accessory({ children }: { children?: ReactNode }) {
+  if (!children) return null;
+  return <View className="shrink-0">{children}</View>;
+}
+
+/** The row's stacked title + optional subtitle. */
+function RowLabel({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <View className="min-w-0 flex-1">
+      <Text className="text-base text-foreground" numberOfLines={1}>
+        {title}
+      </Text>
+      {subtitle ? (
+        <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** The trailing disclosure chevron, when the row shows one. */
+function RowChevron({ show }: { show: boolean }) {
+  if (!show) return null;
+  return <IconSymbol color="hsl(240 4% 46%)" fallback="›" name="chevron.right" size={16} />;
+}
+
 /** A single tappable settings-style row. Fires selection haptics on press. */
 export function NavRow({ title, subtitle, leading, trailing, chevron, onPress }: NavRowProps) {
   const showChevron = chevron ?? Boolean(onPress);
@@ -67,21 +95,10 @@ export function NavRow({ title, subtitle, leading, trailing, chevron, onPress }:
         onPress?.();
       }}
     >
-      {leading ? <View className="shrink-0">{leading}</View> : null}
-      <View className="min-w-0 flex-1">
-        <Text className="text-base text-foreground" numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text className="text-sm text-muted-foreground" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-      {trailing ? <View className="shrink-0">{trailing}</View> : null}
-      {showChevron ? (
-        <IconSymbol color="hsl(240 4% 46%)" fallback="›" name="chevron.right" size={16} />
-      ) : null}
+      <Accessory>{leading}</Accessory>
+      <RowLabel subtitle={subtitle} title={title} />
+      <Accessory>{trailing}</Accessory>
+      <RowChevron show={showChevron} />
     </Pressable>
   );
 }

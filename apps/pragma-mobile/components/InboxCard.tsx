@@ -33,36 +33,38 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
   const [otherText, setOtherText] = useState("");
 
   const isQuestion = item.kind === "question";
-
-  /** The answer to submit for a question, or null when nothing valid is chosen. */
-  function currentAnswer(): string | null {
-    if (!isQuestion) return null;
-    if (selected === OTHER) {
-      const trimmed = otherText.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    }
-    return selected;
-  }
+  const acceptLabel = isQuestion ? "Submit" : "Approve";
+  const swipeVerb = isQuestion ? "submit" : "approve";
 
   function accept(): void {
-    if (isQuestion) {
-      const answer = currentAnswer();
-      if (!answer) {
-        hapticWarning();
-        swipeRef.current?.close();
-        return;
-      }
+    if (!isQuestion) {
       hapticSuccess();
-      onResolve({ kind: "answer", option: answer });
+      onResolve({ kind: "approve" });
+      return;
+    }
+    // For a question, submit the picked option (or the trimmed free-text answer).
+    const answer = selected === OTHER ? otherText.trim() : selected;
+    if (!answer) {
+      hapticWarning();
+      swipeRef.current?.close();
       return;
     }
     hapticSuccess();
-    onResolve({ kind: "approve" });
+    onResolve({ kind: "answer", option: answer });
   }
 
   function deny(): void {
     hapticWarning();
     onResolve({ kind: "deny" });
+  }
+
+  function handleSwipeOpen(direction: "left" | "right"): void {
+    // Swiping right reveals the LEFT action (accept); swiping left the right (deny).
+    if (direction === "left") {
+      accept();
+    } else {
+      deny();
+    }
   }
 
   return (
@@ -76,7 +78,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
           align="left"
           color="bg-success"
           fallback="✓"
-          label={isQuestion ? "Submit" : "Approve"}
+          label={acceptLabel}
           sf="checkmark.circle.fill"
           translation={translation}
         />
@@ -93,30 +95,10 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
       )}
       rightThreshold={72}
       onSwipeableWillOpen={() => hapticImpact()}
-      onSwipeableOpen={(direction) => {
-        // Swiping right reveals the LEFT action (accept); swiping left the right (deny).
-        if (direction === "left") {
-          accept();
-        } else {
-          deny();
-        }
-      }}
+      onSwipeableOpen={handleSwipeOpen}
     >
       <Card>
-        <CardHeader className="gap-2">
-          <View className="flex-row items-center gap-2">
-            <TypeBadge kind={item.kind} />
-            <Text className="flex-1 text-xs text-muted-foreground" numberOfLines={1}>
-              {item.projectName} · {item.worktreeLabel} · {item.agent}
-            </Text>
-          </View>
-          <Text className="text-base font-semibold text-card-foreground">{item.prompt}</Text>
-          {item.detail ? (
-            <View className="rounded-md bg-muted px-3 py-2">
-              <Text className="font-mono text-xs text-muted-foreground">{item.detail}</Text>
-            </View>
-          ) : null}
-        </CardHeader>
+        <InboxCardHeader item={item} />
 
         <CardContent className="gap-4">
           {isQuestion ? (
@@ -126,7 +108,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
                 hapticSelection();
                 setSelected(value);
               }}
-              options={item.options ?? []}
+              options={item.options}
               otherText={otherText}
               selected={selected}
             />
@@ -135,7 +117,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
           <View className="flex-row gap-3">
             <Button className="flex-1" variant="success" onPress={accept}>
               <IconSymbol color="white" fallback="✓" name="checkmark" size={16} tintColor="white" />
-              <Text>{isQuestion ? "Submit" : "Approve"}</Text>
+              <Text>{acceptLabel}</Text>
             </Button>
             <Button className="flex-1" variant="destructive" onPress={deny}>
               <IconSymbol color="white" fallback="✕" name="xmark" size={16} tintColor="white" />
@@ -143,11 +125,31 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
             </Button>
           </View>
           <Text className="text-center text-xs text-muted-foreground">
-            Swipe right to {isQuestion ? "submit" : "approve"} · swipe left to deny
+            Swipe right to {swipeVerb} · swipe left to deny
           </Text>
         </CardContent>
       </Card>
     </ReanimatedSwipeable>
+  );
+}
+
+/** Card header: type badge, source path, prompt, and optional detail block. */
+function InboxCardHeader({ item }: { item: InboxItem }) {
+  return (
+    <CardHeader className="gap-2">
+      <View className="flex-row items-center gap-2">
+        <TypeBadge kind={item.kind} />
+        <Text className="flex-1 text-xs text-muted-foreground" numberOfLines={1}>
+          {item.projectName} · {item.worktreeLabel} · {item.agent}
+        </Text>
+      </View>
+      <Text className="text-base font-semibold text-card-foreground">{item.prompt}</Text>
+      {item.detail ? (
+        <View className="rounded-md bg-muted px-3 py-2">
+          <Text className="font-mono text-xs text-muted-foreground">{item.detail}</Text>
+        </View>
+      ) : null}
+    </CardHeader>
   );
 }
 
@@ -158,7 +160,7 @@ function QuestionOptions({
   onSelect,
   onOther,
 }: {
-  options: string[];
+  options: string[] | undefined;
   selected: string | null;
   otherText: string;
   onSelect: (value: string) => void;
@@ -166,7 +168,7 @@ function QuestionOptions({
 }) {
   return (
     <RadioGroup onValueChange={onSelect} value={selected ?? ""}>
-      {options.map((option) => (
+      {(options ?? []).map((option) => (
         <OptionRow
           key={option}
           label={option}

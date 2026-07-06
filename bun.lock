@@ -102,7 +102,6 @@
         "@react-native-menu/menu": "^2.0.0",
         "@rn-primitives/portal": "^1.5.2",
         "@rn-primitives/radio-group": "^1.5.2",
-        "@rn-primitives/slot": "^1.5.2",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "expo": "^57.0.2",

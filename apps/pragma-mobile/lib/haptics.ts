@@ -26,5 +26,3 @@ export function hapticSuccess(): void {
 export function hapticWarning(): void {
   if (enabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
 }
-
-export { Haptics };
