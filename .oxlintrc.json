@@ -29,6 +29,14 @@
       "rules": {
         "no-console": "off"
       }
+    },
+    {
+      "files": ["apps/pragma-mobile/**"],
+      "rules": {
+        "react/style-prop-object": "off",
+        "import/namespace": "off",
+        "jsx-a11y/no-autofocus": "off"
+      }
     }
   ]
 }

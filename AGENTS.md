@@ -92,7 +92,8 @@ than no guide.
 ```
 .
 ├── apps/
-│   └── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
+│   ├── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
+│   └── pragma-mobile/           # Expo (SDK 57) native client → see apps/pragma-mobile/AGENTS.md
 ├── crates/
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
@@ -156,6 +157,11 @@ bun install                # Install all workspace deps
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+
+# Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
+bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
+bun run dev:mobile:android # First run: build dev client + boot Android emulator
+bun run dev:mobile         # Metro dev server (after the dev client is installed once)
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo
