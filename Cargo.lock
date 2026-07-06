@@ -5387,6 +5387,7 @@ name = "pragma-server"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "daemonize",
  "portable-pty",
  "pragma-constants",
@@ -5394,6 +5395,7 @@ dependencies = [
  "pragma-protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
 ]

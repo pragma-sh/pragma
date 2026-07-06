@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -8,6 +7,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use chrono::{DateTime, Datelike, Timelike, Utc};
+use sha2::{Digest, Sha256};
 
 use pragma_constants::{
     AutomationInfo, AutomationRootRegistration, AutomationScope, AutomationStatus,
@@ -1086,10 +1088,19 @@ fn string_property(source: &str, key: &str) -> Option<String> {
     None
 }
 
-fn stable_hash(value: &impl Hash) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+/// Deterministic, toolchain-stable hash used for automation IDs and content-trust
+/// gating. Uses SHA-256 (not `DefaultHasher`, whose algorithm is not guaranteed
+/// stable across Rust releases) truncated to 16 hex chars so persisted IDs and
+/// trust records stay valid across binary rebuilds.
+fn stable_hash(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(value.as_bytes());
+    let mut out = String::with_capacity(16);
+    for byte in &digest[..8] {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn now_seconds() -> u64 {
@@ -1107,11 +1118,19 @@ fn cron_matches(schedule: &str, minute: u64) -> bool {
     if parts.len() != 5 {
         return false;
     }
-    let minute_of_hour = minute % 60;
-    let hour = (minute / 60) % 24;
-    let day = ((minute / 60 / 24) % 31) + 1;
-    let month = ((minute / 60 / 24 / 31) % 12) + 1;
-    let weekday = (minute / 60 / 24 + 4) % 7;
+    // Derive the real calendar fields from a UTC timestamp instead of assuming
+    // fixed 31-day months, so day-of-month and month cron fields fire correctly.
+    let Some(when) = i64::try_from(minute * 60)
+        .ok()
+        .and_then(|secs| DateTime::<Utc>::from_timestamp(secs, 0))
+    else {
+        return false;
+    };
+    let minute_of_hour = u64::from(when.minute());
+    let hour = u64::from(when.hour());
+    let day = u64::from(when.day());
+    let month = u64::from(when.month());
+    let weekday = u64::from(when.weekday().num_days_from_sunday());
     field_matches(parts[0], minute_of_hour, 0, 59)
         && field_matches(parts[1], hour, 0, 23)
         && field_matches(parts[2], day, 1, 31)
@@ -1189,5 +1208,17 @@ mod tests {
         assert!(cron_matches("* * * * *", 123));
         assert!(cron_matches("*/5 * * * *", 125));
         assert!(!cron_matches("*/5 * * * *", 126));
+    }
+
+    #[test]
+    fn derives_real_calendar_day_and_month() {
+        // 2021-02-01 00:00 UTC = 1_612_137_600 s = 26_868_960 epoch-minutes.
+        // A naive 31-day-month scheme would report day 1 of the "13th" cycle
+        // here; the chrono-based derivation must report day 1, month 2, Monday.
+        let feb_first = 26_868_960;
+        assert!(cron_matches("0 0 1 2 *", feb_first));
+        assert!(cron_matches("0 0 1 2 1", feb_first)); // Monday
+        assert!(!cron_matches("0 0 1 1 *", feb_first)); // not January
+        assert!(!cron_matches("0 0 32 * *", feb_first)); // no 32nd day
     }
 }
