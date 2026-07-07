@@ -8,12 +8,7 @@ function createBuiltinWatcher(agent, handleDecisions) {
   return {
     agent,
     async watch(ctx) {
-      const config = ctx.config ?? {};
-      const keys = {
-        approveKeys: config.approveKeys ?? DEFAULT_APPROVE_KEYS,
-        denyKeys: config.denyKeys ?? DEFAULT_DENY_KEYS,
-        submitKeys: config.submitKeys ?? DEFAULT_SUBMIT_KEYS,
-      };
+      const keys = resolveKeys(ctx.config);
       const seenRequestIds = new Set();
       while (!ctx.signal.aborted) {
         try {
@@ -30,6 +25,14 @@ function createBuiltinWatcher(agent, handleDecisions) {
 var opencodeApprovalWatcher = createBuiltinWatcher("opencode", true);
 var claudeCodeInterjectWatcher = createBuiltinWatcher("claude-code", false);
 var cursorInterjectWatcher = createBuiltinWatcher("cursor", false);
+function resolveKeys(config) {
+  const c = config ?? {};
+  return {
+    approveKeys: c.approveKeys ?? DEFAULT_APPROVE_KEYS,
+    denyKeys: c.denyKeys ?? DEFAULT_DENY_KEYS,
+    submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS,
+  };
+}
 async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) {
   const connection = await ctx.sdk.agents.connect({
     agent: ctx.agentId,
@@ -41,16 +44,21 @@ async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) 
     if (ctx.signal.aborted) {
       return;
     }
-    if (handleDecisions && event.type === "agentDecision") {
-      const { decision } = event;
-      if (seenRequestIds.has(decision.requestId)) {
-        continue;
-      }
-      seenRequestIds.add(decision.requestId);
-      await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
-    } else if (event.type === "agentInput") {
-      await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+    await handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event);
+  }
+}
+async function handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event) {
+  if (handleDecisions && event.type === "agentDecision") {
+    const { decision } = event;
+    if (seenRequestIds.has(decision.requestId)) {
+      return;
     }
+    seenRequestIds.add(decision.requestId);
+    await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
+    return;
+  }
+  if (event.type === "agentInput") {
+    await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
   }
 }
 async function writeKeys(ctx, data) {

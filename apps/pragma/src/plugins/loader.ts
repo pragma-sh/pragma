@@ -165,17 +165,27 @@ function validateConfig(definition: PluginDefinition, config: unknown): Outcome<
   return { ok: true, value: result.data };
 }
 
+/** Manifest-derived identity fields, falling back when the manifest is absent. */
+function manifestFields(
+  entry: PluginEntryResult,
+): Pick<PluginRecord, "pluginId" | "version" | "dir" | "mainPath" | "modifiedMs"> {
+  const manifest = entry.manifest;
+  return {
+    pluginId: manifest?.name ?? entry.specifier,
+    version: manifest?.version ?? null,
+    dir: manifest?.dir,
+    mainPath: manifest?.mainPath,
+    modifiedMs: manifest?.modifiedMs ?? null,
+  };
+}
+
 /** Builds the scope/identity fields shared by success and failure records. */
 function recordBase(entry: PluginEntryResult, context: PluginLoadContext): PluginRecord {
   return {
-    pluginId: entry.manifest?.name ?? entry.specifier,
-    version: entry.manifest?.version ?? null,
-    dir: entry.manifest?.dir,
-    mainPath: entry.manifest?.mainPath,
+    ...manifestFields(entry),
     scope: entry.scope,
     status: "failed",
     config: entry.config ?? undefined,
-    modifiedMs: entry.manifest?.modifiedMs ?? null,
     ...projectRecordFields(entry.projectPath, context),
   };
 }

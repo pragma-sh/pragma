@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Creates a child-process command with a PATH suitable for GUI-launched hosts.
+#[must_use]
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
     command.env("PATH", user_path());
@@ -25,6 +26,7 @@ pub fn command(program: &str) -> Command {
 /// across worktrees and within one — and `GIT_OPTIONAL_LOCKS=0` stops read-only
 /// commands from taking `index.lock` for opportunistic index refreshes, which
 /// would otherwise make parallel queries on the same worktree fail spuriously.
+#[must_use]
 pub fn git() -> Command {
     let mut command = command("git");
     command.env("GIT_OPTIONAL_LOCKS", "0");

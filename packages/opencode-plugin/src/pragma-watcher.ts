@@ -7,6 +7,8 @@
 //
 // Type-only imports keep this module free of the `@pragma/plugin` runtime barrel
 // so the sidecar bundle stays a lean node module.
+import type { AgentStreamEvent } from "@pragma/sdk";
+
 import type { WatcherContext, WatcherDefinition } from "@pragma/plugin";
 
 /** Per-plugin config controlling which keystrokes answer opencode's prompt. */
@@ -62,14 +64,8 @@ function createBuiltinWatcher(
 ): WatcherDefinition<OpencodeWatcherConfig> {
   return {
     agent,
-    // fallow-ignore-next-line complexity -- polling loop with reconnect is intentionally serial; breaking up would add more complexity
     async watch(ctx: WatcherContext<OpencodeWatcherConfig>): Promise<void> {
-      const config = ctx.config ?? {};
-      const keys: ControlKeys = {
-        approveKeys: config.approveKeys ?? DEFAULT_APPROVE_KEYS,
-        denyKeys: config.denyKeys ?? DEFAULT_DENY_KEYS,
-        submitKeys: config.submitKeys ?? DEFAULT_SUBMIT_KEYS,
-      };
+      const keys = resolveKeys(ctx.config);
       const seenRequestIds = new Set<string>();
 
       while (!ctx.signal.aborted) {
@@ -107,13 +103,22 @@ interface ControlKeys {
   submitKeys: string;
 }
 
+/** Resolves the effective keystrokes from config, applying opencode's defaults. */
+function resolveKeys(config: OpencodeWatcherConfig | undefined): ControlKeys {
+  const c = config ?? {};
+  return {
+    approveKeys: c.approveKeys ?? DEFAULT_APPROVE_KEYS,
+    denyKeys: c.denyKeys ?? DEFAULT_DENY_KEYS,
+    submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS,
+  };
+}
+
 /**
  * Drains one agent connection scoped to this watcher's agent + tab, applying
  * command verdicts (when `handleDecisions`) and interjections to the live
  * terminal. The connection is already filtered to this agent + tab, so no
  * per-event scope check is needed.
  */
-// fallow-ignore-next-line complexity -- sequential per-event decision handling; splitting would not reduce essential complexity
 async function consumeControlEvents(
   ctx: WatcherContext<OpencodeWatcherConfig>,
   keys: ControlKeys,
@@ -130,16 +135,29 @@ async function consumeControlEvents(
     if (ctx.signal.aborted) {
       return;
     }
-    if (handleDecisions && event.type === "agentDecision") {
-      const { decision } = event;
-      if (seenRequestIds.has(decision.requestId)) {
-        continue;
-      }
-      seenRequestIds.add(decision.requestId);
-      await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
-    } else if (event.type === "agentInput") {
-      await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+    await handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event);
+  }
+}
+
+/** Applies one stream event: a deduped command verdict or an interjection. */
+async function handleControlEvent(
+  ctx: WatcherContext<OpencodeWatcherConfig>,
+  keys: ControlKeys,
+  handleDecisions: boolean,
+  seenRequestIds: Set<string>,
+  event: AgentStreamEvent,
+): Promise<void> {
+  if (handleDecisions && event.type === "agentDecision") {
+    const { decision } = event;
+    if (seenRequestIds.has(decision.requestId)) {
+      return;
     }
+    seenRequestIds.add(decision.requestId);
+    await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
+    return;
+  }
+  if (event.type === "agentInput") {
+    await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
   }
 }
 

@@ -1,6 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": ["src/index.{js,jsx,ts,tsx,mjs}", "src/main.{js,jsx,ts,tsx,mjs}"],
+  // Staged sidecar bundles under `src-tauri/resources/plugins/**` are build
+  // artifacts (bunup output copied from analyzed source packages by
+  // `stage-daemon-sidecar.sh`), not hand-written code. Analyzing them for
+  // complexity double-counts the source and always estimates ~0 coverage
+  // (bundling strips comments, so inline `fallow-ignore` never reaches them),
+  // producing spurious CRAP findings. The source packages are analyzed directly.
+  "ignorePatterns": ["apps/pragma/src-tauri/resources/plugins/**"],
   // `test-fixtures/**` plugin bundles are loaded at runtime (blob-URL dynamic
   // import by the plugin loader; path resolution by Rust tests), never
   // statically imported — they are not dead files.
