@@ -30,7 +30,7 @@ mod worktrees;
 
 use pragma_client::router::RouterDb;
 use pragma_constants::{
-    AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
+    AgentDecision, AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
 };
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, Submenu};
@@ -215,8 +215,12 @@ fn read_plugin_bundle(main_path: String) -> AppResult<String> {
 
 /// Starts a host-side watcher sidecar for a plugin-owned agent session.
 #[tauri::command(async)]
-fn start_plugin_watcher(request: plugins::StartWatcherRequest) -> AppResult<()> {
-    plugins::start_watcher(request)
+fn start_plugin_watcher(
+    app: tauri::AppHandle,
+    request: plugins::StartWatcherRequest,
+) -> AppResult<()> {
+    let resource_dir = app.path().resource_dir().ok();
+    plugins::start_watcher(request, resource_dir.as_deref())
 }
 
 /// Ensures the local HTTP gateway is running and returns its base URL + token.
@@ -336,6 +340,37 @@ async fn mark_agents_seen(hosts: tauri::State<'_, Hosts>, tab_id: String) -> App
     run_pty_task(move || {
         for client in clients {
             let _ = client.mark_agents_seen(tab_id.clone());
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Publishes a command-approval verdict from the approval toast. The server
+/// fans it out to agent subscribers so the waiting harness hook (Claude Code) or
+/// plugin watcher (cursor/opencode) runs or rejects the command. Broadcast to
+/// every host since the tab's agent could be tracked by any of them; only the
+/// reporter waiting on this `request_id` acts.
+#[tauri::command]
+async fn resolve_agent_approval(
+    hosts: tauri::State<'_, Hosts>,
+    agent: String,
+    worktree_id: String,
+    tab_id: String,
+    request_id: String,
+    approved: bool,
+) -> AppResult<()> {
+    let clients = hosts.all_clients()?;
+    let decision = AgentDecision {
+        agent,
+        worktree_id,
+        tab_id,
+        request_id,
+        approved,
+    };
+    run_pty_task(move || {
+        for client in &clients {
+            let _ = client.report_agent_decision(&decision);
         }
         Ok(())
     })
@@ -646,6 +681,7 @@ pub fn run() {
             pty_kill_for_path,
             watch_worktree_files,
             mark_agents_seen,
+            resolve_agent_approval,
             worktrees_are_remote,
             take_pending_deep_link,
             restart_daemon,

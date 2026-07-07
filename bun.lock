@@ -195,6 +195,7 @@
       },
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
+        "@pragma/plugin": "workspace:*",
         "@types/node": "^24.12.3",
         "bunup": "^0.16.32",
         "typescript": "^6.0.3",

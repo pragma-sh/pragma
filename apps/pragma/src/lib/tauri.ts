@@ -214,6 +214,21 @@ export function markAgentsSeen(tabId: string): Promise<void> {
 }
 
 /**
+ * Publishes a command-approval verdict from the approval toast. The server fans
+ * it out to agent subscribers so the waiting harness hook (Claude Code) or plugin
+ * watcher (cursor/opencode) runs or rejects the command keyed by `requestId`.
+ */
+export function resolveAgentApproval(params: {
+  agent: string;
+  worktreeId: string;
+  tabId: string;
+  requestId: string;
+  approved: boolean;
+}): Promise<void> {
+  return invoke("resolve_agent_approval", params);
+}
+
+/**
  * Spawns a daemon-backed PTY session and streams events through a Tauri channel.
  * Resolves with the channel so callers can detach (`channel.onmessage = noop`)
  * when the terminal is disposed — Tauri has no explicit channel-close API.

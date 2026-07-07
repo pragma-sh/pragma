@@ -21,6 +21,31 @@ status reporting. The top-level `reportStarted` / `reportStopped` / `reportAtten
 `reportCleared` helpers return `Promise<void>` and no-op unless
 `hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
 
+For command-approval: `reportAttention({ kind: "command", command, requestId })` carries
+the command + a correlation id to the approval toast; `client.agents.reportDecision(...)`
+publishes the approve/deny verdict; and `awaitAgentDecision({ agent, requestId })` (or
+`client.agents.awaitDecision(...)`) blocks on the agent event stream until the matching
+`AgentDecision` arrives (resolving `null` on timeout/no-env). These are the JS side of the
+same round-trip the Claude/Cursor blocking hooks drive via `pragma-cli agent
+await-decision`.
+
+For questions: `reportAttention({ kind: "question", question, requestId })` carries the
+question; `client.agents.reportAnswer(...)` publishes the reply (or a `dismissed`
+dismissal); and `awaitAgentAnswer({ agent, requestId })` (or `client.agents.awaitAnswer(...)`)
+blocks until the matching `AgentAnswer` arrives, resolving the reply text — or `null` on
+dismiss/timeout/no-env. This mirrors the decision round-trip (`pragma-cli agent
+await-answer` / `answer`).
+
+For a **single duplex channel to one running agent**, `client.agents.connect({ agent,
+tabId, worktreeId, prompt? })` returns an `AgentConnection`: async-iterate it to read every
+event routed to that agent + tab (`AgentStreamEvent` filtered to the target), and call its
+methods to talk back on the same channel — `send(text)` interjects (publishes an
+`AgentInput`, delivered via a harness input hook or a plugin watcher's `sendKeys`),
+`answer(requestId, reply|null)` replies to a question, `decide(requestId, approved)` approves
+/denies a command. `prompt` is **optional** — omit it to attach to an existing session
+without sending anything. `connect` supersedes the old read-only `subscribe()`; the standalone
+interjection publish is `client.agents.reportInput(...)` (or `pragma-cli agent input`).
+
 ## Rules
 
 - Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.

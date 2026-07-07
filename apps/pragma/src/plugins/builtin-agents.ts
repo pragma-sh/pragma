@@ -3,9 +3,32 @@ import {
   definePlugin,
   type AgentModelEntry,
   type PluginDefinition,
+  type WatcherDefinition,
 } from "@pragma/plugin";
 
 import type { PluginRecord } from "./registry";
+
+/**
+ * `mainPath` sentinel for built-in watchers. Built-in agents have no on-disk
+ * plugin bundle, so the Rust side (`plugins.rs`) resolves this to the staged
+ * `@pragma/opencode-plugin` watcher module the `pragma-watch` sidecar imports.
+ */
+const BUILTIN_OPENCODE_WATCHER_MAIN = "pragma-builtin:opencode-watcher";
+
+/**
+ * Advertises that a built-in agent has a host-side watcher so the app starts one
+ * on launch. The executable `watch` runs in the `pragma-watch` sidecar (loaded
+ * from {@link BUILTIN_OPENCODE_WATCHER_MAIN}, the shared built-in watcher
+ * bundle); these app-side stubs are never invoked and only carry the agent id
+ * used to key the watcher.
+ *
+ * - **opencode** has no decision-returning plugin hook, so command approval goes
+ *   the watcher route (its plugin reports the command; the watcher answers via
+ *   `sendKeys`) and the watcher also delivers interjections.
+ * - **Claude Code / Cursor** answer approvals through a blocking `await-decision`
+ *   hook, so their watchers exist only to deliver interjections (`AgentInput`).
+ */
+const builtinAgentWatcher = (agent: string): WatcherDefinition => ({ agent, watch: () => {} });
 
 const claudeCodeIconPath = new URL(
   "../../../../packages/claude-code-plugin/assets/claude-code.svg",
@@ -87,6 +110,11 @@ const builtinAgentsPlugin: PluginDefinition = definePlugin({
       },
     }),
   ],
+  watchers: [
+    builtinAgentWatcher("opencode"),
+    builtinAgentWatcher("claude-code"),
+    builtinAgentWatcher("cursor"),
+  ],
 });
 
 export const builtinAgentRecords: PluginRecord[] = [
@@ -96,6 +124,7 @@ export const builtinAgentRecords: PluginRecord[] = [
     scope: "builtin",
     status: "loaded",
     config: undefined,
+    mainPath: BUILTIN_OPENCODE_WATCHER_MAIN,
     definition: builtinAgentsPlugin,
   },
 ];

@@ -159,8 +159,19 @@ fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
         control_result: None,
     };
     write_json_frame(&mut stream, &request)?;
+    stream.set_read_timeout(None)?;
     loop {
         match read_json_frame::<ServerFrame>(&mut stream)? {
+            ServerFrame::Response(response) if response.request_id == request.request_id => {
+                if !response.ok {
+                    return Err(AppError::Daemon(
+                        response
+                            .error
+                            .unwrap_or_else(|| "controller registration rejected".to_string()),
+                    ));
+                }
+                stream.set_read_timeout(None)?;
+            }
             ServerFrame::Control(envelope) => {
                 let result = dispatch(app, envelope.clone());
                 let response = RequestFrame {
@@ -180,9 +191,9 @@ fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
                 write_json_frame(&mut stream, &response)?;
             }
             ServerFrame::Hello(_)
-            | ServerFrame::Response(_)
             | ServerFrame::Rpc(_)
             | ServerFrame::Event(_)
+            | ServerFrame::Response(_)
             | ServerFrame::ControlResult(_) => {}
         }
     }

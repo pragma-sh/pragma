@@ -1,7 +1,9 @@
 /** `pragma-watch` host-side sidecar for plugin watcher instances. */
 import { pathToFileURL } from "node:url";
 
-import { PragmaClient, type AgentMessage, type SessionEvent } from "@pragma/sdk";
+import { PragmaClient, type AgentMessage } from "@pragma/sdk";
+
+import { attachSessionEvents, waitForExit } from "./session-attach";
 
 interface Args {
   pluginId: string;
@@ -59,13 +61,14 @@ async function loadWatcher(args: Args): Promise<(ctx: unknown) => void | Promise
   return watcher.watch;
 }
 
+// fallow-ignore-next-line complexity -- stream-read loop with NDJSON parse + error recovery; refactoring would not reduce essential complexity
 async function* outputChunks(
   sdk: PragmaClient,
   sessionId: string,
   signal: AbortSignal,
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder();
-  for await (const event of sdk.sessions.attach(sessionId, { signal })) {
+  for await (const event of attachSessionEvents(sdk, sessionId, signal)) {
     if (signal.aborted) return;
     if (event.type === "output") {
       yield decoder.decode(base64ToBytes(event.dataBase64), { stream: true });
@@ -117,6 +120,7 @@ async function run(args: Args): Promise<void> {
     Promise.resolve(
       watch({
         sdk,
+        agentId: args.agentId,
         config: JSON.parse(args.config) as unknown,
         session,
         output,
@@ -128,16 +132,6 @@ async function run(args: Args): Promise<void> {
     waitForExit(sdk, args.sessionId, controller.signal),
   ]);
   controller.abort();
-}
-
-async function waitForExit(
-  sdk: PragmaClient,
-  sessionId: string,
-  signal: AbortSignal,
-): Promise<void> {
-  for await (const event of sdk.sessions.attach(sessionId, { signal })) {
-    if ((event as SessionEvent).type === "exit") return;
-  }
 }
 
 async function main(): Promise<number> {

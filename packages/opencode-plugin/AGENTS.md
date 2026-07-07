@@ -9,16 +9,20 @@ through `@pragma/sdk`.
 
 ```
 packages/opencode-plugin/
-├── assets/             # OpenCode brand assets used by the built-in launcher
+├── assets/                 # OpenCode brand assets used by the built-in launcher
 ├── src/
-│   ├── index.ts         # PragmaOpencodePlugin entry point
-│   └── hooks.ts         # Two-flag state machine (busy + attention)
-└── dist/index.mjs       # Built output (Bunup; git-ignored)
+│   ├── index.ts             # PragmaOpencodePlugin entry point
+│   ├── hooks.ts             # Two-flag state machine (busy + attention)
+│   └── pragma-watcher.ts    # Host-side approval watcher (loaded by pragma-watch)
+└── dist/
+    ├── index.mjs            # opencode status plugin (Bunup; git-ignored)
+    └── pragma-watcher.mjs   # Approval watcher bundle
 ```
 
-The built `dist/index.mjs` is **not** bundled by Pragma — `stage-daemon-sidecar.sh`
-stages only the server/`pragma-cli` sidecars. To use the plugin, register its absolute
-path in opencode's own `plugin` config (see _Installation_ below).
+The status plugin (`dist/index.mjs`) is registered in **opencode's own** `plugin` config
+(see _Installation_). The **approval watcher** (`dist/pragma-watcher.mjs`) is a separate
+concern: `stage-daemon-sidecar.sh` stages it into the app resources, and the `pragma-watch`
+sidecar imports it when Pragma launches the built-in opencode agent (see _Command approval_).
 
 ## Installation
 
@@ -59,8 +63,9 @@ even when the `dispose` plugin hook doesn't run (abrupt shutdown).
 
 **`attention` is raised by:**
 
-- The `permission.asked` event (command) and the `question` tool (via
-  `tool.execute.before` or a pending `message.part.updated` part)
+- The `permission.asked` event → a **`command` attention carrying the command text + a
+  requestId** (see _Command approval_), and the `question` tool (via `tool.execute.before`
+  or a pending `message.part.updated` part).
 
 **`attention` is cleared by:**
 
@@ -70,11 +75,59 @@ even when the `dispose` plugin hook doesn't run (abrupt shutdown).
 `permission.replied` (NOT the `permission.updated` the TS `Event` union declares), and
 it **never calls the `permission.ask` plugin hook** (absent from the binary). The plugin
 `event` hook does receive `permission.asked`, which is why event-based detection works.
-The legacy `permission.ask` hook + `permission.updated` event are kept only as harmless
-cross-version fallbacks. Only real opencode events are handled — **do not re-add the
-speculative `session.next.*` events** (opencode does emit
+The `permission.ask` hook + `permission.updated` event are kept as harmless cross-version
+fallbacks (both routed to the same command-approval report). Only real opencode events are
+handled — **do not re-add the speculative `session.next.*` events** (opencode does emit
 `session.next.agent.switched` / `session.next.model.switched`, but they carry no status
 meaning; mapping them was the source of the stuck-yellow bug).
+
+## Command approval (the watcher route)
+
+Unlike Claude Code / Cursor, opencode's `permission.ask` hook — the only one that can
+**return** an allow/deny decision — is absent from the verified binary, so approval cannot
+go through a blocking hook. It goes the **watcher** route instead, split across two pieces:
+
+1. **In-process (this plugin):** on `permission.asked`, report
+   `attention --kind command --command <cmd> --request-id <id>` (requestId is a fresh uuid).
+   `<cmd>` is extracted best-effort by `commandFromPermission`: the shell command for a
+   `bash` permission (including nested `metadata.input.command` / argv arrays), or
+   `<verb> <filePath>` (Read/Write/Edit) for a file tool, falling back to
+   title/pattern/type and finally a generic label. It normalizes the varying payload
+   nesting (`.properties`, `.properties.permission`, or the permission directly) first.
+   This raises the
+   Pragma **approval toast** with the command + Approve/Deny — the same toast Claude/Cursor
+   use. The report **owns** the command attention, so `permission.asked`/`permission.updated`
+   no longer emit a separate generic attention (that would double-toast).
+2. **Host-side (`pragma-watcher.ts`):** the shared built-in-agent watcher bundle, loaded by
+   the `pragma-watch` sidecar for a launched session. Each watcher `connect`s a duplex agent
+   channel scoped to **its** agent + tab (`ctx.sdk.agents.connect({ agent: ctx.agentId, ... })`)
+   and drives the live terminal from it:
+   - **Interjections** (`AgentInput`) are typed into the terminal followed by a submit key
+     (`sendKeys(text + submitKeys)`, default `\r`). All three built-in agents do this.
+   - **Command verdicts** (`AgentDecision`) are answered with keystrokes **only for opencode**
+     (`opencodeApprovalWatcher`, `handleDecisions: true`) — its permission prompt has no
+     decision-returning hook. Claude Code / Cursor answer approvals through their blocking
+     `await-decision` hook, so `claudeCodeInterjectWatcher` / `cursorInterjectWatcher` are
+     interject-only and never touch verdicts.
+
+   The connection is already filtered to the watcher's agent + tab, so no per-event scope
+   check is needed. The agent event stream is a long-lived HTTP response that can drop while
+   the agent keeps running, so the watcher **re-connects** (short backoff) until its session
+   aborts — a single dropped stream must not silently disable approval or interjection — and a
+   failed `sendKeys` write is swallowed rather than tearing the watcher down. The server
+   replays very recent decisions to cover watcher startup races; the watcher dedupes verdicts
+   by `requestId` so reconnect replay does not send Enter twice. opencode's permission prompt
+   has **three** options with "Allow" selected first: **approve** = Enter (`\r`); **reject** =
+   two Right-arrow presses then Enter (`\x1b[C\x1b[C\r`) to move to the third ("Reject") option
+   and confirm. Override via the watcher's `approveKeys` / `denyKeys` / `submitKeys` config if
+   the TUI layout changes.
+
+The watchers are registered against the built-in `opencode`, `claude-code`, and `cursor`
+agents in `apps/pragma/src/plugins/builtin-agents.ts` (a `pragma-builtin:opencode-watcher`
+`mainPath` sentinel the Rust side resolves to this package's `pragma-watcher` module; the
+sidecar selects the entry whose `agent` matches the launched agent). opencode approval
+additionally requires the opencode status plugin (installed in opencode); interjection works
+for any built-in agent Pragma launches.
 
 **`dispose` (agent process exiting) reports `cleared`**, not `stopped` — quitting
 opencode removes the indicator; finishing a turn (`session.idle`) still reports `done`.

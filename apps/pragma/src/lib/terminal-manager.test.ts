@@ -353,6 +353,65 @@ describe("TerminalManager lifecycle", () => {
     }
   });
 
+  it("retries a PTY resize that raced the session spawn so the PTY does not stay at 80x24", async () => {
+    // On agent launch the tab is created, fitted, and spawned in the same tick;
+    // the fitted resize can reach the daemon before the spawn registers the
+    // session ("session not found") and is dropped. The manager must clear its
+    // resize cache and retry, otherwise the PTY keeps the 80x24 spawn default
+    // while xterm fills the pane and the agent TUI renders in a small corner.
+    const offsetParent = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent");
+    Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+      configurable: true,
+      get: () => document.body,
+    });
+    const fitMock = FitAddon as unknown as { nextDimensions: { cols: number; rows: number } };
+    // Exceed the caps so the mock terminal's resize() records the fitted size
+    // (the mock FitAddon.fit() is a no-op and would leave cols at the default).
+    fitMock.nextDimensions = { cols: MAX_TERMINAL_COLS + 80, rows: MAX_TERMINAL_ROWS + 40 };
+    let resizeCalls = 0;
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_resize") {
+        resizeCalls += 1;
+        return resizeCalls < 3
+          ? Promise.reject(new Error("daemon error: session not found"))
+          : Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+
+      manager.mount(tab, "/repo", element);
+      // Flush the attach chain plus two failed resizes and their 200ms retries.
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(resizeCalls).toBe(3);
+      expect(invokeMock).toHaveBeenLastCalledWith("pty_resize", {
+        sessionId: tab.id,
+        cols: MAX_TERMINAL_COLS,
+        rows: MAX_TERMINAL_ROWS,
+      });
+
+      // A later fit with unchanged dimensions stays deduplicated: the successful
+      // resize repopulated the cache, so no further pty_resize is sent.
+      manager.activate(tab.id);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(resizeCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      fitMock.nextDimensions = { cols: 80, rows: 24 };
+      if (offsetParent) {
+        Object.defineProperty(HTMLElement.prototype, "offsetParent", offsetParent);
+      } else {
+        delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent;
+      }
+    }
+  });
+
   it("re-applies the fitted size after a spawn fallback so a reset daemon's PTY matches the window", async () => {
     // A daemon reset makes pty_attach fail; connect() falls back to pty_spawn,
     // which is created with the pre-fit default size. The remote session must

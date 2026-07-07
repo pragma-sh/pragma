@@ -40,6 +40,9 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                             .error
                             .unwrap_or_else(|| "agent subscription rejected".to_string()));
                     }
+                    stream
+                        .set_read_timeout(None)
+                        .map_err(|error| error.to_string())?;
                     let _ = app.emit(AGENT_STATUS_RESET_EVENT, ());
                 }
                 Ok(ServerFrame::Event(EventFrame::Agent {
@@ -48,6 +51,9 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                     agent,
                     status,
                     attention_kind,
+                    command,
+                    question,
+                    request_id,
                 })) => {
                     let payload = AgentReportPayload {
                         agent,
@@ -55,6 +61,9 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                         tab_id,
                         status,
                         attention_kind,
+                        command,
+                        question,
+                        request_id,
                     };
                     let _ = app.emit(AGENT_REPORT_EVENT, payload);
                 }

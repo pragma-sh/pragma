@@ -148,15 +148,54 @@ pub fn read_bundle(main_path: &Path) -> AppResult<String> {
     })
 }
 
-/// Starts a detached `pragma-watch` sidecar for one plugin watcher.
-pub fn start_watcher(request: StartWatcherRequest) -> AppResult<()> {
+/// `mainPath` sentinel a built-in agent uses (it has no on-disk plugin bundle).
+/// The `<name>` suffix selects the staged watcher module. Kept in sync with
+/// `apps/pragma/src/plugins/builtin-agents.ts`.
+const BUILTIN_WATCHER_PREFIX: &str = "pragma-builtin:";
+
+/// Resolves a built-in watcher `mainPath` sentinel to a real module the
+/// `pragma-watch` sidecar can import. Dev imports the workspace TypeScript
+/// source; a release build imports the staged bundle beside the app resources.
+/// Returns `None` (watcher skipped, non-fatal) if no bundle is found in release.
+fn resolve_builtin_watcher_main(sentinel: &str, resource_dir: Option<&Path>) -> Option<PathBuf> {
+    let name = sentinel.strip_prefix(BUILTIN_WATCHER_PREFIX)?;
+    // `pragma-builtin:opencode-watcher` -> the opencode-plugin watcher module.
+    if name != "opencode-watcher" {
+        return None;
+    }
+    if cfg!(debug_assertions) {
+        return Some(workspace_root().join("packages/opencode-plugin/src/pragma-watcher.ts"));
+    }
+    let rel = Path::new("plugins/opencode/pragma-watcher.mjs");
+    resource_dir
+        .into_iter()
+        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
+        .find(|candidate| candidate.exists())
+}
+
+/// Starts a detached `pragma-watch` sidecar for one plugin watcher. Built-in
+/// watchers whose `mainPath` is a `pragma-builtin:` sentinel are resolved to the
+/// staged module; a missing release bundle is a non-fatal skip.
+pub fn start_watcher(request: StartWatcherRequest, resource_dir: Option<&Path>) -> AppResult<()> {
+    let plugin_main = if request.plugin_main.starts_with(BUILTIN_WATCHER_PREFIX) {
+        let Some(path) = resolve_builtin_watcher_main(&request.plugin_main, resource_dir) else {
+            log::warn!(
+                "no watcher bundle for {}; skipping watcher start",
+                request.plugin_main
+            );
+            return Ok(());
+        };
+        path.to_string_lossy().into_owned()
+    } else {
+        request.plugin_main.clone()
+    };
     let mut command = watcher_command();
     command
         .args([
             "--pluginId",
             &request.plugin_id,
             "--pluginMain",
-            &request.plugin_main,
+            &plugin_main,
             "--agentId",
             &request.agent_id,
             "--watcherAgent",
@@ -342,6 +381,23 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_opencode_watcher_resolves_to_the_workspace_source_in_dev() {
+        // Debug builds import the TypeScript source directly; the path must point
+        // at the opencode-plugin watcher module under the workspace root.
+        let resolved = resolve_builtin_watcher_main("pragma-builtin:opencode-watcher", None);
+        if cfg!(debug_assertions) {
+            let path = resolved.expect("dev resolves the watcher source");
+            assert!(path.ends_with("packages/opencode-plugin/src/pragma-watcher.ts"));
+        }
+    }
+
+    #[test]
+    fn unknown_builtin_watcher_sentinel_resolves_to_none() {
+        assert!(resolve_builtin_watcher_main("pragma-builtin:mystery", None).is_none());
+        assert!(resolve_builtin_watcher_main("not-a-sentinel", None).is_none());
+    }
 
     fn write_config(root: &Path, json: &serde_json::Value) {
         let path = config_path(root);

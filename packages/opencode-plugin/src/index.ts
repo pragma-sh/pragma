@@ -57,6 +57,8 @@ function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter
     started: () => report(() => reportStarted({ agent, env })),
     stopped: () => report(() => reportStopped({ agent, env })),
     attention: (kind: AgentAttentionKind) => report(() => reportAttention({ agent, env, kind })),
+    attentionCommand: (command: string, requestId: string) =>
+      report(() => reportAttention({ agent, env, kind: "command", command, requestId })),
     message: (message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">) =>
       report(() => reportMessage({ agent, env, message })),
     cleared: () => report(() => reportCleared({ agent, env })),

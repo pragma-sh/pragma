@@ -4,7 +4,12 @@
   // `test-fixtures/**` plugin bundles are loaded at runtime (blob-URL dynamic
   // import by the plugin loader; path resolution by Rust tests), never
   // statically imported — they are not dead files.
-  "dynamicallyLoaded": ["**/test-fixtures/**"],
+  "dynamicallyLoaded": [
+    "**/test-fixtures/**",
+    // Plugin resource bundles loaded at runtime by the Rust sidecar launcher
+    // (plugins.rs), never statically imported by any entry point.
+    "**/resources/plugins/**",
+  ],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],
   },

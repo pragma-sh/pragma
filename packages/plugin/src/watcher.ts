@@ -12,6 +12,8 @@ export interface WatcherDefinition<TConfig = unknown> {
 export interface WatcherContext<TConfig = unknown> {
   /** Typed gateway SDK. */
   sdk: PragmaClient;
+  /** Full agent id this watcher instance is bound to (plugin-qualified). */
+  agentId: string;
   /** This plugin's validated config. */
   config: TConfig;
   /** Session this watcher is attached to. */
