@@ -21,7 +21,7 @@ mod icons;
 mod kanban;
 mod keybindings;
 mod plugins;
-mod process_env;
+pub(crate) use pragma_core::process_env;
 mod projects;
 mod pty;
 mod scripts;

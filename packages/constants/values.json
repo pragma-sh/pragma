@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 11
+    "protocolVersion": 12
   },
   "gateway": {
     "discoveryFile": "gateway.json",

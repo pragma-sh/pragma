@@ -60,7 +60,10 @@ export async function resolvePluginAgentModels(agentId: string): Promise<AgentMo
     return models.map(toAgentModel);
   }
   if (!runtime.sdk) {
-    return [];
+    // Dynamic model lookups need the gateway SDK. Failing (instead of resolving
+    // to an empty list) keeps the session cache from pinning "no models" when
+    // the picker races the gateway connection at startup.
+    throw new Error("Pragma SDK is not connected yet");
   }
   return (await models(pluginContext(record))).map(toAgentModel);
 }

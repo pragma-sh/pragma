@@ -7,7 +7,6 @@ var RESUBSCRIBE_DELAY_MS = 500;
 function createBuiltinWatcher(agent, handleDecisions) {
   return {
     agent,
-    // fallow-ignore-next-line complexity -- polling loop with reconnect is intentionally serial; breaking up would add more complexity
     async watch(ctx) {
       const config = ctx.config ?? {};
       const keys = {
@@ -31,7 +30,6 @@ function createBuiltinWatcher(agent, handleDecisions) {
 var opencodeApprovalWatcher = createBuiltinWatcher("opencode", true);
 var claudeCodeInterjectWatcher = createBuiltinWatcher("claude-code", false);
 var cursorInterjectWatcher = createBuiltinWatcher("cursor", false);
-// fallow-ignore-next-line complexity -- sequential per-event decision handling; splitting would not reduce essential complexity
 async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) {
   const connection = await ctx.sdk.agents.connect({
     agent: ctx.agentId,
