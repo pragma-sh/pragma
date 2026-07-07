@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use pragma_constants::{
-    AgentAttentionKind, AgentMessage, AgentReportPayload, AgentStatus, ControlMethod,
-    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
+    AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentMessage, AgentReportPayload,
+    AgentStatus, ControlMethod, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -121,6 +121,19 @@ pub enum RequestKind {
     AgentReport,
     /// Reports one rich agent message. `data` carries a JSON [`AgentMessage`].
     AgentMessage,
+    /// Publishes an approve/deny verdict for a command-approval request. `data`
+    /// carries a JSON [`AgentDecision`]. The server fans it out to agent
+    /// subscribers so the waiting reporter (hook or watcher) can act on it.
+    AgentDecision,
+    /// Publishes a reply to a `question` attention request. `data` carries a
+    /// JSON [`AgentAnswer`]. The server fans it out to agent subscribers so the
+    /// waiting reporter (hook or watcher) can act on it.
+    AgentAnswer,
+    /// Publishes free-form input (an interjection) for a running agent. `data`
+    /// carries a JSON [`AgentInput`]. The server fans it out to agent
+    /// subscribers so the waiting reporter (hook or watcher) delivers the text
+    /// into the agent's turn.
+    AgentInput,
     /// Subscribes to daemon-wide agent status events.
     SubscribeAgents,
     /// Marks a tab's resolved (`done`) agent statuses as seen so the daemon
@@ -259,9 +272,31 @@ pub enum EventFrame {
         status: AgentStatus,
         #[serde(rename = "attentionKind")]
         attention_kind: Option<AgentAttentionKind>,
+        /// The command awaiting approval, when `status` is a `command` attention.
+        #[serde(rename = "command", default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        /// The question awaiting an answer, when `status` is a `question` attention.
+        #[serde(rename = "question", default, skip_serializing_if = "Option::is_none")]
+        question: Option<String>,
+        /// Correlation id for a command-approval or question round-trip, when present.
+        #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
     },
     AgentMessage {
         message: AgentMessage,
+    },
+    /// An approve/deny verdict fanned out to agent subscribers.
+    AgentDecision {
+        decision: AgentDecision,
+    },
+    /// A reply to a `question` attention request, fanned out to agent subscribers.
+    AgentAnswer {
+        answer: AgentAnswer,
+    },
+    /// Free-form input (an interjection) for a running agent, fanned out to
+    /// agent subscribers so a hook or watcher can deliver it into the turn.
+    AgentInput {
+        input: AgentInput,
     },
     /// First message for a subscription, carrying the complete current state.
     Snapshot {
@@ -422,8 +457,9 @@ fn write_session_data_frame(
 mod tests {
     use super::{
         read_frame, read_json_frame, write_input_frame, write_json_frame, write_output_frame,
-        ControlEnvelope, ControlMethod, ControlRequest, ControlResult, EventFrame, Frame,
-        HelloFrame, ProtocolError, RequestFrame, RequestKind, ServerFrame,
+        AgentAnswer, AgentDecision, AgentStatus, ControlEnvelope, ControlMethod, ControlRequest,
+        ControlResult, EventFrame, Frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
+        ServerFrame,
     };
 
     #[test]
@@ -448,6 +484,76 @@ mod tests {
         assert_eq!(decoded.request_id, "1");
         assert!(matches!(decoded.kind, RequestKind::Resize));
         assert_eq!(decoded.cols, Some(80));
+    }
+
+    #[test]
+    fn round_trips_agent_command_and_decision_events() {
+        let agent = ServerFrame::Event(EventFrame::Agent {
+            worktree_id: "w".to_string(),
+            tab_id: "t".to_string(),
+            agent: "claude-code".to_string(),
+            status: AgentStatus::Attention,
+            attention_kind: Some(pragma_constants::AgentAttentionKind::Command),
+            command: Some("npm test".to_string()),
+            question: None,
+            request_id: Some("req-1".to_string()),
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &agent).expect("write agent event");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read agent");
+        match decoded {
+            ServerFrame::Event(EventFrame::Agent {
+                command,
+                request_id,
+                ..
+            }) => {
+                assert_eq!(command.as_deref(), Some("npm test"));
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+            }
+            _ => panic!("expected agent event"),
+        }
+
+        let decision = ServerFrame::Event(EventFrame::AgentDecision {
+            decision: AgentDecision {
+                agent: "claude-code".to_string(),
+                worktree_id: "w".to_string(),
+                tab_id: "t".to_string(),
+                request_id: "req-1".to_string(),
+                approved: true,
+            },
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &decision).expect("write decision");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read decision");
+        match decoded {
+            ServerFrame::Event(EventFrame::AgentDecision { decision }) => {
+                assert_eq!(decision.request_id, "req-1");
+                assert!(decision.approved);
+            }
+            _ => panic!("expected decision event"),
+        }
+
+        let answer = ServerFrame::Event(EventFrame::AgentAnswer {
+            answer: AgentAnswer {
+                agent: "claude-code".to_string(),
+                worktree_id: "w".to_string(),
+                tab_id: "t".to_string(),
+                request_id: "req-2".to_string(),
+                answer: Some("use option B".to_string()),
+                dismissed: false,
+            },
+        });
+        let mut bytes = Vec::new();
+        write_json_frame(&mut bytes, &answer).expect("write answer");
+        let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read answer");
+        match decoded {
+            ServerFrame::Event(EventFrame::AgentAnswer { answer }) => {
+                assert_eq!(answer.request_id, "req-2");
+                assert_eq!(answer.answer.as_deref(), Some("use option B"));
+                assert!(!answer.dismissed);
+            }
+            _ => panic!("expected answer event"),
+        }
     }
 
     #[test]
@@ -627,6 +733,9 @@ mod tests {
                 | EventFrame::Exit { .. }
                 | EventFrame::Agent { .. }
                 | EventFrame::AgentMessage { .. }
+                | EventFrame::AgentDecision { .. }
+                | EventFrame::AgentAnswer { .. }
+                | EventFrame::AgentInput { .. }
                 | EventFrame::Snapshot { .. }
                 | EventFrame::Delta { .. }
                 | EventFrame::EchoMode { .. },

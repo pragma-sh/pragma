@@ -3,10 +3,14 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use pragma_constants::ProtocolEventKind;
 use pragma_core::watcher::WorktreeWatcher;
-use pragma_protocol::{AgentMessage, AgentReportPayload, AgentStatus, ControlResult, EventFrame};
+use pragma_protocol::{
+    AgentAnswer, AgentDecision, AgentInput, AgentMessage, AgentReportPayload, AgentStatus,
+    ControlResult, EventFrame,
+};
 use thiserror::Error;
 
 use crate::session::{Session, SessionError};
@@ -31,11 +35,16 @@ pub enum RegistryError {
 /// `Control` envelopes to.
 pub type ControllerWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
 
+const AGENT_DECISION_REPLAY_WINDOW: Duration = Duration::from_secs(5);
+const AGENT_DECISION_REPLAY_LIMIT: usize = 64;
+
 #[derive(Default)]
 pub struct Registry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     socket_path: PathBuf,
     agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
+    recent_agent_decisions: Mutex<Vec<RecentAgentDecision>>,
+    recent_agent_answers: Mutex<Vec<RecentAgentAnswer>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     // `Arc`-wrapped (rather than a bare `Mutex`) so a watcher's own callback
     // can hold a handle back to this map and remove its own entry once its
@@ -51,6 +60,16 @@ pub struct Registry {
 
 type AgentKey = (String, String, String);
 
+struct RecentAgentDecision {
+    decision: AgentDecision,
+    recorded_at: Instant,
+}
+
+struct RecentAgentAnswer {
+    answer: AgentAnswer,
+    recorded_at: Instant,
+}
+
 /// One live filesystem watcher for a worktree plus the set of subscribers it
 /// fans changes out to. Both the watcher and the subscriber list are shared
 /// (`Arc`) so the watcher's background callback can broadcast without holding
@@ -64,12 +83,22 @@ struct WorktreeFileWatch {
     _watcher: WorktreeWatcher,
 }
 
+fn prune_agent_decisions(decisions: &mut Vec<RecentAgentDecision>) {
+    decisions.retain(|entry| entry.recorded_at.elapsed() <= AGENT_DECISION_REPLAY_WINDOW);
+}
+
+fn prune_agent_answers(answers: &mut Vec<RecentAgentAnswer>) {
+    answers.retain(|entry| entry.recorded_at.elapsed() <= AGENT_DECISION_REPLAY_WINDOW);
+}
+
 impl Registry {
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             socket_path,
             agent_statuses: Mutex::new(HashMap::new()),
+            recent_agent_decisions: Mutex::new(Vec::new()),
+            recent_agent_answers: Mutex::new(Vec::new()),
             agent_subscribers: Mutex::new(Vec::new()),
             file_watchers: Arc::new(Mutex::new(HashMap::new())),
             controller: Mutex::new(None),
@@ -119,11 +148,14 @@ impl Registry {
         Ok(attach)
     }
 
+    /// Attaches to a session's event stream. A `Some` size resizes the PTY to
+    /// the attacher's viewport (an interactive client taking over the display);
+    /// `None` attaches as a passive observer — e.g. a plugin watcher — without
+    /// disturbing the size the interactive client already set.
     pub fn attach(
         &self,
         session_id: &str,
-        cols: u16,
-        rows: u16,
+        size: Option<(u16, u16)>,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
         let sessions = self
             .sessions
@@ -132,7 +164,9 @@ impl Registry {
         let session = sessions
             .get(session_id)
             .ok_or_else(|| RegistryError::NotFound(session_id.to_string()))?;
-        session.resize(cols, rows)?;
+        if let Some((cols, rows)) = size {
+            session.resize(cols, rows)?;
+        }
         Ok(session.attach()?)
     }
 
@@ -243,6 +277,57 @@ impl Registry {
         self.broadcast_agent(&EventFrame::AgentMessage { message });
     }
 
+    /// Fans a free-form interjection out to agent subscribers. Transient like a
+    /// message: the target agent's watcher is already long-lived by the time a
+    /// user interjects, so no replay window is needed.
+    pub fn report_agent_input(&self, input: AgentInput) {
+        self.broadcast_agent(&EventFrame::AgentInput { input });
+    }
+
+    /// Fans a command-approval verdict out to agent subscribers. A short replay
+    /// window covers watcher startup/subscription races after a toast click.
+    pub fn report_agent_decision(&self, decision: AgentDecision) {
+        self.remember_agent_decision(&decision);
+        self.broadcast_agent(&EventFrame::AgentDecision { decision });
+    }
+
+    fn remember_agent_decision(&self, decision: &AgentDecision) {
+        let Ok(mut decisions) = self.recent_agent_decisions.lock() else {
+            return;
+        };
+        prune_agent_decisions(&mut decisions);
+        decisions.push(RecentAgentDecision {
+            decision: decision.clone(),
+            recorded_at: Instant::now(),
+        });
+        let excess = decisions.len().saturating_sub(AGENT_DECISION_REPLAY_LIMIT);
+        if excess > 0 {
+            decisions.drain(..excess);
+        }
+    }
+
+    /// Fans a question reply out to agent subscribers. A short replay window
+    /// covers watcher startup/subscription races after a toast answer.
+    pub fn report_agent_answer(&self, answer: AgentAnswer) {
+        self.remember_agent_answer(&answer);
+        self.broadcast_agent(&EventFrame::AgentAnswer { answer });
+    }
+
+    fn remember_agent_answer(&self, answer: &AgentAnswer) {
+        let Ok(mut answers) = self.recent_agent_answers.lock() else {
+            return;
+        };
+        prune_agent_answers(&mut answers);
+        answers.push(RecentAgentAnswer {
+            answer: answer.clone(),
+            recorded_at: Instant::now(),
+        });
+        let excess = answers.len().saturating_sub(AGENT_DECISION_REPLAY_LIMIT);
+        if excess > 0 {
+            answers.drain(..excess);
+        }
+    }
+
     pub fn subscribe_agents(
         &self,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
@@ -250,12 +335,29 @@ impl Registry {
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
+        let mut decisions = self
+            .recent_agent_decisions
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        prune_agent_decisions(&mut decisions);
+        let mut answers = self
+            .recent_agent_answers
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        prune_agent_answers(&mut answers);
         let (tx, rx) = mpsc::channel();
         self.agent_subscribers
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?
             .push(tx);
-        Ok((statuses.values().map(agent_event).collect(), rx))
+        let mut snapshot: Vec<EventFrame> = statuses.values().map(agent_event).collect();
+        snapshot.extend(decisions.iter().map(|entry| EventFrame::AgentDecision {
+            decision: entry.decision.clone(),
+        }));
+        snapshot.extend(answers.iter().map(|entry| EventFrame::AgentAnswer {
+            answer: entry.answer.clone(),
+        }));
+        Ok((snapshot, rx))
     }
 
     /// Subscribes to filesystem changes under a worktree, lazily starting (and
@@ -521,6 +623,9 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
         agent: payload.agent.clone(),
         status: payload.status,
         attention_kind: payload.attention_kind,
+        command: payload.command.clone(),
+        question: payload.question.clone(),
+        request_id: payload.request_id.clone(),
     }
 }
 
@@ -528,11 +633,15 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
 mod tests {
     use std::process::Command;
     use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
-    use pragma_protocol::{AgentReportPayload, AgentStatus, ControlResult};
+    use pragma_protocol::{
+        AgentAnswer, AgentDecision, AgentInput, AgentReportPayload, AgentStatus, ControlResult,
+        EventFrame,
+    };
     use tempfile::tempdir;
 
-    use super::Registry;
+    use super::{RecentAgentAnswer, RecentAgentDecision, Registry, AGENT_DECISION_REPLAY_WINDOW};
 
     fn agent_payload(status: AgentStatus) -> AgentReportPayload {
         AgentReportPayload {
@@ -541,6 +650,19 @@ mod tests {
             tab_id: "tab-1".to_string(),
             status,
             attention_kind: None,
+            command: None,
+            question: None,
+            request_id: None,
+        }
+    }
+
+    fn agent_decision(request_id: &str) -> AgentDecision {
+        AgentDecision {
+            agent: "opencode".to_string(),
+            worktree_id: "worktree-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            request_id: request_id.to_string(),
+            approved: true,
         }
     }
 
@@ -564,6 +686,153 @@ mod tests {
     }
 
     #[test]
+    fn report_agent_decision_fans_out_to_subscribers() {
+        let registry = Registry::default();
+        let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
+        registry.report_agent_decision(agent_decision("req-1"));
+        match rx.recv().expect("decision event") {
+            EventFrame::AgentDecision { decision } => {
+                assert_eq!(decision.request_id, "req-1");
+                assert!(decision.approved);
+            }
+            other => panic!("expected decision event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_agent_decision_replays_to_late_subscribers() {
+        let registry = Registry::default();
+        registry.report_agent_decision(agent_decision("req-1"));
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(snapshot.iter().any(|event| matches!(
+            event,
+            EventFrame::AgentDecision { decision } if decision.request_id == "req-1"
+        )));
+    }
+
+    #[test]
+    fn subscribe_agents_prunes_expired_agent_decisions() {
+        let registry = Registry::default();
+        registry
+            .recent_agent_decisions
+            .lock()
+            .expect("recent decisions")
+            .push(RecentAgentDecision {
+                decision: agent_decision("old-req"),
+                recorded_at: Instant::now()
+                    .checked_sub(AGENT_DECISION_REPLAY_WINDOW * 2)
+                    .expect("test clock underflow"),
+            });
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(snapshot.iter().all(|event| !matches!(
+            event,
+            EventFrame::AgentDecision { decision } if decision.request_id == "old-req"
+        )));
+    }
+
+    fn agent_answer(request_id: &str) -> AgentAnswer {
+        AgentAnswer {
+            agent: "opencode".to_string(),
+            worktree_id: "worktree-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            request_id: request_id.to_string(),
+            answer: Some("option B".to_string()),
+            dismissed: false,
+        }
+    }
+
+    #[test]
+    fn report_agent_answer_fans_out_to_subscribers() {
+        let registry = Registry::default();
+        let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
+        registry.report_agent_answer(agent_answer("req-1"));
+        match rx.recv().expect("answer event") {
+            EventFrame::AgentAnswer { answer } => {
+                assert_eq!(answer.request_id, "req-1");
+                assert_eq!(answer.answer.as_deref(), Some("option B"));
+            }
+            other => panic!("expected answer event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_agent_input_fans_out_to_subscribers() {
+        let registry = Registry::default();
+        let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
+        registry.report_agent_input(AgentInput {
+            agent: "opencode".to_string(),
+            worktree_id: "wt-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            text: "focus on the tests".to_string(),
+            request_id: None,
+        });
+        match rx.recv().expect("input event") {
+            EventFrame::AgentInput { input } => {
+                assert_eq!(input.agent, "opencode");
+                assert_eq!(input.text, "focus on the tests");
+            }
+            other => panic!("expected input event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_agent_input_is_not_replayed_to_late_subscribers() {
+        let registry = Registry::default();
+        registry.report_agent_input(AgentInput {
+            agent: "opencode".to_string(),
+            worktree_id: "wt-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            text: "too late".to_string(),
+            request_id: None,
+        });
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(!snapshot
+            .iter()
+            .any(|event| matches!(event, EventFrame::AgentInput { .. })));
+    }
+
+    #[test]
+    fn report_agent_answer_replays_to_late_subscribers() {
+        let registry = Registry::default();
+        registry.report_agent_answer(agent_answer("req-1"));
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(snapshot.iter().any(|event| matches!(
+            event,
+            EventFrame::AgentAnswer { answer } if answer.request_id == "req-1"
+        )));
+    }
+
+    #[test]
+    fn subscribe_agents_prunes_expired_agent_answers() {
+        let registry = Registry::default();
+        registry
+            .recent_agent_answers
+            .lock()
+            .expect("recent answers")
+            .push(RecentAgentAnswer {
+                answer: agent_answer("old-req"),
+                recorded_at: Instant::now()
+                    .checked_sub(AGENT_DECISION_REPLAY_WINDOW * 2)
+                    .expect("test clock underflow"),
+            });
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(snapshot.iter().all(|event| !matches!(
+            event,
+            EventFrame::AgentAnswer { answer } if answer.request_id == "old-req"
+        )));
+    }
+
+    #[test]
     fn mark_seen_drops_only_done_statuses_for_the_tab() {
         let registry = Registry::default();
         let payload = |tab: &str, agent: &str, status| AgentReportPayload {
@@ -572,6 +841,9 @@ mod tests {
             tab_id: tab.to_string(),
             status,
             attention_kind: None,
+            command: None,
+            question: None,
+            request_id: None,
         };
         registry
             .report_agent(payload("tab-1", "opencode", AgentStatus::Done))
@@ -619,6 +891,34 @@ mod tests {
             .spawn(id.clone(), "worktree-1".to_string(), cwd, 80, 24)
             .expect("session should spawn");
         (registry, id, dir)
+    }
+
+    /// Regression test: a size-less attach (a plugin watcher tailing output)
+    /// must not resize the PTY out from under the interactive client — the
+    /// old behavior shrank a fitted terminal back to a hardcoded 80x24.
+    #[test]
+    fn attach_without_size_leaves_the_pty_grid_alone() {
+        let (registry, id, _dir) = spawn_session();
+        registry
+            .resize(&id, 120, 40)
+            .expect("interactive client resize");
+
+        let (_scrollback, rx) = registry.attach(&id, None).expect("observer attach");
+        registry.write(&id, "stty size\r").expect("write");
+
+        let mut output = String::new();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(EventFrame::Output { data, .. }) =
+                rx.recv_timeout(std::time::Duration::from_millis(200))
+            {
+                output.push_str(&String::from_utf8_lossy(&data));
+                if output.contains("40 120") {
+                    return;
+                }
+            }
+        }
+        panic!("expected stty to report 40 120 (rows cols); output was: {output:?}");
     }
 
     #[test]
@@ -766,6 +1066,9 @@ mod tests {
                 tab_id: id.clone(),
                 status: AgentStatus::Running,
                 attention_kind: None,
+                command: None,
+                question: None,
+                request_id: None,
             })
             .expect("report agent");
 
