@@ -10,6 +10,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bun run --filter pragma tauri:dev",
+    "dev:mobile": "bun run --filter pragma-mobile start",
+    "dev:mobile:ios": "bun run --filter pragma-mobile ios",
+    "dev:mobile:android": "bun run --filter pragma-mobile android",
     "gateway:smoke": "bun scripts/gateway-sdk-smoke.ts",
     "generate": "turbo run generate",
     "lint": "oxlint",

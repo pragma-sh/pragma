@@ -11,7 +11,7 @@ scrollback, raw output, and agent-status strengths.
 - Tracking runtime agent status in memory.
 - Serving `pragma-core` RPC and snapshot-then-delta event subscriptions over the
   existing length-prefixed frame codec.
-- Spawning host-side sidecars (`pragma-ai`, later fully `pragma-github`).
+- Spawning host-side sidecars (`pragma-ai`, `pragma-github`, `pragma-automations`).
 
 ## Socket And Access Control
 

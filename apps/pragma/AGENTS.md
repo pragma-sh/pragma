@@ -218,8 +218,9 @@ triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
-plugin. `pragma-cli`, `pragma-ai`, and `pragma-github` are staged by the same script;
-plugin JS itself is **not** bundled by Pragma. `binaries/` is git-ignored.
+plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
+by the same script; plugin JS itself is **not** bundled by Pragma. `binaries/` is
+git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build

@@ -1,0 +1,637 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# Automations
+
+A per-project (and global) automation system. Users drop a **single self-contained
+`.ts`/`.js` file** into `.pragma/automations` (project, read across all worktrees) or
+`~/.pragma/automations` (global). Each file calls **`defineAutomation`** with a name,
+description, a **trigger** (`cron` or `event`), and the automation body. Files are
+**esbuild-bundled** (bare imports auto-installed on demand) and executed by a new
+**long-lived `pragma-automations` Bun sidecar owned by `pragma-server`** — so automations
+run on the host **even when the desktop app is closed**.
+
+A new **full-view Automations screen** (clock icon in the sidebar titlebar) lists
+automations grouped **Global / Local**, opens each as an editable **CodeMirror** tab, and
+gates newly-detected **local** automations behind a **security approval dialog**.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships, and the decisions that scope it</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm space-y-2">
+
+- **New `@pragma/automations` package** — the runtime the author imports: `defineAutomation` + types, plus the sidecar `src/cli.ts` (NDJSON), compiled to a `pragma-automations` binary like `pragma-ai` / `pragma-github`.
+- **`pragma-server` owns the runner** — a new module in `crates/pragma-server` adds (a) a **cron scheduler thread**, (b) an **automations-directory watcher**, and (c) a **managed long-lived sidecar child**. The sidecar transpiles + runs; the server schedules and supervises.
+- **Server-side trust store (new)** — the server has no DB today. Add a small server-owned SQLite/JSON store in the server data dir for automation **trust state** (approved / rejected / pending) plus the **content hash at time of verdict**, readable while the app is closed. `rusqlite` is already a workspace dep.
+- **App registers project roots with the server** — the server has no project registry; only the app's `pragma.db` knows a project's `.pragma` root + worktree set. On connect the app pushes roots (and known automations) so the server can watch/enumerate and keep crons alive after the app quits.
+- **Trust model** — **local** (`.pragma/automations`) automations are **inert until approved** via the install dialog; **global** (`~/.pragma/automations`) are **trusted automatically**. Reject keeps the code on disk and marks it rejected in the store against the file's current content hash — editing the file afterward changes the hash, clears the rejection, and re-prompts on next scan.
+- **Events are free-form background listeners** — an `event` automation ships arbitrary listener code that runs in the sidecar background and flips `eventTriggered` to fire the body. Maximum flexibility (this is exactly why local files need approval).
+- **npm via on-demand install** — esbuild bundles the file; bare imports are auto-installed into a managed cache, no per-dir `package.json` required.
+- **Full-view UI** — clock icon toggles a whole-view mode (Kanban is the precedent), grouped Global/Local sidebar with a worktree subtree for automations unique to a worktree, CodeMirror editor tabs, and an approval dialog.
+
+</CardContent>
+</Card>
+
+<Alert className="my-4">
+  <AlertTitle>Security is the core constraint, not a footnote</AlertTitle>
+  <AlertDescription>
+
+An automation is **arbitrary code that runs on the host on a schedule / on events, headless,
+outliving the app**. The whole trust flow (inert-until-approved for local, explicit reject,
+warning copy) exists because event listeners are free-form and unsandboxed. Treat every
+approval-path change as a security change.
+
+  </AlertDescription>
+</Alert>
+
+## Resolved decisions
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Topic</TableHead>
+      <TableHead>Decision</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Runner host</TableCell>
+      <TableCell>
+        <strong>
+          <code>pragma-server</code> owns one long-lived <code>pragma-automations</code> Bun
+          sidecar.
+        </strong>{" "}
+        Server schedules crons and fans events to it; sidecar transpiles + executes. Survives app
+        close — matches "always run on the app server".
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Event triggers</TableCell>
+      <TableCell>
+        <strong>Free-form background listener.</strong> The automation ships arbitrary listener code
+        loaded in the sidecar background; when it flips <code>eventTriggered</code> the body runs.
+        Not limited to Pragma's internal <code>ProtocolEventKind</code> set.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Trust model</TableCell>
+      <TableCell>
+        <strong>
+          Global <code>~/.pragma</code> trusted; local <code>.pragma</code> prompts.
+        </strong>{" "}
+        Local automations are inert until approved via the install dialog. Reject keeps the file,
+        marks it rejected against the file's content hash. Approval is one-time per automation id;
+        rejection is not — editing the file (in Pragma's editor or elsewhere) changes the hash and
+        re-prompts on next scan.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">npm deps</TableCell>
+      <TableCell>
+        <strong>Auto-install imports on demand.</strong> Parse bare imports from the single file,
+        install missing packages into a managed cache, then esbuild-bundle. No per-dir{" "}
+        <code>package.json</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Trust storage</TableCell>
+      <TableCell>
+        <strong>New server-owned store</strong> in the server data dir. The app's{" "}
+        <code>pragma.db</code> can't be a second writer and the server needs to read trust state
+        while the app is closed.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Server→app "pending" push</TableCell>
+      <TableCell>
+        <strong>New subscription event kind</strong> (<code>automationPending</code>) broadcast like
+        the file-watcher, not a new control frame. Approve/reject flows back as a{" "}
+        <strong>new RPC method</strong>.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Architecture
+
+Data flow, source of truth on each side:
+
+<Card className="my-4">
+  <CardContent className="text-sm pt-6">
+
+```
+author writes file                       pragma-server (persistent host)
+────────────────                         ────────────────────────────────
+.pragma/automations/*.ts   ──watch──►   AutomationsRegistry
+~/.pragma/automations/*.ts              ├─ dir watcher (notify)
+                                        ├─ cron scheduler thread
+                                        ├─ trust store (SQLite, server data dir)
+                                        └─ managed child: pragma-automations sidecar
+                                                          │  (Bun, NDJSON stdin/stdout)
+                                                          ├─ esbuild bundle (on-demand npm)
+                                                          ├─ cron jobs (fire on schedule)
+                                                          └─ event listeners (free-form bg)
+        ▲  approve/reject (RPC)                 │  emit: pending / status / logs
+        │                                       ▼  (ProtocolEventKind subscription)
+ ┌──────┴───────────────── Tauri app (controller, may be closed) ──────────────┐
+ │  clock icon → full-view AutomationsWorkspace                                 │
+ │  Global / Local sidebar tree · CodeMirror editor tab · approval dialog       │
+ │  on connect: register project roots + known automations with the server      │
+ └──────────────────────────────────────────────────────────────────────────────┘
+```
+
+</CardContent>
+</Card>
+
+Three things are new because the server is minimal today (confirmed during exploration):
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Gap in the server today</TableHead>
+      <TableHead>What we add</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>
+        No scheduler — server is connection-reactive only (`main.rs:120-143` accept loop, no
+        background thread).
+      </TableCell>
+      <TableCell>
+        A cron scheduler thread spawned before the accept loop, owned by the registry.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        No persistent store — all state is in-memory `Mutex&lt;HashMap&gt;` in `Registry`.
+      </TableCell>
+      <TableCell>A server-owned trust store under `server_paths().dir`.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>
+        No project registry — the server only knows a worktree from a per-request `cwd`; the
+        `.pragma` root + worktree set live in the app's `pragma.db`.
+      </TableCell>
+      <TableCell>
+        App pushes project roots (+ known automations) to the server on connect; server persists
+        them so crons keep running after the app quits.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## The `defineAutomation` API
+
+One default export per file. The author imports from the bundled runtime; the sidecar provides
+`ctx` (structured logger, worktree/project paths, a `@pragma/sdk` client for host ops).
+
+<Tabs defaultValue="cron">
+  <TabsList>
+    <TabsTrigger value="cron">cron trigger</TabsTrigger>
+    <TabsTrigger value="event">event trigger</TabsTrigger>
+    <TabsTrigger value="types">types</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="cron">
+
+Runs on a schedule. The server's scheduler fires it; the body runs in the sidecar.
+
+```ts
+import { defineAutomation } from "@pragma/automations";
+import { Octokit } from "@octokit/rest"; // bare import → auto-installed on demand
+
+export default defineAutomation({
+  name: "Nightly stale-branch report",
+  description: "Every night, list branches with no commits in 30 days and log a summary.",
+  trigger: { type: "cron", schedule: "0 3 * * *" }, // standard 5-field cron
+  async run(ctx) {
+    const stale = await ctx.git.staleBranches({ days: 30 });
+    ctx.log.info(`found ${stale.length} stale branches`, { branches: stale });
+  },
+});
+```
+
+  </TabsContent>
+
+  <TabsContent value="event">
+
+The `listen` function is **free-form** and runs in the sidecar background. Call `fire()` (the
+`eventTriggered` signal) to run `run`. Anything goes — timers, fs watches, polling an API,
+subscribing to a stream — which is exactly why local automations require approval.
+
+```ts
+import { defineAutomation } from "@pragma/automations";
+
+export default defineAutomation({
+  name: "Alert on build output",
+  description: "Watch dist/ and run whenever a new bundle larger than 5MB appears.",
+  trigger: {
+    type: "event",
+    // free-form background listener; `fire` is the eventTriggered signal
+    listen(ctx, fire) {
+      const timer = setInterval(async () => {
+        const big = await ctx.fs.find("dist", { minBytes: 5_000_000 });
+        if (big.length > 0) fire({ files: big }); // → eventTriggered: true
+      }, 10_000);
+      return () => clearInterval(timer); // disposer on unload
+    },
+  },
+  async run(ctx, payload) {
+    ctx.log.warn("large bundle detected", payload);
+  },
+});
+```
+
+  </TabsContent>
+
+  <TabsContent value="types">
+
+```ts
+export interface AutomationContext {
+  log: { info(msg: string, data?: unknown): void; warn(...): void; error(...): void };
+  paths: { project: string; worktree: string; global: boolean };
+  git: GitClient; // subset of @pragma/sdk
+  fs: FsClient; // confined to the automation's root
+  // exec/network available but flagged in the approval dialog
+}
+
+type Trigger =
+  | { type: "cron"; schedule: string } // 5-field cron, host timezone
+  | {
+      type: "event";
+      listen: (ctx: AutomationContext, fire: (payload?: unknown) => void) => (() => void) | void;
+    };
+
+export function defineAutomation(def: {
+  name: string;
+  description: string;
+  trigger: Trigger;
+  run: (ctx: AutomationContext, payload?: unknown) => void | Promise<void>;
+}): AutomationDefinition;
+```
+
+  </TabsContent>
+</Tabs>
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="loading">
+    <AccordionTrigger>How a file becomes a running automation</AccordionTrigger>
+    <AccordionContent>
+
+1. Server dir-watcher sees a new/changed file → computes an automation **id** (stable, path-derived) + content hash.
+2. **Trust check** (server store): global root → trusted; local root → look up id. Unknown local id → mark **pending**, broadcast `automationPending`, **do not load**. Known local id with verdict **rejected** → compare stored hash to the current one; mismatch means the file changed since rejection, so treat it like unknown (mark **pending**, broadcast, do not load) rather than staying rejected.
+3. On load (trusted/approved): server hands the file path to the sidecar over NDJSON. Sidecar **esbuild-bundles** it (auto-installing bare imports into the managed cache), imports the bundle, validates the `defineAutomation` shape, and **registers** it: cron jobs go to the scheduler; event `listen` runs immediately in the background.
+4. Runtime failures (bundle error, throw, bad shape) → sidecar emits a `status: error` line → surfaced in the UI, automation marked errored (not silently dropped).
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="npm">
+    <AccordionTrigger>On-demand npm install</AccordionTrigger>
+    <AccordionContent>
+
+The sidecar scans bare specifiers, resolves any missing into a **managed cache dir** (server data
+dir, shared across automations) via `bun install`/`bun add`, then esbuild bundles against it. No
+`package.json` in the automations dir — the file stays self-contained. Version pinning is
+best-effort (latest satisfying); a follow-up could let a `// @pin pkg@1.2.3` comment lock versions.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Trust &amp; the approval flow
+
+<Alert className="my-4">
+  <AlertTitle>Local automation detected → inert until the user approves</AlertTitle>
+  <AlertDescription>
+
+When the server's watcher sees a **local** automation whose id is not in the trust store (or whose
+stored verdict is **rejected** but the content hash no longer matches), it marks it **pending** and
+broadcasts `automationPending`. The app pops a modal stating the **title + description**, warning
+that the code runs on the host on a schedule / on events, and that the user should trust the source
+before installing. **Approve** loads + runs it; **Reject** keeps the file on disk and records
+`rejected` in the store against the current content hash — no dialog again unless the user
+re-approves from the UI _or_ edits the file, which invalidates the hash and re-prompts on the next
+scan. Global automations skip this entirely.
+
+  </AlertDescription>
+</Alert>
+
+Try the interaction (mock):
+
+<Playground>
+  <div className="flex gap-2 mb-4">
+    <Button bind="open:false" onClick={() => setOpen(true)} variant="outline">
+      Simulate: new local automation detected
+    </Button>
+    <Button bind="result:''" onClick={() => setResult("")} variant="ghost">
+      reset
+    </Button>
+  </div>
+
+{open && (
+
+  <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 max-w-md">
+    <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+      ⚠ New automation installed
+    </div>
+    <div className="mt-2 font-medium">Alert on build output</div>
+    <div className="text-sm text-muted-foreground">
+      Watch dist/ and run whenever a new bundle larger than 5MB appears.
+    </div>
+    <div className="mt-3 rounded bg-muted/50 p-2 text-xs text-muted-foreground">
+      This code runs on your machine on events, in the background, even when Pragma is closed. Only
+      install it if you trust the source.
+    </div>
+    <div className="mt-4 flex justify-end gap-2">
+      <Button
+        variant="ghost"
+        onClick={() => {
+          setResult("rejected — file kept, marked rejected in store (re-prompts if edited)");
+          setOpen(false);
+        }}
+      >
+        Reject
+      </Button>
+      <Button
+        onClick={() => {
+          setResult("approved — loaded and running on the server");
+          setOpen(false);
+        }}
+      >
+        Trust &amp; install
+      </Button>
+    </div>
+  </div>
+)}
+
+{result && <div className="mt-3 text-sm font-mono text-muted-foreground">{result}</div>}
+
+</Playground>
+
+## UI: the full-view Automations screen
+
+Clock icon in the sidebar titlebar toggles a whole-view mode — **Kanban is the exact precedent**
+(it swaps the workspace body while keeping the shell). Left: automations grouped **Global** /
+**Local**. Under **Local**, automations present on the main worktree list flat; any automation that
+exists **only in specific worktrees** (not on main) appears under a **worktree subtree** so the user
+sees where it lives. Clicking an item opens its **uncompiled `.ts`** as a normal editable CodeMirror
+tab.
+
+<Playground>
+  <div className="flex gap-2 mb-3">
+    <Button bind="mode:'normal'" onClick={() => setMode(mode === "auto" ? "normal" : "auto")} variant="outline">
+      🕐 {mode === "auto" ? "Exit automations" : "Automations"}
+    </Button>
+  </div>
+
+<div className="rounded-lg border overflow-hidden h-72 flex text-sm">
+  <div className="w-56 border-r bg-muted/30 flex flex-col">
+    {mode === "auto" ? (
+      <div className="p-2 space-y-3 overflow-auto">
+        <div>
+          <div className="px-2 text-xs font-semibold uppercase text-muted-foreground">Global</div>
+          <div bind="sel:'a'" onClick={() => setSel("a")} className={`mt-1 rounded px-2 py-1 cursor-pointer ${sel === "a" ? "bg-accent" : ""}`}>
+            <div className="font-medium">Nightly cleanup</div>
+            <div className="text-xs text-muted-foreground truncate">Prune old branches every night</div>
+          </div>
+        </div>
+        <div>
+          <div className="px-2 text-xs font-semibold uppercase text-muted-foreground">Local</div>
+          <div onClick={() => setSel("b")} className={`mt-1 rounded px-2 py-1 cursor-pointer ${sel === "b" ? "bg-accent" : ""}`}>
+            <div className="font-medium">Alert on build output</div>
+            <div className="text-xs text-muted-foreground truncate">Watch dist/ for large bundles</div>
+          </div>
+          <div className="mt-1 pl-2 border-l ml-2">
+            <div className="text-[11px] text-muted-foreground px-1">worktree: feat/x</div>
+            <div onClick={() => setSel("c")} className={`rounded px-2 py-1 cursor-pointer ${sel === "c" ? "bg-accent" : ""}`}>
+              <div className="font-medium">Deploy preview</div>
+              <div className="text-xs text-muted-foreground truncate">only on this worktree</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="p-3 text-xs text-muted-foreground">worktree tree (normal mode)</div>
+    )}
+  </div>
+  <div className="flex-1 p-3 font-mono text-xs bg-background overflow-auto">
+    {mode === "auto" ? (
+      <pre>{`// ${sel === "a" ? "nightly-cleanup" : sel === "c" ? "deploy-preview" : "alert-on-build"}.ts
+import { defineAutomation } from "@pragma/automations";
+
+export default defineAutomation({
+  name: "...",
+  trigger: { type: "${sel === "a" ? "cron" : "event"}", ... },
+  async run(ctx) { /* editable CodeMirror tab */ },
+});`}</pre>
+    ) : (
+      <div className="text-muted-foreground">terminal / editor (normal workspace)</div>
+    )}
+  </div>
+</div>
+
+</Playground>
+
+## Implementation phases
+
+<Accordion type="multiple" className="my-4">
+  <AccordionItem value="p0">
+    <AccordionTrigger>
+      Phase 0 — Shared runtime + constants <Badge variant="secondary" className="ml-2">foundation</Badge>
+    </AccordionTrigger>
+    <AccordionContent>
+
+- **New `packages/automations`** (`@pragma/automations`): `src/index.ts` exports `defineAutomation` + types (author-facing); `src/cli.ts` is the sidecar NDJSON entrypoint (mirror `packages/ai-helpers/src/cli.ts` — `emit`/`emitError`, argv parse, command table). `package.json` `build:sidecar` = `bun build src/cli.ts --compile --minify --outfile dist/pragma-automations`.
+- **Constants** (`packages/constants`): add `automationPending` (and `automationsChanged`) to the `ProtocolEventKind` enum (`schema.json:56-68`) **and** the `values.json` events array (`values.json:24-31`). Add approve/reject/list RPC methods to `ProtocolRpcMethod` (`schema.json:38-55` + `values.json:11-23`). Add automation DTO types (id, name, description, scope, trust, trigger kind, worktreeId?) to `schema.json`. Bump `daemon.protocolVersion` (`values.json:4`). Run `bun run generate`.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="p1">
+    <AccordionTrigger>
+      Phase 1 — The sidecar (transpile + run) <Badge variant="secondary" className="ml-2">Bun/TS</Badge>
+    </AccordionTrigger>
+    <AccordionContent>
+
+- esbuild bundle a file with on-demand bare-import install into a managed cache; import + validate the `defineAutomation` shape.
+- Register cron jobs (report next-fire to the server; server owns the clock) and start event `listen` background listeners; run `run` on fire; emit `status`/`log`/`error` NDJSON lines.
+- Commands over stdin: `load {path, root, scope}`, `unload {id}`, `runNow {id}`, `reload {id}`. Vitest for bundling, import parsing, shape validation, and listener lifecycle.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="p2">
+    <AccordionTrigger>
+      Phase 2 — Server integration <Badge variant="secondary" className="ml-2">Rust / pragma-server</Badge>
+    </AccordionTrigger>
+    <AccordionContent>
+
+- New `crates/pragma-server/src/automations.rs` (+ `pragma-core` helpers as needed): **dir watcher** over each registered `.pragma/automations` and `~/.pragma/automations` (a raw `notify` watcher — the existing `WorktreeWatcher` filters `.git` and emits worktree-relative paths); **cron scheduler thread** spawned before the accept loop (`main.rs:118-120`); **managed sidecar `Child`** as a new `Registry` field (all other children live in `Session` today).
+- **Trust store**: server-owned SQLite/JSON under `server_paths().dir` (`main.rs:653`). `rusqlite` already a workspace dep — add to `crates/pragma-server/Cargo.toml` if reused.
+- Sidecar resolved beside the server exe (same pattern the server uses to spawn `pragma-gateway`, `pty.rs:281-306`); debug = `bun packages/automations/src/cli.ts`, release = staged binary.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="p3">
+    <AccordionTrigger>
+      Phase 3 — App ↔ server wiring <Badge variant="secondary" className="ml-2">protocol / IPC</Badge>
+    </AccordionTrigger>
+    <AccordionContent>
+
+- **Server→app pending push**: broadcast `automationPending`/`automationsChanged` as `EventFrame::Delta` (pattern at `registry.rs:326`); wire the new event kind's snapshot source (`main.rs:522-543` currently only wires `fileChanged`).
+- **App→server approve/reject/list/runNow**: new RPC methods through `core.handle_rpc` (`main.rs:423`, `crates/pragma-core/src/rpc.rs`).
+- **Root registration**: on controller connect, the app sends project roots + known automations (a new RPC) so the server can watch/enumerate and persist them.
+- **Tauri commands** in `src-tauri/src/lib.rs` + typed wrappers in `apps/pragma/src/lib/tauri.ts` (`list_automations`, `approve_automation`, `reject_automation`, `run_automation_now`, `on_automation_installed` / `on_automations_changed` listeners — mirror the `showAgentNotification` / `onAgentReport` wiring at `tauri.ts:172-195`).
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="p4">
+    <AccordionTrigger>
+      Phase 4 — Frontend UI <Badge variant="secondary" className="ml-2">React</Badge>
+    </AccordionTrigger>
+    <AccordionContent>
+
+- **Mode toggle**: `AutomationsProvider` in `App.tsx:15` modeled on `kanban-context.tsx:467-505`; `<Clock/>` button in `ProjectSidebar.tsx:48-67` copied from the Kanban `LayoutGrid` button (`:49-58`); third branch in the `WorkspaceShell.tsx:195-199` mode switch → `<AutomationsWorkspace/>`.
+- **Sidebar**: grouped Global/Local reusing the `WorktreeTree.tsx` collapsible-group (`:121-141`) + recursive rows (`:511-598`) and `worktree-tree.ts` node shape; Local subtree only for automations unique to a worktree.
+- **Editor**: open the `.ts` source via `workspace.openFileTab(path)` (`workspace-context.tsx:2655`) → existing `"editor"` tab kind + `EditorView` (no new tab kind).
+- **Approval dialog**: `AutomationApprovalProvider` cloning the imperative provider in `components/editor/confirm-close.tsx:31-103` (three-action AlertDialog), triggered from the `on_automation_installed` listener.
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+## Key files
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Area</TableHead>
+      <TableHead>File</TableHead>
+      <TableHead>Why</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Sidecar template</TableCell>
+      <TableCell>
+        <code>packages/ai-helpers/src/cli.ts</code>
+      </TableCell>
+      <TableCell>NDJSON entrypoint + long-lived child pattern (`ai.rs:592`) to mirror.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Staging / bundling</TableCell>
+      <TableCell>
+        <code>apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh</code>,{" "}
+        <code>tauri.conf.json:44-50</code>
+      </TableCell>
+      <TableCell>Add `pragma-automations` build + `externalBin`.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Server core</TableCell>
+      <TableCell>
+        <code>{"crates/pragma-server/src/{main.rs,registry.rs}"}</code>
+      </TableCell>
+      <TableCell>
+        Scheduler thread, watcher field, managed child, trust store (`server_paths()`
+        `main.rs:653`).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Watcher pattern</TableCell>
+      <TableCell>
+        <code>crates/pragma-core/src/watcher.rs:38</code>
+      </TableCell>
+      <TableCell>
+        `notify` debouncer to mirror (but raw, not `.git`-filtered/worktree-relative).
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Broadcast + RPC</TableCell>
+      <TableCell>
+        <code>crates/pragma-server/src/main.rs:522-543</code>,{" "}
+        <code>crates/pragma-core/src/rpc.rs</code>
+      </TableCell>
+      <TableCell>New event-kind snapshot source + approve/reject/list RPC.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Constants</TableCell>
+      <TableCell>
+        <code>{"packages/constants/{schema.json,values.json}"}</code>
+      </TableCell>
+      <TableCell>Event kinds, RPC methods, DTOs, protocol version.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>FE toggle + shell</TableCell>
+      <TableCell>
+        <code>App.tsx:15</code>, <code>ProjectSidebar.tsx:48-67</code>,{" "}
+        <code>WorkspaceShell.tsx:195-199</code>
+      </TableCell>
+      <TableCell>Provider, clock icon, mode branch (Kanban precedent).</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>FE sidebar / editor / dialog</TableCell>
+      <TableCell>
+        <code>WorktreeTree.tsx</code>, <code>workspace-context.tsx:2655</code>,{" "}
+        <code>editor/confirm-close.tsx:31-103</code>
+      </TableCell>
+      <TableCell>Grouped tree, `openFileTab`, approval provider.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>IPC surface</TableCell>
+      <TableCell>
+        <code>apps/pragma/src/lib/tauri.ts</code>, <code>apps/pragma/src-tauri/src/lib.rs</code>
+      </TableCell>
+      <TableCell>Typed command wrappers + `#[tauri::command]`s.</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Open questions
+
+<Card className="my-4">
+  <CardContent className="text-sm pt-6 space-y-2">
+
+- **Root registration timing** — before the app has _ever_ opened a project, the server can't know its `.pragma` root, so a cron can't run "cold" the very first time. Acceptable? (Global automations are unaffected — the server watches `~/.pragma` on startup.)
+- **`ctx` surface** — how much host capability to expose (git, fs, exec, network). More power = more useful and more dangerous. Proposed: log + paths + a `@pragma/sdk` subset; exec/network available but called out in the approval dialog.
+- **Cron ownership** — server holds the schedule (survives app close) and pokes the sidecar to run; the sidecar does **not** self-schedule. Confirm.
+- ~~**Trust granularity** — trust is per automation id (path), one-time. Do we ever want to re-verify on external content change (git pull replacing the file)?~~ Resolved: rejected verdicts are keyed to the content hash at rejection time; any content change (Pragma editor, external edit, `git pull`) clears the rejection and re-prompts. Approved verdicts stay one-time per id regardless of edits.
+
+</CardContent>
+</Card>
+
+## Acceptance
+
+<Card className="my-4">
+  <CardContent className="text-sm pt-6">
+
+- [ ] A `.ts` file in `~/.pragma/automations` with a `cron` trigger runs on schedule with the app closed.
+- [ ] A `.ts` file in `.pragma/automations` is **inert** until approved; the install dialog shows title + description + security warning.
+- [ ] Reject keeps the file and records `rejected` against its content hash; no re-prompt on next scan unless the file's content changes, in which case it goes back to `pending`.
+- [ ] An `event` automation's free-form `listen` runs in the background and fires `run` on `eventTriggered`.
+- [ ] A bare `import` (e.g. `@octokit/rest`) is auto-installed and bundled — file stays self-contained.
+- [ ] Clock icon opens the full-view screen; Global/Local grouping; worktree subtree for worktree-unique automations.
+- [ ] Clicking an automation opens its uncompiled `.ts` as an editable CodeMirror tab; ⌘S saves.
+- [ ] Bundle/throw/bad-shape surfaces as an error status in the UI, not a silent drop.
+- [ ] `bun run check` green (oxlint, oxfmt, typecheck, clippy, both test suites).
+
+</CardContent>
+</Card>

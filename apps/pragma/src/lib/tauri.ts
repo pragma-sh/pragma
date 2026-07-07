@@ -23,6 +23,8 @@ import type {
   WorktreeStatus,
   AgentMessage,
   AgentReportPayload,
+  AutomationInfo,
+  AutomationRootRegistration,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -129,6 +131,59 @@ export function onAgentMessage(handler: (payload: AgentMessage) => void): Promis
 /** Fires before the daemon replays its current agent-status snapshot. */
 export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("pragma:agent-status-reset", () => handler());
+}
+
+/** Subscribes to local automation approval requests from the host server. */
+export function onAutomationPending(
+  handler: (payload: AutomationInfo) => void,
+): Promise<UnlistenFn> {
+  return listen<AutomationInfo>("pragma:automation-pending", (event) => handler(event.payload));
+}
+
+/** Subscribes to automation list/runtime changes from the host server. */
+export function onAutomationsChanged(
+  handler: (payload: AutomationInfo[]) => void,
+): Promise<UnlistenFn> {
+  return listen<AutomationInfo[]>("pragma:automations-changed", (event) => handler(event.payload));
+}
+
+/** Registers known project/worktree roots with the host automation server. */
+export function registerAutomationRoots(projects: AutomationRootRegistration[]): Promise<void> {
+  return invoke("register_automation_roots", { projects });
+}
+
+/** Lists automations discovered by the host server. */
+export function listAutomations(): Promise<AutomationInfo[]> {
+  return invoke<AutomationInfo[]>("list_automations");
+}
+
+/** Approves a pending local automation. */
+export function approveAutomation(id: string): Promise<void> {
+  return invoke("approve_automation", { id });
+}
+
+/** Rejects a pending local automation without deleting its file. */
+export function rejectAutomation(id: string): Promise<void> {
+  return invoke("reject_automation", { id });
+}
+
+/** Runs a loaded automation immediately. */
+export function runAutomationNow(id: string): Promise<void> {
+  return invoke("run_automation_now", { id });
+}
+
+/**
+ * Reads the `.ts` source backing an automation from whichever host owns the
+ * server socket (local for local projects, the remote box for SSH-bridged ones).
+ * Used by the Automations workspace preview editor; shared by global + local.
+ */
+export function readAutomationSource(id: string): Promise<FileContents> {
+  return invoke<FileContents>("read_automation_source", { id });
+}
+
+/** Overwrites the `.ts` source backing an automation with UTF-8 text. */
+export function writeAutomationSource(id: string, contents: string): Promise<void> {
+  return invoke("write_automation_source", { id, contents });
 }
 
 /** Warns once when `~/.local/bin` is not on PATH after installing `pragma-cli`. */

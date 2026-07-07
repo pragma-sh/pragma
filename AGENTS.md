@@ -75,6 +75,7 @@ than no guide.
 | Backend           | Rust (Tauri commands)                                                                                                                                           |
 | GitHub            | Octokit (JS, in `lib/github.ts` only) + `reqwest` (Rust auth, `0600` token file); TipTap + react-markdown for PR bodies                                         |
 | AI                | pi coding-agent SDK (`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`) wrapped by `@pragma/ai-helpers`, run via the Bun-compiled `pragma-ai` sidecar |
+| Automations       | `@pragma/automations` authoring API + Bun-compiled `pragma-automations` sidecar, supervised by `pragma-server`                                                  |
 | Shared constants  | JSON Schema → typed TS (`json-schema-to-typescript`) + Rust (`typify`)                                                                                          |
 | SDK bundling      | [Bunup](https://bunup.dev) for dual ESM/CJS library output + `.d.ts`                                                                                            |
 | Lint (TS)         | [oxlint](https://oxc.rs)                                                                                                                                        |
@@ -92,7 +93,8 @@ than no guide.
 ```
 .
 ├── apps/
-│   └── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
+│   ├── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
+│   └── pragma-mobile/           # Expo (SDK 57) native client → see apps/pragma-mobile/AGENTS.md
 ├── crates/
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
@@ -104,6 +106,7 @@ than no guide.
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
+│   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
@@ -112,6 +115,7 @@ than no guide.
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
 │   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-cli`
+│   ├── automations/             # `@pragma/automations` API + `pragma-automations` host sidecar
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
@@ -156,6 +160,11 @@ bun install                # Install all workspace deps
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+
+# Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
+bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
+bun run dev:mobile:android # First run: build dev client + boot Android emulator
+bun run dev:mobile         # Metro dev server (after the dev client is installed once)
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo

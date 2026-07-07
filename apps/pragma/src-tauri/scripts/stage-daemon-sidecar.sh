@@ -45,10 +45,11 @@ fi
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
-# Build the opencode plugin so its host-side approval watcher bundle
+# Build the opencode plugin so its host-side approval watchers bundle
 # (`dist/pragma-watcher.mjs`) exists; a release app imports it from resources
 # (dev imports the TS source directly). See `resolve_builtin_watcher_main`.
 bun --filter @pragma/opencode-plugin build
+bun --filter @pragma/automations build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-server" \
@@ -63,6 +64,8 @@ cp "$repo_root/packages/github-helpers/dist/pragma-github" \
   "$src_tauri_dir/binaries/pragma-github-$triple"
 cp "$repo_root/packages/watcher/dist/pragma-watch" \
   "$src_tauri_dir/binaries/pragma-watch-$triple"
+cp "$repo_root/packages/automations/dist/pragma-automations" \
+  "$src_tauri_dir/binaries/pragma-automations-$triple"
 
 # Remove any plugin JS left over from a previous staging layout. Pragma no longer
 # bundles opencode's *status* plugin dist (`index.mjs`) as a Tauri resource; since
@@ -84,3 +87,4 @@ echo "staged pragma-cli ($profile) -> src-tauri/binaries/pragma-cli-$triple"
 echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
 echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"
+echo "staged pragma-automations -> src-tauri/binaries/pragma-automations-$triple"

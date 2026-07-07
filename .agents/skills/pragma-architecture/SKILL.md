@@ -30,6 +30,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
 - `packages/plugin/` — `@pragma/plugin`, the public TS API/runtime stub for pure Pragma
   plugins loaded from `.pragma/config.json`.
+- `packages/automations/` — `@pragma/automations`, the authoring API plus
+  `pragma-automations` Bun sidecar supervised by `pragma-server`.
 - `packages/create-pragma-plugin/` — `create-pragma-plugin` scaffolder CLI for
   single-bundle plugin projects.
 - `packages/github-helpers/` — `@pragma/github-helpers`, the `pragma-github` host-side sidecar scaffold.
@@ -52,6 +54,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                               |
 | Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                           |
 | Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                     |
+| Automation authoring API / host sidecar          | `packages/automations` (`@pragma/automations`)           |
 | Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                          |
 | Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)              |
 | opencode runtime integration plugin              | `packages/opencode-plugin`                               |

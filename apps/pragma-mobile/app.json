@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Pragma",
+    "slug": "pragma-mobile",
+    "scheme": "pragma",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "sh.pragma.mobile",
+      "infoPlist": {
+        "CFBundleDisplayName": "Pragma"
+      }
+    },
+    "android": {
+      "package": "sh.pragma.mobile",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "dark": { "backgroundColor": "#0b0b0c" }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
