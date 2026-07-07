@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use pragma_client::PragmaClient;
 use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
-use pragma_protocol::{AgentMessage, AgentReportPayload};
+use pragma_protocol::{AgentAnswer, AgentDecision, AgentInput, AgentMessage, AgentReportPayload};
 use serde_json::Value;
 
 use crate::error::{GatewayError, GatewayResult};
@@ -68,16 +68,16 @@ impl GatewayClient {
             .map_err(GatewayError::from)
     }
 
-    /// Attaches to a session event stream.
+    /// Attaches to a session event stream. A `Some` size resizes the PTY to
+    /// the attacher's viewport; `None` observes without resizing.
     pub fn attach_stream(
         &self,
         session_id: String,
-        cols: u16,
-        rows: u16,
+        size: Option<(u16, u16)>,
     ) -> GatewayResult<UnixStream> {
         self.ensure_protocol()?;
         self.client
-            .attach_stream(session_id, cols, rows)
+            .attach_stream(session_id, size)
             .map_err(GatewayError::from)
     }
 
@@ -122,6 +122,30 @@ impl GatewayClient {
         self.ensure_protocol()?;
         self.client
             .report_agent_message(message)
+            .map_err(GatewayError::from)
+    }
+
+    /// Publishes a command-approval verdict.
+    pub fn report_agent_decision(&self, decision: &AgentDecision) -> GatewayResult<()> {
+        self.ensure_protocol()?;
+        self.client
+            .report_agent_decision(decision)
+            .map_err(GatewayError::from)
+    }
+
+    /// Publishes a reply to a question request.
+    pub fn report_agent_answer(&self, answer: &AgentAnswer) -> GatewayResult<()> {
+        self.ensure_protocol()?;
+        self.client
+            .report_agent_answer(answer)
+            .map_err(GatewayError::from)
+    }
+
+    /// Publishes a free-form interjection for a running agent.
+    pub fn report_agent_input(&self, input: &AgentInput) -> GatewayResult<()> {
+        self.ensure_protocol()?;
+        self.client
+            .report_agent_input(input)
             .map_err(GatewayError::from)
     }
 

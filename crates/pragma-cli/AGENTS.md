@@ -8,7 +8,33 @@ crate's debug binary).
 
 ```sh
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
+# Command approval: report the command + a correlation id, then block for the verdict.
+pragma-cli agent report --agent <id> attention --kind command --command "<cmd>" --request-id <id>
+pragma-cli agent await-decision --agent <id> --request-id <id> [--timeout 300]
+pragma-cli agent decide --agent <id> --request-id <id> --allow|--deny
+# Question/answer: report the question + a correlation id, then block for the reply.
+pragma-cli agent report --agent <id> attention --kind question --question "<q>" --request-id <id>
+pragma-cli agent await-answer --agent <id> --request-id <id> [--timeout 300]
+pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismiss
+# Interject: publish free-form input to a running agent (the controlling-client side).
+pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
 ```
+
+`agent await-decision` blocks on the agent event stream until a Pragma approval toast
+publishes the matching `AgentDecision`, then prints `allow`/`deny` (exit 0). On timeout it
+prints nothing and exits non-zero so a blocking harness hook (Claude Code
+`PermissionRequest`, Cursor `beforeShellExecution`) can fall back to its native prompt.
+`agent decide` is the controlling-client side: it publishes that verdict.
+
+`agent await-answer` mirrors this for questions: it blocks until the matching `AgentAnswer`
+arrives, then prints the reply text (exit 0). A dismissed reply or a timeout prints nothing
+and exits non-zero so the caller can fall back. `agent answer` publishes the reply
+(`--text`) or a dismissal (`--dismiss`).
+
+`agent input` publishes an `AgentInput` (a free-form interjection) fanned out to agent
+subscribers; the waiting reporter — a harness input hook or a plugin watcher — delivers the
+text into the running agent's turn. It is fire-and-forget (no verdict to wait for) and is the
+CLI side of the SDK's `client.agents.connect(...).send(text)`.
 
 `pragma-cli agent start` is brokered through the app but is not supported for
 plugin-defined agents; launch agents from the Pragma UI so the frontend can run JS

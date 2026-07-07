@@ -32,7 +32,14 @@ beforeEach(() => {
   // A fake `pragma-cli` on PATH that records its arguments, one call per line,
   // so the test can assert exactly which statuses report.sh emits.
   const fake = join(binDir, "pragma-cli");
-  writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
+  // Records every call; for `agent await-decision` it prints $PRAGMA_TEST_DECISION
+  // on stdout (empty by default = timeout/no verdict) so the blocking approval
+  // path can be exercised without a real server.
+  writeFileSync(
+    fake,
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    { mode: 0o755 },
+  );
 });
 
 afterEach(() => {
@@ -77,6 +84,29 @@ function run(
   }
   execFileSync("sh", [REPORT_SH, event, ...args], { env: runEnv, input: stdin });
   return reportCalls();
+}
+
+/** Runs report.sh and returns its stdout (the PermissionRequest decision JSON). */
+function runRaw(
+  event: string,
+  {
+    env: extraEnv = {},
+    socket = true,
+    stdin = "",
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string } = {},
+): string {
+  const runEnv: Record<string, string> = {
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    TMPDIR: tmpEnvDir,
+    PRAGMA_TAB_ID: TAB_ID,
+    PRAGMA_TEST_LOG: logPath,
+    PRAGMA_WATCH_INTERVAL: "0.1",
+    ...extraEnv,
+  };
+  if (socket) {
+    runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
+  }
+  return execFileSync("sh", [REPORT_SH, event], { env: runEnv, input: stdin }).toString();
 }
 
 /** The pid of the watcher report.sh spawned for the current tab, if any. */
@@ -249,6 +279,60 @@ describe("report.sh", () => {
     // must NOT land on an already-finished turn that nothing would clear.
     expect(run("attention")).toEqual([]);
     expect(existsSync(markerPath())).toBe(false);
+  });
+
+  const PERMISSION_STDIN = JSON.stringify({
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+  });
+
+  it("reports a command attention with the command and a requestId on PermissionRequest", () => {
+    run("started");
+    run("permission", { stdin: PERMISSION_STDIN });
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent claude-code started");
+    expect(reports[1]).toMatch(
+      /^agent report --agent claude-code attention --kind command --command .+ --request-id claude-code-tab-test-/,
+    );
+  });
+
+  it("ignores a PermissionRequest once the turn has ended", () => {
+    expect(run("permission", { stdin: PERMISSION_STDIN })).toEqual([]);
+  });
+
+  it("emits Claude's allow decision when the toast approves", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: PERMISSION_STDIN,
+      env: { PRAGMA_TEST_DECISION: "allow" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "allow" },
+      },
+    });
+  });
+
+  it("emits Claude's deny decision when the toast denies", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: PERMISSION_STDIN,
+      env: { PRAGMA_TEST_DECISION: "deny" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "deny" },
+      },
+    });
+  });
+
+  it("emits nothing (defers to Claude's own prompt) when no verdict arrives", () => {
+    run("started");
+    const output = runRaw("permission", { stdin: PERMISSION_STDIN });
+    expect(output.trim()).toBe("");
   });
 
   it("re-asserts running after a tool completes so approved-prompt attention clears", () => {
