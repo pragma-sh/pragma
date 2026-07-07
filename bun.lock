@@ -149,6 +149,18 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/automations": {
+      "name": "@pragma/automations",
+      "version": "0.0.0",
+      "bin": {
+        "pragma-automations": "./src/cli.ts",
+      },
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/claude-code-plugin": {
       "name": "@pragma/claude-code-plugin",
       "version": "0.0.0",
@@ -1078,6 +1090,8 @@
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.71.0", "", { "os": "win32", "cpu": "x64" }, "sha512-D2kyEIPHk/G/wiZLnwTVC/sVst+T/lKldVOjAFpgTIBUAOlry72e5OiapDbDBF4LfJLkN5ypJb/8Eu6yJzkveQ=="],
 
     "@pragma/ai-helpers": ["@pragma/ai-helpers@workspace:packages/ai-helpers"],
+
+    "@pragma/automations": ["@pragma/automations@workspace:packages/automations"],
 
     "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
 

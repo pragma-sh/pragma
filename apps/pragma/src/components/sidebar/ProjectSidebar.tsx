@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, LayoutGrid, Plus } from "lucide-react";
+import { ChevronDown, Clock, LayoutGrid, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -58,6 +58,17 @@ export function ProjectSidebar() {
             onClick={() => (kanban.mode === "kanban" ? kanban.exitBoard() : kanban.openBoard())}
           >
             <LayoutGrid />
+          </Button>
+          <Button
+            aria-label="Toggle automations"
+            aria-pressed={kanban.mode === "automations"}
+            size="icon-sm"
+            variant={kanban.mode === "automations" ? "secondary" : "ghost"}
+            onClick={() =>
+              kanban.mode === "automations" ? kanban.exitBoard() : kanban.openAutomations()
+            }
+          >
+            <Clock />
           </Button>
           <Button
             aria-label="Add project"

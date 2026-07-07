@@ -4,6 +4,7 @@ import { GitHubSetupModal } from "@/components/github/GitHubSetupModal";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { PluginProvider } from "@/plugins/PluginProvider";
 import { AiProvider } from "@/state/ai-context";
+import { AutomationsProvider } from "@/state/automations-context";
 import { GitHubProvider } from "@/state/github-context";
 import { KanbanProvider } from "@/state/kanban-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
@@ -15,11 +16,13 @@ function App() {
         <WorkspaceProvider>
           <PluginProvider>
             <KanbanProvider>
-              <ConfirmCloseProvider>
-                <WorkspaceShell />
-                <GitHubSetupModal />
-                <AiSetupModal />
-              </ConfirmCloseProvider>
+              <AutomationsProvider>
+                <ConfirmCloseProvider>
+                  <WorkspaceShell />
+                  <GitHubSetupModal />
+                  <AiSetupModal />
+                </ConfirmCloseProvider>
+              </AutomationsProvider>
             </KanbanProvider>
           </PluginProvider>
         </WorkspaceProvider>

@@ -1,3 +1,4 @@
+mod automations;
 mod registry;
 mod session;
 
@@ -17,7 +18,7 @@ use std::thread;
 use std::time::Duration;
 
 use daemonize::Daemonize;
-use pragma_constants::{ProtocolEventKind, CONSTANTS};
+use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
@@ -115,7 +116,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = UnixListener::bind(&paths.socket)?;
     set_socket_permissions(&paths.socket)?;
 
-    let registry = Arc::new(Registry::new(paths.socket.clone()));
+    let registry = Arc::new(Registry::new(
+        paths.socket.clone(),
+        paths.dir.clone(),
+        workspace_root(),
+    ));
     let core = Arc::new(Core);
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
@@ -396,7 +401,7 @@ fn handle_request(
             Ok(Outcome::default())
         }
         RequestKind::Rpc => Err(HandledRequestError::Rpc(Box::new(handle_rpc_request(
-            request, core,
+            request, registry, core,
         )?))),
         RequestKind::Subscribe => Ok(Outcome {
             event_stream: Some(subscription_snapshot(request, registry)?),
@@ -412,6 +417,7 @@ fn handle_request(
 
 fn handle_rpc_request(
     request: RequestFrame,
+    registry: &Registry,
     core: &Core,
 ) -> Result<RpcResponseFrame, HandledRequestError> {
     let Some(rpc) = request.rpc else {
@@ -420,6 +426,25 @@ fn handle_rpc_request(
         ));
     };
     let request_id = request.request_id;
+    if matches!(rpc.method, ProtocolRpcMethod::Automations) {
+        return Ok(match registry.handle_automation_rpc(rpc.payload) {
+            Ok(payload) => RpcResponseFrame {
+                request_id,
+                ok: true,
+                payload: Some(payload),
+                error: None,
+            },
+            Err(error) => RpcResponseFrame {
+                request_id,
+                ok: false,
+                payload: None,
+                error: Some(RpcError {
+                    code: pragma_constants::ProtocolErrorCode::Internal,
+                    message: error.to_string(),
+                }),
+            },
+        });
+    }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {
             request_id,
@@ -537,6 +562,18 @@ fn subscription_snapshot(
         let root = required(request.cwd, "cwd")?;
         let (scrollback, rx) = registry
             .subscribe_files(worktree_id, &root)
+            .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
+    if matches!(subscription.event, ProtocolEventKind::AutomationPending) {
+        let (scrollback, rx) = registry
+            .subscribe_automation_pending()
+            .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
+    if matches!(subscription.event, ProtocolEventKind::AutomationsChanged) {
+        let (scrollback, rx) = registry
+            .subscribe_automations_changed()
             .map_err(|err| HandledRequestError::Request(err.to_string()))?;
         return Ok(EventStream { scrollback, rx });
     }

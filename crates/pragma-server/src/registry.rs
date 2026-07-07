@@ -9,6 +9,7 @@ use pragma_core::watcher::WorktreeWatcher;
 use pragma_protocol::{AgentReportPayload, AgentStatus, ControlResult, EventFrame};
 use thiserror::Error;
 
+use crate::automations::{AutomationError, AutomationsRegistry};
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Error)]
@@ -31,7 +32,6 @@ pub enum RegistryError {
 /// `Control` envelopes to.
 pub type ControllerWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
 
-#[derive(Default)]
 pub struct Registry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     socket_path: PathBuf,
@@ -47,6 +47,7 @@ pub struct Registry {
     /// In-flight brokered control requests keyed by `request_id`, each waiting
     /// for the controller's `ControlResult` reply.
     pending: Mutex<HashMap<String, Sender<ControlResult>>>,
+    automations: Arc<AutomationsRegistry>,
 }
 
 type AgentKey = (String, String, String);
@@ -65,7 +66,7 @@ struct WorktreeFileWatch {
 }
 
 impl Registry {
-    pub fn new(socket_path: PathBuf) -> Self {
+    pub fn new(socket_path: PathBuf, server_dir: PathBuf, _workspace_root: PathBuf) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             socket_path,
@@ -74,7 +75,27 @@ impl Registry {
             file_watchers: Arc::new(Mutex::new(HashMap::new())),
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
+            automations: AutomationsRegistry::new(server_dir),
         }
+    }
+
+    pub fn handle_automation_rpc(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, AutomationError> {
+        self.automations.handle_rpc(payload)
+    }
+
+    pub fn subscribe_automation_pending(
+        &self,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), AutomationError> {
+        self.automations.subscribe_pending()
+    }
+
+    pub fn subscribe_automations_changed(
+        &self,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), AutomationError> {
+        self.automations.subscribe_changed()
     }
 
     pub fn spawn(
@@ -517,6 +538,14 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
         agent: payload.agent.clone(),
         status: payload.status,
         attention_kind: payload.attention_kind,
+    }
+}
+
+#[cfg(test)]
+impl Default for Registry {
+    fn default() -> Self {
+        let root = std::env::temp_dir().join(format!("pragma-server-test-{}", std::process::id()));
+        Self::new(root.join("daemon.sock"), root, PathBuf::new())
     }
 }
 

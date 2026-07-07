@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 8
+    "protocolVersion": 9
   },
   "gateway": {
     "discoveryFile": "gateway.json",
@@ -23,7 +23,8 @@
       "settings",
       "github",
       "ai",
-      "exec"
+      "exec",
+      "automations"
     ],
     "events": [
       "agentStatus",
@@ -31,7 +32,9 @@
       "kanbanChanged",
       "tabsChanged",
       "fileChanged",
-      "echoMode"
+      "echoMode",
+      "automationPending",
+      "automationsChanged"
     ],
     "errors": [
       "invalidPayload",

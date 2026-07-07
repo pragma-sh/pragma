@@ -15,16 +15,18 @@ mod generated {
 
 pub use generated::{
     AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, Agents, AppInfo,
-    BranchSyncStatus, ChangeStatus, ChangedFile, Constants, ControlMethod, Daemon, DiffSide,
-    DirEntry, EditorLauncher, EditorLaunchers, FileChange, FileChangeKind, FileContents, FileDiff,
-    Gateway, GitHub, GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction,
-    KanbanPromptCard, KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord,
-    KeybindingChordModifiersItem, Keybindings, KeybindingsConfig, Links, PlatformChord, Project,
-    ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind,
-    ProtocolRpcMethod, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit,
-    SplitTabLeaf, SplitVertical, Tab, TabKind, WindowDefaults, Worktree, WorktreeChanges,
-    WorktreeStatus,
+    AutomationInfo, AutomationPendingPayload, AutomationRootRegistration, AutomationScope,
+    AutomationStatus, AutomationTriggerKind, AutomationTrust, AutomationWorktreeRoot,
+    AutomationsChangedPayload, BranchSyncStatus, ChangeStatus, ChangedFile, Constants,
+    ControlMethod, Daemon, DiffSide, DirEntry, EditorLauncher, EditorLaunchers, FileChange,
+    FileChangeKind, FileContents, FileDiff, Gateway, GitHub, GitHubAuthStatus, GitHubRepoRef,
+    GitHubUser, KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus, KanbanSchedulingMode,
+    KeybindingChord, KeybindingChordModifiersItem, Keybindings, KeybindingsConfig, Links,
+    PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode,
+    ProtocolEventKind, ProtocolRpcMethod, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
+    RunScriptSplit, RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode,
+    SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, WindowDefaults, Worktree,
+    WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
