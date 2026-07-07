@@ -8,6 +8,8 @@ const listPluginAgentsMock = vi.fn();
 const requestPermissionMock = vi.fn();
 const sendNotificationMock = vi.fn();
 const showAgentNotificationMock = vi.fn();
+const resolveAgentApprovalMock = vi.fn();
+const startWatcherForAgentSessionMock = vi.fn();
 const audioWindow = window as unknown as {
   AudioContext?: typeof AudioContext;
   webkitAudioContext?: typeof AudioContext;
@@ -17,10 +19,15 @@ const originalWebkitAudioContext = audioWindow.webkitAudioContext;
 
 vi.mock("@/lib/tauri", () => ({
   showAgentNotification: (...args: unknown[]) => showAgentNotificationMock(...args),
+  resolveAgentApproval: (...args: unknown[]) => resolveAgentApprovalMock(...args),
 }));
 
 vi.mock("@/plugins/agents", () => ({
   listPluginAgents: () => listPluginAgentsMock(),
+}));
+
+vi.mock("@/plugins/watchers", () => ({
+  startWatcherForAgentSession: (...args: unknown[]) => startWatcherForAgentSessionMock(...args),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -125,6 +132,8 @@ describe("alertAgent", () => {
     requestPermissionMock.mockReset();
     sendNotificationMock.mockReset();
     showAgentNotificationMock.mockReset();
+    resolveAgentApprovalMock.mockReset();
+    startWatcherForAgentSessionMock.mockReset();
 
     isFocusedMock.mockResolvedValue(false);
     isPermissionGrantedMock.mockResolvedValue(true);
@@ -132,6 +141,7 @@ describe("alertAgent", () => {
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);
     showAgentNotificationMock.mockResolvedValue(false);
+    startWatcherForAgentSessionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -194,7 +204,151 @@ describe("alertAgent", () => {
       body: "The agent is waiting for an answer.",
     });
   });
+
+  it("shows the command and auto-approves it from the toast", async () => {
+    isFocusedMock.mockResolvedValue(true); // focused -> the in-app toast path
+    const { toast } = await import("sonner");
+    const customMock = toast.custom as unknown as ReturnType<typeof vi.fn>;
+    customMock.mockClear();
+
+    await alertAgent(
+      report({
+        tabId: "tab-cmd",
+        status: "attention",
+        attentionKind: "command",
+        command: "rm -rf ./dist",
+        requestId: "req-1",
+      }),
+    );
+
+    expect(customMock).toHaveBeenCalledTimes(1);
+    expect(startWatcherForAgentSessionMock).toHaveBeenCalledWith({
+      agentId: "opencode",
+      sessionId: "tab-cmd",
+      tabId: "tab-cmd",
+      worktreeId: "worktree-1",
+    });
+    const render = customMock.mock.calls[0]?.[0] as (id: string) => unknown;
+    const element = render("toast-1");
+
+    expect(
+      findNode(element, (node) => node.type === "code" && node.props?.children === "rm -rf ./dist"),
+    ).toBeDefined();
+    const approve = findNode(
+      element,
+      (node) => node.type === "button" && node.props?.children === "Approve",
+    );
+    expect(approve).toBeDefined();
+
+    approve?.props?.onClick?.();
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith({
+      agent: "opencode",
+      worktreeId: "worktree-1",
+      tabId: "tab-cmd",
+      requestId: "req-1",
+      approved: true,
+    });
+  });
+
+  it("still renders the approval toast when the app is unfocused", async () => {
+    isFocusedMock.mockResolvedValue(false); // unfocused -> would normally be OS-notification only
+    isPermissionGrantedMock.mockResolvedValue(true);
+    const { toast } = await import("sonner");
+    const customMock = toast.custom as unknown as ReturnType<typeof vi.fn>;
+    customMock.mockClear();
+
+    await alertAgent(
+      report({
+        tabId: "tab-cmd-unfocused",
+        status: "attention",
+        attentionKind: "command",
+        command: "rm -rf ./dist",
+        requestId: "req-2",
+      }),
+    );
+
+    // The interactive Approve toast is rendered even unfocused...
+    expect(customMock).toHaveBeenCalledTimes(1);
+    const render = customMock.mock.calls[0]?.[0] as (id: string) => unknown;
+    const approve = findNode(
+      render("toast-2"),
+      (node) => node.type === "button" && node.props?.children === "Approve",
+    );
+    expect(approve).toBeDefined();
+    // ...and the native banner still fires to draw the user back to the window.
+    expect(sendNotificationMock).toHaveBeenCalled();
+  });
+
+  it("keeps approval available when command text is missing", async () => {
+    isFocusedMock.mockResolvedValue(true);
+    const { toast } = await import("sonner");
+    const customMock = toast.custom as unknown as ReturnType<typeof vi.fn>;
+    customMock.mockClear();
+
+    await alertAgent(
+      report({
+        tabId: "tab-cmd-missing",
+        status: "attention",
+        attentionKind: "command",
+        requestId: "req-missing",
+      }),
+    );
+
+    const render = customMock.mock.calls[0]?.[0] as (id: string) => unknown;
+    const element = render("toast-missing");
+
+    expect(
+      findNode(
+        element,
+        (node) =>
+          node.type === "code" &&
+          node.props?.children ===
+            "Command details unavailable. Review terminal prompt before approving.",
+      ),
+    ).toBeDefined();
+    const approve = findNode(
+      element,
+      (node) => node.type === "button" && node.props?.children === "Approve",
+    );
+
+    approve?.props?.onClick?.();
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith({
+      agent: "opencode",
+      worktreeId: "worktree-1",
+      tabId: "tab-cmd-missing",
+      requestId: "req-missing",
+      approved: true,
+    });
+  });
 });
+
+interface ElementNode {
+  type?: unknown;
+  props?: { children?: unknown; onClick?: () => void };
+}
+
+/** Depth-first walk of a createElement tree returning the first matching node. */
+function findNode(
+  node: unknown,
+  predicate: (node: ElementNode) => boolean,
+): ElementNode | undefined {
+  if (!node || typeof node !== "object") {
+    return undefined;
+  }
+  const element = node as ElementNode;
+  if (predicate(element)) {
+    return element;
+  }
+  const children = element.props?.children;
+  const list = Array.isArray(children) ? children : [children];
+  for (const child of list) {
+    const found = findNode(child, predicate);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
 
 describe("alert latch", () => {
   it("alerts once for a status, then suppresses identical re-deliveries", () => {
@@ -230,6 +384,27 @@ describe("alert latch", () => {
     expect(shouldAlertForStatus(attention)).toBe(false);
     // A subsequent completion is still a new event.
     expect(shouldAlertForStatus(done)).toBe(true);
+  });
+
+  it("notifies for each command approval request", () => {
+    const tabId = `tab-${crypto.randomUUID()}`;
+    const first = report({
+      tabId,
+      status: "attention",
+      attentionKind: "command",
+      requestId: "req-1",
+    });
+    const second = report({
+      tabId,
+      status: "attention",
+      attentionKind: "command",
+      requestId: "req-2",
+    });
+
+    latchAlertedStatus(first);
+
+    expect(shouldAlertForStatus(first)).toBe(false);
+    expect(shouldAlertForStatus(second)).toBe(true);
   });
 
   it("drops latches for a closed tab", () => {

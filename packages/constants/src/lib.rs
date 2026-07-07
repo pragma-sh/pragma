@@ -14,7 +14,9 @@ mod generated {
 }
 
 pub use generated::{
-    AgentAttentionKind, AgentReportKind, AgentReportPayload, AgentStatus, Agents, AppInfo,
+    AgentAnswer, AgentAttentionKind, AgentDecision, AgentFileChange, AgentFileChangeKind,
+    AgentInput, AgentMessage, AgentMessageKind, AgentMessageRole, AgentReportKind,
+    AgentReportPayload, AgentStatus, AgentToolCall, AgentToolCallStatus, Agents, AppInfo,
     AutomationInfo, AutomationPendingPayload, AutomationRootRegistration, AutomationScope,
     AutomationStatus, AutomationTriggerKind, AutomationTrust, AutomationWorktreeRoot,
     AutomationsChangedPayload, BranchSyncStatus, ChangeStatus, ChangedFile, Constants,

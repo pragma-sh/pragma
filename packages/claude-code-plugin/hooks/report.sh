@@ -44,6 +44,9 @@ pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
 # is killed uncatchably (SIGKILL) and the marker is never removed.
 interval="${PRAGMA_WATCH_INTERVAL:-1}"
 max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
+# How long a PermissionRequest blocks waiting for a remote approve/deny from a
+# Pragma toast before giving up and letting Claude Code show its own prompt.
+approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Claude Code session (e.g. when pragma-cli or the server is unavailable).
@@ -51,10 +54,41 @@ report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
+# Reports a coarse rich message. Hook payloads are intentionally not parsed here
+# beyond existing transcript handling; this keeps hooks fail-open and portable.
+message() {
+  role="$1"
+  text="$2"
+  id="${agent}-${tab}-$(date +%s)-$$-$role"
+  ts=$(date +%s)
+  payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
+  "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
 # Reads the hook's stdin JSON and prints the `transcript_path` field, if any.
 # Claude Code passes a JSON payload on stdin to every command hook.
 transcript_path_from_stdin() {
   sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Extracts a human-readable command string from a PermissionRequest stdin JSON
+# payload (passed as $1). Prefers `jq` for a faithful `tool_input.command`
+# (Bash); falls back to the tool name when jq is absent or the tool has no
+# command field, so the approval toast always shows *something* to approve.
+extract_command() {
+  input="$1"
+  if command -v jq >/dev/null 2>&1; then
+    cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
+    if [ -n "$cmd" ]; then
+      printf '%s' "$cmd"
+      return 0
+    fi
+    name=$(printf '%s' "$input" | jq -r '.tool_name // "tool"' 2>/dev/null)
+    args=$(printf '%s' "$input" | jq -rc '.tool_input // {}' 2>/dev/null)
+    printf '%s %s' "$name" "$args"
+    return 0
+  fi
+  printf '%s' "$input" | sed -n 's/.*"tool_name":"\([^"]*\)".*/\1/p' | head -n 1
 }
 
 # Succeeds when the most recent turn in the transcript ended in a user
@@ -130,6 +164,7 @@ case "${1:-}" in
     token="$$-$(date +%s)"
     printf '%s' "$token" >"$marker"
     report started
+    message assistant "Claude Code turn started"
     stop_watcher
     tp="$(transcript_path_from_stdin)"
     if [ -n "$tp" ]; then
@@ -151,14 +186,17 @@ case "${1:-}" in
     rm -f "$marker"
     if turn_interrupted "$(transcript_path_from_stdin)"; then
       report cleared
+      message system "Claude Code turn interrupted"
     else
       report stopped
+      message assistant "Claude Code turn completed"
     fi
     ;;
   cleared)
     stop_watcher
     rm -f "$marker"
     report cleared
+    message system "Claude Code session cleared"
     ;;
   running)
     # PostToolUse: a tool just finished mid-turn. If a turn is in flight, re-assert
@@ -168,7 +206,41 @@ case "${1:-}" in
     # deliberately leave the marker and the abort watcher untouched: this is the same
     # turn `started` set up, so its cancel detection must keep running. Guarded on the
     # marker so a stray PostToolUse outside a turn can't flash a phantom "running".
-    [ -f "$marker" ] && report started
+    if [ -f "$marker" ]; then
+      report started
+      message tool "Claude Code tool finished"
+    fi
+    ;;
+  permission)
+    # PermissionRequest: Claude is asking to run a tool and is BLOCKED on this
+    # hook's stdout. Report a `command` attention carrying the command text and a
+    # unique requestId, then block on `await-decision` for the verdict a Pragma
+    # approval toast publishes. Emit Claude's PermissionRequest decision JSON so
+    # an approve runs the tool and a deny rejects it -- all without the user
+    # touching the terminal. On timeout (no one answered) emit nothing so Claude
+    # falls back to its own native permission prompt. Guarded on the marker so a
+    # stray request outside a turn can't wedge the hook.
+    if [ -f "$marker" ]; then
+      input="$(cat)"
+      command_text="$(extract_command "$input")"
+      request_id="${agent}-${tab}-$(date +%s)-$$"
+      report attention --kind command --command "$command_text" --request-id "$request_id"
+      message system "Claude Code needs approval"
+      verdict="$("$pragma_cli" agent await-decision \
+        --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" 2>/dev/null)"
+      case "$verdict" in
+        allow)
+          printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+          ;;
+        deny)
+          printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
+          ;;
+        *)
+          # Timed out / no decision: defer to Claude's own prompt.
+          :
+          ;;
+      esac
+    fi
     ;;
   attention)
     # Only raise attention while a turn is actually in flight. The fast
@@ -179,7 +251,10 @@ case "${1:-}" in
     # longer wire the *debounced* `Notification permission_prompt` (~3-5s late):
     # after an approval the marker is still present, so that stale notification
     # would re-raise a phantom attention over a turn that is already running.
-    [ -f "$marker" ] && report attention
+    if [ -f "$marker" ]; then
+      report attention
+      message system "Claude Code needs attention"
+    fi
     ;;
   idle)
     # Idle-prompt notification. After a normal completion the marker is already
@@ -190,6 +265,7 @@ case "${1:-}" in
       stop_watcher
       rm -f "$marker"
       report cleared
+      message system "Claude Code turn cleared"
     fi
     ;;
 esac

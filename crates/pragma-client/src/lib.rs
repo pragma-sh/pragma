@@ -22,8 +22,9 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
-    read_json_frame, write_input_frame, write_json_frame, AgentReportPayload, ProtocolEventKind,
-    RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame, SubscriptionRequest,
+    read_json_frame, write_input_frame, write_json_frame, AgentAnswer, AgentDecision, AgentInput,
+    AgentMessage, AgentReportPayload, ProtocolEventKind, RequestFrame, RequestKind, RpcError,
+    RpcRequest, ServerFrame, SubscriptionRequest,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -172,14 +173,15 @@ impl PragmaClient {
     }
 
     /// Opens an attach request and returns the event stream positioned after the
-    /// request's success response.
+    /// request's success response. A `Some` size resizes the PTY to the
+    /// attacher's viewport; `None` attaches as a passive observer without
+    /// resizing (e.g. a plugin watcher tailing output).
     pub fn attach_stream(
         &self,
         session_id: String,
-        cols: u16,
-        rows: u16,
+        size: Option<(u16, u16)>,
     ) -> ClientResult<UnixStream> {
-        let request = request_attach(session_id, cols, rows);
+        let request = request_attach(session_id, size);
         self.open_event_stream(&request)
     }
 
@@ -242,6 +244,30 @@ impl PragmaClient {
     /// Reports an agent status update to the server.
     pub fn report_agent(&self, payload: &AgentReportPayload) -> ClientResult<()> {
         let request = request_agent_report(payload)?;
+        self.request(&request)
+    }
+
+    /// Reports one rich agent message to the server.
+    pub fn report_agent_message(&self, message: &AgentMessage) -> ClientResult<()> {
+        let request = request_agent_message(message)?;
+        self.request(&request)
+    }
+
+    /// Publishes a command-approval verdict, fanned out to agent subscribers.
+    pub fn report_agent_decision(&self, decision: &AgentDecision) -> ClientResult<()> {
+        let request = request_agent_decision(decision)?;
+        self.request(&request)
+    }
+
+    /// Publishes a reply to a question request, fanned out to agent subscribers.
+    pub fn report_agent_answer(&self, answer: &AgentAnswer) -> ClientResult<()> {
+        let request = request_agent_answer(answer)?;
+        self.request(&request)
+    }
+
+    /// Publishes a free-form interjection, fanned out to agent subscribers.
+    pub fn report_agent_input(&self, input: &AgentInput) -> ClientResult<()> {
+        let request = request_agent_input(input)?;
         self.request(&request)
     }
 
@@ -666,16 +692,17 @@ pub fn request_spawn(
     )
 }
 
-/// Builds an `Attach` request frame.
+/// Builds an `Attach` request frame. A `Some` size resizes the PTY to the
+/// attacher's viewport; `None` attaches as a passive observer without resizing.
 #[must_use]
-pub fn request_attach(session_id: String, cols: u16, rows: u16) -> RequestFrame {
+pub fn request_attach(session_id: String, size: Option<(u16, u16)>) -> RequestFrame {
     request_frame(
         RequestKind::Attach,
         Some(session_id),
         None,
         None,
-        Some(cols),
-        Some(rows),
+        size.map(|(cols, _)| cols),
+        size.map(|(_, rows)| rows),
         None,
     )
 }
@@ -770,6 +797,66 @@ pub fn request_agent_report(payload: &AgentReportPayload) -> ClientResult<Reques
         serde_json::to_string(&payload).map_err(|error| ClientError::Server(error.to_string()))?;
     Ok(request_frame(
         RequestKind::AgentReport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds an `AgentMessage` request frame.
+pub fn request_agent_message(message: &AgentMessage) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&message).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentMessage,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds an `AgentDecision` request frame.
+pub fn request_agent_decision(decision: &AgentDecision) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&decision).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentDecision,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds an `AgentAnswer` request frame.
+pub fn request_agent_answer(answer: &AgentAnswer) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&answer).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentAnswer,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds an `AgentInput` request frame.
+pub fn request_agent_input(input: &AgentInput) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&input).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentInput,
         None,
         None,
         None,

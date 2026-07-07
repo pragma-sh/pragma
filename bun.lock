@@ -246,6 +246,7 @@
       },
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
+        "@pragma/plugin": "workspace:*",
         "@types/node": "^24.12.3",
         "bunup": "^0.16.32",
         "typescript": "^6.0.3",
@@ -283,6 +284,21 @@
         "@pragma/constants": "workspace:*",
         "@types/node": "^24.10.1",
         "bunup": "^0.16.32",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/watcher": {
+      "name": "@pragma/watcher",
+      "version": "0.0.0",
+      "bin": {
+        "pragma-watch": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@pragma/sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.10.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -1108,6 +1124,8 @@
     "@pragma/plugin": ["@pragma/plugin@workspace:packages/plugin"],
 
     "@pragma/sdk": ["@pragma/sdk@workspace:packages/sdk"],
+
+    "@pragma/watcher": ["@pragma/watcher@workspace:packages/watcher"],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 

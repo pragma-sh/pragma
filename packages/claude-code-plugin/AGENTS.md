@@ -28,16 +28,16 @@ means the script works regardless of its executable bit. Keeping the logic in on
 
 ## Hook → status mapping
 
-| Hook                         | `report.sh` arg | Reports                                                                      |
-| ---------------------------- | --------------- | ---------------------------------------------------------------------------- |
-| `SessionStart`               | `cleared`       | `cleared` (+ tears down any stale watcher)                                   |
-| `SessionEnd`                 | `cleared`       | `cleared` (+ tears down the watcher)                                         |
-| `UserPromptSubmit`           | `started`       | `started` (+ spawns the abort watcher — see below)                           |
-| `Stop`                       | `stopped`       | `stopped` (or `cleared` on the rare build where `Stop` trails an interrupt)  |
-| `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)           |
-| `PermissionRequest`          | `attention`     | `attention` (no `--kind`) **iff** a marker exists — the fast path, see below |
-| `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path     |
-| `Notification` `idle_prompt` | `idle`          | `cleared` **iff** a turn's marker still exists; else nothing                 |
+| Hook                         | `report.sh` arg | Reports                                                                                                 |
+| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
+| `SessionStart`               | `cleared`       | `cleared` (+ tears down any stale watcher)                                                              |
+| `SessionEnd`                 | `cleared`       | `cleared` (+ tears down the watcher)                                                                    |
+| `UserPromptSubmit`           | `started`       | `started` (+ spawns the abort watcher — see below)                                                      |
+| `Stop`                       | `stopped`       | `stopped` (or `cleared` on the rare build where `Stop` trails an interrupt)                             |
+| `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)                                      |
+| `PermissionRequest`          | `permission`    | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below |
+| `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                |
+| `Notification` `idle_prompt` | `idle`          | `cleared` **iff** a turn's marker still exists; else nothing                                            |
 
 `Stop` always trails `UserPromptSubmit` on a _normal_ turn, so the happy path needs no
 state machine. Cancelled turns fire **no hook at all** — that is the whole problem the
@@ -52,9 +52,33 @@ attention" dot from it lagged that far behind the prompt actually appearing.
 `PermissionRequest` (and `Elicitation` for MCP input) fire **the instant the dialog is
 shown**, and — unlike `PreToolUse` — only when the user would actually be prompted (never
 on an auto-approved tool), so they're the direct equivalent of opencode's `permission.ask`
-event. We drive `attention` from them for a ~immediate (<500ms) transition. The hooks only
-**observe**: `report.sh` writes nothing to stdout and exits 0, so it returns no permission
-decision and the normal prompt proceeds.
+event. We drive `attention` from them for a ~immediate (<500ms) transition.
+
+## Approving from a Pragma toast (`PermissionRequest` blocks)
+
+`PermissionRequest` is a **blocking** hook: Claude Code waits for its stdout before
+proceeding. The `permission` case in `report.sh` uses that to approve remotely:
+
+1. It extracts the command from the hook's stdin JSON (`tool_input.command`, via `jq`
+   with a `tool_name` fallback), mints a `requestId`, and reports
+   `attention --kind command --command <cmd> --request-id <id>` — so a Pragma approval
+   toast shows the command with **Approve**/**Deny**.
+2. It then blocks on `pragma-cli agent await-decision --request-id <id>
+--timeout ${PRAGMA_APPROVAL_TIMEOUT:-300}`, which unblocks when the app publishes the
+   verdict (the user clicked a button; server fans out an `AgentDecision`).
+3. It emits Claude Code's `PermissionRequest` decision JSON —
+   `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny"}}}` —
+   so approve runs the tool and deny rejects it, no terminal interaction needed.
+4. On **timeout** (nobody answered / Pragma unavailable) it emits nothing and exits 0, so
+   Claude Code falls back to its own native permission prompt. Never hangs a session.
+
+**Interjections** (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are
+**not** handled by these hooks. They are delivered by the shared built-in-agent watcher
+(`@pragma/opencode-plugin`'s `claudeCodeInterjectWatcher`, registered in
+`apps/pragma/src/plugins/builtin-agents.ts`), which writes the text into the live terminal
+followed by a submit key. These hooks stay status/approval-only.
+
+`Elicitation` stays observe-only (`attention` dot, no decision).
 
 **We deliberately do _not_ wire the `Notification permission_prompt`/`elicitation_dialog`
 matchers.** That notification is debounced ~3–5s, and — critically — it fires _regardless
@@ -82,13 +106,13 @@ detection. Re-reporting `running` while already running is harmless: the daemon 
 status idempotently and only the transition the UI cares about (attention → running) is
 visible.
 
-`attention` reports a **generic** attention with no `--kind`: `PermissionRequest` gives no
-structured question-vs-command signal, so Pragma shows a neutral "needs attention"
-indicator. (`--kind` is optional in `pragma-cli agent report`; opencode, which does know the kind,
-still passes `question`/`command`.)
+`PermissionRequest` reports `attention --kind command` (with the command + a requestId for
+the approval round-trip, see above). `Elicitation` reports a **generic** attention with no
+`--kind` — MCP input gives no structured question-vs-command signal, so Pragma shows a
+neutral "needs attention" indicator. (`--kind` is optional in `pragma-cli agent report`.)
 
-**The `attention` report is guarded on the turn marker** (`[ -f "$marker" ] && report
-attention`). The fast hooks always fire mid-turn so the marker is present and the guard
+**Both attention reports are guarded on the turn marker** (`[ -f "$marker" ]`). The fast
+hooks always fire mid-turn so the marker is present and the guard
 never suppresses a real prompt; it's defense-in-depth so a late or stray attention can't
 land on an already-finished turn (which nothing would clear). It is also why we can drop
 the debounced `Notification` fallback without leaving a hole: the actual clear path on a

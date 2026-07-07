@@ -398,6 +398,30 @@ pub enum AgentCommand {
     /// Report an external agent's status to the server. Direct to the server;
     /// the reporting logic is the same as before, only the command path moved.
     Report(AgentReportArgs),
+    /// Report a rich agent message to the server. Direct to the server.
+    Message(AgentMessageArgs),
+    /// Block until a command-approval verdict arrives for `--request-id`, then
+    /// print `allow`/`deny` on stdout. A blocking harness hook calls this after a
+    /// `report attention --kind command`; on timeout it exits non-zero with no
+    /// output so the caller can fall back to its native prompt.
+    AwaitDecision(AgentAwaitDecisionArgs),
+    /// Publish a command-approval verdict for `--request-id`, fanned out to the
+    /// waiting reporter. The controlling-client side of `await-decision`.
+    Decide(AgentDecideArgs),
+    /// Publish a reply to a `question` attention request for `--request-id`,
+    /// fanned out to the waiting reporter. The controlling-client side of
+    /// `await-answer`.
+    Answer(AgentAnswerPublishArgs),
+    /// Block until a question reply arrives for `--request-id`, then print the
+    /// answer text on stdout. A blocking harness hook calls this after a `report
+    /// attention --kind question`; on dismiss or timeout it exits non-zero with
+    /// no output so the caller can fall back to its native prompt.
+    AwaitAnswer(AgentAwaitAnswerArgs),
+    /// Publish a free-form interjection for a running agent, fanned out to the
+    /// waiting reporter (a harness input hook or a plugin watcher) which
+    /// delivers the text into the agent's turn. The controlling-client side of
+    /// an interject.
+    Input(AgentInputArgs),
 }
 
 #[derive(Debug, Args)]
@@ -435,6 +459,94 @@ pub struct AgentReportArgs {
     pub report: AgentReportCommand,
 }
 
+#[derive(Debug, Args)]
+pub struct AgentAwaitDecisionArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// The requestId this call waits on; must match the one sent with
+    /// `report attention --kind command --request-id`.
+    #[arg(long = "request-id")]
+    pub request_id: String,
+    /// Seconds to wait before giving up. `0` waits indefinitely.
+    #[arg(long, default_value_t = 300)]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentDecideArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// The requestId this verdict answers; must match the one sent with
+    /// `report attention --kind command --request-id`.
+    #[arg(long = "request-id")]
+    pub request_id: String,
+    /// Approve the command.
+    #[arg(long, conflicts_with = "deny")]
+    pub allow: bool,
+    /// Reject the command.
+    #[arg(long)]
+    pub deny: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentAnswerPublishArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// The requestId this reply answers; must match the one sent with
+    /// `report attention --kind question --request-id`.
+    #[arg(long = "request-id")]
+    pub request_id: String,
+    /// The reply text. Mutually exclusive with `--dismiss`.
+    #[arg(long, conflicts_with = "dismiss")]
+    pub text: Option<String>,
+    /// Dismiss the question without answering.
+    #[arg(long)]
+    pub dismiss: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentAwaitAnswerArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// The requestId this call waits on; must match the one sent with
+    /// `report attention --kind question --request-id`.
+    #[arg(long = "request-id")]
+    pub request_id: String,
+    /// Seconds to wait before giving up. `0` waits indefinitely.
+    #[arg(long, default_value_t = 300)]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentInputArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// The interjection text to deliver to the running agent.
+    #[arg(long)]
+    pub text: String,
+    /// Optional correlation id when the interjection answers a specific prompt.
+    #[arg(long = "request-id")]
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct AgentMessageArgs {
+    /// Stable agent id from the plugin agent definition.
+    #[arg(long)]
+    pub agent: String,
+    /// `AgentMessage` JSON payload. Routing keys are filled from env/--agent.
+    #[arg(long, conflicts_with = "stdin")]
+    pub payload: Option<String>,
+    /// Read `AgentMessage` JSON payload from stdin. Routing keys are filled from env/--agent.
+    #[arg(long)]
+    pub stdin: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum AgentReportCommand {
     Started,
@@ -449,6 +561,19 @@ pub enum AgentReportCommand {
         /// attention indicator.
         #[arg(long, value_enum)]
         kind: Option<AttentionKindArg>,
+        /// The command text awaiting approval. Shown in the approval toast so a
+        /// non-terminal client can review it. Pair with `--kind command`.
+        #[arg(long)]
+        command: Option<String>,
+        /// The question text awaiting an answer. Shown in the toast so a
+        /// non-terminal client can review it. Pair with `--kind question`.
+        #[arg(long)]
+        question: Option<String>,
+        /// Correlation id for the command-approval or question round-trip. Set
+        /// this and then call `agent await-decision`/`await-answer
+        /// --request-id <id>` to block for the verdict/reply.
+        #[arg(long = "request-id")]
+        request_id: Option<String>,
     },
     /// Clears the tab's indicator entirely instead of leaving a `done`/green dot.
     /// Use when the agent process exits rather than finishing a turn.
@@ -510,6 +635,29 @@ mod tests {
     }
 
     #[test]
+    fn agent_input_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "input",
+            "--agent",
+            "opencode",
+            "--text",
+            "focus on the tests",
+        ])
+        .expect("agent input parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::Input(args),
+        } = cli.command
+        else {
+            panic!("expected agent input");
+        };
+        assert_eq!(args.agent, "opencode");
+        assert_eq!(args.text, "focus on the tests");
+        assert_eq!(args.request_id, None);
+    }
+
+    #[test]
     fn agent_report_attention_with_kind_parses() {
         let cli = Cli::try_parse_from([
             "pragma-cli",
@@ -531,9 +679,154 @@ mod tests {
         assert!(matches!(
             report,
             AgentReportCommand::Attention {
-                kind: Some(AttentionKindArg::Question)
+                kind: Some(AttentionKindArg::Question),
+                ..
             }
         ));
+    }
+
+    #[test]
+    fn agent_report_attention_with_question_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "report",
+            "--agent",
+            "mock",
+            "attention",
+            "--kind",
+            "question",
+            "--question",
+            "Which option?",
+            "--request-id",
+            "req-9",
+        ])
+        .expect("attention with question parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::Report(AgentReportArgs { report, .. }),
+        } = cli.command
+        else {
+            panic!("expected agent report");
+        };
+        let AgentReportCommand::Attention {
+            question,
+            request_id,
+            ..
+        } = report
+        else {
+            panic!("expected attention");
+        };
+        assert_eq!(question.as_deref(), Some("Which option?"));
+        assert_eq!(request_id.as_deref(), Some("req-9"));
+    }
+
+    #[test]
+    fn agent_decide_allow_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "decide",
+            "--agent",
+            "mock",
+            "--request-id",
+            "req-1",
+            "--allow",
+        ])
+        .expect("agent decide --allow parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::Decide(args),
+        } = cli.command
+        else {
+            panic!("expected agent decide");
+        };
+        assert!(args.allow);
+        assert!(!args.deny);
+        assert_eq!(args.request_id, "req-1");
+    }
+
+    #[test]
+    fn agent_decide_allow_and_deny_conflict() {
+        let result = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "decide",
+            "--agent",
+            "mock",
+            "--request-id",
+            "req-1",
+            "--allow",
+            "--deny",
+        ]);
+        assert!(
+            result.is_err(),
+            "--allow and --deny must not parse together"
+        );
+    }
+
+    #[test]
+    fn agent_answer_text_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "answer",
+            "--agent",
+            "mock",
+            "--request-id",
+            "req-2",
+            "--text",
+            "option B",
+        ])
+        .expect("agent answer --text parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::Answer(args),
+        } = cli.command
+        else {
+            panic!("expected agent answer");
+        };
+        assert_eq!(args.text.as_deref(), Some("option B"));
+        assert!(!args.dismiss);
+    }
+
+    #[test]
+    fn agent_answer_text_and_dismiss_conflict() {
+        let result = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "answer",
+            "--agent",
+            "mock",
+            "--request-id",
+            "req-2",
+            "--text",
+            "x",
+            "--dismiss",
+        ]);
+        assert!(
+            result.is_err(),
+            "--text and --dismiss must not parse together"
+        );
+    }
+
+    #[test]
+    fn agent_await_answer_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "await-answer",
+            "--agent",
+            "mock",
+            "--request-id",
+            "req-3",
+        ])
+        .expect("agent await-answer parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::AwaitAnswer(args),
+        } = cli.command
+        else {
+            panic!("expected agent await-answer");
+        };
+        assert_eq!(args.request_id, "req-3");
+        assert_eq!(args.timeout, 300);
     }
 
     #[test]
@@ -555,7 +848,7 @@ mod tests {
         };
         assert!(matches!(
             report,
-            AgentReportCommand::Attention { kind: None }
+            AgentReportCommand::Attention { kind: None, .. }
         ));
     }
 

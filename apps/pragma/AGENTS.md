@@ -197,6 +197,12 @@ against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
+Plugin watchers are normally started when Pragma launches an agent session, but command
+approval reports also lazy-start the matching watcher for their tab. This keeps approval
+working when a user manually starts a watcher-backed agent (for example typing `opencode`
+inside a Pragma terminal): the status plugin can raise the toast, and the lazy watcher can
+write the Approve/Deny keys back into that same PTY.
+
 ## Server sidecar + instance channel
 
 See `crates/pragma-server/AGENTS.md` and `crates/pragma-client/AGENTS.md` for the

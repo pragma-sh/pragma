@@ -78,3 +78,7 @@ Shell sessions export both `PRAGMA_SERVER_SOCKET` and the legacy
 `pragma-cli`. They also export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
 directory to `PATH` so plugins can find the helper even when the user's login shell omits
 `~/.local/bin`.
+
+Command-approval decisions are broadcast on the same agent stream and kept only in a
+short bounded replay window, so a watcher that starts/subscribes just after the toast
+click still sees the verdict without making approvals durable state.

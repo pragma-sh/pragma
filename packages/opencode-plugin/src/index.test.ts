@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({
   reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportMessage: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
 }));
@@ -19,6 +20,7 @@ vi.mock("@pragma/sdk", () => {
       ),
     reportAttention: forwardReportMock(sdkMocks.reportAttention),
     reportCleared: forwardReportMock(sdkMocks.reportCleared),
+    reportMessage: forwardReportMock(sdkMocks.reportMessage),
     reportStarted: forwardReportMock(sdkMocks.reportStarted),
     reportStopped: forwardReportMock(sdkMocks.reportStopped),
   };
@@ -39,6 +41,7 @@ const pragmaEnv = {
 
 function testHooks() {
   const reports: Report[] = [];
+  const commands: string[] = [];
   const hooks = createPragmaOpencodeHooks({
     env: pragmaEnv,
     async started() {
@@ -50,11 +53,16 @@ function testHooks() {
     async attention(kind) {
       reports.push(`attention:${kind}`);
     },
+    async message() {},
     async cleared() {
       reports.push("cleared");
     },
+    async attentionCommand(command) {
+      reports.push("attention:command");
+      commands.push(command);
+    },
   });
-  return { hooks, reports };
+  return { hooks, reports, commands };
 }
 
 function runtimeEvent(type: string, properties: Record<string, unknown>) {
@@ -99,7 +107,7 @@ function permissionEvent(type: "permission.asked" | "permission.updated") {
     sessionID: "s1",
     messageID: "m1",
     title: "Run command",
-    metadata: {},
+    metadata: { command: "npm test" },
     time: { created: 0 },
   });
 }
@@ -260,8 +268,8 @@ describe("Pragma opencode plugin", () => {
     await expectEventReports(questionPart("error"), ["started"]);
   });
 
-  it("reports permission attention for documented asked event then resumes when replied", async () => {
-    const { hooks, reports } = testHooks();
+  it("reports a command attention (with the command) for the asked event then resumes when replied", async () => {
+    const { hooks, reports, commands } = testHooks();
 
     await hooks.event?.(permissionEvent("permission.asked"));
     await hooks.event?.(
@@ -273,10 +281,71 @@ describe("Pragma opencode plugin", () => {
     );
 
     expect(reports).toEqual(["attention:command", "started"]);
+    expect(commands).toEqual(["npm test"]);
   });
 
   it("keeps supporting the older typed permission updated event", async () => {
     await expectEventReports(permissionEvent("permission.updated"), ["attention:command"]);
+  });
+
+  async function expectCommandText(
+    properties: Record<string, unknown>,
+    expected: string,
+  ): Promise<void> {
+    const { hooks, commands } = testHooks();
+    await hooks.event?.(runtimeEvent("permission.asked", properties));
+    expect(commands).toEqual([expected]);
+  }
+
+  it("shows the file path (with a verb) for a file-edit permission", async () => {
+    await expectCommandText(
+      { id: "perm-1", type: "edit", metadata: { filePath: "src/app.ts" } },
+      "Edit src/app.ts",
+    );
+  });
+
+  it("shows the file path for a write permission", async () => {
+    await expectCommandText(
+      { id: "perm-1", type: "write", metadata: { path: "notes.md" } },
+      "Write notes.md",
+    );
+  });
+
+  it("shows the file path for a read permission", async () => {
+    await expectCommandText(
+      { id: "perm-1", type: "read", metadata: { filePath: "secrets.env" } },
+      "Read secrets.env",
+    );
+  });
+
+  it("unwraps a nested permission payload", async () => {
+    await expectCommandText(
+      { permission: { type: "bash", metadata: { command: "rm -rf build" } } },
+      "rm -rf build",
+    );
+  });
+
+  it("shows a command nested under tool input", async () => {
+    await expectCommandText(
+      {
+        permission: {
+          type: "bash",
+          metadata: { tool: "bash", input: { command: "bun test packages/opencode-plugin" } },
+        },
+      },
+      "bun test packages/opencode-plugin",
+    );
+  });
+
+  it("shows a command from argv-style command arrays", async () => {
+    await expectCommandText(
+      { id: "perm-1", type: "bash", metadata: { input: { command: ["bun", "test"] } } },
+      "bun test",
+    );
+  });
+
+  it("falls back to the generic label when nothing is extractable", async () => {
+    await expectCommandText({ id: "perm-1" }, "Run a command");
   });
 
   it("forwards pragma env vars to opencode shell commands", async () => {

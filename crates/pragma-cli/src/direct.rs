@@ -6,9 +6,9 @@
 //! - `agent report` — write one `AgentReport` frame and exit (unchanged
 //!   logic, only the command path moved).
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, EventFrame, Frame, RequestFrame, RequestKind,
@@ -169,6 +169,7 @@ pub fn agent_status(
                 agent,
                 status,
                 attention_kind,
+                ..
             })) => {
                 rows.push(AgentStatusRow {
                     worktree_id,
@@ -214,6 +215,7 @@ fn stream_deltas(
                 agent,
                 status,
                 attention_kind,
+                ..
             })) => {
                 let row = AgentStatusRow {
                     worktree_id,
@@ -297,14 +299,17 @@ pub fn agent_report(
     out: &output::Output,
 ) -> Result<(), CliError> {
     let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
-    let (status, attention_kind, worktree_override) = report_fields(&args.report);
-    let worktree_id = report_worktree(worktree_override)?;
+    let fields = report_fields(&args.report);
+    let worktree_id = report_worktree(fields.worktree_override)?;
     let payload = serde_json::json!({
         "agent": args.agent,
         "worktreeId": worktree_id,
         "tabId": tab_id,
-        "status": status,
-        "attentionKind": attention_kind,
+        "status": fields.status,
+        "attentionKind": fields.attention_kind,
+        "command": fields.command,
+        "question": fields.question,
+        "requestId": fields.request_id,
     });
     let frame = RequestFrame {
         request_id: format!("agent-{}", std::process::id()),
@@ -331,25 +336,311 @@ pub fn agent_report(
     Ok(())
 }
 
-fn report_fields(
-    report: &crate::cli::AgentReportCommand,
-) -> (&'static str, Option<&'static str>, Option<String>) {
-    match report {
-        crate::cli::AgentReportCommand::Started => ("running", None, None),
-        crate::cli::AgentReportCommand::Stopped { worktree_id } => {
-            ("done", None, worktree_id.clone())
+/// Rich message sent by an external agent through the server.
+pub fn agent_message(
+    args: &crate::cli::AgentMessageArgs,
+    out: &output::Output,
+) -> Result<(), CliError> {
+    let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let worktree_id = report_worktree(None)?;
+    let raw = message_payload(args)?;
+    let mut value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| CliError::config(format!("invalid AgentMessage JSON: {error}")))?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(CliError::config("AgentMessage JSON must be an object"));
+    };
+    object.insert(
+        "agent".to_string(),
+        serde_json::Value::String(args.agent.clone()),
+    );
+    object.insert(
+        "worktreeId".to_string(),
+        serde_json::Value::String(worktree_id),
+    );
+    object.insert("tabId".to_string(), serde_json::Value::String(tab_id));
+    let frame = RequestFrame {
+        request_id: format!("agent-message-{}", std::process::id()),
+        kind: RequestKind::AgentMessage,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: Some(value.to_string()),
+        rpc: None,
+        subscription: None,
+        control: None,
+        control_result: None,
+    };
+    let Server { mut stream } = server::connect()?;
+    write_json_frame(&mut stream, &frame)?;
+    out.line(
+        "reported",
+        &serde_json::json!({ "ok": true, "agent": args.agent, "messageId": value["id"] }),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+/// Blocks on the agent event stream until a matching [`AgentDecision`] arrives,
+/// printing `allow`/`deny` on stdout. Used by a blocking harness hook to turn a
+/// remote approval toast into a synchronous permission verdict. Times out (exit
+/// non-zero, no output) after `--timeout` seconds so the caller can fall back.
+pub fn agent_await_decision(args: &crate::cli::AgentAwaitDecisionArgs) -> Result<(), CliError> {
+    let Server { mut stream } = server::connect()?;
+    let request = subscribe_agents_request();
+    write_json_frame(&mut stream, &request)?;
+    let deadline = (args.timeout > 0).then(|| Instant::now() + Duration::from_secs(args.timeout));
+    loop {
+        if let Some(deadline) = deadline {
+            match deadline.checked_duration_since(Instant::now()) {
+                Some(remaining) => {
+                    let _ = stream.set_read_timeout(Some(remaining.max(Duration::from_millis(1))));
+                }
+                None => return Err(CliError::config("timed out waiting for approval decision")),
+            }
         }
-        crate::cli::AgentReportCommand::Attention { kind } => (
-            "attention",
-            kind.map(|k| match k {
+        match read_json_frame::<ServerFrame>(&mut stream) {
+            Ok(ServerFrame::Event(EventFrame::AgentDecision { decision }))
+                if decision.request_id == args.request_id && decision.agent == args.agent =>
+            {
+                println!("{}", if decision.approved { "allow" } else { "deny" });
+                let _ = std::io::stdout().flush();
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(pragma_protocol::ProtocolError::Io(ref error))
+                if deadline.is_some()
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+            {
+                return Err(CliError::config("timed out waiting for approval decision"));
+            }
+            Err(error) => return Err(CliError::from(error)),
+        }
+    }
+}
+
+/// Publishes a command-approval verdict, fanned out to the waiting reporter.
+pub fn agent_decide(
+    args: &crate::cli::AgentDecideArgs,
+    out: &output::Output,
+) -> Result<(), CliError> {
+    if !args.allow && !args.deny {
+        return Err(CliError::config("pass --allow or --deny"));
+    }
+    let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let worktree_id = report_worktree(None)?;
+    let payload = serde_json::json!({
+        "agent": args.agent,
+        "worktreeId": worktree_id,
+        "tabId": tab_id,
+        "requestId": args.request_id,
+        "approved": args.allow,
+    });
+    publish_agent_frame(RequestKind::AgentDecision, &payload)?;
+    out.line(
+        "decided",
+        &serde_json::json!({
+            "ok": true,
+            "agent": args.agent,
+            "requestId": args.request_id,
+            "approved": args.allow,
+        }),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+/// Publishes a reply to a question request, fanned out to the waiting reporter.
+pub fn agent_answer(
+    args: &crate::cli::AgentAnswerPublishArgs,
+    out: &output::Output,
+) -> Result<(), CliError> {
+    if args.text.is_none() && !args.dismiss {
+        return Err(CliError::config("pass --text <answer> or --dismiss"));
+    }
+    let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let worktree_id = report_worktree(None)?;
+    let payload = serde_json::json!({
+        "agent": args.agent,
+        "worktreeId": worktree_id,
+        "tabId": tab_id,
+        "requestId": args.request_id,
+        "answer": args.text,
+        "dismissed": args.dismiss,
+    });
+    publish_agent_frame(RequestKind::AgentAnswer, &payload)?;
+    out.line(
+        "answered",
+        &serde_json::json!({
+            "ok": true,
+            "agent": args.agent,
+            "requestId": args.request_id,
+            "dismissed": args.dismiss,
+        }),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+/// Publishes a free-form interjection, fanned out to the waiting reporter.
+pub fn agent_input(
+    args: &crate::cli::AgentInputArgs,
+    out: &output::Output,
+) -> Result<(), CliError> {
+    let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let worktree_id = report_worktree(None)?;
+    let payload = serde_json::json!({
+        "agent": args.agent,
+        "worktreeId": worktree_id,
+        "tabId": tab_id,
+        "text": args.text,
+        "requestId": args.request_id,
+    });
+    publish_agent_frame(RequestKind::AgentInput, &payload)?;
+    out.line(
+        "sent",
+        &serde_json::json!({
+            "ok": true,
+            "agent": args.agent,
+        }),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+/// Writes one fire-and-forget agent publish frame (decision, answer, or input).
+fn publish_agent_frame(kind: RequestKind, payload: &serde_json::Value) -> Result<(), CliError> {
+    let frame = RequestFrame {
+        request_id: format!("agent-publish-{}", std::process::id()),
+        kind,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: Some(payload.to_string()),
+        rpc: None,
+        subscription: None,
+        control: None,
+        control_result: None,
+    };
+    let Server { mut stream } = server::connect()?;
+    write_json_frame(&mut stream, &frame)?;
+    Ok(())
+}
+
+/// Blocks on the agent event stream until a matching [`AgentAnswer`] arrives,
+/// printing the reply text on stdout. Used by a blocking harness hook to turn a
+/// remote question toast into a synchronous answer. A dismissed reply or a
+/// timeout exits non-zero with no output so the caller can fall back.
+pub fn agent_await_answer(args: &crate::cli::AgentAwaitAnswerArgs) -> Result<(), CliError> {
+    let Server { mut stream } = server::connect()?;
+    let request = subscribe_agents_request();
+    write_json_frame(&mut stream, &request)?;
+    let deadline = (args.timeout > 0).then(|| Instant::now() + Duration::from_secs(args.timeout));
+    loop {
+        if let Some(deadline) = deadline {
+            match deadline.checked_duration_since(Instant::now()) {
+                Some(remaining) => {
+                    let _ = stream.set_read_timeout(Some(remaining.max(Duration::from_millis(1))));
+                }
+                None => return Err(CliError::config("timed out waiting for question answer")),
+            }
+        }
+        match read_json_frame::<ServerFrame>(&mut stream) {
+            Ok(ServerFrame::Event(EventFrame::AgentAnswer { answer }))
+                if answer.request_id == args.request_id && answer.agent == args.agent =>
+            {
+                if answer.dismissed {
+                    return Err(CliError::config("question dismissed without an answer"));
+                }
+                println!("{}", answer.answer.unwrap_or_default());
+                let _ = std::io::stdout().flush();
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(pragma_protocol::ProtocolError::Io(ref error))
+                if deadline.is_some()
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+            {
+                return Err(CliError::config("timed out waiting for question answer"));
+            }
+            Err(error) => return Err(CliError::from(error)),
+        }
+    }
+}
+
+fn message_payload(args: &crate::cli::AgentMessageArgs) -> Result<String, CliError> {
+    if let Some(payload) = &args.payload {
+        return Ok(payload.clone());
+    }
+    if args.stdin {
+        let mut payload = String::new();
+        std::io::stdin().read_to_string(&mut payload)?;
+        return Ok(payload);
+    }
+    Err(CliError::config("pass --payload JSON or --stdin"))
+}
+
+/// The wire fields derived from a `report` subcommand.
+struct ReportFields {
+    status: &'static str,
+    attention_kind: Option<&'static str>,
+    command: Option<String>,
+    question: Option<String>,
+    request_id: Option<String>,
+    worktree_override: Option<String>,
+}
+
+fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
+    match report {
+        crate::cli::AgentReportCommand::Started => ReportFields {
+            status: "running",
+            attention_kind: None,
+            command: None,
+            question: None,
+            request_id: None,
+            worktree_override: None,
+        },
+        crate::cli::AgentReportCommand::Stopped { worktree_id } => ReportFields {
+            status: "done",
+            attention_kind: None,
+            command: None,
+            question: None,
+            request_id: None,
+            worktree_override: worktree_id.clone(),
+        },
+        crate::cli::AgentReportCommand::Attention {
+            kind,
+            command,
+            question,
+            request_id,
+        } => ReportFields {
+            status: "attention",
+            attention_kind: kind.map(|k| match k {
                 crate::cli::AttentionKindArg::Question => "question",
                 crate::cli::AttentionKindArg::Command => "command",
             }),
-            None,
-        ),
-        crate::cli::AgentReportCommand::Cleared { worktree_id } => {
-            ("cleared", None, worktree_id.clone())
-        }
+            command: command.clone(),
+            question: question.clone(),
+            request_id: request_id.clone(),
+            worktree_override: None,
+        },
+        crate::cli::AgentReportCommand::Cleared { worktree_id } => ReportFields {
+            status: "cleared",
+            attention_kind: None,
+            command: None,
+            question: None,
+            request_id: None,
+            worktree_override: worktree_id.clone(),
+        },
     }
 }
 

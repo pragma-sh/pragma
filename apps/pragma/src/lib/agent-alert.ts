@@ -8,8 +8,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createElement } from "react";
 import { toast } from "sonner";
 
-import { showAgentNotification } from "@/lib/tauri";
+import { resolveAgentApproval, showAgentNotification } from "@/lib/tauri";
 import { listPluginAgents } from "@/plugins/agents";
+import { startWatcherForAgentSession } from "@/plugins/watchers";
 
 let lastChime = 0;
 const CHIME_DEBOUNCE_MS = 750;
@@ -29,7 +30,12 @@ let agentNameByIdPromise: Promise<Map<string, string>> | null = null;
 const alertedStatusByKey = new Map<string, AgentStatus>();
 
 function statusLatchKey(payload: AgentReportPayload): string {
-  return [payload.worktreeId, payload.tabId, payload.agent].join("\u0000");
+  return [
+    payload.worktreeId,
+    payload.tabId,
+    payload.agent,
+    payload.attentionKind === "command" ? (payload.requestId ?? "") : "",
+  ].join("\u0000");
 }
 
 /**
@@ -71,6 +77,7 @@ export interface AgentAlertOptions {
 }
 
 /** Plays a short alert and surfaces a focused/unfocused notification. */
+// fallow-ignore-next-line complexity -- multi-branch alert dispatch (toast/chime/notification) is inherently conditional; splitting would not reduce cyclomatic count meaningfully
 export async function alertAgent(payload: AgentReportPayload, options: AgentAlertOptions = {}) {
   const key = alertKey(payload);
   const recent = recentAlertAtByKey.get(key) ?? 0;
@@ -83,13 +90,33 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   const agentName = await displayNameForAgent(payload.agent);
   const title = titleFor(payload, agentName);
   const description = descriptionFor(payload);
-  if (await isAppFocused()) {
-    const id = toast.custom((toastId) => agentToast(toastId, title, description, options, key), {
-      duration: Infinity,
-      onDismiss: () => activeToastByKey.delete(key),
+  const focused = await isAppFocused();
+  if (isApprovableCommand(payload)) {
+    void startWatcherForAgentSession({
+      agentId: payload.agent,
+      sessionId: payload.tabId,
+      tabId: payload.tabId,
+      worktreeId: payload.worktreeId,
+    }).catch((cause: unknown) => {
+      console.warn(`failed to start watcher for ${payload.agent}`, cause);
     });
+  }
+  // A command approval must always surface its interactive Approve/Deny toast —
+  // its whole point is answering without touching the terminal, and these reports
+  // usually arrive while the window is unfocused. So render the toast even when
+  // unfocused; the native banner below still fires to draw the user back.
+  if (focused || isApprovableCommand(payload)) {
+    const id = toast.custom(
+      (toastId) => agentToast(toastId, payload, title, description, options, key),
+      {
+        duration: Infinity,
+        onDismiss: () => activeToastByKey.delete(key),
+      },
+    );
     activeToastByKey.set(key, id);
-    return;
+    if (focused) {
+      return;
+    }
   }
   try {
     if (await ensureNotificationPermission()) {
@@ -171,8 +198,23 @@ async function requestNotificationPermission(): Promise<boolean> {
   }
 }
 
+/**
+ * A command-approval report carries the command text plus a `requestId` so the
+ * toast can approve it. Non-command attention and `done` reports omit both.
+ */
+function isApprovableCommand(
+  payload: AgentReportPayload,
+): payload is AgentReportPayload & { requestId: string } {
+  return (
+    payload.status === "attention" &&
+    payload.attentionKind === "command" &&
+    Boolean(payload.requestId)
+  );
+}
+
 function agentToast(
   toastId: string | number,
+  payload: AgentReportPayload,
   title: string,
   description: string,
   options: AgentAlertOptions,
@@ -182,6 +224,9 @@ function agentToast(
     activeToastByKey.delete(key);
     toast.dismiss(toastId);
   };
+  if (isApprovableCommand(payload)) {
+    return commandApprovalToast(payload, title, dismiss);
+  }
   return createElement(
     "button",
     {
@@ -218,6 +263,94 @@ function agentToast(
   );
 }
 
+/**
+ * Toast for a command-approval report: shows the command and an Approve button
+ * that runs it in the harness (via {@link resolveAgentApproval}) without the user
+ * touching the terminal. Deny rejects it; Dismiss leaves the harness to its own
+ * prompt (the hook falls back on timeout; a watcher simply does not answer).
+ */
+function commandApprovalToast(
+  payload: AgentReportPayload & { requestId: string },
+  title: string,
+  dismiss: () => void,
+) {
+  const command =
+    payload.command?.trim() ||
+    "Command details unavailable. Review terminal prompt before approving.";
+  const resolve = (approved: boolean) => {
+    dismiss();
+    void resolveAgentApproval({
+      agent: payload.agent,
+      worktreeId: payload.worktreeId,
+      tabId: payload.tabId,
+      requestId: payload.requestId,
+      approved,
+    });
+  };
+  return createElement(
+    "div",
+    {
+      className:
+        "flex w-[var(--width)] flex-col gap-2 rounded-md border border-border bg-popover px-4 py-3 text-left text-popover-foreground shadow-lg",
+    },
+    createElement("span", { className: "text-sm font-medium" }, title),
+    createElement(
+      "code",
+      {
+        className:
+          "block max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 font-mono text-xs",
+      },
+      command,
+    ),
+    createElement(
+      "span",
+      { className: "flex items-center gap-2 pt-1" },
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground",
+          onClick: () => resolve(true),
+          ref: nativeClickRef(() => resolve(true)),
+        },
+        "Approve",
+      ),
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "rounded border border-border px-2 py-1 text-xs",
+          onClick: () => resolve(false),
+          ref: nativeClickRef(() => resolve(false)),
+        },
+        "Deny",
+      ),
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "rounded border border-border px-2 py-1 text-xs text-muted-foreground",
+          onClick: dismiss,
+          ref: nativeClickRef(dismiss),
+        },
+        "Dismiss",
+      ),
+    ),
+  );
+}
+
+function nativeClickRef(handler: () => void): (node: HTMLButtonElement | null) => void {
+  return (node) => {
+    if (!node) {
+      return;
+    }
+    node.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handler();
+    });
+  };
+}
+
 function alertKey(payload: AgentReportPayload): string {
   return [
     payload.worktreeId,
@@ -225,6 +358,9 @@ function alertKey(payload: AgentReportPayload): string {
     payload.agent,
     payload.status,
     payload.attentionKind ?? "",
+    // A new command is a distinct approval even when the tab/agent match a prior
+    // one, so key on requestId too — otherwise a second command would dedupe.
+    payload.requestId ?? "",
   ].join("\u0000");
 }
 

@@ -14,6 +14,15 @@ import { createFileLinkProvider, getTerminalLinkHandler } from "@/lib/terminal-l
 import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 
 const RESIZE_DEBOUNCE_MS = 75;
+/**
+ * Retry budget for a PTY resize that the server rejected. A resize can race
+ * the session's own spawn ("session not found") — most often on agent launch,
+ * where the tab is created and fitted in the same tick as the spawn — and a
+ * dropped resize would otherwise leave the PTY at the 80x24 spawn default
+ * while xterm fills the pane. Retries are spaced by {@link RESIZE_RETRY_MS}.
+ */
+const MAX_RESIZE_RETRIES = 5;
+const RESIZE_RETRY_MS = 200;
 export const MAX_TERMINAL_COLS = 240;
 export const MAX_TERMINAL_ROWS = 90;
 export const TERMINAL_SCROLLBACK_LINES = 500;
@@ -95,6 +104,8 @@ interface ManagedTerminal {
   resizeTimer: number | null;
   lastResizeCols: number | null;
   lastResizeRows: number | null;
+  /** Consecutive failed PTY resizes; bounds the retry loop in maybeResizePty. */
+  resizeRetries: number;
   /** Raw output byte-chunks awaiting an xterm write; coalesced on flush. */
   pendingOutput: Uint8Array[];
   writeInFlight: boolean;
@@ -239,6 +250,7 @@ export class TerminalManager {
       resizeTimer: null,
       lastResizeCols: null,
       lastResizeRows: null,
+      resizeRetries: 0,
       pendingOutput: [],
       writeInFlight: false,
       channel: null,
@@ -367,7 +379,30 @@ export class TerminalManager {
     }
     managed.lastResizeCols = fittedCols;
     managed.lastResizeRows = fittedRows;
-    void ptyResize(tabId, fittedCols, fittedRows);
+    ptyResize(tabId, fittedCols, fittedRows)
+      .then(() => {
+        managed.resizeRetries = 0;
+        return undefined;
+      })
+      .catch(() => {
+        // The resize raced the session's spawn (or a daemon restart) and was
+        // dropped server-side. Clear the cache — it now records a size the PTY
+        // never received — and retry shortly, so the PTY doesn't stay at its
+        // 80x24 spawn default. Bounded so a genuinely dead session can't loop.
+        if (managed.lastResizeCols === fittedCols && managed.lastResizeRows === fittedRows) {
+          managed.lastResizeCols = null;
+          managed.lastResizeRows = null;
+        }
+        if (managed.resizeRetries >= MAX_RESIZE_RETRIES) {
+          return;
+        }
+        managed.resizeRetries += 1;
+        window.setTimeout(() => {
+          if (this.terminals.get(tabId) === managed) {
+            this.fit(tabId);
+          }
+        }, RESIZE_RETRY_MS);
+      });
   }
 
   private enqueueOutput(managed: ManagedTerminal, data: Uint8Array): void {

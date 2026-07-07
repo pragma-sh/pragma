@@ -346,10 +346,11 @@ fn handle_request(
         }
         RequestKind::Attach => {
             let session_id = required(request.session_id, "sessionId")?;
-            let cols = request.cols.unwrap_or(80);
-            let rows = request.rows.unwrap_or(24);
+            // Only resize when the attacher declares a viewport; a size-less
+            // attach (plugin watcher) observes without disturbing the PTY grid.
+            let size = request.cols.zip(request.rows);
             let (scrollback, rx) = registry
-                .attach(&session_id, cols, rows)
+                .attach(&session_id, size)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
             Ok(Outcome {
                 event_stream: Some(EventStream { scrollback, rx }),
@@ -387,6 +388,10 @@ fn handle_request(
                 .map(|()| Outcome::default())
                 .map_err(|err| HandledRequestError::Request(err.to_string()))
         }
+        RequestKind::AgentMessage
+        | RequestKind::AgentDecision
+        | RequestKind::AgentAnswer
+        | RequestKind::AgentInput => handle_agent_publish(&request.kind, request.data, registry),
         RequestKind::SubscribeAgents => {
             let (scrollback, rx) = registry
                 .subscribe_agents()
@@ -413,6 +418,31 @@ fn handle_request(
         RequestKind::RegisterController | RequestKind::ControlResult => Ok(Outcome::default()),
         RequestKind::Control => handle_control_request(request, registry),
     }
+}
+
+/// Handles the fire-and-forget agent publish frames (message, decision, answer,
+/// input): parse `data` into the payload and fan it out through the registry.
+/// The caller matches these kinds, so any other kind is unreachable.
+fn handle_agent_publish(
+    kind: &RequestKind,
+    data: Option<String>,
+    registry: &Registry,
+) -> Result<Outcome, HandledRequestError> {
+    let data = required(data, "data")?;
+    match kind {
+        RequestKind::AgentMessage => registry.report_agent_message(parse_data(&data)?),
+        RequestKind::AgentDecision => registry.report_agent_decision(parse_data(&data)?),
+        RequestKind::AgentAnswer => registry.report_agent_answer(parse_data(&data)?),
+        RequestKind::AgentInput => registry.report_agent_input(parse_data(&data)?),
+        _ => unreachable!("handle_agent_publish is only called for agent publish kinds"),
+    }
+    Ok(Outcome::default())
+}
+
+/// Deserializes a request's JSON `data` payload, mapping parse failures to a
+/// client request error.
+fn parse_data<T: serde::de::DeserializeOwned>(data: &str) -> Result<T, HandledRequestError> {
+    serde_json::from_str(data).map_err(|err| HandledRequestError::Request(err.to_string()))
 }
 
 fn handle_rpc_request(

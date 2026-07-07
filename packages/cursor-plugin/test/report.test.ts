@@ -22,7 +22,13 @@ beforeEach(() => {
   mkdirSync(binDir, { recursive: true });
   mkdirSync(tmpEnvDir, { recursive: true });
   const fake = join(binDir, "pragma-cli");
-  writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
+  // Logs every call; for `agent await-decision` it prints $PRAGMA_TEST_DECISION
+  // on stdout (empty by default = timeout/no verdict) so the hook can be driven.
+  writeFileSync(
+    fake,
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    { mode: 0o755 },
+  );
 });
 
 afterEach(() => {
@@ -35,8 +41,25 @@ function markerPath(): string {
 
 function run(
   event: string,
-  { env = {}, socket = true }: { env?: Record<string, string>; socket?: boolean } = {},
+  {
+    env = {},
+    socket = true,
+    stdin = "",
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string } = {},
 ): string[] {
+  runRaw(event, { env, socket, stdin });
+  return reportCalls();
+}
+
+/** Runs report.sh and returns its stdout (the harness-specific decision JSON). */
+function runRaw(
+  event: string,
+  {
+    env = {},
+    socket = true,
+    stdin = "",
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string } = {},
+): string {
   const runEnv: Record<string, string> = {
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     TMPDIR: tmpEnvDir,
@@ -47,8 +70,7 @@ function run(
   if (socket) {
     runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
-  execFileSync("sh", [REPORT_SH, event], { env: runEnv });
-  return calls();
+  return execFileSync("sh", [REPORT_SH, event], { env: runEnv, input: stdin }).toString();
 }
 
 function calls(): string[] {
@@ -58,16 +80,21 @@ function calls(): string[] {
   return readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
 }
 
+/** Only `agent report` calls — filters out `agent message` calls (those carry non-deterministic ids/ts). */
+function reportCalls(): string[] {
+  return calls().filter((line) => line.startsWith("agent report "));
+}
+
 describe("cursor report.sh", () => {
   it("no-ops outside Pragma", () => {
     run("started", { socket: false });
-    expect(calls()).toEqual([]);
+    expect(reportCalls()).toEqual([]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
   it("reports started and sets marker", () => {
     run("started");
-    expect(calls()).toEqual(["agent report --agent cursor started"]);
+    expect(reportCalls()).toEqual(["agent report --agent cursor started"]);
     expect(existsSync(markerPath())).toBe(true);
   });
 
@@ -75,13 +102,13 @@ describe("cursor report.sh", () => {
     run("started", {
       env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
     });
-    expect(calls()).toEqual(["agent report --agent cursor started"]);
+    expect(reportCalls()).toEqual(["agent report --agent cursor started"]);
   });
 
   it("reports stopped and clears marker", () => {
     run("started");
     run("stopped");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor stopped",
     ]);
@@ -91,32 +118,55 @@ describe("cursor report.sh", () => {
   it("reports cleared", () => {
     run("started");
     run("cleared");
-    expect(calls()).toEqual([
+    expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("reports command attention only during a turn", () => {
+  it("reports command attention with command + requestId only during a turn", () => {
     run("attention-command");
-    expect(calls()).toEqual([]);
+    expect(reportCalls()).toEqual([]);
     run("started");
-    run("attention-command");
-    expect(calls()).toEqual([
-      "agent report --agent cursor started",
-      "agent report --agent cursor attention --kind command",
-    ]);
+    run("attention-command", { stdin: '{"command":"npm test"}' });
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent cursor started");
+    expect(reports[1]).toMatch(
+      /^agent report --agent cursor attention --kind command --command npm test --request-id cursor-/,
+    );
+  });
+
+  it("emits Cursor's allow decision when the toast approves", () => {
+    run("started");
+    const output = runRaw("attention-command", {
+      stdin: '{"command":"npm test"}',
+      env: { PRAGMA_TEST_DECISION: "allow" },
+    });
+    expect(output.trim()).toBe('{"permission":"allow"}');
+  });
+
+  it("emits Cursor's deny decision when the toast denies", () => {
+    run("started");
+    const output = runRaw("attention-command", {
+      stdin: '{"command":"npm test"}',
+      env: { PRAGMA_TEST_DECISION: "deny" },
+    });
+    expect(output.trim()).toBe('{"permission":"deny"}');
+  });
+
+  it("defers to Cursor's own prompt (no output) when no verdict arrives", () => {
+    run("started");
+    const output = runRaw("attention-command", { stdin: '{"command":"npm test"}' });
+    expect(output.trim()).toBe("");
   });
 
   it("re-asserts running after attention via running", () => {
     run("started");
-    run("attention-command");
+    run("attention-command", { stdin: '{"command":"npm test"}' });
     run("running");
-    expect(calls()).toEqual([
-      "agent report --agent cursor started",
-      "agent report --agent cursor attention --kind command",
-      "agent report --agent cursor started",
-    ]);
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent cursor started");
+    expect(reports[2]).toBe("agent report --agent cursor started");
   });
 });

@@ -1,4 +1,4 @@
-use pragma_protocol::AgentReportPayload;
+use pragma_protocol::{AgentAnswer, AgentDecision, AgentInput, AgentMessage, AgentReportPayload};
 use tiny_http::Request;
 
 use crate::error::GatewayResult;
@@ -15,6 +15,46 @@ pub fn report(
 ) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
     let payload: AgentReportPayload = read_json(request)?;
     state.client.report_agent(&payload)?;
+    Ok(empty_response(202))
+}
+
+/// Handles `POST /v1/agents/messages`.
+pub fn message(
+    request: &mut Request,
+    state: &AppState,
+) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
+    let payload: AgentMessage = read_json(request)?;
+    state.client.report_agent_message(&payload)?;
+    Ok(empty_response(202))
+}
+
+/// Handles `POST /v1/agents/decisions`.
+pub fn decision(
+    request: &mut Request,
+    state: &AppState,
+) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
+    let payload: AgentDecision = read_json(request)?;
+    state.client.report_agent_decision(&payload)?;
+    Ok(empty_response(202))
+}
+
+/// Handles `POST /v1/agents/answers`.
+pub fn answer(
+    request: &mut Request,
+    state: &AppState,
+) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
+    let payload: AgentAnswer = read_json(request)?;
+    state.client.report_agent_answer(&payload)?;
+    Ok(empty_response(202))
+}
+
+/// Handles `POST /v1/agents/inputs`.
+pub fn input(
+    request: &mut Request,
+    state: &AppState,
+) -> GatewayResult<tiny_http::Response<std::io::Cursor<Vec<u8>>>> {
+    let payload: AgentInput = read_json(request)?;
+    state.client.report_agent_input(&payload)?;
     Ok(empty_response(202))
 }
 

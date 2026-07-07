@@ -8,9 +8,16 @@
 - Bind only to `127.0.0.1`, normally on an ephemeral port.
 - Write `gateway.json` beside `daemon.sock` with `{ port, token, pid, protocolVersion }`
   using mode `0600`.
+- On startup, refuse if a live gateway with the **same** protocol version already serves
+  the discovery file; a live gateway with a **different** protocol version (leftover from
+  a previous app build) is killed and replaced — otherwise a protocol bump deadlocks
+  every future gateway start (the app rejects the mismatched `gateway.json`, spawns a new
+  gateway, and the new gateway refuses because the old one still answers `/v1/health`).
 - Require `Authorization: Bearer <token>` for every route except `GET /v1/health`.
 - Translate HTTP requests to existing `pragma-client` calls over the Unix socket.
 - Stream session, agent, and subscription events as NDJSON. Do not use SSE or WebSockets.
+- NDJSON streams begin with a `{"type":"ready"}` heartbeat so fetch clients resolve the
+  response and install readers before the first real daemon event arrives.
 
 ## Route Table
 
@@ -24,6 +31,9 @@
 - `DELETE /v1/sessions/{id}` - kill a PTY.
 - `DELETE /v1/sessions?cwd=...` - kill PTYs rooted at a cwd.
 - `POST /v1/agents/reports` - agent status report.
+- `POST /v1/agents/{messages,decisions,answers,inputs}` - publish an agent message / a
+  command-approval verdict / a question reply / a free-form interjection; all fanned out to
+  agent-event subscribers.
 - `GET /v1/agents/events` - stream agent status events.
 - `POST /v1/tabs/{tabId}/agents/seen` - mark done agents seen.
 - `GET /v1/subscriptions/{event}` - stream protocol snapshots and deltas.

@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ComponentType, HTMLAttributes, JSX } from "react";
+import type { AgentMessage } from "@pragma/sdk";
 import type { OpenWebViewOptions, WebViewReference } from "./contributions";
 import type { PragmaHooksBridge } from "./hooks";
 
@@ -34,6 +35,10 @@ export interface PragmaActionsBridge {
     webView: WebViewReference<TPayload>,
     options?: OpenWebViewOptions<TPayload>,
   ) => Promise<void>;
+  agents: {
+    /** Reports one rich agent message through the host SDK bridge. */
+    reportMessage: (message: AgentMessage) => Promise<void>;
+  };
 }
 
 /**

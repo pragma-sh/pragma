@@ -19,6 +19,7 @@ import { syncPluginCss } from "./css";
 import { PluginCommandKeybindings } from "./commands";
 import { setPluginAgents } from "./agents";
 import { builtinAgentRecords } from "./builtin-agents";
+import { setPluginWatchers } from "./watchers";
 import { setPluginWebViewOpener, setPluginWebViews } from "./webviews";
 
 /** How often dev mode polls plugin bundles for changes (hot-reload). */
@@ -76,21 +77,37 @@ function useRuntimeProject(project: { id: string; name: string; path: string } |
   }, [project]);
 }
 
+/** How long to wait before re-trying the gateway connection at startup. */
+const SDK_CONNECT_RETRY_MS = 2000;
+
 function useRuntimeSdk(): void {
   useEffect(() => {
     let cancelled = false;
-    gatewayConnectionInfo()
-      .then((info) => {
-        if (!cancelled) {
-          setPluginRuntimeSdk(new PragmaClient({ baseUrl: info.baseUrl, token: info.token }));
-        }
-        return undefined;
-      })
-      .catch((cause: unknown) => {
-        console.warn("plugin SDK bridge: gateway unavailable", cause);
-      });
+    let timer: number | null = null;
+    const connect = () => {
+      gatewayConnectionInfo()
+        .then((info) => {
+          if (!cancelled) {
+            setPluginRuntimeSdk(new PragmaClient({ baseUrl: info.baseUrl, token: info.token }));
+          }
+          return undefined;
+        })
+        .catch((cause: unknown) => {
+          // The gateway spawns lazily; keep retrying so a slow first spawn
+          // (common in release builds) doesn't leave plugins without an SDK
+          // for the whole session.
+          console.warn("plugin SDK bridge: gateway unavailable, retrying", cause);
+          if (!cancelled) {
+            timer = window.setTimeout(connect, SDK_CONNECT_RETRY_MS);
+          }
+        });
+    };
+    connect();
     return () => {
       cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
     };
   }, []);
 }
@@ -143,6 +160,9 @@ function usePluginContributionRegistries(
   useEffect(() => {
     setPluginAgents(activePlugins, runtime);
   }, [activePlugins, runtime]);
+  useEffect(() => {
+    setPluginWatchers(activePlugins);
+  }, [activePlugins]);
   useEffect(() => {
     setPluginWebViews(activePlugins);
   }, [activePlugins]);

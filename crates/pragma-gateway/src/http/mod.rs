@@ -6,7 +6,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use tiny_http::{Request, ResponseBox, Server};
+use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 
 use crate::auth::verify_bearer;
 use crate::client::GatewayClient;
@@ -42,9 +42,38 @@ pub fn serve(server: &Server, state: &AppState) {
 }
 
 fn respond(mut request: Request, state: &AppState) {
-    let response =
-        dispatch(&mut request, state).unwrap_or_else(|error| error_response(&error).boxed());
-    let _ = request.respond(response);
+    let response = if *request.method() == Method::Options {
+        preflight_response()
+    } else {
+        dispatch(&mut request, state).unwrap_or_else(|error| error_response(&error).boxed())
+    };
+    let _ = request.respond(with_cors(response));
+}
+
+/// Answers a CORS preflight so webview clients (`tauri://localhost` in release
+/// builds, `http://localhost:*` in dev) can call the gateway with the
+/// `authorization` and `content-type` headers the SDK sends. Authentication
+/// stays with the bearer token; the origin itself carries no trust.
+fn preflight_response() -> ResponseBox {
+    let mut response = Response::from_data(Vec::new()).with_status_code(StatusCode(204));
+    response.add_header(header("access-control-allow-methods", "GET, POST, DELETE"));
+    response.add_header(header(
+        "access-control-allow-headers",
+        "authorization, content-type",
+    ));
+    response.add_header(header("access-control-max-age", "86400"));
+    response.boxed()
+}
+
+/// Adds the CORS allow-origin header every gateway response needs so webview
+/// `fetch` calls are not blocked by the browser.
+fn with_cors(mut response: ResponseBox) -> ResponseBox {
+    response.add_header(header("access-control-allow-origin", "*"));
+    response
+}
+
+fn header(field: &str, value: &str) -> Header {
+    Header::from_bytes(field.as_bytes(), value.as_bytes()).expect("valid header")
 }
 
 fn dispatch(request: &mut Request, state: &AppState) -> GatewayResult<ResponseBox> {
@@ -69,6 +98,10 @@ fn dispatch(request: &mut Request, state: &AppState) -> GatewayResult<ResponseBo
         "sessions.kill" => routes::sessions::kill(state, &matched)?.boxed(),
         "sessions.killForCwd" => routes::sessions::kill_for_cwd(state, &matched)?.boxed(),
         "agents.reports" => routes::agents::report(request, state)?.boxed(),
+        "agents.messages" => routes::agents::message(request, state)?.boxed(),
+        "agents.decisions" => routes::agents::decision(request, state)?.boxed(),
+        "agents.answers" => routes::agents::answer(request, state)?.boxed(),
+        "agents.inputs" => routes::agents::input(request, state)?.boxed(),
         "agents.events" => routes::agents::events(state)?.boxed(),
         "agents.seen" => routes::agents::mark_seen(state, &matched)?.boxed(),
         "subscriptions.events" => routes::subscriptions::events(state, &matched)?.boxed(),
@@ -98,4 +131,42 @@ pub fn read_body(request: &mut Request) -> GatewayResult<Vec<u8>> {
     let mut body = Vec::new();
     request.as_reader().read_to_end(&mut body)?;
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use tiny_http::Response;
+
+    use super::{preflight_response, with_cors};
+
+    fn header_value(response: &tiny_http::ResponseBox, field: &'static str) -> Option<String> {
+        response
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv(field))
+            .map(|header| header.value.as_str().to_string())
+    }
+
+    #[test]
+    fn preflight_allows_sdk_methods_and_headers() {
+        let response = preflight_response();
+        assert_eq!(response.status_code().0, 204);
+        assert_eq!(
+            header_value(&response, "access-control-allow-methods").as_deref(),
+            Some("GET, POST, DELETE")
+        );
+        assert_eq!(
+            header_value(&response, "access-control-allow-headers").as_deref(),
+            Some("authorization, content-type")
+        );
+    }
+
+    #[test]
+    fn cors_origin_header_is_added_to_responses() {
+        let response = with_cors(Response::from_data(Vec::new()).boxed());
+        assert_eq!(
+            header_value(&response, "access-control-allow-origin").as_deref(),
+            Some("*")
+        );
+    }
 }

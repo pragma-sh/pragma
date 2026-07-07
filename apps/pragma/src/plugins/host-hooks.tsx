@@ -23,12 +23,17 @@ import type {
   PluginSessionSummary,
   PragmaHooksBridge,
 } from "@pragma/plugin";
-import type { PragmaClient } from "@pragma/sdk";
+import type { AgentMessage, PragmaClient } from "@pragma/sdk";
 
 import { useRequiredContext } from "@/lib/context";
 import { errorMessage } from "@/lib/errors";
 import { pluginStorageGet, pluginStorageSet } from "@/lib/tauri";
-import { agentEntriesForWorktree, subscribeAgentStatuses } from "@/state/agent-status-store";
+import {
+  agentEntriesForWorktree,
+  agentMessagesForWorktree,
+  subscribeAgentMessages,
+  subscribeAgentStatuses,
+} from "@/state/agent-status-store";
 import { subscribePluginEvent } from "./events";
 
 /**
@@ -81,6 +86,14 @@ export function setPluginRuntimeSdk(sdk: PragmaClient | null): void {
 export function setPluginRuntimeProject(project: PluginProject | null): void {
   runtimeState = { ...runtimeState, project };
   emitRuntime();
+}
+
+/** Reports one rich agent message through the current SDK bridge. */
+export async function reportAgentMessageFromPlugin(message: AgentMessage): Promise<void> {
+  if (!runtimeState.sdk) {
+    throw new Error("Pragma SDK is not connected yet — the local gateway has not come up");
+  }
+  await runtimeState.sdk.agents.reportMessage(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +330,25 @@ function pluginAgentEntries(worktreeId: string | null): PluginAgentStatusEntry[]
   return entries;
 }
 
+function useAgentMessagesImpl(
+  worktreeId: string | null,
+  tabId?: string | null,
+): PluginQueryResult<AgentMessage[]> {
+  const [entries, setEntries] = useState<AgentMessage[]>(() =>
+    agentMessagesForWorktree(worktreeId, tabId),
+  );
+  useEffect(() => {
+    setEntries(agentMessagesForWorktree(worktreeId, tabId));
+    return subscribeAgentMessages(() => {
+      setEntries(agentMessagesForWorktree(worktreeId, tabId));
+    });
+  }, [worktreeId, tabId]);
+  const refetch = useCallback(() => {
+    setEntries(agentMessagesForWorktree(worktreeId, tabId));
+  }, [worktreeId, tabId]);
+  return { data: entries, error: null, loading: false, refetch };
+}
+
 const noSessions: PluginSessionSummary[] = [];
 
 function useSessionsImpl(): PluginQueryResult<PluginSessionSummary[]> {
@@ -378,5 +410,6 @@ export const hostHooks: PragmaHooksBridge = {
       [root, path],
     ),
   useAgentStatuses: useAgentStatusesImpl,
+  useAgentMessages: useAgentMessagesImpl,
   useSessions: useSessionsImpl,
 };

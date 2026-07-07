@@ -47,6 +47,7 @@
       "binaries/pragma-cli",
       "binaries/pragma-ai",
       "binaries/pragma-github",
+      "binaries/pragma-watch",
       "binaries/pragma-automations"
     ],
     "resources": ["resources/**/*"],

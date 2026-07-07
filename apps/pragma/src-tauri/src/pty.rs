@@ -193,7 +193,9 @@ impl PtyClient {
         rows: u16,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
-        let stream = self.inner.attach_stream(session_id.clone(), cols, rows)?;
+        let stream = self
+            .inner
+            .attach_stream(session_id.clone(), Some((cols, rows)))?;
         self.track_stream(&session_id, &stream);
         forward_stream(stream, on_event);
         Ok(())
@@ -241,6 +243,15 @@ impl PtyClient {
 
     pub fn mark_agents_seen(&self, tab_id: String) -> AppResult<()> {
         Ok(self.inner.mark_agents_seen(tab_id)?)
+    }
+
+    /// Publishes a command-approval verdict to the server, fanned out to agent
+    /// subscribers (the waiting hook or watcher).
+    pub fn report_agent_decision(
+        &self,
+        decision: &pragma_protocol::AgentDecision,
+    ) -> AppResult<()> {
+        Ok(self.inner.report_agent_decision(decision)?)
     }
 
     /// Sends a business-logic RPC to this project's host and returns the JSON
@@ -472,6 +483,10 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                         | ServerFrame::Event(
                             EventFrame::Output { .. }
                             | EventFrame::Agent { .. }
+                            | EventFrame::AgentMessage { .. }
+                            | EventFrame::AgentDecision { .. }
+                            | EventFrame::AgentAnswer { .. }
+                            | EventFrame::AgentInput { .. }
                             | EventFrame::Snapshot { .. }
                             | EventFrame::Delta { .. }
                             | EventFrame::EchoMode { .. },

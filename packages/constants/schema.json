@@ -758,6 +758,87 @@
       "type": "string",
       "enum": ["question", "command"]
     },
+    "AgentMessageKind": {
+      "title": "AgentMessageKind",
+      "description": "Agent event stream message frame kind.",
+      "type": "string",
+      "enum": ["message"]
+    },
+    "AgentMessageRole": {
+      "title": "AgentMessageRole",
+      "description": "Role/source for one rich agent message entry.",
+      "type": "string",
+      "enum": ["assistant", "tool", "user", "system"]
+    },
+    "AgentToolCallStatus": {
+      "title": "AgentToolCallStatus",
+      "description": "Lifecycle status for a tool call reported inside an AgentMessage.",
+      "type": "string",
+      "enum": ["running", "done", "error"]
+    },
+    "AgentFileChangeKind": {
+      "title": "AgentFileChangeKind",
+      "description": "File interaction kind reported inside an AgentMessage.",
+      "type": "string",
+      "enum": ["read", "edited", "created", "deleted"]
+    },
+    "AgentToolCall": {
+      "title": "AgentToolCall",
+      "description": "One tool call surfaced by an agent message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "$ref": "#/definitions/AgentToolCallStatus" },
+        "summary": { "type": "string" }
+      }
+    },
+    "AgentFileChange": {
+      "title": "AgentFileChange",
+      "description": "A path touched by an agent, without file contents.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "change"],
+      "properties": {
+        "path": { "type": "string" },
+        "change": { "$ref": "#/definitions/AgentFileChangeKind" }
+      }
+    },
+    "AgentMessage": {
+      "title": "AgentMessage",
+      "description": "Append-only rich message entry reported by an agent. Consumers upsert by id when tool-call state changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "id", "role", "subAgentsActive", "ts"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "id": { "type": "string" },
+        "role": { "$ref": "#/definitions/AgentMessageRole" },
+        "text": { "type": "string" },
+        "toolCalls": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentToolCall" }
+        },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentFileChange" }
+        },
+        "subAgentsActive": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of active sub-agents visible to the reporting plugin; no nested transcript is carried."
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Emitter timestamp in milliseconds since Unix epoch."
+        }
+      }
+    },
     "AgentReportPayload": {
       "title": "AgentReportPayload",
       "description": "Status report sent by pragma-cli through pragma-server to native clients.",
@@ -771,6 +852,76 @@
         "status": { "$ref": "#/definitions/AgentStatus" },
         "attentionKind": {
           "anyOf": [{ "$ref": "#/definitions/AgentAttentionKind" }, { "type": "null" }]
+        },
+        "command": {
+          "type": "string",
+          "description": "The command (or tool invocation) the agent is asking permission to run. Set when attentionKind is `command` so a non-terminal client can show it and approve remotely."
+        },
+        "question": {
+          "type": "string",
+          "description": "The question the agent is asking. Set when attentionKind is `question` so a non-terminal client can show it and answer remotely."
+        },
+        "requestId": {
+          "type": "string",
+          "description": "Correlation id for a command-approval or question round-trip. The reporter sets it on a `command`/`question` attention report and waits for a matching AgentDecision/AgentAnswer before proceeding."
+        }
+      }
+    },
+    "AgentDecision": {
+      "title": "AgentDecision",
+      "description": "Approve/deny verdict for a command-approval request, published by the controlling client and fanned out to agent subscribers. The waiting reporter (a blocking harness hook or a plugin watcher) matches it by requestId.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "requestId", "approved"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "approved": {
+          "type": "boolean",
+          "description": "true to run the command, false to reject it."
+        }
+      }
+    },
+    "AgentAnswer": {
+      "title": "AgentAnswer",
+      "description": "Reply to a `question` attention request, published by the controlling client and fanned out to agent subscribers. The waiting reporter (a blocking harness hook or a plugin watcher) matches it by requestId.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "requestId", "dismissed"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "answer": {
+          "type": "string",
+          "description": "The reply text. Present when the question was answered; omitted when dismissed."
+        },
+        "dismissed": {
+          "type": "boolean",
+          "description": "true when the question was dismissed without an answer."
+        }
+      }
+    },
+    "AgentInput": {
+      "title": "AgentInput",
+      "description": "Free-form input (an interjection) sent by the controlling client to a running agent and fanned out to agent subscribers. A blocking harness hook or a plugin watcher delivers `text` into the agent's turn (via a harness input API, or by writing it to the tab's PTY). Unlike AgentDecision/AgentAnswer this is not tied to an outstanding request; `requestId` is optional and only set when the interjection answers a specific prompt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId", "text"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "text": {
+          "type": "string",
+          "description": "The message text to deliver to the running agent."
+        },
+        "requestId": {
+          "type": "string",
+          "description": "Optional correlation id when the interjection answers a specific outstanding prompt."
         }
       }
     },

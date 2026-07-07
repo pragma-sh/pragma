@@ -1,4 +1,5 @@
 import type {
+  AgentMessage,
   BranchSyncStatus,
   DirEntry,
   FileContents,
@@ -38,6 +39,10 @@ export interface PragmaHooksBridge {
   useDirEntries: (root: string | null, path?: string) => PluginQueryResult<DirEntry[]>;
   useFileContents: (root: string | null, path: string | null) => PluginQueryResult<FileContents>;
   useAgentStatuses: (worktreeId: string | null) => PluginQueryResult<PluginAgentStatusEntry[]>;
+  useAgentMessages: (
+    worktreeId: string | null,
+    tabId?: string | null,
+  ) => PluginQueryResult<AgentMessage[]>;
   useSessions: () => PluginQueryResult<PluginSessionSummary[]>;
 }
 
@@ -125,6 +130,14 @@ export function useAgentStatuses(
   worktreeId: string | null,
 ): PluginQueryResult<PluginAgentStatusEntry[]> {
   return getBridge().hooks.useAgentStatuses(worktreeId);
+}
+
+/** Live rich agent messages for a worktree, optionally scoped to one tab. */
+export function useAgentMessages(
+  worktreeId: string | null,
+  tabId?: string | null,
+): PluginQueryResult<AgentMessage[]> {
+  return getBridge().hooks.useAgentMessages(worktreeId, tabId);
 }
 
 /** Live PTY sessions. */

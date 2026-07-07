@@ -32,7 +32,14 @@ beforeEach(() => {
   // A fake `pragma-cli` on PATH that records its arguments, one call per line,
   // so the test can assert exactly which statuses report.sh emits.
   const fake = join(binDir, "pragma-cli");
-  writeFileSync(fake, `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\n`, { mode: 0o755 });
+  // Records every call; for `agent await-decision` it prints $PRAGMA_TEST_DECISION
+  // on stdout (empty by default = timeout/no verdict) so the blocking approval
+  // path can be exercised without a real server.
+  writeFileSync(
+    fake,
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    { mode: 0o755 },
+  );
 });
 
 afterEach(() => {
@@ -76,7 +83,30 @@ function run(
     runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
   }
   execFileSync("sh", [REPORT_SH, event, ...args], { env: runEnv, input: stdin });
-  return calls();
+  return reportCalls();
+}
+
+/** Runs report.sh and returns its stdout (the PermissionRequest decision JSON). */
+function runRaw(
+  event: string,
+  {
+    env: extraEnv = {},
+    socket = true,
+    stdin = "",
+  }: { env?: Record<string, string>; socket?: boolean; stdin?: string } = {},
+): string {
+  const runEnv: Record<string, string> = {
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    TMPDIR: tmpEnvDir,
+    PRAGMA_TAB_ID: TAB_ID,
+    PRAGMA_TEST_LOG: logPath,
+    PRAGMA_WATCH_INTERVAL: "0.1",
+    ...extraEnv,
+  };
+  if (socket) {
+    runEnv.PRAGMA_DAEMON_SOCKET = join(workdir, "daemon.sock");
+  }
+  return execFileSync("sh", [REPORT_SH, event], { env: runEnv, input: stdin }).toString();
 }
 
 /** The pid of the watcher report.sh spawned for the current tab, if any. */
@@ -140,6 +170,11 @@ function calls(): string[] {
     return [];
   }
   return readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
+}
+
+/** Only `agent report` calls — filters out `agent message` calls (those carry non-deterministic ids/ts). */
+function reportCalls(): string[] {
+  return calls().filter((line) => line.startsWith("agent report "));
 }
 
 describe("report.sh", () => {
@@ -246,6 +281,60 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  const PERMISSION_STDIN = JSON.stringify({
+    hook_event_name: "PermissionRequest",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+  });
+
+  it("reports a command attention with the command and a requestId on PermissionRequest", () => {
+    run("started");
+    run("permission", { stdin: PERMISSION_STDIN });
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent claude-code started");
+    expect(reports[1]).toMatch(
+      /^agent report --agent claude-code attention --kind command --command .+ --request-id claude-code-tab-test-/,
+    );
+  });
+
+  it("ignores a PermissionRequest once the turn has ended", () => {
+    expect(run("permission", { stdin: PERMISSION_STDIN })).toEqual([]);
+  });
+
+  it("emits Claude's allow decision when the toast approves", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: PERMISSION_STDIN,
+      env: { PRAGMA_TEST_DECISION: "allow" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "allow" },
+      },
+    });
+  });
+
+  it("emits Claude's deny decision when the toast denies", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: PERMISSION_STDIN,
+      env: { PRAGMA_TEST_DECISION: "deny" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "deny" },
+      },
+    });
+  });
+
+  it("emits nothing (defers to Claude's own prompt) when no verdict arrives", () => {
+    run("started");
+    const output = runRaw("permission", { stdin: PERMISSION_STDIN });
+    expect(output.trim()).toBe("");
+  });
+
   it("re-asserts running after a tool completes so approved-prompt attention clears", () => {
     run("started");
     // A permission prompt put the tab on `attention`; approving it fires no hook,
@@ -287,7 +376,7 @@ describe("report.sh", () => {
       // The cancel surfaces only in the transcript, never as a hook.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(600);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code cleared",
       ]);
@@ -301,7 +390,7 @@ describe("report.sh", () => {
       const t = transcriptFile([ASSISTANT_DONE, INTERRUPTED]);
       run("started", { stdin: t.stdin });
       await sleep(400);
-      expect(calls()).toEqual(["agent report --agent claude-code started"]);
+      expect(reportCalls()).toEqual(["agent report --agent claude-code started"]);
       expect(existsSync(markerPath())).toBe(true);
     });
 
@@ -311,7 +400,7 @@ describe("report.sh", () => {
       // This turn's own cancel is appended past where the watcher was pinned.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(400);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code cleared",
       ]);
@@ -327,7 +416,7 @@ describe("report.sh", () => {
       // A late transcript line must not resurrect a clear after a normal end.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
       await sleep(300);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code stopped",
       ]);
@@ -341,7 +430,7 @@ describe("report.sh", () => {
       // Cancelling the *old* turn must not clear: its watcher was replaced.
       appendFileSync(first.path, `${INTERRUPTED}\n`);
       await sleep(600);
-      expect(calls()).toEqual([
+      expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code started",
       ]);

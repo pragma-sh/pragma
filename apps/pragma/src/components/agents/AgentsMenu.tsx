@@ -16,6 +16,7 @@ import { useAgentsList } from "@/hooks/use-agents-list";
 import { startAgentInTab } from "@/lib/agent-launch";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { type AgentConfig } from "@/lib/tauri";
+import { startWatcherForAgentSession } from "@/plugins/watchers";
 import { isAgentPinned, toggleAgentPin, useAgentPins } from "@/state/agent-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -35,6 +36,16 @@ export function AgentsMenu() {
       return;
     }
     startAgentInTab(tab.id, agent);
+    if (workspace.selectedWorktree) {
+      void startWatcherForAgentSession({
+        agentId: agent.id,
+        sessionId: tab.id,
+        tabId: tab.id,
+        worktreeId: workspace.selectedWorktree.id,
+      }).catch((cause: unknown) => {
+        console.warn(`failed to start watcher for ${agent.id}`, cause);
+      });
+    }
   }
 
   return (

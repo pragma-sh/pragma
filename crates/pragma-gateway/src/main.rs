@@ -50,7 +50,10 @@ fn run(args: Args) -> GatewayResult<()> {
     let token = args.token.unwrap_or_else(generate_token);
     let config = GatewayConfig::new(socket_path, args.port, token, discovery_path);
 
-    remove_stale_or_refuse(&config.discovery_path)?;
+    remove_stale_or_refuse(
+        &config.discovery_path,
+        CONSTANTS.daemon.protocol_version.get(),
+    )?;
     let client = client::GatewayClient::new(config.socket_path.clone());
     client.ensure_protocol()?;
 

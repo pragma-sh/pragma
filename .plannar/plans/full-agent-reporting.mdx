@@ -1,0 +1,562 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+# Full agent reporting + a `defineWatcher` plugin API
+
+Two connected upgrades to how Pragma sees agents:
+
+1. **Rich reporting.** Today an agent report is a single coarse status
+   (`running` / `attention` / `done` / `cleared`). Grow it into a stream of the agent's
+   **full message** — assistant text, tool calls, files touched, and a flag that
+   **sub-agents are active** — so a client that is not the terminal (mobile, another
+   client) can read what the agent is doing and approve from afar.
+2. **`defineWatcher`.** A new, separately-defined plugin function. When a plugin's agent
+   launches, Pragma assigns it a **host-side watcher** (if one is defined) that can read
+   the terminal output as a **stream** and **emulate key presses**. This is the
+   groundwork layer for out-of-terminal / mobile interaction — not the mobile UI itself.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>At a glance</CardTitle>
+    <CardDescription>What ships, and the decisions behind it</CardDescription>
+  </CardHeader>
+<CardContent className="text-sm space-y-2">
+
+- **Messages are a new frame, not a fatter status.** Status stays exactly as-is (it drives
+  the dot). A new `AgentMessage` frame carries the rich, append-only turn content on a
+  parallel channel. Old clients keep working; new clients subscribe to the extra stream.
+- **Message source = both.** Each host-tool plugin emits **structured** messages from its
+  transcript when it can (Claude Code already parses one); a **watcher** can scrape the
+  terminal stream as a fallback where no structured source exists. _(Your call.)_
+- **Sub-agents = a boolean, not a tree.** `subAgentsActive` (a count) on the message.
+  We show that sub-agents are running; their contents are out of scope for now. _(Your call.)_
+- **Watchers run host-side in a Bun sidecar.** A new `pragma-watch` sidecar (modeled on
+  `pragma-ai` / `pragma-github`) hosts `defineWatcher` functions with full `@pragma/sdk`
+  access, so a watcher survives the UI closing and can stream + inject for the agent's
+  whole life. _(Your call.)_
+- **All plumbing already exists.** `GET /v1/sessions/{id}/events` (NDJSON output stream)
+  and `POST /v1/sessions/{id}/input` (write bytes) are live in `pragma-gateway` and wrapped
+  by `@pragma/sdk`. The watcher runtime is a consumer of these, not new transport.
+- **One source of truth.** The message schema lands in `@pragma/constants`
+  (`schema.json`) so TS and Rust generate from the same definition — same rule the current
+  `AgentReportPayload` follows.
+
+</CardContent>
+</Card>
+
+<Alert className="my-4">
+  <AlertTitle>Groundwork, staged</AlertTitle>
+  <AlertDescription>
+
+You asked to lay the foundation, not ship mobile approval. So the plan is phased: the
+message channel and the `defineWatcher` contract + sidecar land first; existing plugins are
+migrated to emit messages; the mobile/remote consumer is a later plan that reads this stream.
+
+  </AlertDescription>
+</Alert>
+
+## Where things stand today
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>The current reporting path</CardTitle>
+  </CardHeader>
+<CardContent className="text-sm">
+
+A host-tool hook script calls `pragma-cli agent report --agent <id> started|stopped|attention|cleared`.
+`pragma-cli` connects to the `pragma-server` Unix socket and writes one `AgentReport` frame
+(`crates/pragma-protocol/src/lib.rs`). The server fans it out as an `EventFrame::Agent` to
+subscribers; the Tauri app's `agent_events.rs` bridge re-emits it as `pragma:agent-report`,
+and `agent-status-store.ts` turns it into the tab dot. Payload shape lives in
+`packages/constants/schema.json` → `AgentReportPayload` (status + `attentionKind` only).
+
+</CardContent>
+</Card>
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Layer</TableHead>
+      <TableHead>File</TableHead>
+      <TableHead>What it does now</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Wire schema</TableCell>
+      <TableCell>`packages/constants/schema.json`</TableCell>
+      <TableCell>`AgentStatus`, `AgentReportPayload` (status + attentionKind)</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Protocol</TableCell>
+      <TableCell>`crates/pragma-protocol/src/lib.rs`</TableCell>
+      <TableCell>`RequestKind::AgentReport`, `EventFrame::Agent`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>CLI</TableCell>
+      <TableCell>`crates/pragma-cli/src/{cli,direct}.rs`</TableCell>
+      <TableCell>`agent report` maps command → status, writes one frame</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>App bridge</TableCell>
+      <TableCell>`apps/pragma/src-tauri/src/agent_events.rs`</TableCell>
+      <TableCell>Subscribes, re-emits `pragma:agent-report`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Store / hook</TableCell>
+      <TableCell>`state/agent-status-store.ts`, `packages/plugin/src/hooks.ts`</TableCell>
+      <TableCell>`useAgentStatuses` → tab dot</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Plugins</TableCell>
+      <TableCell>`packages/{claude-code,cursor,opencode}-plugin/hooks/*`</TableCell>
+      <TableCell>Translate host-tool lifecycle → `agent report`</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Stream I/O</TableCell>
+      <TableCell>`crates/pragma-gateway/src/routes/sessions.rs`</TableCell>
+      <TableCell>`GET .../events` (NDJSON out), `POST .../input` (write) — **already exist**</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Separator className="my-6" />
+
+## Part 1 — Full message reporting
+
+The rich content rides a **new, parallel channel**. We do not widen the status enum or bloat
+`AgentReportPayload`: status is small, frequent, and drives the dot; a message is larger,
+append-only, and only some clients want it.
+
+<Tabs defaultValue="schema" className="my-4">
+  <TabsList>
+    <TabsTrigger value="schema">Message model</TabsTrigger>
+    <TabsTrigger value="transport">Transport</TabsTrigger>
+    <TabsTrigger value="cli">CLI + plugin API</TabsTrigger>
+    <TabsTrigger value="preview">Shape preview</TabsTrigger>
+  </TabsList>
+
+<TabsContent value="schema">
+
+New `@pragma/constants` definitions (regenerate TS + Rust with `bun run generate`):
+
+- **`AgentMessage`** — one append-only entry in an agent's turn:
+  - `agent`, `worktreeId`, `tabId` — routing keys, same as `AgentReportPayload`.
+  - `id` — stable id for the message (so re-sends dedupe / updates replace).
+  - `role` — `assistant` | `tool` | `user` | `system`.
+  - `text?` — the assistant/user text for this entry.
+  - `toolCalls?` — array of `{ id, name, status: running|done|error, summary? }`.
+  - `files?` — array of `{ path, change: read|edited|created|deleted }`.
+  - `subAgentsActive` — integer count of running sub-agents (**flag only**, no contents).
+  - `ts` — emit time.
+- **`AgentMessageKind`** — enum used by the frame tag.
+
+Design rules that keep it honest:
+
+- **Append-only + upsert by `id`.** Streaming a tool call from `running` → `done` re-sends
+  the same `id`; consumers replace. No partial-diff protocol.
+- **Optional everything but routing + `id` + `ts`.** A plugin that only knows text emits
+  text; one that parses a transcript fills `toolCalls`/`files`. Matches the "both sources"
+  decision.
+- **No secrets by construction.** Message text is whatever the host tool already prints;
+  we do not add file _contents_, only paths + change kind.
+
+</TabsContent>
+
+<TabsContent value="transport">
+
+Mirror the existing status path one-for-one, on its own frame so nothing about the current
+status flow changes:
+
+- **Protocol** (`crates/pragma-protocol/src/lib.rs`): add `RequestKind::AgentMessage`
+  (payload = JSON `AgentMessage`) and `EventFrame::AgentMessage { ... }`. The server fans it
+  out to agent subscribers exactly like `EventFrame::Agent`.
+- **Server** (`crates/pragma-server`): route the new request kind to the same subscriber
+  broadcast used for agent status. Messages are **not** persisted server-side in this phase
+  (the dot store already treats status as ephemeral); a bounded per-tab ring buffer for
+  replay is noted as a follow-up.
+- **App bridge** (`agent_events.rs`): match `EventFrame::AgentMessage`, emit a new
+  `pragma:agent-message` Tauri event.
+- **Gateway** (`crates/pragma-gateway/src/routes/agents.rs`): expose the message stream over
+  HTTP (extend the agents subscription NDJSON) so `@pragma/sdk` — and later a mobile client —
+  can read it without the Unix socket.
+
+</TabsContent>
+
+<TabsContent value="cli">
+
+**CLI.** New subcommand alongside `agent report`:
+
+```sh
+pragma-cli agent message --agent <id> --json '<AgentMessage JSON>'
+# or read the JSON payload from stdin for large messages:
+some-transcript-parser | pragma-cli agent message --agent <id> --stdin
+```
+
+It reuses the exact connect-write-exit path `agent report` already uses (`direct.rs`), just
+writing an `AgentMessage` frame instead of `AgentReport`.
+
+**Plugin API.** Two additions, both additive (minor version bump):
+
+- **Emit side** — extend the plugin runtime with a typed emitter so a plugin's own code /
+  watcher can push a message without shelling out:
+  `bridge.agents.reportMessage(msg: AgentMessage)`. Under the hood this is the same as the
+  CLI call. (`@pragma/sdk` gets `reportMessage()` next to `reportStarted`/`reportStopped` in
+  `agents-client.ts`.)
+- **Read side** — a new hook `useAgentMessages(worktreeId, tabId?)` in
+  `packages/plugin/src/hooks.ts` (delegating onto `__PRAGMA__.hooks`), returning the live
+  message list for a tab. Extend `PluginAgentStatusEntry` consumers rather than replacing
+  them: status and messages stay separate hooks.
+
+</TabsContent>
+
+<TabsContent value="preview">
+
+A sketch of what a consumer renders from the message stream for one turn — text, a couple of
+tool calls, touched files, and the sub-agents flag. Toggle to see the state change:
+
+<Playground>
+
+<label className="flex items-center gap-2 text-sm mb-3">
+  <input type="checkbox" bind="subs:true" />
+  sub-agents active
+</label>
+
+  <div className="rounded-lg border p-4 space-y-3 text-sm font-mono">
+    <div className="flex items-center gap-2">
+      <span className="inline-block w-2 h-2 rounded-full bg-yellow-500" />
+      <span className="font-semibold">claude-code</span>
+      {subs ? <span className="ml-auto rounded bg-purple-500/15 text-purple-600 px-2 py-0.5 text-xs">2 sub-agents ▸</span> : null}
+    </div>
+    <div>Refactoring the auth middleware to fix the token expiry check.</div>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2"><span className="text-green-600">✓</span> Read <span className="opacity-70">src/auth/middleware.ts</span></div>
+      <div className="flex items-center gap-2"><span className="text-green-600">✓</span> Edit <span className="opacity-70">src/auth/middleware.ts</span></div>
+      <div className="flex items-center gap-2"><span className="text-yellow-600 animate-pulse">●</span> Bash <span className="opacity-70">bun test auth</span></div>
+    </div>
+  </div>
+</Playground>
+
+The point: a non-terminal client reconstructs the turn from `AgentMessage` entries alone.
+
+</TabsContent>
+</Tabs>
+
+<Separator className="my-6" />
+
+## Part 2 — `defineWatcher`
+
+A watcher is defined **separately** from `defineAgent` (your requirement) and **bound by
+agent id**. When Pragma launches an agent that has a registered watcher, the host spins up a
+watcher instance for that session inside the `pragma-watch` sidecar.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>The contract</CardTitle>
+    <CardDescription>`packages/plugin/src/watcher.ts` — a new file, exported from `index.ts`</CardDescription>
+  </CardHeader>
+<CardContent className="text-sm">
+
+```ts
+/** Declares a watcher a plugin attaches to one of its agents' sessions. */
+export interface WatcherDefinition<TConfig = unknown> {
+  /** The `defineAgent` id this watcher attaches to. */
+  agent: string;
+  /** Runs once per launched session; lives until the session exits. */
+  watch: (ctx: WatcherContext<TConfig>) => void | Promise<void>;
+}
+
+export interface WatcherContext<TConfig> {
+  sdk: PragmaClient; // full gateway SDK
+  config: TConfig; // this plugin's validated config
+  session: { id: string; tabId: string; worktreeId: string };
+  /** Async iterator over decoded terminal output for this session. */
+  output: AsyncIterable<string>;
+  /** Emulate key presses / paste text into the session. */
+  sendKeys: (data: string) => Promise<void>;
+  /** Push a rich message onto the Part 1 channel (scrape fallback source). */
+  reportMessage: (msg: Omit<AgentMessage, "agent" | "tabId" | "worktreeId">) => Promise<void>;
+  /** Resolves when the session exits; also an AbortSignal for cleanup. */
+  signal: AbortSignal;
+}
+
+/** Declares a watcher contribution. Author defines this as a separate function. */
+export function defineWatcher<TConfig = unknown>(
+  input: WatcherDefinition<TConfig>,
+): WatcherDefinition<TConfig> {
+  return input;
+}
+```
+
+</CardContent>
+</Card>
+
+<Alert className="my-4">
+  <AlertTitle>`sendKeys` writes real bytes into a live terminal — treat it as privileged</AlertTitle>
+  <AlertDescription>
+
+A watcher that emulates key presses can approve prompts and run commands on the user's behalf.
+The plan gates it: watchers only attach to **their own plugin's** agents, run in the sandboxed
+sidecar with no ambient filesystem/network beyond the SDK, and every `sendKeys` is logged to
+the daemon log with the originating plugin + watcher id for audit. Auto-approval policy (what a
+watcher is _allowed_ to answer) is deferred to the mobile-consumer plan, not decided here.
+
+  </AlertDescription>
+</Alert>
+
+<Tabs defaultValue="runtime" className="my-4">
+  <TabsList>
+    <TabsTrigger value="runtime">Runtime & lifecycle</TabsTrigger>
+    <TabsTrigger value="io">Stream + key I/O</TabsTrigger>
+    <TabsTrigger value="reg">Registration</TabsTrigger>
+    <TabsTrigger value="example">Example watcher</TabsTrigger>
+  </TabsList>
+
+<TabsContent value="runtime">
+
+**Where it runs — `pragma-watch` sidecar.** A new Bun-compiled sidecar, added to
+`externalBin` in `tauri.conf.json` next to `pragma-ai` / `pragma-github`, staged by the same
+`stage-daemon-sidecar.sh` mechanism.
+
+**Lifecycle:**
+
+1. App launches an agent (existing flow in `src-tauri/src/agents.rs`).
+2. If a plugin registered a `defineWatcher` for that agent id, the app tells `pragma-watch`
+   to start a watcher instance, passing `{ pluginId, agentId, sessionId, tabId, worktreeId }`
+   and the gateway socket path.
+3. The sidecar loads the plugin's watcher bundle, builds a `WatcherContext`, and calls
+   `watch(ctx)`.
+4. When the session exits (`EventFrame::Exit` / stream close), `signal` aborts; the sidecar
+   tears the instance down. A max-lifetime backstop mirrors the existing hook-watcher guard.
+
+Running host-side (not in the React webview) is what makes it survive the UI closing — the
+requirement for mobile/remote approval later.
+
+</TabsContent>
+
+<TabsContent value="io">
+
+Both directions already have transport — the watcher is a **client of the gateway**, no new
+Rust I/O primitives:
+
+- **Read stream:** `output` wraps `GET /v1/sessions/{id}/events` (the NDJSON stream from
+  `attach_stream`, `sessions.rs:73`), already exposed by `@pragma/sdk` streaming. The sidecar
+  decodes output frames into an `AsyncIterable<string>`.
+- **Emulate keys:** `sendKeys` wraps `POST /v1/sessions/{id}/input` (`sessions.rs:94`, which
+  calls `registry.write`). Bracketed-paste / control sequences are the caller's responsibility,
+  same bytes the terminal would send.
+
+So `defineWatcher` is a thin, well-typed ergonomic layer over transport that already ships.
+
+</TabsContent>
+
+<TabsContent value="reg">
+
+`definePlugin` gains an optional `watchers` contribution, parallel to `agents`:
+
+```ts
+definePlugin({
+  // ...
+  agents: [claudeAgent],
+  watchers: [claudeWatcher], // new
+});
+```
+
+- `packages/plugin/src/plugin.ts` — add `watchers?: WatcherDefinition[]` to
+  `PluginUiContributions` (or a new `PluginRuntimeContributions`), export types.
+- `apps/pragma/src/plugins/PluginProvider.tsx` — collect registered watchers, index by agent
+  id, and on agent launch dispatch to `pragma-watch`.
+- Host-side registry in `apps/pragma/src-tauri/src/plugins.rs` learns which agent ids have
+  watchers so it can start one at launch.
+
+Per the repo rule, this is generic plugin-runtime infrastructure (allowed in
+`packages/plugin` + `apps/pragma/src/plugins` + `plugins.rs`), **not** per-tool core code.
+
+</TabsContent>
+
+<TabsContent value="example">
+
+A minimal watcher that scrapes output into the Part 1 message channel and auto-dismisses a
+known benign prompt:
+
+```ts
+export const claudeWatcher = defineWatcher({
+  agent: "claude-code",
+  async watch({ output, sendKeys, reportMessage, signal }) {
+    for await (const chunk of output) {
+      if (signal.aborted) return;
+
+      // Scrape fallback: turn visible tool lines into messages.
+      const tool = chunk.match(/^\s*[⏺●]\s+(\w+)\((.*)\)/m);
+      if (tool) {
+        await reportMessage({
+          id: crypto.randomUUID(),
+          role: "tool",
+          toolCalls: [
+            { id: crypto.randomUUID(), name: tool[1], status: "running", summary: tool[2] },
+          ],
+          subAgentsActive: /Task\(/.test(chunk) ? 1 : 0,
+          ts: Date.now(),
+        });
+      }
+
+      // Emulate a key press to answer a trusted prompt.
+      if (chunk.includes("Continue? (y/n)")) await sendKeys("y\r");
+    }
+  },
+});
+```
+
+</TabsContent>
+</Tabs>
+
+<Separator className="my-6" />
+
+## Part 3 — Migrate the existing plugins
+
+Each host-tool plugin keeps its current `agent report` calls (the dot is unchanged) and
+**adds** message emission. Where a structured transcript exists we parse it; otherwise the
+plugin's watcher scrapes. This is the "both sources" decision applied per plugin.
+
+<Table className="my-4">
+  <TableHeader>
+    <TableRow>
+      <TableHead>Plugin</TableHead>
+      <TableHead>Structured source available?</TableHead>
+      <TableHead>Migration</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>`claude-code-plugin`</TableCell>
+      <TableCell>Yes — already reads the JSONL transcript (`hooks/report.sh`)</TableCell>
+      <TableCell>
+        Emit `AgentMessage` per transcript entry (assistant text, tool_use, tool files, `Task` =
+        sub-agent → `subAgentsActive`). Preferred path; watcher optional.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>`cursor-plugin`</TableCell>
+      <TableCell>Partial — hooks fire for shell/MCP, no full transcript</TableCell>
+      <TableCell>
+        Emit messages from the hooks it does get (tool calls, approvals); use a `defineWatcher`
+        scrape fallback for assistant text.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>`opencode-plugin`</TableCell>
+      <TableCell>ESM plugin (`src/hooks.ts`) with richer in-process events</TableCell>
+      <TableCell>
+        Call `reportMessage()` directly from the plugin's event handlers — no scraping needed.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+<Alert className="my-4">
+  <AlertTitle>Sub-agent detection is deliberately shallow</AlertTitle>
+  <AlertDescription>
+
+Per your call, each plugin only needs to set `subAgentsActive` (a count) when it can see a
+sub-agent is running — Claude's `Task` tool, opencode's sub-session events. No nested message
+tree, no sub-agent transcript. We show the badge; contents are a later plan.
+
+  </AlertDescription>
+</Alert>
+
+<Separator className="my-6" />
+
+## Build order & risks
+
+<Accordion type="single" collapsible className="my-4">
+  <AccordionItem value="phase-1">
+    <AccordionTrigger>Phase 1 — Message channel (schema → wire → dot-store unchanged)</AccordionTrigger>
+<AccordionContent>
+
+1. `@pragma/constants`: add `AgentMessage` / `AgentMessageKind`; `bun run generate`.
+2. `pragma-protocol`: `RequestKind::AgentMessage` + `EventFrame::AgentMessage`; server fan-out.
+3. `pragma-cli`: `agent message` subcommand (reuse `direct.rs` connect-write-exit).
+4. `agent_events.rs`: emit `pragma:agent-message`; `agent-status-store` gains a message list.
+5. `@pragma/sdk` + `packages/plugin`: `reportMessage()` + `useAgentMessages()`.
+6. Gateway: expose the message stream over the agents NDJSON subscription.
+
+Tests: protocol round-trip (Rust), `agent message` CLI (Rust), `agents-client` +
+`useAgentMessages` (Vitest).
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="phase-2">
+    <AccordionTrigger>Phase 2 — `defineWatcher` + `pragma-watch` sidecar</AccordionTrigger>
+<AccordionContent>
+
+1. `packages/plugin`: `watcher.ts` (`defineWatcher`, `WatcherDefinition`, `WatcherContext`);
+   export; `watchers` contribution on `definePlugin`.
+2. New `pragma-watch` sidecar: load watcher bundles, build `WatcherContext` over the SDK
+   stream + input endpoints, lifecycle bound to session exit + abort.
+3. `tauri.conf.json` `externalBin` + staging script; `plugins.rs` watcher registry;
+   `PluginProvider.tsx` launch dispatch.
+4. Audit logging of every `sendKeys`.
+
+Tests: watcher lifecycle (start on launch, abort on exit), `sendKeys` → `registry.write`
+integration, scrape → `reportMessage` unit test.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="phase-3">
+    <AccordionTrigger>Phase 3 — Migrate claude-code / cursor / opencode</AccordionTrigger>
+<AccordionContent>
+
+Add message emission to each plugin per the table above. Claude parses its transcript;
+opencode emits from in-process events; cursor uses hooks + a scrape watcher. Update each
+plugin's `AGENTS.md` and the existing `report.test.ts` suites.
+
+</AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="risks">
+    <AccordionTrigger>Risks & open questions</AccordionTrigger>
+<AccordionContent>
+
+- **Message volume.** A chatty agent can emit many entries/sec. Mitigation: upsert-by-`id`,
+  coalesce tool-call updates, and a bounded per-tab buffer. Watch the polling-re-render
+  lessons already in the codebase (the recent lag fixes).
+- **Scrape fragility.** ANSI/redraw output makes regex scraping lossy — that's why structured
+  sources are preferred and scraping is the fallback, per your decision.
+- **`sendKeys` safety.** Covered by the audit-log + own-agent-only gate; the _policy_ of what
+  a watcher may auto-answer is intentionally deferred to the mobile plan.
+- **No server-side replay yet.** A client attaching mid-turn misses earlier messages until we
+  add the ring buffer (flagged as a follow-up, not in this scope).
+
+</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>Out of scope (this plan lays the groundwork)</CardTitle>
+  </CardHeader>
+<CardContent className="text-sm space-y-1">
+
+- The mobile / remote-client UI that consumes the message stream and drives `sendKeys`.
+- Sub-agent contents / nested message trees.
+- Auto-approval policy engine.
+- Server-side message persistence / replay buffer.
+
+</CardContent>
+</Card>

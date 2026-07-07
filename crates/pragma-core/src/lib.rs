@@ -13,7 +13,7 @@ use pragma_constants::ProtocolRpcMethod;
 pub mod exec;
 pub mod fs;
 pub mod git;
-pub(crate) mod process_env;
+pub mod process_env;
 pub mod rpc;
 pub mod watcher;
 

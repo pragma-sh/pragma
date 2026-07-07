@@ -8,7 +8,7 @@ import type { PragmaBridge } from "@pragma/plugin";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
-import { hostHooks } from "./host-hooks";
+import { hostHooks, reportAgentMessageFromPlugin } from "./host-hooks";
 import { openRegisteredWebView } from "./webviews";
 
 declare global {
@@ -39,6 +39,9 @@ export function installPragmaBridge(): void {
     ui: { Button, Kbd } as PragmaBridge["ui"],
     icons: lucideIcons as unknown as PragmaBridge["icons"],
     hooks: hostHooks,
-    actions: { openWebView: openRegisteredWebView },
+    actions: {
+      openWebView: openRegisteredWebView,
+      agents: { reportMessage: reportAgentMessageFromPlugin },
+    },
   };
 }

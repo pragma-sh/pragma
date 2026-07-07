@@ -21,6 +21,7 @@ import type {
   WorktreeChanges,
   Worktree,
   WorktreeStatus,
+  AgentMessage,
   AgentReportPayload,
   AutomationInfo,
   AutomationRootRegistration,
@@ -122,6 +123,11 @@ export function onAgentReport(handler: (payload: AgentReportPayload) => void): P
   return listen<AgentReportPayload>("pragma:agent-report", (event) => handler(event.payload));
 }
 
+/** Subscribes to daemon-forwarded rich agent messages. */
+export function onAgentMessage(handler: (payload: AgentMessage) => void): Promise<UnlistenFn> {
+  return listen<AgentMessage>("pragma:agent-message", (event) => handler(event.payload));
+}
+
 /** Fires before the daemon replays its current agent-status snapshot. */
 export function onAgentStatusReset(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("pragma:agent-status-reset", () => handler());
@@ -185,6 +191,25 @@ export function onAgentCliPathWarning(handler: (path: string) => void): Promise<
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
 
+/** Request to start one host-side plugin watcher instance. */
+export interface StartPluginWatcherRequest {
+  pluginId: string;
+  pluginMain: string;
+  agentId: string;
+  watcherAgent: string;
+  config: unknown;
+  sessionId: string;
+  tabId: string;
+  worktreeId: string;
+  gatewayUrl: string;
+  gatewayToken: string;
+}
+
+/** Starts a detached watcher sidecar for a plugin-owned agent session. */
+export function startPluginWatcher(request: StartPluginWatcherRequest): Promise<void> {
+  return invoke("start_plugin_watcher", { request });
+}
+
 /** Workspace metadata event emitted after a brokered CLI mutation. */
 export interface WorkspaceChangedEvent {
   action: string;
@@ -241,6 +266,21 @@ export function onAgentNotificationClick(
  */
 export function markAgentsSeen(tabId: string): Promise<void> {
   return invoke("mark_agents_seen", { tabId });
+}
+
+/**
+ * Publishes a command-approval verdict from the approval toast. The server fans
+ * it out to agent subscribers so the waiting harness hook (Claude Code) or plugin
+ * watcher (cursor/opencode) runs or rejects the command keyed by `requestId`.
+ */
+export function resolveAgentApproval(params: {
+  agent: string;
+  worktreeId: string;
+  tabId: string;
+  requestId: string;
+  approved: boolean;
+}): Promise<void> {
+  return invoke("resolve_agent_approval", params);
 }
 
 /**

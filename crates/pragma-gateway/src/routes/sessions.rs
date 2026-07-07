@@ -76,17 +76,20 @@ pub fn events(
     matched: &RouteMatch,
 ) -> GatewayResult<tiny_http::Response<crate::http::response::NdjsonReader>> {
     let session_id = param(matched, "id")?;
+    // Attach resizes the PTY only when the caller declares its viewport via
+    // `cols`+`rows`. A size-less attach (e.g. a plugin watcher tailing output)
+    // must not disturb the grid the interactive client already set.
     let cols = matched
         .query
         .get("cols")
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or_else(default_cols);
+        .and_then(|value| value.parse::<u16>().ok());
     let rows = matched
         .query
         .get("rows")
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or_else(default_rows);
-    let stream = state.client.attach_stream(session_id.clone(), cols, rows)?;
+        .and_then(|value| value.parse::<u16>().ok());
+    let stream = state
+        .client
+        .attach_stream(session_id.clone(), cols.zip(rows))?;
     drop_pending_spawn_stream(state, &session_id);
     Ok(ndjson_response(stream))
 }

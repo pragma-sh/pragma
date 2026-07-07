@@ -92,6 +92,12 @@ export function createBridge(hooks: Partial<PragmaHooksBridge> = {}): BridgeHand
       loading: true,
       refetch: () => undefined,
     }),
+    useAgentMessages: () => ({
+      data: undefined,
+      error: null,
+      loading: true,
+      refetch: () => undefined,
+    }),
     useSessions: () => ({ data: undefined, error: null, loading: true, refetch: () => undefined }),
   } as unknown as PragmaHooksBridge;
 
@@ -102,7 +108,10 @@ export function createBridge(hooks: Partial<PragmaHooksBridge> = {}): BridgeHand
     zod: {} as unknown as PragmaBridge["zod"],
     icons: {} as unknown as PragmaBridge["icons"],
     hooks: { ...defaults, ...hooks },
-    actions: { openWebView: async () => undefined },
+    actions: {
+      openWebView: async () => undefined,
+      agents: { reportMessage: async () => undefined },
+    },
     ui: { Button, Kbd } as unknown as PragmaBridge["ui"],
   };
 

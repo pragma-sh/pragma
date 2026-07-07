@@ -12,11 +12,13 @@ export function cachedAgentModels(agentId: string): AgentModel[] | undefined {
 /**
  * Resolves model metadata for an agent, caching the result for the session.
  *
- * A successful resolution (including a legitimately empty list) is cached and
- * reused on every subsequent call, so repeatedly hovering an agent in the picker
- * does not re-run the underlying — and potentially process-spawning — lookup.
- * Failures are not cached, leaving the next call free to retry. Concurrent calls
- * are coalesced via the in-flight map. Pass `force` to bypass the cache.
+ * Only a non-empty resolution is cached and reused on subsequent calls, so
+ * repeatedly hovering an agent in the picker does not re-run the underlying —
+ * and potentially process-spawning — lookup. Empty results and failures are
+ * not cached: an empty list usually means the lookup ran too early (gateway
+ * SDK still connecting) or the agent CLI was missing, and caching it would pin
+ * "No models found" for the whole session. Concurrent calls are coalesced via
+ * the in-flight map. Pass `force` to bypass the cache.
  */
 export function refreshAgentModels(agentId: string, force = false): Promise<AgentModel[]> {
   if (!force) {
@@ -33,7 +35,9 @@ export function refreshAgentModels(agentId: string, force = false): Promise<Agen
     .then((pluginModels) => pluginModels ?? [])
     .then((models) => {
       const next = Array.isArray(models) ? models : [];
-      cache.set(agentId, next);
+      if (next.length > 0) {
+        cache.set(agentId, next);
+      }
       return next;
     })
     .catch(() => [] as AgentModel[])

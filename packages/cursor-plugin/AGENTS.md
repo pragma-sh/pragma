@@ -54,18 +54,40 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 
 ## Hook → status mapping
 
-| Cursor hook            | `report.sh` arg     | Reports                                                 |
-| ---------------------- | ------------------- | ------------------------------------------------------- |
-| `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)            |
-| `sessionEnd`           | `cleared`           | `cleared`                                               |
-| `beforeSubmitPrompt`   | `started`           | `started` (sets the turn marker)                        |
-| `stop`                 | `stopped`           | `stopped`                                               |
-| `beforeShellExecution` | `attention-command` | `attention --kind command` (observe-only)               |
-| `beforeMCPExecution`   | `attention-command` | `attention --kind command` (observe-only)               |
-| `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red) |
+| Cursor hook            | `report.sh` arg     | Reports                                                                           |
+| ---------------------- | ------------------- | --------------------------------------------------------------------------------- |
+| `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)                                      |
+| `sessionEnd`           | `cleared`           | `cleared`                                                                         |
+| `beforeSubmitPrompt`   | `started`           | `started` (sets the turn marker)                                                  |
+| `stop`                 | `stopped`           | `stopped`                                                                         |
+| `beforeShellExecution` | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
+| `beforeMCPExecution`   | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
+| `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red)                           |
 
-`beforeShellExecution` / `beforeMCPExecution` exit 0 with **no stdout** so Cursor keeps
-its normal approval UI (fail-open).
+## Approving from a Pragma toast (`beforeShellExecution` / `beforeMCPExecution` block)
+
+Cursor's command/MCP gates are **blocking** hooks whose stdout is a
+`{"permission":"allow"|"deny"|"ask"}` decision. The `attention-command` case uses that to
+approve remotely (mirrors Claude Code's `permission` case):
+
+1. Extract the command from stdin (`.command` / `.tool_name`, via `jq` with a sed
+   fallback), mint a `requestId`, and report
+   `attention --kind command --command <cmd> --request-id <id>` so the Pragma approval
+   toast shows the command with **Approve**/**Deny**.
+2. Block on `pragma-cli agent await-decision --request-id <id>
+--timeout ${PRAGMA_APPROVAL_TIMEOUT:-300}` for the verdict the app publishes.
+3. Emit `{"permission":"allow"}` / `{"permission":"deny"}` so approve runs the command and
+   deny rejects it — no terminal interaction.
+4. On **timeout** emit nothing (exit 0) so Cursor keeps its own approval UI (fail-open).
+   Never hangs a session.
+
+## Interjection (free-form input)
+
+Interjections (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are **not**
+handled by these hooks. Cursor is a PTY TUI with no mid-turn input hook, so the shared
+built-in-agent watcher (`@pragma/opencode-plugin`'s `cursorInterjectWatcher`, registered in
+`apps/pragma/src/plugins/builtin-agents.ts`) delivers the text by writing it into the live
+terminal followed by a submit key. This plugin's hooks stay approval-only.
 
 ## AskQuestion — not reported (and why)
 

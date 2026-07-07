@@ -44,11 +44,12 @@ pub fn ndjson_response(stream: std::os::unix::net::UnixStream) -> Response<Ndjso
         vec![ndjson_header()],
         NdjsonReader {
             rx,
-            current: Vec::new(),
+            current: b"{\"type\":\"ready\"}\n".to_vec(),
         },
         None,
         None,
-    );
+    )
+    .with_chunked_threshold(0);
     response.add_header(no_cache_header());
     response
 }
@@ -77,6 +78,9 @@ pub fn event_json(event: EventFrame) -> Value {
             agent,
             status,
             attention_kind,
+            command,
+            question,
+            request_id,
         } => json!({
             "type": "agent",
             "worktreeId": worktree_id,
@@ -84,6 +88,25 @@ pub fn event_json(event: EventFrame) -> Value {
             "agent": agent,
             "status": status,
             "attentionKind": attention_kind,
+            "command": command,
+            "question": question,
+            "requestId": request_id,
+        }),
+        EventFrame::AgentMessage { message } => json!({
+            "type": "agentMessage",
+            "message": message,
+        }),
+        EventFrame::AgentDecision { decision } => json!({
+            "type": "agentDecision",
+            "decision": decision,
+        }),
+        EventFrame::AgentAnswer { answer } => json!({
+            "type": "agentAnswer",
+            "answer": answer,
+        }),
+        EventFrame::AgentInput { input } => json!({
+            "type": "agentInput",
+            "input": input,
         }),
         EventFrame::Snapshot {
             subscription,
