@@ -3,8 +3,10 @@ use std::path::PathBuf;
 
 use pragma_client::PragmaClient;
 use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
-use pragma_protocol::{AgentAnswer, AgentDecision, AgentInput, AgentMessage, AgentReportPayload};
-use serde_json::Value;
+use pragma_protocol::{
+    AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
+};
+use serde_json::{json, Value};
 
 use crate::error::{GatewayError, GatewayResult};
 
@@ -51,6 +53,35 @@ impl GatewayClient {
     pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> GatewayResult<Value> {
         self.ensure_protocol()?;
         self.client.rpc(method, payload).map_err(GatewayError::from)
+    }
+
+    /// Sends a brokered control request to the desktop app and returns its
+    /// JSON reply. Used by `POST /v1/control/{method}` to route remote
+    /// `agentSessionLaunch` requests to the controller. A missing controller
+    /// (no desktop app connected) maps to `GatewayError::Conflict` so the
+    /// phone can render "Open Pragma on your computer to launch sessions."
+    pub fn control(
+        &self,
+        method: pragma_constants::ControlMethod,
+        payload: Value,
+    ) -> GatewayResult<Value> {
+        self.ensure_protocol()?;
+        self.client
+            .control(method, payload)
+            .map_err(GatewayError::from)
+    }
+
+    /// Returns the cached agent catalog assembled by the plugins sidecar.
+    pub fn agent_catalog(&self) -> GatewayResult<Value> {
+        self.rpc(ProtocolRpcMethod::Plugins, json!({ "action": "catalog" }))
+    }
+
+    /// Returns `{ base64, mime }` for a plugin-contributed icon asset by hash.
+    pub fn read_asset(&self, hash: &str) -> GatewayResult<Value> {
+        self.rpc(
+            ProtocolRpcMethod::Plugins,
+            json!({ "action": "readAsset", "hash": hash }),
+        )
     }
 
     /// Spawns a session and returns its event stream.
@@ -146,6 +177,14 @@ impl GatewayClient {
         self.ensure_protocol()?;
         self.client
             .report_agent_input(input)
+            .map_err(GatewayError::from)
+    }
+
+    /// Publishes a transient interrupt for a running agent.
+    pub fn report_agent_interrupt(&self, interrupt: &AgentInterrupt) -> GatewayResult<()> {
+        self.ensure_protocol()?;
+        self.client
+            .report_agent_interrupt(interrupt)
             .map_err(GatewayError::from)
     }
 

@@ -42,9 +42,12 @@ event routed to that agent + tab (`AgentStreamEvent` filtered to the target), an
 methods to talk back on the same channel — `send(text)` interjects (publishes an
 `AgentInput`, delivered via a harness input hook or a plugin watcher's `sendKeys`),
 `answer(requestId, reply|null)` replies to a question, `decide(requestId, approved)` approves
-/denies a command. `prompt` is **optional** — omit it to attach to an existing session
+/denies a command, and `interrupt(requestId?)` publishes a transient `AgentInterrupt` — a
+watcher subscribed to the tab sends ESC into the agent's PTY (no replay buffer; best-effort
+to live watchers). `prompt` is **optional** — omit it to attach to an existing session
 without sending anything. `connect` supersedes the old read-only `subscribe()`; the standalone
-interjection publish is `client.agents.reportInput(...)` (or `pragma-cli agent input`).
+publishes are `client.agents.reportInput(...)` / `client.agents.reportInterrupt(...)` (or
+`pragma-cli agent input`).
 
 ## Rules
 

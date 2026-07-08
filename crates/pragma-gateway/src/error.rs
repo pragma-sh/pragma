@@ -20,6 +20,10 @@ pub enum GatewayError {
     /// Route or RPC method was not found.
     #[error("not found")]
     NotFound,
+    /// No desktop controller is registered; the remote caller can render
+    /// "Open Pragma on your computer to launch sessions."
+    #[error("pragma is not running: {0}")]
+    Conflict(String),
     /// Server and gateway protocol versions differ.
     #[error("protocol version mismatch: expected {expected}, actual {actual}")]
     ProtocolMismatch { expected: u64, actual: u64 },
@@ -54,6 +58,7 @@ impl GatewayError {
             Self::InvalidPayload(_) | Self::Json(_) => 400,
             Self::Unauthorized => 401,
             Self::NotFound => 404,
+            Self::Conflict(_) => 409,
             Self::ProtocolMismatch { .. } => 503,
             Self::Transport(_) => 502,
             Self::Rpc { code, .. } => rpc_status(*code),
@@ -68,6 +73,7 @@ impl GatewayError {
             Self::InvalidPayload(_) | Self::Json(_) => "invalidPayload",
             Self::Unauthorized => "unauthorized",
             Self::NotFound => "notFound",
+            Self::Conflict(_) => "conflict",
             Self::ProtocolMismatch { .. } => "protocolVersionMismatch",
             Self::Transport(_) => "transport",
             Self::Rpc { code, .. } => protocol_code_name(*code),
@@ -81,7 +87,16 @@ impl From<ClientError> for GatewayError {
         match error {
             ClientError::Io(err) => Self::Transport(err.to_string()),
             ClientError::Protocol(err) => Self::Transport(err.to_string()),
-            ClientError::Server(message) => Self::Server(message),
+            ClientError::Server(message) => {
+                // The canonical "app not running" reply from a brokered
+                // control request becomes 409 so a phone can render "Open Pragma
+                // on your computer to launch sessions." rather than a 500.
+                if message.starts_with("Pragma is not running") {
+                    Self::Conflict(message)
+                } else {
+                    Self::Server(message)
+                }
+            }
             ClientError::Rpc { code, message } => Self::Rpc { code, message },
             ClientError::LockPoisoned => Self::Server("client lock poisoned".to_string()),
             ClientError::NoBootstrap => {

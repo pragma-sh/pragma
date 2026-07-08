@@ -297,6 +297,19 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
+    /// Returns every worktree across every project, ordered to mirror the
+    /// sidebar's grouping (`project_id`, `is_main` DESC, `created_at`). Used by the
+    /// workspace mirror publisher to snapshot remote-visible state.
+    pub fn list_all_worktrees(&self) -> AppResult<Vec<Worktree>> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, parent_id, branch, title, path, is_main, hidden, created_at
+             FROM worktrees ORDER BY project_id, is_main DESC, created_at",
+        )?;
+        let rows = stmt.query_map([], worktree_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
     pub fn worktree(&self, worktree_id: &str) -> AppResult<Worktree> {
         self.0
             .lock()?
@@ -406,6 +419,19 @@ impl Db {
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
+    /// Returns every tab across every project, ordered to mirror the tab strip
+    /// (`project_id`, `order_index`, `created_at`). Used by the workspace mirror
+    /// publisher to snapshot remote-visible state.
+    pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
+             FROM tabs ORDER BY project_id, order_index, created_at",
+        )?;
+        let rows = stmt.query_map([], tab_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 

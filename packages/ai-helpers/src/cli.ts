@@ -17,6 +17,8 @@
  *   pull-request --cwd <path>     (JSON context on stdin) → { type: "result", title, body } | error
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
  */
+import { readStdinLines } from "@pragma/sidecar-kit";
+
 import {
   type AiAuthMethod,
   createAuthStorage,
@@ -63,28 +65,17 @@ function readAllStdin(): Promise<string> {
 
 /** A line-buffered stdin reader for the interactive login flow. */
 class StdinLines {
-  private buffer = "";
   private waiters: Array<(line: string) => void> = [];
   private pending: string[] = [];
 
   constructor() {
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => this.onData(chunk));
+    readStdinLines((line) => this.onLine(line));
   }
 
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    let newline = this.buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line) {
-        const waiter = this.waiters.shift();
-        if (waiter) waiter(line);
-        else this.pending.push(line);
-      }
-      newline = this.buffer.indexOf("\n");
-    }
+  private onLine(line: string): void {
+    const waiter = this.waiters.shift();
+    if (waiter) waiter(line);
+    else this.pending.push(line);
   }
 
   next(): Promise<string> {

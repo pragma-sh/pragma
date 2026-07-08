@@ -50,6 +50,9 @@ bun --filter @pragma/watcher build:sidecar
 # (dev imports the TS source directly). See `resolve_builtin_watcher_main`.
 bun --filter @pragma/opencode-plugin build
 bun --filter @pragma/automations build:sidecar
+# Build the plugin catalog sidecar; it statically bundles the built-in agent
+# definitions from the claude-code/opencode/cursor plugin packages.
+bun --filter @pragma/plugins-host build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
 cp "$repo_root/target/$profile/pragma-server" \
@@ -66,6 +69,8 @@ cp "$repo_root/packages/watcher/dist/pragma-watch" \
   "$src_tauri_dir/binaries/pragma-watch-$triple"
 cp "$repo_root/packages/automations/dist/pragma-automations" \
   "$src_tauri_dir/binaries/pragma-automations-$triple"
+cp "$repo_root/packages/plugins-host/dist/pragma-plugins" \
+  "$src_tauri_dir/binaries/pragma-plugins-$triple"
 
 # Remove any plugin JS left over from a previous staging layout. Pragma no longer
 # bundles opencode's *status* plugin dist (`index.mjs`) as a Tauri resource; since
@@ -88,3 +93,4 @@ echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
 echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
 echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"
 echo "staged pragma-automations -> src-tauri/binaries/pragma-automations-$triple"
+echo "staged pragma-plugins -> src-tauri/binaries/pragma-plugins-$triple"

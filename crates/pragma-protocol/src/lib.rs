@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use pragma_constants::{
-    AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentMessage, AgentReportPayload,
-    AgentStatus, ControlMethod, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
+    AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
+    AgentReportPayload, AgentSessionLaunchPayload, AgentStatus, ControlMethod, NewWorktreeSpec,
+    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, WorkspaceSnapshot,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -134,6 +135,11 @@ pub enum RequestKind {
     /// subscribers so the waiting reporter (hook or watcher) delivers the text
     /// into the agent's turn.
     AgentInput,
+    /// Publishes a transient interrupt for a running agent. `data` carries a
+    /// JSON [`AgentInterrupt`]. The server fans it out to agent subscribers so a
+    /// watcher can send an interrupt (ESC) into the agent's tab. No replay
+    /// buffer: delivery is best-effort to live subscribers only.
+    AgentInterrupt,
     /// Subscribes to daemon-wide agent status events.
     SubscribeAgents,
     /// Marks a tab's resolved (`done`) agent statuses as seen so the daemon
@@ -157,6 +163,13 @@ pub enum RequestKind {
     /// The controller app's reply to a forwarded `Control` request. `control_result`
     /// carries the payload or error; `request_id` matches the forwarded request.
     ControlResult,
+    /// Publishes a full `WorkspaceSnapshot` (projects/worktrees/tabs) the desktop
+    /// app mirrors from its `SQLite` state. The server caches it and broadcasts a
+    /// `Delta` carrying the replacement snapshot to `workspace` subscribers, so a
+    /// remote client (e.g. a paired phone) can render the session launcher without
+    /// registering as the controller. Fire-and-forget: the publishing app never
+    /// blocks on it. `data` carries a JSON [`WorkspaceSnapshot`].
+    PublishWorkspace,
 }
 
 /// Request payload for generalized server-owned business-logic RPC.
@@ -297,6 +310,11 @@ pub enum EventFrame {
     /// agent subscribers so a hook or watcher can deliver it into the turn.
     AgentInput {
         input: AgentInput,
+    },
+    /// A transient interrupt for a running agent, fanned out to agent
+    /// subscribers so a watcher can send an interrupt (ESC) into the tab.
+    AgentInterrupt {
+        interrupt: AgentInterrupt,
     },
     /// First message for a subscription, carrying the complete current state.
     Snapshot {
@@ -736,6 +754,7 @@ mod tests {
                 | EventFrame::AgentDecision { .. }
                 | EventFrame::AgentAnswer { .. }
                 | EventFrame::AgentInput { .. }
+                | EventFrame::AgentInterrupt { .. }
                 | EventFrame::Snapshot { .. }
                 | EventFrame::Delta { .. }
                 | EventFrame::EchoMode { .. },

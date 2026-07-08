@@ -9,6 +9,7 @@ description = "Localhost HTTP gateway for the Pragma Unix-socket server protocol
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 pragma-client = { path = "../pragma-client", default-features = false }
 pragma-constants = { path = "../../packages/constants" }

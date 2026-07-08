@@ -209,9 +209,13 @@ session.
 
 ## Built-in launcher
 
-The launchable Claude Code entry is defined by the built-in agent in
-`apps/pragma/src/plugins/builtin-agents.ts`; it starts `claude --permission-mode auto`.
-Its icon asset stays in this package under `assets/`, not in Pragma core.
+The launchable Claude Code entry is defined **here** in `src/pragma-agent.ts`; it starts
+`claude --permission-mode auto`. This is now the single source of truth: the
+`pragma-plugins` catalog sidecar (`@pragma/plugins-host`) imports it directly to assemble
+the agent catalog, and `apps/pragma/src/plugins/builtin-agents.ts` re-exports it
+(overriding `iconPath` with a browser URL and attaching the built-in watcher) so the
+webview path shares the same definition. Its icon asset stays in this package under
+`assets/`, not in Pragma core.
 Claude Code supports `--model` and `--effort` but does not expose a supported model-list
 command, so the built-in agent uses static model metadata. Reasoning efforts are listed
 per model and are appended as `--effort {reasoning}` when selected; choosing a model with

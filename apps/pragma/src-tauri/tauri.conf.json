@@ -48,7 +48,8 @@
       "binaries/pragma-ai",
       "binaries/pragma-github",
       "binaries/pragma-watch",
-      "binaries/pragma-automations"
+      "binaries/pragma-automations",
+      "binaries/pragma-plugins"
     ],
     "resources": ["resources/**/*"],
     "icon": [

@@ -295,6 +295,35 @@ describe("agents", () => {
       text: "focus on the tests",
     });
   });
+
+  it("posts an interrupt to the interrupts route", async () => {
+    let input: string | URL | Request | undefined;
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (target, init) => {
+        input = target;
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await client.agents.reportInterrupt({
+      agent: "opencode",
+      worktreeId: "worktree",
+      tabId: "tab",
+      requestId: "req-9",
+    });
+
+    expect(input).toBe("http://127.0.0.1:1/v1/agents/interrupts");
+    expect(JSON.parse(body)).toEqual({
+      agent: "opencode",
+      worktreeId: "worktree",
+      tabId: "tab",
+      requestId: "req-9",
+    });
+  });
 });
 
 describe("agents connect", () => {
@@ -364,10 +393,15 @@ describe("agents connect", () => {
       type: "agentInput",
       input: { agent: "cursor", worktreeId: "worktree", tabId: "tab", text: "nope" },
     });
+    const interruptOtherTab = JSON.stringify({
+      type: "agentInterrupt",
+      interrupt: { agent: "opencode", worktreeId: "worktree", tabId: "other" },
+    });
     const client = new PragmaClient({
       baseUrl: "http://127.0.0.1:1",
       token: "token",
-      fetch: async () => ndjsonResponse(`${mine}\n${otherTab}\n${otherAgent}\n`),
+      fetch: async () =>
+        ndjsonResponse(`${mine}\n${otherTab}\n${otherAgent}\n${interruptOtherTab}\n`),
     });
 
     const connection = await client.agents.connect({
@@ -410,6 +444,7 @@ describe("agents connect", () => {
     await connection.answer("req-1", "reply");
     await connection.answer("req-2", null);
     await connection.decide("req-3", false);
+    await connection.interrupt("req-4");
     connection.close();
 
     expect(posts).toEqual([
@@ -446,6 +481,15 @@ describe("agents connect", () => {
           tabId: "tab",
           requestId: "req-3",
           approved: false,
+        },
+      },
+      {
+        url: "http://127.0.0.1:1/v1/agents/interrupts",
+        body: {
+          agent: "opencode",
+          worktreeId: "worktree",
+          tabId: "tab",
+          requestId: "req-4",
         },
       },
     ]);

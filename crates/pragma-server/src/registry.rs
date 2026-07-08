@@ -8,12 +8,13 @@ use std::time::{Duration, Instant};
 use pragma_constants::ProtocolEventKind;
 use pragma_core::watcher::WorktreeWatcher;
 use pragma_protocol::{
-    AgentAnswer, AgentDecision, AgentInput, AgentMessage, AgentReportPayload, AgentStatus,
-    ControlResult, EventFrame,
+    AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
+    AgentStatus, ControlResult, EventFrame, WorkspaceSnapshot,
 };
 use thiserror::Error;
 
 use crate::automations::{AutomationError, AutomationsRegistry};
+use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::session::{Session, SessionError};
 
 #[derive(Debug, Error)]
@@ -56,7 +57,16 @@ pub struct Registry {
     /// In-flight brokered control requests keyed by `request_id`, each waiting
     /// for the controller's `ControlResult` reply.
     pending: Mutex<HashMap<String, Sender<ControlResult>>>,
+    /// Latest workspace mirror the desktop app published (projects/worktrees/tabs).
+    /// Cached so a remote subscriber (e.g. a paired phone) attaching just after a
+    /// publish still gets the current state as its snapshot.
+    workspace: Mutex<Option<WorkspaceSnapshot>>,
+    /// Subscribers to the workspace snapshot-then-delta stream. A publish replaces
+    /// the snapshot and fans a full-snapshot `Delta` to all live subscribers; v1
+    /// keeps deltas trivial (every delta is a full replacement).
+    workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     automations: Arc<AutomationsRegistry>,
+    plugins: Arc<PluginsRegistry>,
 }
 
 type AgentKey = (String, String, String);
@@ -104,8 +114,20 @@ impl Registry {
             file_watchers: Arc::new(Mutex::new(HashMap::new())),
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
-            automations: AutomationsRegistry::new(server_dir),
+            workspace: Mutex::new(None),
+            workspace_subscribers: Mutex::new(Vec::new()),
+            automations: AutomationsRegistry::new(server_dir.clone()),
+            plugins: PluginsRegistry::new(server_dir),
         }
+    }
+
+    /// Routes a `plugins` RPC (catalog, registerRoots, readAsset, reload) to the
+    /// plugin catalog host.
+    pub fn handle_plugins_rpc(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginsError> {
+        self.plugins.handle_rpc(payload)
     }
 
     pub fn handle_automation_rpc(
@@ -125,6 +147,59 @@ impl Registry {
         &self,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), AutomationError> {
         self.automations.subscribe_changed()
+    }
+
+    /// Stores the latest workspace mirror and fans a `Delta` carrying the full
+    /// replacement snapshot to all live subscribers. v1 keeps deltas trivial
+    /// (the delta is the whole snapshot); row-level deltas are a later
+    /// optimization. Mirrors `broadcast_agent`: dead subscribers are pruned.
+    pub fn publish_workspace(&self, snapshot: WorkspaceSnapshot) {
+        let payload = serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null);
+        if let Ok(mut guard) = self.workspace.lock() {
+            *guard = Some(snapshot);
+        }
+        self.broadcast_workspace(&EventFrame::Delta {
+            subscription: ProtocolEventKind::Workspace,
+            payload,
+        });
+    }
+
+    /// Subscribes to the workspace snapshot-then-delta stream. The snapshot is
+    /// the cached mirror, or an empty payload when the desktop has not yet
+    /// published. Mirrors `subscribe_agents`.
+    pub fn subscribe_workspace(
+        &self,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        let (tx, rx) = mpsc::channel();
+        let mut subscribers = self
+            .workspace_subscribers
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        subscribers.push(tx);
+        let snapshot = self
+            .workspace
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .as_ref()
+            .map_or_else(
+                || serde_json::json!({ "projects": [], "worktrees": [], "tabs": [] }),
+                |snapshot| serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null),
+            );
+        Ok((
+            vec![EventFrame::Snapshot {
+                subscription: ProtocolEventKind::Workspace,
+                payload: snapshot,
+            }],
+            rx,
+        ))
+    }
+
+    /// Fans a delta event out to workspace subscribers, pruning any whose channel
+    /// has gone away. Mirrors `broadcast_agent`.
+    fn broadcast_workspace(&self, event: &EventFrame) {
+        if let Ok(mut subscribers) = self.workspace_subscribers.lock() {
+            subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+        }
     }
 
     pub fn spawn(
@@ -303,6 +378,13 @@ impl Registry {
     /// user interjects, so no replay window is needed.
     pub fn report_agent_input(&self, input: AgentInput) {
         self.broadcast_agent(&EventFrame::AgentInput { input });
+    }
+
+    /// Fans a transient interrupt out to agent subscribers. No replay buffer:
+    /// interrupts are best-effort to live watchers, which are long-lived
+    /// subscribers by the time a user interrupts a running agent.
+    pub fn report_agent_interrupt(&self, interrupt: AgentInterrupt) {
+        self.broadcast_agent(&EventFrame::AgentInterrupt { interrupt });
     }
 
     /// Fans a command-approval verdict out to agent subscribers. A short replay
@@ -665,8 +747,8 @@ mod tests {
     use std::time::Instant;
 
     use pragma_protocol::{
-        AgentAnswer, AgentDecision, AgentInput, AgentReportPayload, AgentStatus, ControlResult,
-        EventFrame,
+        AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentReportPayload, AgentStatus,
+        ControlResult, EventFrame,
     };
     use tempfile::tempdir;
 
@@ -806,6 +888,42 @@ mod tests {
             }
             other => panic!("expected input event, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn report_agent_interrupt_fans_out_to_subscribers() {
+        let registry = Registry::default();
+        let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
+        registry.report_agent_interrupt(AgentInterrupt {
+            agent: "opencode".to_string(),
+            worktree_id: "wt-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            request_id: None,
+        });
+        match rx.recv().expect("interrupt event") {
+            EventFrame::AgentInterrupt { interrupt } => {
+                assert_eq!(interrupt.agent, "opencode");
+                assert_eq!(interrupt.tab_id, "tab-1");
+            }
+            other => panic!("expected interrupt event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_agent_interrupt_is_not_replayed_to_late_subscribers() {
+        let registry = Registry::default();
+        registry.report_agent_interrupt(AgentInterrupt {
+            agent: "opencode".to_string(),
+            worktree_id: "wt-1".to_string(),
+            tab_id: "tab-1".to_string(),
+            request_id: None,
+        });
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+
+        assert!(!snapshot
+            .iter()
+            .any(|event| matches!(event, EventFrame::AgentInterrupt { .. })));
     }
 
     #[test]

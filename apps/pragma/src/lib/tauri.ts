@@ -1192,6 +1192,39 @@ export function gatewayConnectionInfo(): Promise<GatewayConnectionInfo> {
   return invoke<GatewayConnectionInfo>("gateway_connection_info");
 }
 
+/**
+ * Regenerates the gateway bearer token and returns the fresh connection info.
+ * Paired devices disconnect until they re-pair with the new token.
+ */
+export function regenerateGatewayToken(): Promise<GatewayConnectionInfo> {
+  return invoke<GatewayConnectionInfo>("regenerate_gateway_token");
+}
+
+/** Remote-access tunnel lifecycle state (mirrors the Rust `TunnelStatus`). */
+export type TunnelStatus =
+  | { state: "idle" }
+  | { state: "starting" }
+  | { state: "active"; value: string }
+  | { state: "error"; value: string };
+
+/**
+ * Starts the remote-access tunnel exposing the local gateway. Returns the
+ * initial status (usually `starting`); poll {@link tunnelStatus} until `active`.
+ */
+export function tunnelStart(): Promise<TunnelStatus> {
+  return invoke<TunnelStatus>("tunnel_start");
+}
+
+/** Stops the remote-access tunnel; paired devices disconnect. */
+export function tunnelStop(): Promise<void> {
+  return invoke<void>("tunnel_stop");
+}
+
+/** Returns the current remote-access tunnel status. */
+export function tunnelStatus(): Promise<TunnelStatus> {
+  return invoke<TunnelStatus>("tunnel_status");
+}
+
 /** Reads one plugin-owned durable storage value as an opaque JSON string. */
 export function pluginStorageGet(pluginId: string, key: string): Promise<string | null> {
   return invoke<string | null>("plugin_storage_get", { pluginId, key });

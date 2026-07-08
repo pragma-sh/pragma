@@ -8,6 +8,11 @@
 - Bind only to `127.0.0.1`, normally on an ephemeral port.
 - Write `gateway.json` beside `daemon.sock` with `{ port, token, pid, protocolVersion }`
   using mode `0600`.
+- Persist the bearer token in a `gateway-token` file (mode `0600`) beside `daemon.sock`
+  when `--token` is absent: read it if present, otherwise generate and write it. This
+  keeps the token stable across gateway restarts so paired remote devices are not
+  disconnected on every respawn. The desktop `regenerate_gateway_token` command deletes
+  this file (and kills the gateway) to force a fresh token. `--token` still overrides.
 - On startup, refuse if a live gateway with the **same** protocol version already serves
   the discovery file; a live gateway with a **different** protocol version (leftover from
   a previous app build) is killed and replaced — otherwise a protocol bump deadlocks
@@ -31,9 +36,10 @@
 - `DELETE /v1/sessions/{id}` - kill a PTY.
 - `DELETE /v1/sessions?cwd=...` - kill PTYs rooted at a cwd.
 - `POST /v1/agents/reports` - agent status report.
-- `POST /v1/agents/{messages,decisions,answers,inputs}` - publish an agent message / a
-  command-approval verdict / a question reply / a free-form interjection; all fanned out to
-  agent-event subscribers.
+- `POST /v1/agents/{messages,decisions,answers,inputs,interrupts}` - publish an agent
+  message / a command-approval verdict / a question reply / a free-form interjection / a
+  transient interrupt; all fanned out to agent-event subscribers. Interrupts carry no
+  replay buffer (best-effort to live watchers).
 - `GET /v1/agents/events` - stream agent status events.
 - `POST /v1/tabs/{tabId}/agents/seen` - mark done agents seen.
 - `GET /v1/subscriptions/{event}` - stream protocol snapshots and deltas.

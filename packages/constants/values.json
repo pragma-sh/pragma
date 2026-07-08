@@ -1,11 +1,16 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 12
+    "protocolVersion": 15
   },
   "gateway": {
     "discoveryFile": "gateway.json",
+    "tokenFile": "gateway-token",
     "tokenHeader": "authorization"
+  },
+  "tunnel": {
+    "defaultCommand": "ngrok http {port} --log stdout --log-format json",
+    "defaultUrlPattern": "(https://[^\\s\"]+)"
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
@@ -24,7 +29,8 @@
       "github",
       "ai",
       "exec",
-      "automations"
+      "automations",
+      "plugins"
     ],
     "events": [
       "agentStatus",
@@ -34,7 +40,8 @@
       "fileChanged",
       "echoMode",
       "automationPending",
-      "automationsChanged"
+      "automationsChanged",
+      "workspace"
     ],
     "errors": [
       "invalidPayload",

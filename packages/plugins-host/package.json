@@ -1,0 +1,37 @@
+{
+  "name": "@pragma/plugins-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pragma plugin catalog host sidecar: resolves plugin agent contributions and their icon assets, emitting a catalog for pragma-server.",
+  "bin": {
+    "pragma-plugins": "./src/cli.ts"
+  },
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint .",
+    "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-plugins"
+  },
+  "dependencies": {
+    "@pragma/claude-code-plugin": "workspace:*",
+    "@pragma/constants": "workspace:*",
+    "@pragma/cursor-plugin": "workspace:*",
+    "@pragma/opencode-plugin": "workspace:*",
+    "@pragma/plugin": "workspace:*",
+    "@pragma/sdk": "workspace:*",
+    "@pragma/sidecar-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

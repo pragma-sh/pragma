@@ -13,6 +13,7 @@ packages/opencode-plugin/
 ├── src/
 │   ├── index.ts             # PragmaOpencodePlugin entry point
 │   ├── hooks.ts             # Two-flag state machine (busy + attention)
+│   ├── pragma-agent.ts      # Built-in agent definition (loaded by pragma-plugins sidecar)
 │   └── pragma-watcher.ts    # Host-side approval watcher (loaded by pragma-watch)
 └── dist/
     ├── index.mjs            # opencode status plugin (Bunup; git-ignored)
@@ -144,9 +145,12 @@ accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` un
 
 ## Built-in launcher
 
-The launchable OpenCode entry is defined by the built-in agent in
-`apps/pragma/src/plugins/builtin-agents.ts`.
-Its icon asset stays in this package under `assets/`, not in Pragma core.
+The launchable OpenCode entry is defined **here** in `src/pragma-agent.ts` — this is now
+the single source of truth. The `pragma-plugins` catalog sidecar
+(`@pragma/plugins-host`) imports it directly to assemble the agent catalog, and
+`apps/pragma/src/plugins/builtin-agents.ts` re-exports it (overriding `iconPath` with a
+browser URL and attaching the built-in watcher) so the webview path shares the same
+definition. Its icon asset stays in this package under `assets/`, not in Pragma core.
 
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.

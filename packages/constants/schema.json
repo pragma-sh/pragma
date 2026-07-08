@@ -16,7 +16,8 @@
     "gateway",
     "protocol",
     "github",
-    "plugins"
+    "plugins",
+    "tunnel"
   ],
   "properties": {
     "maxParallelAgents": {
@@ -34,7 +35,8 @@
     "gateway": { "$ref": "#/definitions/Gateway" },
     "protocol": { "$ref": "#/definitions/Protocol" },
     "github": { "$ref": "#/definitions/GitHub" },
-    "plugins": { "$ref": "#/definitions/Plugins" }
+    "plugins": { "$ref": "#/definitions/Plugins" },
+    "tunnel": { "$ref": "#/definitions/Tunnel" }
   },
   "definitions": {
     "ProtocolRpcMethod": {
@@ -53,7 +55,8 @@
         "github",
         "ai",
         "exec",
-        "automations"
+        "automations",
+        "plugins"
       ]
     },
     "ProtocolEventKind": {
@@ -68,7 +71,8 @@
         "fileChanged",
         "echoMode",
         "automationPending",
-        "automationsChanged"
+        "automationsChanged",
+        "workspace"
       ]
     },
     "ProtocolErrorCode": {
@@ -114,7 +118,8 @@
         "browserClick",
         "browserEval",
         "browserScreenshot",
-        "agentStart"
+        "agentStart",
+        "agentSessionLaunch"
       ]
     },
     "Protocol": {
@@ -436,16 +441,140 @@
       "title": "Gateway",
       "type": "object",
       "additionalProperties": false,
-      "required": ["discoveryFile", "tokenHeader"],
+      "required": ["discoveryFile", "tokenFile", "tokenHeader"],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
         "discoveryFile": {
           "type": "string",
           "description": "Filename written beside daemon.sock with gateway port, token, pid, and protocol version."
         },
+        "tokenFile": {
+          "type": "string",
+          "description": "Filename written beside daemon.sock holding the persistent 0600 bearer token, so the token survives gateway restarts and stays stable across paired devices until explicitly regenerated."
+        },
         "tokenHeader": {
           "type": "string",
           "description": "HTTP authorization header name used for bearer-token authentication."
+        }
+      }
+    },
+    "Tunnel": {
+      "title": "Tunnel",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultCommand", "defaultUrlPattern"],
+      "description": "Defaults for the remote-access tunnel that exposes the local HTTP gateway to a paired mobile device. A user overrides these per-install via the `tunnel` key in `~/.pragma/config.json`. Shared so the Rust tunnel supervisor and any TypeScript config UI agree on the shipped defaults.",
+      "properties": {
+        "defaultCommand": {
+          "type": "string",
+          "description": "Default tunnel command template. `{port}` is the only substitution and is replaced with the live gateway port. Ships targeting ngrok's JSON log output."
+        },
+        "defaultUrlPattern": {
+          "type": "string",
+          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://…\"` log and plain `https://…` URLs (e.g. cloudflared)."
+        }
+      }
+    },
+    "AgentReasoning": {
+      "title": "AgentReasoning",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma/plugin so the catalog wire type has one source of truth.",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "AgentModelEntry": {
+      "title": "AgentModelEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "One selectable model for an agent, with optional reasoning levels.",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "reasoning": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentReasoning" }
+        }
+      }
+    },
+    "AgentIcon": {
+      "title": "AgentIcon",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "mime"],
+      "description": "Reference to a plugin-contributed agent icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
+      "properties": {
+        "hash": {
+          "type": "string",
+          "description": "Lowercase-hex sha256 of the icon bytes; also the ETag and cache key."
+        },
+        "mime": {
+          "type": "string",
+          "description": "Icon MIME type (e.g. `image/svg+xml`)."
+        }
+      }
+    },
+    "CatalogAgent": {
+      "title": "CatalogAgent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "pluginId", "models"],
+      "description": "One launchable agent in the resolved plugin catalog.",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "pluginId": {
+          "type": "string",
+          "description": "Id of the plugin that contributed this agent."
+        },
+        "icon": {
+          "anyOf": [{ "$ref": "#/definitions/AgentIcon" }, { "type": "null" }]
+        },
+        "models": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentModelEntry" }
+        }
+      }
+    },
+    "AgentCatalog": {
+      "title": "AgentCatalog",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agents"],
+      "description": "The resolved set of launchable agents contributed by all loaded plugins, assembled by the pragma-plugins sidecar and cached by pragma-server.",
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CatalogAgent" }
+        }
+      }
+    },
+    "PairingPayload": {
+      "title": "PairingPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "token", "protocolVersion", "hostName"],
+      "description": "The QR-encoded payload a desktop shows so a mobile client can connect to this host's gateway through the remote-access tunnel.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Public tunnel base URL of the local HTTP gateway."
+        },
+        "token": {
+          "type": "string",
+          "description": "Gateway bearer token the paired device must present."
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "description": "Daemon protocol version the host speaks, so the client can reject an incompatible host early."
+        },
+        "hostName": {
+          "type": "string",
+          "description": "Human-readable name of the host, shown on the paired device."
         }
       }
     },
@@ -923,6 +1052,77 @@
           "type": "string",
           "description": "Optional correlation id when the interjection answers a specific outstanding prompt."
         }
+      }
+    },
+    "AgentInterrupt": {
+      "title": "AgentInterrupt",
+      "description": "Transient request to interrupt a running agent's current turn, published by the controlling client and fanned out to agent subscribers. Delivery is best-effort with no replay buffer: a watcher subscribed to the matching tab sends an interrupt (ESC) to the agent's PTY. Unlike AgentDecision/AgentAnswer it is not required to carry a requestId.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "worktreeId", "tabId"],
+      "properties": {
+        "agent": { "type": "string" },
+        "worktreeId": { "type": "string" },
+        "tabId": { "type": "string" },
+        "requestId": {
+          "type": "string",
+          "description": "Optional correlation id when the interrupt targets a specific outstanding request."
+        }
+      }
+    },
+    "WorkspaceSnapshot": {
+      "title": "WorkspaceSnapshot",
+      "description": "Mirror of the desktop app's entire workspace state (all projects, worktrees, and tabs), published to pragma-server so remote clients (e.g. a paired phone) can render the session launcher without registering as the controller. The desktop publishes the full snapshot on every mutation; v1 keeps deltas trivial (every delta is a full replacement).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projects", "worktrees", "tabs"],
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Project" }
+        },
+        "worktrees": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Worktree" }
+        },
+        "tabs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Tab" }
+        }
+      }
+    },
+    "AgentSessionLaunchPayload": {
+      "title": "AgentSessionLaunchPayload",
+      "description": "Payload for the brokered `agentSessionLaunch` control method. The desktop creates or resolves the target worktree + tab, replies with `{ worktreeId, tabId }` immediately, then asynchronously spawns the agent + watcher through the proven Kanban background-launch sequence. Either an existing `worktreeId` or a `newWorktree` spec must be provided.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "agentId", "worktreeId", "newWorktree"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "worktreeId": {
+          "type": ["string", "null"],
+          "description": "Id of an existing worktree to launch into. Mutually exclusive with `newWorktree`."
+        },
+        "newWorktree": {
+          "description": "Describes a fresh worktree to create when `worktreeId` is absent. Mutually exclusive with `worktreeId`.",
+          "anyOf": [{ "$ref": "#/definitions/NewWorktreeSpec" }, { "type": "null" }]
+        },
+        "agentId": { "type": "string" },
+        "modelId": { "type": ["string", "null"] },
+        "reasoningId": { "type": ["string", "null"] },
+        "prompt": { "type": ["string", "null"] }
+      }
+    },
+    "NewWorktreeSpec": {
+      "title": "NewWorktreeSpec",
+      "description": "Spec for creating a fresh worktree as part of an `agentSessionLaunch` request. Omitted/optional fields fall back to Pragma defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parentWorktreeId", "branch"],
+      "properties": {
+        "parentWorktreeId": { "type": "string" },
+        "branch": { "type": "string" },
+        "title": { "type": ["string", "null"] }
       }
     },
     "Tab": {

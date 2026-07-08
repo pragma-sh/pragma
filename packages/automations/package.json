@@ -20,6 +20,9 @@
     "lint": "oxlint .",
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-automations"
   },
+  "dependencies": {
+    "@pragma/sidecar-kit": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.10.1",
     "typescript": "^6.0.3",

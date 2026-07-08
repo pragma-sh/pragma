@@ -15,19 +15,28 @@ pub fn list_projects(db: State<'_, Db>) -> AppResult<Vec<Project>> {
 }
 
 #[tauri::command(async)]
-pub fn add_project(db: State<'_, Db>, path: String) -> AppResult<Project> {
-    add_project_path(&db, PathBuf::from(path))
+pub fn add_project(
+    db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
+    path: String,
+) -> AppResult<Project> {
+    let project = add_project_path(&db, PathBuf::from(path))?;
+    publisher.trigger();
+    Ok(project)
 }
 
 #[tauri::command(async)]
 pub fn clone_project(
     db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     remote_url: String,
     into_directory: String,
 ) -> AppResult<Project> {
     let target = git::clone(&remote_url, &PathBuf::from(&into_directory))?;
     db.set_setting(PROJECTS_DIRECTORY, &into_directory)?;
-    add_project_path(&db, target)
+    let project = add_project_path(&db, target)?;
+    publisher.trigger();
+    Ok(project)
 }
 
 #[tauri::command]

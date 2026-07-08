@@ -109,16 +109,19 @@ than no guide.
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
+│   ├── sidecar-kit/             # `@pragma/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
+│   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
 │   ├── sdk/                     # `@pragma/sdk` typed Node/Bun wrapper around `pragma-cli`
 │   ├── automations/             # `@pragma/automations` API + `pragma-automations` host sidecar
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
-│   └── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
+│   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
+│   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -131,6 +134,10 @@ than no guide.
 
 **Where things go:**
 
+- User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
+  remote-access tunnel under `tunnel` = `{ command, urlPattern }`). Shipped defaults for
+  such settings belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`) so Rust and TS
+  agree, never hard-coded in one language.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.

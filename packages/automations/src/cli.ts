@@ -3,6 +3,8 @@ import { builtinModules } from "node:module";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { readStdinLines } from "@pragma/sidecar-kit";
+
 import { defineAutomation, type AutomationContext, type AutomationDefinition } from "./index.ts";
 
 declare const Bun: {
@@ -321,24 +323,8 @@ async function handle(command: Command): Promise<void> {
 }
 
 class StdinLines {
-  private buffer = "";
-
   constructor() {
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => this.onData(chunk));
-  }
-
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    let newline = this.buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line) {
-        void this.dispatch(line);
-      }
-      newline = this.buffer.indexOf("\n");
-    }
+    readStdinLines((line) => void this.dispatch(line));
   }
 
   private async dispatch(line: string): Promise<void> {

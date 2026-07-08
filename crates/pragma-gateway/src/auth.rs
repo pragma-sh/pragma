@@ -32,6 +32,36 @@ pub fn generate_token() -> String {
     Alphanumeric.sample_string(&mut rand::thread_rng(), 48)
 }
 
+/// Reads the persistent bearer token beside the socket, generating and writing
+/// it `0600` on first use so the token survives gateway restarts and stays
+/// stable across paired devices until explicitly regenerated.
+pub fn read_or_create_token(path: &Path) -> GatewayResult<String> {
+    if let Ok(existing) = fs::read_to_string(path) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let token = generate_token();
+    write_token(path, &token)?;
+    Ok(token)
+}
+
+/// Writes the persistent bearer token with owner-only permissions.
+pub fn write_token(path: &Path, token: &str) -> GatewayResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path)?;
+    file.write_all(token.as_bytes())?;
+    file.flush()?;
+    Ok(())
+}
+
 /// Constant-time-ish token verification for equal-length strings.
 #[must_use]
 pub fn verify_bearer(expected: &str, header: Option<&str>) -> bool {
@@ -143,7 +173,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        read_discovery, remove_stale_or_refuse, verify_bearer, write_discovery, GatewayDiscovery,
+        read_discovery, read_or_create_token, remove_stale_or_refuse, verify_bearer,
+        write_discovery, GatewayDiscovery,
     };
 
     /// Serves one `/v1/health` 200 response on an ephemeral port, mimicking a
@@ -225,6 +256,26 @@ mod tests {
         remove_stale_or_refuse(&path, 11).expect("corrupt removal");
 
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn read_or_create_token_persists_and_reuses() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("gateway-token");
+
+        let first = read_or_create_token(&path).expect("create token");
+        assert!(!first.is_empty());
+        let second = read_or_create_token(&path).expect("reuse token");
+        assert_eq!(first, second, "token must survive across reads");
+
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&path).expect("metadata").permissions();
+            assert_eq!(
+                std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

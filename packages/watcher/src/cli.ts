@@ -95,6 +95,55 @@ function auditSendKeys(args: Args, bytes: number): void {
   );
 }
 
+/** ESC byte: the default interrupt delivered into an agent's PTY turn. */
+const INTERRUPT_KEY = "\x1b";
+
+/** Connects once and forwards {@link AgentInterrupt} events until the stream ends. */
+async function forwardInterrupts(
+  sdk: PragmaClient,
+  args: Args,
+  sendKeys: (data: string) => Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  const connection = await sdk.agents.connect({
+    agent: args.agentId,
+    tabId: args.tabId,
+    worktreeId: args.worktreeId,
+    signal,
+  });
+  for await (const event of connection) {
+    if (signal.aborted) return;
+    if (event.type === "agentInterrupt") {
+      await sendKeys(INTERRUPT_KEY);
+    }
+  }
+}
+
+/**
+ * Subscribes to this tab's agent events and, on an {@link AgentInterrupt}
+ * matching this watcher's agent + tab, sends ESC through the existing sendKeys
+ * path. Reconnects on stream end/error and only resolves once `signal` aborts —
+ * a transient failure must never tear the watcher down. No per-plugin plumbing:
+ * interrupt delivery is a built-in watcher default.
+ */
+async function deliverInterrupts(
+  sdk: PragmaClient,
+  args: Args,
+  sendKeys: (data: string) => Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      await forwardInterrupts(sdk, args, sendKeys, signal);
+    } catch {
+      // Stream errored: fall through to the reconnect backoff below.
+    }
+    if (signal.aborted) return;
+    // Stream ended or errored without an abort: back off, then reconnect.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 async function run(args: Args): Promise<void> {
   const sdk = new PragmaClient({ baseUrl: args.gatewayUrl, token: args.gatewayToken });
   const controller = new AbortController();
@@ -117,6 +166,7 @@ async function run(args: Args): Promise<void> {
   };
   const output = outputChunks(sdk, args.sessionId, controller.signal);
   await Promise.race([
+    deliverInterrupts(sdk, args, sendKeys, controller.signal),
     Promise.resolve(
       watch({
         sdk,

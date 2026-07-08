@@ -23,6 +23,17 @@ pub fn register_automation_roots(
     pty: tauri::State<'_, PtyClient>,
     projects: Vec<AutomationRootRegistration>,
 ) -> AppResult<()> {
+    // The plugin catalog host shares the same project roots so it can resolve
+    // project-scoped `.pragma/config.json` plugins. Best-effort: a plugins
+    // failure must not break automation registration.
+    let plugin_roots: Vec<String> = projects
+        .iter()
+        .map(|project| project.project_path.clone())
+        .collect();
+    let _ = pty.rpc(
+        ProtocolRpcMethod::Plugins,
+        json!({ "action": "registerRoots", "roots": plugin_roots }),
+    );
     automation_rpc(
         &pty,
         json!({

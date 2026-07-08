@@ -76,7 +76,11 @@ pub fn gateway_router() -> Router {
         .route("POST", "/v1/agents/decisions", "agents.decisions")
         .route("POST", "/v1/agents/answers", "agents.answers")
         .route("POST", "/v1/agents/inputs", "agents.inputs")
+        .route("POST", "/v1/agents/interrupts", "agents.interrupts")
+        .route("GET", "/v1/agents/catalog", "agents.catalog")
         .route("GET", "/v1/agents/events", "agents.events")
+        .route("POST", "/v1/control/{method}", "control")
+        .route("GET", "/v1/assets/{hash}", "assets.get")
         .route("POST", "/v1/tabs/{tabId}/agents/seen", "agents.seen")
         .route("GET", "/v1/subscriptions/{event}", "subscriptions.events")
 }
