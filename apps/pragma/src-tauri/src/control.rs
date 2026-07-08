@@ -1072,6 +1072,8 @@ fn agent_session_launch(
         None,
     )?;
     emit_tabs_changed(app, "tabOpened", &tab);
+    app.state::<crate::workspace_mirror::WorkspacePublisher>()
+        .trigger();
     let result = AgentSessionLaunchResult {
         worktree_id: worktree.id.clone(),
         tab_id: tab.id.clone(),

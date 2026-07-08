@@ -91,7 +91,7 @@ impl From<ClientError> for GatewayError {
                 // The canonical "app not running" reply from a brokered
                 // control request becomes 409 so a phone can render "Open Pragma
                 // on your computer to launch sessions." rather than a 500.
-                if message.contains("Pragma is not running") {
+                if message.starts_with("Pragma is not running") {
                     Self::Conflict(message)
                 } else {
                     Self::Server(message)

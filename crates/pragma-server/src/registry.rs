@@ -181,9 +181,10 @@ impl Registry {
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?
             .as_ref()
-            .map_or(serde_json::Value::Array(Vec::new()), |snapshot| {
-                serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null)
-            });
+            .map_or_else(
+                || serde_json::json!({ "projects": [], "worktrees": [], "tabs": [] }),
+                |snapshot| serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null),
+            );
         Ok((
             vec![EventFrame::Snapshot {
                 subscription: ProtocolEventKind::Workspace,
