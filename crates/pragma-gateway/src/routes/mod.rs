@@ -1,4 +1,6 @@
 pub mod agents;
+pub mod assets;
+pub mod control;
 pub mod health;
 pub mod rpc;
 pub mod sessions;

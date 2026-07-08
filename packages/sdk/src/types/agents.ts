@@ -1,22 +1,44 @@
 import type {
   AgentAnswer,
   AgentAttentionKind,
+  AgentCatalog,
   AgentDecision,
+  AgentIcon,
   AgentInput,
+  AgentInterrupt,
   AgentMessage,
+  AgentModelEntry,
+  AgentReasoning,
   AgentReportPayload,
+  AgentSessionLaunchPayload,
   AgentStatus,
+  CatalogAgent,
+  WorkspaceSnapshot,
 } from "@pragma/constants";
 
 export type {
   AgentAnswer,
   AgentAttentionKind,
+  AgentCatalog,
   AgentDecision,
+  AgentIcon,
   AgentInput,
+  AgentInterrupt,
   AgentMessage,
+  AgentModelEntry,
+  AgentReasoning,
   AgentReportPayload,
+  AgentSessionLaunchPayload,
   AgentStatus,
+  CatalogAgent,
+  WorkspaceSnapshot,
 };
+
+/** Result of `client.agents.launch(...)`: the resolved worktree + tab. */
+export interface AgentSessionLaunchResult {
+  worktreeId: string;
+  tabId: string;
+}
 
 export interface AgentEvent {
   type: "agent";
@@ -56,12 +78,19 @@ export interface AgentInputEvent {
   input: AgentInput;
 }
 
+/** Transient interrupt fanned out to agent subscribers. */
+export interface AgentInterruptEvent {
+  type: "agentInterrupt";
+  interrupt: AgentInterrupt;
+}
+
 export type AgentStreamEvent =
   | AgentEvent
   | AgentMessageEvent
   | AgentDecisionEvent
   | AgentAnswerEvent
-  | AgentInputEvent;
+  | AgentInputEvent
+  | AgentInterruptEvent;
 
 export interface ReportOptions {
   agent: string;
@@ -109,6 +138,8 @@ export interface AgentConnection extends AsyncIterable<AgentStreamEvent> {
   answer(requestId: string, reply: string | null): Promise<void>;
   /** Approves (`true`) or denies (`false`) a `command` attention request. */
   decide(requestId: string, approved: boolean): Promise<void>;
+  /** Interrupts the agent's current turn; a watcher sends ESC to its tab. */
+  interrupt(requestId?: string): Promise<void>;
   /** Closes the read stream and releases the connection. */
   close(): void;
 }

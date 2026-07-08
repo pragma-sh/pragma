@@ -7,12 +7,19 @@
     ".claude-plugin",
     "assets",
     "hooks",
-    "pragma"
+    "pragma",
+    "src"
   ],
+  "exports": {
+    "./pragma-agent": "./src/pragma-agent.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/plugin": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",

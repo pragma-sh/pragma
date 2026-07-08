@@ -16,10 +16,12 @@ pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Wo
 }
 
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn create_worktree(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     project_id: String,
     parent_worktree_id: String,
     branch: String,
@@ -62,6 +64,7 @@ pub fn create_worktree(
     )?;
     let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
     scripts::run_headless_commands(&pty, &project, &worktree, "setup", config.setup.as_slice())?;
+    publisher.trigger();
     Ok(worktree)
 }
 
@@ -91,15 +94,25 @@ pub fn rename_worktree(
     worktree_id: String,
     title: Option<String>,
     db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
 ) -> AppResult<Worktree> {
-    db.rename_worktree(&worktree_id, title.as_deref())
+    let worktree = db.rename_worktree(&worktree_id, title.as_deref())?;
+    publisher.trigger();
+    Ok(worktree)
 }
 
 /// Toggles the `hidden` flag on a worktree — the row stays on disk, but the
 /// sidebar filters it out. Persists across restarts.
 #[tauri::command]
-pub fn hide_worktree(worktree_id: String, hidden: bool, db: State<'_, Db>) -> AppResult<Worktree> {
-    db.set_worktree_hidden(&worktree_id, hidden)
+pub fn hide_worktree(
+    worktree_id: String,
+    hidden: bool,
+    db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
+) -> AppResult<Worktree> {
+    let worktree = db.set_worktree_hidden(&worktree_id, hidden)?;
+    publisher.trigger();
+    Ok(worktree)
 }
 
 /// Removes a worktree from disk, optionally deletes its branch, terminates
@@ -116,6 +129,7 @@ pub fn delete_worktree(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
 ) -> AppResult<()> {
     let worktree = db.worktree(&worktree_id)?;
     if worktree.is_main {
@@ -179,5 +193,6 @@ pub fn delete_worktree(
     }
 
     db.delete_worktree(&worktree_id)?;
+    publisher.trigger();
     Ok(())
 }

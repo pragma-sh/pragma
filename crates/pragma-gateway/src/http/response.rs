@@ -108,6 +108,10 @@ pub fn event_json(event: EventFrame) -> Value {
             "type": "agentInput",
             "input": input,
         }),
+        EventFrame::AgentInterrupt { interrupt } => json!({
+            "type": "agentInterrupt",
+            "interrupt": interrupt,
+        }),
         EventFrame::Snapshot {
             subscription,
             payload,

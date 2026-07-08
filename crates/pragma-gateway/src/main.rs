@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use auth::{generate_token, remove_stale_or_refuse, write_discovery, GatewayDiscovery};
+use auth::{read_or_create_token, remove_stale_or_refuse, write_discovery, GatewayDiscovery};
 use clap::Parser;
 use config::GatewayConfig;
 use error::{GatewayError, GatewayResult};
@@ -47,7 +47,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run(args: Args) -> GatewayResult<()> {
     let socket_path = resolve_socket_path(&args)?;
     let discovery_path = socket_path.with_file_name(CONSTANTS.gateway.discovery_file.as_str());
-    let token = args.token.unwrap_or_else(generate_token);
+    let token = if let Some(token) = args.token {
+        token
+    } else {
+        let token_path = socket_path.with_file_name(CONSTANTS.gateway.token_file.as_str());
+        read_or_create_token(&token_path)?
+    };
     let config = GatewayConfig::new(socket_path, args.port, token, discovery_path);
 
     remove_stale_or_refuse(

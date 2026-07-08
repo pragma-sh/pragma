@@ -146,8 +146,12 @@ falling back to `pragma-cli` from `PATH`.
 
 ## Built-in launcher
 
-The built-in Cursor agent in `apps/pragma/src/plugins/builtin-agents.ts` uses Pragma's
-generic launch timing fields:
+The launchable Cursor entry is defined **here** in `src/pragma-agent.ts`. This is now
+the single source of truth: the `pragma-plugins` catalog sidecar
+(`@pragma/plugins-host`) imports it directly to assemble the agent catalog, and
+`apps/pragma/src/plugins/builtin-agents.ts` re-exports it (overriding `iconPath` with a
+browser URL and attaching the built-in watcher) so the webview path shares the same
+definition.
 
 Its icon asset stays in this package under `assets/`, not in Pragma core.
 

@@ -22,6 +22,7 @@ pragma-constants = { path = "../../../packages/constants" }
 pragma-client = { path = "../../../crates/pragma-client" }
 pragma-core = { path = "../../../crates/pragma-core" }
 pragma-protocol = { path = "../../../crates/pragma-protocol" }
+regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

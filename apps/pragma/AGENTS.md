@@ -165,8 +165,13 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
-plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor are
-defined by the built-in plugin in `src/plugins/builtin-agents.ts`. Agent definitions
+plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor agent
+definitions live in their host-tool plugin packages
+(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-agent`) as the single source of
+truth. `src/plugins/builtin-agents.ts` shrinks to re-exports of those definitions,
+overriding `iconPath` with a browser URL and attaching the built-in watchers so the
+webview path keeps working; the `pragma-plugins` catalog sidecar imports the same
+definitions directly to assemble the catalog. Agent definitions
 carry `id`, `name`, optional `iconPath`, `launch.command`, optional model providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
 before prompt prefill), and optional prefill controls (`prefillMode: "bracketed" |
@@ -202,6 +207,52 @@ approval reports also lazy-start the matching watcher for their tab. This keeps 
 working when a user manually starts a watcher-backed agent (for example typing `opencode`
 inside a Pragma terminal): the status plugin can raise the toast, and the lazy watcher can
 write the Approve/Deny keys back into that same PTY.
+
+## Remote access (tunnel + pair modal)
+
+`src-tauri/src/tunnel.rs` supervises a remote-access tunnel that exposes the local HTTP
+gateway to a paired mobile device. It reads the `tunnel` key of `~/.pragma/config.json`
+(`{ command, urlPattern }`), falling back to `CONSTANTS.tunnel.default{Command,UrlPattern}`
+so Rust and TS agree; `{port}` is the only template variable and is filled with the live
+gateway port. The child is spawned with `std::process::Command` (never the shell plugin);
+reader threads scan **stdout and stderr** against the regex (cloudflared prints to stderr).
+Managed `TunnelState` holds the child + `TunnelStatus` (`idle | starting | active(url) |
+error(msg)`); the child is killed on `tunnel_stop` and on app exit (the `RunEvent::Exit`
+arm in `lib.rs run()`). Commands: `tunnel_start` / `tunnel_stop` / `tunnel_status` (+ typed
+wrappers in `src/lib/tauri.ts`). A missing tunnel binary becomes an `AppError::Tunnel` the
+modal renders.
+
+The `PairDeviceDialog` (Smartphone icon in `ProjectSidebar`) toggles the tunnel and renders
+a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers live in
+`src/lib/pairing.ts`. The tunnel deliberately **survives the modal closing**. "Regenerate
+token" calls `regenerate_gateway_token` (kills gateway, deletes the `gateway-token` file,
+respawns) — paired devices must reconnect.
+
+## Workspace mirror publisher
+
+`src-tauri/src/workspace_mirror.rs` mirrors the desktop's entire workspace state
+(projects/worktrees/tabs) to `pragma-server` so a paired phone can render the session
+launcher. `WorkspacePublisher` is managed Tauri state: a cheap cloneable handle whose
+`trigger()` sends a non-blocking signal to a single worker thread. The worker drains
+bursts with a ~250ms idle debounce, reads all rows from `Db` (`list_projects` +
+`list_all_worktrees` + `list_all_tabs` — added to `db.rs` for this purpose), and sends
+`PublishWorkspace` over the `PtyClient`. The work never runs on the macOS main thread.
+Mutation commands (`create_tab`, `close_tab`, `rename_tab`, `set_tab_*`,
+`create_plugin_webview_tab`, `create_worktree`, `rename_worktree`, `hide_worktree`,
+`delete_worktree`, `add_project`, `clone_project`) and brokered `control.rs` handlers
+(`worktree_create`, `worktree_delete`, `worktree_rename`, `worktree_set_hidden`,
+`tab_open`, `tab_close`, `tab_rename`, `agent_session_launch`) all call `trigger()` after
+their DB write.
+
+## Remote agent session launch
+
+`control.rs` handles the brokered `agentSessionLaunch` control method: it resolves or
+creates the target worktree + a new terminal tab via the existing Rust paths, replies
+`{ worktreeId, tabId }` immediately, then emits the `pragma:agent-session-launch` Tauri
+event. A `workspace-context.tsx` listener runs the proven Kanban background-launch
+sequence (`refreshProject` → `startBackgroundAgentSession` → `startWatcherForAgentSession`)
+so board-invisible launches from a phone work identically to a Kanban card start. The PTY
+spawns directly — no mounted terminal needed.
 
 ## Server sidecar + instance channel
 

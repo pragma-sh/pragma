@@ -1,4 +1,5 @@
 mod automations;
+mod plugins_host;
 mod registry;
 mod session;
 
@@ -391,7 +392,10 @@ fn handle_request(
         RequestKind::AgentMessage
         | RequestKind::AgentDecision
         | RequestKind::AgentAnswer
-        | RequestKind::AgentInput => handle_agent_publish(&request.kind, request.data, registry),
+        | RequestKind::AgentInput
+        | RequestKind::AgentInterrupt => {
+            handle_agent_publish(&request.kind, request.data, registry)
+        }
         RequestKind::SubscribeAgents => {
             let (scrollback, rx) = registry
                 .subscribe_agents()
@@ -417,11 +421,18 @@ fn handle_request(
         // on a non-controller connection is a no-op acknowledgement.
         RequestKind::RegisterController | RequestKind::ControlResult => Ok(Outcome::default()),
         RequestKind::Control => handle_control_request(request, registry),
+        RequestKind::PublishWorkspace => {
+            let snapshot =
+                parse_data::<pragma_protocol::WorkspaceSnapshot>(&required(request.data, "data")?)?;
+            registry.publish_workspace(snapshot);
+            Ok(Outcome::default())
+        }
     }
 }
 
 /// Handles the fire-and-forget agent publish frames (message, decision, answer,
-/// input): parse `data` into the payload and fan it out through the registry.
+/// input, interrupt): parse `data` into the payload and fan it out through the
+/// registry.
 /// The caller matches these kinds, so any other kind is unreachable.
 fn handle_agent_publish(
     kind: &RequestKind,
@@ -434,6 +445,7 @@ fn handle_agent_publish(
         RequestKind::AgentDecision => registry.report_agent_decision(parse_data(&data)?),
         RequestKind::AgentAnswer => registry.report_agent_answer(parse_data(&data)?),
         RequestKind::AgentInput => registry.report_agent_input(parse_data(&data)?),
+        RequestKind::AgentInterrupt => registry.report_agent_interrupt(parse_data(&data)?),
         _ => unreachable!("handle_agent_publish is only called for agent publish kinds"),
     }
     Ok(Outcome::default())
@@ -458,6 +470,25 @@ fn handle_rpc_request(
     let request_id = request.request_id;
     if matches!(rpc.method, ProtocolRpcMethod::Automations) {
         return Ok(match registry.handle_automation_rpc(rpc.payload) {
+            Ok(payload) => RpcResponseFrame {
+                request_id,
+                ok: true,
+                payload: Some(payload),
+                error: None,
+            },
+            Err(error) => RpcResponseFrame {
+                request_id,
+                ok: false,
+                payload: None,
+                error: Some(RpcError {
+                    code: pragma_constants::ProtocolErrorCode::Internal,
+                    message: error.to_string(),
+                }),
+            },
+        });
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Plugins) {
+        return Ok(match registry.handle_plugins_rpc(&rpc.payload) {
             Ok(payload) => RpcResponseFrame {
                 request_id,
                 ok: true,
@@ -604,6 +635,12 @@ fn subscription_snapshot(
     if matches!(subscription.event, ProtocolEventKind::AutomationsChanged) {
         let (scrollback, rx) = registry
             .subscribe_automations_changed()
+            .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
+    if matches!(subscription.event, ProtocolEventKind::Workspace) {
+        let (scrollback, rx) = registry
+            .subscribe_workspace()
             .map_err(|err| HandledRequestError::Request(err.to_string()))?;
         return Ok(EventStream { scrollback, rx });
     }

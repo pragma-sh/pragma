@@ -23,8 +23,9 @@ use std::time::{Duration, Instant};
 use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
 use pragma_protocol::{
     read_json_frame, write_input_frame, write_json_frame, AgentAnswer, AgentDecision, AgentInput,
-    AgentMessage, AgentReportPayload, ProtocolEventKind, RequestFrame, RequestKind, RpcError,
-    RpcRequest, ServerFrame, SubscriptionRequest,
+    AgentInterrupt, AgentMessage, AgentReportPayload, ControlRequest, ProtocolEventKind,
+    RequestFrame, RequestKind, RpcError, RpcRequest, ServerFrame, SubscriptionRequest,
+    WorkspaceSnapshot,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -271,6 +272,20 @@ impl PragmaClient {
         self.request(&request)
     }
 
+    /// Publishes a transient interrupt, fanned out to agent subscribers.
+    pub fn report_agent_interrupt(&self, interrupt: &AgentInterrupt) -> ClientResult<()> {
+        let request = request_agent_interrupt(interrupt)?;
+        self.request(&request)
+    }
+
+    /// Publishes a full workspace mirror (projects/worktrees/tabs) the server
+    /// caches and broadcasts to `workspace` subscribers (e.g. a paired phone
+    /// rendering the session launcher). Fire-and-forget.
+    pub fn publish_workspace(&self, snapshot: &WorkspaceSnapshot) -> ClientResult<()> {
+        let request = request_publish_workspace(snapshot)?;
+        self.request(&request)
+    }
+
     /// Opens a daemon-wide agent event stream positioned after the success response.
     pub fn subscribe_agents_stream(&self) -> ClientResult<UnixStream> {
         let request = request_subscribe_agents();
@@ -437,6 +452,49 @@ impl PragmaClient {
     pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
         let request = request_rpc(method, payload);
         self.with_request_conn("server rpc failed", |stream| Self::rpc_on(stream, &request))
+    }
+
+    /// Sends a brokered control request to the controller app and awaits its
+    /// `ControlResult` reply. Used by the gateway to route remote
+    /// `agentSessionLaunch` requests to the desktop app. Returns the
+    /// controller's payload on `ok: true`; surfaces the controller error
+    /// (or `app not running` server failure) as `ClientError::Server`.
+    pub fn control(
+        &self,
+        method: pragma_protocol::ControlMethod,
+        payload: Value,
+    ) -> ClientResult<Value> {
+        let request = request_control(method, payload);
+        self.with_request_conn("server control failed", |stream| {
+            Self::control_on(stream, &request)
+        })
+    }
+
+    /// Reads until the `ControlResult` matching `request.request_id` arrives.
+    fn control_on(
+        stream: &mut UnixStream,
+        request: &RequestFrame,
+    ) -> Result<ClientResult<Value>, ClientError> {
+        write_json_frame(stream, request)?;
+        loop {
+            match read_json_frame::<ServerFrame>(stream)? {
+                ServerFrame::ControlResult(result) => {
+                    return Ok(if result.ok {
+                        Ok(result.payload.unwrap_or(Value::Null))
+                    } else {
+                        Err(result.error.map_or_else(
+                            || ClientError::Server("control request failed".to_string()),
+                            ClientError::Server,
+                        ))
+                    });
+                }
+                ServerFrame::Hello(_)
+                | ServerFrame::Response(_)
+                | ServerFrame::Event(_)
+                | ServerFrame::Rpc(_)
+                | ServerFrame::Control(_) => {}
+            }
+        }
     }
 
     /// Runs `op` on a checked-out request connection, returning the connection
@@ -864,6 +922,55 @@ pub fn request_agent_input(input: &AgentInput) -> ClientResult<RequestFrame> {
         None,
         Some(data),
     ))
+}
+
+/// Builds an `AgentInterrupt` request frame.
+pub fn request_agent_interrupt(interrupt: &AgentInterrupt) -> ClientResult<RequestFrame> {
+    let data = serde_json::to_string(&interrupt)
+        .map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::AgentInterrupt,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds a `PublishWorkspace` request frame carrying a full workspace mirror.
+pub fn request_publish_workspace(snapshot: &WorkspaceSnapshot) -> ClientResult<RequestFrame> {
+    let data =
+        serde_json::to_string(&snapshot).map_err(|error| ClientError::Server(error.to_string()))?;
+    Ok(request_frame(
+        RequestKind::PublishWorkspace,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(data),
+    ))
+}
+
+/// Builds a `Control` request frame carrying a brokered control method + payload.
+#[must_use]
+pub fn request_control(method: pragma_protocol::ControlMethod, payload: Value) -> RequestFrame {
+    RequestFrame {
+        request_id: Uuid::new_v4().to_string(),
+        kind: RequestKind::Control,
+        session_id: None,
+        worktree_id: None,
+        cwd: None,
+        cols: None,
+        rows: None,
+        data: None,
+        rpc: None,
+        subscription: None,
+        control: Some(ControlRequest { method, payload }),
+        control_result: None,
+    }
 }
 
 /// Builds a `Subscribe` request frame for a snapshot-then-delta event stream.

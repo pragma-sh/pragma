@@ -1,4 +1,6 @@
 export { PragmaClient } from "./client";
+export { AssetsClient, type FetchedAsset } from "./assets-client";
+export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 export { PragmaGatewayError, PragmaTransportError } from "./errors";
@@ -23,14 +25,24 @@ export type {
   AgentEvent,
   AgentInput,
   AgentInputEvent,
+  AgentInterrupt,
+  AgentInterruptEvent,
+  AgentCatalog,
+  AgentModelEntry,
+  AgentReasoning,
+  CatalogAgent,
+  AgentIcon,
   AgentMessage,
   AgentMessageEvent,
   AgentReportPayload,
+  AgentSessionLaunchPayload,
+  AgentSessionLaunchResult,
   AgentStreamEvent,
   AgentStatus,
   ConnectOptions,
   ReportMessageOptions,
   ReportOptions,
+  WorkspaceSnapshot,
 } from "./types/agents";
 export type { CommandResult, ExecRunRequest } from "./types/exec";
 export type {

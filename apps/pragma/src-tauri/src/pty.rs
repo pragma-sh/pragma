@@ -254,6 +254,16 @@ impl PtyClient {
         Ok(self.inner.report_agent_decision(decision)?)
     }
 
+    /// Publishes a full workspace mirror (projects/worktrees/tabs) the server
+    /// caches and broadcasts to `workspace` subscribers (e.g. a paired phone).
+    /// Fire-and-forget: never blocks the caller.
+    pub fn publish_workspace(
+        &self,
+        snapshot: &pragma_protocol::WorkspaceSnapshot,
+    ) -> AppResult<()> {
+        Ok(self.inner.publish_workspace(snapshot)?)
+    }
+
     /// Sends a business-logic RPC to this project's host and returns the JSON
     /// response. The host executes `filesystem`/`git`/… against its own disk —
     /// the local managed server for local projects, the remote `pragma-server`
@@ -308,6 +318,20 @@ impl PtyClient {
             base_url: format!("http://127.0.0.1:{port}"),
             token,
         })
+    }
+
+    /// Regenerates the gateway bearer token: kills the running gateway, deletes
+    /// the persistent token file plus the stale discovery file, then respawns so
+    /// a fresh token is minted. Devices paired with the old token are rejected
+    /// until they re-pair.
+    pub fn regenerate_gateway_token(&self) -> AppResult<GatewayConnectionInfo> {
+        let socket_path = self.inner.socket_path();
+        let discovery_path = gateway_discovery_path(&socket_path);
+        kill_running_gateway(&discovery_path);
+        let token_path = socket_path.with_file_name(CONSTANTS.gateway.token_file.as_str());
+        let _ = std::fs::remove_file(&token_path);
+        let _ = std::fs::remove_file(&discovery_path);
+        self.gateway_connection_info()
     }
 
     /// Reads the host server's advertised protocol version (used to verify a
@@ -386,6 +410,26 @@ pub(crate) fn cargo_executable() -> PathBuf {
 
 fn gateway_discovery_path(socket_path: &Path) -> PathBuf {
     socket_path.with_file_name(CONSTANTS.gateway.discovery_file.as_str())
+}
+
+/// Best-effort kill of the gateway process named in the discovery file. Used by
+/// token regeneration; a missing/unreadable discovery file is a no-op.
+fn kill_running_gateway(discovery_path: &Path) {
+    let Ok(contents) = std::fs::read_to_string(discovery_path) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return;
+    };
+    let Some(pid) = value.get("pid").and_then(serde_json::Value::as_u64) else {
+        return;
+    };
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+    }
 }
 
 fn gateway_log_path(socket_path: &Path) -> PathBuf {
@@ -487,6 +531,7 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
                             | EventFrame::AgentDecision { .. }
                             | EventFrame::AgentAnswer { .. }
                             | EventFrame::AgentInput { .. }
+                            | EventFrame::AgentInterrupt { .. }
                             | EventFrame::Snapshot { .. }
                             | EventFrame::Delta { .. }
                             | EventFrame::EchoMode { .. },

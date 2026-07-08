@@ -246,6 +246,7 @@ fn dispatch_inner(
         ControlMethod::BrowserEval => browser_eval(app, payload),
         ControlMethod::BrowserScreenshot => browser_screenshot(app, payload),
         ControlMethod::AgentStart => agent_start(app, payload),
+        ControlMethod::AgentSessionLaunch => agent_session_launch(app, payload),
     }
 }
 
@@ -338,6 +339,7 @@ fn worktree_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
         app.state::<Db>(),
         app.state::<Hosts>(),
         app.state::<GitLocks>(),
+        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
         project_id.clone(),
         args.parent_worktree_id,
         args.branch,
@@ -361,7 +363,12 @@ struct RenamePayload {
 
 fn worktree_rename(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
     let args: RenamePayload = parse(payload)?;
-    let worktree = worktrees::rename_worktree(args.worktree_id, args.title, app.state::<Db>())?;
+    let worktree = worktrees::rename_worktree(
+        args.worktree_id,
+        args.title,
+        app.state::<Db>(),
+        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
+    )?;
     emit_worktree_changed(
         app,
         "worktreeRenamed",
@@ -383,7 +390,12 @@ fn worktree_set_hidden(
     payload: serde_json::Value,
 ) -> AppResult<serde_json::Value> {
     let args: HiddenPayload = parse(payload)?;
-    let worktree = worktrees::hide_worktree(args.worktree_id, args.hidden, app.state::<Db>())?;
+    let worktree = worktrees::hide_worktree(
+        args.worktree_id,
+        args.hidden,
+        app.state::<Db>(),
+        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
+    )?;
     emit_worktree_changed(
         app,
         "worktreeHiddenChanged",
@@ -411,6 +423,7 @@ fn worktree_delete(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
         app.state::<Db>(),
         app.state::<Hosts>(),
         app.state::<GitLocks>(),
+        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
     )?;
     emit_worktree_changed(
         app,
@@ -499,6 +512,8 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
         }
     }
     emit_tabs_changed(app, "tabOpened", &tab);
+    app.state::<crate::workspace_mirror::WorkspacePublisher>()
+        .trigger();
     json(tab)
 }
 
@@ -507,6 +522,8 @@ fn tab_close(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_jso
     let tab = resolve_tab(app, &args.tab_id)?;
     app.state::<Db>().delete_tab(&tab.id)?;
     emit_tabs_changed(app, "tabClosed", &tab);
+    app.state::<crate::workspace_mirror::WorkspacePublisher>()
+        .trigger();
     json(serde_json::json!({ "ok": true }))
 }
 
@@ -522,6 +539,8 @@ fn tab_rename(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_js
     let tab = resolve_tab(app, &args.tab_id)?;
     let tab = app.state::<Db>().rename_tab(&tab.id, &args.title)?;
     emit_tabs_changed(app, "tabRenamed", &tab);
+    app.state::<crate::workspace_mirror::WorkspacePublisher>()
+        .trigger();
     json(tab)
 }
 
@@ -961,6 +980,117 @@ fn agent_start(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_j
         args.model,
         args.prompt,
     )?)
+}
+
+/// Reply payload for {@link `agent_session_launch`}: the resolved/created worktree
+/// and tab the frontend should launch the agent into.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSessionLaunchResult {
+    worktree_id: String,
+    tab_id: String,
+}
+
+/// Payload for the brokered `agentSessionLaunch` control method (schema
+/// `AgentSessionLaunchPayload`). Either `worktreeId` (an existing worktree) or
+/// `newWorktree` (a fresh-worktree spec) must be provided.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSessionLaunchArgs {
+    project_id: String,
+    worktree_id: Option<String>,
+    new_worktree: Option<NewWorktreeArgs>,
+    agent_id: String,
+    model_id: Option<String>,
+    reasoning_id: Option<String>,
+    prompt: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewWorktreeArgs {
+    parent_worktree_id: String,
+    branch: String,
+    title: Option<String>,
+}
+
+/// Handles `agentSessionLaunch`: resolves or creates the target worktree and a
+/// new terminal tab, replies `{ worktreeId, tabId }`, and emits the
+/// `pragma:agent-session-launch` Tauri event so the frontend runs the proven
+/// Kanban background-launch sequence (refreshProject →
+/// `startBackgroundAgentSession` → `startWatcherForAgentSession`). The reply
+/// is immediate; the PTY spawn + agent launch happen asynchronously in the
+/// frontend listener, so a remote caller never blocks on TUI startup.
+fn agent_session_launch(
+    app: &AppHandle,
+    payload: serde_json::Value,
+) -> AppResult<serde_json::Value> {
+    let args: AgentSessionLaunchArgs = parse(payload)?;
+    // Resolve or create the target worktree.
+    let worktree = match (args.worktree_id, args.new_worktree) {
+        (Some(id), None) => app.state::<Db>().worktree(&id)?,
+        (None, Some(spec)) => {
+            let worktree = worktrees::create_worktree(
+                app.state::<Db>(),
+                app.state::<Hosts>(),
+                app.state::<GitLocks>(),
+                app.state::<crate::workspace_mirror::WorkspacePublisher>(),
+                args.project_id.clone(),
+                spec.parent_worktree_id,
+                spec.branch,
+                spec.title,
+            )?;
+            emit_worktree_changed(
+                app,
+                "worktreeCreated",
+                args.project_id.clone(),
+                Some(worktree.id.clone()),
+            );
+            worktree
+        }
+        (Some(_), Some(_)) => {
+            return Err(AppError::InvalidInput(
+                "agentSessionLaunch: provide either worktreeId or newWorktree, not both"
+                    .to_string(),
+            ));
+        }
+        (None, None) => {
+            return Err(AppError::InvalidInput(
+                "agentSessionLaunch: worktreeId or newWorktree is required".to_string(),
+            ));
+        }
+    };
+    // Create a terminal tab in the resolved worktree.
+    let tab = app.state::<Db>().create_tab(
+        &worktree.project_id,
+        &worktree.id,
+        TabKind::Terminal,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )?;
+    emit_tabs_changed(app, "tabOpened", &tab);
+    let result = AgentSessionLaunchResult {
+        worktree_id: worktree.id.clone(),
+        tab_id: tab.id.clone(),
+    };
+    // Trigger the frontend launch sequence + a workspace mirror publish.
+    let _ = app.emit(
+        "pragma:agent-session-launch",
+        serde_json::json!({
+            "projectId": worktree.project_id,
+            "worktreeId": worktree.id,
+            "worktreePath": worktree.path,
+            "tabId": tab.id,
+            "agentId": args.agent_id,
+            "modelId": args.model_id,
+            "reasoningId": args.reasoning_id,
+            "prompt": args.prompt,
+        }),
+    );
+    json(result)
 }
 
 /// Brokered CLI agent starts are unsupported now that agents are plugin-defined

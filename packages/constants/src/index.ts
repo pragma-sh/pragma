@@ -54,6 +54,7 @@ export type {
   AgentDecision,
   AgentAnswer,
   AgentInput,
+  AgentInterrupt,
   Tab,
   TabKind,
   DirEntry,
@@ -79,6 +80,16 @@ export type {
   PlatformChord,
   Keybindings,
   KeybindingsConfig,
+  Tunnel,
+  PairingPayload,
+  AgentReasoning,
+  AgentModelEntry,
+  AgentIcon,
+  CatalogAgent,
+  AgentCatalog,
+  WorkspaceSnapshot,
+  AgentSessionLaunchPayload,
+  NewWorktreeSpec,
 } from "./generated/constants";
 
 /**

@@ -1,10 +1,13 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type {
   AgentAnswer,
+  AgentCatalog,
   AgentDecision,
   AgentInput,
+  AgentInterrupt,
   AgentMessage,
   AgentReportPayload,
+  AgentSessionLaunchPayload,
 } from "@pragma/constants";
 
 import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
@@ -13,6 +16,7 @@ import { ndjsonStream } from "./streaming";
 import { Transport } from "./transport";
 import type {
   AgentConnection,
+  AgentSessionLaunchResult,
   AgentStreamEvent,
   ConnectOptions,
   ReportMessageOptions,
@@ -66,6 +70,15 @@ export class AgentsClient {
     });
   }
 
+  /** Publishes a transient interrupt, fanned out to agent subscribers. */
+  reportInterrupt(payload: AgentInterrupt, options: { signal?: AbortSignal } = {}): Promise<void> {
+    return this.transport.request<void>(routes.agentInterrupts, {
+      method: "POST",
+      body: payload,
+      signal: options.signal,
+    });
+  }
+
   reportStarted(options: ReportOptions): Promise<void> {
     return reportWithClient(this, options, "running", null);
   }
@@ -80,6 +93,33 @@ export class AgentsClient {
 
   reportCleared(options: ReportOptions): Promise<void> {
     return reportWithClient(this, options, "cleared", null);
+  }
+
+  /** Returns the resolved agent catalog assembled by the plugins sidecar. */
+  catalog(options: { signal?: AbortSignal } = {}): Promise<AgentCatalog> {
+    return this.transport.request<AgentCatalog>(routes.agentCatalog, {
+      method: "GET",
+      signal: options.signal,
+    });
+  }
+
+  /**
+   * Launches a new agent session on the host's desktop app via the brokered
+   * `agentSessionLaunch` control route. The host creates or resolves the
+   * target worktree + tab, replies `{ worktreeId, tabId }` immediately, then
+   * asynchronously spawns the agent. The desktop app must be running; a
+   * missing controller maps to a 409 the caller can render as
+   * "Open Pragma on your computer to launch sessions."
+   */
+  launch(
+    payload: AgentSessionLaunchPayload,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AgentSessionLaunchResult> {
+    return this.transport.request<AgentSessionLaunchResult>(routes.control("agentSessionLaunch"), {
+      method: "POST",
+      body: payload,
+      signal: options.signal,
+    });
   }
 
   markAgentsSeen(
@@ -149,6 +189,16 @@ export class AgentsClient {
       decide: (requestId, approved) =>
         this.reportDecision(
           { agent, worktreeId, tabId, requestId, approved },
+          { signal: controller.signal },
+        ),
+      interrupt: (requestId) =>
+        this.reportInterrupt(
+          {
+            agent,
+            worktreeId,
+            tabId,
+            ...(requestId ? { requestId } : {}),
+          },
           { signal: controller.signal },
         ),
       close: () => controller.abort(),
@@ -266,6 +316,8 @@ function matchesAgentTab(event: AgentStreamEvent, agent: string, tabId: string):
       return event.answer.agent === agent && event.answer.tabId === tabId;
     case "agentInput":
       return event.input.agent === agent && event.input.tabId === tabId;
+    case "agentInterrupt":
+      return event.interrupt.agent === agent && event.interrupt.tabId === tabId;
   }
 }
 

@@ -13,7 +13,11 @@ export const routes = {
   agentAnswers: "/v1/agents/answers",
   agentDecisions: "/v1/agents/decisions",
   agentInputs: "/v1/agents/inputs",
+  agentInterrupts: "/v1/agents/interrupts",
+  agentCatalog: "/v1/agents/catalog",
   agentEvents: "/v1/agents/events",
+  asset: (hash: string): string => `/v1/assets/${encodeURIComponent(hash)}`,
   agentsSeen: (tabId: string): string => `/v1/tabs/${encodeURIComponent(tabId)}/agents/seen`,
   subscription: (event: string): string => `/v1/subscriptions/${encodeURIComponent(event)}`,
+  control: (method: string): string => `/v1/control/${encodeURIComponent(method)}`,
 } as const;

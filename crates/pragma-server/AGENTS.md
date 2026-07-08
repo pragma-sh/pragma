@@ -11,7 +11,32 @@ scrollback, raw output, and agent-status strengths.
 - Tracking runtime agent status in memory.
 - Serving `pragma-core` RPC and snapshot-then-delta event subscriptions over the
   existing length-prefixed frame codec.
-- Spawning host-side sidecars (`pragma-ai`, `pragma-github`, `pragma-automations`).
+- Spawning host-side sidecars (`pragma-ai`, `pragma-github`, `pragma-automations`,
+  `pragma-plugins`).
+
+## Plugin catalog host
+
+`plugins_host.rs` supervises the `pragma-plugins` sidecar (`@pragma/plugins-host`),
+mirroring the `automations` supervisor: a lazily respawned child with a stdout reader
+thread. It caches the last `catalog` event plus the hash → asset map; a sidecar crash
+never blanks the catalog — a respawn re-runs `load` and the cache holds until a fresh
+publish arrives. RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
+cached catalog), `registerRoots` (project roots, sharing the same desktop RPC that
+registers automation roots), `readAsset` (base64 + mime, validated lowercase-hex sha256),
+and `reload`. The sidecar reads the gateway port + token from the discovery file beside
+the socket so its `PragmaClient` resolves async model providers against the local gateway.
+
+## Workspace mirror store
+
+`registry.rs` caches the latest `WorkspaceSnapshot` (projects/worktrees/tabs) the
+desktop app publishes via `RequestKind::PublishWorkspace`. `publish_workspace`
+replaces the cache and fans a `Delta` carrying the full replacement snapshot to
+`workspace` subscribers (v1 keeps deltas trivial — every delta is a full
+replacement; row-level deltas are a later optimization). `subscribe_workspace`
+returns the cached snapshot (or an empty payload before the first publish) plus
+the delta receiver. A remote client (e.g. a paired phone) subscribes to render
+the session launcher without registering as the controller. The gateway exposes
+this as `GET /v1/subscriptions/workspace`.
 
 ## Socket And Access Control
 

@@ -30,6 +30,9 @@ fn parse_event(event: &str) -> Option<ProtocolEventKind> {
         "tabsChanged" => ProtocolEventKind::TabsChanged,
         "fileChanged" => ProtocolEventKind::FileChanged,
         "echoMode" => ProtocolEventKind::EchoMode,
+        "automationPending" => ProtocolEventKind::AutomationPending,
+        "automationsChanged" => ProtocolEventKind::AutomationsChanged,
+        "workspace" => ProtocolEventKind::Workspace,
         _ => return None,
     })
 }

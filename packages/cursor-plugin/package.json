@@ -7,13 +7,20 @@
     "assets",
     "hooks",
     "scripts",
-    "pragma"
+    "pragma",
+    "src"
   ],
+  "exports": {
+    "./pragma-agent": "./src/pragma-agent.ts"
+  },
   "scripts": {
     "install:local": "sh scripts/install-local.sh",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/plugin": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",

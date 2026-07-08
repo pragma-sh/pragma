@@ -26,7 +26,9 @@ mod projects;
 mod pty;
 mod scripts;
 mod ssh_host;
+mod tunnel;
 mod window_chrome;
+mod workspace_mirror;
 mod worktrees;
 
 use pragma_client::router::RouterDb;
@@ -230,6 +232,54 @@ async fn gateway_connection_info(
     pty: tauri::State<'_, PtyClient>,
 ) -> AppResult<pty::GatewayConnectionInfo> {
     pty.gateway_connection_info()
+}
+
+/// Regenerates the gateway bearer token (kills, deletes the token file, and
+/// respawns the gateway) and returns the fresh connection info. Paired devices
+/// disconnect until they re-pair with the new token.
+#[tauri::command]
+async fn regenerate_gateway_token(
+    pty: tauri::State<'_, PtyClient>,
+) -> AppResult<pty::GatewayConnectionInfo> {
+    pty.regenerate_gateway_token()
+}
+
+/// Starts the remote-access tunnel exposing the local gateway, returning the
+/// current tunnel status. Poll `tunnel_status` until it becomes `active`.
+#[tauri::command]
+async fn tunnel_start(
+    app: tauri::AppHandle,
+    tunnel: tauri::State<'_, tunnel::TunnelState>,
+    pty: tauri::State<'_, PtyClient>,
+) -> AppResult<tunnel::TunnelStatus> {
+    let info = pty.gateway_connection_info()?;
+    let port = gateway_port_from_base_url(&info.base_url)?;
+    let home = app.path().home_dir()?;
+    tunnel.start(&home, port)
+}
+
+/// Stops the remote-access tunnel (kills the child); paired devices disconnect.
+#[tauri::command]
+async fn tunnel_stop(tunnel: tauri::State<'_, tunnel::TunnelState>) -> AppResult<()> {
+    tunnel.stop();
+    Ok(())
+}
+
+/// Returns the current remote-access tunnel status.
+#[tauri::command]
+async fn tunnel_status(
+    tunnel: tauri::State<'_, tunnel::TunnelState>,
+) -> AppResult<tunnel::TunnelStatus> {
+    Ok(tunnel.status())
+}
+
+/// Parses the gateway port from a `http://127.0.0.1:PORT` base URL.
+fn gateway_port_from_base_url(base_url: &str) -> AppResult<u16> {
+    base_url
+        .rsplit(':')
+        .next()
+        .and_then(|port| port.parse::<u16>().ok())
+        .ok_or_else(|| AppError::Daemon(format!("gateway base URL has no port: {base_url}")))
 }
 
 #[tauri::command]
@@ -457,6 +507,7 @@ fn list_tabs(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Vec<Tab>
 #[tauri::command]
 fn create_tab(
     db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
     project_id: String,
     worktree_id: String,
     kind: TabKind,
@@ -466,7 +517,7 @@ fn create_tab(
     diff_side: Option<DiffSide>,
     pr_number: Option<i64>,
 ) -> AppResult<Tab> {
-    db.create_tab(
+    let tab = db.create_tab(
         &project_id,
         &worktree_id,
         kind,
@@ -475,7 +526,9 @@ fn create_tab(
         file_path,
         diff_side,
         pr_number,
-    )
+    )?;
+    publisher.trigger();
+    Ok(tab)
 }
 
 // A plugin webview tab carries plugin locator fields plus an opaque payload string.
@@ -483,6 +536,7 @@ fn create_tab(
 #[tauri::command]
 fn create_plugin_webview_tab(
     db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
     project_id: String,
     worktree_id: String,
     title: Option<String>,
@@ -491,7 +545,7 @@ fn create_plugin_webview_tab(
     plugin_payload: Option<String>,
     plugin_dedupe_key: Option<String>,
 ) -> AppResult<Tab> {
-    db.create_plugin_webview_tab(
+    let tab = db.create_plugin_webview_tab(
         &project_id,
         &worktree_id,
         title,
@@ -499,31 +553,60 @@ fn create_plugin_webview_tab(
         Some(plugin_view_id),
         plugin_payload,
         plugin_dedupe_key,
-    )
+    )?;
+    publisher.trigger();
+    Ok(tab)
 }
 
 #[tauri::command]
-fn close_tab(db: tauri::State<'_, Db>, tab_id: String) -> AppResult<()> {
-    db.delete_tab(&tab_id)
+fn close_tab(
+    db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    tab_id: String,
+) -> AppResult<()> {
+    db.delete_tab(&tab_id)?;
+    publisher.trigger();
+    Ok(())
 }
 
 #[tauri::command]
-fn rename_tab(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppResult<Tab> {
-    db.rename_tab(&tab_id, &title)
+fn rename_tab(
+    db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    tab_id: String,
+    title: String,
+) -> AppResult<Tab> {
+    let tab = db.rename_tab(&tab_id, &title)?;
+    publisher.trigger();
+    Ok(tab)
 }
 
 /// Persists a shell-driven tab title (OSC 0/2) without touching the
 /// `user_renamed` flag. The frontend reducer is responsible for refusing
 /// to apply the update when the user has explicitly renamed the tab.
 #[tauri::command]
-fn set_tab_title(db: tauri::State<'_, Db>, tab_id: String, title: String) -> AppResult<Tab> {
-    db.set_tab_title(&tab_id, &title)
+fn set_tab_title(
+    db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    tab_id: String,
+    title: String,
+) -> AppResult<Tab> {
+    let tab = db.set_tab_title(&tab_id, &title)?;
+    publisher.trigger();
+    Ok(tab)
 }
 
 /// Persists the current page URL for a browser tab (session restore).
 #[tauri::command]
-fn set_tab_url(db: tauri::State<'_, Db>, tab_id: String, url: String) -> AppResult<Tab> {
-    db.set_tab_url(&tab_id, &url)
+fn set_tab_url(
+    db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    tab_id: String,
+    url: String,
+) -> AppResult<Tab> {
+    let tab = db.set_tab_url(&tab_id, &url)?;
+    publisher.trigger();
+    Ok(tab)
 }
 
 /// Lists the persisted split-pane layouts for a project's worktrees.
@@ -621,6 +704,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(control::BrowserHistory::default());
+    app.manage(tunnel::TunnelState::default());
+    // Mirror the workspace (projects/worktrees/tabs) to pragma-server so a paired
+    // phone can render the session launcher without being the controller. Debounced
+    // on a worker thread; never reads SQLite on the mac main thread.
+    app.manage(workspace_mirror::WorkspacePublisher::start(
+        app.handle().clone(),
+        pty.clone(),
+    ));
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
@@ -675,6 +766,10 @@ pub fn run() {
             read_plugin_bundle,
             start_plugin_watcher,
             gateway_connection_info,
+            regenerate_gateway_token,
+            tunnel_start,
+            tunnel_stop,
+            tunnel_status,
             pty_spawn,
             pty_attach,
             pty_write,
@@ -797,6 +892,15 @@ pub fn run() {
             browser::browser_snapshot,
             dev_bridge::__dev_bridge_result
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            // Kill the remote-access tunnel child on app exit so ngrok/cloudflared
+            // never outlives Pragma.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(tunnel) = app_handle.try_state::<tunnel::TunnelState>() {
+                    tunnel.stop();
+                }
+            }
+        });
 }
