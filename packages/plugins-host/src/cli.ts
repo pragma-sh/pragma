@@ -6,9 +6,10 @@ import cursorAgentPlugin from "@pragma/cursor-plugin/pragma-agent";
 import opencodeAgentPlugin from "@pragma/opencode-plugin/pragma-agent";
 import type { PluginContext, PluginDefinition } from "@pragma/plugin";
 import { PragmaClient } from "@pragma/sdk";
+import { readStdinLines } from "@pragma/sidecar-kit";
 
 import { assembleCatalog, type ResolvedPlugin } from "./catalog";
-import { resolveManifests } from "./manifest";
+import { resolveManifests, type ResolvedManifest } from "./manifest";
 
 interface LoadCommand {
   type: "load";
@@ -50,23 +51,25 @@ function contextFor(sdk: PragmaClient, pluginId: string, root: string | undefine
   };
 }
 
+async function loadConfigPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | undefined> {
+  try {
+    const imported = (await import(pathToFileURL(manifest.mainPath).href)) as {
+      default?: PluginDefinition;
+    };
+    return imported.default
+      ? { pluginId: manifest.pluginId, definition: imported.default }
+      : undefined;
+  } catch (error) {
+    emit({ type: "log", pluginId: manifest.pluginId, level: "error", message: String(error) });
+    return undefined;
+  }
+}
+
 async function resolveConfigPlugins(roots: string[]): Promise<ResolvedPlugin[]> {
   const home = process.env.HOME ?? "";
   const manifests = await resolveManifests(home, roots);
-  const plugins: ResolvedPlugin[] = [];
-  for (const manifest of manifests) {
-    try {
-      const imported = (await import(pathToFileURL(manifest.mainPath).href)) as {
-        default?: PluginDefinition;
-      };
-      if (imported.default) {
-        plugins.push({ pluginId: manifest.pluginId, definition: imported.default });
-      }
-    } catch (error) {
-      emit({ type: "log", pluginId: manifest.pluginId, level: "error", message: String(error) });
-    }
-  }
-  return plugins;
+  const plugins = await Promise.all(manifests.map(loadConfigPlugin));
+  return plugins.filter((plugin): plugin is ResolvedPlugin => plugin !== undefined);
 }
 
 async function load(command: LoadCommand): Promise<void> {
@@ -103,24 +106,8 @@ async function handle(command: Command): Promise<void> {
 }
 
 class StdinLines {
-  private buffer = "";
-
   constructor() {
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => this.onData(chunk));
-  }
-
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    let newline = this.buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line) {
-        void this.dispatch(line);
-      }
-      newline = this.buffer.indexOf("\n");
-    }
+    readStdinLines((line) => void this.dispatch(line));
   }
 
   private async dispatch(line: string): Promise<void> {

@@ -98,6 +98,27 @@ function auditSendKeys(args: Args, bytes: number): void {
 /** ESC byte: the default interrupt delivered into an agent's PTY turn. */
 const INTERRUPT_KEY = "\x1b";
 
+/** Connects once and forwards {@link AgentInterrupt} events until the stream ends. */
+async function forwardInterrupts(
+  sdk: PragmaClient,
+  args: Args,
+  sendKeys: (data: string) => Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  const connection = await sdk.agents.connect({
+    agent: args.agentId,
+    tabId: args.tabId,
+    worktreeId: args.worktreeId,
+    signal,
+  });
+  for await (const event of connection) {
+    if (signal.aborted) return;
+    if (event.type === "agentInterrupt") {
+      await sendKeys(INTERRUPT_KEY);
+    }
+  }
+}
+
 /**
  * Subscribes to this tab's agent events and, on an {@link AgentInterrupt}
  * matching this watcher's agent + tab, sends ESC through the existing sendKeys
@@ -113,21 +134,11 @@ async function deliverInterrupts(
 ): Promise<void> {
   while (!signal.aborted) {
     try {
-      const connection = await sdk.agents.connect({
-        agent: args.agentId,
-        tabId: args.tabId,
-        worktreeId: args.worktreeId,
-        signal,
-      });
-      for await (const event of connection) {
-        if (signal.aborted) return;
-        if (event.type === "agentInterrupt") {
-          await sendKeys(INTERRUPT_KEY);
-        }
-      }
+      await forwardInterrupts(sdk, args, sendKeys, signal);
     } catch {
-      if (signal.aborted) return;
+      // Stream errored: fall through to the reconnect backoff below.
     }
+    if (signal.aborted) return;
     // Stream ended or errored without an abort: back off, then reconnect.
     await new Promise((resolve) => setTimeout(resolve, 500));
   }

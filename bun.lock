@@ -146,6 +146,7 @@
       "dependencies": {
         "@earendil-works/pi-ai": "0.79.10",
         "@earendil-works/pi-coding-agent": "0.79.10",
+        "@pragma/sidecar-kit": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.10.1",
@@ -158,6 +159,9 @@
       "version": "0.0.0",
       "bin": {
         "pragma-automations": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@pragma/sidecar-kit": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.10.1",
@@ -300,6 +304,7 @@
         "@pragma/opencode-plugin": "workspace:*",
         "@pragma/plugin": "workspace:*",
         "@pragma/sdk": "workspace:*",
+        "@pragma/sidecar-kit": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
@@ -314,6 +319,15 @@
         "@pragma/constants": "workspace:*",
         "@types/node": "^24.10.1",
         "bunup": "^0.16.32",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/sidecar-kit": {
+      "name": "@pragma/sidecar-kit",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -1156,6 +1170,8 @@
     "@pragma/plugins-host": ["@pragma/plugins-host@workspace:packages/plugins-host"],
 
     "@pragma/sdk": ["@pragma/sdk@workspace:packages/sdk"],
+
+    "@pragma/sidecar-kit": ["@pragma/sidecar-kit@workspace:packages/sidecar-kit"],
 
     "@pragma/watcher": ["@pragma/watcher@workspace:packages/watcher"],
 

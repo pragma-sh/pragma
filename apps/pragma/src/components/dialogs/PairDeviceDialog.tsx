@@ -32,20 +32,28 @@ interface PairDeviceDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface PairingTunnel {
+  status: TunnelStatus;
+  token: string;
+  hostName: string;
+  busy: boolean;
+  error: string | null;
+  refreshStatus: () => Promise<void>;
+  toggleRemote: (next: boolean) => Promise<void>;
+  regenerateToken: () => Promise<void>;
+}
+
 /**
- * Pair-a-device modal: flips the remote-access tunnel on/off and renders a QR
- * of the {@link PairingPayload} (public URL + gateway token) for a phone to
- * scan. The tunnel deliberately survives the modal closing — closing does not
- * stop it — so users can pair, close, and re-open without dropping devices.
+ * Owns the remote-access tunnel's state: the current {@link TunnelStatus},
+ * the pairing token/host name, and the on/off toggle. Loads the token + host
+ * name and starts polling the tunnel status whenever `open` flips true.
  */
-export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) {
+function usePairingTunnel(open: boolean): PairingTunnel {
   const [status, setStatus] = useState<TunnelStatus>({ state: "idle" });
   const [token, setToken] = useState("");
   const [hostName, setHostName] = useState("Pragma");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEscapeToClose(open, () => onOpenChange(false));
-  useSuppressNativeOverlayWhile(open);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -90,9 +98,7 @@ export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) 
     return () => clearInterval(timer);
   }, [open, refreshStatus]);
 
-  const enabled = status.state === "active" || status.state === "starting";
-
-  async function toggleRemote(next: boolean) {
+  async function toggleRemote(next: boolean): Promise<void> {
     setBusy(true);
     setError(null);
     try {
@@ -105,10 +111,41 @@ export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) 
     }
   }
 
+  async function regenerateToken(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const info = await regenerateGatewayToken();
+      setToken(info.token);
+      await refreshStatus();
+      toast.success("Gateway token regenerated. Paired devices must reconnect.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return { status, token, hostName, busy, error, refreshStatus, toggleRemote, regenerateToken };
+}
+
+/**
+ * Pair-a-device modal: flips the remote-access tunnel on/off and renders a QR
+ * of the {@link PairingPayload} (public URL + gateway token) for a phone to
+ * scan. The tunnel deliberately survives the modal closing — closing does not
+ * stop it — so users can pair, close, and re-open without dropping devices.
+ */
+export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) {
+  useEscapeToClose(open, () => onOpenChange(false));
+  useSuppressNativeOverlayWhile(open);
+  const { status, token, hostName, busy, error, toggleRemote, regenerateToken } =
+    usePairingTunnel(open);
+
   if (!open) {
     return null;
   }
 
+  const enabled = status.state === "active" || status.state === "starting";
   const url = status.state === "active" ? status.value : "";
 
   return (
@@ -144,25 +181,7 @@ export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) 
       ) : null}
 
       {url ? (
-        <ManualSection
-          url={url}
-          token={token}
-          onRegenerate={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              const info = await regenerateGatewayToken();
-              setToken(info.token);
-              await refreshStatus();
-              toast.success("Gateway token regenerated. Paired devices must reconnect.");
-            } catch (cause) {
-              setError(errorMessage(cause));
-            } finally {
-              setBusy(false);
-            }
-          }}
-          busy={busy}
-        />
+        <ManualSection url={url} token={token} onRegenerate={regenerateToken} busy={busy} />
       ) : null}
 
       {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}

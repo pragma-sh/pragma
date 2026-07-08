@@ -1,11 +1,8 @@
 {
-  "name": "@pragma/automations",
+  "name": "@pragma/sidecar-kit",
   "version": "0.0.0",
   "private": true,
-  "description": "Pragma automation authoring API and host sidecar runtime.",
-  "bin": {
-    "pragma-automations": "./src/cli.ts"
-  },
+  "description": "Shared stdin/NDJSON helpers for Pragma's Bun-compiled host sidecars.",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -17,14 +14,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
-    "lint": "oxlint .",
-    "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-automations"
-  },
-  "dependencies": {
-    "@pragma/sidecar-kit": "workspace:*"
+    "lint": "oxlint ."
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.12.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }

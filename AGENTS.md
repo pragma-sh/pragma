@@ -109,6 +109,7 @@ than no guide.
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
+│   ├── sidecar-kit/             # `@pragma/sidecar-kit` shared NDJSON stdin helpers for host sidecars → see packages/sidecar-kit/AGENTS.md
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
