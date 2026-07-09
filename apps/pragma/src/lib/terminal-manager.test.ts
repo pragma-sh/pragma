@@ -784,6 +784,13 @@ describe("TerminalManager Shift+Enter", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
   });
 
+  it("blocks legacy keypress Enter events so WebKit cannot submit twice", async () => {
+    const passthrough = await passthroughHandler();
+
+    expect(passthrough(new KeyboardEvent("keypress", { key: "Enter" }))).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+
   it("does not rewrite Cmd/Ctrl/Alt+Enter so the original keybinding reaches xterm", async () => {
     const passthrough = await passthroughHandler();
     for (const event of [

@@ -48,6 +48,11 @@ function currentTerminalPlatform(): TerminalPlatform {
 }
 
 function handleTerminalKeyEvent(tabId: string, event: KeyboardEvent): boolean {
+  // xterm runs custom key handlers for both keydown and legacy keypress events.
+  // WebKit can turn both Enter events into terminal input, yielding two CRs.
+  if (event.type === "keypress") {
+    return false;
+  }
   const platform = currentTerminalPlatform();
   if (handleSoftNewline(tabId, event)) {
     return false;
