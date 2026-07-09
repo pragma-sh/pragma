@@ -21,7 +21,7 @@ export function ModalShell({ children, className }: ModalShellProps) {
       <div
         data-slot="modal-shell-card"
         className={cn(
-          "bg-background w-full max-w-md rounded-xl border p-5 shadow-floating",
+          "bg-background w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border p-5 shadow-floating",
           className,
         )}
       >
