@@ -32,6 +32,22 @@ describe("refreshAgentModels", () => {
     expect(cachedAgentModels(id)).toHaveLength(1);
   });
 
+  it("refreshes an expired model list", async () => {
+    vi.useFakeTimers();
+    const id = agentId();
+    resolveMock.mockResolvedValueOnce([{ id: "old", name: "Old", reasoning: [] }]);
+    resolveMock.mockResolvedValueOnce([{ id: "new", name: "New", reasoning: [] }]);
+
+    await expect(refreshAgentModels(id)).resolves.toHaveLength(1);
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    await expect(refreshAgentModels(id)).resolves.toEqual([
+      { id: "new", name: "New", reasoning: [] },
+    ]);
+
+    expect(resolveMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it("does not cache an empty resolution, so a later call can recover", async () => {
     const id = agentId();
     resolveMock.mockResolvedValueOnce([]);
