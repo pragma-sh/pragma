@@ -55,12 +55,7 @@ export function AiSetupModal() {
         <AiAuthOptions onProviderAuthScreenChange={setProviderAuthScreenOpen} />
         {!providerAuthScreenOpen ? (
           <div className="flex gap-2">
-            <Button
-              className="flex-1"
-              onClick={() => void dismissSetup()}
-              size="sm"
-              variant="outline"
-            >
+            <Button className="flex-1" onClick={finish} size="sm" variant="outline">
               Skip for now
             </Button>
             {hasAuthedProvider ? (
