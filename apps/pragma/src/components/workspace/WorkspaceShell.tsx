@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
-import type { MouseEvent } from "react";
+import { useEffect, useEffectEvent, type MouseEvent } from "react";
 import { LayoutGrid } from "lucide-react";
+import { toast } from "sonner";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
 import type { Tab } from "@pragma/constants";
@@ -14,7 +15,14 @@ import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { SplitHost } from "@/components/workspace/SplitHost";
 import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
 import { useShortcuts } from "@/hooks/use-shortcuts";
-import { browserDevtools, browserReload } from "@/lib/tauri";
+import {
+  browserDevtools,
+  browserReload,
+  onMenuAction,
+  restartDaemon,
+  type MenuAction,
+} from "@/lib/tauri";
+import { errorMessage } from "@/lib/errors";
 import { terminalManager } from "@/lib/terminal-manager";
 import { useKanban } from "@/state/kanban-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
@@ -71,6 +79,41 @@ function useWorkspaceShortcuts(workspace: Workspace, requestClose: (tab: Tab) =>
       if (workspace.activeTabId) terminalManager.scrollToBottom(workspace.activeTabId);
     },
   });
+}
+
+/** Routes native menu shortcuts through the same tab lifecycle as UI controls. */
+function useNativeMenuActions(workspace: Workspace, requestClose: (tab: Tab) => void) {
+  const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
+    if (action === "tabs.new-terminal") {
+      await workspace.createTerminalTab();
+      return;
+    }
+    if (action === "tabs.close-active") {
+      if (workspace.activeTab) requestClose(workspace.activeTab);
+      return;
+    }
+    if (action === "troubleshooting.open-daemon-logs") {
+      await workspace.openDaemonLogTab();
+      return;
+    }
+    const pending = toast.loading("Restarting daemon…");
+    try {
+      await restartDaemon();
+      toast.success("Daemon restarted", { id: pending });
+    } catch (cause) {
+      toast.error(errorMessage(cause), { id: pending });
+    }
+  });
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void onMenuAction((action) => void handleMenuAction(action))
+      .then((stop) => (unlisten = stop))
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 }
 
 /** The "Opened from the prompt board" banner with a Back to Kanban button. */
@@ -172,6 +215,7 @@ export function WorkspaceShell() {
   const kanban = useKanban();
   const requestClose = useConfirmClose();
   useWorkspaceShortcuts(workspace, requestClose);
+  useNativeMenuActions(workspace, requestClose);
 
   return (
     <RightSidebarProvider>

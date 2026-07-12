@@ -48,6 +48,48 @@ import {
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
 
+const PR_DRAFT_STORAGE_PREFIX = "pragma:pull-request-draft:";
+
+type PullRequestDraft = { title: string; body: string };
+
+/** Reads a worktree's unfinished PR form, ignoring unavailable or malformed storage. */
+function readPullRequestDraft(worktreeId: string): PullRequestDraft {
+  try {
+    const raw = window.localStorage.getItem(`${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`);
+    if (!raw) return { title: "", body: "" };
+    const parsed = JSON.parse(raw) as Partial<PullRequestDraft>;
+    return {
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      body: typeof parsed.body === "string" ? parsed.body : "",
+    };
+  } catch {
+    return { title: "", body: "" };
+  }
+}
+
+/** Persists unfinished PR form content outside git so commits cannot reset it. */
+function savePullRequestDraft(worktreeId: string, draft: PullRequestDraft): void {
+  try {
+    const key = `${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`;
+    if (!draft.title && !draft.body) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    window.localStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // Draft persistence must not prevent editing when localStorage is unavailable.
+  }
+}
+
+/** Removes a worktree's saved form after its PR has been opened successfully. */
+function clearPullRequestDraft(worktreeId: string): void {
+  try {
+    window.localStorage.removeItem(`${PR_DRAFT_STORAGE_PREFIX}${worktreeId}`);
+  } catch {
+    // The PR is open even if the best-effort draft cleanup cannot run.
+  }
+}
+
 /**
  * A submit blocked or waiting on confirmation by the pre-flight checks. The dirty
  * variant carries the already-fetched {@link BranchSyncStatus} so confirming past
@@ -208,6 +250,7 @@ function usePrSubmit({
           { title: title.trim(), body, draft },
         );
         toast.success(`Opened pull request #${pr.number}`);
+        clearPullRequestDraft(worktreeId);
         onCreated(pr);
       } catch (cause) {
         toast.error(errorMessage(cause));
@@ -306,8 +349,8 @@ function useCreatePullRequestForm({
   onCreated: (pr: PullRequestSummary) => void;
 }) {
   const { available: aiAvailable } = useAi();
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [title, setTitle] = useState(() => readPullRequestDraft(worktreeId).title);
+  const [body, setBody] = useState(() => readPullRequestDraft(worktreeId).body);
   const { baseRepos, baseRepo, branches, baseBranch, setBaseBranch, selectBaseRepo } =
     useBaseRepoSelection(repo);
   const { submitting, preflight, setPreflight, open, submit } = usePrSubmit({
@@ -328,6 +371,10 @@ function useCreatePullRequestForm({
 
   usePrInitialDraft(initialDraft, initialDraftKey, setTitle, setBody);
   usePrTitleDefault(worktreeId, setTitle);
+
+  useEffect(() => {
+    savePullRequestDraft(worktreeId, { title, body });
+  }, [worktreeId, title, body]);
 
   const canSubmit =
     title.trim().length > 0 &&

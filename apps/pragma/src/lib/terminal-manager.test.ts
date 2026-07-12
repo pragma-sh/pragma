@@ -784,6 +784,13 @@ describe("TerminalManager Shift+Enter", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
   });
 
+  it("blocks legacy keypress Enter events so WebKit cannot submit twice", async () => {
+    const passthrough = await passthroughHandler();
+
+    expect(passthrough(new KeyboardEvent("keypress", { key: "Enter" }))).toBe(false);
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+
   it("does not rewrite Cmd/Ctrl/Alt+Enter so the original keybinding reaches xterm", async () => {
     const passthrough = await passthroughHandler();
     for (const event of [
@@ -952,6 +959,88 @@ describe("TerminalManager.onTitle", () => {
   it("onTitle returns a passive unsubscribe for a tab that never emits", () => {
     const manager = new TerminalManager();
     const off = manager.onTitle("missing", () => {
+      throw new Error("listener should not be called");
+    });
+    expect(off()).toBeUndefined();
+  });
+});
+
+describe("TerminalManager.onExit", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    channelInstances.length = 0;
+  });
+
+  it("forwards the exit code to subscribed listeners", async () => {
+    type PtyEvt = { event: "title"; title: string } | { event: "exit"; code: number | null };
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const channel = channelInstances.at(-1);
+    expect(channel).toBeDefined();
+    const onEvent = channel!.onmessage;
+
+    const codes: (number | null)[] = [];
+    manager.onExit(tab.id, (code) => codes.push(code));
+
+    onEvent({ event: "exit", code: 0 } as PtyEvt);
+
+    expect(codes).toEqual([0]);
+  });
+
+  it("stops delivering after unsubscribe", async () => {
+    type PtyEvt = { event: "title"; title: string } | { event: "exit"; code: number | null };
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const channel = channelInstances.at(-1);
+    const onEvent = channel!.onmessage;
+
+    const codes: (number | null)[] = [];
+    const off = manager.onExit(tab.id, (code) => codes.push(code));
+    off();
+
+    onEvent({ event: "exit", code: 1 } as PtyEvt);
+
+    expect(codes).toHaveLength(0);
+  });
+
+  it("drops listeners once the tab is disposed", async () => {
+    type PtyEvt = { event: "title"; title: string } | { event: "exit"; code: number | null };
+
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const channel = channelInstances.at(-1);
+    const onEvent = channel!.onmessage;
+
+    const codes: (number | null)[] = [];
+    manager.onExit(tab.id, (code) => codes.push(code));
+    manager.dispose(tab.id);
+
+    onEvent({ event: "exit", code: 1 } as PtyEvt);
+
+    expect(codes).toHaveLength(0);
+  });
+
+  it("onExit returns a passive unsubscribe for a tab that never emits", () => {
+    const manager = new TerminalManager();
+    const off = manager.onExit("missing", () => {
       throw new Error("listener should not be called");
     });
     expect(off()).toBeUndefined();

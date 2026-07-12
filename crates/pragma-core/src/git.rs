@@ -812,8 +812,19 @@ fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreR
         return Ok(());
     }
     let message = String::from_utf8_lossy(&output.stderr);
-    if message.contains("not a working tree") || message.contains("not a git worktree") {
-        prune_worktrees(repo_root)?;
+    if message.contains("not a working tree")
+        || message.contains("not a git worktree")
+        || message.contains("not a git repository")
+    {
+        // Git may already have removed the main worktree or its metadata after a
+        // merge, leaving no repository from which to prune. Disk cleanup still
+        // lets Pragma remove the stale worktree record.
+        if let Err(error) = prune_worktrees(repo_root) {
+            eprintln!(
+                "pragma-core: failed to prune orphaned worktree metadata from {}: {error}",
+                repo_root.display()
+            );
+        }
         if worktree_path.exists() {
             if let Err(error) = std::fs::remove_dir_all(worktree_path) {
                 eprintln!(

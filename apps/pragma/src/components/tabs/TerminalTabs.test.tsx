@@ -120,6 +120,7 @@ afterEach(() => {
   cleanup();
   mockWorkspace.splitRootByWorktree = {};
   mockWorkspace.selectedWorktree = null;
+  mockWorkspace.selectedWorktreeId = "worktree";
   mockWorkspace.remoteWorktrees = {};
   mockWorkspace.runScriptsAvailable = false;
   mockWorkspace.runScriptsState = null;
@@ -223,5 +224,14 @@ describe("TerminalTabs", () => {
     await userEvent.click(screen.getByLabelText("Stop project scripts"));
 
     expect(mockWorkspace.stopRunScripts).toHaveBeenCalled();
+  });
+
+  it("does not show scripts from another worktree as running", () => {
+    mockWorkspace.selectedWorktreeId = "other-worktree";
+    mockWorkspace.runScriptsState = null;
+    render(<TerminalTabs />);
+
+    expect(screen.getByLabelText("Run project scripts")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Stop project scripts")).not.toBeInTheDocument();
   });
 });

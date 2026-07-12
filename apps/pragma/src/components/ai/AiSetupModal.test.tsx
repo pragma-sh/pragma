@@ -59,6 +59,17 @@ describe("AiSetupModal", () => {
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
   });
 
+  it("closes and persists setup dismissal when skipped", async () => {
+    renderModal();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_ai_setup_dismissed", { dismissed: true });
+  });
+
   it("shows Done as the preferred action after a provider is authenticated", async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === "ai_status") {

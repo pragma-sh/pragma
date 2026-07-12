@@ -78,7 +78,6 @@ import {
   onAgentReport,
   onAgentStatusReset,
   onDeepLink,
-  onMenuAction,
   onTabsChanged,
   onWorktreeChanged,
   takePendingDeepLink,
@@ -86,7 +85,6 @@ import {
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
-  restartDaemon as restartDaemonCommand,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
@@ -162,20 +160,26 @@ type RunScriptsState = {
   splitSnapshot: RunScriptsSplitSnapshot | null;
 } | null;
 
-type ManagedScriptsState = (RunScriptsState & { kind: InteractiveScriptKind }) | null;
+/** Active interactive scripts, isolated by worktree so other worktrees stay usable. */
+type ManagedScriptsState = Record<
+  string,
+  NonNullable<RunScriptsState> & { kind: InteractiveScriptKind }
+>;
 
 function managedScriptsStateForKind(
   state: ManagedScriptsState,
+  worktreeId: string | null,
   kind: InteractiveScriptKind,
 ): RunScriptsState {
-  if (!state || state.kind !== kind) {
+  const scripts = worktreeId ? state[worktreeId] : undefined;
+  if (!scripts || scripts.kind !== kind) {
     return null;
   }
   return {
-    worktreeId: state.worktreeId,
-    tabIds: state.tabIds,
-    stopping: state.stopping,
-    splitSnapshot: state.splitSnapshot,
+    worktreeId: scripts.worktreeId,
+    tabIds: scripts.tabIds,
+    stopping: scripts.stopping,
+    splitSnapshot: scripts.splitSnapshot,
   };
 }
 
@@ -207,7 +211,7 @@ type WorkspaceAction =
   | { type: "move-tab-to-pane"; worktreeId: string; paneId: string; tabId: string }
   | { type: "set-split-root"; worktreeId: string; root: SplitLayoutNode }
   | { type: "clear-split-root"; worktreeId: string }
-  | { type: "add-tab"; tab: Tab }
+  | { type: "add-tab"; tab: Tab; focus?: boolean }
   | { type: "add-tab-to-pane"; tab: Tab; paneId: string }
   | {
       type: "open-in-new-split";
@@ -1393,6 +1397,9 @@ function reduceSelectWorktree(
 }
 
 function reduceAddTab(state: WorkspaceState, action: ActionOf<"add-tab">): WorkspaceState {
+  if (action.focus === false) {
+    return { ...state, tabs: [...state.tabs, action.tab] };
+  }
   return {
     ...state,
     tabs: [...state.tabs, action.tab],
@@ -1602,9 +1609,10 @@ async function startAutoSubmitSession(
 interface ManagedScriptRunContext {
   projectId: string;
   worktreeId: string;
+  cwd: string;
   kind: InteractiveScriptKind;
   dispatch: (action: WorkspaceAction) => void;
-  setManagedScriptsState: (state: ManagedScriptsState) => void;
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
   splitRootByWorktree: WorkspaceState["splitRootByWorktree"];
   closeTab: (tabId: string) => Promise<unknown>;
 }
@@ -1621,18 +1629,36 @@ async function createScriptTabForCommand(
     ctx.projectId,
     ctx.worktreeId,
     "terminal",
-    defaultTabTitle("terminal"),
+    ctx.kind === "run" ? "Run" : "Build",
   );
   startedTabIds.push(tab.id);
   tabIdsByCommand[commandIndex] = tab.id;
-  ctx.dispatch({ type: "add-tab", tab });
-  ctx.setManagedScriptsState({
-    kind: ctx.kind,
-    worktreeId: ctx.worktreeId,
-    tabIds: [...startedTabIds],
-    stopping: false,
-    splitSnapshot,
-  });
+  ctx.dispatch({ type: "add-tab", tab, focus: false });
+  // Unfocused tabs never render (only the active tab per pane mounts), so
+  // mount into an off-screen host now to spawn the PTY immediately. It's kept
+  // in the document (not display:none) so xterm can still measure it.
+  // TerminalView re-parents this same terminal instance into the real DOM
+  // once the tab is actually viewed, instead of creating a second one.
+  const offscreenHost = document.createElement("div");
+  offscreenHost.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:80ch;height:24em;";
+  document.body.append(offscreenHost);
+  terminalManager.mount(tab, ctx.cwd, offscreenHost);
+  offscreenHost.remove();
+  // Script tabs are unattended (no one is sitting at the terminal to close
+  // them), so a script that finishes or crashes on its own must close its
+  // own tab; closeTab already drops the tab from managedScriptsState and
+  // resets the run/build button to inactive once no tabs are left.
+  terminalManager.onExit(tab.id, () => void ctx.closeTab(tab.id));
+  ctx.setManagedScriptsState((current) => ({
+    ...current,
+    [ctx.worktreeId]: {
+      kind: ctx.kind,
+      worktreeId: ctx.worktreeId,
+      tabIds: [...startedTabIds],
+      stopping: false,
+      splitSnapshot,
+    },
+  }));
 }
 
 /** Applies one plan item's split layout, capturing the pre-split snapshot on first use. */
@@ -1671,7 +1697,12 @@ function flushScriptCommands(
     const tabId = tabIdsByCommand[commandIndex];
     const command = plan.commands[commandIndex];
     if (tabId && command) {
-      terminalManager.writeWhenReady(tabId, `${command}\r`);
+      // The tab's shell only ever emits a PTY "exit" when the shell itself
+      // exits, not when a typed-in command finishes (the shell just returns
+      // to its prompt). Chaining `exit $?` makes the shell terminate the
+      // moment the script command does (with its exit code), so the "exit"
+      // event that closeTab listens for actually fires.
+      terminalManager.writeWhenReady(tabId, `${command}; exit $?\r`);
     }
   }
 }
@@ -1718,7 +1749,10 @@ async function handleManagedScriptsFailure(
   startedTabIds: string[],
   cause: unknown,
 ): Promise<void> {
-  ctx.setManagedScriptsState(null);
+  ctx.setManagedScriptsState((current) => {
+    const { [ctx.worktreeId]: _, ...remaining } = current;
+    return remaining;
+  });
   if (splitSnapshot) {
     restoreRunScriptsSplitSnapshot(ctx.dispatch, ctx.worktreeId, splitSnapshot);
   }
@@ -2816,11 +2850,18 @@ function useTabLifecycle(
         await closeTabCommand(tabId);
         dispatch({ type: "remove-tab", tabId });
         setManagedScriptsState((current) => {
-          if (!current?.tabIds.includes(tabId)) {
-            return current;
+          for (const [worktreeId, scripts] of Object.entries(current)) {
+            if (!scripts.tabIds.includes(tabId)) {
+              continue;
+            }
+            const tabIds = scripts.tabIds.filter((id) => id !== tabId);
+            if (tabIds.length > 0) {
+              return { ...current, [worktreeId]: { ...scripts, tabIds } };
+            }
+            const { [worktreeId]: _, ...remaining } = current;
+            return remaining;
           }
-          const tabIds = current.tabIds.filter((id) => id !== tabId);
-          return tabIds.length === 0 ? null : { ...current, tabIds };
+          return current;
         });
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
@@ -2855,37 +2896,6 @@ function useTabLifecycle(
   const setActiveTabRef = useRef(setActiveTab);
   setActiveTabRef.current = setActiveTab;
   return { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef };
-}
-
-/** Forwards native Troubleshooting-menu clicks to the restart/open-logs handler. */
-function useMenuActionListener(openDaemonLogTab: () => Promise<void>): void {
-  const handleMenuAction = useCallback(
-    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
-      if (action === "troubleshooting.open-daemon-logs") {
-        await openDaemonLogTab();
-        return;
-      }
-      const pending = toast.loading("Restarting daemon…");
-      try {
-        await restartDaemonCommand();
-        toast.success("Daemon restarted", { id: pending });
-      } catch (cause) {
-        toast.error(errorMessage(cause), { id: pending });
-      }
-    },
-    [openDaemonLogTab],
-  );
-  const handleMenuActionRef = useRef(handleMenuAction);
-  handleMenuActionRef.current = handleMenuAction;
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    onMenuAction((action) => void handleMenuActionRef.current(action))
-      .then((stop) => (unlisten = stop))
-      .catch(() => undefined);
-    return () => {
-      unlisten?.();
-    };
-  }, []);
 }
 
 /** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
@@ -3141,25 +3151,31 @@ function useManagedScripts(
   stopRunScripts: () => Promise<void>;
   stopBuildScripts: () => Promise<void>;
 } {
+  const selectedWorktreeId = state.selectedProjectId
+    ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
+    : null;
   const runScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, "run"),
-    [managedScriptsState],
+    () => managedScriptsStateForKind(managedScriptsState, selectedWorktreeId, "run"),
+    [managedScriptsState, selectedWorktreeId],
   );
   const buildScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, "build"),
-    [managedScriptsState],
+    () => managedScriptsStateForKind(managedScriptsState, selectedWorktreeId, "build"),
+    [managedScriptsState, selectedWorktreeId],
   );
 
   const startManagedScripts = useCallback(
     async (kind: InteractiveScriptKind) => {
       const projectId = state.selectedProjectId;
       const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId || managedScriptsState) {
+      if (!projectId || !worktreeId || managedScriptsState[worktreeId]) {
         return;
       }
+      const cwd =
+        state.worktrees[projectId]?.find((worktree) => worktree.id === worktreeId)?.path ?? "~";
       const ctx: ManagedScriptRunContext = {
         projectId,
         worktreeId,
+        cwd,
         kind,
         dispatch,
         setManagedScriptsState,
@@ -3187,6 +3203,7 @@ function useManagedScripts(
       state.selectedProjectId,
       state.selectedWorktreeByProject,
       state.splitRootByWorktree,
+      state.worktrees,
     ],
   );
 
@@ -3195,18 +3212,34 @@ function useManagedScripts(
 
   const stopManagedScripts = useCallback(
     async (kind: InteractiveScriptKind) => {
-      if (!managedScriptsState || managedScriptsState.kind !== kind) {
+      const worktreeId = state.selectedProjectId
+        ? state.selectedWorktreeByProject[state.selectedProjectId]
+        : undefined;
+      const current = worktreeId ? managedScriptsState[worktreeId] : undefined;
+      if (!current || current.kind !== kind) {
         return;
       }
-      const current = managedScriptsState;
-      setManagedScriptsState(() => ({ ...current, stopping: true }));
+      setManagedScriptsState((previous) => ({
+        ...previous,
+        [current.worktreeId]: { ...current, stopping: true },
+      }));
       if (current.splitSnapshot) {
         restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
       }
       await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
-      setManagedScriptsState(() => null);
+      setManagedScriptsState((previous) => {
+        const { [current.worktreeId]: _, ...remaining } = previous;
+        return remaining;
+      });
     },
-    [closeTab, dispatch, managedScriptsState, setManagedScriptsState],
+    [
+      closeTab,
+      dispatch,
+      managedScriptsState,
+      setManagedScriptsState,
+      state.selectedProjectId,
+      state.selectedWorktreeByProject,
+    ],
   );
 
   const stopRunScripts = useCallback(() => stopManagedScripts("run"), [stopManagedScripts]);
@@ -3281,7 +3314,10 @@ function useWorktreeActions(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
       await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
       dispatch({ type: "remove-worktree", worktreeId });
-      setManagedScriptsState((current) => (current?.worktreeId === worktreeId ? null : current));
+      setManagedScriptsState((current) => {
+        const { [worktreeId]: _, ...remaining } = current;
+        return remaining;
+      });
     },
     [dispatch, setManagedScriptsState],
   );
@@ -3763,7 +3799,7 @@ function useTabManagement({
   };
 }
 
-/** Project loading + browser/terminal metadata + troubleshooting-menu listeners. */
+/** Project loading plus browser and terminal metadata listeners. */
 function useWorkspaceListeners({
   state,
   dispatch,
@@ -3771,7 +3807,6 @@ function useWorkspaceListeners({
   tabsRef,
   terminalTabIdsKey,
   setActiveTabRef,
-  openDaemonLogTab,
   refreshProject,
 }: {
   state: WorkspaceState;
@@ -3781,12 +3816,10 @@ function useWorkspaceListeners({
   tabsRef: RefObject<Tab[]>;
   terminalTabIdsKey: string;
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
-  openDaemonLogTab: () => Promise<void>;
 }): void {
   useProjectLoading(state, dispatch, reload);
   useWorkspaceChangedListener(dispatch, refreshProject);
   useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
-  useMenuActionListener(openDaemonLogTab);
 }
 
 /** Split-layout + selection persistence. */
@@ -3952,7 +3985,7 @@ function useWorkspaceActions({
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
-  const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>(null);
+  const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>({});
   const { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError } =
     useProjectScriptsConfig(state.selectedProjectId);
   const {
@@ -4017,7 +4050,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tabsRef,
     terminalTabIdsKey,
     setActiveTabRef,
-    openDaemonLogTab,
   });
 
   useWorkspacePersistence(state, didHydrateRef, lastPersistedRef);

@@ -50,9 +50,13 @@ use crate::pty::PtyClient;
 const MENU_RESTART_DAEMON: &str = "troubleshooting.restart-daemon";
 /// Menu item id for "Open Server Logs" in the Troubleshooting submenu.
 const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
+/// Menu item id for creating a terminal tab from the native menu.
+const MENU_NEW_TERMINAL_TAB: &str = "tabs.new-terminal";
+/// Menu item id for closing the active tab from the native menu.
+const MENU_CLOSE_ACTIVE_TAB: &str = "tabs.close-active";
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
-/// above. The frontend (`workspace-context`) listens and runs the action so the
-/// resulting toast / tab lives where the rest of the UI does.
+/// above. The workspace shell handles it so tab lifecycle and feedback stay
+/// consistent with their UI controls.
 const MENU_EVENT: &str = "pragma:menu";
 
 /// Tauri event emitted for each incoming `pragma://` deep link; payload is the
@@ -131,14 +135,55 @@ fn install_deep_links(app: &tauri::App) {
     });
 }
 
-/// Installs the application menu — the OS default menu plus a Troubleshooting
-/// submenu — and wires the submenu's clicks to the frontend. Used on both macOS
-/// (global menu bar) and Linux (window menu). The handler only forwards the
-/// action via `MENU_EVENT`; the actual restart/log-open runs through the typed
-/// Tauri commands so feedback (toasts, the new tab) is uniform with the rest of
-/// the UI.
+/// Installs the application menu plus Pragma tab and troubleshooting actions.
+/// Native accelerators must be menu items: macOS consumes Cmd+W before `WebView`
+/// listeners see it, and `WebKit` may consume Cmd+T for a browser tab.
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
+    let new_terminal_tab = MenuItem::with_id(
+        app,
+        MENU_NEW_TERMINAL_TAB,
+        "New Terminal Tab",
+        true,
+        Some("CmdOrCtrl+T"),
+    )?;
+    let close_active_tab = MenuItem::with_id(
+        app,
+        MENU_CLOSE_ACTIVE_TAB,
+        "Close Tab",
+        true,
+        Some("CmdOrCtrl+W"),
+    )?;
+    // Replace File entirely: its default Close Window item keeps Cmd+W even when
+    // removed in place on macOS.
+    #[cfg(target_os = "macos")]
+    {
+        let file_menu = Submenu::with_id_and_items(
+            app,
+            "file",
+            "File",
+            true,
+            &[&new_terminal_tab, &close_active_tab],
+        )?;
+        menu.remove_at(1)?;
+        menu.insert(&file_menu, 1)?;
+        let window_menu = menu
+            .get("window")
+            .and_then(|item| item.as_submenu().cloned());
+        if let Some(window_menu) = window_menu {
+            // The default macOS Window menu also owns Cmd+W for closing the window.
+            window_menu.remove_at(3)?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(window_menu) = menu
+        .get("window")
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        // Linux has no default File menu, so surface Pragma tab actions here.
+        window_menu.append(&new_terminal_tab)?;
+        window_menu.append(&close_active_tab)?;
+    }
     let restart_daemon = MenuItem::with_id(
         app,
         MENU_RESTART_DAEMON,
@@ -159,7 +204,13 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         let action = event.id().as_ref();
-        if action == MENU_RESTART_DAEMON || action == MENU_OPEN_DAEMON_LOGS {
+        if matches!(
+            action,
+            MENU_RESTART_DAEMON
+                | MENU_OPEN_DAEMON_LOGS
+                | MENU_NEW_TERMINAL_TAB
+                | MENU_CLOSE_ACTIVE_TAB
+        ) {
             let _ = app.emit(MENU_EVENT, action);
         }
     });

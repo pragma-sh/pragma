@@ -87,6 +87,7 @@ describe("CreatePullRequestView pre-flight", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     aiAvailableMock = false;
     githubDefaultPrTitle.mockResolvedValue("Seed title");
     githubPushBranch.mockResolvedValue(undefined);
@@ -188,5 +189,19 @@ describe("CreatePullRequestView pre-flight", () => {
     await waitFor(() => expect(aiGeneratePullRequestDraft).toHaveBeenCalledWith("wt1"));
     expect(screen.getByLabelText("Pull request title")).toHaveValue("Generated PR title");
     expect(screen.getByLabelText("Body")).toHaveValue("Generated PR body");
+  });
+
+  it("restores an unfinished form for its worktree after leaving the PR tab", async () => {
+    await renderReady();
+    fireEvent.change(screen.getByLabelText("Pull request title"), {
+      target: { value: "Saved title" },
+    });
+    fireEvent.change(screen.getByLabelText("Body"), { target: { value: "Saved body" } });
+
+    cleanup();
+    render(<CreatePullRequestView onCreated={vi.fn()} repo={repo} worktreeId="wt1" />);
+
+    expect(screen.getByLabelText("Pull request title")).toHaveValue("Saved title");
+    expect(screen.getByLabelText("Body")).toHaveValue("Saved body");
   });
 });

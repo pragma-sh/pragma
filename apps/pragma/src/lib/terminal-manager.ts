@@ -40,6 +40,7 @@ export const TERMINAL_SCROLLBACK_LINES = 500;
 export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 2;
 
 export type TitleListener = (title: string) => void;
+export type ExitListener = (code: number | null) => void;
 
 type TerminalPlatform = "mac" | "linux";
 
@@ -48,6 +49,11 @@ function currentTerminalPlatform(): TerminalPlatform {
 }
 
 function handleTerminalKeyEvent(tabId: string, event: KeyboardEvent): boolean {
+  // xterm runs custom key handlers for both keydown and legacy keypress events.
+  // WebKit can turn both Enter events into terminal input, yielding two CRs.
+  if (event.type === "keypress") {
+    return false;
+  }
   const platform = currentTerminalPlatform();
   if (handleSoftNewline(tabId, event)) {
     return false;
@@ -148,6 +154,10 @@ export class TerminalManager {
   // Storing them inside ManagedTerminal would silently drop subscriptions made
   // before mount() or after a re-parent.
   private titleListeners = new Map<string, Set<TitleListener>>();
+  // Exit listeners are one-shot in practice (a PTY exits once) but follow the
+  // same keyed-Set shape as titleListeners for consistency; cleaned up in
+  // dispose() rather than lingering like title subscriptions do.
+  private exitListeners = new Map<string, Set<ExitListener>>();
 
   mount(tab: Tab, cwd: string, element: HTMLElement): void {
     const existing = this.terminals.get(tab.id);
@@ -338,6 +348,7 @@ export class TerminalManager {
     managed.container.remove();
     this.terminals.delete(tabId);
     this.pendingInput.delete(tabId);
+    this.exitListeners.delete(tabId);
     void ptyKill(tabId);
   }
 
@@ -461,6 +472,30 @@ export class TerminalManager {
     };
   }
 
+  /**
+   * Subscribes to the PTY process exiting for a tab. Fires once, when the
+   * underlying shell exits on its own (not when the tab is closed/disposed
+   * from the UI, since that detaches the channel handler first).
+   */
+  onExit(tabId: string, listener: ExitListener): () => void {
+    let listeners = this.exitListeners.get(tabId);
+    if (!listeners) {
+      listeners = new Set();
+      this.exitListeners.set(tabId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const set = this.exitListeners.get(tabId);
+      if (!set) {
+        return;
+      }
+      set.delete(listener);
+      if (set.size === 0) {
+        this.exitListeners.delete(tabId);
+      }
+    };
+  }
+
   private connect(tab: Tab, cwd: string, managed: ManagedTerminal): void {
     const tabId = tab.id;
     const onEvent = (message: PtyMessage) => {
@@ -480,11 +515,18 @@ export class TerminalManager {
           }
           break;
         }
-        case "exit":
+        case "exit": {
           managed.terminal.writeln(
             `\r\n[process exited${message.code === null ? "" : ` with ${message.code}`}]`,
           );
+          const listeners = this.exitListeners.get(tabId);
+          if (listeners) {
+            for (const listener of listeners) {
+              listener(message.code);
+            }
+          }
           break;
+        }
       }
     };
     const cols = managed.terminal.cols || 80;
