@@ -154,11 +154,21 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+W"),
     )?;
+    // Tauri's default macOS File menu puts Close Window first. Its submenu id is
+    // generated, unlike Window's stable id, so locate it by default-menu position.
+    #[cfg(target_os = "macos")]
+    if let Some(file_menu) = menu
+        .items()?
+        .get(1)
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        file_menu.remove_at(0)?;
+    }
     if let Some(window_menu) = menu
         .get("window")
         .and_then(|item| item.as_submenu().cloned())
     {
-        // The default macOS Window menu owns Cmd+W for closing the window.
+        // The default macOS Window menu also owns Cmd+W for closing the window.
         #[cfg(target_os = "macos")]
         window_menu.remove_at(3)?;
         window_menu.append(&new_terminal_tab)?;
