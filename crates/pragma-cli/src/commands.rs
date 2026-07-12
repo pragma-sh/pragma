@@ -92,7 +92,7 @@ fn worktree_delete(args: &WorktreeDeleteArgs, out: &Output) -> Result<(), CliErr
         }),
     )?;
     out.line(
-        format!("deleted {}", &args.id),
+        format!("deleted {}", args.id),
         &serde_json::json!({ "id": args.id }),
     );
     Ok(())
