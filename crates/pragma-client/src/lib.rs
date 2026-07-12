@@ -83,6 +83,10 @@ pub struct LocalServerConfig {
     channel: String,
     workspace_root: PathBuf,
     debug: bool,
+    /// The app's bundled resource directory, forwarded to the spawned server as
+    /// `PRAGMA_RESOURCE_DIR` so it can resolve staged watcher bundles for
+    /// headless agent launches. `None` outside a bundled app (tests, CLI).
+    resource_dir: Option<PathBuf>,
 }
 
 impl LocalServerConfig {
@@ -93,12 +97,14 @@ impl LocalServerConfig {
         channel: String,
         workspace_root: PathBuf,
         debug: bool,
+        resource_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             app_data_dir,
             channel,
             workspace_root,
             debug,
+            resource_dir,
         }
     }
 }
@@ -657,6 +663,9 @@ impl PragmaClient {
             .env("PRAGMA_DAEMON_CHANNEL", &config.channel)
             .env("PRAGMA_SERVER_CHANNEL", &config.channel)
             .stdin(Stdio::null());
+        if let Some(resource_dir) = &config.resource_dir {
+            command.env("PRAGMA_RESOURCE_DIR", resource_dir);
+        }
         if let Ok(log_file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

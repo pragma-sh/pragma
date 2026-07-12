@@ -414,8 +414,8 @@ pub enum AgentCommand {
     Answer(AgentAnswerPublishArgs),
     /// Block until a question reply arrives for `--request-id`, then print the
     /// answer text on stdout. A blocking harness hook calls this after a `report
-    /// attention --kind question`; on dismiss or timeout it exits non-zero with
-    /// no output so the caller can fall back to its native prompt.
+    /// attention --kind question`; on timeout it exits non-zero with no output
+    /// so the caller can fall back to its native prompt.
     AwaitAnswer(AgentAwaitAnswerArgs),
     /// Publish a free-form interjection for a running agent, fanned out to the
     /// waiting reporter (a harness input hook or a plugin watcher) which
@@ -519,6 +519,10 @@ pub struct AgentAwaitAnswerArgs {
     /// Seconds to wait before giving up. `0` waits indefinitely.
     #[arg(long, default_value_t = 300)]
     pub timeout: u64,
+    /// Print this value and exit successfully when the question is dismissed.
+    /// Without this option, dismissal exits non-zero with no output.
+    #[arg(long = "dismiss-output")]
+    pub dismiss_output: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -569,6 +573,11 @@ pub enum AgentReportCommand {
         /// non-terminal client can review it. Pair with `--kind question`.
         #[arg(long)]
         question: Option<String>,
+        /// Answer choices for a `question` attention, as a JSON array of
+        /// `{"label": "...", "description": "..."}` objects (`description`
+        /// optional). Pair with `--kind question`; omit for free-text.
+        #[arg(long)]
+        options: Option<String>,
         /// Correlation id for the command-approval or question round-trip. Set
         /// this and then call `agent await-decision`/`await-answer
         /// --request-id <id>` to block for the verdict/reply.

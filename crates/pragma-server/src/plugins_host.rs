@@ -25,6 +25,11 @@ use thiserror::Error;
 
 const SIDECAR_NAME: &str = "pragma-plugins";
 
+/// File beside `daemon.sock` holding the last registered plugin roots, so a
+/// server restarted while the desktop app is closed still resolves
+/// project-contributed agents for headless launches.
+const PLUGIN_ROOTS_FILE: &str = "plugin-roots.json";
+
 /// Icons are capped at 256 KB so base64-in-JSON asset delivery stays cheap.
 const ASSET_MAX_BYTES: u64 = 256 * 1024;
 
@@ -47,6 +52,17 @@ pub enum PluginsError {
 struct AssetEntry {
     path: String,
     mime: String,
+}
+
+/// How far catalog loading has progressed. A load sent before the gateway
+/// discovery file exists resolves only static-model agents (dynamic model
+/// providers shell out through the gateway and fail), so it must be retried
+/// once gateway credentials appear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadState {
+    NotStarted,
+    StartedWithoutGateway,
+    StartedWithGateway,
 }
 
 /// Events emitted by the `pragma-plugins` sidecar on stdout.
@@ -76,6 +92,7 @@ pub struct PluginsRegistry {
     catalog: Arc<Mutex<Value>>,
     assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
     roots: Mutex<Vec<String>>,
+    load_state: Mutex<LoadState>,
 }
 
 impl PluginsRegistry {
@@ -83,12 +100,14 @@ impl PluginsRegistry {
         let (tx, rx) = mpsc::channel();
         let catalog = Arc::new(Mutex::new(json!({ "agents": [] })));
         let assets = Arc::new(Mutex::new(HashMap::new()));
+        let roots = load_persisted_roots(&server_dir);
         let registry = Arc::new(Self {
             server_dir,
             sidecar: PluginsSidecar::new(tx),
             catalog: Arc::clone(&catalog),
             assets: Arc::clone(&assets),
-            roots: Mutex::new(Vec::new()),
+            roots: Mutex::new(roots),
+            load_state: Mutex::new(LoadState::NotStarted),
         });
         thread::spawn(move || {
             for event in rx {
@@ -129,14 +148,17 @@ impl PluginsRegistry {
             .and_then(Value::as_str)
             .unwrap_or_default();
         match action {
-            "catalog" => Ok(self.cached_catalog()?),
+            "catalog" => {
+                self.ensure_catalog_fresh()?;
+                Ok(self.cached_catalog()?)
+            }
             "registerRoots" => {
                 self.register_roots(payload)?;
                 Ok(json!({ "ok": true }))
             }
             "readAsset" => self.read_asset(payload),
             "reload" => {
-                self.sidecar.send(&json!({ "type": "reload" }))?;
+                self.reload()?;
                 Ok(json!({ "ok": true }))
             }
             other => Err(PluginsError::InvalidRequest(format!(
@@ -158,43 +180,76 @@ impl PluginsRegistry {
             .get("roots")
             .and_then(|value| serde_json::from_value(value.clone()).ok())
             .unwrap_or_default();
+        persist_roots(&self.server_dir, &roots);
         (*self.roots.lock().map_err(|_| PluginsError::LockPoisoned)?).clone_from(&roots);
-        self.send_load(&roots)
+        self.reload()
     }
 
-    fn send_load(&self, roots: &[String]) -> Result<(), PluginsError> {
-        let (gateway_url, gateway_token) = self.gateway_credentials();
+    /// Re-sends `load` with the current roots and freshly read gateway
+    /// credentials (e.g. after the gateway starts and writes its discovery
+    /// file, so dynamic model providers can finally resolve).
+    fn reload(&self) -> Result<(), PluginsError> {
+        let roots = self
+            .roots
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?
+            .clone();
+        let state = self.send_load(&roots)?;
+        *self
+            .load_state
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)? = state;
+        Ok(())
+    }
+
+    /// Starts catalog assembly on first read, and retries it once gateway
+    /// credentials appear when the first load ran without them (a credential-less
+    /// load drops every agent whose model provider needs the gateway).
+    fn ensure_catalog_fresh(&self) -> Result<(), PluginsError> {
+        let state = *self
+            .load_state
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        match state {
+            LoadState::StartedWithGateway => Ok(()),
+            LoadState::StartedWithoutGateway if self.gateway_credentials().is_none() => Ok(()),
+            LoadState::NotStarted | LoadState::StartedWithoutGateway => self.reload(),
+        }
+    }
+
+    fn send_load(&self, roots: &[String]) -> Result<LoadState, PluginsError> {
+        let credentials = self.gateway_credentials();
+        let state = if credentials.is_some() {
+            LoadState::StartedWithGateway
+        } else {
+            LoadState::StartedWithoutGateway
+        };
+        let (gateway_url, gateway_token) = credentials.unwrap_or_default();
         self.sidecar.send(&json!({
             "type": "load",
             "roots": roots,
             "gatewayUrl": gateway_url,
             "gatewayToken": gateway_token,
-        }))
+        }))?;
+        Ok(state)
     }
 
-    /// Reads the gateway port + token from the discovery file beside the socket.
-    /// A missing gateway yields empty credentials; agents with static models
-    /// still resolve, and a later reload refreshes those needing the gateway.
-    fn gateway_credentials(&self) -> (String, String) {
+    /// Reads the gateway `(url, token)` from the discovery file beside the
+    /// socket, or `None` before the gateway has started. A credential-less load
+    /// still resolves agents with static models; [`Self::ensure_catalog_fresh`]
+    /// retries once credentials appear so gateway-dependent agents recover.
+    fn gateway_credentials(&self) -> Option<(String, String)> {
         let path = self
             .server_dir
             .join(CONSTANTS.gateway.discovery_file.as_str());
-        let Ok(contents) = fs::read_to_string(path) else {
-            return (String::new(), String::new());
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&contents) else {
-            return (String::new(), String::new());
-        };
-        let port = value
-            .get("port")
-            .and_then(Value::as_u64)
-            .unwrap_or_default();
-        let token = value
-            .get("token")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        (format!("http://127.0.0.1:{port}"), token)
+        let contents = fs::read_to_string(path).ok()?;
+        let value = serde_json::from_str::<Value>(&contents).ok()?;
+        let port = value.get("port").and_then(Value::as_u64)?;
+        let token = value.get("token").and_then(Value::as_str)?;
+        if port == 0 || token.is_empty() {
+            return None;
+        }
+        Some((format!("http://127.0.0.1:{port}"), token.to_string()))
     }
 
     fn read_asset(&self, payload: &Value) -> Result<Value, PluginsError> {
@@ -225,6 +280,27 @@ impl PluginsRegistry {
             .map_err(|err| PluginsError::Operation(format!("read asset: {err}")))?;
         let base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
         Ok(json!({ "base64": base64, "mime": entry.mime }))
+    }
+}
+
+/// Reads the persisted plugin roots, or an empty list before the first
+/// `registerRoots` (or when the file is unreadable/corrupt — built-in agents
+/// still resolve without roots).
+fn load_persisted_roots(server_dir: &Path) -> Vec<String> {
+    fs::read_to_string(server_dir.join(PLUGIN_ROOTS_FILE))
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+/// Persists the registered plugin roots beside the socket. Best-effort: a
+/// failed write only costs project-plugin agents after a server restart.
+fn persist_roots(server_dir: &Path, roots: &[String]) {
+    let Ok(contents) = serde_json::to_string(roots) else {
+        return;
+    };
+    if let Err(error) = fs::write(server_dir.join(PLUGIN_ROOTS_FILE), contents) {
+        eprintln!("failed to persist plugin roots: {error}");
     }
 }
 
@@ -416,6 +492,30 @@ mod tests {
         )
         .expect("catalog event must parse");
         assert!(matches!(event, SidecarEvent::Catalog { .. }));
+    }
+
+    #[test]
+    fn gateway_credentials_require_a_real_port_and_token() {
+        let dir =
+            std::env::temp_dir().join(format!("pragma-plugins-creds-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let registry = PluginsRegistry::new(dir.clone());
+        let discovery = dir.join(pragma_constants::CONSTANTS.gateway.discovery_file.as_str());
+        assert!(
+            registry.gateway_credentials().is_none(),
+            "missing discovery file yields no credentials"
+        );
+        std::fs::write(&discovery, r#"{"port":0,"token":""}"#).expect("write discovery");
+        assert!(
+            registry.gateway_credentials().is_none(),
+            "zero port / empty token yields no credentials"
+        );
+        std::fs::write(&discovery, r#"{"port":4242,"token":"abc"}"#).expect("write discovery");
+        assert_eq!(
+            registry.gateway_credentials(),
+            Some(("http://127.0.0.1:4242".to_string(), "abc".to_string()))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

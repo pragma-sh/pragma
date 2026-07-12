@@ -5,17 +5,23 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::ProtocolEventKind;
+use pragma_constants::{
+    AgentSessionLaunchPayload, NewWorktreeSpec, ProtocolEventKind, Tab, TabKind, Worktree,
+};
+use pragma_core::git::GitRequest;
 use pragma_core::watcher::WorktreeWatcher;
 use pragma_protocol::{
     AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
     AgentStatus, ControlResult, EventFrame, WorkspaceSnapshot,
 };
+use serde_json::{json, Value};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::automations::{AutomationError, AutomationsRegistry};
 use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::session::{Session, SessionError};
+use crate::tunnel::{TunnelError, TunnelRegistry};
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -37,16 +43,32 @@ pub enum RegistryError {
 /// `Control` envelopes to.
 pub type ControllerWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
 
+/// File beside `daemon.sock` holding the last published workspace snapshot.
+/// Persisted so controller-free (headless) agent launches keep working after
+/// the server restarts while the desktop app stays closed.
+const WORKSPACE_SNAPSHOT_FILE: &str = "workspace.json";
+
 const AGENT_DECISION_REPLAY_WINDOW: Duration = Duration::from_secs(5);
 const AGENT_DECISION_REPLAY_LIMIT: usize = 64;
-
+/// Newest chat messages retained per agent session for subscriber replay, so a
+/// client attaching mid-session (a paired phone opening a chat) sees the
+/// conversation so far instead of an empty transcript.
+const AGENT_MESSAGE_REPLAY_LIMIT: usize = 200;
 pub struct Registry {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     socket_path: PathBuf,
+    /// Directory beside the socket where server-owned state (the persisted
+    /// workspace snapshot) lives.
+    server_dir: PathBuf,
     agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
     recent_agent_decisions: Mutex<Vec<RecentAgentDecision>>,
     recent_agent_answers: Mutex<Vec<RecentAgentAnswer>>,
+    /// Chat-message history per live agent session (bounded, newest kept),
+    /// replayed to new agent subscribers. Dropped with the session's tab.
+    recent_agent_messages: Mutex<HashMap<AgentKey, Vec<AgentMessage>>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
+    /// Subscribers to durable agent-status snapshots for generic protocol clients.
+    agent_status_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     // `Arc`-wrapped (rather than a bare `Mutex`) so a watcher's own callback
     // can hold a handle back to this map and remove its own entry once its
     // last subscriber disconnects — see `start_file_watcher`.
@@ -67,9 +89,97 @@ pub struct Registry {
     workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
+    tunnel: Arc<TunnelRegistry>,
 }
 
 type AgentKey = (String, String, String);
+
+fn optional_str(value: &Value) -> Option<&str> {
+    if value.is_null() {
+        None
+    } else {
+        value.as_str()
+    }
+}
+
+/// Reads the persisted workspace snapshot from `server_dir`, or `None` when no
+/// snapshot has ever been published (or the file is unreadable/corrupt — a
+/// stale mirror is strictly worse than an empty one the desktop republishes).
+fn load_workspace_snapshot(server_dir: &Path) -> Option<WorkspaceSnapshot> {
+    let contents = std::fs::read_to_string(server_dir.join(WORKSPACE_SNAPSHOT_FILE)).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+/// Persists the workspace snapshot beside the socket. Best-effort: a failed
+/// write only costs headless launches after a future server restart.
+fn persist_workspace_snapshot(server_dir: &Path, snapshot: &WorkspaceSnapshot) {
+    let Ok(contents) = serde_json::to_string(snapshot) else {
+        return;
+    };
+    if let Err(error) = std::fs::write(server_dir.join(WORKSPACE_SNAPSHOT_FILE), contents) {
+        eprintln!("failed to persist workspace snapshot: {error}");
+    }
+}
+
+/// Runs one `pragma-core` git operation locally (the same operations the
+/// desktop routes through host RPC), mapping failures to launch errors.
+fn run_core_git(request: &GitRequest) -> Result<(), String> {
+    let payload = serde_json::to_value(request).map_err(|error| error.to_string())?;
+    pragma_core::git::handle(payload)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+/// UTC timestamp in the `YYYY-MM-DD HH:MM:SS` format the desktop's `SQLite`
+/// rows use, so headless-created snapshot rows sort alongside DB-created ones.
+fn now_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_./:=@+-".contains(&byte))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn schedule_agent_launch(session: &Session, launch: &Value, command: &str, prompt: Option<&str>) {
+    thread::sleep(Duration::from_millis(
+        pragma_constants::CONSTANTS.agents.start_delay_ms,
+    ));
+    let _ = session.write(&format!("{command}\r"));
+    let mut elapsed_ms = 0;
+    for input in launch["startupInput"].as_array().into_iter().flatten() {
+        let delay_ms = input["delayMs"].as_u64().unwrap_or(0);
+        thread::sleep(Duration::from_millis(delay_ms.saturating_sub(elapsed_ms)));
+        elapsed_ms = elapsed_ms.max(delay_ms);
+        if let Some(data) = input["data"].as_str() {
+            let _ = session.write(data);
+        }
+    }
+    let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) else {
+        return;
+    };
+    let prefill_delay_ms = launch["prefillDelayMs"].as_u64().unwrap_or(2_500);
+    thread::sleep(Duration::from_millis(
+        prefill_delay_ms.saturating_sub(elapsed_ms),
+    ));
+    let body = if launch["prefillMode"] == "plain" {
+        prompt.to_string()
+    } else {
+        format!("\u{1b}[200~{prompt}\u{1b}[201~")
+    };
+    let _ = session.write(&body);
+    thread::sleep(Duration::from_millis(
+        launch["prefillSubmitDelayMs"].as_u64().unwrap_or(200),
+    ));
+    let _ = session.write(launch["prefillSubmit"].as_str().unwrap_or("\r"));
+}
 
 struct RecentAgentDecision {
     decision: AgentDecision,
@@ -110,15 +220,26 @@ impl Registry {
             agent_statuses: Mutex::new(HashMap::new()),
             recent_agent_decisions: Mutex::new(Vec::new()),
             recent_agent_answers: Mutex::new(Vec::new()),
+            recent_agent_messages: Mutex::new(HashMap::new()),
             agent_subscribers: Mutex::new(Vec::new()),
+            agent_status_subscribers: Mutex::new(Vec::new()),
             file_watchers: Arc::new(Mutex::new(HashMap::new())),
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
-            workspace: Mutex::new(None),
+            workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
-            plugins: PluginsRegistry::new(server_dir),
+            plugins: PluginsRegistry::new(server_dir.clone()),
+            tunnel: TunnelRegistry::new(server_dir.clone()),
+            server_dir,
         }
+    }
+
+    pub fn handle_tunnel_rpc(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, TunnelError> {
+        self.tunnel.handle_rpc(payload)
     }
 
     /// Routes a `plugins` RPC (catalog, registerRoots, readAsset, reload) to the
@@ -155,6 +276,7 @@ impl Registry {
     /// optimization. Mirrors `broadcast_agent`: dead subscribers are pruned.
     pub fn publish_workspace(&self, snapshot: WorkspaceSnapshot) {
         let payload = serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null);
+        persist_workspace_snapshot(&self.server_dir, &snapshot);
         if let Ok(mut guard) = self.workspace.lock() {
             *guard = Some(snapshot);
         }
@@ -164,6 +286,263 @@ impl Registry {
         });
     }
 
+    /// Applies a server-originated mutation (a headless launch creating a
+    /// worktree/tab) to the mirrored snapshot, persists it, and fans the full
+    /// replacement out to workspace subscribers — so a paired phone sees the
+    /// new rows immediately even though the desktop app is closed. The desktop
+    /// remains the source of truth: its next publish replaces this snapshot
+    /// (it adopts headless worktrees from disk before publishing).
+    fn mutate_workspace(&self, mutate: impl FnOnce(&mut WorkspaceSnapshot)) -> Result<(), String> {
+        let payload = {
+            let mut guard = self
+                .workspace
+                .lock()
+                .map_err(|_| "workspace lock poisoned".to_string())?;
+            let snapshot = guard
+                .as_mut()
+                .ok_or_else(|| "desktop has not published a workspace snapshot".to_string())?;
+            mutate(snapshot);
+            persist_workspace_snapshot(&self.server_dir, snapshot);
+            serde_json::to_value(&*snapshot).unwrap_or(serde_json::Value::Null)
+        };
+        self.broadcast_workspace(&EventFrame::Delta {
+            subscription: ProtocolEventKind::Workspace,
+            payload,
+        });
+        Ok(())
+    }
+
+    /// Launches an agent when no desktop controller is connected: resolves an
+    /// existing mirrored worktree — or creates a fresh git worktree via
+    /// `pragma-core` — spawns the PTY, schedules the agent's startup/prefill
+    /// input, and merges the new worktree/tab into the mirrored snapshot so a
+    /// paired phone sees them immediately. The desktop adopts headless-created
+    /// worktrees from disk on its next publish.
+    pub fn launch_agent_headless(&self, payload: Value) -> Result<Value, String> {
+        let args: AgentSessionLaunchPayload =
+            serde_json::from_value(payload).map_err(|error| error.to_string())?;
+        let (worktree_id, cwd) = match (args.worktree_id, args.new_worktree) {
+            (Some(_), Some(_)) => {
+                return Err(
+                    "agentSessionLaunch: provide either worktreeId or newWorktree, not both"
+                        .to_string(),
+                );
+            }
+            (None, None) => {
+                return Err("agentSessionLaunch: worktreeId or newWorktree is required".to_string());
+            }
+            (Some(id), None) => {
+                let cwd = self.mirrored_worktree_path(&args.project_id, &id)?;
+                (id, cwd)
+            }
+            (None, Some(spec)) => self.create_worktree_headless(&args.project_id, &spec)?,
+        };
+        let (plugin_id, launch, command) = self.resolve_agent_launch(
+            &args.agent_id,
+            args.model_id.as_deref(),
+            args.reasoning_id.as_deref(),
+        )?;
+        let tab_id = Uuid::new_v4().to_string();
+        let _events = self
+            .spawn(tab_id.clone(), worktree_id.clone(), cwd, 120, 40)
+            .map_err(|error| error.to_string())?;
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| "sessions lock poisoned".to_string())?
+            .get(&tab_id)
+            .cloned()
+            .ok_or_else(|| "spawned session disappeared".to_string())?;
+        crate::watchers::start_for_headless_launch(
+            &self.server_dir,
+            Some(&plugin_id),
+            &args.agent_id,
+            &tab_id,
+            &worktree_id,
+        );
+        let prompt = args.prompt;
+        thread::spawn(move || {
+            schedule_agent_launch(&session, &launch, &command, prompt.as_deref());
+        });
+        self.append_mirrored_tab(&args.project_id, &worktree_id, &tab_id);
+        Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
+    }
+
+    /// Resolves an existing worktree's path from the mirrored snapshot.
+    fn mirrored_worktree_path(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+    ) -> Result<String, String> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?;
+        let snapshot = workspace
+            .as_ref()
+            .ok_or_else(|| "desktop has not published a workspace snapshot".to_string())?;
+        snapshot
+            .worktrees
+            .iter()
+            .find(|worktree| worktree.id == worktree_id && worktree.project_id == project_id)
+            .map(|worktree| worktree.path.clone())
+            .ok_or_else(|| "worktree is not present in mirrored workspace".to_string())
+    }
+
+    /// Creates a fresh git worktree for a headless launch, mirroring the
+    /// desktop's layout (`<project>/.pragma/worktrees/<uuid>`, new branch
+    /// forked from the parent worktree) through the same `pragma-core` git
+    /// operations, then merges it into the mirrored snapshot. Returns the new
+    /// `(worktreeId, path)`.
+    fn create_worktree_headless(
+        &self,
+        project_id: &str,
+        spec: &NewWorktreeSpec,
+    ) -> Result<(String, String), String> {
+        let branch = spec.branch.trim();
+        if branch.is_empty() {
+            return Err("branch is required".to_string());
+        }
+        let (project_path, parent) = {
+            let workspace = self
+                .workspace
+                .lock()
+                .map_err(|_| "workspace lock poisoned".to_string())?;
+            let snapshot = workspace
+                .as_ref()
+                .ok_or_else(|| "desktop has not published a workspace snapshot".to_string())?;
+            let project_path = snapshot
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .map(|project| project.path.clone())
+                .ok_or_else(|| "project is not present in mirrored workspace".to_string())?;
+            let parent = snapshot
+                .worktrees
+                .iter()
+                .find(|worktree| {
+                    worktree.id == spec.parent_worktree_id && worktree.project_id == project_id
+                })
+                .cloned()
+                .ok_or_else(|| {
+                    "parent worktree is not present in mirrored workspace".to_string()
+                })?;
+            (project_path, parent)
+        };
+        let worktree_id = Uuid::new_v4().to_string();
+        let path = Path::new(&project_path)
+            .join(".pragma/worktrees")
+            .join(&worktree_id)
+            .to_string_lossy()
+            .into_owned();
+        run_core_git(&GitRequest::EnsurePragmaExcluded {
+            project_root: project_path,
+        })?;
+        run_core_git(&GitRequest::CreateWorktree {
+            parent_root: parent.path,
+            branch: branch.to_string(),
+            path: path.clone(),
+        })?;
+        let worktree = Worktree {
+            id: worktree_id.clone(),
+            project_id: project_id.to_string(),
+            parent_id: Some(parent.id),
+            branch: branch.to_string(),
+            title: spec
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_string),
+            path: path.clone(),
+            is_main: false,
+            hidden: false,
+            created_at: now_timestamp(),
+        };
+        self.mutate_workspace(|snapshot| snapshot.worktrees.push(worktree))?;
+        Ok((worktree_id, path))
+    }
+
+    /// Merges the headless launch's terminal tab into the mirrored snapshot so
+    /// remote subscribers can render it. Best-effort: the desktop's next
+    /// publish replaces the snapshot with its own durable rows.
+    fn append_mirrored_tab(&self, project_id: &str, worktree_id: &str, tab_id: &str) {
+        let tab = Tab {
+            id: tab_id.to_string(),
+            project_id: project_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            kind: TabKind::Terminal,
+            title: None,
+            url: None,
+            file_path: None,
+            diff_side: None,
+            pr_number: None,
+            plugin_id: None,
+            plugin_view_id: None,
+            plugin_payload: None,
+            plugin_dedupe_key: None,
+            user_renamed: false,
+            order_index: 0,
+            created_at: now_timestamp(),
+        };
+        if let Err(error) = self.mutate_workspace(|snapshot| {
+            let next_index = snapshot
+                .tabs
+                .iter()
+                .filter(|existing| existing.worktree_id == worktree_id)
+                .map(|existing| existing.order_index)
+                .max()
+                .map_or(0, |max| max + 1);
+            snapshot.tabs.push(Tab {
+                order_index: next_index,
+                ..tab
+            });
+        }) {
+            eprintln!("headless launch: failed to mirror tab {tab_id}: {error}");
+        }
+    }
+
+    /// Resolves an agent's launch spec + shell command from the plugin catalog
+    /// for the selected model/reasoning combination.
+    fn resolve_agent_launch(
+        &self,
+        agent_id: &str,
+        model_id: Option<&str>,
+        reasoning_id: Option<&str>,
+    ) -> Result<(String, Value, String), String> {
+        let catalog = self
+            .plugins
+            .handle_rpc(&json!({ "action": "catalog" }))
+            .map_err(|error| error.to_string())?;
+        let agent = catalog["agents"]
+            .as_array()
+            .and_then(|agents| agents.iter().find(|agent| agent["id"] == agent_id))
+            .ok_or_else(|| format!("agent not found: {agent_id}"))?;
+        let command = agent["launch"]["commands"]
+            .as_array()
+            .and_then(|commands| {
+                commands.iter().find(|command| {
+                    optional_str(&command["modelId"]) == model_id
+                        && optional_str(&command["reasoningId"]) == reasoning_id
+                })
+            })
+            .and_then(|launch| launch["command"].as_array())
+            .ok_or_else(|| "agent launch command does not match selected model".to_string())?
+            .iter()
+            .map(|part| {
+                part.as_str()
+                    .map(shell_quote)
+                    .ok_or_else(|| "agent launch command contains non-string".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .join(" ");
+        let plugin_id = agent["pluginId"]
+            .as_str()
+            .ok_or_else(|| "agent catalog entry has no plugin id".to_string())?
+            .to_string();
+        Ok((plugin_id, agent["launch"].clone(), command))
+    }
+
     /// Subscribes to the workspace snapshot-then-delta stream. The snapshot is
     /// the cached mirror, or an empty payload when the desktop has not yet
     /// published. Mirrors `subscribe_agents`.
@@ -171,20 +550,28 @@ impl Registry {
         &self,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
         let (tx, rx) = mpsc::channel();
-        let mut subscribers = self
-            .workspace_subscribers
-            .lock()
-            .map_err(|_| RegistryError::LockPoisoned)?;
-        subscribers.push(tx);
-        let snapshot = self
-            .workspace
-            .lock()
-            .map_err(|_| RegistryError::LockPoisoned)?
-            .as_ref()
-            .map_or_else(
+        // Lock the workspace snapshot first, then the subscriber list. This
+        // matches the order used by `publish_workspace` (workspace ->
+        // subscribers) and prevents a deadlock when a publish races with a new
+        // subscription. The subscriber is added while the workspace guard is
+        // still held so a concurrent publish cannot update the snapshot and
+        // broadcast before this subscriber is registered.
+        let snapshot = {
+            let workspace = self
+                .workspace
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            let snapshot = workspace.as_ref().map_or_else(
                 || serde_json::json!({ "projects": [], "worktrees": [], "tabs": [] }),
                 |snapshot| serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null),
             );
+            let mut subscribers = self
+                .workspace_subscribers
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            subscribers.push(tx);
+            snapshot
+        };
         Ok((
             vec![EventFrame::Snapshot {
                 subscription: ProtocolEventKind::Workspace,
@@ -356,26 +743,88 @@ impl Registry {
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
-        // `cleared` is a transient removal signal, not a stored state: drop the
-        // entry so a reconnecting subscriber's snapshot omits it, then broadcast
-        // the cleared event so live subscribers remove their indicator.
-        if matches!(payload.status, AgentStatus::Cleared) {
-            statuses.remove(&key);
-        } else {
-            statuses.insert(key, payload);
-        }
+        // `cleared` is stored like every other status: it marks an idle-but-live
+        // agent session (a fresh TUI before its first turn, or a finished one),
+        // so a late subscriber — e.g. a paired phone's worktree list — still
+        // sees that the session exists. Live subscribers keep treating the
+        // broadcast `cleared` event as "remove the indicator". Entries are
+        // removed when the hosting tab's session exits
+        // ([`Self::clear_agents_for_tab`]).
+        statuses.insert(key, payload);
         drop(statuses);
         self.broadcast_agent(&event);
+        self.broadcast_agent_status()?;
         Ok(())
     }
 
+    /// Subscribes to a snapshot-then-replacement stream of all live agent statuses.
+    pub fn subscribe_agent_status(
+        &self,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        let (tx, rx) = mpsc::channel();
+        let statuses = self
+            .agent_statuses
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let snapshot = serde_json::to_value(statuses.values().collect::<Vec<_>>())
+            .unwrap_or(serde_json::Value::Null);
+        self.agent_status_subscribers
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .push(tx);
+        Ok((
+            vec![EventFrame::Snapshot {
+                subscription: ProtocolEventKind::AgentStatus,
+                payload: snapshot,
+            }],
+            rx,
+        ))
+    }
+
+    /// Fans the complete live-status replacement so cleared reports remove stale inbox items.
+    fn broadcast_agent_status(&self) -> Result<(), RegistryError> {
+        let statuses = self
+            .agent_statuses
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let event = EventFrame::Delta {
+            subscription: ProtocolEventKind::AgentStatus,
+            payload: serde_json::to_value(statuses.values().collect::<Vec<_>>())
+                .unwrap_or(serde_json::Value::Null),
+        };
+        drop(statuses);
+        if let Ok(mut subscribers) = self.agent_status_subscribers.lock() {
+            subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+        }
+        Ok(())
+    }
+
+    /// Fans a chat message out to agent subscribers and appends it to the
+    /// session's bounded replay buffer so late subscribers get the transcript.
     pub fn report_agent_message(&self, message: AgentMessage) {
+        self.remember_agent_message(&message);
         self.broadcast_agent(&EventFrame::AgentMessage { message });
     }
 
-    /// Fans a free-form interjection out to agent subscribers. Transient like a
-    /// message: the target agent's watcher is already long-lived by the time a
-    /// user interjects, so no replay window is needed.
+    fn remember_agent_message(&self, message: &AgentMessage) {
+        let Ok(mut messages) = self.recent_agent_messages.lock() else {
+            return;
+        };
+        let key = (
+            message.worktree_id.clone(),
+            message.tab_id.clone(),
+            message.agent.clone(),
+        );
+        let buffer = messages.entry(key).or_default();
+        buffer.push(message.clone());
+        let excess = buffer.len().saturating_sub(AGENT_MESSAGE_REPLAY_LIMIT);
+        if excess > 0 {
+            buffer.drain(..excess);
+        }
+    }
+
+    /// Fans a free-form interjection out to agent subscribers. Desktop and
+    /// headless launches both run watchers that own TUI-specific delivery.
     pub fn report_agent_input(&self, input: AgentInput) {
         self.broadcast_agent(&EventFrame::AgentInput { input });
     }
@@ -460,6 +909,16 @@ impl Registry {
         snapshot.extend(answers.iter().map(|entry| EventFrame::AgentAnswer {
             answer: entry.answer.clone(),
         }));
+        if let Ok(messages) = self.recent_agent_messages.lock() {
+            snapshot.extend(
+                messages
+                    .values()
+                    .flatten()
+                    .map(|message| EventFrame::AgentMessage {
+                        message: message.clone(),
+                    }),
+            );
+        }
         Ok((snapshot, rx))
     }
 
@@ -586,19 +1045,25 @@ impl Registry {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
             statuses.retain(|(_, status_tab_id, _), _| status_tab_id != tab_id);
         }
+        if let Ok(mut messages) = self.recent_agent_messages.lock() {
+            messages.retain(|(_, message_tab_id, _), _| message_tab_id != tab_id);
+        }
     }
 
-    /// Drops a tab's resolved (`done`) agent statuses once the user has viewed
-    /// the tab, so the server stops replaying them on the next subscriber
-    /// reconnect. `running`/`attention` are kept — they persist until the agent
+    /// Downgrades a tab's resolved (`done`) agent statuses to `cleared` once the
+    /// user has viewed the tab, so the server stops replaying the green dot on
+    /// the next subscriber reconnect while the session itself stays listed as
+    /// idle. `running`/`attention` are kept — they persist until the agent
     /// itself moves on. Unlike a `cleared` report this does **not** broadcast: the
     /// viewing client has already dropped the green dot locally, so the sole
     /// purpose here is to keep a *seen* `done` out of future snapshots.
     pub fn mark_agents_seen_for_tab(&self, tab_id: &str) {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
-            statuses.retain(|(_, status_tab_id, _), payload| {
-                status_tab_id != tab_id || !matches!(payload.status, AgentStatus::Done)
-            });
+            for ((_, status_tab_id, _), payload) in statuses.iter_mut() {
+                if status_tab_id == tab_id && matches!(payload.status, AgentStatus::Done) {
+                    payload.status = AgentStatus::Cleared;
+                }
+            }
         }
     }
 
@@ -728,6 +1193,13 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
         attention_kind: payload.attention_kind,
         command: payload.command.clone(),
         question: payload.question.clone(),
+        // typify models optional schema arrays as `Vec` (default empty); the
+        // wire event keeps `Option` so absent options stay omitted on the wire.
+        options: if payload.options.is_empty() {
+            None
+        } else {
+            Some(payload.options.clone())
+        },
         request_id: payload.request_id.clone(),
     }
 }
@@ -746,13 +1218,146 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
+    use pragma_constants::{NewWorktreeSpec, Project, Worktree};
     use pragma_protocol::{
-        AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentReportPayload, AgentStatus,
-        ControlResult, EventFrame,
+        AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
+        AgentStatus, ControlResult, EventFrame, WorkspaceSnapshot,
     };
     use tempfile::tempdir;
 
     use super::{RecentAgentAnswer, RecentAgentDecision, Registry, AGENT_DECISION_REPLAY_WINDOW};
+
+    /// A registry rooted in its own private directory, so persistence tests do
+    /// not bleed state through the process-wide `Default` directory.
+    fn registry_in(dir: &std::path::Path) -> Registry {
+        Registry::new(
+            dir.join("daemon.sock"),
+            dir.to_path_buf(),
+            std::path::PathBuf::new(),
+        )
+    }
+
+    fn snapshot_with_project(project_path: &str) -> WorkspaceSnapshot {
+        WorkspaceSnapshot {
+            projects: vec![Project {
+                id: "project-1".to_string(),
+                name: "sandbox".to_string(),
+                path: project_path.to_string(),
+                order_index: 0,
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }],
+            worktrees: vec![Worktree {
+                id: "worktree-main".to_string(),
+                project_id: "project-1".to_string(),
+                parent_id: None,
+                branch: "main".to_string(),
+                title: None,
+                path: project_path.to_string(),
+                is_main: true,
+                hidden: false,
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }],
+            tabs: vec![],
+        }
+    }
+
+    #[test]
+    fn published_workspace_snapshot_survives_a_server_restart() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_project("/tmp/sandbox"));
+        drop(registry);
+
+        let reloaded = registry_in(dir.path());
+        let (snapshot, _rx) = reloaded.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        assert_eq!(payload["projects"][0]["id"], "project-1");
+        assert_eq!(payload["worktrees"][0]["id"], "worktree-main");
+    }
+
+    #[test]
+    fn headless_new_worktree_creates_a_git_checkout_and_mirrors_it() {
+        let repo = tempdir().expect("repo dir");
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["init", "-b", "main"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        std::fs::write(repo.path().join("README.md"), "hello").expect("write file");
+        run(&["add", "."]);
+        run(&["commit", "-m", "init"]);
+
+        let server_dir = tempdir().expect("server dir");
+        let registry = registry_in(server_dir.path());
+        let project_path = repo.path().to_string_lossy().into_owned();
+        registry.publish_workspace(snapshot_with_project(&project_path));
+
+        let (worktree_id, path) = registry
+            .create_worktree_headless(
+                "project-1",
+                &NewWorktreeSpec {
+                    parent_worktree_id: "worktree-main".to_string(),
+                    branch: "from-mobile".to_string(),
+                    title: Some("From mobile".to_string()),
+                },
+            )
+            .expect("headless worktree creation");
+
+        assert!(
+            std::path::Path::new(&path).join(".git").exists(),
+            "git checkout should exist at {path}"
+        );
+        assert!(path.ends_with(&worktree_id), "path is named by worktree id");
+
+        // The mirrored snapshot gained the worktree and persisted it for the
+        // next server process.
+        let reloaded = registry_in(server_dir.path());
+        let (snapshot, _rx) = reloaded.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        let worktrees = payload["worktrees"].as_array().expect("worktrees array");
+        let adopted = worktrees
+            .iter()
+            .find(|worktree| worktree["id"] == worktree_id.as_str())
+            .expect("new worktree mirrored");
+        assert_eq!(adopted["branch"], "from-mobile");
+        assert_eq!(adopted["title"], "From mobile");
+        assert_eq!(adopted["parentId"], "worktree-main");
+    }
+
+    #[test]
+    fn headless_new_worktree_requires_a_known_parent() {
+        let server_dir = tempdir().expect("server dir");
+        let registry = registry_in(server_dir.path());
+        registry.publish_workspace(snapshot_with_project("/tmp/sandbox"));
+        let error = registry
+            .create_worktree_headless(
+                "project-1",
+                &NewWorktreeSpec {
+                    parent_worktree_id: "missing".to_string(),
+                    branch: "branch".to_string(),
+                    title: None,
+                },
+            )
+            .expect_err("unknown parent must fail");
+        assert!(error.contains("parent worktree"), "got: {error}");
+    }
 
     fn agent_payload(status: AgentStatus) -> AgentReportPayload {
         AgentReportPayload {
@@ -763,8 +1368,44 @@ mod tests {
             attention_kind: None,
             command: None,
             question: None,
+            options: vec![],
             request_id: None,
         }
+    }
+
+    #[test]
+    fn agent_messages_replay_to_late_subscribers_and_drop_with_the_tab() {
+        let registry = Registry::default();
+        let message: AgentMessage = serde_json::from_value(serde_json::json!({
+            "agent": "claude-code",
+            "worktreeId": "worktree-1",
+            "tabId": "tab-1",
+            "id": "msg-1",
+            "role": "assistant",
+            "text": "All done.",
+            "subAgentsActive": 0,
+            "ts": 1,
+        }))
+        .expect("valid message");
+        registry.report_agent_message(message);
+
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            snapshot.iter().any(|event| matches!(
+                event,
+                EventFrame::AgentMessage { message } if message.text.as_deref() == Some("All done.")
+            )),
+            "late subscribers should see the buffered chat message"
+        );
+
+        registry.clear_agents_for_tab("tab-1");
+        let (after, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            !after
+                .iter()
+                .any(|event| matches!(event, EventFrame::AgentMessage { .. })),
+            "closing the tab drops its chat history"
+        );
     }
 
     fn agent_decision(request_id: &str) -> AgentDecision {
@@ -778,7 +1419,7 @@ mod tests {
     }
 
     #[test]
-    fn cleared_report_removes_the_stored_status() {
+    fn cleared_report_stores_an_idle_status() {
         let registry = Registry::default();
         registry
             .report_agent(agent_payload(AgentStatus::Running))
@@ -788,12 +1429,46 @@ mod tests {
 
         registry
             .report_agent(agent_payload(AgentStatus::Cleared))
-            .expect("cleared report should remove");
+            .expect("cleared report should store");
         let (after, _rx) = registry.subscribe_agents().expect("subscribe");
         assert!(
-            after.is_empty(),
-            "cleared status must not linger in the snapshot"
+            matches!(
+                after.as_slice(),
+                [EventFrame::Agent {
+                    status: AgentStatus::Cleared,
+                    ..
+                }]
+            ),
+            "cleared keeps the session listed as idle so late subscribers see it exists"
         );
+    }
+
+    #[test]
+    fn agent_status_subscription_replays_and_updates_full_statuses() {
+        let registry = Registry::default();
+        registry
+            .report_agent(agent_payload(AgentStatus::Running))
+            .expect("running report should store");
+
+        let (snapshot, rx) = registry
+            .subscribe_agent_status()
+            .expect("agent status subscription should start");
+        assert!(matches!(
+            snapshot.as_slice(),
+            [EventFrame::Snapshot { payload, .. }] if payload.as_array().is_some_and(|items| items.len() == 1)
+        ));
+
+        registry
+            .report_agent(agent_payload(AgentStatus::Cleared))
+            .expect("cleared report should publish");
+        let update = rx.recv().expect("status update should reach subscriber");
+        assert!(matches!(
+            update,
+            EventFrame::Delta { payload, .. }
+                if payload.as_array().is_some_and(|items| {
+                    items.len() == 1 && items[0]["status"] == "cleared"
+                })
+        ));
     }
 
     #[test]
@@ -891,6 +1566,28 @@ mod tests {
     }
 
     #[test]
+    fn report_agent_input_fans_out_without_a_controller() {
+        let (registry, session_id, _dir) = spawn_session();
+        let (_snapshot, agent_rx) = registry.subscribe_agents().expect("subscribe");
+
+        registry.report_agent_input(AgentInput {
+            agent: "opencode".to_string(),
+            worktree_id: "worktree-1".to_string(),
+            tab_id: session_id.clone(),
+            text: "printf __HEADLESS_REPLY__".to_string(),
+            request_id: None,
+        });
+
+        match agent_rx.recv().expect("input event") {
+            EventFrame::AgentInput { input } => {
+                assert_eq!(input.tab_id, session_id);
+                assert_eq!(input.text, "printf __HEADLESS_REPLY__");
+            }
+            other => panic!("expected input event, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn report_agent_interrupt_fans_out_to_subscribers() {
         let registry = Registry::default();
         let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
@@ -980,7 +1677,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_seen_drops_only_done_statuses_for_the_tab() {
+    fn mark_seen_downgrades_only_done_statuses_for_the_tab() {
         let registry = Registry::default();
         let payload = |tab: &str, agent: &str, status| AgentReportPayload {
             agent: agent.to_string(),
@@ -990,6 +1687,7 @@ mod tests {
             attention_kind: None,
             command: None,
             question: None,
+            options: vec![],
             request_id: None,
         };
         registry
@@ -1012,14 +1710,18 @@ mod tests {
                 _ => None,
             })
             .collect();
-        remaining.sort_by(|a, b| a.0.cmp(&b.0));
+        remaining.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(format!("{:?}", a.1).cmp(&format!("{:?}", b.1)))
+        });
         assert_eq!(
             remaining,
             vec![
+                ("tab-1".to_string(), AgentStatus::Cleared),
                 ("tab-1".to_string(), AgentStatus::Running),
                 ("tab-2".to_string(), AgentStatus::Done),
             ],
-            "only tab-1's done is dropped; its running and other tabs survive"
+            "only tab-1's done downgrades to idle; its running and other tabs survive"
         );
     }
 
@@ -1215,6 +1917,7 @@ mod tests {
                 attention_kind: None,
                 command: None,
                 question: None,
+                options: vec![],
                 request_id: None,
             })
             .expect("report agent");
