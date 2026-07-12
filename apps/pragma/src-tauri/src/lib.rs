@@ -136,8 +136,8 @@ fn install_deep_links(app: &tauri::App) {
 }
 
 /// Installs the application menu plus Pragma tab and troubleshooting actions.
-/// Native accelerators must be menu items: macOS consumes Cmd+W before WebView
-/// listeners see it, and WebKit may consume Cmd+T for a browser tab.
+/// Native accelerators must be menu items: macOS consumes Cmd+W before `WebView`
+/// listeners see it, and `WebKit` may consume Cmd+T for a browser tab.
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
     let new_terminal_tab = MenuItem::with_id(
