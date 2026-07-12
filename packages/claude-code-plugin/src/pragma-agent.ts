@@ -1,4 +1,4 @@
-import { defineAgent, definePlugin, type PluginDefinition } from "@pragma/plugin";
+import { defineAgent, definePlugin, type PluginDefinition } from "@pragma/plugin/catalog";
 
 /** Absolute filesystem path to this plugin's agent icon. */
 export const claudeCodeIconPath = new URL("../assets/claude-code.svg", import.meta.url).pathname;

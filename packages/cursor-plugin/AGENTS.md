@@ -58,8 +58,9 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 | ---------------------- | ------------------- | --------------------------------------------------------------------------------- |
 | `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)                                      |
 | `sessionEnd`           | `cleared`           | `cleared`                                                                         |
-| `beforeSubmitPrompt`   | `started`           | `started` (sets the turn marker)                                                  |
-| `stop`                 | `stopped`           | `stopped`                                                                         |
+| `beforeSubmitPrompt`   | `started`           | `started` + user prompt message (sets the turn marker)                            |
+| `afterAgentResponse`   | `response`          | Assistant response message                                                        |
+| `stop`                 | `stopped`           | `stopped`; `cleared` when Cursor reports `aborted` or `error`                     |
 | `beforeShellExecution` | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
 | `beforeMCPExecution`   | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
 | `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red)                           |

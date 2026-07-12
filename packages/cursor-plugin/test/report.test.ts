@@ -85,6 +85,16 @@ function reportCalls(): string[] {
   return calls().filter((line) => line.startsWith("agent report "));
 }
 
+function messagePayloads(): Array<{ role: string; text: string }> {
+  const flag = "--payload ";
+  return calls()
+    .filter((line) => line.startsWith("agent message "))
+    .map(
+      (line) =>
+        JSON.parse(line.slice(line.indexOf(flag) + flag.length)) as { role: string; text: string },
+    );
+}
+
 describe("cursor report.sh", () => {
   it("no-ops outside Pragma", () => {
     run("started", { socket: false });
@@ -96,6 +106,13 @@ describe("cursor report.sh", () => {
     run("started");
     expect(reportCalls()).toEqual(["agent report --agent cursor started"]);
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("surfaces the submitted prompt as a user message", () => {
+    run("started", { stdin: JSON.stringify({ prompt: 'Fix the "auth" bug' }) });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "user", text: 'Fix the "auth" bug' }),
+    );
   });
 
   it("uses PRAGMA_CLI when it is set", () => {
@@ -115,14 +132,34 @@ describe("cursor report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  it("surfaces agent responses as assistant messages", () => {
+    run("started");
+    run("response", { stdin: JSON.stringify({ text: "Implemented the fix." }) });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "Implemented the fix." }),
+    );
+  });
+
+  it.each(["aborted", "error"])("clears an %s turn instead of reporting completion", (status) => {
+    run("started");
+    run("stopped", { stdin: JSON.stringify({ status }) });
+    expect(reportCalls()).toEqual([
+      "agent report --agent cursor started",
+      "agent report --agent cursor cleared",
+    ]);
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
   it("reports cleared", () => {
     run("started");
+    const messagesBeforeClear = messagePayloads();
     run("cleared");
     expect(reportCalls()).toEqual([
       "agent report --agent cursor started",
       "agent report --agent cursor cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
+    expect(messagePayloads()).toEqual(messagesBeforeClear);
   });
 
   it("reports command attention with command + requestId only during a turn", () => {

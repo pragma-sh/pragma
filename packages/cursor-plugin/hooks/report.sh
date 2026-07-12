@@ -53,13 +53,57 @@ extract_command() {
   printf '%s' "$input" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p' | head -n 1
 }
 
+# AgentMessage.ts is milliseconds since Unix epoch (see @pragma/constants).
+# `date +%s` is seconds — multiply so chat clients that stamp local input with
+# Date.now() don't sort every agent bubble above the user's messages.
+message_ts_ms() {
+  echo $(($(date +%s) * 1000))
+}
+
 # Reports a coarse rich message without depending on jq or hook-specific JSON.
 message() {
   role="$1"
   text="$2"
   id="${agent}-${tab}-$(date +%s)-$$-$role"
-  ts=$(date +%s)
+  ts="$(message_ts_ms)"
   payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
+  "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
+# Content-bearing hook fields need real JSON parsing and escaping. Python 3 is
+# available on supported macOS/Linux hosts; without it, status reporting still
+# works and coarse fallback messages preserve prior behavior.
+py3="$(command -v python3 2>/dev/null || true)"
+
+json_field() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$2" | "$py3" -c '
+import json, sys
+try:
+    value = (json.load(sys.stdin) or {}).get(sys.argv[1])
+except Exception:
+    value = None
+if isinstance(value, str):
+    print(value)
+' "$1" 2>/dev/null
+}
+
+content_message() {
+  role="$1"
+  text="$2"
+  [ -n "$py3" ] && [ -n "$text" ] || return 0
+  id="${agent}-${tab}-$(date +%s)-$$-$role"
+  ts="$(message_ts_ms)"
+  payload=$("$py3" -c '
+import json, sys
+print(json.dumps({
+    "id": sys.argv[1],
+    "role": sys.argv[2],
+    "text": sys.argv[3],
+    "subAgentsActive": 0,
+    "ts": int(sys.argv[4]),
+}))' "$id" "$role" "$text" "$ts" 2>/dev/null)
+  [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
 
@@ -68,17 +112,33 @@ case "${1:-}" in
     # A new turn is in flight: tag the marker and report running.
     printf '%s' "$$-$(date +%s)" >"$marker"
     report started
-    message assistant "Cursor Agent turn started"
+    input="$(cat)"
+    prompt="$(json_field prompt "$input")"
+    if [ -n "$prompt" ]; then
+      content_message user "$prompt"
+    else
+      message assistant "Cursor Agent turn started"
+    fi
     ;;
   stopped)
     rm -f "$marker"
-    report stopped
-    message assistant "Cursor Agent turn completed"
+    input="$(cat)"
+    status="$(json_field status "$input")"
+    case "$status" in
+      aborted|error) report cleared ;;
+      *) report stopped ;;
+    esac
     ;;
   cleared)
     rm -f "$marker"
     report cleared
-    message system "Cursor Agent session cleared"
+    ;;
+  response)
+    input="$(cat)"
+    text="$(json_field text "$input")"
+    if [ -n "$text" ]; then
+      content_message assistant "$text"
+    fi
     ;;
   running)
     # PostToolUse: a tool finished mid-turn. Re-assert running so a lingering

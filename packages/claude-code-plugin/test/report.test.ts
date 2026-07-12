@@ -33,11 +33,12 @@ beforeEach(() => {
   // so the test can assert exactly which statuses report.sh emits.
   const fake = join(binDir, "pragma-cli");
   // Records every call; for `agent await-decision` it prints $PRAGMA_TEST_DECISION
-  // on stdout (empty by default = timeout/no verdict) so the blocking approval
-  // path can be exercised without a real server.
+  // and for `agent await-answer` $PRAGMA_TEST_ANSWER on stdout (empty by default
+  // = timeout/no reply) so blocking approval/question paths can be exercised
+  // without a real server.
   writeFileSync(
     fake,
-    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "$1 $2" = "agent await-answer" ]; then printf '%s' "\${PRAGMA_TEST_ANSWER:-}"; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -177,6 +178,20 @@ function reportCalls(): string[] {
   return calls().filter((line) => line.startsWith("agent report "));
 }
 
+/** Parsed payloads of every `agent message` call recorded so far. */
+function messagePayloads(): Array<{ role: string; text: string }> {
+  const flag = "--payload ";
+  return calls()
+    .filter((line) => line.startsWith("agent message "))
+    .map(
+      (line) =>
+        JSON.parse(line.slice(line.indexOf(flag) + flag.length)) as {
+          role: string;
+          text: string;
+        },
+    );
+}
+
 describe("report.sh", () => {
   it("no-ops outside a Pragma terminal (no daemon socket)", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -203,6 +218,39 @@ describe("report.sh", () => {
       "agent report --agent claude-code stopped",
     ]);
     expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("surfaces the user's prompt as a user chat message on started", () => {
+    run("started", {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: 'Fix the "auth" bug' }),
+    });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "user", text: 'Fix the "auth" bug' }),
+    );
+  });
+
+  it("surfaces the transcript's assistant reply as a chat message on stopped", () => {
+    run("started");
+    run("stopped", { stdin: transcript([ASSISTANT_DONE]) });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "All done." }),
+    );
+  });
+
+  it("surfaces Stop's assistant reply without requiring a transcript", () => {
+    run("started");
+    run("stopped", {
+      stdin: JSON.stringify({
+        hook_event_name: "Stop",
+        last_assistant_message: "Implemented the fix.",
+      }),
+    });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "Implemented the fix." }),
+    );
+    expect(messagePayloads()).not.toContainEqual(
+      expect.objectContaining({ text: "Claude Code turn completed" }),
+    );
   });
 
   it("reports stopped when Stop carries no transcript (older Claude Code)", () => {
@@ -297,6 +345,30 @@ describe("report.sh", () => {
     );
   });
 
+  it.each([
+    ["Read", { file_path: "src/config.ts" }, "Read src/config.ts"],
+    [
+      "Write",
+      { file_path: "src/config.ts", content: "export const enabled = true;" },
+      "Write src/config.ts",
+    ],
+    ["Read", JSON.stringify({ file_path: "src/config.ts" }), "Read src/config.ts"],
+  ])("reports a file path instead of JSON for %s permissions", (toolName, toolInput, command) => {
+    run("started");
+    run("permission", {
+      stdin: JSON.stringify({
+        hook_event_name: "PermissionRequest",
+        tool_name: toolName,
+        tool_input: toolInput,
+      }),
+    });
+
+    expect(reportCalls()[1]).toContain("attention --kind command");
+    expect(reportCalls()[1]).toContain(`--command ${command}`);
+    expect(reportCalls()[1]).toMatch(/--request-id claude-code-tab-test-/);
+    expect(reportCalls()[1]).not.toContain(JSON.stringify(toolInput));
+  });
+
   it("ignores a PermissionRequest once the turn has ended", () => {
     expect(run("permission", { stdin: PERMISSION_STDIN })).toEqual([]);
   });
@@ -335,6 +407,99 @@ describe("report.sh", () => {
     expect(output.trim()).toBe("");
   });
 
+  const QUESTION = {
+    question: "Which auth method should we use?",
+    header: "Auth method",
+    options: [{ label: "OAuth", description: "Redirect flow" }, { label: "API key" }],
+    multiSelect: false,
+  };
+  const QUESTION_STDIN = JSON.stringify({
+    hook_event_name: "PermissionRequest",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [QUESTION] },
+  });
+
+  it("reports a question attention (not a command) for AskUserQuestion", () => {
+    run("started");
+    run("permission", { stdin: QUESTION_STDIN });
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent claude-code started");
+    expect(reports[1]).toContain("attention --kind question");
+    expect(reports[1]).toContain("--question Which auth method should we use?");
+    expect(reports[1]).toContain(
+      '--options [{"label": "OAuth", "description": "Redirect flow"}, {"label": "API key"}]',
+    );
+    expect(reports[1]).toMatch(/--request-id claude-code-tab-test-/);
+    expect(reports[1]).not.toContain("--kind command");
+  });
+
+  it("feeds a remote reply back as an allow decision with pre-filled answers", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: QUESTION_STDIN,
+      env: { PRAGMA_TEST_ANSWER: "OAuth" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "allow",
+          updatedInput: {
+            questions: [QUESTION],
+            answers: { "Which auth method should we use?": "OAuth" },
+          },
+        },
+      },
+    });
+  });
+
+  it("denies a remotely dismissed question so Claude closes its native prompt", () => {
+    run("started");
+    const output = runRaw("permission", {
+      stdin: QUESTION_STDIN,
+      env: { PRAGMA_TEST_ANSWER: "__PRAGMA_QUESTION_DISMISSED__" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "deny" },
+      },
+    });
+    expect(reportCalls()[1]).toContain("attention --kind question");
+    const awaitCall = calls().find((call) => call.startsWith("agent await-answer "));
+    expect(awaitCall).toContain(
+      "agent await-answer --agent claude-code --request-id claude-code-tab-test-",
+    );
+    expect(awaitCall).toContain("--timeout 300 --dismiss-output __PRAGMA_QUESTION_DISMISSED__");
+  });
+
+  it("emits nothing (defers to Claude's question UI) when no answer arrives", () => {
+    run("started");
+    const output = runRaw("permission", { stdin: QUESTION_STDIN });
+    expect(output.trim()).toBe("");
+    // The question attention still went out so the tab shows the prompt.
+    expect(reportCalls()[1]).toContain("--kind question");
+  });
+
+  it("falls back to a generic attention for multi-question payloads", () => {
+    run("started");
+    const stdin = JSON.stringify({
+      hook_event_name: "PermissionRequest",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [QUESTION, { ...QUESTION, question: "And the DB?" }] },
+    });
+    const output = runRaw("permission", { stdin });
+    expect(output.trim()).toBe("");
+    expect(reportCalls()).toEqual([
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code attention",
+    ]);
+  });
+
+  it("ignores an AskUserQuestion request once the turn has ended", () => {
+    expect(run("permission", { stdin: QUESTION_STDIN })).toEqual([]);
+  });
+
   it("re-asserts running after a tool completes so approved-prompt attention clears", () => {
     run("started");
     // A permission prompt put the tab on `attention`; approving it fires no hook,
@@ -356,11 +521,13 @@ describe("report.sh", () => {
 
   it("reports cleared and removes the marker on session start/end", () => {
     run("started");
+    const messagesBeforeClear = messagePayloads();
     expect(run("cleared")).toEqual([
       "agent report --agent claude-code started",
       "agent report --agent claude-code cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
+    expect(messagePayloads()).toEqual(messagesBeforeClear);
   });
 
   // Cancelling a turn (ESC abort / reject command / decline question) fires no

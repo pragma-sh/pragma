@@ -4,7 +4,7 @@ import {
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin";
+} from "@pragma/plugin/catalog";
 
 /** Absolute filesystem path to this plugin's agent icon. */
 export const cursorIconPath = new URL("../assets/cursor.svg", import.meta.url).pathname;
@@ -24,7 +24,13 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       prefillDelayMs: 14000,
       prefillMode: "plain",
       prefillSubmit: "\r",
-      models: async (ctx) => parseCursorModels(await execFirst(ctx, "agent models 2>/dev/null")),
+      // `cursor-agent` first: Cursor's short `agent` name is easily shadowed by
+      // other CLIs that also install an `agent` binary (e.g. grok), which made
+      // the model list come back empty (or wrong) in host-side shells.
+      models: async (ctx) =>
+        parseCursorModels(
+          await execFirst(ctx, "cursor-agent models 2>/dev/null || agent models 2>/dev/null"),
+        ),
       permissionModes: [],
       args: {
         model: (modelId: string) => ["--model", modelId],
