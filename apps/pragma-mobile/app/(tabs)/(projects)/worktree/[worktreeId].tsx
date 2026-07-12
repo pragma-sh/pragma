@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useCallback, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import { Alert, ScrollView, View, type ColorValue } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -49,34 +49,80 @@ export default function WorktreeScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: worktree ? worktreeLabel(worktree) : "Worktree",
-          headerRight: status === "paired" && worktree ? renderLaunchAgentButton : undefined,
-        }}
+      <WorktreeHeader headerRight={renderLaunchAgentButton} status={status} worktree={worktree} />
+      <WorktreeContents
+        agentTabs={agentTabs}
+        empty={empty}
+        insetBottom={insets.bottom}
+        worktreeNodes={children}
       />
-      <ScrollView
-        className="flex-1 bg-background"
-        contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: insets.bottom + 24 }}
-        contentInsetAdjustmentBehavior="automatic"
-      >
-        <WorktreesGroup nodes={children} />
-        <AgentTabsGroup tabs={agentTabs} />
-        {empty ? (
-          <Text className="px-4 py-6 text-muted-foreground">
-            No nested worktrees or agents here.
-          </Text>
-        ) : null}
-      </ScrollView>
-      {worktree ? (
-        <LaunchSheet
-          onOpenChange={setLaunchOpen}
-          open={launchOpen}
-          projectId={worktree.projectId}
-          worktreeId={worktree.id}
-        />
-      ) : null}
+      <WorktreeLaunchSheet onOpenChange={setLaunchOpen} open={launchOpen} worktree={worktree} />
     </>
+  );
+}
+
+function WorktreeHeader({
+  headerRight,
+  status,
+  worktree,
+}: {
+  headerRight: ({ tintColor }: { tintColor?: ColorValue }) => ReactNode;
+  status: ReturnType<typeof useConnection>["status"];
+  worktree: ReturnType<typeof useWorktree>;
+}) {
+  return (
+    <Stack.Screen
+      options={{
+        title: worktree ? worktreeLabel(worktree) : "Worktree",
+        headerRight: status === "paired" && worktree ? headerRight : undefined,
+      }}
+    />
+  );
+}
+
+function WorktreeContents({
+  agentTabs,
+  empty,
+  insetBottom,
+  worktreeNodes,
+}: {
+  agentTabs: AgentTab[];
+  empty: boolean;
+  insetBottom: number;
+  worktreeNodes: WorktreeNode[];
+}) {
+  return (
+    <ScrollView
+      className="flex-1 bg-background"
+      contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: insetBottom + 24 }}
+      contentInsetAdjustmentBehavior="automatic"
+    >
+      <WorktreesGroup nodes={worktreeNodes} />
+      <AgentTabsGroup tabs={agentTabs} />
+      {empty ? (
+        <Text className="px-4 py-6 text-muted-foreground">No nested worktrees or agents here.</Text>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+function WorktreeLaunchSheet({
+  onOpenChange,
+  open,
+  worktree,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  worktree: ReturnType<typeof useWorktree>;
+}) {
+  if (!worktree) return null;
+  return (
+    <LaunchSheet
+      onOpenChange={onOpenChange}
+      open={open}
+      projectId={worktree.projectId}
+      worktreeId={worktree.id}
+    />
   );
 }
 
@@ -94,57 +140,76 @@ function WorktreesGroup({ nodes }: { nodes: WorktreeNode[] }) {
 
 /** The worktree's agent tabs section, or nothing when there are none. */
 function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
+  const [menuTab, setMenuTab] = useState<AgentTab | null>(null);
+  if (tabs.length === 0) return null;
+
+  return (
+    <NavGroup title="Agents">
+      <AgentTabRows tabs={tabs} onOpenActions={setMenuTab} />
+      <AgentTabActionSheets menuTab={menuTab} onMenuTabChange={setMenuTab} />
+    </NavGroup>
+  );
+}
+
+function AgentTabRows({
+  tabs,
+  onOpenActions,
+}: {
+  tabs: AgentTab[];
+  onOpenActions: (tab: AgentTab) => void;
+}) {
+  return tabs.map((tab) => (
+    <NavRow
+      key={tab.id}
+      onLongPress={() => onOpenActions(tab)}
+      onPress={() => router.push({ pathname: "/chat/[tabId]", params: { tabId: tab.id } })}
+      subtitle={tab.agent}
+      title={tab.title}
+      trailing={<AgentStatusDot status={tab.status} />}
+    />
+  ));
+}
+
+function AgentTabActionSheets({
+  menuTab,
+  onMenuTabChange,
+}: {
+  menuTab: AgentTab | null;
+  onMenuTabChange: (tab: AgentTab | null) => void;
+}) {
   const { clearAgent, renameAgent } = useAgentActions();
   const [clearingTabId, setClearingTabId] = useState<string | null>(null);
-  const [menuTab, setMenuTab] = useState<AgentTab | null>(null);
   const [renamingTab, setRenamingTab] = useState<AgentTab | null>(null);
   const [title, setTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
-  if (tabs.length === 0) return null;
 
-  const clear = (tab: AgentTab): void => {
+  function clear(tab: AgentTab): void {
     if (clearingTabId) return;
     setClearingTabId(tab.id);
     void clearAgent(tab.id)
       .catch(() => Alert.alert("Couldn't clear agent", "The agent process could not be ended."))
       .finally(() => setClearingTabId(null));
-  };
+  }
 
-  const openRename = (tab: AgentTab): void => {
-    setTitle(tab.title);
-    setRenamingTab(tab);
-  };
-
-  const rename = (): void => {
+  async function rename(): Promise<void> {
     const nextTitle = title.trim();
     if (!renamingTab || !nextTitle) return;
     setRenaming(true);
-    void renameAgent(renamingTab.id, nextTitle)
-      .then(() => {
-        hapticSuccess();
-        setRenamingTab(null);
-        return undefined;
-      })
-      .catch(() => {
-        hapticWarning();
-        Alert.alert("Couldn't rename agent", "The agent process could not be renamed.");
-      })
-      .finally(() => setRenaming(false));
-  };
+    try {
+      await renameAgent(renamingTab.id, nextTitle);
+      hapticSuccess();
+      setRenamingTab(null);
+    } catch {
+      hapticWarning();
+      Alert.alert("Couldn't rename agent", "The agent process could not be renamed.");
+    } finally {
+      setRenaming(false);
+    }
+  }
 
   return (
-    <NavGroup title="Agents">
-      {tabs.map((tab) => (
-        <NavRow
-          key={tab.id}
-          onLongPress={() => setMenuTab(tab)}
-          onPress={() => router.push({ pathname: "/chat/[tabId]", params: { tabId: tab.id } })}
-          subtitle={tab.agent}
-          title={tab.title}
-          trailing={<AgentStatusDot status={tab.status} />}
-        />
-      ))}
-      <BottomSheet onOpenChange={(open) => !open && setMenuTab(null)} open={!!menuTab}>
+    <>
+      <BottomSheet onOpenChange={(open) => !open && onMenuTabChange(null)} open={!!menuTab}>
         <View className="gap-1">
           <Text className="text-lg font-semibold">{menuTab?.title}</Text>
           <Text className="text-sm text-muted-foreground">Agent session actions</Text>
@@ -153,8 +218,9 @@ function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
           <Button
             onPress={() => {
               if (!menuTab) return;
-              openRename(menuTab);
-              setMenuTab(null);
+              setTitle(menuTab.title);
+              setRenamingTab(menuTab);
+              onMenuTabChange(null);
             }}
             variant="outline"
           >
@@ -164,7 +230,7 @@ function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
             onPress={() => {
               if (!menuTab) return;
               clear(menuTab);
-              setMenuTab(null);
+              onMenuTabChange(null);
             }}
             variant="destructive"
           >
@@ -180,17 +246,22 @@ function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
           </Text>
         </View>
         <View className="mt-5 gap-3">
-          <Input autoFocus onChangeText={setTitle} onSubmitEditing={rename} value={title} />
+          <Input
+            autoFocus
+            onChangeText={setTitle}
+            onSubmitEditing={() => void rename()}
+            value={title}
+          />
           <View className="flex-row justify-end gap-2">
             <Button onPress={() => setRenamingTab(null)} size="sm" variant="outline">
               <Text>Cancel</Text>
             </Button>
-            <Button disabled={!title.trim() || renaming} onPress={rename} size="sm">
+            <Button disabled={!title.trim() || renaming} onPress={() => void rename()} size="sm">
               <Text>{renaming ? "Renaming..." : "Rename"}</Text>
             </Button>
           </View>
         </View>
       </BottomSheet>
-    </NavGroup>
+    </>
   );
 }

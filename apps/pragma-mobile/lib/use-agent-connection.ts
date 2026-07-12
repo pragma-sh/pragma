@@ -1,7 +1,7 @@
 import type { AgentConnection } from "@pragma/sdk";
 import { PragmaGatewayError } from "@pragma/sdk";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useReducer, useRef, useState } from "react";
+import { useCallback, useReducer, useRef, useState, type Dispatch, type RefObject } from "react";
 
 import { useConnection } from "./connection-context";
 import { hapticSuccess, hapticWarning } from "./haptics";
@@ -69,71 +69,20 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
 
   const { agent, tabId, worktreeId } = target;
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!client || !agent || !tabId || !worktreeId) return undefined;
-      let cancelled = false;
-      let backoff = INITIAL_BACKOFF_MS;
-      let retryTimer: ReturnType<typeof setTimeout> | undefined;
-
-      dispatch({ type: "reset" });
-      attentionIdRef.current = null;
-      setErrored(false);
-
-      async function run(): Promise<void> {
-        if (cancelled || !client) return;
-        setErrored(false);
-        try {
-          const connection = await client.agents.connect({ agent, tabId, worktreeId });
-          if (cancelled) {
-            connection.close();
-            return;
-          }
-          connectionRef.current = connection;
-          setConnected(true);
-          backoff = INITIAL_BACKOFF_MS;
-          for await (const event of connection) {
-            if (cancelled) break;
-            dispatch({ type: "event", event });
-          }
-        } catch (error) {
-          if (cancelled) return;
-          if (error instanceof PragmaGatewayError && error.httpStatus === 401) {
-            handleUnauthorized();
-            return;
-          }
-          setConnected(false);
-          setErrored(true);
-          retryTimer = setTimeout(() => void run(), backoff);
-          backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-          return;
-        }
-        // Stream ended cleanly (server closed): retry after a beat.
-        if (!cancelled) {
-          setConnected(false);
-          retryTimer = setTimeout(() => void run(), backoff);
-          backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-        }
-      }
-
-      void run();
-
-      return () => {
-        cancelled = true;
-        if (retryTimer) clearTimeout(retryTimer);
-        connectionRef.current?.close();
-        connectionRef.current = null;
-        setConnected(false);
-      };
-    }, [client, agent, tabId, worktreeId, handleUnauthorized]),
+  useFocusedConnection(
+    client,
+    { agent, tabId, worktreeId },
+    connectionRef,
+    attentionIdRef,
+    dispatch,
+    setConnected,
+    setErrored,
+    handleUnauthorized,
   );
 
   // Buzz once each time a fresh attention request appears.
   const incomingId = state.attention?.requestId ?? null;
-  if (incomingId !== attentionIdRef.current) {
-    attentionIdRef.current = incomingId;
-    if (incomingId) hapticWarning();
-  }
+  notifyNewAttention(attentionIdRef, incomingId);
 
   const send = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -159,13 +108,203 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
   }, []);
 
   const rows = transcriptRows(state);
-  const phase: ChatConnectionState = errored
-    ? "error"
-    : !connected
-      ? "connecting"
-      : rows.length === 0
-        ? "empty"
-        : "open";
+  const phase = chatPhase(errored, connected, rows);
 
   return { rows, attention: state.attention, phase, send, interrupt, decide, answer };
+}
+
+type ConnectionClient = NonNullable<ReturnType<typeof useConnection>["client"]>;
+type DispatchAction = Dispatch<StoreAction>;
+
+function useFocusedConnection(
+  client: ConnectionClient | null,
+  target: AgentTarget,
+  connectionRef: RefObject<AgentConnection | null>,
+  attentionIdRef: RefObject<string | null>,
+  dispatch: DispatchAction,
+  setConnected: (connected: boolean) => void,
+  setErrored: (errored: boolean) => void,
+  onUnauthorized: () => void,
+): void {
+  const { agent, tabId, worktreeId } = target;
+  useFocusEffect(
+    useCallback(
+      () =>
+        focusedConnectionEffect(
+          client,
+          { agent, tabId, worktreeId },
+          connectionRef,
+          attentionIdRef,
+          dispatch,
+          setConnected,
+          setErrored,
+          onUnauthorized,
+        ),
+      [
+        agent,
+        attentionIdRef,
+        client,
+        connectionRef,
+        dispatch,
+        onUnauthorized,
+        setConnected,
+        setErrored,
+        tabId,
+        worktreeId,
+      ],
+    ),
+  );
+}
+
+function focusedConnectionEffect(
+  client: ConnectionClient | null,
+  target: AgentTarget,
+  connectionRef: RefObject<AgentConnection | null>,
+  attentionIdRef: RefObject<string | null>,
+  dispatch: DispatchAction,
+  setConnected: (connected: boolean) => void,
+  setErrored: (errored: boolean) => void,
+  onUnauthorized: () => void,
+): (() => void) | undefined {
+  if (!client || missingTargetPart(target)) return undefined;
+  return startConnection(
+    client,
+    target,
+    connectionRef,
+    attentionIdRef,
+    dispatch,
+    setConnected,
+    setErrored,
+    onUnauthorized,
+  );
+}
+
+function missingTargetPart({ agent, tabId, worktreeId }: AgentTarget): boolean {
+  return [agent, tabId, worktreeId].some((part) => !part);
+}
+
+function startConnection(
+  client: ConnectionClient,
+  target: AgentTarget,
+  connectionRef: RefObject<AgentConnection | null>,
+  attentionIdRef: RefObject<string | null>,
+  dispatch: DispatchAction,
+  setConnected: (connected: boolean) => void,
+  setErrored: (errored: boolean) => void,
+  onUnauthorized: () => void,
+): () => void {
+  let cancelled = false;
+  let backoff = INITIAL_BACKOFF_MS;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  dispatch({ type: "reset" });
+  attentionIdRef.current = null;
+  setErrored(false);
+  const retry = (): void => {
+    retryTimer = setTimeout(() => void run(), backoff);
+    backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+  };
+  const run = async (): Promise<void> => {
+    setErrored(false);
+    const result = await streamConnection(
+      client,
+      target,
+      connectionRef,
+      dispatch,
+      () => cancelled,
+      () => {
+        setConnected(true);
+        setErrored(false);
+        backoff = INITIAL_BACKOFF_MS;
+      },
+    );
+    if (cancelled) return;
+    if (handleStreamResult(result, onUnauthorized, setErrored)) return;
+    setConnected(false);
+    retry();
+  };
+  void run();
+  return () => {
+    cancelled = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    connectionRef.current?.close();
+    connectionRef.current = null;
+    setConnected(false);
+  };
+}
+
+function handleStreamResult(
+  result: "closed" | "error" | "unauthorized",
+  onUnauthorized: () => void,
+  setErrored: (errored: boolean) => void,
+): boolean {
+  if (result === "unauthorized") {
+    onUnauthorized();
+    return true;
+  }
+  if (result === "error") setErrored(true);
+  return false;
+}
+
+async function streamConnection(
+  client: ConnectionClient,
+  target: AgentTarget,
+  connectionRef: RefObject<AgentConnection | null>,
+  dispatch: DispatchAction,
+  isCancelled: () => boolean,
+  onConnected: () => void,
+): Promise<"closed" | "error" | "unauthorized"> {
+  const connection = await openConnection(client, target);
+  if (typeof connection === "string") return connection;
+  return consumeConnection(connection, connectionRef, dispatch, isCancelled, onConnected);
+}
+
+async function openConnection(
+  client: ConnectionClient,
+  target: AgentTarget,
+): Promise<AgentConnection | "error" | "unauthorized"> {
+  try {
+    return await client.agents.connect(target);
+  } catch (error) {
+    return connectionFailure(error);
+  }
+}
+
+function connectionFailure(error: unknown): "error" | "unauthorized" {
+  return error instanceof PragmaGatewayError && error.httpStatus === 401 ? "unauthorized" : "error";
+}
+
+async function consumeConnection(
+  connection: AgentConnection,
+  connectionRef: RefObject<AgentConnection | null>,
+  dispatch: DispatchAction,
+  isCancelled: () => boolean,
+  onConnected: () => void,
+): Promise<"closed"> {
+  if (isCancelled()) {
+    connection.close();
+    return "closed";
+  }
+  connectionRef.current = connection;
+  onConnected();
+  for await (const event of connection) {
+    if (isCancelled()) break;
+    dispatch({ type: "event", event });
+  }
+  return "closed";
+}
+
+function notifyNewAttention(ref: RefObject<string | null>, incomingId: string | null): void {
+  if (incomingId === ref.current) return;
+  ref.current = incomingId;
+  if (incomingId) hapticWarning();
+}
+
+function chatPhase(
+  errored: boolean,
+  connected: boolean,
+  rows: TranscriptRow[],
+): ChatConnectionState {
+  if (errored) return "error";
+  if (!connected) return "connecting";
+  return rows.length === 0 ? "empty" : "open";
 }

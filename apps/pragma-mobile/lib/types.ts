@@ -45,24 +45,30 @@ export interface AttentionRequest {
 /** Normalizes question choices from current and pre-description host payloads. */
 export function normalizeQuestionOptions(value: unknown): QuestionOption[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const options = value.flatMap((option): QuestionOption[] => {
-    if (typeof option === "string") {
-      const label = option.trim();
-      return label ? [{ label }] : [];
-    }
-    if (typeof option !== "object" || option === null || !("label" in option)) return [];
-    const { label, description } = option;
-    if (typeof label !== "string" || !label.trim()) return [];
-    return [
-      {
-        label: label.trim(),
-        ...(typeof description === "string" && description.trim()
-          ? { description: description.trim() }
-          : {}),
-      },
-    ];
-  });
+  const options = value.flatMap(normalizeQuestionOption);
   return options.length > 0 ? options : undefined;
+}
+
+function normalizeQuestionOption(option: unknown): QuestionOption[] {
+  if (typeof option === "string") return optionFromLabel(option);
+  if (!isQuestionOption(option)) return [];
+  return optionFromParts(option.label, option.description);
+}
+
+function isQuestionOption(option: unknown): option is { label: unknown; description?: unknown } {
+  return typeof option === "object" && option !== null && "label" in option;
+}
+
+function optionFromLabel(label: string): QuestionOption[] {
+  return optionFromParts(label, undefined);
+}
+
+function optionFromParts(label: unknown, description: unknown): QuestionOption[] {
+  if (typeof label !== "string" || !label.trim()) return [];
+  const trimmedDescription = typeof description === "string" ? description.trim() : "";
+  return [
+    { label: label.trim(), ...(trimmedDescription ? { description: trimmedDescription } : {}) },
+  ];
 }
 
 /**

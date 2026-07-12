@@ -19,7 +19,6 @@ export function Composer({ isRunning, onSend, onInterrupt }: ComposerProps) {
   const [text, setText] = useState("");
   const colors = useThemeColors();
   const canSend = text.trim().length > 0;
-  const showStop = isRunning && !canSend;
 
   function submit(): void {
     if (!canSend) return;
@@ -33,32 +32,106 @@ export function Composer({ isRunning, onSend, onInterrupt }: ComposerProps) {
       className="flex-row items-end gap-2 border-t border-border bg-background px-3 pt-2"
       style={{ paddingBottom: 8 }}
     >
-      <View className="min-h-11 flex-1 rounded-2xl border border-input bg-background px-3">
-        <TextInput
-          className="max-h-28 flex-1 py-2 text-base text-foreground"
-          multiline
-          onChangeText={setText}
-          placeholder="Message the agent…"
-          placeholderTextColor={colors.mutedForeground}
-          style={{ textAlignVertical: "center" }}
-          value={text}
-        />
-      </View>
-      <Pressable
-        accessibilityLabel={showStop ? "Stop the agent" : "Send message"}
-        className={`h-11 w-11 items-center justify-center rounded-full ${showStop || canSend ? "bg-primary active:opacity-80" : "bg-muted"}`}
-        disabled={!showStop && !canSend}
-        onPress={showStop ? onInterrupt : submit}
-      >
-        <IconSymbol
-          color={showStop || canSend ? colors.primaryForeground : colors.mutedForeground}
-          fallback={showStop ? "◼" : "↑"}
-          name={showStop ? "stop.fill" : "arrow.up"}
-          size={18}
-          tintColor={showStop || canSend ? colors.primaryForeground : colors.mutedForeground}
-        />
-      </Pressable>
+      <ComposerInput
+        onChangeText={setText}
+        placeholderTextColor={colors.mutedForeground}
+        value={text}
+      />
+      <ComposerAction
+        canSend={canSend}
+        colors={colors}
+        isRunning={isRunning}
+        onInterrupt={onInterrupt}
+        onSend={submit}
+      />
     </View>
+  );
+}
+
+function ComposerInput({
+  onChangeText,
+  placeholderTextColor,
+  value,
+}: {
+  onChangeText: (text: string) => void;
+  placeholderTextColor: string;
+  value: string;
+}) {
+  return (
+    <View className="min-h-11 flex-1 rounded-2xl border border-input bg-background px-3">
+      <TextInput
+        className="max-h-28 flex-1 py-2 text-base text-foreground"
+        multiline
+        onChangeText={onChangeText}
+        placeholder="Message the agent…"
+        placeholderTextColor={placeholderTextColor}
+        style={{ textAlignVertical: "center" }}
+        value={value}
+      />
+    </View>
+  );
+}
+
+function ComposerAction({
+  canSend,
+  colors,
+  isRunning,
+  onInterrupt,
+  onSend,
+}: {
+  canSend: boolean;
+  colors: ReturnType<typeof useThemeColors>;
+  isRunning: boolean;
+  onInterrupt: () => void;
+  onSend: () => void;
+}) {
+  if (isRunning && !canSend) return <StopAction colors={colors} onInterrupt={onInterrupt} />;
+  return <SendAction canSend={canSend} colors={colors} onSend={onSend} />;
+}
+
+function StopAction({
+  colors,
+  onInterrupt,
+}: {
+  colors: ReturnType<typeof useThemeColors>;
+  onInterrupt: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel="Stop the agent"
+      className="h-11 w-11 items-center justify-center rounded-full bg-primary active:opacity-80"
+      onPress={onInterrupt}
+    >
+      <IconSymbol
+        color={colors.primaryForeground}
+        fallback="◼"
+        name="stop.fill"
+        size={18}
+        tintColor={colors.primaryForeground}
+      />
+    </Pressable>
+  );
+}
+
+function SendAction({
+  canSend,
+  colors,
+  onSend,
+}: {
+  canSend: boolean;
+  colors: ReturnType<typeof useThemeColors>;
+  onSend: () => void;
+}) {
+  const color = canSend ? colors.primaryForeground : colors.mutedForeground;
+  return (
+    <Pressable
+      accessibilityLabel="Send message"
+      className={`h-11 w-11 items-center justify-center rounded-full ${canSend ? "bg-primary active:opacity-80" : "bg-muted"}`}
+      disabled={!canSend}
+      onPress={onSend}
+    >
+      <IconSymbol color={color} fallback="↑" name="arrow.up" size={18} tintColor={color} />
+    </Pressable>
   );
 }
 

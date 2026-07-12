@@ -35,7 +35,7 @@ export function parsePairingPayload(raw: string): PairingPayload | null {
 }
 
 /** True when the host's protocol version matches this build's. */
-export function isProtocolCompatible(version: number): boolean {
+function isProtocolCompatible(version: number): boolean {
   return version === EXPECTED_PROTOCOL_VERSION;
 }
 

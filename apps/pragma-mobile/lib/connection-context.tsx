@@ -24,7 +24,7 @@ const STORE_KEY = "pragma.connection.v1";
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** Whether the app has a verified, usable host connection yet. */
-export type ConnectionStatus = "loading" | "paired" | "unpaired";
+type ConnectionStatus = "loading" | "paired" | "unpaired";
 
 interface ConnectionContextValue {
   status: ConnectionStatus;
@@ -79,29 +79,33 @@ export async function probeConnection(config: ConnectionConfig): Promise<ProbeRe
     await clientFor(config).agents.catalog({ signal: controller.signal });
     return { ok: true };
   } catch (error) {
-    if (controller.signal.aborted) {
-      return {
-        ok: false,
-        reason: "The desktop didn't respond in time. Check the tunnel and try again.",
-      };
-    }
-    if (error instanceof PragmaGatewayError && error.httpStatus === 401) {
-      return { ok: false, reason: "The desktop rejected that token. Re-scan or re-copy it." };
-    }
-    if (error instanceof PragmaGatewayError) {
-      return {
-        ok: false,
-        reason:
-          "The desktop is reachable but isn't ready to pair. Keep Pragma open, then try again.",
-      };
-    }
-    return {
-      ok: false,
-      reason: "Couldn't reach the desktop. Check it's running and the URL is correct.",
-    };
+    return probeFailure(error, controller.signal.aborted);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function probeFailure(error: unknown, timedOut: boolean): ProbeResult {
+  if (timedOut)
+    return {
+      ok: false,
+      reason: "The desktop didn't respond in time. Check the tunnel and try again.",
+    };
+  if (error instanceof PragmaGatewayError) return gatewayProbeFailure(error);
+  return {
+    ok: false,
+    reason: "Couldn't reach the desktop. Check it's running and the URL is correct.",
+  };
+}
+
+function gatewayProbeFailure(error: PragmaGatewayError): ProbeResult {
+  if (error.httpStatus === 401) {
+    return { ok: false, reason: "The desktop rejected that token. Re-scan or re-copy it." };
+  }
+  return {
+    ok: false,
+    reason: "The desktop is reachable but isn't ready to pair. Keep Pragma open, then try again.",
+  };
 }
 
 interface StoredState {
@@ -121,34 +125,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<ConnectionStatus>("loading");
   const [stored, setStored] = useState<StoredState | null>(null);
 
-  // Load and verify persisted config once; a stale tunnel or token must not
-  // leave the app showing its paired navigation without a usable host.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const raw = await SecureStore.getItemAsync(STORE_KEY).catch(() => null);
-      if (cancelled) return;
-      const parsed = raw ? (safeParse(raw) ?? devConfigFromEnv()) : devConfigFromEnv();
-      if (!parsed) {
-        setStatus("unpaired");
-        return;
-      }
-      const probe = await probeConnection(parsed.config);
-      if (cancelled) return;
-      if (probe.ok) {
-        setStored(parsed);
-        setStatus("paired");
-        return;
-      }
-      await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
-      setStatus("unpaired");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useRestoredConnection(setStored, setStatus);
 
-  const client = useMemo(() => (stored ? clientFor(stored.config) : null), [stored]);
+  const connection = useMemo(() => connectionState(stored), [stored]);
 
   const pair = useCallback(async (config: ConnectionConfig, hostName?: string) => {
     const next: StoredState = { config, hostName: hostName ?? null };
@@ -172,19 +151,41 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ConnectionContextValue>(
-    () => ({
-      status,
-      config: stored?.config ?? null,
-      client,
-      hostName: stored?.hostName ?? null,
-      pair,
-      unpair,
-      handleUnauthorized,
-    }),
-    [status, stored, client, pair, unpair, handleUnauthorized],
+    () =>
+      connectionValue(
+        status,
+        connection.config,
+        connection.client,
+        connection.hostName,
+        pair,
+        unpair,
+        handleUnauthorized,
+      ),
+    [status, connection, pair, unpair, handleUnauthorized],
   );
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;
+}
+
+function connectionState(stored: StoredState | null): {
+  client: PragmaClient | null;
+  config: ConnectionConfig | null;
+  hostName: string | null;
+} {
+  if (!stored) return { client: null, config: null, hostName: null };
+  return { client: clientFor(stored.config), config: stored.config, hostName: stored.hostName };
+}
+
+function connectionValue(
+  status: ConnectionStatus,
+  config: ConnectionConfig | null,
+  client: PragmaClient | null,
+  hostName: string | null,
+  pair: ConnectionContextValue["pair"],
+  unpair: ConnectionContextValue["unpair"],
+  handleUnauthorized: ConnectionContextValue["handleUnauthorized"],
+): ConnectionContextValue {
+  return { status, config, client, hostName, pair, unpair, handleUnauthorized };
 }
 
 /** Access the app-wide connection. Throws outside {@link ConnectionProvider}. */
@@ -199,9 +200,57 @@ export function useConnection(): ConnectionContextValue {
 function safeParse(raw: string): StoredState | null {
   try {
     const parsed = JSON.parse(raw) as StoredState;
-    if (parsed?.config?.url && parsed.config.token) return parsed;
-    return null;
+    return isStoredState(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function isStoredState(value: StoredState): boolean {
+  return Boolean(value?.config?.url && value.config.token);
+}
+
+function useRestoredConnection(
+  setStored: (state: StoredState | null) => void,
+  setStatus: (status: ConnectionStatus) => void,
+): void {
+  useEffect(() => {
+    let cancelled = false;
+    void restoreConnection(setStored, setStatus, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [setStatus, setStored]);
+}
+
+async function restoreConnection(
+  setStored: (state: StoredState | null) => void,
+  setStatus: (status: ConnectionStatus) => void,
+  isCancelled: () => boolean,
+): Promise<void> {
+  const stored = await restoredState();
+  if (isCancelled()) return;
+  if (!stored) return setStatus("unpaired");
+  const probe = await probeConnection(stored.config);
+  if (isCancelled()) return;
+  return applyRestoredProbe(probe, stored, setStored, setStatus);
+}
+
+async function restoredState(): Promise<StoredState | null> {
+  const raw = await SecureStore.getItemAsync(STORE_KEY).catch(() => null);
+  return raw ? (safeParse(raw) ?? devConfigFromEnv()) : devConfigFromEnv();
+}
+
+async function applyRestoredProbe(
+  probe: ProbeResult,
+  stored: StoredState,
+  setStored: (state: StoredState | null) => void,
+  setStatus: (status: ConnectionStatus) => void,
+): Promise<void> {
+  if (probe.ok) {
+    setStored(stored);
+    return setStatus("paired");
+  }
+  await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
+  setStatus("unpaired");
 }

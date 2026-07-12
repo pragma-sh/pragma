@@ -67,70 +67,20 @@ interface LiveSnapshot {
 export function DataProvider({ children }: { children: ReactNode }) {
   const { client, status: connectionStatus, handleUnauthorized } = useConnection();
   const paired = connectionStatus === "paired" && !!client;
-
-  const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
-  const [statuses, setStatuses] = useState<AgentReportPayload[]>([]);
-  const [liveTitles, setLiveTitles] = useState<Record<string, string>>({});
-  const [renamedTitles, setRenamedTitles] = useState<Record<string, string>>({});
-  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
-  const [hiddenTabIds, setHiddenTabIds] = useState<Set<string>>(() => new Set());
+  const { snapshot, statuses, setStatuses } = useSubscriptionData(client, handleUnauthorized);
+  const {
+    dismissed,
+    hiddenTabIds,
+    liveTitles,
+    renamedTitles,
+    setDismissed,
+    setHiddenTabIds,
+    setRenamedTitles,
+  } = useAgentPresentation(client, statuses, handleUnauthorized);
   const visibleStatuses = useMemo(
     () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
     [hiddenTabIds, statuses],
   );
-  const agentTabIdsKey = useMemo(
-    // Hermes does not yet provide Array.prototype.toSorted.
-    // oxlint-disable-next-line unicorn/no-array-sort
-    () => [...new Set(visibleStatuses.map((status) => status.tabId))].sort().join("\u0000"),
-    [visibleStatuses],
-  );
-
-  // Subscribe to the host workspace + agent statuses while paired.
-  useEffect(() => {
-    if (!client) {
-      setSnapshot(null);
-      setStatuses([]);
-      return undefined;
-    }
-    const controller = new AbortController();
-    runWorkspaceSubscription(client, controller.signal, setSnapshot, handleUnauthorized);
-    runAgentStatusSubscription(client, controller.signal, setStatuses, handleUnauthorized);
-    return () => controller.abort();
-  }, [client, handleUnauthorized]);
-
-  useEffect(() => {
-    setDismissed(new Set());
-    setHiddenTabIds(new Set());
-    setRenamedTitles({});
-  }, [client]);
-
-  // Workspace snapshots only change after desktop persists a title. Listen to
-  // the PTYs directly so coding-agent OSC title changes reach mobile immediately.
-  useEffect(() => {
-    if (!client || !agentTabIdsKey) {
-      setLiveTitles({});
-      return undefined;
-    }
-    const controller = new AbortController();
-    const tabIds = agentTabIdsKey.split("\u0000");
-    const activeTabIds = new Set(tabIds);
-    setLiveTitles((previous) => {
-      const next = Object.fromEntries(
-        Object.entries(previous).filter(([tabId]) => activeTabIds.has(tabId)),
-      );
-      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
-    });
-    for (const tabId of tabIds) {
-      runSessionTitleSubscription(
-        client,
-        tabId,
-        controller.signal,
-        setLiveTitles,
-        handleUnauthorized,
-      );
-    }
-    return () => controller.abort();
-  }, [agentTabIdsKey, client, handleUnauthorized]);
 
   const projects = useMemo<Project[]>(
     () => (paired ? (snapshot?.projects ?? []) : MOCK_PROJECTS),
@@ -171,31 +121,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const resolveInboxItem = useCallback(
     (id: string, resolution: InboxResolution) => {
       setDismissed((prev) => new Set(prev).add(id));
-      if (!paired || !client) return;
-      const item = derivedInbox.find((entry) => entry.id === id);
-      if (!item?.requestId || !item.tabId) return;
-      const base = {
-        agent: item.agent,
-        worktreeId: item.worktreeId,
-        tabId: item.tabId,
-        requestId: item.requestId,
-      };
-      if (item.kind === "command") {
-        void client.agents
-          .reportDecision({ ...base, approved: resolution.kind === "approve" })
-          .catch(() => undefined);
-      } else {
-        const answered = resolution.kind === "answer";
-        void client.agents
-          .reportAnswer({
-            ...base,
-            dismissed: !answered,
-            ...(answered ? { answer: resolution.option } : {}),
-          })
-          .catch(() => undefined);
-      }
+      void publishInboxResolution(client, paired, derivedInbox, id, resolution).catch(
+        () => undefined,
+      );
     },
-    [paired, client, derivedInbox],
+    [paired, client, derivedInbox, setDismissed],
   );
 
   const markAgentSeen = useCallback(
@@ -206,37 +136,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
       });
     },
-    [client, handleUnauthorized, paired],
+    [client, handleUnauthorized, paired, setStatuses],
   );
 
   const clearAgent = useCallback(
     async (tabId: string) => {
-      if (paired && client) {
-        try {
-          await client.sessions.kill(tabId);
-        } catch (error) {
-          if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-          throw error;
-        }
-      }
+      await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
+        activeClient.sessions.kill(tabId),
+      );
       setHiddenTabIds((previous) => new Set(previous).add(tabId));
     },
-    [client, handleUnauthorized, paired],
+    [client, handleUnauthorized, paired, setHiddenTabIds],
   );
 
   const renameAgent = useCallback(
     async (tabId: string, title: string) => {
-      if (paired && client) {
-        try {
-          await client.sessions.rename(tabId, title);
-        } catch (error) {
-          if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
-          throw error;
-        }
-      }
+      await runSessionAction(client, paired, handleUnauthorized, (activeClient) =>
+        activeClient.sessions.rename(tabId, title),
+      );
       setRenamedTitles((previous) => ({ ...previous, [tabId]: title }));
     },
-    [client, handleUnauthorized, paired],
+    [client, handleUnauthorized, paired, setRenamedTitles],
   );
 
   const value = useMemo<DataContextValue>(
@@ -266,6 +186,177 @@ export function DataProvider({ children }: { children: ReactNode }) {
 }
 
 type Client = NonNullable<ReturnType<typeof useConnection>["client"]>;
+
+function useSubscriptionData(client: Client | null, onUnauthorized: () => void) {
+  const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
+  const [statuses, setStatuses] = useState<AgentReportPayload[]>([]);
+
+  useEffect(() => {
+    if (!client) {
+      setSnapshot(null);
+      setStatuses([]);
+      return undefined;
+    }
+    const controller = new AbortController();
+    runWorkspaceSubscription(client, controller.signal, setSnapshot, onUnauthorized);
+    runAgentStatusSubscription(client, controller.signal, setStatuses, onUnauthorized);
+    return () => controller.abort();
+  }, [client, onUnauthorized]);
+
+  return { snapshot, statuses, setStatuses };
+}
+
+function useAgentPresentation(
+  client: Client | null,
+  statuses: AgentReportPayload[],
+  onUnauthorized: () => void,
+) {
+  const [liveTitles, setLiveTitles] = useState<Record<string, string>>({});
+  const [renamedTitles, setRenamedTitles] = useState<Record<string, string>>({});
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [hiddenTabIds, setHiddenTabIds] = useState<Set<string>>(() => new Set());
+  const agentTabIdsKey = useMemo(() => tabIdsKey(statuses, hiddenTabIds), [hiddenTabIds, statuses]);
+
+  useEffect(() => {
+    setDismissed(new Set());
+    setHiddenTabIds(new Set());
+    setRenamedTitles({});
+  }, [client]);
+
+  useEffect(() => {
+    if (!client || !agentTabIdsKey) {
+      setLiveTitles({});
+      return undefined;
+    }
+    const controller = new AbortController();
+    const tabIds = agentTabIdsKey.split("\u0000");
+    setLiveTitles((previous) => retainActiveTitles(previous, tabIds));
+    for (const tabId of tabIds) {
+      runSessionTitleSubscription(client, tabId, controller.signal, setLiveTitles, onUnauthorized);
+    }
+    return () => controller.abort();
+  }, [agentTabIdsKey, client, onUnauthorized]);
+
+  return {
+    dismissed,
+    hiddenTabIds,
+    liveTitles,
+    renamedTitles,
+    setDismissed,
+    setHiddenTabIds,
+    setRenamedTitles,
+  };
+}
+
+function tabIdsKey(statuses: AgentReportPayload[], hiddenTabIds: Set<string>): string {
+  // Hermes does not yet provide Array.prototype.toSorted.
+  const tabIds = [
+    ...new Set(statuses.map((status) => status.tabId).filter((id) => !hiddenTabIds.has(id))),
+  ];
+  // oxlint-disable-next-line unicorn/no-array-sort
+  return tabIds.sort().join("\u0000");
+}
+
+function retainActiveTitles(
+  previous: Record<string, string>,
+  tabIds: string[],
+): Record<string, string> {
+  const activeTabIds = new Set(tabIds);
+  const next = Object.fromEntries(
+    Object.entries(previous).filter(([tabId]) => activeTabIds.has(tabId)),
+  );
+  return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+}
+
+async function publishInboxResolution(
+  client: Client | null,
+  paired: boolean,
+  inbox: InboxItem[],
+  id: string,
+  resolution: InboxResolution,
+): Promise<void> {
+  const activeClient = pairedClient(client, paired);
+  const item = inboxRequest(inbox, id);
+  if (!activeClient || !item) return;
+  await reportInboxResolution(activeClient, item, resolution);
+}
+
+function pairedClient(client: Client | null, paired: boolean): Client | null {
+  return paired ? client : null;
+}
+
+function inboxRequest(inbox: InboxItem[], id: string): InboxRequest | undefined {
+  const item = inbox.find((entry) => entry.id === id);
+  return isInboxRequest(item) ? item : undefined;
+}
+
+type InboxRequest = InboxItem & { tabId: string; requestId: string };
+
+function isInboxRequest(item: InboxItem | undefined): item is InboxRequest {
+  return Boolean(item?.tabId && item.requestId);
+}
+
+async function reportInboxResolution(
+  client: Client,
+  item: InboxRequest,
+  resolution: InboxResolution,
+): Promise<void> {
+  const request = {
+    agent: item.agent,
+    worktreeId: item.worktreeId,
+    tabId: item.tabId,
+    requestId: item.requestId,
+  };
+  if (item.kind === "command") {
+    await reportCommandResolution(client, request, resolution);
+    return;
+  }
+  await reportQuestionResolution(client, request, resolution);
+}
+
+async function reportCommandResolution(
+  client: Client,
+  request: Pick<InboxRequest, "agent" | "worktreeId" | "tabId" | "requestId">,
+  resolution: InboxResolution,
+): Promise<void> {
+  await client.agents.reportDecision({ ...request, approved: resolution.kind === "approve" });
+}
+
+async function reportQuestionResolution(
+  client: Client,
+  request: Pick<InboxRequest, "agent" | "worktreeId" | "tabId" | "requestId">,
+  resolution: InboxResolution,
+): Promise<void> {
+  if (resolution.kind !== "answer") {
+    await client.agents.reportAnswer({ ...request, dismissed: true });
+    return;
+  }
+  await client.agents.reportAnswer({ ...request, dismissed: false, answer: resolution.option });
+}
+
+async function runSessionAction(
+  client: Client | null,
+  paired: boolean,
+  onUnauthorized: () => void,
+  action: (client: Client) => Promise<void>,
+): Promise<void> {
+  const activeClient = pairedClient(client, paired);
+  if (!activeClient) return;
+  try {
+    await action(activeClient);
+  } catch (error) {
+    reportUnauthorized(error, onUnauthorized);
+    throw error;
+  }
+}
+
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof PragmaGatewayError && error.httpStatus === 401;
+}
+
+function reportUnauthorized(error: unknown, onUnauthorized: () => void): void {
+  if (isUnauthorized(error)) onUnauthorized();
+}
 
 /** Runs the workspace snapshot subscription with capped-backoff reconnect. */
 function runWorkspaceSubscription(
@@ -325,42 +416,44 @@ async function subscriptionLoop(
 ): Promise<void> {
   let backoff = RECONNECT_INITIAL_MS;
   while (!signal.aborted) {
-    const startedAt = Date.now();
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- sequential reconnect attempts.
-      await body();
-    } catch (error) {
-      if (error instanceof PragmaGatewayError && error.httpStatus === 401) {
-        onUnauthorized();
-        return;
-      }
+    const result = await runSubscription(body);
+    if (result === "unauthorized") {
+      onUnauthorized();
+      return;
     }
     if (signal.aborted) return;
-    // Streams routinely die after minutes of tunnel idle; a connection that
-    // held for a while was healthy, so reconnect promptly instead of letting
-    // the backoff creep toward the cap across the session's lifetime.
-    if (Date.now() - startedAt >= RECONNECT_HEALTHY_MS) {
-      backoff = RECONNECT_INITIAL_MS;
-    }
+    backoff = reconnectDelay(backoff, result.startedAt);
     // oxlint-disable-next-line no-await-in-loop -- backoff between reconnects.
     await delay(backoff, signal);
     backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
   }
 }
 
+async function runSubscription(
+  body: () => Promise<void>,
+): Promise<{ startedAt: number } | "unauthorized"> {
+  const startedAt = Date.now();
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- sequential reconnect attempts.
+    await body();
+  } catch (error) {
+    if (isUnauthorized(error)) return "unauthorized";
+  }
+  return { startedAt };
+}
+
+function reconnectDelay(backoff: number, startedAt: number): number {
+  // Streams routinely die after tunnel idle. A long-lived connection is healthy,
+  // so reconnect promptly instead of carrying a large backoff across its lifetime.
+  return Date.now() - startedAt >= RECONNECT_HEALTHY_MS ? RECONNECT_INITIAL_MS : backoff;
+}
+
 function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const wake = (): void => resolve();
-    const timer = setTimeout(wake, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        wake();
-      },
-      { once: true },
-    );
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const aborted = new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
   });
+  return Promise.race([timeout, aborted]);
 }
 
 function useData(): DataContextValue {

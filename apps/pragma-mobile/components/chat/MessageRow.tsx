@@ -24,25 +24,31 @@ export function MessageRow({ row }: { row: TranscriptRow }) {
   if (row.kind === "event") {
     return row.tool ? <ToolLine tool={row.tool} /> : <EventLine text={row.text} />;
   }
-  const isMuted = row.role === "system" || row.role === "tool";
-  const isUser = row.role === "user";
+  return <ChatMessage row={row} />;
+}
 
-  if (isMuted) {
-    return (
-      <View className="items-center px-6 py-1.5">
-        <Text className="text-center text-xs text-muted-foreground">{row.text}</Text>
-      </View>
-    );
-  }
+function ChatMessage({ row }: { row: Exclude<TranscriptRow, { kind: "event" }> }) {
+  if (row.role === "system" || row.role === "tool") return <MutedMessage text={row.text} />;
+  return <MessageBubble isUser={row.role === "user"} text={row.text} />;
+}
 
+function MutedMessage({ text }: { text: string }) {
   return (
-    <View className={`px-4 py-1.5 ${isUser ? "items-end" : "items-start"}`}>
-      <View
-        className={`max-w-[82%] px-4 py-2.5 ${
-          isUser ? "rounded-2xl rounded-br-sm bg-primary" : "rounded-2xl rounded-bl-sm bg-secondary"
-        }`}
-      >
-        <MessageMarkdown isUser={isUser}>{row.text}</MessageMarkdown>
+    <View className="items-center px-6 py-1.5">
+      <Text className="text-center text-xs text-muted-foreground">{text}</Text>
+    </View>
+  );
+}
+
+function MessageBubble({ isUser, text }: { isUser: boolean; text: string }) {
+  const alignment = isUser ? "items-end" : "items-start";
+  const bubble = isUser
+    ? "rounded-2xl rounded-br-sm bg-primary"
+    : "rounded-2xl rounded-bl-sm bg-secondary";
+  return (
+    <View className={`px-4 py-1.5 ${alignment}`}>
+      <View className={`max-w-[82%] px-4 py-2.5 ${bubble}`}>
+        <MessageMarkdown isUser={isUser}>{text}</MessageMarkdown>
       </View>
     </View>
   );
@@ -67,20 +73,21 @@ function MessageMarkdown({ children, isUser }: { children: string; isUser: boole
     colorScheme,
     renderer,
     styles: markdownStyles,
-    theme: isUser
-      ? {
-          colors: {
-            text: userForeground,
-            link: colorScheme === "dark" ? "#1d4ed8" : "#93c5fd",
-            code: colorScheme === "dark" ? "#e4e4e7" : "#27272a",
-            border: colorScheme === "dark" ? "#71717a" : "#a1a1aa",
-          },
-        }
-      : undefined,
+    theme: messageTheme(isUser, colorScheme === "dark", userForeground),
   });
 
   return <View>{elements}</View>;
 }
+
+function messageTheme(isUser: boolean, isDark: boolean, foreground: string) {
+  if (!isUser) return undefined;
+  return { colors: { text: foreground, ...messageColors[isDark ? "dark" : "light"] } };
+}
+
+const messageColors = {
+  dark: { link: "#1d4ed8", code: "#e4e4e7", border: "#71717a" },
+  light: { link: "#93c5fd", code: "#27272a", border: "#a1a1aa" },
+};
 
 /** Adds language-aware highlighting to fenced Markdown code blocks. */
 class CodeHighlightingRenderer extends Renderer {
@@ -90,37 +97,56 @@ class CodeHighlightingRenderer extends Renderer {
 
   override code(text: string, language?: string) {
     const grammar = syntax.languages[codeLanguage(language)];
-    return (
-      <View
-        className="mb-2 overflow-hidden rounded-md border border-border"
-        key={this.getKey()}
-        style={{ backgroundColor: this.isDark ? "#18181b" : "#e5e7eb" }}
-      >
-        <NativeText
-          selectable
-          style={{
-            backgroundColor: this.isDark ? "#18181b" : "#e5e7eb",
-            color: this.isDark ? "#abb2bf" : "#24292f",
-            fontFamily: "monospace",
-            fontSize: 13,
-            lineHeight: 19,
-            padding: 10,
-          }}
-        >
-          {grammar ? renderTokens(syntax.tokenize(text, grammar), this.isDark) : text}
-        </NativeText>
-      </View>
-    );
+    const colors = codeColors(this.isDark);
+    const content = grammar ? renderTokens(syntax.tokenize(text, grammar), this.isDark) : text;
+    return <CodeBlock colors={colors} content={content} key={this.getKey()} />;
   }
+}
+
+function CodeBlock({
+  colors,
+  content,
+}: {
+  colors: { backgroundColor: string; color: string };
+  content: React.ReactNode;
+}) {
+  return (
+    <View
+      className="mb-2 overflow-hidden rounded-md border border-border"
+      style={{ backgroundColor: colors.backgroundColor }}
+    >
+      <NativeText
+        selectable
+        style={{
+          backgroundColor: colors.backgroundColor,
+          color: colors.color,
+          fontFamily: "monospace",
+          fontSize: 13,
+          lineHeight: 19,
+          padding: 10,
+        }}
+      >
+        {content}
+      </NativeText>
+    </View>
+  );
 }
 
 function codeLanguage(language: string | undefined): string {
   const normalized = language?.trim().toLowerCase();
-  if (normalized === "ts") return "typescript";
-  if (normalized === "js") return "javascript";
-  if (normalized === "sh" || normalized === "shell") return "bash";
-  if (normalized === "py") return "python";
-  return normalized || "plaintext";
+  return (
+    ({ ts: "typescript", js: "javascript", sh: "bash", shell: "bash", py: "python" }[
+      normalized ?? ""
+    ] ??
+      normalized) ||
+    "plaintext"
+  );
+}
+
+function codeColors(isDark: boolean) {
+  return isDark
+    ? { backgroundColor: "#18181b", color: "#abb2bf" }
+    : { backgroundColor: "#e5e7eb", color: "#24292f" };
 }
 
 function renderTokens(tokens: Array<string | SyntaxToken>, isDark: boolean): React.ReactNode[] {

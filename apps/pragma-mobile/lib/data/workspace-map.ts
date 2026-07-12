@@ -51,32 +51,67 @@ export function inboxFromStatuses(
   worktrees: Worktree[],
   tabs: Tab[],
 ): InboxItem[] {
-  const projectsById = new Map(projects.map((p) => [p.id, p]));
-  const worktreesById = new Map(worktrees.map((w) => [w.id, w]));
+  const locations = {
+    projectsById: new Map(projects.map((project) => [project.id, project])),
+    worktreesById: new Map(worktrees.map((worktree) => [worktree.id, worktree])),
+  };
   const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
-  const items: InboxItem[] = [];
-  for (const status of newestStatusesFirst(statuses, tabsById)) {
-    if (status.status !== "attention" || !status.attentionKind || !status.requestId) continue;
-    const worktree = worktreesById.get(status.worktreeId);
-    const project = worktree ? projectsById.get(worktree.projectId) : undefined;
-    const isCommand = status.attentionKind === "command";
-    const options = normalizeQuestionOptions(status.options);
-    items.push({
-      id: `${status.tabId}:${status.agent}:${status.requestId}`,
-      kind: status.attentionKind,
-      projectId: project?.id ?? "",
-      projectName: project?.name ?? "",
-      worktreeId: status.worktreeId,
-      worktreeLabel: worktree ? worktreeLabel(worktree) : status.worktreeId,
-      agent: status.agent,
-      prompt: isCommand ? (status.command ?? "Approve command?") : (status.question ?? ""),
-      ...(isCommand && status.command ? { detail: status.command } : {}),
-      ...(!isCommand && options && options.length > 0 ? { options } : {}),
-      tabId: status.tabId,
-      requestId: status.requestId,
-    });
-  }
-  return items;
+  return newestStatusesFirst(statuses, tabsById)
+    .map((status) => inboxItemForStatus(status, locations))
+    .filter((item): item is InboxItem => item !== null);
+}
+
+function inboxItemForStatus(
+  status: AgentReportPayload,
+  locations: {
+    projectsById: ReadonlyMap<string, Project>;
+    worktreesById: ReadonlyMap<string, Worktree>;
+  },
+): InboxItem | null {
+  if (!isAttentionStatus(status)) return null;
+  const worktree = locations.worktreesById.get(status.worktreeId);
+  const project = worktree ? locations.projectsById.get(worktree.projectId) : undefined;
+  const base = {
+    id: `${status.tabId}:${status.agent}:${status.requestId}`,
+    kind: status.attentionKind,
+    projectId: project?.id ?? "",
+    projectName: project?.name ?? "",
+    worktreeId: status.worktreeId,
+    worktreeLabel: worktree ? worktreeLabel(worktree) : status.worktreeId,
+    agent: status.agent,
+    tabId: status.tabId,
+    requestId: status.requestId,
+  };
+  return status.attentionKind === "command"
+    ? commandInboxItem(base, status.command)
+    : questionInboxItem(base, status.question, status.options);
+}
+
+function isAttentionStatus(status: AgentReportPayload): status is AgentReportPayload & {
+  attentionKind: NonNullable<AgentReportPayload["attentionKind"]>;
+  requestId: string;
+} {
+  return Boolean(status.status === "attention" && status.attentionKind && status.requestId);
+}
+
+function commandInboxItem(
+  base: Omit<InboxItem, "prompt" | "detail" | "options">,
+  command: string | null | undefined,
+): InboxItem {
+  return {
+    ...base,
+    prompt: command ?? "Approve command?",
+    ...(command ? { detail: command } : {}),
+  };
+}
+
+function questionInboxItem(
+  base: Omit<InboxItem, "prompt" | "detail" | "options">,
+  question: string | null | undefined,
+  rawOptions: unknown,
+): InboxItem {
+  const options = normalizeQuestionOptions(rawOptions);
+  return { ...base, prompt: question ?? "", ...(options ? { options } : {}) };
 }
 
 function newestStatusesFirst(

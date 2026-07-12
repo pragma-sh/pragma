@@ -49,18 +49,13 @@ export default function PairScreen() {
 
   function onScan(raw: string): void {
     if (handledRef.current || busy) return;
-    const payload = parsePairingPayload(raw);
-    if (!payload) {
-      setError("That QR code isn't a Pragma pairing code.");
-      return;
-    }
-    const result = validatePairingPayload(payload);
-    if (!result.ok) {
-      setError(result.reason);
+    const scan = validateScan(raw);
+    if (!scan.ok) {
+      setError(scan.reason);
       return;
     }
     handledRef.current = true;
-    void tryPair(result.config, payload.hostName);
+    void tryPair(scan.config, scan.hostName);
   }
 
   function onManualSubmit(): void {
@@ -94,36 +89,75 @@ export default function PairScreen() {
         onScan={onScan}
       />
 
+      <PairingStatus busy={busy} error={error} />
+      <ManualPairingForm
+        busy={busy}
+        onSubmit={onManualSubmit}
+        setToken={setManualToken}
+        setUrl={setManualUrl}
+        token={manualToken}
+        url={manualUrl}
+      />
+    </ScrollView>
+  );
+}
+
+function validateScan(
+  raw: string,
+): { ok: true; config: ConnectionConfig; hostName?: string } | { ok: false; reason: string } {
+  const payload = parsePairingPayload(raw);
+  if (!payload) return { ok: false, reason: "That QR code isn't a Pragma pairing code." };
+  const result = validatePairingPayload(payload);
+  return result.ok ? { ok: true, config: result.config, hostName: payload.hostName } : result;
+}
+
+function PairingStatus({ busy, error }: { busy: boolean; error: string | null }) {
+  return (
+    <>
       {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
       {busy ? <Text className="text-sm text-muted-foreground">Connecting…</Text> : null}
+    </>
+  );
+}
 
-      <View className="gap-3">
-        <Text className="text-base font-semibold text-foreground">Or enter details manually</Text>
-        <Input
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          onChangeText={setManualUrl}
-          placeholder="https://your-host.ngrok.app"
-          value={manualUrl}
-        />
-        <Input
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={setManualToken}
-          placeholder="Gateway token"
-          secureTextEntry
-          value={manualToken}
-        />
-        <Button
-          className={busy ? "opacity-50" : undefined}
-          disabled={busy}
-          onPress={onManualSubmit}
-        >
-          <Text>Connect</Text>
-        </Button>
-      </View>
-    </ScrollView>
+function ManualPairingForm({
+  busy,
+  onSubmit,
+  setToken,
+  setUrl,
+  token,
+  url,
+}: {
+  busy: boolean;
+  onSubmit: () => void;
+  setToken: (token: string) => void;
+  setUrl: (url: string) => void;
+  token: string;
+  url: string;
+}) {
+  return (
+    <View className="gap-3">
+      <Text className="text-base font-semibold text-foreground">Or enter details manually</Text>
+      <Input
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        onChangeText={setUrl}
+        placeholder="https://your-host.ngrok.app"
+        value={url}
+      />
+      <Input
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={setToken}
+        placeholder="Gateway token"
+        secureTextEntry
+        value={token}
+      />
+      <Button className={busy ? "opacity-50" : undefined} disabled={busy} onPress={onSubmit}>
+        <Text>Connect</Text>
+      </Button>
+    </View>
   );
 }
 

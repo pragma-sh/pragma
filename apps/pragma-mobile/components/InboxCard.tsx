@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { type RefObject, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import ReanimatedSwipeable, {
   type SwipeableMethods,
@@ -35,41 +35,13 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
   const swipeRef = useRef<SwipeableMethods>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [otherText, setOtherText] = useState("");
-
-  const isQuestion = item.kind === "question";
-  const acceptLabel = isQuestion ? "Submit" : "Approve";
-  const denyLabel = isQuestion ? "Dismiss" : "Deny";
-
-  function accept(): void {
-    if (!isQuestion) {
-      hapticSuccess();
-      onResolve({ kind: "approve" });
-      return;
-    }
-    // For a question, submit the picked option (or the trimmed free-text answer).
-    const answer = selected === OTHER ? otherText.trim() : selected;
-    if (!answer) {
-      hapticWarning();
-      swipeRef.current?.close();
-      return;
-    }
-    hapticSuccess();
-    onResolve({ kind: "answer", option: answer });
-  }
-
-  function deny(): void {
-    hapticWarning();
-    onResolve({ kind: "deny" });
-  }
-
-  function handleSwipeOpen(direction: "left" | "right"): void {
-    // Swiping right reveals the LEFT action (accept); swiping left the right (deny).
-    if (direction === "right") {
-      accept();
-    } else {
-      deny();
-    }
-  }
+  const { accept, acceptLabel, deny, denyLabel, handleSwipeOpen, isQuestion } = useInboxActions({
+    item,
+    onResolve,
+    otherText,
+    selected,
+    swipeRef,
+  });
 
   return (
     <ReanimatedSwipeable
@@ -103,46 +75,165 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
     >
       <Card>
         <InboxCardHeader item={item} />
-
-        <CardContent className="gap-4">
-          {isQuestion ? (
-            <QuestionOptions
-              onOther={(text) => setOtherText(text)}
-              onSelect={(value) => {
-                hapticSelection();
-                setSelected(value);
-              }}
-              options={item.options}
-              otherText={otherText}
-              selected={selected}
-            />
-          ) : null}
-
-          <View className="flex-row justify-end gap-2">
-            <Button
-              accessibilityLabel={denyLabel}
-              accessibilityHint="Dismiss this request"
-              className="h-12 w-12 rounded-full"
-              size="icon"
-              variant="destructive"
-              onPress={deny}
-            >
-              <IconSymbol color="white" fallback="✕" name="xmark" size={20} tintColor="white" />
-            </Button>
-            <Button
-              accessibilityLabel={acceptLabel}
-              accessibilityHint={isQuestion ? "Submit selected answer" : "Approve this command"}
-              className="h-12 w-12 rounded-full"
-              size="icon"
-              variant="success"
-              onPress={accept}
-            >
-              <IconSymbol color="white" fallback="✓" name="checkmark" size={20} tintColor="white" />
-            </Button>
-          </View>
-        </CardContent>
+        <InboxCardContent
+          acceptLabel={acceptLabel}
+          denyLabel={denyLabel}
+          isQuestion={isQuestion}
+          item={item}
+          onAccept={accept}
+          onDeny={deny}
+          onOther={setOtherText}
+          onSelect={setSelected}
+          otherText={otherText}
+          selected={selected}
+        />
       </Card>
     </ReanimatedSwipeable>
+  );
+}
+
+function useInboxActions({
+  item,
+  onResolve,
+  otherText,
+  selected,
+  swipeRef,
+}: {
+  item: InboxItem;
+  onResolve: (resolution: InboxResolution) => void;
+  otherText: string;
+  selected: string | null;
+  swipeRef: RefObject<SwipeableMethods | null>;
+}) {
+  const isQuestion = item.kind === "question";
+  const acceptLabel = isQuestion ? "Submit" : "Approve";
+  const denyLabel = isQuestion ? "Dismiss" : "Deny";
+
+  function accept(): void {
+    if (!isQuestion) {
+      hapticSuccess();
+      onResolve({ kind: "approve" });
+      return;
+    }
+    acceptQuestion(otherText, selected, swipeRef, onResolve);
+  }
+
+  function deny(): void {
+    hapticWarning();
+    onResolve({ kind: "deny" });
+  }
+
+  function handleSwipeOpen(direction: "left" | "right"): void {
+    // Swiping right reveals the LEFT action (accept); swiping left the right (deny).
+    if (direction === "right") accept();
+    else deny();
+  }
+
+  return { accept, acceptLabel, deny, denyLabel, handleSwipeOpen, isQuestion };
+}
+
+function acceptQuestion(
+  otherText: string,
+  selected: string | null,
+  swipeRef: RefObject<SwipeableMethods | null>,
+  onResolve: (resolution: InboxResolution) => void,
+): void {
+  const answer = selected === OTHER ? otherText.trim() : selected;
+  if (!answer) {
+    hapticWarning();
+    swipeRef.current?.close();
+    return;
+  }
+  hapticSuccess();
+  onResolve({ kind: "answer", option: answer });
+}
+
+function InboxCardContent({
+  acceptLabel,
+  denyLabel,
+  isQuestion,
+  item,
+  onAccept,
+  onDeny,
+  onOther,
+  onSelect,
+  otherText,
+  selected,
+}: {
+  acceptLabel: string;
+  denyLabel: string;
+  isQuestion: boolean;
+  item: InboxItem;
+  onAccept: () => void;
+  onDeny: () => void;
+  onOther: (text: string) => void;
+  onSelect: (value: string) => void;
+  otherText: string;
+  selected: string | null;
+}) {
+  function select(value: string): void {
+    hapticSelection();
+    onSelect(value);
+  }
+
+  return (
+    <CardContent className="gap-4">
+      {isQuestion ? (
+        <QuestionOptions
+          onOther={onOther}
+          onSelect={select}
+          options={item.options}
+          otherText={otherText}
+          selected={selected}
+        />
+      ) : null}
+      <InboxCardButtons
+        acceptLabel={acceptLabel}
+        denyLabel={denyLabel}
+        isQuestion={isQuestion}
+        onAccept={onAccept}
+        onDeny={onDeny}
+      />
+    </CardContent>
+  );
+}
+
+function InboxCardButtons({
+  acceptLabel,
+  denyLabel,
+  isQuestion,
+  onAccept,
+  onDeny,
+}: {
+  acceptLabel: string;
+  denyLabel: string;
+  isQuestion: boolean;
+  onAccept: () => void;
+  onDeny: () => void;
+}) {
+  return (
+    <View className="flex-row justify-end gap-2">
+      <Button
+        accessibilityLabel={denyLabel}
+        accessibilityHint="Dismiss this request"
+        className="h-12 w-12 rounded-full"
+        onPress={onDeny}
+        size="icon"
+        variant="destructive"
+      >
+        <IconSymbol color="white" fallback="✕" name="xmark" size={20} tintColor="white" />
+      </Button>
+      <Button
+        accessibilityLabel={acceptLabel}
+        accessibilityHint={isQuestion ? "Submit selected answer" : "Approve this command"}
+        className="h-12 w-12 rounded-full"
+        onPress={onAccept}
+        size="icon"
+        variant="success"
+      >
+        <IconSymbol color="white" fallback="✓" name="checkmark" size={20} tintColor="white" />
+      </Button>
+    </View>
   );
 }
 

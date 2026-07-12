@@ -40,32 +40,56 @@ export function AgentIcon({ icon, fallback, size = 24 }: AgentIconProps) {
       return undefined;
     }
     let cancelled = false;
-    void (async () => {
-      try {
-        const asset = await client.assets.fetch(icon.hash);
-        const next: ResolvedIcon = icon.mime.includes("svg")
-          ? { kind: "svg", xml: new TextDecoder().decode(asset.bytes) }
-          : { kind: "raster", uri: await client.assets.toDataUri(icon.hash) };
-        iconCache.set(icon.hash, next);
-        if (!cancelled) setResolved(next);
-      } catch {
-        if (!cancelled) setResolved(null);
-      }
-    })();
+    void loadIcon(client, icon, () => cancelled, setResolved);
     return () => {
       cancelled = true;
     };
   }, [icon, client]);
 
-  if (!resolved) {
-    return <Text style={{ fontSize: size }}>{fallback}</Text>;
+  return <AgentIconContent fallback={fallback} resolved={resolved} size={size} />;
+}
+
+async function loadIcon(
+  client: NonNullable<ReturnType<typeof useConnection>["client"]>,
+  icon: AgentIconRef,
+  isCancelled: () => boolean,
+  setResolved: (icon: ResolvedIcon | null) => void,
+): Promise<void> {
+  try {
+    const resolved = await fetchIcon(client, icon);
+    if (!isCancelled()) setResolved(resolved);
+  } catch {
+    if (!isCancelled()) setResolved(null);
   }
-  if (resolved.kind === "svg") {
+}
+
+async function fetchIcon(
+  client: NonNullable<ReturnType<typeof useConnection>["client"]>,
+  icon: AgentIconRef,
+): Promise<ResolvedIcon> {
+  const asset = await client.assets.fetch(icon.hash);
+  const resolved = icon.mime.includes("svg")
+    ? { kind: "svg" as const, xml: new TextDecoder().decode(asset.bytes) }
+    : { kind: "raster" as const, uri: await client.assets.toDataUri(icon.hash) };
+  iconCache.set(icon.hash, resolved);
+  return resolved;
+}
+
+function AgentIconContent({
+  fallback,
+  resolved,
+  size,
+}: {
+  fallback: string;
+  resolved: ResolvedIcon | null;
+  size: number;
+}) {
+  if (!resolved) return <Text style={{ fontSize: size }}>{fallback}</Text>;
+  if (resolved.kind === "svg")
     return (
       <View style={{ width: size, height: size }}>
         <SvgXml height={size} width={size} xml={resolved.xml} />
       </View>
     );
-  }
   return <Image source={{ uri: resolved.uri }} style={{ width: size, height: size }} />;
 }

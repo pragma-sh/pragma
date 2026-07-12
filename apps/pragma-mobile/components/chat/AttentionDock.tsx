@@ -95,49 +95,95 @@ function QuestionActions({
 
   return (
     <>
-      {options.length > 0 ? (
-        <RadioGroup
-          onValueChange={(value) => {
-            hapticSelection();
-            setSelected(value);
-          }}
-          value={selected ?? ""}
-        >
-          {options.map((option) => (
-            <OptionRow
-              key={option.label}
-              description={option.description}
-              label={option.label}
-              onPress={() => setSelected(option.label)}
-              selected={selected === option.label}
-              value={option.label}
-            />
-          ))}
-          <OptionRow
-            label="Other"
-            onPress={() => setSelected(OTHER)}
-            selected={selected === OTHER}
-            value={OTHER}
-          />
-        </RadioGroup>
-      ) : null}
-      {options.length === 0 || selected === OTHER ? (
-        <Input
-          autoFocus={selected === OTHER}
-          onChangeText={setOtherText}
-          placeholder="Type your answer…"
-          value={otherText}
-        />
-      ) : null}
-      <View className="flex-row gap-3">
-        <Button className="flex-1" variant="success" onPress={submit}>
-          <Text>Submit</Text>
-        </Button>
-        <Button variant="ghost" onPress={() => onAnswer(request.requestId, null)}>
-          <Text>Dismiss</Text>
-        </Button>
-      </View>
+      <QuestionOptions options={options} selected={selected} onSelect={setSelected} />
+      <QuestionAnswerInput
+        otherText={otherText}
+        onOtherTextChange={setOtherText}
+        selected={selected}
+        show={options.length === 0 || selected === OTHER}
+      />
+      <QuestionActionButtons
+        onDismiss={() => onAnswer(request.requestId, null)}
+        onSubmit={submit}
+      />
     </>
+  );
+}
+
+function QuestionOptions({
+  onSelect,
+  options,
+  selected,
+}: {
+  onSelect: (value: string) => void;
+  options: QuestionOption[];
+  selected: string | null;
+}) {
+  if (options.length === 0) return null;
+  function select(value: string): void {
+    hapticSelection();
+    onSelect(value);
+  }
+  return (
+    <RadioGroup onValueChange={select} value={selected ?? ""}>
+      {options.map((option) => (
+        <OptionRow
+          key={option.label}
+          description={option.description}
+          label={option.label}
+          onPress={() => select(option.label)}
+          selected={selected === option.label}
+          value={option.label}
+        />
+      ))}
+      <OptionRow
+        label="Other"
+        onPress={() => select(OTHER)}
+        selected={selected === OTHER}
+        value={OTHER}
+      />
+    </RadioGroup>
+  );
+}
+
+function QuestionAnswerInput({
+  onOtherTextChange,
+  otherText,
+  selected,
+  show,
+}: {
+  onOtherTextChange: (text: string) => void;
+  otherText: string;
+  selected: string | null;
+  show: boolean;
+}) {
+  if (!show) return null;
+  return (
+    <Input
+      autoFocus={selected === OTHER}
+      onChangeText={onOtherTextChange}
+      placeholder="Type your answer…"
+      value={otherText}
+    />
+  );
+}
+
+function QuestionActionButtons({
+  onDismiss,
+  onSubmit,
+}: {
+  onDismiss: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <View className="flex-row gap-3">
+      <Button className="flex-1" variant="success" onPress={onSubmit}>
+        <Text>Submit</Text>
+      </Button>
+      <Button variant="ghost" onPress={onDismiss}>
+        <Text>Dismiss</Text>
+      </Button>
+    </View>
   );
 }
 

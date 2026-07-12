@@ -50,80 +50,126 @@ export function AgentModelSelector({
   const actions = buildActions(agents, value);
   const colors = useThemeColors();
 
+  const onSelectModel = ({ nativeEvent }: { nativeEvent: { event: string } }) => {
+    const selection = parseModelId(nativeEvent.event);
+    if (!selection) return;
+    hapticSelection();
+    onChange(selection);
+  };
+
   return (
     <View className="flex-row gap-2">
-      <MenuView
-        onPressAction={({ nativeEvent }) => {
-          const selection = parseModelId(nativeEvent.event);
-          if (!selection) return;
-          hapticSelection();
-          onChange(selection);
-        }}
-        actions={actions}
-        style={{ flex: 1 }}
-        title="Choose agent and model"
-      >
-        <View className="h-11 flex-row items-center justify-between rounded-lg border border-input bg-background px-3">
-          {label ? (
-            <View className="min-w-0 flex-1 flex-row items-center gap-2">
-              <Text className="text-base text-foreground" numberOfLines={1}>
-                {label.agent.name}
-              </Text>
-              <Text className="min-w-0 flex-1 text-base text-muted-foreground" numberOfLines={1}>
-                / {label.model.name}
-              </Text>
-            </View>
-          ) : (
-            <Text className="text-base text-muted-foreground">Select agent</Text>
-          )}
-          <IconSymbol
-            color={colors.mutedForeground}
-            fallback="⌄"
-            name="chevron.up.chevron.down"
-            size={16}
-          />
-        </View>
-      </MenuView>
-
-      {label && label.model.reasoning.length > 0 ? (
-        <MenuView
-          onPressAction={({ nativeEvent }) => {
-            hapticSelection();
-            onChange({
-              agentId: label.agent.id,
-              modelId: label.model.id,
-              reasoningId: nativeEvent.event === "auto" ? null : nativeEvent.event,
-            });
-          }}
-          actions={[
-            { id: "auto", title: "Auto", state: value?.reasoningId === null ? "on" : "off" },
-            ...label.model.reasoning.map((reasoning) => ({
-              id: reasoning.id,
-              title: reasoning.name,
-              state: value?.reasoningId === reasoning.id ? ("on" as const) : ("off" as const),
-            })),
-          ]}
-          style={{ flex: 1 }}
-          title="Choose effort"
-        >
-          <View className="h-11 flex-row items-center justify-between rounded-lg border border-input bg-background px-3">
-            <Text className="text-base text-foreground">Effort</Text>
-            <View className="flex-row items-center gap-2">
-              <Text className="text-base text-muted-foreground">
-                {label.reasoning?.name ?? "Auto"}
-              </Text>
-              <IconSymbol
-                color={colors.mutedForeground}
-                fallback="⌄"
-                name="chevron.up.chevron.down"
-                size={16}
-              />
-            </View>
-          </View>
-        </MenuView>
-      ) : null}
+      <AgentMenu actions={actions} colors={colors} label={label} onSelect={onSelectModel} />
+      <EffortMenu colors={colors} label={label} onChange={onChange} value={value} />
     </View>
   );
+}
+
+function AgentMenu({
+  actions,
+  colors,
+  label,
+  onSelect,
+}: {
+  actions: MenuAction[];
+  colors: ReturnType<typeof useThemeColors>;
+  label: ReturnType<typeof agentSelectionLabel>;
+  onSelect: (event: { nativeEvent: { event: string } }) => void;
+}) {
+  return (
+    <MenuView
+      actions={actions}
+      onPressAction={onSelect}
+      style={{ flex: 1 }}
+      title="Choose agent and model"
+    >
+      <View className="h-11 flex-row items-center justify-between rounded-lg border border-input bg-background px-3">
+        {label ? (
+          <View className="min-w-0 flex-1 flex-row items-center gap-2">
+            <Text className="text-base text-foreground" numberOfLines={1}>
+              {label.agent.name}
+            </Text>
+            <Text className="min-w-0 flex-1 text-base text-muted-foreground" numberOfLines={1}>
+              / {label.model.name}
+            </Text>
+          </View>
+        ) : (
+          <Text className="text-base text-muted-foreground">Select agent</Text>
+        )}
+        <SelectorIcon color={colors.mutedForeground} />
+      </View>
+    </MenuView>
+  );
+}
+
+function EffortMenu({
+  colors,
+  label,
+  onChange,
+  value,
+}: {
+  colors: ReturnType<typeof useThemeColors>;
+  label: ReturnType<typeof agentSelectionLabel>;
+  onChange: (selection: AgentModelSelection) => void;
+  value: AgentModelSelection | null;
+}) {
+  if (!label) return null;
+  if (label.model.reasoning.length === 0) return null;
+  return (
+    <MenuView
+      actions={effortActions(label, value)}
+      onPressAction={({ nativeEvent }) => selectReasoning(label, nativeEvent.event, onChange)}
+      style={{ flex: 1 }}
+      title="Choose effort"
+    >
+      <View className="h-11 flex-row items-center justify-between rounded-lg border border-input bg-background px-3">
+        <Text className="text-base text-foreground">Effort</Text>
+        <View className="flex-row items-center gap-2">
+          <Text className="text-base text-muted-foreground">{effortLabel(label)}</Text>
+          <SelectorIcon color={colors.mutedForeground} />
+        </View>
+      </View>
+    </MenuView>
+  );
+}
+
+function effortLabel(label: NonNullable<ReturnType<typeof agentSelectionLabel>>): string {
+  return label.reasoning?.name ?? "Auto";
+}
+
+function effortActions(
+  label: NonNullable<ReturnType<typeof agentSelectionLabel>>,
+  value: AgentModelSelection | null,
+): MenuAction[] {
+  return [
+    { id: "auto", title: "Auto", state: menuState(value?.reasoningId === null) },
+    ...label.model.reasoning.map((reasoning) => ({
+      id: reasoning.id,
+      title: reasoning.name,
+      state: menuState(value?.reasoningId === reasoning.id),
+    })),
+  ];
+}
+
+function menuState(selected: boolean): "on" | "off" {
+  return selected ? "on" : "off";
+}
+
+function SelectorIcon({ color }: { color: string }) {
+  return <IconSymbol color={color} fallback="⌄" name="chevron.up.chevron.down" size={16} />;
+}
+
+function selectReasoning(
+  label: NonNullable<ReturnType<typeof agentSelectionLabel>>,
+  reasoningId: string,
+  onChange: (selection: AgentModelSelection) => void,
+): void {
+  hapticSelection();
+  onChange({
+    agentId: label.agent.id,
+    modelId: label.model.id,
+    reasoningId: reasoningId === "auto" ? null : reasoningId,
+  });
 }
 
 /** Build the nested native-menu action tree from the agent fixtures. */

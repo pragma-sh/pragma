@@ -52,121 +52,242 @@ export function LaunchSheet({ open, onOpenChange, projectId, worktreeId }: Launc
 
   async function launch(): Promise<void> {
     if (!client) return;
-    const built = buildLaunchPayload(
-      { selection: effectiveSelection, prompt, target },
-      { projectId, worktreeId },
-    );
-    if (!built.ok) {
-      setError(built.reason);
-      hapticWarning();
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await client.agents.launch(built.payload);
-      hapticSuccess();
-      onOpenChange(false);
-      reset();
-      router.push({
-        pathname: "/chat/[tabId]",
-        params: {
-          tabId: result.tabId,
-          agent: built.payload.agentId,
-          worktreeId: result.worktreeId,
-        },
-      });
-    } catch (caught) {
-      setError(
-        caught instanceof PragmaGatewayError && caught.httpStatus === 409
-          ? "Open Pragma on your computer to launch sessions."
-          : "Couldn't launch the session. Try again.",
-      );
-      hapticWarning();
-    } finally {
-      setBusy(false);
-    }
+    const result = await launchAgent({
+      client,
+      effectiveSelection,
+      onOpenChange,
+      projectId,
+      prompt,
+      reset,
+      setBusy,
+      setError,
+      target,
+      worktreeId,
+    });
+    if (result) router.push(result);
   }
 
   return (
     <BottomSheet onOpenChange={onOpenChange} open={open}>
-      <View className="gap-1">
-        <Text className="text-lg font-semibold">Launch agent</Text>
-        <Text className="text-sm text-muted-foreground">
-          Start a new agent session in this worktree or a fresh branch.
-        </Text>
-      </View>
+      <LaunchSheetHeader />
+      <LaunchForm
+        agents={agents}
+        error={error}
+        onPromptChange={setPrompt}
+        onSelectionChange={setSelection}
+        onTargetChange={setTarget}
+        prompt={prompt}
+        selectedCatalogAgent={selectedCatalogAgent}
+        selection={effectiveSelection}
+        target={target}
+      />
+      <LaunchSheetActions busy={busy} onCancel={() => onOpenChange(false)} onLaunch={launch} />
+    </BottomSheet>
+  );
+}
 
-      <View className="mt-5 gap-4">
-        <Field label="Agent">
-          <View className="flex-row items-center gap-2">
-            <AgentIcon fallback="◆" icon={selectedCatalogAgent?.icon} size={22} />
-            <View className="flex-1">
-              <AgentModelSelector
-                agents={agents}
-                onChange={setSelection}
-                value={effectiveSelection}
-              />
-            </View>
+async function launchAgent({
+  client,
+  effectiveSelection,
+  onOpenChange,
+  projectId,
+  prompt,
+  reset,
+  setBusy,
+  setError,
+  target,
+  worktreeId,
+}: {
+  client: NonNullable<ReturnType<typeof useConnection>["client"]>;
+  effectiveSelection: AgentModelSelection | null;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
+  prompt: string;
+  reset: () => void;
+  setBusy: (busy: boolean) => void;
+  setError: (error: string | null) => void;
+  target: LaunchTarget;
+  worktreeId: string;
+}) {
+  const payload = validateLaunch({
+    effectiveSelection,
+    projectId,
+    prompt,
+    setError,
+    target,
+    worktreeId,
+  });
+  if (!payload) return null;
+  setBusy(true);
+  setError(null);
+  try {
+    const result = await client.agents.launch(payload);
+    hapticSuccess();
+    onOpenChange(false);
+    reset();
+    return {
+      pathname: "/chat/[tabId]",
+      params: {
+        tabId: result.tabId,
+        agent: payload.agentId,
+        worktreeId: result.worktreeId,
+      },
+    } as const;
+  } catch (caught) {
+    setError(launchErrorMessage(caught));
+    hapticWarning();
+    return null;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function validateLaunch({
+  effectiveSelection,
+  projectId,
+  prompt,
+  setError,
+  target,
+  worktreeId,
+}: {
+  effectiveSelection: AgentModelSelection | null;
+  projectId: string;
+  prompt: string;
+  setError: (error: string | null) => void;
+  target: LaunchTarget;
+  worktreeId: string;
+}) {
+  const built = buildLaunchPayload(
+    { selection: effectiveSelection, prompt, target },
+    { projectId, worktreeId },
+  );
+  if (built.ok) return built.payload;
+  setError(built.reason);
+  hapticWarning();
+  return null;
+}
+
+function launchErrorMessage(caught: unknown): string {
+  if (caught instanceof PragmaGatewayError && caught.httpStatus === 409) {
+    return "Open Pragma on your computer to launch sessions.";
+  }
+  return "Couldn't launch the session. Try again.";
+}
+
+function LaunchSheetHeader() {
+  return (
+    <View className="gap-1">
+      <Text className="text-lg font-semibold">Launch agent</Text>
+      <Text className="text-sm text-muted-foreground">
+        Start a new agent session in this worktree or a fresh branch.
+      </Text>
+    </View>
+  );
+}
+
+function LaunchForm({
+  agents,
+  error,
+  onPromptChange,
+  onSelectionChange,
+  onTargetChange,
+  prompt,
+  selectedCatalogAgent,
+  selection,
+  target,
+}: {
+  agents: ReturnType<typeof catalogToSelectorAgents>;
+  error: string | null;
+  onPromptChange: (text: string) => void;
+  onSelectionChange: (selection: AgentModelSelection) => void;
+  onTargetChange: (target: LaunchTarget) => void;
+  prompt: string;
+  selectedCatalogAgent: NonNullable<ReturnType<typeof useCatalog>>["agents"][number] | undefined;
+  selection: AgentModelSelection | null;
+  target: LaunchTarget;
+}) {
+  return (
+    <View className="mt-5 gap-4">
+      <Field label="Agent">
+        <View className="flex-row items-center gap-2">
+          <AgentIcon fallback="◆" icon={selectedCatalogAgent?.icon} size={22} />
+          <View className="flex-1">
+            <AgentModelSelector agents={agents} onChange={onSelectionChange} value={selection} />
           </View>
-        </Field>
+        </View>
+      </Field>
 
-        <Field label="Run in">
-          <View className="flex-row gap-2">
-            <Choice
-              active={target.kind === "existing"}
-              label="This worktree"
-              onPress={() => setTarget({ kind: "existing" })}
-            />
-            <Choice
-              active={target.kind === "new"}
-              label="New branch"
-              onPress={() => setTarget({ kind: "new", branch: "", title: "" })}
-            />
-          </View>
-        </Field>
+      <Field label="Run in">
+        <View className="flex-row gap-2">
+          <Choice
+            active={target.kind === "existing"}
+            label="This worktree"
+            onPress={() => onTargetChange({ kind: "existing" })}
+          />
+          <Choice
+            active={target.kind === "new"}
+            label="New branch"
+            onPress={() => onTargetChange({ kind: "new", branch: "", title: "" })}
+          />
+        </View>
+      </Field>
 
-        {target.kind === "new" ? (
-          <Field label="Branch name">
-            <Input
-              autoCapitalize="none"
-              autoCorrect={false}
-              onChangeText={(text) =>
-                setTarget({ kind: "new", branch: text.replace(/\s+/g, "-"), title: target.title })
-              }
-              placeholder="feature-branch"
-              value={target.branch}
-            />
-          </Field>
-        ) : null}
-
-        <Field label="Prompt">
+      {target.kind === "new" ? (
+        <Field label="Branch name">
           <Input
-            className="h-28 py-2"
-            multiline
-            onChangeText={setPrompt}
-            placeholder="Describe what you want the agent to do…"
-            style={{ textAlignVertical: "top" }}
-            value={prompt}
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={(text) =>
+              onTargetChange({
+                kind: "new",
+                branch: text.replace(/\s+/g, "-"),
+                title: target.title,
+              })
+            }
+            placeholder="feature-branch"
+            value={target.branch}
           />
         </Field>
+      ) : null}
 
-        {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
-      </View>
+      <Field label="Prompt">
+        <Input
+          className="h-28 py-2"
+          multiline
+          onChangeText={onPromptChange}
+          placeholder="Describe what you want the agent to do…"
+          style={{ textAlignVertical: "top" }}
+          value={prompt}
+        />
+      </Field>
 
-      <View className="mt-6 flex-row justify-end gap-3">
-        <Button onPress={() => onOpenChange(false)} variant="ghost">
-          <Text>Cancel</Text>
-        </Button>
-        <Button
-          className={busy ? "opacity-50" : undefined}
-          disabled={busy}
-          onPress={() => void launch()}
-        >
-          <Text>{busy ? "Launching…" : "Launch"}</Text>
-        </Button>
-      </View>
-    </BottomSheet>
+      {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
+    </View>
+  );
+}
+
+function LaunchSheetActions({
+  busy,
+  onCancel,
+  onLaunch,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onLaunch: () => void;
+}) {
+  return (
+    <View className="mt-6 flex-row justify-end gap-3">
+      <Button onPress={onCancel} variant="ghost">
+        <Text>Cancel</Text>
+      </Button>
+      <Button
+        className={busy ? "opacity-50" : undefined}
+        disabled={busy}
+        onPress={() => void onLaunch()}
+      >
+        <Text>{busy ? "Launching…" : "Launch"}</Text>
+      </Button>
+    </View>
   );
 }
 

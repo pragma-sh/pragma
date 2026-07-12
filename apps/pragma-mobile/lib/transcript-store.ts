@@ -98,22 +98,24 @@ function applyAgentStatus(
   state: TranscriptState,
   event: Extract<AgentStreamEvent, { type: "agent" }>,
 ): TranscriptState {
-  if (event.status === "attention" && event.attentionKind && event.requestId) {
-    const options = normalizeQuestionOptions(event.options);
-    const attention: AttentionRequest = {
-      kind: event.attentionKind,
-      requestId: event.requestId,
-      prompt:
-        (event.attentionKind === "command" ? event.command : event.question) ??
-        event.command ??
-        event.question ??
-        "",
-      ...(options && options.length > 0 ? { options } : {}),
-    };
-    return { ...state, attention };
-  }
+  const attention = attentionForEvent(event);
+  if (attention) return { ...state, attention };
   // Any non-attention status means the agent moved on — drop a stale request.
   return state.attention ? { ...state, attention: null } : state;
+}
+
+function attentionForEvent(
+  event: Extract<AgentStreamEvent, { type: "agent" }>,
+): AttentionRequest | null {
+  if (event.status !== "attention" || !event.attentionKind || !event.requestId) return null;
+  const preferredPrompt = event.attentionKind === "command" ? event.command : event.question;
+  const options = normalizeQuestionOptions(event.options);
+  return {
+    kind: event.attentionKind,
+    requestId: event.requestId,
+    prompt: preferredPrompt ?? event.command ?? event.question ?? "",
+    ...(options ? { options } : {}),
+  };
 }
 
 function clearIfMatches(state: TranscriptState, requestId: string): TranscriptState {
