@@ -1,18 +1,31 @@
 // src/pragma-watcher.ts
 var DEFAULT_APPROVE_KEYS = "\r";
 var RIGHT_ARROW = "\x1B[C";
+var DOWN_ARROW = "\x1B[B";
 var DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 var DEFAULT_SUBMIT_KEYS = "\r";
+var QUESTION_REJECT_KEYS = "\x1B";
+var QUESTION_DIGIT_MAX = 9;
+var QUESTION_OTHER_INPUT_DELAY_MS = 150;
+var CLAUDE_INTERJECT_SUBMIT_DELAY_MS = 200;
 var RESUBSCRIBE_DELAY_MS = 500;
-function createBuiltinWatcher(agent, handleDecisions) {
+function createBuiltinWatcher(agent, handleDecisions, interjectSubmitDelayMs = 0) {
   return {
     agent,
     async watch(ctx) {
       const keys = resolveKeys(ctx.config);
       const seenRequestIds = new Set();
+      const questionOptionsByRequestId = new Map();
       while (!ctx.signal.aborted) {
         try {
-          await consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds);
+          await consumeControlEvents(
+            ctx,
+            keys,
+            handleDecisions,
+            interjectSubmitDelayMs,
+            seenRequestIds,
+            questionOptionsByRequestId,
+          );
         } catch {}
         if (ctx.signal.aborted) {
           return;
@@ -23,7 +36,11 @@ function createBuiltinWatcher(agent, handleDecisions) {
   };
 }
 var opencodeApprovalWatcher = createBuiltinWatcher("opencode", true);
-var claudeCodeInterjectWatcher = createBuiltinWatcher("claude-code", false);
+var claudeCodeInterjectWatcher = createBuiltinWatcher(
+  "claude-code",
+  false,
+  CLAUDE_INTERJECT_SUBMIT_DELAY_MS,
+);
 var cursorInterjectWatcher = createBuiltinWatcher("cursor", false);
 function resolveKeys(config) {
   const c = config ?? {};
@@ -33,7 +50,14 @@ function resolveKeys(config) {
     submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS,
   };
 }
-async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) {
+async function consumeControlEvents(
+  ctx,
+  keys,
+  handleDecisions,
+  interjectSubmitDelayMs,
+  seenRequestIds,
+  questionOptionsByRequestId,
+) {
   const connection = await ctx.sdk.agents.connect({
     agent: ctx.agentId,
     tabId: ctx.session.tabId,
@@ -44,10 +68,30 @@ async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) 
     if (ctx.signal.aborted) {
       return;
     }
-    await handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event);
+    await handleControlEvent(
+      ctx,
+      keys,
+      handleDecisions,
+      interjectSubmitDelayMs,
+      seenRequestIds,
+      questionOptionsByRequestId,
+      event,
+    );
   }
 }
-async function handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event) {
+async function handleControlEvent(
+  ctx,
+  keys,
+  handleDecisions,
+  interjectSubmitDelayMs,
+  seenRequestIds,
+  questionOptionsByRequestId,
+  event,
+) {
+  if (event.type === "agent" && handleDecisions) {
+    rememberQuestionOptions(questionOptionsByRequestId, event);
+    return;
+  }
   if (handleDecisions && event.type === "agentDecision") {
     const { decision } = event;
     if (seenRequestIds.has(decision.requestId)) {
@@ -57,9 +101,78 @@ async function handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, ev
     await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
     return;
   }
-  if (event.type === "agentInput") {
-    await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+  if (handleDecisions && event.type === "agentAnswer") {
+    const { answer } = event;
+    if (seenRequestIds.has(answer.requestId)) {
+      return;
+    }
+    seenRequestIds.add(answer.requestId);
+    const options = questionOptionsByRequestId.get(answer.requestId) ?? [];
+    questionOptionsByRequestId.delete(answer.requestId);
+    const reply = answer.answer?.trim() ?? null;
+    if (!answer.dismissed && reply && !options.includes(reply)) {
+      await writeKeys(ctx, openOtherEditorKeys(options.length));
+      await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
+      if (!ctx.signal.aborted) {
+        await writeKeys(ctx, `${reply}\r`);
+      }
+      return;
+    }
+    const strokes = questionAnswerKeys({ dismissed: answer.dismissed, reply, options });
+    if (strokes) {
+      await writeKeys(ctx, strokes);
+    }
+    return;
   }
+  if (event.type === "agentInput") {
+    if (interjectSubmitDelayMs > 0 && keys.submitKeys) {
+      await writeKeys(ctx, event.input.text);
+      await delay(interjectSubmitDelayMs, ctx.signal);
+      if (!ctx.signal.aborted) {
+        await writeKeys(ctx, keys.submitKeys);
+      }
+    } else {
+      await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+    }
+  }
+}
+function rememberQuestionOptions(cache, event) {
+  if (
+    event.status === "attention" &&
+    event.attentionKind === "question" &&
+    typeof event.requestId === "string" &&
+    event.requestId.length > 0
+  ) {
+    const options = (event.options ?? [])
+      .map((option) => option.label)
+      .filter((option) => option.trim() !== "");
+    cache.set(event.requestId, options);
+  }
+}
+function questionAnswerKeys(input) {
+  if (input.dismissed || input.reply === null) {
+    return QUESTION_REJECT_KEYS;
+  }
+  const reply = input.reply.trim();
+  if (!reply) {
+    return QUESTION_REJECT_KEYS;
+  }
+  const options = input.options;
+  const matchIndex = options.findIndex((option) => option === reply);
+  if (matchIndex >= 0) {
+    return selectOptionKeys(matchIndex, options.length);
+  }
+  return `${openOtherEditorKeys(options.length)}${reply}\r`;
+}
+function openOtherEditorKeys(optionCount) {
+  return `${DOWN_ARROW.repeat(optionCount)}\r`;
+}
+function selectOptionKeys(index, optionCount) {
+  const total = optionCount + 1;
+  if (index < QUESTION_DIGIT_MAX && index < total) {
+    return String(index + 1);
+  }
+  return `${DOWN_ARROW.repeat(index)}\r`;
 }
 async function writeKeys(ctx, data) {
   try {
@@ -88,6 +201,7 @@ var pragmaWatcher = {
 };
 var pragma_watcher_default = pragmaWatcher;
 export {
+  questionAnswerKeys,
   opencodeApprovalWatcher,
   pragma_watcher_default as default,
   cursorInterjectWatcher,

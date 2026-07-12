@@ -1,9 +1,10 @@
 // Host-side watcher for the built-in opencode agent, loaded by the `pragma-watch`
 // sidecar (see `apps/pragma/src-tauri/src/plugins.rs`). opencode exposes no
 // decision-returning plugin hook on the current binary, so remote command
-// approval goes the watcher route: the in-process opencode plugin reports a
-// `command` attention (which raises the Pragma approval toast), and this watcher
-// answers the user's verdict by writing the keystroke into the live terminal.
+// approval and question answers go the watcher route: the in-process opencode
+// plugin reports a `command`/`question` attention (which raises the Pragma toast
+// / mobile answer UI), and this watcher writes the matching keystrokes into the
+// live terminal.
 //
 // Type-only imports keep this module free of the `@pragma/plugin` runtime barrel
 // so the sidecar bundle stays a lean node module.
@@ -33,45 +34,52 @@ export interface OpencodeWatcherConfig {
 
 const DEFAULT_APPROVE_KEYS = "\r";
 const RIGHT_ARROW = "\x1b[C";
+const DOWN_ARROW = "\x1b[B";
 const DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 const DEFAULT_SUBMIT_KEYS = "\r";
+/** Escape rejects OpenCode's question prompt when not editing free-text. */
+const QUESTION_REJECT_KEYS = "\x1b";
+/** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
+const QUESTION_DIGIT_MAX = 9;
+/** Lets OpenCode mount its custom-answer editor before typing into it. */
+const QUESTION_OTHER_INPUT_DELAY_MS = 150;
+/** Lets paste-aware TUIs commit interjected text before receiving Enter. */
+const CLAUDE_INTERJECT_SUBMIT_DELAY_MS = 200;
 
 /** Backoff before re-subscribing after the agent event stream drops. */
 const RESUBSCRIBE_DELAY_MS = 500;
 
 /**
- * Watches one launched opencode session and drives it from the app's control
- * channel: for every command-approval verdict, write the matching keystroke into
- * the terminal; for every interjection (`AgentInput`), type the text and submit
- * it. Runs until the session exits (`ctx.signal` aborts).
- *
- * The agent event stream is a long-lived HTTP response that can drop (gateway
- * hiccup, idle close, reconnect) while opencode keeps running. A single `for
- * await` would then end and leave the session permanently unable to be driven,
- * so we re-connect until the signal aborts — a dropped stream must not silently
- * disable approval or interjection.
- */
-/**
  * Builds a built-in-agent watcher. `handleDecisions` is true for opencode (whose
- * permission prompts have no decision-returning hook and so must be answered via
- * keystrokes); it is false for agents (Claude Code, Cursor) whose approvals go
- * through a blocking `await-decision` hook, leaving the watcher responsible only
- * for interjections.
+ * permission / question prompts have no decision-returning hook and so must be
+ * answered via keystrokes); it is false for agents (Claude Code, Cursor) whose
+ * approvals go through a blocking `await-decision` hook, leaving the watcher
+ * responsible only for interjections.
  */
 function createBuiltinWatcher(
   agent: string,
   handleDecisions: boolean,
+  interjectSubmitDelayMs = 0,
 ): WatcherDefinition<OpencodeWatcherConfig> {
   return {
     agent,
     async watch(ctx: WatcherContext<OpencodeWatcherConfig>): Promise<void> {
       const keys = resolveKeys(ctx.config);
       const seenRequestIds = new Set<string>();
+      /** Options from the latest `question` attention, keyed by requestId. */
+      const questionOptionsByRequestId = new Map<string, string[]>();
 
       while (!ctx.signal.aborted) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one live connection at a time; reconnect only after the previous stream ends.
-          await consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds);
+          await consumeControlEvents(
+            ctx,
+            keys,
+            handleDecisions,
+            interjectSubmitDelayMs,
+            seenRequestIds,
+            questionOptionsByRequestId,
+          );
         } catch {
           // Stream error (not an abort): fall through to re-connect below.
         }
@@ -85,13 +93,13 @@ function createBuiltinWatcher(
   };
 }
 
-/** Answers opencode permission prompts and applies interjections via keystrokes. */
+/** Answers opencode permission/question prompts and applies interjections via keystrokes. */
 export const opencodeApprovalWatcher: WatcherDefinition<OpencodeWatcherConfig> =
   createBuiltinWatcher("opencode", true);
 
 /** Applies interjections to Claude Code; approvals go through its blocking hook. */
 export const claudeCodeInterjectWatcher: WatcherDefinition<OpencodeWatcherConfig> =
-  createBuiltinWatcher("claude-code", false);
+  createBuiltinWatcher("claude-code", false, CLAUDE_INTERJECT_SUBMIT_DELAY_MS);
 
 /** Applies interjections to Cursor Agent; approvals go through its blocking hook. */
 export const cursorInterjectWatcher: WatcherDefinition<OpencodeWatcherConfig> =
@@ -115,15 +123,17 @@ function resolveKeys(config: OpencodeWatcherConfig | undefined): ControlKeys {
 
 /**
  * Drains one agent connection scoped to this watcher's agent + tab, applying
- * command verdicts (when `handleDecisions`) and interjections to the live
- * terminal. The connection is already filtered to this agent + tab, so no
+ * command/question verdicts (when `handleDecisions`) and interjections to the
+ * live terminal. The connection is already filtered to this agent + tab, so no
  * per-event scope check is needed.
  */
 async function consumeControlEvents(
   ctx: WatcherContext<OpencodeWatcherConfig>,
   keys: ControlKeys,
   handleDecisions: boolean,
+  interjectSubmitDelayMs: number,
   seenRequestIds: Set<string>,
+  questionOptionsByRequestId: Map<string, string[]>,
 ): Promise<void> {
   const connection = await ctx.sdk.agents.connect({
     agent: ctx.agentId,
@@ -135,18 +145,34 @@ async function consumeControlEvents(
     if (ctx.signal.aborted) {
       return;
     }
-    await handleControlEvent(ctx, keys, handleDecisions, seenRequestIds, event);
+    await handleControlEvent(
+      ctx,
+      keys,
+      handleDecisions,
+      interjectSubmitDelayMs,
+      seenRequestIds,
+      questionOptionsByRequestId,
+      event,
+    );
   }
 }
 
-/** Applies one stream event: a deduped command verdict or an interjection. */
+/** Applies one stream event: a deduped command/question verdict or an interjection. */
 async function handleControlEvent(
   ctx: WatcherContext<OpencodeWatcherConfig>,
   keys: ControlKeys,
   handleDecisions: boolean,
+  interjectSubmitDelayMs: number,
   seenRequestIds: Set<string>,
+  questionOptionsByRequestId: Map<string, string[]>,
   event: AgentStreamEvent,
 ): Promise<void> {
+  // Remember question choices from attention reports so an AgentAnswer can be
+  // turned into the matching TUI digit / free-text keystroke sequence.
+  if (event.type === "agent" && handleDecisions) {
+    rememberQuestionOptions(questionOptionsByRequestId, event);
+    return;
+  }
   if (handleDecisions && event.type === "agentDecision") {
     const { decision } = event;
     if (seenRequestIds.has(decision.requestId)) {
@@ -156,9 +182,112 @@ async function handleControlEvent(
     await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
     return;
   }
-  if (event.type === "agentInput") {
-    await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+  if (handleDecisions && event.type === "agentAnswer") {
+    const { answer } = event;
+    if (seenRequestIds.has(answer.requestId)) {
+      return;
+    }
+    seenRequestIds.add(answer.requestId);
+    const options = questionOptionsByRequestId.get(answer.requestId) ?? [];
+    questionOptionsByRequestId.delete(answer.requestId);
+    const reply = answer.answer?.trim() ?? null;
+    if (!answer.dismissed && reply && !options.includes(reply)) {
+      // OpenCode reserves digit shortcuts for listed choices. Navigate to its
+      // virtual Other row with arrows so Enter opens the custom-answer editor.
+      await writeKeys(ctx, openOtherEditorKeys(options.length));
+      await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
+      if (!ctx.signal.aborted) {
+        await writeKeys(ctx, `${reply}\r`);
+      }
+      return;
+    }
+    const strokes = questionAnswerKeys({ dismissed: answer.dismissed, reply, options });
+    if (strokes) {
+      await writeKeys(ctx, strokes);
+    }
+    return;
   }
+  if (event.type === "agentInput") {
+    if (interjectSubmitDelayMs > 0 && keys.submitKeys) {
+      await writeKeys(ctx, event.input.text);
+      await delay(interjectSubmitDelayMs, ctx.signal);
+      if (!ctx.signal.aborted) {
+        await writeKeys(ctx, keys.submitKeys);
+      }
+    } else {
+      await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
+    }
+  }
+}
+
+/**
+ * Caches option labels for a live `question` attention so a later answer can
+ * pick the matching OpenCode TUI digit. Drops the cache when attention clears.
+ */
+function rememberQuestionOptions(
+  cache: Map<string, string[]>,
+  event: Extract<AgentStreamEvent, { type: "agent" }>,
+): void {
+  if (
+    event.status === "attention" &&
+    event.attentionKind === "question" &&
+    typeof event.requestId === "string" &&
+    event.requestId.length > 0
+  ) {
+    const options = (event.options ?? [])
+      .map((option) => option.label)
+      .filter((option) => option.trim() !== "");
+    cache.set(event.requestId, options);
+  }
+  // Orphaned entries (cleared/aborted without an AgentAnswer) are tiny and are
+  // overwritten the next time the same requestId is reused; the answer handler
+  // deletes the entry on a successful reply.
+}
+
+/**
+ * Builds the OpenCode question-TUI keystroke sequence for one remote answer.
+ *
+ * Single-select questions bind digits `1`–`9` to select+submit immediately.
+ * "Type your own answer" is the virtual option after the last label. It needs
+ * arrow navigation plus Enter to open its editor, then text + Enter to submit.
+ * Dismiss maps to Escape. Returns `null` when there is nothing to write.
+ */
+export function questionAnswerKeys(input: {
+  dismissed: boolean;
+  reply: string | null;
+  options: string[];
+}): string | null {
+  if (input.dismissed || input.reply === null) {
+    return QUESTION_REJECT_KEYS;
+  }
+  const reply = input.reply.trim();
+  if (!reply) {
+    return QUESTION_REJECT_KEYS;
+  }
+  const options = input.options;
+  const matchIndex = options.findIndex((option) => option === reply);
+  if (matchIndex >= 0) {
+    return selectOptionKeys(matchIndex, options.length);
+  }
+  // Free-text / "Other": open the custom-answer editor, type, submit.
+  return `${openOtherEditorKeys(options.length)}${reply}\r`;
+}
+
+/** Opens OpenCode's virtual custom-answer editor. */
+function openOtherEditorKeys(optionCount: number): string {
+  return `${DOWN_ARROW.repeat(optionCount)}\r`;
+}
+
+/**
+ * Keys that highlight option `index` (0-based) and activate it. Prefer digits
+ * 1–9 (OpenCode's fast path); fall back to Down arrows + Enter past digit 9.
+ */
+function selectOptionKeys(index: number, optionCount: number): string {
+  const total = optionCount + 1; // options + "Type your own answer"
+  if (index < QUESTION_DIGIT_MAX && index < total) {
+    return String(index + 1);
+  }
+  return `${DOWN_ARROW.repeat(index)}\r`;
 }
 
 /** Writes keystrokes, swallowing transient failures so the watcher survives. */

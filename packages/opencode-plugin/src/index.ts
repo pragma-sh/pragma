@@ -8,6 +8,7 @@ import {
   reportStopped,
   type AgentAttentionKind,
   type AgentMessage,
+  type QuestionOption,
 } from "@pragma/sdk";
 
 import { type Environment, type PragmaReporter, createPragmaOpencodeHooks } from "./hooks";
@@ -59,6 +60,17 @@ function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter
     attention: (kind: AgentAttentionKind) => report(() => reportAttention({ agent, env, kind })),
     attentionCommand: (command: string, requestId: string) =>
       report(() => reportAttention({ agent, env, kind: "command", command, requestId })),
+    attentionQuestion: (question: string, questionOptions: QuestionOption[], requestId: string) =>
+      report(() =>
+        reportAttention({
+          agent,
+          env,
+          kind: "question",
+          question,
+          ...(questionOptions.length > 0 ? { options: questionOptions } : {}),
+          requestId,
+        }),
+      ),
     message: (message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">) =>
       report(() => reportMessage({ agent, env, message })),
     cleared: () => report(() => reportCleared({ agent, env })),

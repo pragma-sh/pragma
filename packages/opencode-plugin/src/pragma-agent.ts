@@ -4,7 +4,7 @@ import {
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
-} from "@pragma/plugin";
+} from "@pragma/plugin/catalog";
 
 /** Absolute filesystem path to this plugin's agent icon. */
 export const opencodeIconPath: string = new URL("../assets/opencode.svg", import.meta.url).pathname;
