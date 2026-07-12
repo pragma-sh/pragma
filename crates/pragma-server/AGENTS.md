@@ -30,7 +30,7 @@ process therefore follows persistent server lifetime, not Tauri client lifetime.
 mirroring the `automations` supervisor: a lazily respawned child with a stdout reader
 thread. It caches the last `catalog` event plus the hash → asset map; a sidecar crash
 never blanks the catalog — a respawn re-runs `load` and the cache holds until a fresh
-publish arrives. RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
+publish arrives. Public RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
 cached catalog), `registerRoots` (project roots, sharing the same desktop RPC that
 registers automation roots), `readAsset` (base64 + mime, validated lowercase-hex sha256),
 and `reload` (re-sends `load` with freshly read gateway credentials; the gateway calls it
@@ -43,6 +43,13 @@ the local gateway. A load sent
 before the gateway exists drops gateway-dependent agents (their model providers throw),
 so the host tracks whether the last load had credentials and re-loads on the next
 `catalog` read once they appear.
+
+Watcher metadata stays server-internal because plugin config may contain secrets. Internal
+action `watcher` accepts an agent id and returns matching plugin id, bundle path, config,
+and local watcher agent. Headless launch registers its mirrored project root through
+`registerRoots` before catalog/watcher lookup, then starts `pragma-watch` from that metadata.
+Catalog ids select the watcher; its plugin-local `watcherAgent` is the runtime stream id
+passed as `--agentId`, matching status reports and mobile interjections.
 
 ## Workspace mirror store
 

@@ -16,7 +16,8 @@ commands on stdin, and emits NDJSON events on stdout:
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + the hash → asset map),
   `error`, `log`.
 
-On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
+On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
+resource directory, global `~/.pragma/config.json`, plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust
 `plugins.rs` `resolve_local_dir` semantics — accepted duplication, flagged as debt until
 resolution moves into `pragma-core`). It imports the built-in agent plugins
@@ -39,13 +40,12 @@ packages/plugins-host/
 └── package.json      # bin: pragma-plugins -> src/cli.ts; build:sidecar compiles dist/pragma-plugins
 ```
 
-## Built-in agents live in the plugin packages
+## Shipped agents live in plugin packages
 
 The three built-in agent definitions (`claude-code`, `opencode`, `cursor`) live in their
-plugin packages' `src/pragma-agent.ts` and are imported here directly. This is the one
-source of truth the catalog sidecar and the in-webview `apps/pragma/src/plugins/builtin-agents.ts`
-share — the webview path re-exports them (overriding `iconPath` with a browser URL and
-attaching the built-in watchers). Do not duplicate agent metadata across packages.
+plugin packages' `src/pragma-plugin.ts`. Staging copies each package's `package.json`,
+`dist/`, and `assets/`; desktop and catalog sidecar discover and import those same bundles.
+Do not statically import shipped packages or duplicate agent metadata here.
 
 ## Catalog wire types
 

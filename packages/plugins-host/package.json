@@ -21,10 +21,7 @@
     "build:sidecar": "bun build src/cli.ts --compile --minify --outfile dist/pragma-plugins"
   },
   "dependencies": {
-    "@pragma/claude-code-plugin": "workspace:*",
     "@pragma/constants": "workspace:*",
-    "@pragma/cursor-plugin": "workspace:*",
-    "@pragma/opencode-plugin": "workspace:*",
     "@pragma/plugin": "workspace:*",
     "@pragma/sdk": "workspace:*",
     "@pragma/sidecar-kit": "workspace:*"

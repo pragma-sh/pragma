@@ -321,6 +321,10 @@ impl Registry {
     pub fn launch_agent_headless(&self, payload: Value) -> Result<Value, String> {
         let args: AgentSessionLaunchPayload =
             serde_json::from_value(payload).map_err(|error| error.to_string())?;
+        let project_root = self.mirrored_project_path(&args.project_id)?;
+        self.plugins
+            .handle_rpc(&json!({ "action": "registerRoots", "roots": [project_root] }))
+            .map_err(|error| error.to_string())?;
         let (worktree_id, cwd) = match (args.worktree_id, args.new_worktree) {
             (Some(_), Some(_)) => {
                 return Err(
@@ -354,6 +358,7 @@ impl Registry {
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
         crate::watchers::start_for_headless_launch(
+            &self.plugins,
             &self.server_dir,
             Some(&plugin_id),
             &args.agent_id,
@@ -366,6 +371,23 @@ impl Registry {
         });
         self.append_mirrored_tab(&args.project_id, &worktree_id, &tab_id);
         Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
+    }
+
+    fn mirrored_project_path(&self, project_id: &str) -> Result<String, String> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?;
+        workspace
+            .as_ref()
+            .and_then(|snapshot| {
+                snapshot
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+            })
+            .map(|project| project.path.clone())
+            .ok_or_else(|| format!("project not found: {project_id}"))
     }
 
     /// Resolves an existing worktree's path from the mirrored snapshot.

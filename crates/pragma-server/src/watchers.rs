@@ -7,9 +7,10 @@
 //! agent headlessly (no desktop controller) it must start that watcher itself,
 //! or a paired phone's replies never reach the agent.
 //!
-//! V1 covers the built-in agents (Claude Code, opencode, Cursor), which all
-//! share the `@pragma/opencode-plugin` watcher module. Config-plugin watchers
-//! still require the desktop to launch the session.
+//! Watcher resolution is catalog-driven: the plugin catalog sidecar reports a
+//! watcher spec (bundle path + config) for every plugin that declares one, so
+//! any installed agent plugin — bundled with the app or user-configured —
+//! gets its watcher headlessly with no per-plugin code here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -18,47 +19,52 @@ use std::thread;
 use pragma_constants::CONSTANTS;
 use serde_json::Value;
 
-/// The plugin id the desktop passes for built-in watcher instances; carried
-/// only for logging/dedup inside the watcher process.
-const BUILTIN_WATCHER_PLUGIN_ID: &str = "pragma.builtin-agents";
+use crate::plugins_host::{PluginsRegistry, WatcherSpec};
 
-/// Catalog plugin ids whose agents are served by the shared built-in watcher
-/// module. Kept in sync with `BUILTIN_PLUGINS` in `packages/plugins-host`.
-const BUILTIN_AGENT_PLUGIN_IDS: [&str; 3] =
-    ["pragma.claude-code", "pragma.opencode", "pragma.cursor"];
-
-/// Starts the built-in watcher for a headless agent launch. Best-effort: a
-/// missing gateway, watcher bundle, or non-built-in agent logs and skips —
-/// the session still runs, phone replies just cannot reach it.
+/// Starts the plugin-declared watcher for a headless agent launch.
+/// Best-effort: a missing gateway, watcher declaration, or bundle logs and
+/// skips — the session still runs, phone replies just cannot reach it.
 pub fn start_for_headless_launch(
+    plugins: &PluginsRegistry,
     server_dir: &Path,
     agent_plugin_id: Option<&str>,
     agent_id: &str,
     tab_id: &str,
     worktree_id: &str,
 ) {
-    if !agent_plugin_id.is_some_and(|id| BUILTIN_AGENT_PLUGIN_IDS.contains(&id)) {
+    let payload = serde_json::json!({
+        "action": "watcher",
+        "agentId": agent_id,
+        "pluginId": agent_plugin_id,
+    });
+    let watcher: Option<WatcherSpec> = plugins
+        .handle_internal_rpc(&payload)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok());
+    let Some(watcher) = watcher else {
         eprintln!(
-            "headless launch: no built-in watcher for agent {agent_id} (plugin {agent_plugin_id:?}); phone replies will not reach it"
+            "headless launch: no plugin watcher declared for agent {agent_id} (plugin {agent_plugin_id:?}); phone replies will not reach it"
         );
         return;
-    }
+    };
     let Some((gateway_url, gateway_token)) = gateway_credentials(server_dir) else {
         eprintln!("headless launch: gateway is not running; skipping watcher for {agent_id}");
         return;
     };
-    let Some(watcher_main) = builtin_watcher_main() else {
-        eprintln!("headless launch: no watcher bundle found; skipping watcher for {agent_id}");
+    if !Path::new(&watcher.main_path).is_file() {
+        eprintln!(
+            "headless launch: watcher bundle missing at {}; skipping watcher for {agent_id}",
+            watcher.main_path
+        );
         return;
-    };
+    }
     let mut command = watcher_command();
     command
-        .args(["--pluginId", BUILTIN_WATCHER_PLUGIN_ID])
-        .arg("--pluginMain")
-        .arg(&watcher_main)
-        .args(["--agentId", agent_id])
-        .args(["--watcherAgent", agent_id])
-        .args(["--config", "{}"])
+        .args(["--pluginId", &watcher.plugin_id])
+        .args(["--pluginMain", &watcher.main_path])
+        .args(["--agentId", &watcher.watcher_agent])
+        .args(["--watcherAgent", &watcher.watcher_agent])
+        .args(["--config", &watcher.config.to_string()])
         .args(["--sessionId", tab_id])
         .args(["--tabId", tab_id])
         .args(["--worktreeId", worktree_id])
@@ -103,23 +109,6 @@ fn watcher_command() -> Command {
     } else {
         Command::new(sidecar_executable("pragma-watch"))
     }
-}
-
-/// Resolves the built-in watcher module: dev imports the workspace TypeScript
-/// source; release resolves the staged bundle inside the app resource
-/// directory the desktop forwarded via `PRAGMA_RESOURCE_DIR` when it spawned
-/// this server (mirrors `resolve_builtin_watcher_main` in the desktop's
-/// `plugins.rs`).
-fn builtin_watcher_main() -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        return Some(workspace_root().join("packages/opencode-plugin/src/pragma-watcher.ts"));
-    }
-    let rel = Path::new("plugins/opencode/pragma-watcher.mjs");
-    std::env::var_os("PRAGMA_RESOURCE_DIR")
-        .map(PathBuf::from)
-        .into_iter()
-        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
-        .find(|candidate| candidate.exists())
 }
 
 fn sidecar_executable(name: &str) -> PathBuf {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { extname } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
 
 import type {
   AgentCatalog,
@@ -13,10 +13,29 @@ import type { AgentDefinition, PluginContext, PluginDefinition } from "@pragma/p
 /** Maximum icon size the catalog will serve, in bytes. */
 export const ICON_MAX_BYTES = 256 * 1024;
 
-/** A plugin definition tagged with the stable id it was resolved under. */
+/** A loaded plugin definition plus the manifest facts the hosts need. */
 export interface ResolvedPlugin {
   pluginId: string;
+  /** Absolute plugin directory (relative icon paths resolve against it). */
+  dir: string;
+  /** Absolute path of the imported bundle (`pragma-watch` re-imports it). */
+  mainPath: string;
+  /** The plugin's config entry, passed through to its watcher instances. */
+  config: unknown;
   definition: PluginDefinition;
+}
+
+/**
+ * One watcher a plugin attaches to an agent, flattened for the server so a
+ * headless launch can start the matching `pragma-watch` sidecar. Server-side
+ * only — the config may hold secrets and must never ride the public catalog.
+ */
+export interface WatcherEntry {
+  pluginId: string;
+  agentId: string;
+  watcherAgent: string;
+  mainPath: string;
+  config: unknown;
 }
 
 /** A hashed icon asset the gateway can serve by content hash. */
@@ -84,37 +103,70 @@ export async function assembleCatalog(
 ): Promise<CatalogResult> {
   const agents: CatalogAgent[] = [];
   const assets: Record<string, IconAsset> = {};
-  for (const { pluginId, definition } of plugins) {
-    for (const agent of definition.agents ?? []) {
+  for (const plugin of plugins) {
+    for (const agent of plugin.definition.agents ?? []) {
       try {
-        agents.push(await catalogAgent(agent, pluginId, ctx, assets));
+        agents.push(await catalogAgent(agent, plugin, ctx, assets));
       } catch (error) {
-        onError(pluginId, agent.id, error);
+        onError(plugin.pluginId, agent.id, error);
       }
     }
   }
   return { catalog: { agents }, assets };
 }
 
+/**
+ * Flattens every plugin's watcher declarations into {@link WatcherEntry}s so
+ * the server can start the matching `pragma-watch` sidecar for a headless
+ * launch of any agent — bundled and user-configured plugins alike.
+ */
+export function assembleWatchers(plugins: ResolvedPlugin[]): WatcherEntry[] {
+  return plugins.flatMap((plugin) =>
+    (plugin.definition.watchers ?? []).map((watcher) => ({
+      pluginId: plugin.pluginId,
+      agentId: qualifiedAgentId(plugin.pluginId, watcher.agent),
+      watcherAgent: watcher.agent,
+      mainPath: plugin.mainPath,
+      config: plugin.config ?? {},
+    })),
+  );
+}
+
 async function catalogAgent(
   agent: AgentDefinition,
-  pluginId: string,
+  plugin: ResolvedPlugin,
   ctx: PluginContext,
   assets: Record<string, IconAsset>,
 ): Promise<CatalogAgent> {
   const models = await resolveModels(agent, ctx);
-  const icon = catalogIcon(agent, assets);
+  const icon = catalogIcon(agent, plugin.dir, assets);
   const commands = launchCommands(agent, models);
   const launch = catalogLaunch(agent, commands);
-  return { id: agent.id, name: agent.name, pluginId, models, launch, ...(icon ? { icon } : {}) };
+  return {
+    id: qualifiedAgentId(plugin.pluginId, agent.id),
+    name: agent.name,
+    pluginId: plugin.pluginId,
+    models,
+    launch,
+    ...(icon ? { icon } : {}),
+  };
+}
+
+function qualifiedAgentId(pluginId: string, agentId: string): string {
+  if (agentId.includes(".")) return agentId;
+  return pluginId === `pragma.${agentId}` ? pluginId : `${pluginId}.${agentId}`;
 }
 
 function catalogIcon(
   agent: AgentDefinition,
+  pluginDir: string,
   assets: Record<string, IconAsset>,
 ): CatalogAgent["icon"] | undefined {
   if (!agent.iconPath) return undefined;
-  const asset = hashIcon(agent.iconPath);
+  // Definitions declare icons relative to their plugin directory so the same
+  // bundle works from any install location; absolute paths pass through.
+  const path = isAbsolute(agent.iconPath) ? agent.iconPath : join(pluginDir, agent.iconPath);
+  const asset = hashIcon(path);
   assets[asset.hash] = asset;
   return { hash: asset.hash, mime: asset.mime };
 }

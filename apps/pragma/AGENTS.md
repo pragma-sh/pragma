@@ -167,11 +167,10 @@ to the regular plugin notification.
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
 plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor agent
 definitions live in their host-tool plugin packages
-(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-agent`) as the single source of
-truth. `src/plugins/builtin-agents.ts` shrinks to re-exports of those definitions,
-overriding `iconPath` with a browser URL and attaching the built-in watchers so the
-webview path keeps working; the `pragma-plugins` catalog sidecar imports the same
-definitions directly to assemble the catalog. Agent definitions
+(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-plugin`) as the single source of
+truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
+resource directory. Desktop and `pragma-plugins` discover them through the same manifest
+path as global/project plugins; no built-in registry seam exists. Agent definitions
 carry `id`, `name`, optional `iconPath`, `launch.command`, optional model providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
 before prompt prefill), and optional prefill controls (`prefillMode: "bracketed" |
@@ -206,7 +205,9 @@ Plugin watchers are normally started when Pragma launches an agent session, but 
 approval reports also lazy-start the matching watcher for their tab. This keeps approval
 working when a user manually starts a watcher-backed agent (for example typing `opencode`
 inside a Pragma terminal): the status plugin can raise the toast, and the lazy watcher can
-write the Approve/Deny keys back into that same PTY.
+write the Approve/Deny keys back into that same PTY. Watcher lookup uses the qualified
+catalog agent id; `pragma-watch --agentId` uses the plugin-local watcher agent so runtime
+status, reply, and interjection events share one stream identity.
 
 ## Remote access (tunnel + pair modal)
 
@@ -276,7 +277,8 @@ triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
-by the same script; plugin JS itself is **not** bundled by Pragma. `binaries/` is
+by the same script. Shipped plugin packages are staged under `resources/plugins/` using
+`CONSTANTS.plugins.bundledDirName`. `binaries/` is
 git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**

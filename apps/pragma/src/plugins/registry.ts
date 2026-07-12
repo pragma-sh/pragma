@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import type { PluginDefinition } from "@pragma/plugin";
 
 /** Where a plugin was declared. */
-export type PluginScope = "builtin" | "global" | "project";
+export type PluginScope = "bundled" | "global" | "project";
 
 /** Load status of one plugin entry. */
 export type PluginStatus = "loaded" | "failed" | "disabled";
@@ -51,7 +51,7 @@ let snapshot: PluginRecord[] = [];
 
 function emit(): void {
   snapshot = [
-    ...(groups.get(scopeKey("builtin")) ?? []),
+    ...(groups.get(scopeKey("bundled")) ?? []),
     ...(groups.get(scopeKey("global")) ?? []),
   ];
   for (const [key, records] of groups) {

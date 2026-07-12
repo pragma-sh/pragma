@@ -203,9 +203,11 @@ fn read_plugin_manifests(
     project_path: Option<String>,
 ) -> AppResult<Vec<plugins::PluginEntryResult>> {
     let home = app_handle.path().home_dir()?;
+    let resource_dir = app_handle.path().resource_dir().ok();
     Ok(plugins::read_manifests(
         home,
         project_path.as_deref().map(std::path::Path::new),
+        resource_dir.as_deref(),
     ))
 }
 
@@ -217,12 +219,8 @@ fn read_plugin_bundle(main_path: String) -> AppResult<String> {
 
 /// Starts a host-side watcher sidecar for a plugin-owned agent session.
 #[tauri::command(async)]
-fn start_plugin_watcher(
-    app: tauri::AppHandle,
-    request: plugins::StartWatcherRequest,
-) -> AppResult<()> {
-    let resource_dir = app.path().resource_dir().ok();
-    plugins::start_watcher(request, resource_dir.as_deref())
+fn start_plugin_watcher(request: plugins::StartWatcherRequest) -> AppResult<()> {
+    plugins::start_watcher(request)
 }
 
 /// Ensures the local HTTP gateway is running and returns its base URL + token.

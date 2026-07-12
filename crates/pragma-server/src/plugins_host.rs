@@ -14,12 +14,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use base64::Engine;
 use pragma_constants::CONSTANTS;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
@@ -32,6 +33,7 @@ const PLUGIN_ROOTS_FILE: &str = "plugin-roots.json";
 
 /// Icons are capped at 256 KB so base64-in-JSON asset delivery stays cheap.
 const ASSET_MAX_BYTES: u64 = 256 * 1024;
+const LOAD_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Error)]
 pub enum PluginsError {
@@ -54,6 +56,24 @@ struct AssetEntry {
     mime: String,
 }
 
+/// One watcher a plugin attaches to an agent, as reported by the sidecar.
+/// Server-internal: the `config` may hold plugin secrets, so watcher specs are
+/// cached beside — never inside — the catalog the gateway serves to clients.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WatcherSpec {
+    /// Plugin the watcher belongs to (stable catalog plugin id).
+    pub plugin_id: String,
+    /// Agent id the watcher attaches to.
+    pub agent_id: String,
+    /// Agent id used to select the watcher inside the plugin bundle.
+    pub watcher_agent: String,
+    /// Absolute path of the plugin bundle `pragma-watch` imports.
+    pub main_path: String,
+    /// The plugin's config, forwarded verbatim to the watcher instance.
+    pub config: Value,
+}
+
 /// How far catalog loading has progressed. A load sent before the gateway
 /// discovery file exists resolves only static-model agents (dynamic model
 /// providers shell out through the gateway and fail), so it must be retried
@@ -74,6 +94,8 @@ enum SidecarEvent {
         catalog: Value,
         #[serde(default)]
         assets: HashMap<String, AssetEntry>,
+        #[serde(default)]
+        watchers: Vec<WatcherSpec>,
     },
     Error {
         #[serde(default)]
@@ -91,6 +113,8 @@ pub struct PluginsRegistry {
     sidecar: PluginsSidecar,
     catalog: Arc<Mutex<Value>>,
     assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
+    watchers: Arc<Mutex<Vec<WatcherSpec>>>,
+    publish_revision: Arc<(Mutex<u64>, Condvar)>,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
 }
@@ -100,12 +124,16 @@ impl PluginsRegistry {
         let (tx, rx) = mpsc::channel();
         let catalog = Arc::new(Mutex::new(json!({ "agents": [] })));
         let assets = Arc::new(Mutex::new(HashMap::new()));
+        let watchers = Arc::new(Mutex::new(Vec::new()));
+        let publish_revision = Arc::new((Mutex::new(0), Condvar::new()));
         let roots = load_persisted_roots(&server_dir);
         let registry = Arc::new(Self {
             server_dir,
             sidecar: PluginsSidecar::new(tx),
             catalog: Arc::clone(&catalog),
             assets: Arc::clone(&assets),
+            watchers: Arc::clone(&watchers),
+            publish_revision: Arc::clone(&publish_revision),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
         });
@@ -115,12 +143,21 @@ impl PluginsRegistry {
                     SidecarEvent::Catalog {
                         catalog: fresh,
                         assets: fresh_assets,
+                        watchers: fresh_watchers,
                     } => {
                         if let Ok(mut guard) = catalog.lock() {
                             *guard = fresh;
                         }
                         if let Ok(mut guard) = assets.lock() {
                             *guard = fresh_assets;
+                        }
+                        if let Ok(mut guard) = watchers.lock() {
+                            *guard = fresh_watchers;
+                        }
+                        let (revision, changed) = &*publish_revision;
+                        if let Ok(mut revision) = revision.lock() {
+                            *revision += 1;
+                            changed.notify_all();
                         }
                     }
                     SidecarEvent::Error { error } => {
@@ -175,6 +212,37 @@ impl PluginsRegistry {
             .clone())
     }
 
+    /// Handles server-only plugin RPC actions whose payloads must never cross
+    /// the public gateway boundary.
+    pub fn handle_internal_rpc(&self, payload: &Value) -> Result<Value, PluginsError> {
+        let action = payload
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if action != "watcher" {
+            return Err(PluginsError::InvalidRequest(format!(
+                "unknown internal plugins action: {action}"
+            )));
+        }
+        let agent_id = payload
+            .get("agentId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| PluginsError::InvalidRequest("missing agentId".to_string()))?;
+        let plugin_id = payload.get("pluginId").and_then(Value::as_str);
+        self.ensure_catalog_fresh()?;
+        let watcher = self
+            .watchers
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?
+            .iter()
+            .find(|watcher| {
+                watcher.agent_id == agent_id && plugin_id.is_none_or(|id| watcher.plugin_id == id)
+            })
+            .cloned();
+        serde_json::to_value(watcher)
+            .map_err(|error| PluginsError::Operation(format!("serialize watcher: {error}")))
+    }
+
     fn register_roots(&self, payload: &Value) -> Result<(), PluginsError> {
         let roots: Vec<String> = payload
             .get("roots")
@@ -194,7 +262,21 @@ impl PluginsRegistry {
             .lock()
             .map_err(|_| PluginsError::LockPoisoned)?
             .clone();
+        let (revision, changed) = &*self.publish_revision;
+        let previous = *revision.lock().map_err(|_| PluginsError::LockPoisoned)?;
         let state = self.send_load(&roots)?;
+        let (revision, timeout) = changed
+            .wait_timeout_while(
+                revision.lock().map_err(|_| PluginsError::LockPoisoned)?,
+                LOAD_TIMEOUT,
+                |revision| *revision == previous,
+            )
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        if timeout.timed_out() && *revision == previous {
+            return Err(PluginsError::Operation(
+                "timed out waiting for plugin catalog".to_string(),
+            ));
+        }
         *self
             .load_state
             .lock()
@@ -228,6 +310,7 @@ impl PluginsRegistry {
         self.sidecar.send(&json!({
             "type": "load",
             "roots": roots,
+            "bundledDir": bundled_plugins_dir(),
             "gatewayUrl": gateway_url,
             "gatewayToken": gateway_token,
         }))?;
@@ -284,7 +367,7 @@ impl PluginsRegistry {
 }
 
 /// Reads the persisted plugin roots, or an empty list before the first
-/// `registerRoots` (or when the file is unreadable/corrupt — built-in agents
+/// `registerRoots` (or when the file is unreadable/corrupt — bundled agents
 /// still resolve without roots).
 fn load_persisted_roots(server_dir: &Path) -> Vec<String> {
     fs::read_to_string(server_dir.join(PLUGIN_ROOTS_FILE))
@@ -450,6 +533,26 @@ fn sidecar_command() -> Command {
     }
 }
 
+/// Resolves the directory of plugin bundles shipped with the app. Dev reads
+/// the staged copies under the workspace `src-tauri/resources`; a release
+/// build reads them from the app resource dir the desktop forwarded via
+/// `PRAGMA_RESOURCE_DIR` when it spawned this server. `None` (no watcher /
+/// bundled agents, non-fatal) when neither location exists.
+pub fn bundled_plugins_dir() -> Option<PathBuf> {
+    let rel = Path::new(CONSTANTS.plugins.bundled_dir_name.as_str());
+    if cfg!(debug_assertions) {
+        let dir = workspace_root()
+            .join("apps/pragma/src-tauri/resources")
+            .join(rel);
+        return dir.is_dir().then_some(dir);
+    }
+    std::env::var_os("PRAGMA_RESOURCE_DIR")
+        .map(PathBuf::from)
+        .into_iter()
+        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
+        .find(|candidate| candidate.is_dir())
+}
+
 fn sidecar_executable(name: &str) -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -522,9 +625,7 @@ mod tests {
     fn caches_empty_catalog_before_any_publish() {
         let dir = std::env::temp_dir().join(format!("pragma-plugins-test-{}", std::process::id()));
         let registry = PluginsRegistry::new(dir);
-        let catalog = registry
-            .handle_rpc(&serde_json::json!({ "action": "catalog" }))
-            .expect("catalog rpc");
+        let catalog = registry.cached_catalog().expect("cached catalog");
         assert_eq!(catalog, serde_json::json!({ "agents": [] }));
     }
 

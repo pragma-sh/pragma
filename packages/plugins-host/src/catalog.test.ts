@@ -8,6 +8,7 @@ import type { PluginContext, PluginDefinition } from "@pragma/plugin";
 import {
   ICON_MAX_BYTES,
   assembleCatalog,
+  assembleWatchers,
   hashIcon,
   mimeForIcon,
   resolveModels,
@@ -60,31 +61,38 @@ describe("resolveModels", () => {
   });
 });
 
+function plugin(pluginId: string, definition: unknown, dir = "/plugins/one"): ResolvedPlugin {
+  return {
+    pluginId,
+    dir,
+    mainPath: join(dir, "plugin.mjs"),
+    config: undefined,
+    definition: definition as PluginDefinition,
+  };
+}
+
 describe("assembleCatalog", () => {
   it("assembles agents with icon assets and skips failures", async () => {
     const iconPath = tempIcon("agent.svg", "<svg>a</svg>");
     const plugins: ResolvedPlugin[] = [
-      {
-        pluginId: "p.one",
-        definition: {
-          agents: [
-            {
-              id: "good",
-              name: "Good",
-              iconPath,
-              launch: { command: ["good"] },
-              models: [{ id: "m", name: "M" }],
-              args: { model: (id: string) => ["--model", id] },
-            },
-            {
-              id: "bad",
-              name: "Bad",
-              iconPath: "/does/not/exist.svg",
-              models: [],
-            },
-          ],
-        } as unknown as PluginDefinition,
-      },
+      plugin("p.one", {
+        agents: [
+          {
+            id: "good",
+            name: "Good",
+            iconPath,
+            launch: { command: ["good"] },
+            models: [{ id: "m", name: "M" }],
+            args: { model: (id: string) => ["--model", id] },
+          },
+          {
+            id: "bad",
+            name: "Bad",
+            iconPath: "/does/not/exist.svg",
+            models: [],
+          },
+        ],
+      }),
     ];
     const errors: string[] = [];
     const { catalog, assets } = await assembleCatalog(plugins, ctx, (_p, agentId) =>
@@ -94,7 +102,7 @@ describe("assembleCatalog", () => {
     expect(errors).toEqual(["bad"]);
     expect(catalog.agents).toHaveLength(1);
     const [agent] = catalog.agents;
-    expect(agent?.id).toBe("good");
+    expect(agent?.id).toBe("p.one.good");
     expect(agent?.pluginId).toBe("p.one");
     expect(agent?.launch.commands).toEqual([
       { modelId: null, reasoningId: null, command: ["good"] },
@@ -103,5 +111,53 @@ describe("assembleCatalog", () => {
     expect(agent?.icon?.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(Object.keys(assets)).toEqual([agent?.icon?.hash]);
     expect(assets[agent!.icon!.hash]?.path).toBe(iconPath);
+  });
+
+  it("resolves a plugin-dir-relative icon path against the plugin directory", async () => {
+    const iconPath = tempIcon("rel.svg", "<svg>rel</svg>");
+    const dir = join(iconPath, "..");
+    const plugins: ResolvedPlugin[] = [
+      plugin(
+        "p.rel",
+        {
+          agents: [
+            {
+              id: "rel",
+              name: "Rel",
+              iconPath: "rel.svg",
+              launch: { command: ["rel"] },
+              models: [],
+              args: { model: () => [] },
+            },
+          ],
+        },
+        dir,
+      ),
+    ];
+    const { catalog, assets } = await assembleCatalog(plugins, ctx);
+    const hash = catalog.agents[0]?.icon?.hash;
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(assets[hash!]?.path).toBe(join(dir, "rel.svg"));
+  });
+});
+
+describe("assembleWatchers", () => {
+  it("flattens plugin watcher declarations with their bundle path and config", () => {
+    const plugins: ResolvedPlugin[] = [
+      {
+        ...plugin("p.one", { watchers: [{ agent: "one", watch: () => {} }] }),
+        config: { approveKeys: "y" },
+      },
+      plugin("p.none", { agents: [] }),
+    ];
+    expect(assembleWatchers(plugins)).toEqual([
+      {
+        pluginId: "p.one",
+        agentId: "p.one.one",
+        watcherAgent: "one",
+        mainPath: "/plugins/one/plugin.mjs",
+        config: { approveKeys: "y" },
+      },
+    ]);
   });
 });

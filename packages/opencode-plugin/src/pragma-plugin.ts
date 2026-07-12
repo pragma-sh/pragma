@@ -5,22 +5,27 @@ import {
   type PluginContext,
   type PluginDefinition,
 } from "@pragma/plugin/catalog";
-
-/** Absolute filesystem path to this plugin's agent icon. */
-export const opencodeIconPath: string = new URL("../assets/opencode.svg", import.meta.url).pathname;
+import { createTuiWatcher } from "@pragma/watcher-kit";
 
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
 
-/** Pragma agent contribution for OpenCode, loaded by the pragma-plugins sidecar. */
+/**
+ * Pragma plugin for OpenCode, bundled to `dist/pragma-plugin.mjs` and loaded by
+ * the pragma-plugins sidecar, the desktop webview, and the `pragma-watch`
+ * sidecar alike. OpenCode exposes no decision-returning plugin hook on the
+ * current binary, so remote command approvals and question answers go the
+ * watcher route (`handleDecisions: true`).
+ */
 export const opencodeAgentPlugin: PluginDefinition = definePlugin({
   name: "OpenCode",
   description: "Launch OpenCode from Pragma.",
+  watchers: [createTuiWatcher({ agent: "opencode", handleDecisions: true })],
   agents: [
     defineAgent({
       id: "opencode",
       name: "OpenCode",
       icon: () => null,
-      iconPath: opencodeIconPath,
+      iconPath: "assets/opencode.svg",
       launch: { command: ["opencode"] },
       prefillDelayMs: 6000,
       models: async (ctx) =>

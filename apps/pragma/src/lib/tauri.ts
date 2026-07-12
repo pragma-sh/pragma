@@ -1177,7 +1177,7 @@ export interface PluginEntryResult {
   /** The original `path` specifier from the config file. */
   specifier: string;
   /** Which config file declared this entry. */
-  scope: "global" | "project";
+  scope: "bundled" | "global" | "project";
   /** Project root path for `scope: "project"` entries. */
   projectPath: string | null;
   /** The entry's `config` object, validated by the plugin's zod schema. */

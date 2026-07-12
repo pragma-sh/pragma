@@ -5,20 +5,33 @@ import {
   type PluginContext,
   type PluginDefinition,
 } from "@pragma/plugin/catalog";
+import { createTuiWatcher } from "@pragma/watcher-kit";
 
-/** Absolute filesystem path to this plugin's agent icon. */
-export const cursorIconPath = new URL("../assets/cursor.svg", import.meta.url).pathname;
+/** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
+const INTERJECT_SUBMIT_DELAY_MS = 200;
 
-/** Pragma agent contribution for Cursor Agent, loaded by the pragma-plugins sidecar. */
+/**
+ * Pragma plugin for Cursor Agent, bundled to `dist/pragma-plugin.mjs` and
+ * loaded by the pragma-plugins sidecar, the desktop webview, and the
+ * `pragma-watch` sidecar alike. Approvals go through Cursor's blocking
+ * `await-decision` hook, so the watcher only delivers interjections.
+ */
 export const cursorAgentPlugin: PluginDefinition = definePlugin({
   name: "Cursor Agent",
   description: "Launch Cursor Agent from Pragma.",
+  watchers: [
+    createTuiWatcher({
+      agent: "cursor",
+      handleDecisions: false,
+      interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
+    }),
+  ],
   agents: [
     defineAgent({
       id: "cursor",
       name: "Cursor Agent",
       icon: () => null,
-      iconPath: cursorIconPath,
+      iconPath: "assets/cursor.svg",
       launch: { command: ["agent", "--force", "--approve-mcps"] },
       startupInput: [{ delayMs: 5000, data: "a" }],
       prefillDelayMs: 14000,

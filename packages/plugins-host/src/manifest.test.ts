@@ -32,6 +32,7 @@ describe("resolveManifests", () => {
 
     expect(manifests).toHaveLength(1);
     expect(manifests[0]?.pluginId).toBe("@me/plugin");
+    expect(manifests[0]?.dir).toBe(join(root, "my-plugin"));
     expect(manifests[0]?.mainPath).toBe(join(root, "my-plugin", "index.js"));
     expect(manifests[0]?.config).toEqual({ a: 1 });
     expect(manifests[0]?.scope).toBe("project");
@@ -42,5 +43,45 @@ describe("resolveManifests", () => {
     writeConfig(root, [{ path: "./nonexistent" }, { path: "npm-package" }]);
 
     expect(await resolveManifests(makeRoot(), [root])).toEqual([]);
+  });
+
+  it("prefers the package.json pragma field for id and main", async () => {
+    const root = makeRoot();
+    const dir = join(root, "tool-plugin");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "@me/tool-plugin",
+        main: "./dist/index.mjs",
+        pragma: { pluginId: "pragma.tool", main: "./dist/pragma-plugin.mjs" },
+      }),
+    );
+    writeConfig(root, [{ path: "./tool-plugin" }]);
+
+    const manifests = await resolveManifests(makeRoot(), [root]);
+
+    expect(manifests[0]?.pluginId).toBe("pragma.tool");
+    expect(manifests[0]?.mainPath).toBe(join(dir, "dist/pragma-plugin.mjs"));
+  });
+
+  it("scans a bundled dir ahead of config scopes, without config entries", async () => {
+    const bundled = makeRoot();
+    writePluginDir(bundled, "b-plugin", "pragma.bundled", "plugin.mjs");
+    const root = makeRoot();
+    writePluginDir(root, "my-plugin", "@me/plugin", "index.js");
+    writeConfig(root, [{ path: "./my-plugin" }]);
+
+    const manifests = await resolveManifests(makeRoot(), [root], bundled);
+
+    expect(manifests.map((m) => [m.pluginId, m.scope])).toEqual([
+      ["pragma.bundled", "bundled"],
+      ["@me/plugin", "project"],
+    ]);
+    expect(manifests[0]?.config).toBeUndefined();
+  });
+
+  it("treats a missing bundled dir as empty", async () => {
+    expect(await resolveManifests(makeRoot(), [], "/does/not/exist")).toEqual([]);
   });
 });

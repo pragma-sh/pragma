@@ -182,9 +182,11 @@
       "version": "0.0.0",
       "dependencies": {
         "@pragma/plugin": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -216,9 +218,11 @@
       "version": "0.0.0",
       "dependencies": {
         "@pragma/plugin": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -264,11 +268,12 @@
       "name": "@pragma/opencode-plugin",
       "version": "0.0.0",
       "dependencies": {
+        "@pragma/plugin": "workspace:*",
         "@pragma/sdk": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
       },
       "devDependencies": {
         "@opencode-ai/plugin": "^1.17.8",
-        "@pragma/plugin": "workspace:*",
         "@types/node": "^24.12.3",
         "bunup": "^0.16.32",
         "typescript": "^6.0.3",
@@ -306,10 +311,7 @@
         "pragma-plugins": "./src/cli.ts",
       },
       "dependencies": {
-        "@pragma/claude-code-plugin": "workspace:*",
         "@pragma/constants": "workspace:*",
-        "@pragma/cursor-plugin": "workspace:*",
-        "@pragma/opencode-plugin": "workspace:*",
         "@pragma/plugin": "workspace:*",
         "@pragma/sdk": "workspace:*",
         "@pragma/sidecar-kit": "workspace:*",
@@ -351,6 +353,16 @@
       },
       "devDependencies": {
         "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
+    "packages/watcher-kit": {
+      "name": "@pragma/watcher-kit",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@pragma/plugin": "workspace:*",
+        "@pragma/sdk": "workspace:*",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
@@ -1186,6 +1198,8 @@
     "@pragma/sidecar-kit": ["@pragma/sidecar-kit@workspace:packages/sidecar-kit"],
 
     "@pragma/watcher": ["@pragma/watcher@workspace:packages/watcher"],
+
+    "@pragma/watcher-kit": ["@pragma/watcher-kit@workspace:packages/watcher-kit"],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 

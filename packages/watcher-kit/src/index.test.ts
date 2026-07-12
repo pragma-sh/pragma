@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  claudeCodeInterjectWatcher,
-  cursorInterjectWatcher,
-  opencodeApprovalWatcher,
-  questionAnswerKeys,
-} from "./pragma-watcher";
+import { createTuiWatcher, questionAnswerKeys } from "./index";
+
+/** Decision-handling watcher (opencode's shape). */
+const approvalWatcher = createTuiWatcher({ agent: "opencode", handleDecisions: true });
+/** Interject-only watcher with a paste-commit delay (Claude Code's shape). */
+const interjectWatcher = createTuiWatcher({
+  agent: "claude-code",
+  handleDecisions: false,
+  interjectSubmitDelayMs: 1,
+});
 
 interface DecisionEvent {
   type: "agentDecision";
@@ -165,39 +169,39 @@ describe("questionAnswerKeys", () => {
   });
 });
 
-describe("opencodeApprovalWatcher", () => {
-  it("is bound to the opencode agent", () => {
-    expect(opencodeApprovalWatcher.agent).toBe("opencode");
+describe("createTuiWatcher with handleDecisions", () => {
+  it("is bound to the configured agent", () => {
+    expect(approvalWatcher.agent).toBe("opencode");
   });
 
   it("sends the approve keystroke on an approve verdict for its session", async () => {
     const { ctx, sendKeys } = context([decision(true)]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledTimes(1);
     expect(sendKeys).toHaveBeenCalledWith("\r");
   });
 
   it("sends the deny keystrokes (right, right, enter) on a deny verdict", async () => {
     const { ctx, sendKeys } = context([decision(false)]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
   });
 
   it("honors configured keystrokes", async () => {
     const { ctx, sendKeys } = context([decision(true)], { approveKeys: "y\r", denyKeys: "n\r" });
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("y\r");
   });
 
   it("types an interjection's text and submits it", async () => {
     const { ctx, sendKeys } = context([input("focus on the tests")]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("focus on the tests\r");
   });
 
   it("honors a configured submit key for interjections", async () => {
     const { ctx, sendKeys } = context([input("hello")], { submitKeys: "" });
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("hello");
   });
 
@@ -232,7 +236,7 @@ describe("opencodeApprovalWatcher", () => {
       reportMessage: async () => {},
       signal: controller.signal,
     };
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(connectCount).toBe(2);
     expect(sendKeys).toHaveBeenCalledWith("\r");
   });
@@ -243,7 +247,7 @@ describe("opencodeApprovalWatcher", () => {
       decision(true, { requestId: "req-2" }),
     ]);
     sendKeys.mockRejectedValueOnce(new Error("write failed"));
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledTimes(2);
   });
 
@@ -277,7 +281,7 @@ describe("opencodeApprovalWatcher", () => {
       signal: controller.signal,
     };
 
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
 
     expect(connectCount).toBe(2);
     expect(sendKeys).toHaveBeenCalledTimes(1);
@@ -285,7 +289,7 @@ describe("opencodeApprovalWatcher", () => {
 
   it("answers a question with the digit for the matching option", async () => {
     const { ctx, sendKeys } = context([questionAttention("req-q", ["3", "4", "5"]), answer("4")]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("2");
   });
 
@@ -294,14 +298,14 @@ describe("opencodeApprovalWatcher", () => {
       questionAttention("req-q", ["3", "4", "5"]),
       answer("forty-two"),
     ]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\x1b[B\r");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "forty-two\r");
   });
 
   it("rejects a dismissed question with Escape", async () => {
     const { ctx, sendKeys } = context([questionAttention("req-q", ["3", "4", "5"]), answer(null)]);
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("\x1b");
   });
 
@@ -336,22 +340,21 @@ describe("opencodeApprovalWatcher", () => {
       signal: controller.signal,
     };
 
-    await opencodeApprovalWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
     expect(connectCount).toBe(2);
     expect(sendKeys).toHaveBeenCalledTimes(1);
     expect(sendKeys).toHaveBeenCalledWith("2");
   });
 });
 
-describe("interject-only watchers", () => {
-  it("bind to their agents", () => {
-    expect(claudeCodeInterjectWatcher.agent).toBe("claude-code");
-    expect(cursorInterjectWatcher.agent).toBe("cursor");
+describe("createTuiWatcher without handleDecisions", () => {
+  it("binds to the configured agent", () => {
+    expect(interjectWatcher.agent).toBe("claude-code");
   });
 
-  it("applies Claude interjections with a separate submit key", async () => {
+  it("applies interjections with a separate submit key and ignores decisions", async () => {
     const { ctx, sendKeys } = context([decision(true), input("do the thing")]);
-    await claudeCodeInterjectWatcher.watch(ctx as never);
+    await interjectWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledTimes(2);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "do the thing");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");

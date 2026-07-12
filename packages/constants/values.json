@@ -14,7 +14,8 @@
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
-    "storageScopes": ["global", "project"]
+    "storageScopes": ["global", "project"],
+    "bundledDirName": "plugins"
   },
   "protocol": {
     "rpcMethods": [

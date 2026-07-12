@@ -1,22 +1,23 @@
-// Host-side watcher for the built-in opencode agent, loaded by the `pragma-watch`
-// sidecar (see `apps/pragma/src-tauri/src/plugins.rs`). opencode exposes no
-// decision-returning plugin hook on the current binary, so remote command
-// approval and question answers go the watcher route: the in-process opencode
-// plugin reports a `command`/`question` attention (which raises the Pragma toast
-// / mobile answer UI), and this watcher writes the matching keystrokes into the
-// live terminal.
+// Shared TUI watcher engine for Pragma agent plugins, loaded by the
+// `pragma-watch` sidecar. A plugin declares a watcher with `createTuiWatcher`
+// when its agent's remote controls (command approvals, question answers,
+// interjections) must be delivered as keystrokes into the live terminal: the
+// in-process host-tool plugin reports a `command`/`question` attention (which
+// raises the Pragma toast / mobile answer UI), and this watcher writes the
+// matching keystrokes.
 //
-// Type-only imports keep this module free of the `@pragma/plugin` runtime barrel
-// so the sidecar bundle stays a lean node module.
+// Type-only imports keep this module free of the `@pragma/plugin` runtime
+// barrel so plugin watcher bundles stay lean.
 import type { AgentStreamEvent } from "@pragma/sdk";
 
 import type { WatcherContext, WatcherDefinition } from "@pragma/plugin";
 
-/** Per-plugin config controlling which keystrokes answer opencode's prompt. */
-export interface OpencodeWatcherConfig {
+/** Per-plugin config controlling which keystrokes answer the agent's prompts. */
+export interface TuiWatcherConfig {
   /**
-   * Bytes written to accept a permission prompt. Default `\r` (Enter — opencode's
-   * three-option prompt has "Allow" selected first, so Enter approves).
+   * Bytes written to accept a permission prompt. Default `\r` (Enter — e.g.
+   * opencode's three-option prompt has "Allow" selected first, so Enter
+   * approves).
    */
   approveKeys?: string;
   /**
@@ -32,39 +33,52 @@ export interface OpencodeWatcherConfig {
   submitKeys?: string;
 }
 
+/** How a plugin's agent wants the shared TUI watcher to behave. */
+export interface TuiWatcherOptions {
+  /** The `defineAgent` id this watcher attaches to. */
+  agent: string;
+  /**
+   * True when the agent's permission / question prompts have no
+   * decision-returning hook and must be answered via keystrokes (opencode).
+   * False for agents whose approvals go through a blocking `await-decision`
+   * hook (Claude Code, Cursor), leaving the watcher responsible only for
+   * interjections.
+   */
+  handleDecisions: boolean;
+  /**
+   * Pause between typing an interjection's text and sending the submit keys,
+   * for paste-aware TUIs that need to commit the text first. Default 0.
+   */
+  interjectSubmitDelayMs?: number;
+}
+
 const DEFAULT_APPROVE_KEYS = "\r";
 const RIGHT_ARROW = "\x1b[C";
 const DOWN_ARROW = "\x1b[B";
 const DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 const DEFAULT_SUBMIT_KEYS = "\r";
-/** Escape rejects OpenCode's question prompt when not editing free-text. */
+/** Escape rejects the question prompt when not editing free-text. */
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
 const QUESTION_DIGIT_MAX = 9;
-/** Lets OpenCode mount its custom-answer editor before typing into it. */
+/** Lets the TUI mount its custom-answer editor before typing into it. */
 const QUESTION_OTHER_INPUT_DELAY_MS = 150;
-/** Lets paste-aware TUIs commit interjected text before receiving Enter. */
-const CLAUDE_INTERJECT_SUBMIT_DELAY_MS = 200;
 
 /** Backoff before re-subscribing after the agent event stream drops. */
 const RESUBSCRIBE_DELAY_MS = 500;
 
 /**
- * Builds a built-in-agent watcher. `handleDecisions` is true for opencode (whose
- * permission / question prompts have no decision-returning hook and so must be
- * answered via keystrokes); it is false for agents (Claude Code, Cursor) whose
- * approvals go through a blocking `await-decision` hook, leaving the watcher
- * responsible only for interjections.
+ * Builds a keystroke-driven watcher for one agent. The returned definition is
+ * declared in the plugin's `definePlugin({ watchers })` and executed by the
+ * `pragma-watch` sidecar for every launched session of that agent.
  */
-function createBuiltinWatcher(
-  agent: string,
-  handleDecisions: boolean,
-  interjectSubmitDelayMs = 0,
-): WatcherDefinition<OpencodeWatcherConfig> {
+export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<unknown> {
+  const { agent, handleDecisions, interjectSubmitDelayMs = 0 } = options;
   return {
     agent,
-    async watch(ctx: WatcherContext<OpencodeWatcherConfig>): Promise<void> {
-      const keys = resolveKeys(ctx.config);
+    async watch(ctx: WatcherContext<unknown>): Promise<void> {
+      const watcherContext = ctx as WatcherContext<TuiWatcherConfig>;
+      const keys = resolveKeys(watcherContext.config);
       const seenRequestIds = new Set<string>();
       /** Options from the latest `question` attention, keyed by requestId. */
       const questionOptionsByRequestId = new Map<string, string[]>();
@@ -73,7 +87,7 @@ function createBuiltinWatcher(
         try {
           // oxlint-disable-next-line no-await-in-loop -- one live connection at a time; reconnect only after the previous stream ends.
           await consumeControlEvents(
-            ctx,
+            watcherContext,
             keys,
             handleDecisions,
             interjectSubmitDelayMs,
@@ -93,26 +107,14 @@ function createBuiltinWatcher(
   };
 }
 
-/** Answers opencode permission/question prompts and applies interjections via keystrokes. */
-export const opencodeApprovalWatcher: WatcherDefinition<OpencodeWatcherConfig> =
-  createBuiltinWatcher("opencode", true);
-
-/** Applies interjections to Claude Code; approvals go through its blocking hook. */
-export const claudeCodeInterjectWatcher: WatcherDefinition<OpencodeWatcherConfig> =
-  createBuiltinWatcher("claude-code", false, CLAUDE_INTERJECT_SUBMIT_DELAY_MS);
-
-/** Applies interjections to Cursor Agent; approvals go through its blocking hook. */
-export const cursorInterjectWatcher: WatcherDefinition<OpencodeWatcherConfig> =
-  createBuiltinWatcher("cursor", false);
-
 interface ControlKeys {
   approveKeys: string;
   denyKeys: string;
   submitKeys: string;
 }
 
-/** Resolves the effective keystrokes from config, applying opencode's defaults. */
-function resolveKeys(config: OpencodeWatcherConfig | undefined): ControlKeys {
+/** Resolves the effective keystrokes from config, applying the defaults. */
+function resolveKeys(config: TuiWatcherConfig | undefined): ControlKeys {
   const c = config ?? {};
   return {
     approveKeys: c.approveKeys ?? DEFAULT_APPROVE_KEYS,
@@ -128,7 +130,7 @@ function resolveKeys(config: OpencodeWatcherConfig | undefined): ControlKeys {
  * per-event scope check is needed.
  */
 async function consumeControlEvents(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   keys: ControlKeys,
   handleDecisions: boolean,
   interjectSubmitDelayMs: number,
@@ -159,7 +161,7 @@ async function consumeControlEvents(
 
 /** Applies one stream event: a deduped command/question verdict or an interjection. */
 async function handleControlEvent(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   keys: ControlKeys,
   handleDecisions: boolean,
   interjectSubmitDelayMs: number,
@@ -188,7 +190,7 @@ async function handleControlEvent(
 }
 
 async function handleDecision(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   keys: ControlKeys,
   seenRequestIds: Set<string>,
   event: AgentStreamEvent,
@@ -201,7 +203,7 @@ async function handleDecision(
 }
 
 async function handleAnswer(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   seenRequestIds: Set<string>,
   questionOptionsByRequestId: Map<string, string[]>,
   event: AgentStreamEvent,
@@ -223,18 +225,18 @@ async function handleAnswer(
 }
 
 async function writeFreeTextAnswer(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   optionCount: number,
   reply: string,
 ): Promise<void> {
-  // OpenCode reserves digit shortcuts for listed choices. Navigate to its virtual Other row.
+  // The TUI reserves digit shortcuts for listed choices. Navigate to its virtual Other row.
   await writeKeys(ctx, openOtherEditorKeys(optionCount));
   await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
   if (!ctx.signal.aborted) await writeKeys(ctx, `${reply}\r`);
 }
 
 async function handleInterjection(
-  ctx: WatcherContext<OpencodeWatcherConfig>,
+  ctx: WatcherContext<TuiWatcherConfig>,
   submitKeys: string,
   submitDelayMs: number,
   text: string,
@@ -250,7 +252,7 @@ async function handleInterjection(
 
 /**
  * Caches option labels for a live `question` attention so a later answer can
- * pick the matching OpenCode TUI digit. Drops the cache when attention clears.
+ * pick the matching TUI digit. Drops the cache when attention clears.
  */
 function rememberQuestionOptions(
   cache: Map<string, string[]>,
@@ -273,7 +275,7 @@ function rememberQuestionOptions(
 }
 
 /**
- * Builds the OpenCode question-TUI keystroke sequence for one remote answer.
+ * Builds the question-TUI keystroke sequence for one remote answer.
  *
  * Single-select questions bind digits `1`–`9` to select+submit immediately.
  * "Type your own answer" is the virtual option after the last label. It needs
@@ -301,14 +303,14 @@ export function questionAnswerKeys(input: {
   return `${openOtherEditorKeys(options.length)}${reply}\r`;
 }
 
-/** Opens OpenCode's virtual custom-answer editor. */
+/** Opens the TUI's virtual custom-answer editor. */
 function openOtherEditorKeys(optionCount: number): string {
   return `${DOWN_ARROW.repeat(optionCount)}\r`;
 }
 
 /**
  * Keys that highlight option `index` (0-based) and activate it. Prefer digits
- * 1–9 (OpenCode's fast path); fall back to Down arrows + Enter past digit 9.
+ * 1–9 (the TUI's fast path); fall back to Down arrows + Enter past digit 9.
  */
 function selectOptionKeys(index: number, optionCount: number): string {
   const total = optionCount + 1; // options + "Type your own answer"
@@ -319,7 +321,7 @@ function selectOptionKeys(index: number, optionCount: number): string {
 }
 
 /** Writes keystrokes, swallowing transient failures so the watcher survives. */
-async function writeKeys(ctx: WatcherContext<OpencodeWatcherConfig>, data: string): Promise<void> {
+async function writeKeys(ctx: WatcherContext<TuiWatcherConfig>, data: string): Promise<void> {
   try {
     await ctx.sendKeys(data);
   } catch {
@@ -346,15 +348,3 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
     );
   });
 }
-
-/**
- * Default export shape the `pragma-watch` sidecar loads (`default.watchers`).
- * This is the shared built-in-agent watcher bundle: the sidecar selects the
- * entry whose `agent` matches the launched agent, so opencode, Claude Code, and
- * Cursor all resolve from this one module.
- */
-const pragmaWatcher: { watchers: WatcherDefinition<OpencodeWatcherConfig>[] } = {
-  watchers: [opencodeApprovalWatcher, claudeCodeInterjectWatcher, cursorInterjectWatcher],
-};
-
-export default pragmaWatcher;

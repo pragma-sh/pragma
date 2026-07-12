@@ -27,15 +27,15 @@ afterEach(() => {
 });
 
 describe("plugin registry", () => {
-  it("orders records builtin, then global, then project", () => {
+  it("orders records bundled, then global, then project", () => {
     setPluginsForScope("project", "/p/one", [
       record({ pluginId: "project-plugin", scope: "project", projectId: "one" }),
     ]);
     setPluginsForScope("global", null, [record({ pluginId: "global-plugin" })]);
-    setPluginsForScope("builtin", null, [record({ pluginId: "builtin-plugin", scope: "builtin" })]);
+    setPluginsForScope("bundled", null, [record({ pluginId: "bundled-plugin", scope: "bundled" })]);
 
     expect(getAllPlugins().map((r) => r.pluginId)).toEqual([
-      "builtin-plugin",
+      "bundled-plugin",
       "global-plugin",
       "project-plugin",
     ]);
