@@ -210,17 +210,16 @@ write the Approve/Deny keys back into that same PTY.
 
 ## Remote access (tunnel + pair modal)
 
-`src-tauri/src/tunnel.rs` supervises a remote-access tunnel that exposes the local HTTP
-gateway to a paired mobile device. It reads the `tunnel` key of `~/.pragma/config.json`
+`pragma-server/src/tunnel.rs` supervises remote-access tunnel exposing local HTTP
+gateway to paired mobile device. It reads `tunnel` key of `~/.pragma/config.json`
 (`{ command, urlPattern }`), falling back to `CONSTANTS.tunnel.default{Command,UrlPattern}`
 so Rust and TS agree; `{port}` is the only template variable and is filled with the live
 gateway port. The child is spawned with `std::process::Command` (never the shell plugin);
 reader threads scan **stdout and stderr** against the regex (cloudflared prints to stderr).
-Managed `TunnelState` holds the child + `TunnelStatus` (`idle | starting | active(url) |
-error(msg)`); the child is killed on `tunnel_stop` and on app exit (the `RunEvent::Exit`
-arm in `lib.rs run()`). Commands: `tunnel_start` / `tunnel_stop` / `tunnel_status` (+ typed
-wrappers in `src/lib/tauri.ts`). A missing tunnel binary becomes an `AppError::Tunnel` the
-modal renders.
+Server-owned state holds child + status (`idle | starting | active(url) | error(msg)`).
+`tunnel.enabled` persists toggle and restores tunnel on server startup. Tauri commands
+`tunnel_start` / `tunnel_stop` / `tunnel_status` are thin RPC adapters (+ typed wrappers
+in `src/lib/tauri.ts`), so desktop exit does not kill mobile forwarding.
 
 The `PairDeviceDialog` (Smartphone icon in `ProjectSidebar`) toggles the tunnel and renders
 a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers live in
@@ -243,6 +242,13 @@ Mutation commands (`create_tab`, `close_tab`, `rename_tab`, `set_tab_*`,
 (`worktree_create`, `worktree_delete`, `worktree_rename`, `worktree_set_hidden`,
 `tab_open`, `tab_close`, `tab_rename`, `agent_session_launch`) all call `trigger()` after
 their DB write.
+
+Before each publish the worker runs `adopt_headless_worktrees`: any git checkout under
+`<project>/.pragma/worktrees/` the DB does not know (created by `pragma-server`'s
+headless `agentSessionLaunch` while the app was closed) is inserted as a worktree row
+parented to the project's main worktree, keeping the directory name as its id so remote
+clients' ids stay stable. Adoption is local-only (remote SSH project paths are skipped)
+and best-effort.
 
 ## Remote agent session launch
 

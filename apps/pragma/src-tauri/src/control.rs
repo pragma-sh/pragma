@@ -171,6 +171,15 @@ fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
                     ));
                 }
                 stream.set_read_timeout(None)?;
+                // The server may have restarted while the app was running (its
+                // workspace cache is in memory only). Republish the current
+                // snapshot so remote subscribers like a paired phone see
+                // projects/worktrees/tabs immediately after reconnect.
+                if let Some(publisher) =
+                    app.try_state::<crate::workspace_mirror::WorkspacePublisher>()
+                {
+                    publisher.trigger();
+                }
             }
             ServerFrame::Control(envelope) => {
                 let result = dispatch(app, envelope.clone());

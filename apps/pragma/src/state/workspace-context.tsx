@@ -38,7 +38,7 @@ import {
   shouldAlertForStatus,
   type AgentAlertOptions,
 } from "@/lib/agent-alert";
-import { startAgentInTab } from "@/lib/agent-launch";
+import { startAgentInTab, startBackgroundAgentSession } from "@/lib/agent-launch";
 import {
   parseNewSessionDeepLink,
   parsePluginDeepLink,
@@ -76,6 +76,7 @@ import {
   onAgentMessage,
   onAgentNotificationClick,
   onAgentReport,
+  onAgentSessionLaunch,
   onAgentStatusReset,
   onDeepLink,
   onMenuAction,
@@ -2963,6 +2964,49 @@ function useProjectLoading(
       .catch(() => undefined);
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void onAgentSessionLaunch((request) => {
+      const agent = listPluginAgents().find((candidate) => candidate.id === request.agentId);
+      if (!agent) {
+        toast.error(`Couldn't launch ${request.agentId}: agent is unavailable.`);
+        return;
+      }
+      void startBackgroundAgentSession(
+        request.tabId,
+        request.worktreeId,
+        request.worktreePath,
+        agent,
+        request.prompt ?? undefined,
+        { modelId: request.modelId, reasoningId: request.reasoningId },
+      )
+        .then(() =>
+          startWatcherForAgentSession({
+            agentId: agent.id,
+            sessionId: request.tabId,
+            tabId: request.tabId,
+            worktreeId: request.worktreeId,
+          }),
+        )
+        .catch((cause: unknown) => {
+          console.warn(`failed to launch remote agent ${agent.id}`, cause);
+          toast.error("Couldn't launch agent session from your phone.");
+        });
+    }).then((nextUnlisten) => {
+      if (cancelled) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 

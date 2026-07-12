@@ -95,7 +95,6 @@ export function AgentsMenu() {
                 key={agent.id}
                 onSelect={() => void launch(agent)}
               >
-                <AgentIcon agent={agent} />
                 <span className="min-w-0 flex-1 truncate">{agent.name}</span>
                 <button
                   className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
