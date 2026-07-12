@@ -20,6 +20,8 @@ const MAX_BACKOFF_MS = 10_000;
 /** Identifies the running agent a chat screen attaches to. */
 export interface AgentTarget {
   agent: string;
+  initialMessage?: string;
+  initialMessageTs?: number;
   tabId: string;
   worktreeId: string;
 }
@@ -36,14 +38,16 @@ export interface AgentConversation {
 }
 
 type StoreAction =
-  | { type: "reset" }
+  | { type: "reset"; initialMessage?: string; initialMessageTs?: number }
   | { type: "event"; event: Parameters<typeof applyEvent>[1] }
   | { type: "localInput"; text: string; ts: number };
 
 function reducer(state: TranscriptState, action: StoreAction): TranscriptState {
   switch (action.type) {
     case "reset":
-      return emptyTranscript();
+      return action.initialMessage && action.initialMessageTs
+        ? applyLocalInput(emptyTranscript(), action.initialMessage, action.initialMessageTs)
+        : emptyTranscript();
     case "event":
       return applyEvent(state, action.event);
     case "localInput":
@@ -67,11 +71,11 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
   const connectionRef = useRef<AgentConnection | null>(null);
   const attentionIdRef = useRef<string | null>(null);
 
-  const { agent, tabId, worktreeId } = target;
+  const { agent, initialMessage, initialMessageTs, tabId, worktreeId } = target;
 
   useFocusedConnection(
     client,
-    { agent, tabId, worktreeId },
+    { agent, initialMessage, initialMessageTs, tabId, worktreeId },
     connectionRef,
     attentionIdRef,
     dispatch,
@@ -126,13 +130,13 @@ function useFocusedConnection(
   setErrored: (errored: boolean) => void,
   onUnauthorized: () => void,
 ): void {
-  const { agent, tabId, worktreeId } = target;
+  const { agent, initialMessage, initialMessageTs, tabId, worktreeId } = target;
   useFocusEffect(
     useCallback(
       () =>
         focusedConnectionEffect(
           client,
-          { agent, tabId, worktreeId },
+          { agent, initialMessage, initialMessageTs, tabId, worktreeId },
           connectionRef,
           attentionIdRef,
           dispatch,
@@ -146,6 +150,8 @@ function useFocusedConnection(
         client,
         connectionRef,
         dispatch,
+        initialMessage,
+        initialMessageTs,
         onUnauthorized,
         setConnected,
         setErrored,
@@ -196,7 +202,11 @@ function startConnection(
   let cancelled = false;
   let backoff = INITIAL_BACKOFF_MS;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
-  dispatch({ type: "reset" });
+  dispatch({
+    type: "reset",
+    initialMessage: target.initialMessage,
+    initialMessageTs: target.initialMessageTs,
+  });
   attentionIdRef.current = null;
   setErrored(false);
   const retry = (): void => {

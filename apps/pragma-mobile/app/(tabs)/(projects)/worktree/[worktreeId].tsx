@@ -162,7 +162,12 @@ function AgentTabRows({
     <NavRow
       key={tab.id}
       onLongPress={() => onOpenActions(tab)}
-      onPress={() => router.push({ pathname: "/chat/[tabId]", params: { tabId: tab.id } })}
+      onPress={() =>
+        router.push({
+          pathname: "/chat/[tabId]",
+          params: { agent: tab.agent, tabId: tab.id, worktreeId: tab.worktreeId },
+        })
+      }
       subtitle={tab.agent}
       title={tab.title}
       trailing={<AgentStatusDot status={tab.status} />}

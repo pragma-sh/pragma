@@ -137,6 +137,7 @@ export function transcriptRows(state: TranscriptState): TranscriptRow[] {
 
 /** Expands one message into its prose row (if any) plus gray event lines. */
 function rowsForMessage(message: AgentMessage): TranscriptRow[] {
+  if (message.id.startsWith("reasoning:")) return [];
   const rows: TranscriptRow[] = [];
   const text = message.text?.trim();
   if (text) {

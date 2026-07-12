@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentModelSelection } from "./data/agents";
-import { buildLaunchPayload, initialLaunchForm, type LaunchFormState } from "./launch-form";
+import {
+  buildLaunchPayload,
+  initialLaunchForm,
+  runtimeAgentId,
+  type LaunchFormState,
+} from "./launch-form";
 
 const selection: AgentModelSelection = { agentId: "claude", modelId: "opus", reasoningId: "high" };
 const context = { projectId: "p1", worktreeId: "w1" };
+
+describe("runtimeAgentId", () => {
+  it("removes a catalog namespace", () => {
+    expect(runtimeAgentId("pragma.opencode")).toBe("opencode");
+  });
+
+  it("preserves an unqualified id", () => {
+    expect(runtimeAgentId("opencode")).toBe("opencode");
+  });
+});
 
 function form(over: Partial<LaunchFormState> = {}): LaunchFormState {
   return { ...initialLaunchForm(selection), ...over };

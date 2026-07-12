@@ -20,28 +20,40 @@ import { worktreeLabel } from "@/lib/worktree-tree";
  * interjections + interrupts back on the same channel.
  */
 export default function ChatScreen() {
-  const params = useLocalSearchParams<{ tabId: string; agent?: string; worktreeId?: string }>();
+  const params = useLocalSearchParams<{
+    tabId: string;
+    agent?: string;
+    initialMessage?: string;
+    initialMessageTs?: string;
+    title?: string;
+    worktreeId?: string;
+  }>();
   return <LiveChat params={params} />;
 }
 
-function LiveChat({ params }: { params: { tabId: string; agent?: string; worktreeId?: string } }) {
+type ChatParams = {
+  tabId: string;
+  agent?: string;
+  initialMessage?: string;
+  initialMessageTs?: string;
+  title?: string;
+  worktreeId?: string;
+};
+
+function LiveChat({ params }: { params: ChatParams }) {
   const { tabId } = params;
   const tab = useAgentTab(tabId);
   return <ChatSession params={params} tab={tab} />;
 }
 
-function ChatSession({
-  params,
-  tab,
-}: {
-  params: { tabId: string; agent?: string; worktreeId?: string };
-  tab: ReturnType<typeof useAgentTab>;
-}) {
+function ChatSession({ params, tab }: { params: ChatParams; tab: ReturnType<typeof useAgentTab> }) {
   const details = chatDetails(params, tab);
   // Prefer launch-time params so a freshly launched session attaches before the
   // workspace snapshot catches up; fall back to the resolved tab afterwards.
   const { rows, attention, phase, send, interrupt, decide, answer } = useAgentConnection({
     agent: details.agent,
+    initialMessage: params.initialMessage,
+    initialMessageTs: Number(params.initialMessageTs) || undefined,
     tabId: details.tabId,
     worktreeId: details.worktreeId,
   });
@@ -63,28 +75,25 @@ function ChatSession({
   );
 }
 
-function chatDetails(
-  params: { tabId: string; agent?: string; worktreeId?: string },
-  tab: ReturnType<typeof useAgentTab>,
-) {
+function chatDetails(params: ChatParams, tab: ReturnType<typeof useAgentTab>) {
   return {
     agent: resolvedAgent(tab, params.agent),
     status: tab && tab.status,
     tabId: params.tabId,
-    title: tab && tab.title,
+    title: tab?.title && tab.title !== "Shell" ? tab.title : (params.title ?? tab?.title),
     worktreeId: resolvedWorktreeId(tab, params.worktreeId),
   };
 }
 
 function resolvedAgent(tab: ReturnType<typeof useAgentTab>, agent: string | undefined): string {
-  return tab?.agent ?? agent ?? "";
+  return agent ?? tab?.agent ?? "";
 }
 
 function resolvedWorktreeId(
   tab: ReturnType<typeof useAgentTab>,
   worktreeId: string | undefined,
 ): string {
-  return tab?.worktreeId ?? worktreeId ?? "";
+  return worktreeId ?? tab?.worktreeId ?? "";
 }
 
 function ChatNavigation({ title, worktreeId }: { title: string | undefined; worktreeId: string }) {

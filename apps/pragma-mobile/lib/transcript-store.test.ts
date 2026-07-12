@@ -119,6 +119,20 @@ describe("transcript-store row expansion", () => {
     expect(transcriptRows(state)).toHaveLength(0);
   });
 
+  it("omits streamed model reasoning", () => {
+    const state = fold([
+      messageEvent(
+        msg({
+          id: "reasoning:assistant-1:part-1",
+          role: "system",
+          text: "private reasoning",
+          ts: 1,
+        }),
+      ),
+    ]);
+    expect(transcriptRows(state)).toHaveLength(0);
+  });
+
   it("singularizes a single spawned sub-agent", () => {
     const state = fold([messageEvent(msg({ id: "m1", ts: 1, subAgentsActive: 1 }))]);
     expect(transcriptRows(state)[0]?.text).toBe("spawned 1 sub-agent");

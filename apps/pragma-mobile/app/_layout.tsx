@@ -22,8 +22,10 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ConnectionProvider>
-          <StatusBar style="auto" />
-          <ConnectionGate />
+          <DataProvider>
+            <StatusBar style="auto" />
+            <ConnectionGate />
+          </DataProvider>
         </ConnectionProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -49,7 +51,7 @@ function ConnectionGate() {
   }
 
   return (
-    <DataProvider>
+    <>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -62,6 +64,6 @@ function ConnectionGate() {
         <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
       </Stack>
       <PortalHost />
-    </DataProvider>
+    </>
   );
 }

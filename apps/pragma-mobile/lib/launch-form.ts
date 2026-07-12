@@ -27,6 +27,11 @@ export function initialLaunchForm(selection: AgentModelSelection | null): Launch
   return { selection, prompt: "", target: { kind: "existing" } };
 }
 
+/** Resolves a catalog-qualified agent id to its runtime stream id. */
+export function runtimeAgentId(agentId: string): string {
+  return agentId.split(".").at(-1) ?? agentId;
+}
+
 export type BuildResult =
   | { ok: true; payload: AgentSessionLaunchPayload }
   | { ok: false; reason: string };

@@ -13,7 +13,7 @@ import { useConnection } from "@/lib/connection-context";
 import { catalogToSelectorAgents } from "@/lib/catalog";
 import { defaultAgentSelection, type AgentModelSelection } from "@/lib/data/agents";
 import { hapticSuccess, hapticWarning } from "@/lib/haptics";
-import { buildLaunchPayload, type LaunchTarget } from "@/lib/launch-form";
+import { buildLaunchPayload, runtimeAgentId, type LaunchTarget } from "@/lib/launch-form";
 import { useCatalog } from "@/lib/use-catalog";
 
 interface LaunchSheetProps {
@@ -129,7 +129,10 @@ async function launchAgent({
       pathname: "/chat/[tabId]",
       params: {
         tabId: result.tabId,
-        agent: payload.agentId,
+        agent: runtimeAgentId(payload.agentId),
+        initialMessage: payload.prompt,
+        initialMessageTs: String(Date.now()),
+        title: "Agent Session",
         worktreeId: result.worktreeId,
       },
     } as const;
