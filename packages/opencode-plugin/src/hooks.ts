@@ -76,6 +76,13 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     "message.updated": applyMessageUpdatedEvent,
     "message.part.updated": applyMessagePartEvent,
   };
+  const chatContentHandlers: Record<string, (event: RuntimeEvent) => Promise<void>> = {
+    "message.updated": async (event) => {
+      rememberMessageRole(event);
+    },
+    "message.part.delta": reportChatDelta,
+    "message.part.updated": reportUpdatedPart,
+  };
 
   return {
     event: async ({ event }) => {
@@ -300,63 +307,49 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
    * in the sync path; this only publishes {@link PragmaReporter.message}.
    */
   async function reportChatContent(event: RuntimeEvent): Promise<void> {
-    if (event.type === "message.updated") {
-      rememberMessageRole(event);
-      return;
-    }
-    if (event.type === "message.part.delta") {
-      await reportChatDelta(event);
-      return;
-    }
-    if (event.type !== "message.part.updated") {
-      return;
-    }
+    const handler = chatContentHandlers[event.type];
+    if (handler) await handler(event);
+  }
+
+  async function reportUpdatedPart(event: RuntimeEvent): Promise<void> {
     const part = partFromEvent(event);
     if (!part) {
       return;
     }
-    const partID = typeof part.id === "string" ? part.id : undefined;
-    const partType = typeof part.type === "string" ? part.type : undefined;
-    if (partID && partType) partTypes.set(partID, partType);
-    if (partType !== "text" && partType !== "reasoning") return;
-    const messageID = typeof part.messageID === "string" ? part.messageID : undefined;
+    rememberPartType(part);
+    const details = assistantTextPart(part);
     // OpenCode can emit an assistant text part before its message.updated role
     // event. Only suppress a part once we positively know it belongs to a user;
     // chat.message already reports those prompts.
-    if (!messageID || messageRoles.get(messageID) === "user") {
+    if (!details || messageRoles.get(details.messageID) === "user") {
       return;
     }
-    const text = typeof part.text === "string" ? part.text.trim() : "";
-    if (!text) {
-      return;
-    }
-    const key = messageTextKey(messageID, partID);
-    messageText.set(key, text);
-    await reportAssistantText(messageID, text, partType, partID);
+    const key = messageTextKey(details.messageID, details.partID);
+    messageText.set(key, details.text);
+    await reportAssistantText(details.messageID, details.text, details.partType, details.partID);
+  }
+
+  function rememberPartType(part: Record<string, unknown>): void {
+    const partID = typeof part.id === "string" ? part.id : undefined;
+    const partType = typeof part.type === "string" ? part.type : undefined;
+    if (partID && partType) partTypes.set(partID, partType);
   }
 
   /** Accumulates OpenCode's incremental text event and publishes a growing snapshot. */
   async function reportChatDelta(event: RuntimeEvent): Promise<void> {
-    const properties = event.properties as Record<string, unknown> | undefined;
-    if (!properties) {
+    const delta = chatDelta(event, messageRoles);
+    if (!delta) {
       return;
     }
-    const messageID = typeof properties.messageID === "string" ? properties.messageID : undefined;
-    const partID = typeof properties.partID === "string" ? properties.partID : undefined;
-    const partType = partID ? partTypes.get(partID) : undefined;
-    if (
-      !messageID ||
-      messageRoles.get(messageID) === "user" ||
-      (properties.field !== undefined && properties.field !== "text") ||
-      typeof properties.delta !== "string" ||
-      !properties.delta
-    ) {
-      return;
-    }
-    const key = messageTextKey(messageID, partID);
-    const text = `${messageText.get(key) ?? ""}${properties.delta}`;
+    const key = messageTextKey(delta.messageID, delta.partID);
+    const text = `${messageText.get(key) ?? ""}${delta.text}`;
     messageText.set(key, text);
-    await reportAssistantText(messageID, text, partType, partID);
+    await reportAssistantText(
+      delta.messageID,
+      text,
+      delta.partID ? partTypes.get(delta.partID) : undefined,
+      delta.partID,
+    );
   }
 
   /** Reports one assistant text snapshot under its stable transcript id. */
@@ -419,19 +412,14 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   /** Updates flags from a question tool part's state: resume when resolved, else raise. */
   function applyQuestionPartState(part: Record<string, unknown>): void {
     const state = isRecord(part.state) ? part.state : undefined;
-    const status = state?.status;
-    if (status === "completed" || status === "error") {
+    if (questionPartFinished(state)) {
       attention = false;
       busy = true;
       return;
     }
     // Prefer the structured report (prompt + options) when the part carries
     // tool input; fall back to a bare attention flag when it doesn't.
-    const input = isRecord(state?.input)
-      ? state.input
-      : isRecord(part.input)
-        ? part.input
-        : undefined;
+    const input = questionPartInput(state, part);
     if (input) {
       void raiseQuestionAttention(input, typeof part.callID === "string" ? part.callID : undefined);
       return;
@@ -444,6 +432,62 @@ export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function assistantTextPart(
+  part: Record<string, unknown>,
+): { messageID: string; partID: string | undefined; partType: string; text: string } | undefined {
+  const partType = typeof part.type === "string" ? part.type : undefined;
+  if (partType !== "text" && partType !== "reasoning") return undefined;
+  const messageID = typeof part.messageID === "string" ? part.messageID : undefined;
+  const text = typeof part.text === "string" ? part.text.trim() : "";
+  if (!messageID || !text) return undefined;
+  return {
+    messageID,
+    partID: typeof part.id === "string" ? part.id : undefined,
+    partType,
+    text,
+  };
+}
+
+function chatDelta(
+  event: RuntimeEvent,
+  messageRoles: ReadonlyMap<string, "user" | "assistant">,
+): { messageID: string; partID: string | undefined; text: string } | undefined {
+  const properties = event.properties;
+  if (!isRecord(properties) || !isTextDelta(properties)) {
+    return undefined;
+  }
+  const messageID = typeof properties.messageID === "string" ? properties.messageID : undefined;
+  if (!messageID || messageRoles.get(messageID) === "user") {
+    return undefined;
+  }
+  return {
+    messageID,
+    partID: typeof properties.partID === "string" ? properties.partID : undefined,
+    text: properties.delta,
+  };
+}
+
+function isTextDelta(
+  properties: Record<string, unknown>,
+): properties is Record<string, unknown> & { delta: string } {
+  return (
+    (properties.field === undefined || properties.field === "text") &&
+    typeof properties.delta === "string" &&
+    properties.delta.length > 0
+  );
+}
+
+function questionPartFinished(state: Record<string, unknown> | undefined): boolean {
+  return state?.status === "completed" || state?.status === "error";
+}
+
+function questionPartInput(
+  state: Record<string, unknown> | undefined,
+  part: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return isRecord(state?.input) ? state.input : isRecord(part.input) ? part.input : undefined;
 }
 
 /** A unique correlation id for one command-approval round-trip. Opaque. */
@@ -605,42 +649,43 @@ function summaryFromRecord(record: Record<string, unknown>): string | undefined 
  * mobile chat renders `summary` as the gray activity line.
  */
 function toolSummary(tool: string, args: Record<string, unknown>): string | undefined {
-  const name = tool.toLowerCase();
-  switch (name) {
-    case "bash":
-    case "shell":
-      return firstString(args.command, args.cmd, args.script) ?? summaryFromRecord(args);
-    case "read":
-    case "write":
-    case "edit":
-    case "apply_patch":
-    case "patch":
-      return (
-        firstString(args.filePath, args.filepath, args.path, args.file) ?? summaryFromRecord(args)
-      );
-    case "grep":
-      return (
-        firstString(args.pattern, args.query, args.regex) ??
-        firstString(args.path, args.include) ??
-        summaryFromRecord(args)
-      );
-    case "glob":
-      return firstString(args.pattern, args.glob, args.path) ?? summaryFromRecord(args);
-    case "webfetch":
-    case "fetch":
-      return firstString(args.url, args.uri) ?? summaryFromRecord(args);
-    case "websearch":
-    case "search":
-      return firstString(args.query, args.q, args.search) ?? summaryFromRecord(args);
-    case "todowrite":
-    case "todo":
-      return "Updating todos";
-    case "task":
-    case "agent":
-      return firstString(args.description, args.prompt, args.text) ?? "Spawning sub-agent";
-    default:
-      return summaryFromRecord(args);
-  }
+  return TOOL_SUMMARIES[tool.toLowerCase()]?.(args) ?? summaryFromRecord(args);
+}
+
+const TOOL_SUMMARIES: Record<string, (args: Record<string, unknown>) => string | undefined> = {
+  bash: commandSummary,
+  shell: commandSummary,
+  read: pathSummary,
+  write: pathSummary,
+  edit: pathSummary,
+  apply_patch: pathSummary,
+  patch: pathSummary,
+  grep: grepSummary,
+  glob: (args) => firstString(args.pattern, args.glob, args.path),
+  webfetch: (args) => firstString(args.url, args.uri),
+  fetch: (args) => firstString(args.url, args.uri),
+  websearch: (args) => firstString(args.query, args.q, args.search),
+  search: (args) => firstString(args.query, args.q, args.search),
+  todowrite: () => "Updating todos",
+  todo: () => "Updating todos",
+  task: taskSummary,
+  agent: taskSummary,
+};
+
+function commandSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.command, args.cmd, args.script);
+}
+
+function pathSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.filePath, args.filepath, args.path, args.file);
+}
+
+function grepSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.pattern, args.query, args.regex) ?? firstString(args.path, args.include);
+}
+
+function taskSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.description, args.prompt, args.text) ?? "Spawning sub-agent";
 }
 
 /**

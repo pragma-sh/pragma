@@ -103,32 +103,58 @@ async function catalogAgent(
   assets: Record<string, IconAsset>,
 ): Promise<CatalogAgent> {
   const models = await resolveModels(agent, ctx);
-  let icon: CatalogAgent["icon"];
-  if (agent.iconPath) {
-    const asset = hashIcon(agent.iconPath);
-    assets[asset.hash] = asset;
-    icon = { hash: asset.hash, mime: asset.mime };
-  }
+  const icon = catalogIcon(agent, assets);
+  const commands = launchCommands(agent, models);
+  const launch = catalogLaunch(agent, commands);
+  return { id: agent.id, name: agent.name, pluginId, models, launch, ...(icon ? { icon } : {}) };
+}
+
+function catalogIcon(
+  agent: AgentDefinition,
+  assets: Record<string, IconAsset>,
+): CatalogAgent["icon"] | undefined {
+  if (!agent.iconPath) return undefined;
+  const asset = hashIcon(agent.iconPath);
+  assets[asset.hash] = asset;
+  return { hash: asset.hash, mime: asset.mime };
+}
+
+function launchCommands(agent: AgentDefinition, models: AgentModelEntry[]): AgentLaunchCommand[] {
   const commands: AgentLaunchCommand[] = [
     { modelId: null, reasoningId: null, command: agent.launch.command },
   ];
   for (const model of models) {
-    commands.push({
-      modelId: model.id,
-      reasoningId: null,
-      command: [...agent.launch.command, ...agent.args.model(model.id)],
-    });
+    commands.push(modelCommand(agent, model.id));
     for (const reasoning of model.reasoning ?? []) {
-      const args = agent.args.modelReasoning
-        ? agent.args.modelReasoning(model.id, reasoning.id)
-        : [...agent.args.model(model.id), ...agent.args.reasoning(reasoning.id)];
-      commands.push({
-        modelId: model.id,
-        reasoningId: reasoning.id,
-        command: [...agent.launch.command, ...args],
-      });
+      commands.push(reasoningCommand(agent, model.id, reasoning.id));
     }
   }
+  return commands;
+}
+
+function modelCommand(agent: AgentDefinition, modelId: string): AgentLaunchCommand {
+  return {
+    modelId,
+    reasoningId: null,
+    command: [...agent.launch.command, ...agent.args.model(modelId)],
+  };
+}
+
+function reasoningCommand(
+  agent: AgentDefinition,
+  modelId: string,
+  reasoningId: string,
+): AgentLaunchCommand {
+  const args = agent.args.modelReasoning
+    ? agent.args.modelReasoning(modelId, reasoningId)
+    : [...agent.args.model(modelId), ...agent.args.reasoning(reasoningId)];
+  return { modelId, reasoningId, command: [...agent.launch.command, ...args] };
+}
+
+function catalogLaunch(
+  agent: AgentDefinition,
+  commands: AgentLaunchCommand[],
+): CatalogAgent["launch"] {
   const launch = {
     commands,
     ...(agent.startupInput ? { startupInput: agent.startupInput } : {}),
@@ -139,5 +165,5 @@ async function catalogAgent(
       ? { prefillSubmitDelayMs: agent.prefillSubmitDelayMs }
       : {}),
   };
-  return { id: agent.id, name: agent.name, pluginId, models, launch, ...(icon ? { icon } : {}) };
+  return launch;
 }
