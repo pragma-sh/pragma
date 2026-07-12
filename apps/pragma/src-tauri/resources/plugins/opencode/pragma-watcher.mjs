@@ -92,49 +92,55 @@ async function handleControlEvent(
     rememberQuestionOptions(questionOptionsByRequestId, event);
     return;
   }
-  if (handleDecisions && event.type === "agentDecision") {
-    const { decision } = event;
-    if (seenRequestIds.has(decision.requestId)) {
-      return;
-    }
-    seenRequestIds.add(decision.requestId);
-    await writeKeys(ctx, decision.approved ? keys.approveKeys : keys.denyKeys);
+  if (handleDecisions && (await handleDecision(ctx, keys, seenRequestIds, event))) {
     return;
   }
-  if (handleDecisions && event.type === "agentAnswer") {
-    const { answer } = event;
-    if (seenRequestIds.has(answer.requestId)) {
-      return;
-    }
-    seenRequestIds.add(answer.requestId);
-    const options = questionOptionsByRequestId.get(answer.requestId) ?? [];
-    questionOptionsByRequestId.delete(answer.requestId);
-    const reply = answer.answer?.trim() ?? null;
-    if (!answer.dismissed && reply && !options.includes(reply)) {
-      await writeKeys(ctx, openOtherEditorKeys(options.length));
-      await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
-      if (!ctx.signal.aborted) {
-        await writeKeys(ctx, `${reply}\r`);
-      }
-      return;
-    }
-    const strokes = questionAnswerKeys({ dismissed: answer.dismissed, reply, options });
-    if (strokes) {
-      await writeKeys(ctx, strokes);
-    }
+  if (
+    handleDecisions &&
+    (await handleAnswer(ctx, seenRequestIds, questionOptionsByRequestId, event))
+  ) {
     return;
   }
   if (event.type === "agentInput") {
-    if (interjectSubmitDelayMs > 0 && keys.submitKeys) {
-      await writeKeys(ctx, event.input.text);
-      await delay(interjectSubmitDelayMs, ctx.signal);
-      if (!ctx.signal.aborted) {
-        await writeKeys(ctx, keys.submitKeys);
-      }
-    } else {
-      await writeKeys(ctx, `${event.input.text}${keys.submitKeys}`);
-    }
+    await handleInterjection(ctx, keys.submitKeys, interjectSubmitDelayMs, event.input.text);
   }
+}
+async function handleDecision(ctx, keys, seenRequestIds, event) {
+  if (event.type !== "agentDecision") return false;
+  if (seenRequestIds.has(event.decision.requestId)) return true;
+  seenRequestIds.add(event.decision.requestId);
+  await writeKeys(ctx, event.decision.approved ? keys.approveKeys : keys.denyKeys);
+  return true;
+}
+async function handleAnswer(ctx, seenRequestIds, questionOptionsByRequestId, event) {
+  if (event.type !== "agentAnswer") return false;
+  const { answer } = event;
+  if (seenRequestIds.has(answer.requestId)) return true;
+  seenRequestIds.add(answer.requestId);
+  const options = questionOptionsByRequestId.get(answer.requestId) ?? [];
+  questionOptionsByRequestId.delete(answer.requestId);
+  const reply = answer.answer?.trim() ?? null;
+  if (!answer.dismissed && reply && !options.includes(reply)) {
+    await writeFreeTextAnswer(ctx, options.length, reply);
+    return true;
+  }
+  const strokes = questionAnswerKeys({ dismissed: answer.dismissed, reply, options });
+  if (strokes) await writeKeys(ctx, strokes);
+  return true;
+}
+async function writeFreeTextAnswer(ctx, optionCount, reply) {
+  await writeKeys(ctx, openOtherEditorKeys(optionCount));
+  await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
+  if (!ctx.signal.aborted) await writeKeys(ctx, `${reply}\r`);
+}
+async function handleInterjection(ctx, submitKeys, submitDelayMs, text) {
+  if (submitDelayMs <= 0 || !submitKeys) {
+    await writeKeys(ctx, `${text}${submitKeys}`);
+    return;
+  }
+  await writeKeys(ctx, text);
+  await delay(submitDelayMs, ctx.signal);
+  if (!ctx.signal.aborted) await writeKeys(ctx, submitKeys);
 }
 function rememberQuestionOptions(cache, event) {
   if (
