@@ -83,8 +83,20 @@ pub fn stream_ndjson_response(request: Request, stream: UnixStream) -> GatewayRe
     thread::spawn(move || {
         forward_stream_to_writer(stream, &writer);
         done.store(true, Ordering::Relaxed);
+        finish_chunked_body(&writer);
     });
     Ok(())
+}
+
+/// Writes the HTTP/1.1 terminal chunk (`0\r\n\r\n`, RFC 7230 §4.1) once the
+/// event stream ends, so clients and buffering proxies see a clean body end
+/// instead of a bare connection close. Best-effort: the client may already be
+/// gone.
+fn finish_chunked_body(writer: &SharedWriter) {
+    if let Ok(mut guard) = writer.lock() {
+        let _ = write_chunk(&mut **guard, &[]);
+        let _ = guard.flush();
+    }
 }
 
 /// Periodically writes the keepalive line until the forwarder finishes or a
@@ -98,6 +110,12 @@ fn spawn_keepalive(writer: SharedWriter, done: Arc<AtomicBool>, shutdown: Option
         }
         let failed = match writer.lock() {
             Ok(mut writer) => {
+                // Re-check under the lock: the forwarder may have written the
+                // terminal chunk since the sleep, and a keepalive chunk after
+                // it would corrupt the chunked body.
+                if done.load(Ordering::Relaxed) {
+                    return;
+                }
                 write_chunk(&mut **writer, KEEPALIVE_LINE).is_err() || writer.flush().is_err()
             }
             Err(_) => true,
@@ -314,5 +332,12 @@ mod tests {
         let mut output = Vec::new();
         write_chunk(&mut output, b"ready\n").expect("chunk should write");
         assert_eq!(output, b"6\r\nready\n\r\n");
+    }
+
+    #[test]
+    fn empty_chunk_is_the_terminal_chunk() {
+        let mut output = Vec::new();
+        write_chunk(&mut output, &[]).expect("chunk should write");
+        assert_eq!(output, b"0\r\n\r\n");
     }
 }
