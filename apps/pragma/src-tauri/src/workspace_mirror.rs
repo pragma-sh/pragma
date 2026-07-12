@@ -14,15 +14,17 @@
 //! a fast burst of mutations yields a single publish.
 
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
+use pragma_core::git::{GitRequest, HeadlessWorktree};
 use tauri::{AppHandle, Manager};
 
 use crate::db::Db;
 use crate::error::AppResult;
+use crate::git::host_rpc;
+use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
 /// Coalesce window: while mutations keep arriving, the publisher waits this
@@ -93,7 +95,7 @@ fn worker(rx: Receiver<()>, app: AppHandle, pty: PtyClient) {
 /// Reads all projects/worktrees/tabs from `Db` and publishes a snapshot.
 fn publish_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
     let db = app.state::<Db>();
-    adopt_headless_worktrees(&db);
+    adopt_headless_worktrees(&db, &app.state::<Hosts>());
     let projects = db.list_projects()?;
     let worktrees = db.list_all_worktrees()?;
     let tabs = db.list_all_tabs()?;
@@ -112,8 +114,11 @@ fn publish_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
 /// parented to the project's main worktree, so the sidebar shows it and the
 /// snapshot the mirror is about to publish keeps it. The directory name is the
 /// worktree id the server minted, keeping remote clients' ids stable across
-/// the adoption. Best-effort: failures are logged, never fatal to a publish.
-fn adopt_headless_worktrees(db: &Db) {
+/// the adoption. The disk scan runs on the project's host via the `git` RPC
+/// (`ListHeadlessWorktrees`), so remote (SSH) projects are scanned on the
+/// machine that owns them. Best-effort: failures are logged, never fatal to a
+/// publish.
+fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
     let (Ok(projects), Ok(worktrees)) = (db.list_projects(), db.list_all_worktrees()) else {
         return;
     };
@@ -129,47 +134,29 @@ fn adopt_headless_worktrees(db: &Db) {
         else {
             continue;
         };
-        // Remote (SSH) project paths do not exist locally; read_dir fails and
-        // the project is skipped — adoption is a local-host concern.
-        let Ok(entries) = std::fs::read_dir(Path::new(&project.path).join(".pragma/worktrees"))
-        else {
+        let Ok(client) = hosts.for_project(db, &project.id) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let path_str = path.to_string_lossy().into_owned();
-            if !path.join(".git").exists() || known_paths.contains(path_str.as_str()) {
+        let request = GitRequest::ListHeadlessWorktrees {
+            project_root: project.path.clone(),
+        };
+        // An unreachable host skips the project until the next publish.
+        let Ok(candidates) = host_rpc::<Vec<HeadlessWorktree>>(&client, &request) else {
+            continue;
+        };
+        for HeadlessWorktree { id, path, branch } in candidates {
+            if known_paths.contains(path.as_str()) {
                 continue;
             }
-            let id = entry.file_name().to_string_lossy().into_owned();
             if db.worktree(&id).is_ok() {
                 // The id is taken by a row at a different path (a moved or
                 // recreated checkout) — leave it for the user to resolve.
                 continue;
             }
-            let Some(branch) = current_git_branch(&path) else {
-                continue;
-            };
-            match db.insert_worktree(&id, &project.id, &main_id, &branch, None, &path_str) {
-                Ok(_) => log::info!("adopted headless worktree {id} ({branch}) at {path_str}"),
+            match db.insert_worktree(&id, &project.id, &main_id, &branch, None, &path) {
+                Ok(_) => log::info!("adopted headless worktree {id} ({branch}) at {path}"),
                 Err(error) => log::warn!("failed to adopt headless worktree {id}: {error}"),
             }
         }
     }
-}
-
-/// The branch checked out at `path`, or `None` when `path` is not a usable git
-/// worktree (adoption skips it).
-fn current_git_branch(path: &Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["-C"])
-        .arg(path)
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!branch.is_empty() && branch != "HEAD").then_some(branch)
 }
