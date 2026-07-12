@@ -154,23 +154,33 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+W"),
     )?;
-    // Tauri's default macOS File menu puts Close Window first. Its submenu id is
-    // generated, unlike Window's stable id, so locate it by default-menu position.
+    // Replace File entirely: its default Close Window item keeps Cmd+W even when
+    // removed in place on macOS.
     #[cfg(target_os = "macos")]
-    if let Some(file_menu) = menu
-        .items()?
-        .get(1)
-        .and_then(|item| item.as_submenu().cloned())
     {
-        file_menu.remove_at(0)?;
+        let file_menu = Submenu::with_id_and_items(
+            app,
+            "file",
+            "File",
+            true,
+            &[&new_terminal_tab, &close_active_tab],
+        )?;
+        menu.remove_at(1)?;
+        menu.insert(&file_menu, 1)?;
+        let window_menu = menu
+            .get("window")
+            .and_then(|item| item.as_submenu().cloned());
+        if let Some(window_menu) = window_menu {
+            // The default macOS Window menu also owns Cmd+W for closing the window.
+            window_menu.remove_at(3)?;
+        }
     }
+    #[cfg(target_os = "linux")]
     if let Some(window_menu) = menu
         .get("window")
         .and_then(|item| item.as_submenu().cloned())
     {
-        // The default macOS Window menu also owns Cmd+W for closing the window.
-        #[cfg(target_os = "macos")]
-        window_menu.remove_at(3)?;
+        // Linux has no default File menu, so surface Pragma tab actions here.
         window_menu.append(&new_terminal_tab)?;
         window_menu.append(&close_active_tab)?;
     }
