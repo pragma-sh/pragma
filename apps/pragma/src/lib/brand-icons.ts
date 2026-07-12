@@ -18,3 +18,4 @@ import brandIcons from "@/lib/brand-icons.json";
  */
 addCollection(brandIcons.lucide as IconifyJSON);
 addCollection(brandIcons["simple-icons"] as IconifyJSON);
+addCollection(brandIcons.brand as IconifyJSON);

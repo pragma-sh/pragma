@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import { Icon } from "@iconify/react";
-import { constants, type Worktree } from "@pragma/constants";
+import type { Worktree } from "@pragma/constants";
 import {
   ChevronRight,
   Copy,
@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
+import { editorLaunchers } from "@/lib/editor-launchers";
 import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
@@ -45,7 +46,6 @@ import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { useWorkspace } from "@/state/workspace-context";
 
-const editorLaunchers = constants.editorLaunchers.options;
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
 // Trailing debounce for file-watch-triggered merged-status refreshes. An agent
 // or build writing files emits a continuous stream of change events; refreshing

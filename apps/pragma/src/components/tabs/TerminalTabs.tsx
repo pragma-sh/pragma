@@ -40,6 +40,7 @@ import { useConfirmClose } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { editorLaunchers } from "@/lib/editor-launchers";
 import { isMacPlatform } from "@/lib/platform";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
@@ -60,7 +61,6 @@ import {
 import type { TopperItemDefinition } from "@pragma/plugin";
 
 const SELECTED_EDITOR_STORAGE_KEY = "pragma.selectedEditorLauncher";
-const editorLaunchers = constants.editorLaunchers.options;
 const fallbackEditor =
   editorLaunchers.find((editor) => editor.id === constants.editorLaunchers.defaultEditorId) ??
   editorLaunchers[0]!;

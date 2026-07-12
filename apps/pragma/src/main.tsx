@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { constants } from "@pragma/constants";
 import { Toaster } from "@/components/ui/sonner";
 import { primeNotificationPermission } from "@/lib/agent-alert";
@@ -13,11 +14,28 @@ import App from "./App.tsx";
 // lights (see src-tauri/window_chrome.rs). The `.vibrancy` class lets the project
 // rail render translucent so the desktop blur reads through it, and reserves a
 // `--titlebar-height` strip the frontend keeps draggable and clear of the
-// traffic lights. Other platforms keep an opaque rail and standard decorations.
+// traffic lights. Native fullscreen has no traffic lights, so shrink that inset
+// to a small top margin that aligns sidebar content with the top bar. Other platforms keep an
+// opaque rail and standard decorations.
 if (isMacPlatform()) {
   const root = document.documentElement;
   root.classList.add("vibrancy");
-  root.style.setProperty("--titlebar-height", `${constants.window.titlebarHeight}px`);
+  const appWindow = getCurrentWindow();
+  const syncTitlebarHeight = () => {
+    void appWindow
+      .isFullscreen()
+      .then((fullscreen) => {
+        root.style.setProperty(
+          "--titlebar-height",
+          fullscreen ? "5px" : `${constants.window.titlebarHeight}px`,
+        );
+        return undefined;
+      })
+      .catch(() => undefined);
+  };
+
+  syncTitlebarHeight();
+  void appWindow.onResized(syncTitlebarHeight);
 }
 
 // Request OS notification permission while the window is frontmost at launch, so
