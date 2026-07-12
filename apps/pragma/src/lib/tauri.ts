@@ -966,10 +966,14 @@ export function onBrowserFocusRequest(
   return listen<BrowserFocusRequest>("browser-focus-request", (event) => handler(event.payload));
 }
 
-/** A Troubleshooting-menu action forwarded from the native menubar. */
-export type MenuAction = "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs";
+/** A native menubar action forwarded to the workspace shell. */
+export type MenuAction =
+  | "tabs.new-terminal"
+  | "tabs.close-active"
+  | "troubleshooting.restart-daemon"
+  | "troubleshooting.open-daemon-logs";
 
-/** Subscribes to native menubar actions (the Troubleshooting menu). */
+/** Subscribes to native menubar actions. */
 export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
   return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));
 }

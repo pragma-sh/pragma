@@ -78,7 +78,6 @@ import {
   onAgentReport,
   onAgentStatusReset,
   onDeepLink,
-  onMenuAction,
   onTabsChanged,
   onWorktreeChanged,
   takePendingDeepLink,
@@ -86,7 +85,6 @@ import {
   projectIcon,
   renameTab as renameTabCommand,
   renameWorktree as renameWorktreeCommand,
-  restartDaemon as restartDaemonCommand,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
   setTabTitle as setTabTitleCommand,
@@ -2857,37 +2855,6 @@ function useTabLifecycle(
   return { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef };
 }
 
-/** Forwards native Troubleshooting-menu clicks to the restart/open-logs handler. */
-function useMenuActionListener(openDaemonLogTab: () => Promise<void>): void {
-  const handleMenuAction = useCallback(
-    async (action: "troubleshooting.restart-daemon" | "troubleshooting.open-daemon-logs") => {
-      if (action === "troubleshooting.open-daemon-logs") {
-        await openDaemonLogTab();
-        return;
-      }
-      const pending = toast.loading("Restarting daemon…");
-      try {
-        await restartDaemonCommand();
-        toast.success("Daemon restarted", { id: pending });
-      } catch (cause) {
-        toast.error(errorMessage(cause), { id: pending });
-      }
-    },
-    [openDaemonLogTab],
-  );
-  const handleMenuActionRef = useRef(handleMenuAction);
-  handleMenuActionRef.current = handleMenuAction;
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    onMenuAction((action) => void handleMenuActionRef.current(action))
-      .then((stop) => (unlisten = stop))
-      .catch(() => undefined);
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-}
-
 /** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
 function useWorkspaceChangedListener(
   dispatch: WorkspaceDispatch,
@@ -3763,7 +3730,7 @@ function useTabManagement({
   };
 }
 
-/** Project loading + browser/terminal metadata + troubleshooting-menu listeners. */
+/** Project loading plus browser and terminal metadata listeners. */
 function useWorkspaceListeners({
   state,
   dispatch,
@@ -3771,7 +3738,6 @@ function useWorkspaceListeners({
   tabsRef,
   terminalTabIdsKey,
   setActiveTabRef,
-  openDaemonLogTab,
   refreshProject,
 }: {
   state: WorkspaceState;
@@ -3781,12 +3747,10 @@ function useWorkspaceListeners({
   tabsRef: RefObject<Tab[]>;
   terminalTabIdsKey: string;
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
-  openDaemonLogTab: () => Promise<void>;
 }): void {
   useProjectLoading(state, dispatch, reload);
   useWorkspaceChangedListener(dispatch, refreshProject);
   useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
-  useMenuActionListener(openDaemonLogTab);
 }
 
 /** Split-layout + selection persistence. */
@@ -4017,7 +3981,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tabsRef,
     terminalTabIdsKey,
     setActiveTabRef,
-    openDaemonLogTab,
   });
 
   useWorkspacePersistence(state, didHydrateRef, lastPersistedRef);
