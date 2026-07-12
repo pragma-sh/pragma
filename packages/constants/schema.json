@@ -56,7 +56,8 @@
         "ai",
         "exec",
         "automations",
-        "plugins"
+        "plugins",
+        "tunnel"
       ]
     },
     "ProtocolEventKind": {
@@ -522,7 +523,7 @@
       "title": "CatalogAgent",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "pluginId", "models"],
+      "required": ["id", "name", "pluginId", "models", "launch"],
       "description": "One launchable agent in the resolved plugin catalog.",
       "properties": {
         "id": { "type": "string" },
@@ -537,7 +538,52 @@
         "models": {
           "type": "array",
           "items": { "$ref": "#/definitions/AgentModelEntry" }
+        },
+        "launch": {
+          "$ref": "#/definitions/AgentLaunchConfig"
         }
+      }
+    },
+    "AgentLaunchConfig": {
+      "title": "AgentLaunchConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands"],
+      "description": "Resolved launch commands and terminal-input behavior needed by the persistent host to start an agent without a desktop webview.",
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentLaunchCommand" }
+        },
+        "startupInput": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentStartupInput" }
+        },
+        "prefillDelayMs": { "type": "integer", "minimum": 0 },
+        "prefillMode": { "enum": ["bracketed", "plain"] },
+        "prefillSubmit": { "type": "string" },
+        "prefillSubmitDelayMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "AgentLaunchCommand": {
+      "title": "AgentLaunchCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "reasoningId", "command"],
+      "properties": {
+        "modelId": { "type": ["string", "null"] },
+        "reasoningId": { "type": ["string", "null"] },
+        "command": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "AgentStartupInput": {
+      "title": "AgentStartupInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delayMs", "data"],
+      "properties": {
+        "delayMs": { "type": "integer", "minimum": 0 },
+        "data": { "type": "string" }
       }
     },
     "AgentCatalog": {
@@ -990,9 +1036,31 @@
           "type": "string",
           "description": "The question the agent is asking. Set when attentionKind is `question` so a non-terminal client can show it and answer remotely."
         },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/QuestionOption" },
+          "description": "Answer choices for a `question` attention. Empty/omitted when the question is free-text only or when attentionKind is `command`."
+        },
         "requestId": {
           "type": "string",
           "description": "Correlation id for a command-approval or question round-trip. The reporter sets it on a `command`/`question` attention report and waits for a matching AgentDecision/AgentAnswer before proceeding."
+        }
+      }
+    },
+    "QuestionOption": {
+      "title": "QuestionOption",
+      "description": "A selectable answer to an agent question.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Answer text sent back to the agent when selected."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional explanation shown beneath the answer label."
         }
       }
     },

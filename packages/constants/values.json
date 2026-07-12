@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 15
+    "protocolVersion": 18
   },
   "gateway": {
     "discoveryFile": "gateway.json",
@@ -30,7 +30,8 @@
       "ai",
       "exec",
       "automations",
-      "plugins"
+      "plugins",
+      "tunnel"
     ],
     "events": [
       "agentStatus",
