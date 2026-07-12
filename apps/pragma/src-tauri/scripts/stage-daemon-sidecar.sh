@@ -48,7 +48,7 @@ bun --filter @pragma/watcher build:sidecar
 # Build the opencode plugin so its host-side approval watchers bundle
 # (`dist/pragma-watcher.mjs`) exists; a release app imports it from resources
 # (dev imports the TS source directly). See `resolve_builtin_watcher_main`.
-bun --filter @pragma/opencode-plugin build
+bunx turbo run build --filter=@pragma/opencode-plugin
 bun --filter @pragma/automations build:sidecar
 # Build the plugin catalog sidecar; it statically bundles the built-in agent
 # definitions from the claude-code/opencode/cursor plugin packages.
