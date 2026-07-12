@@ -8,7 +8,11 @@ import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reani
 import type { InboxResolution } from "@/lib/data/data-context";
 import { hapticImpact, hapticSelection, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import type { InboxItem } from "@/lib/types";
+import { useCatalogAgent } from "@/lib/use-catalog";
+import type { QuestionOption } from "@pragma/constants";
+import { AgentIcon } from "./AgentIcon";
 import { IconSymbol } from "./IconSymbol";
+import { RequestTypeBadge } from "./RequestTypeBadge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader } from "./ui/card";
 import { Input } from "./ui/input";
@@ -34,7 +38,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
 
   const isQuestion = item.kind === "question";
   const acceptLabel = isQuestion ? "Submit" : "Approve";
-  const swipeVerb = isQuestion ? "submit" : "approve";
+  const denyLabel = isQuestion ? "Dismiss" : "Deny";
 
   function accept(): void {
     if (!isQuestion) {
@@ -70,7 +74,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
   return (
     <ReanimatedSwipeable
       ref={swipeRef}
-      containerStyle={{ borderRadius: 12 }}
+      containerStyle={{ borderRadius: 16 }}
       friction={1.5}
       leftThreshold={72}
       renderLeftActions={(_progress, translation) => (
@@ -114,19 +118,28 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
             />
           ) : null}
 
-          <View className="flex-row gap-3">
-            <Button className="flex-1" variant="success" onPress={accept}>
-              <IconSymbol color="white" fallback="✓" name="checkmark" size={16} tintColor="white" />
-              <Text>{acceptLabel}</Text>
+          <View className="flex-row justify-end gap-2">
+            <Button
+              accessibilityLabel={denyLabel}
+              accessibilityHint="Dismiss this request"
+              className="h-12 w-12 rounded-full"
+              size="icon"
+              variant="destructive"
+              onPress={deny}
+            >
+              <IconSymbol color="white" fallback="✕" name="xmark" size={20} tintColor="white" />
             </Button>
-            <Button className="flex-1" variant="destructive" onPress={deny}>
-              <IconSymbol color="white" fallback="✕" name="xmark" size={16} tintColor="white" />
-              <Text>Deny</Text>
+            <Button
+              accessibilityLabel={acceptLabel}
+              accessibilityHint={isQuestion ? "Submit selected answer" : "Approve this command"}
+              className="h-12 w-12 rounded-full"
+              size="icon"
+              variant="success"
+              onPress={accept}
+            >
+              <IconSymbol color="white" fallback="✓" name="checkmark" size={20} tintColor="white" />
             </Button>
           </View>
-          <Text className="text-center text-xs text-muted-foreground">
-            Swipe right to {swipeVerb} · swipe left to deny
-          </Text>
         </CardContent>
       </Card>
     </ReanimatedSwipeable>
@@ -135,17 +148,26 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
 
 /** Card header: type badge, source path, prompt, and optional detail block. */
 function InboxCardHeader({ item }: { item: InboxItem }) {
+  const catalogAgent = useCatalogAgent(item.agent);
   return (
-    <CardHeader className="gap-2">
-      <View className="flex-row items-center gap-2">
-        <TypeBadge kind={item.kind} />
-        <Text className="flex-1 text-xs text-muted-foreground" numberOfLines={1}>
-          {item.projectName} · {item.worktreeLabel} · {item.agent}
+    <CardHeader className="gap-2.5">
+      <View className="flex-row items-center justify-between">
+        <RequestTypeBadge kind={item.kind} />
+        <View className="flex-row items-center gap-1.5">
+          <AgentIcon fallback="◆" icon={catalogAgent?.icon} size={14} />
+          <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+            {item.worktreeLabel}
+          </Text>
+        </View>
+      </View>
+      <View>
+        <Text className="text-base font-semibold text-card-foreground">{item.prompt}</Text>
+        <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+          {item.projectName}
         </Text>
       </View>
-      <Text className="text-base font-semibold text-card-foreground">{item.prompt}</Text>
       {item.detail ? (
-        <View className="rounded-md bg-muted px-3 py-2">
+        <View className="rounded-lg border border-border bg-muted/60 px-3 py-2">
           <Text className="font-mono text-xs text-muted-foreground">{item.detail}</Text>
         </View>
       ) : null}
@@ -160,7 +182,7 @@ function QuestionOptions({
   onSelect,
   onOther,
 }: {
-  options: string[] | undefined;
+  options: QuestionOption[] | undefined;
   selected: string | null;
   otherText: string;
   onSelect: (value: string) => void;
@@ -170,11 +192,12 @@ function QuestionOptions({
     <RadioGroup onValueChange={onSelect} value={selected ?? ""}>
       {(options ?? []).map((option) => (
         <OptionRow
-          key={option}
-          label={option}
-          onPress={() => onSelect(option)}
-          selected={selected === option}
-          value={option}
+          key={option.label}
+          description={option.description}
+          label={option.label}
+          onPress={() => onSelect(option.label)}
+          selected={selected === option.label}
+          value={option.label}
         />
       ))}
       <OptionRow
@@ -199,47 +222,29 @@ function QuestionOptions({
 function OptionRow({
   value,
   label,
+  description,
   selected,
   onPress,
 }: {
   value: string;
   label: string;
+  description?: string;
   selected: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable className="flex-row items-center gap-3 py-1" onPress={onPress}>
       <RadioGroupItem aria-labelledby={`opt-${value}`} value={value} />
-      <Text
-        className={selected ? "flex-1 text-foreground" : "flex-1 text-muted-foreground"}
-        nativeID={`opt-${value}`}
-      >
-        {label}
-      </Text>
+      <View className="flex-1">
+        <Text
+          className={selected ? "text-foreground" : "text-muted-foreground"}
+          nativeID={`opt-${value}`}
+        >
+          {label}
+        </Text>
+        {description ? <Text className="text-xs text-muted-foreground">{description}</Text> : null}
+      </View>
     </Pressable>
-  );
-}
-
-function TypeBadge({ kind }: { kind: InboxItem["kind"] }) {
-  const isCommand = kind === "command";
-  return (
-    <View
-      className={
-        isCommand
-          ? "rounded-full bg-warning/20 px-2 py-0.5"
-          : "rounded-full bg-primary/15 px-2 py-0.5"
-      }
-    >
-      <Text
-        className={
-          isCommand
-            ? "text-xs font-semibold uppercase text-warning-foreground"
-            : "text-xs font-semibold uppercase text-primary"
-        }
-      >
-        {kind}
-      </Text>
-    </View>
   );
 }
 
@@ -264,7 +269,7 @@ function SwipeAction({
   });
   return (
     <View
-      className={`my-0.5 flex-1 justify-center ${color} ${align === "left" ? "items-start pl-6" : "items-end pr-6"} rounded-xl`}
+      className={`my-0.5 flex-1 justify-center ${color} ${align === "left" ? "items-start pl-6" : "items-end pr-6"} rounded-2xl`}
     >
       <Animated.View className="flex-row items-center gap-2" style={animatedStyle}>
         <IconSymbol

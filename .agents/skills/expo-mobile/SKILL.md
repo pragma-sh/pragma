@@ -32,11 +32,10 @@ worktree navigation and turns agent approvals/questions into a swipeable inbox.
   `NativeTabs.Trigger.Icon` (`sf` + `drawable` props), `.Label`, `.Badge`.
 - Per-screen header/title/headerLeft: render `<Stack.Screen options={...} />` inside the
   screen (typed routes are on, so `router.push({ pathname, params })` is type-checked).
-- Header-**right** on the in-project screens (project root, nested worktrees, chat) is the
-  `NewWorktreeButton` "+" (module-level `renderNewWorktreeButton` so it isn't an unstable
-  nested component). It owns the New Worktree sheet's open state. The all-projects list
-  has no header button; the stack's native back button (left) handles escaping the
-  drill-down.
+- Header-**right** uses module-level renderers so hook-owning buttons remain stable.
+  Project root and chat use `NewWorktreeButton` "+" for the New Worktree sheet; worktree
+  screens use `LaunchAgentButton` "+" for the Launch Agent sheet. The all-projects list
+  has no header button; the stack's native back button handles escaping the drill-down.
 
 ## Styling (NativeWind v4 + React Native Reusables)
 

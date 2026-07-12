@@ -1,6 +1,6 @@
 import { Stack } from "expo-router";
 
-/** Gives the Inbox tab a native large-title header. */
+/** Inbox owns its large title because iOS native tabs suppress nested stack titles. */
 export default function InboxStackLayout() {
-  return <Stack screenOptions={{ headerLargeTitle: true }} />;
+  return <Stack screenOptions={{ headerShown: false }} />;
 }

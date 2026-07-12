@@ -1,5 +1,5 @@
 import { SymbolView, type SymbolViewProps } from "expo-symbols";
-import { Platform } from "react-native";
+import { Platform, type ColorValue } from "react-native";
 
 import { Text } from "./ui/text";
 
@@ -10,8 +10,8 @@ interface IconSymbolProps {
   fallback: string;
   size?: number;
   className?: string;
-  color?: string;
-  tintColor?: string;
+  color?: ColorValue;
+  tintColor?: ColorValue;
 }
 
 // SF Symbols on Apple platforms for a first-class native look; a lightweight

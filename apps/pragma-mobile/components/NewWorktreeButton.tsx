@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable } from "react-native";
+import { Pressable, type ColorValue } from "react-native";
 
 import { NewWorktreeSheet } from "@/components/NewWorktreeSheet";
 import { hapticImpact } from "@/lib/haptics";
@@ -12,7 +12,7 @@ import { IconSymbol } from "./IconSymbol";
  * top-level/home navigation shortcut — the stack's native back button handles
  * escaping the drill-down.
  */
-function NewWorktreeButton() {
+function NewWorktreeButton({ color }: { color: ColorValue }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -26,7 +26,7 @@ function NewWorktreeButton() {
           setOpen(true);
         }}
       >
-        <IconSymbol color="hsl(240 4% 46%)" fallback="+" name="plus" size={22} />
+        <IconSymbol color={color} fallback="+" name="plus" size={22} />
       </Pressable>
       <NewWorktreeSheet onOpenChange={setOpen} open={open} />
     </>
@@ -38,4 +38,6 @@ function NewWorktreeButton() {
  * inline arrow in each screen) keeps the button mounted as a real component so
  * its hooks work, while satisfying `react/no-unstable-nested-components`.
  */
-export const renderNewWorktreeButton = () => <NewWorktreeButton />;
+export const renderNewWorktreeButton = ({ tintColor }: { tintColor?: ColorValue }) => (
+  <NewWorktreeButton color={tintColor ?? "black"} />
+);

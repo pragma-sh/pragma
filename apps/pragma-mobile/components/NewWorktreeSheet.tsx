@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { View } from "react-native";
 
 import { AgentModelSelector } from "@/components/AgentModelSelector";
@@ -6,8 +6,10 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import { catalogToSelectorAgents } from "@/lib/catalog";
 import { defaultAgentSelection, type AgentModelSelection } from "@/lib/data/agents";
 import { hapticSuccess } from "@/lib/haptics";
+import { useCatalog } from "@/lib/use-catalog";
 
 interface NewWorktreeSheetProps {
   open: boolean;
@@ -17,13 +19,17 @@ interface NewWorktreeSheetProps {
 /**
  * Bottom sheet adapting the desktop "New worktree" dialog for mobile: the user
  * names a branch, optionally a display title, and can seed an agent prompt.
- * Front-end only for now — submitting just closes the sheet (no server wiring).
+ * Agent choices come from the paired host catalog; submitting is front-end only
+ * for now and closes the sheet (no worktree creation wiring yet).
  */
 export function NewWorktreeSheet({ open, onOpenChange }: NewWorktreeSheetProps) {
   const [branch, setBranch] = useState("");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [agent, setAgent] = useState<AgentModelSelection | null>(defaultAgentSelection());
+  const catalog = useCatalog();
+  const agents = useMemo(() => catalogToSelectorAgents(catalog?.agents ?? []), [catalog]);
+  const [agent, setAgent] = useState<AgentModelSelection | null>(null);
+  const selectedAgent = agent ?? defaultAgentSelection(agents);
 
   const canSubmit = branch.trim().length > 0;
 
@@ -71,7 +77,7 @@ export function NewWorktreeSheet({ open, onOpenChange }: NewWorktreeSheetProps) 
           />
         </Field>
         <Field label="Agent">
-          <AgentModelSelector onChange={setAgent} value={agent} />
+          <AgentModelSelector agents={agents} onChange={setAgent} value={selectedAgent} />
         </Field>
         <Field label="Prompt">
           <Input
