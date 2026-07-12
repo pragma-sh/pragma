@@ -148,6 +148,19 @@ function acceptQuestion(
   onResolve({ kind: "answer", option: answer });
 }
 
+interface InboxCardContentProps {
+  acceptLabel: string;
+  denyLabel: string;
+  isQuestion: boolean;
+  item: InboxItem;
+  onAccept: () => void;
+  onDeny: () => void;
+  onOther: (text: string) => void;
+  onSelect: (value: string) => void;
+  otherText: string;
+  selected: string | null;
+}
+
 function InboxCardContent({
   acceptLabel,
   denyLabel,
@@ -159,18 +172,7 @@ function InboxCardContent({
   onSelect,
   otherText,
   selected,
-}: {
-  acceptLabel: string;
-  denyLabel: string;
-  isQuestion: boolean;
-  item: InboxItem;
-  onAccept: () => void;
-  onDeny: () => void;
-  onOther: (text: string) => void;
-  onSelect: (value: string) => void;
-  otherText: string;
-  selected: string | null;
-}) {
+}: InboxCardContentProps) {
   function select(value: string): void {
     hapticSelection();
     onSelect(value);

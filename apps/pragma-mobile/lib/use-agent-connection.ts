@@ -45,14 +45,19 @@ type StoreAction =
 function reducer(state: TranscriptState, action: StoreAction): TranscriptState {
   switch (action.type) {
     case "reset":
-      return action.initialMessage && action.initialMessageTs
-        ? applyLocalInput(emptyTranscript(), action.initialMessage, action.initialMessageTs)
-        : emptyTranscript();
+      return resetTranscript(action.initialMessage, action.initialMessageTs);
     case "event":
       return applyEvent(state, action.event);
     case "localInput":
       return applyLocalInput(state, action.text, action.ts);
   }
+}
+
+function resetTranscript(initialMessage: string | undefined, initialMessageTs: number | undefined) {
+  if (initialMessage && initialMessageTs) {
+    return applyLocalInput(emptyTranscript(), initialMessage, initialMessageTs);
+  }
+  return emptyTranscript();
 }
 
 /**

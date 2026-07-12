@@ -48,9 +48,12 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
 export default opencodeAgentPlugin;
 
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
-  const cwd = ctx.project?.path ?? "/tmp";
-  const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
+  const [result] = await ctx.sdk.exec.run({ cwd: projectPath(ctx), commands: [command] });
   return result?.stdout ?? "";
+}
+
+function projectPath(ctx: PluginContext): string {
+  return ctx.project?.path ?? "/tmp";
 }
 
 /** Parses OpenCode's `models` output (JSON or table form) into model entries. */
@@ -68,17 +71,31 @@ export function parseOpenCodeModels(output: string): AgentModelEntry[] {
         .replace(/^│|│$/g, "")
         .trim(),
     )
-    .flatMap((line) => {
-      if (
-        !line ||
-        /^(model|provider|tip|usage)/i.test(line) ||
-        /^[─━│┃┌┐└┘├┤┬┴┼\-+]+$/.test(line)
-      ) {
-        return [];
-      }
-      const [id, name] = line.includes(" - ") ? line.split(" - ", 2) : splitWhitespaceModel(line);
-      return id && name && !/\s/.test(id) ? [{ id, name: withProvider(id, name) }] : [];
-    });
+    .flatMap(modelFromLine);
+}
+
+function modelFromLine(line: string): AgentModelEntry[] {
+  if (isModelTableDecoration(line)) return [];
+  const model = parseModelLine(line);
+  return model ? [model] : [];
+}
+
+function parseModelLine(line: string): AgentModelEntry | null {
+  const [id, name] = modelColumns(line);
+  if (!id) return null;
+  if (!name) return null;
+  if (/\s/.test(id)) return null;
+  return { id, name: withProvider(id, name) };
+}
+
+function modelColumns(line: string): [string | undefined, string | undefined] {
+  if (!line.includes(" - ")) return splitWhitespaceModel(line);
+  const [id, name] = line.split(" - ", 2);
+  return [id, name];
+}
+
+function isModelTableDecoration(line: string): boolean {
+  return !line || /^(model|provider|tip|usage)/i.test(line) || /^[─━│┃┌┐└┘├┤┬┴┼\-+]+$/.test(line);
 }
 
 function parseJsonModels(output: string): AgentModelEntry[] {
@@ -92,6 +109,7 @@ function parseJsonModels(output: string): AgentModelEntry[] {
   }
 }
 
+// fallow-ignore-next-line complexity -- recursive JSON traversal must branch by array, record, and leaf shape.
 function walk(value: unknown, models: AgentModelEntry[]): void {
   if (Array.isArray(value)) {
     for (const child of value) walk(child, models);
@@ -112,13 +130,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function modelFromRecord(record: Record<string, unknown>): AgentModelEntry | null {
-  const id = stringValue(record.id) ?? stringValue(record.model);
-  const name =
-    stringValue(record.name) ?? stringValue(record.displayName) ?? stringValue(record.label) ?? id;
+  const id = firstString(record.id, record.model);
+  const name = modelName(record, id);
   if (!id || !name || !hasModelMetadata(record)) {
     return null;
   }
   return { id, name: withProvider(id, name, stringValue(record.provider)) };
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const string = stringValue(value);
+    if (string) return string;
+  }
+  return undefined;
+}
+
+function modelName(record: Record<string, unknown>, id: string | undefined): string | undefined {
+  return (
+    stringValue(record.name) ?? stringValue(record.displayName) ?? stringValue(record.label) ?? id
+  );
 }
 
 function hasModelMetadata(record: Record<string, unknown>): boolean {

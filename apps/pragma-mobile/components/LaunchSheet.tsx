@@ -86,6 +86,19 @@ export function LaunchSheet({ open, onOpenChange, projectId, worktreeId }: Launc
   );
 }
 
+interface LaunchAgentArgs {
+  client: NonNullable<ReturnType<typeof useConnection>["client"]>;
+  effectiveSelection: AgentModelSelection | null;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
+  prompt: string;
+  reset: () => void;
+  setBusy: (busy: boolean) => void;
+  setError: (error: string | null) => void;
+  target: LaunchTarget;
+  worktreeId: string;
+}
+
 async function launchAgent({
   client,
   effectiveSelection,
@@ -97,18 +110,7 @@ async function launchAgent({
   setError,
   target,
   worktreeId,
-}: {
-  client: NonNullable<ReturnType<typeof useConnection>["client"]>;
-  effectiveSelection: AgentModelSelection | null;
-  onOpenChange: (open: boolean) => void;
-  projectId: string;
-  prompt: string;
-  reset: () => void;
-  setBusy: (busy: boolean) => void;
-  setError: (error: string | null) => void;
-  target: LaunchTarget;
-  worktreeId: string;
-}) {
+}: LaunchAgentArgs) {
   const payload = validateLaunch({
     effectiveSelection,
     projectId,

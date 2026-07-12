@@ -80,9 +80,16 @@ function chatDetails(params: ChatParams, tab: ReturnType<typeof useAgentTab>) {
     agent: resolvedAgent(tab, params.agent),
     status: tab && tab.status,
     tabId: params.tabId,
-    title: tab?.title && tab.title !== "Shell" ? tab.title : (params.title ?? tab?.title),
+    title: chatTitle(tab?.title, params.title),
     worktreeId: resolvedWorktreeId(tab, params.worktreeId),
   };
+}
+
+function chatTitle(
+  tabTitle: string | undefined,
+  launchTitle: string | undefined,
+): string | undefined {
+  return tabTitle && tabTitle !== "Shell" ? tabTitle : (launchTitle ?? tabTitle);
 }
 
 function resolvedAgent(tab: ReturnType<typeof useAgentTab>, agent: string | undefined): string {
