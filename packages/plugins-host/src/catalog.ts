@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
 
-import type { AgentCatalog, AgentModelEntry, CatalogAgent } from "@pragma/constants";
+import type {
+  AgentCatalog,
+  AgentLaunchCommand,
+  AgentModelEntry,
+  CatalogAgent,
+} from "@pragma/constants";
 import type { AgentDefinition, PluginContext, PluginDefinition } from "@pragma/plugin";
 
 /** Maximum icon size the catalog will serve, in bytes. */
@@ -104,5 +109,35 @@ async function catalogAgent(
     assets[asset.hash] = asset;
     icon = { hash: asset.hash, mime: asset.mime };
   }
-  return { id: agent.id, name: agent.name, pluginId, models, ...(icon ? { icon } : {}) };
+  const commands: AgentLaunchCommand[] = [
+    { modelId: null, reasoningId: null, command: agent.launch.command },
+  ];
+  for (const model of models) {
+    commands.push({
+      modelId: model.id,
+      reasoningId: null,
+      command: [...agent.launch.command, ...agent.args.model(model.id)],
+    });
+    for (const reasoning of model.reasoning ?? []) {
+      const args = agent.args.modelReasoning
+        ? agent.args.modelReasoning(model.id, reasoning.id)
+        : [...agent.args.model(model.id), ...agent.args.reasoning(reasoning.id)];
+      commands.push({
+        modelId: model.id,
+        reasoningId: reasoning.id,
+        command: [...agent.launch.command, ...args],
+      });
+    }
+  }
+  const launch = {
+    commands,
+    ...(agent.startupInput ? { startupInput: agent.startupInput } : {}),
+    ...(agent.prefillDelayMs !== undefined ? { prefillDelayMs: agent.prefillDelayMs } : {}),
+    ...(agent.prefillMode ? { prefillMode: agent.prefillMode } : {}),
+    ...(agent.prefillSubmit ? { prefillSubmit: agent.prefillSubmit } : {}),
+    ...(agent.prefillSubmitDelayMs !== undefined
+      ? { prefillSubmitDelayMs: agent.prefillSubmitDelayMs }
+      : {}),
+  };
+  return { id: agent.id, name: agent.name, pluginId, models, launch, ...(icon ? { icon } : {}) };
 }

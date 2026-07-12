@@ -72,7 +72,9 @@ describe("assembleCatalog", () => {
               id: "good",
               name: "Good",
               iconPath,
+              launch: { command: ["good"] },
               models: [{ id: "m", name: "M" }],
+              args: { model: (id: string) => ["--model", id] },
             },
             {
               id: "bad",
@@ -94,6 +96,10 @@ describe("assembleCatalog", () => {
     const [agent] = catalog.agents;
     expect(agent?.id).toBe("good");
     expect(agent?.pluginId).toBe("p.one");
+    expect(agent?.launch.commands).toEqual([
+      { modelId: null, reasoningId: null, command: ["good"] },
+      { modelId: "m", reasoningId: null, command: ["good", "--model", "m"] },
+    ]);
     expect(agent?.icon?.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(Object.keys(assets)).toEqual([agent?.icon?.hash]);
     expect(assets[agent!.icon!.hash]?.path).toBe(iconPath);

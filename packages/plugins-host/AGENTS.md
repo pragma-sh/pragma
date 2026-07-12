@@ -10,7 +10,9 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken) and `reload`.
+- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken). There is no separate
+  `reload` command — the host re-sends a full `load` with freshly read gateway
+  credentials whenever the catalog must be re-resolved.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + the hash → asset map),
   `error`, `log`.
 
@@ -49,7 +51,9 @@ attaching the built-in watchers). Do not duplicate agent metadata across package
 
 `AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `AgentIcon` are
 promoted into `@pragma/constants` (`schema.json`) so the wire type has one source of
-truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`.
+truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
+agents include resolved launch commands for each model/reasoning selection plus terminal
+input timing, allowing `pragma-server` to launch agents without desktop webview.
 
 ## Assets
 

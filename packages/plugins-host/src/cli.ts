@@ -18,11 +18,7 @@ interface LoadCommand {
   gatewayToken: string;
 }
 
-interface ReloadCommand {
-  type: "reload";
-}
-
-type Command = LoadCommand | ReloadCommand;
+type Command = LoadCommand;
 
 /** Built-in agent plugins, tagged with their stable catalog plugin ids. */
 const BUILTIN_PLUGINS: ResolvedPlugin[] = [
@@ -31,7 +27,11 @@ const BUILTIN_PLUGINS: ResolvedPlugin[] = [
   { pluginId: "pragma.cursor", definition: cursorAgentPlugin },
 ];
 
-let lastLoad: LoadCommand | undefined;
+// Static agent definitions must be available while the gateway discovery file
+// is still being written. Dynamic model providers fail individually, and the
+// host re-sends `load` with real credentials once the gateway publishes them.
+const UNAVAILABLE_GATEWAY_URL = "http://127.0.0.1:0";
+const UNAVAILABLE_GATEWAY_TOKEN = "unavailable";
 
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -73,9 +73,11 @@ async function resolveConfigPlugins(roots: string[]): Promise<ResolvedPlugin[]> 
 }
 
 async function load(command: LoadCommand): Promise<void> {
-  lastLoad = command;
   const roots = command.roots ?? [];
-  const sdk = new PragmaClient({ baseUrl: command.gatewayUrl, token: command.gatewayToken });
+  const sdk = new PragmaClient({
+    baseUrl: command.gatewayUrl || UNAVAILABLE_GATEWAY_URL,
+    token: command.gatewayToken || UNAVAILABLE_GATEWAY_TOKEN,
+  });
   const plugins = [...BUILTIN_PLUGINS, ...(await resolveConfigPlugins(roots))];
   // A single shared context (first root as project) resolves async model
   // providers, which shell out through the SDK to the local gateway.
@@ -95,11 +97,6 @@ async function handle(command: Command): Promise<void> {
   switch (command.type) {
     case "load":
       return load(command);
-    case "reload":
-      if (lastLoad) {
-        return load(lastLoad);
-      }
-      return;
     default:
       return;
   }
