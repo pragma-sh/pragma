@@ -2,6 +2,8 @@ mod automations;
 mod plugins_host;
 mod registry;
 mod session;
+mod tunnel;
+mod watchers;
 
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
@@ -506,6 +508,25 @@ fn handle_rpc_request(
             },
         });
     }
+    if matches!(rpc.method, ProtocolRpcMethod::Tunnel) {
+        return Ok(match registry.handle_tunnel_rpc(&rpc.payload) {
+            Ok(payload) => RpcResponseFrame {
+                request_id,
+                ok: true,
+                payload: Some(payload),
+                error: None,
+            },
+            Err(error) => RpcResponseFrame {
+                request_id,
+                ok: false,
+                payload: None,
+                error: Some(RpcError {
+                    code: pragma_constants::ProtocolErrorCode::Internal,
+                    message: error.to_string(),
+                }),
+            },
+        });
+    }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {
             request_id,
@@ -539,6 +560,20 @@ fn handle_control_request(
         .controller_writer()
         .map_err(|err| HandledRequestError::Request(err.to_string()))?
     else {
+        if control.method == pragma_constants::ControlMethod::AgentSessionLaunch {
+            return match registry.launch_agent_headless(control.payload) {
+                Ok(payload) => Err(HandledRequestError::Control(ControlResult {
+                    ok: true,
+                    payload: Some(payload),
+                    error: None,
+                })),
+                Err(error) => Err(HandledRequestError::Control(ControlResult {
+                    ok: false,
+                    payload: None,
+                    error: Some(error),
+                })),
+            };
+        }
         return Err(HandledRequestError::Control(app_not_running_result()));
     };
     let rx = registry
@@ -641,6 +676,12 @@ fn subscription_snapshot(
     if matches!(subscription.event, ProtocolEventKind::Workspace) {
         let (scrollback, rx) = registry
             .subscribe_workspace()
+            .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
+    if matches!(subscription.event, ProtocolEventKind::AgentStatus) {
+        let (scrollback, rx) = registry
+            .subscribe_agent_status()
             .map_err(|err| HandledRequestError::Request(err.to_string()))?;
         return Ok(EventStream { scrollback, rx });
     }

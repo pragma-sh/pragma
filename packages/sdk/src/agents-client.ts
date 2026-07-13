@@ -104,12 +104,9 @@ export class AgentsClient {
   }
 
   /**
-   * Launches a new agent session on the host's desktop app via the brokered
-   * `agentSessionLaunch` control route. The host creates or resolves the
-   * target worktree + tab, replies `{ worktreeId, tabId }` immediately, then
-   * asynchronously spawns the agent. The desktop app must be running; a
-   * missing controller maps to a 409 the caller can render as
-   * "Open Pragma on your computer to launch sessions."
+   * Launches a new agent session through the brokered `agentSessionLaunch`
+   * control route. A connected desktop persists tab/worktree metadata; without
+   * one, the persistent host can launch into an existing mirrored worktree.
    */
   launch(
     payload: AgentSessionLaunchPayload,
@@ -467,6 +464,8 @@ async function reportWithClient(
       status,
       attentionKind,
       ...(options.command ? { command: options.command } : {}),
+      ...(options.question ? { question: options.question } : {}),
+      ...(options.options && options.options.length > 0 ? { options: options.options } : {}),
       ...(options.requestId ? { requestId: options.requestId } : {}),
     },
     { signal: options.signal },

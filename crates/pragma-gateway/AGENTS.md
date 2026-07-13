@@ -44,6 +44,15 @@
 - `POST /v1/tabs/{tabId}/agents/seen` - mark done agents seen.
 - `GET /v1/subscriptions/{event}` - stream protocol snapshots and deltas.
 
+## Error responses
+
+Non-streaming route failures must always answer with the JSON `ErrorBody`
+(`{ code, message }`) at the error's HTTP status — `respond_json` in `http/mod.rs`
+enforces this. Never let a handler error drop the `tiny_http` request: a dropped
+request becomes an empty 500 the SDK cannot explain to the user. The brokered
+"Pragma is not running" control reply maps to `409 conflict` so a phone can render
+"Open Pragma on your computer".
+
 ## Rules
 
 - No dependency on `pragma-core` or anything under `apps/pragma`.

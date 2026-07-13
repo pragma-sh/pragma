@@ -139,9 +139,7 @@ function toAgentConfig(
 }
 
 export function pluginAgentId(pluginId: string, agentId: string): string {
-  if (pluginId === "pragma.builtin-agents") {
-    return agentId;
-  }
+  if (pluginId === `pragma.${agentId}`) return pluginId;
   return agentId.includes(".") ? agentId : `${pluginId}.${agentId}`;
 }
 
@@ -149,7 +147,7 @@ function resolveIconPath(iconPath: string | undefined, record: PluginRecord): st
   if (!iconPath) {
     return null;
   }
-  if (record.scope === "builtin" || isBrowserUrl(iconPath)) {
+  if (isBrowserUrl(iconPath)) {
     return iconPath;
   }
   const absolutePath = iconPath.startsWith("/")

@@ -232,6 +232,27 @@ export function onTabsChanged(
   return listen<WorkspaceChangedEvent>("tabsChanged", (event) => handler(event.payload));
 }
 
+/** A mobile-requested agent session ready for background launch. */
+export interface AgentSessionLaunchRequest {
+  projectId: string;
+  worktreeId: string;
+  worktreePath: string;
+  tabId: string;
+  agentId: string;
+  modelId: string | null;
+  reasoningId: string | null;
+  prompt: string | null;
+}
+
+/** Subscribes to mobile-requested agent sessions brokered through the desktop. */
+export function onAgentSessionLaunch(
+  handler: (payload: AgentSessionLaunchRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentSessionLaunchRequest>("pragma:agent-session-launch", (event) =>
+    handler(event.payload),
+  );
+}
+
 /** Destination emitted when the user clicks a native agent notification. */
 export interface AgentNotificationClick {
   projectId: string;
@@ -1160,7 +1181,7 @@ export interface PluginEntryResult {
   /** The original `path` specifier from the config file. */
   specifier: string;
   /** Which config file declared this entry. */
-  scope: "global" | "project";
+  scope: "bundled" | "global" | "project";
   /** Project root path for `scope: "project"` entries. */
   projectPath: string | null;
   /** The entry's `config` object, validated by the plugin's zod schema. */

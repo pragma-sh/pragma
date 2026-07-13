@@ -53,6 +53,18 @@ emitted only on change.
 
 - `session.idle`, `session.status` idle, a non-abort `session.error`, `session.deleted`
 
+**Chat content (mobile/desktop transcript):**
+
+- `chat.message` reports a **user** `AgentMessage` — text comes from the hook's
+  `output.parts` (text parts), not the input metadata (which has no prompt body).
+- `message.updated` remembers each message's `role` by id.
+- `message.part.delta` accumulates assistant text and reports each growing snapshot;
+  `message.part.updated` reconciles it with the latest full text. Both use an upserted
+  `AgentMessage` (`id: assistant:<messageID>`) so streaming updates replace the same
+  bubble. User text parts are ignored here (already reported via `chat.message`).
+- OpenCode `reasoning` parts use separate stable IDs and the `system` role, so clients
+  render thinking as muted activity instead of a standard assistant bubble.
+
 **`stopped` (green "done") is only emitted after a `started`** — a bare `session.idle`
 or an idle trailing an aborted/cleared turn must not resurrect a phantom "done" dot.
 
@@ -66,7 +78,12 @@ even when the `dispose` plugin hook doesn't run (abrupt shutdown).
 
 - The `permission.asked` event → a **`command` attention carrying the command text + a
   requestId** (see _Command approval_), and the `question` tool (via `tool.execute.before`
-  or a pending `message.part.updated` part).
+  or a pending `message.part.updated` part) → a **`question` attention carrying the
+  prompt + option labels/descriptions + a requestId**. Question args live on the hook's second
+  parameter (`output.args.questions[]`); the plugin parses `question`/`header` and
+  each option's `label`/optional `description` so mobile/desktop can render a real answer UI instead of raw
+  JSON. Non-question tool summaries prefer the primary arg (command, path, pattern)
+  over `JSON.stringify(args)`.
 
 **`attention` is cleared by:**
 
@@ -82,11 +99,14 @@ handled — **do not re-add the speculative `session.next.*` events** (opencode 
 `session.next.agent.switched` / `session.next.model.switched`, but they carry no status
 meaning; mapping them was the source of the stuck-yellow bug).
 
-## Command approval (the watcher route)
+## Command approval + question answers (the watcher route)
 
 Unlike Claude Code / Cursor, opencode's `permission.ask` hook — the only one that can
 **return** an allow/deny decision — is absent from the verified binary, so approval cannot
-go through a blocking hook. It goes the **watcher** route instead, split across two pieces:
+go through a blocking hook. The question tool is the same shape: the in-process plugin can
+_report_ a pending question, but completing it requires either the OpenCode TUI or an HTTP
+`question.reply`. Remote mobile/desktop answers therefore go the **watcher** route too —
+split across two pieces:
 
 1. **In-process (this plugin):** on `permission.asked`, report
    `attention --kind command --command <cmd> --request-id <id>` (requestId is a fresh uuid).
@@ -99,36 +119,51 @@ go through a blocking hook. It goes the **watcher** route instead, split across 
    Pragma **approval toast** with the command + Approve/Deny — the same toast Claude/Cursor
    use. The report **owns** the command attention, so `permission.asked`/`permission.updated`
    no longer emit a separate generic attention (that would double-toast).
+
+   For the `question` tool, `tool.execute.before` / a pending `message.part.updated` part
+   reports `attention --kind question --question <prompt> --options <labels> --request-id
+<id>` (requestId is `opencode-question-<callID>` when known). That drives the mobile
+   AttentionDock / Inbox answer UI.
+
 2. **Host-side (`pragma-watcher.ts`):** the shared built-in-agent watcher bundle, loaded by
    the `pragma-watch` sidecar for a launched session. Each watcher `connect`s a duplex agent
    channel scoped to **its** agent + tab (`ctx.sdk.agents.connect({ agent: ctx.agentId, ... })`)
    and drives the live terminal from it:
    - **Interjections** (`AgentInput`) are typed into the terminal followed by a submit key
-     (`sendKeys(text + submitKeys)`, default `\r`). All three built-in agents do this.
-   - **Command verdicts** (`AgentDecision`) are answered with keystrokes **only for opencode**
-     (`opencodeApprovalWatcher`, `handleDecisions: true`) — its permission prompt has no
-     decision-returning hook. Claude Code / Cursor answer approvals through their blocking
-     `await-decision` hook, so `claudeCodeInterjectWatcher` / `cursorInterjectWatcher` are
-     interject-only and never touch verdicts.
+     (default `\r`). Claude Code receives text and submit as separate writes with a short
+     delay; a single PTY burst is treated as pasted multiline input and leaves the prompt
+     staged instead of submitting. OpenCode and Cursor use one combined write.
+   - **Command verdicts** (`AgentDecision`) and **question replies** (`AgentAnswer`) are
+     answered with keystrokes **only for opencode** (`opencodeApprovalWatcher`,
+     `handleDecisions: true`) — its permission / question prompts have no decision-returning
+     hook. Claude Code / Cursor answer approvals through their blocking `await-decision` hook,
+     so `claudeCodeInterjectWatcher` / `cursorInterjectWatcher` are interject-only and never
+     touch verdicts.
 
    The connection is already filtered to the watcher's agent + tab, so no per-event scope
    check is needed. The agent event stream is a long-lived HTTP response that can drop while
    the agent keeps running, so the watcher **re-connects** (short backoff) until its session
    aborts — a single dropped stream must not silently disable approval or interjection — and a
    failed `sendKeys` write is swallowed rather than tearing the watcher down. The server
-   replays very recent decisions to cover watcher startup races; the watcher dedupes verdicts
-   by `requestId` so reconnect replay does not send Enter twice. opencode's permission prompt
-   has **three** options with "Allow" selected first: **approve** = Enter (`\r`); **reject** =
-   two Right-arrow presses then Enter (`\x1b[C\x1b[C\r`) to move to the third ("Reject") option
-   and confirm. Override via the watcher's `approveKeys` / `denyKeys` / `submitKeys` config if
-   the TUI layout changes.
+   replays very recent decisions/answers to cover watcher startup races; the watcher dedupes
+   verdicts by `requestId` so reconnect replay does not send Enter twice. opencode's permission
+   prompt has **three** options with "Allow" selected first: **approve** = Enter (`\r`);
+   **reject** = two Right-arrow presses then Enter (`\x1b[C\x1b[C\r`) to move to the third
+   ("Reject") option and confirm. Override via the watcher's `approveKeys` / `denyKeys` /
+   `submitKeys` config if the TUI layout changes.
+
+   **Question answers** cache the latest `question` attention's option labels (by
+   `requestId`), then on `AgentAnswer` write OpenCode's question-TUI keystrokes: digits
+   `1`–`9` select+submit a listed option; an unmatched reply opens the virtual "Type your
+   own answer" row (`options.length + 1`), types the text, and Enter-submits; dismiss /
+   empty reply sends Escape. Helper: `questionAnswerKeys`.
 
 The watchers are registered against the built-in `opencode`, `claude-code`, and `cursor`
 agents in `apps/pragma/src/plugins/builtin-agents.ts` (a `pragma-builtin:opencode-watcher`
 `mainPath` sentinel the Rust side resolves to this package's `pragma-watcher` module; the
-sidecar selects the entry whose `agent` matches the launched agent). opencode approval
-additionally requires the opencode status plugin (installed in opencode); interjection works
-for any built-in agent Pragma launches.
+sidecar selects the entry whose `agent` matches the launched agent). opencode approval /
+question answering additionally requires the opencode status plugin (installed in opencode);
+interjection works for any built-in agent Pragma launches.
 
 **`dispose` (agent process exiting) reports `cleared`**, not `stopped` — quitting
 opencode removes the indicator; finishing a turn (`session.idle`) still reports `done`.

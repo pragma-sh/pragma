@@ -13,6 +13,16 @@ scrollback, raw output, and agent-status strengths.
   existing length-prefixed frame codec.
 - Spawning host-side sidecars (`pragma-ai`, `pragma-github`, `pragma-automations`,
   `pragma-plugins`).
+- Supervising persisted remote-access tunnels so mobile connectivity survives desktop
+  client exits and restarts.
+
+## Remote access tunnel
+
+`tunnel.rs` owns ngrok/cloudflared process lifetime. Desktop controls it through
+`ProtocolRpcMethod::Tunnel`; enable/disable writes `tunnel.enabled` in
+`~/.pragma/config.json` while preserving command overrides and unrelated config. On server
+startup, enabled tunnels restart against gateway discovery beside `daemon.sock`. Tunnel
+process therefore follows persistent server lifetime, not Tauri client lifetime.
 
 ## Plugin catalog host
 
@@ -20,23 +30,51 @@ scrollback, raw output, and agent-status strengths.
 mirroring the `automations` supervisor: a lazily respawned child with a stdout reader
 thread. It caches the last `catalog` event plus the hash → asset map; a sidecar crash
 never blanks the catalog — a respawn re-runs `load` and the cache holds until a fresh
-publish arrives. RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
+publish arrives. Public RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
 cached catalog), `registerRoots` (project roots, sharing the same desktop RPC that
 registers automation roots), `readAsset` (base64 + mime, validated lowercase-hex sha256),
-and `reload`. The sidecar reads the gateway port + token from the discovery file beside
-the socket so its `PragmaClient` resolves async model providers against the local gateway.
+and `reload` (re-sends `load` with freshly read gateway credentials; the gateway calls it
+right after writing its discovery file). Registered roots are persisted to
+`plugin-roots.json` beside the socket and reloaded on startup, so a server restarted while
+the desktop is closed still resolves project-contributed agents for headless launches. The
+host reads the gateway port + token from the discovery file beside the socket and passes
+them in each `load` so the sidecar's `PragmaClient` resolves async model providers against
+the local gateway. A load sent
+before the gateway exists drops gateway-dependent agents (their model providers throw),
+so the host tracks whether the last load had credentials and re-loads on the next
+`catalog` read once they appear.
+
+Watcher metadata stays server-internal because plugin config may contain secrets. Internal
+action `watcher` accepts an agent id and returns matching plugin id, bundle path, config,
+and local watcher agent. Headless launch registers its mirrored project root through
+`registerRoots` before catalog/watcher lookup, then starts `pragma-watch` from that metadata.
+Catalog ids select the watcher; its plugin-local `watcherAgent` is the runtime stream id
+passed as `--agentId`, matching status reports and mobile interjections.
 
 ## Workspace mirror store
 
 `registry.rs` caches the latest `WorkspaceSnapshot` (projects/worktrees/tabs) the
 desktop app publishes via `RequestKind::PublishWorkspace`. `publish_workspace`
-replaces the cache and fans a `Delta` carrying the full replacement snapshot to
-`workspace` subscribers (v1 keeps deltas trivial — every delta is a full
-replacement; row-level deltas are a later optimization). `subscribe_workspace`
-returns the cached snapshot (or an empty payload before the first publish) plus
-the delta receiver. A remote client (e.g. a paired phone) subscribes to render
-the session launcher without registering as the controller. The gateway exposes
-this as `GET /v1/subscriptions/workspace`.
+replaces the cache, **persists it to `workspace.json` beside the socket** (so
+headless launches survive server restarts while the app stays closed), and fans
+a `Delta` carrying the full replacement snapshot to `workspace` subscribers (v1
+keeps deltas trivial — every delta is a full replacement; row-level deltas are a
+later optimization). `subscribe_workspace` returns the cached snapshot (or an
+empty payload before the first publish) plus the delta receiver. A remote client
+(e.g. a paired phone) subscribes to render the session launcher without
+registering as the controller. The gateway exposes this as
+`GET /v1/subscriptions/workspace`.
+
+The mirror also enables controller-free (headless) agent launch. `agentSessionLaunch`
+still brokers to desktop when connected; otherwise the server resolves agent launch
+metadata from the plugin catalog, spawns the PTY, and schedules startup/prefill input.
+A `newWorktree` spec is honored headlessly too: the server creates the git checkout at
+`<project>/.pragma/worktrees/<uuid>` through the same `pragma-core` git operations the
+desktop uses, then merges the new worktree + terminal tab into the mirrored snapshot
+(persisted + broadcast) so the phone renders them immediately. The desktop remains the
+source of truth: on its next publish it **adopts** headless-created worktrees from disk
+(see `adopt_headless_worktrees` in `apps/pragma/src-tauri/src/workspace_mirror.rs`);
+headless tab rows stay ephemeral until then.
 
 ## Socket And Access Control
 
@@ -107,3 +145,7 @@ directory to `PATH` so plugins can find the helper even when the user's login sh
 Command-approval decisions are broadcast on the same agent stream and kept only in a
 short bounded replay window, so a watcher that starts/subscribes just after the toast
 click still sees the verdict without making approvals durable state.
+
+Free-form `AgentInput` always uses watcher delivery because each agent owns its TUI-specific
+submit keys and timing. Headless launches start their watcher from `watchers.rs`, so mobile
+replies keep working without a desktop-started watcher process.

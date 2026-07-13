@@ -4,7 +4,7 @@ use pragma_protocol::{
 use tiny_http::Request;
 
 use crate::error::GatewayResult;
-use crate::http::response::{empty_response, ndjson_response};
+use crate::http::response::empty_response;
 use crate::http::router::RouteMatch;
 use crate::http::{read_json, AppState};
 
@@ -77,10 +77,9 @@ pub fn catalog(state: &AppState) -> GatewayResult<tiny_http::Response<std::io::C
 }
 
 /// Handles `GET /v1/agents/events`.
-pub fn events(
-    state: &AppState,
-) -> GatewayResult<tiny_http::Response<crate::http::response::NdjsonReader>> {
-    Ok(ndjson_response(state.client.subscribe_agents_stream()?))
+pub fn events(request: Request, state: &AppState) -> GatewayResult<()> {
+    let stream = state.client.subscribe_agents_stream()?;
+    crate::http::response::stream_ndjson_response(request, stream)
 }
 
 /// Handles `POST /v1/tabs/{tabId}/agents/seen`.

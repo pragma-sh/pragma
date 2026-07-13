@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type { ProtocolEventKind } from "@pragma/constants";
 
 import { routes } from "./routes";
@@ -31,6 +30,12 @@ export class EventsClient {
     const response = await this.transport.raw(`${routes.subscription(event)}${suffix}`, {
       signal: options.signal,
     });
-    yield* ndjsonStream<ProtocolSubscriptionEvent>(response, options.signal);
+    for await (const line of ndjsonStream<{ type?: string }>(response, options.signal)) {
+      // The gateway interleaves `{"type":"ready"}` keepalive lines with real
+      // events; only snapshot/delta lines are subscription events.
+      if (line.type === "snapshot" || line.type === "delta") {
+        yield line as ProtocolSubscriptionEvent;
+      }
+    }
   }
 }

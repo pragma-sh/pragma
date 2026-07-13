@@ -1,7 +1,7 @@
 {
   "maxParallelAgents": 8,
   "daemon": {
-    "protocolVersion": 15
+    "protocolVersion": 18
   },
   "gateway": {
     "discoveryFile": "gateway.json",
@@ -14,7 +14,8 @@
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
-    "storageScopes": ["global", "project"]
+    "storageScopes": ["global", "project"],
+    "bundledDirName": "plugins"
   },
   "protocol": {
     "rpcMethods": [
@@ -30,7 +31,8 @@
       "ai",
       "exec",
       "automations",
-      "plugins"
+      "plugins",
+      "tunnel"
     ],
     "events": [
       "agentStatus",

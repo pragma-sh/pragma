@@ -26,7 +26,6 @@ mod projects;
 mod pty;
 mod scripts;
 mod ssh_host;
-mod tunnel;
 mod window_chrome;
 mod workspace_mirror;
 mod worktrees;
@@ -255,9 +254,11 @@ fn read_plugin_manifests(
     project_path: Option<String>,
 ) -> AppResult<Vec<plugins::PluginEntryResult>> {
     let home = app_handle.path().home_dir()?;
+    let resource_dir = app_handle.path().resource_dir().ok();
     Ok(plugins::read_manifests(
         home,
         project_path.as_deref().map(std::path::Path::new),
+        resource_dir.as_deref(),
     ))
 }
 
@@ -269,12 +270,8 @@ fn read_plugin_bundle(main_path: String) -> AppResult<String> {
 
 /// Starts a host-side watcher sidecar for a plugin-owned agent session.
 #[tauri::command(async)]
-fn start_plugin_watcher(
-    app: tauri::AppHandle,
-    request: plugins::StartWatcherRequest,
-) -> AppResult<()> {
-    let resource_dir = app.path().resource_dir().ok();
-    plugins::start_watcher(request, resource_dir.as_deref())
+fn start_plugin_watcher(request: plugins::StartWatcherRequest) -> AppResult<()> {
+    plugins::start_watcher(request)
 }
 
 /// Ensures the local HTTP gateway is running and returns its base URL + token.
@@ -298,39 +295,31 @@ async fn regenerate_gateway_token(
 /// Starts the remote-access tunnel exposing the local gateway, returning the
 /// current tunnel status. Poll `tunnel_status` until it becomes `active`.
 #[tauri::command]
-async fn tunnel_start(
-    app: tauri::AppHandle,
-    tunnel: tauri::State<'_, tunnel::TunnelState>,
-    pty: tauri::State<'_, PtyClient>,
-) -> AppResult<tunnel::TunnelStatus> {
-    let info = pty.gateway_connection_info()?;
-    let port = gateway_port_from_base_url(&info.base_url)?;
-    let home = app.path().home_dir()?;
-    tunnel.start(&home, port)
+async fn tunnel_start(pty: tauri::State<'_, PtyClient>) -> AppResult<serde_json::Value> {
+    pty.gateway_connection_info()?;
+    pty.rpc(
+        pragma_constants::ProtocolRpcMethod::Tunnel,
+        serde_json::json!({ "action": "start" }),
+    )
 }
 
 /// Stops the remote-access tunnel (kills the child); paired devices disconnect.
 #[tauri::command]
-async fn tunnel_stop(tunnel: tauri::State<'_, tunnel::TunnelState>) -> AppResult<()> {
-    tunnel.stop();
+async fn tunnel_stop(pty: tauri::State<'_, PtyClient>) -> AppResult<()> {
+    pty.rpc(
+        pragma_constants::ProtocolRpcMethod::Tunnel,
+        serde_json::json!({ "action": "stop" }),
+    )?;
     Ok(())
 }
 
 /// Returns the current remote-access tunnel status.
 #[tauri::command]
-async fn tunnel_status(
-    tunnel: tauri::State<'_, tunnel::TunnelState>,
-) -> AppResult<tunnel::TunnelStatus> {
-    Ok(tunnel.status())
-}
-
-/// Parses the gateway port from a `http://127.0.0.1:PORT` base URL.
-fn gateway_port_from_base_url(base_url: &str) -> AppResult<u16> {
-    base_url
-        .rsplit(':')
-        .next()
-        .and_then(|port| port.parse::<u16>().ok())
-        .ok_or_else(|| AppError::Daemon(format!("gateway base URL has no port: {base_url}")))
+async fn tunnel_status(pty: tauri::State<'_, PtyClient>) -> AppResult<serde_json::Value> {
+    pty.rpc(
+        pragma_constants::ProtocolRpcMethod::Tunnel,
+        serde_json::json!({ "action": "status" }),
+    )
 }
 
 #[tauri::command]
@@ -746,7 +735,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
-    let pty = PtyClient::new(app_data_dir, channel);
+    let resource_dir = app.path().resource_dir().ok();
+    let pty = PtyClient::new(app_data_dir, channel, resource_dir);
     // The local client stays managed for host-agnostic consumers (agent event
     // bridge, server restart/logs); `Hosts` owns the project → host routing and
     // the per-host clients, and is what the worktree/session commands resolve.
@@ -755,14 +745,16 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(control::BrowserHistory::default());
-    app.manage(tunnel::TunnelState::default());
     // Mirror the workspace (projects/worktrees/tabs) to pragma-server so a paired
     // phone can render the session launcher without being the controller. Debounced
     // on a worker thread; never reads SQLite on the mac main thread.
-    app.manage(workspace_mirror::WorkspacePublisher::start(
-        app.handle().clone(),
-        pty.clone(),
-    ));
+    let workspace_publisher =
+        workspace_mirror::WorkspacePublisher::start(app.handle().clone(), pty.clone());
+    // Seed the server's cached snapshot at launch so a phone pairing with a
+    // freshly-started desktop sees its projects/worktrees/tabs immediately,
+    // rather than an empty list until the first mutation triggers a publish.
+    workspace_publisher.trigger();
+    app.manage(workspace_publisher);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
@@ -946,12 +938,6 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| {
-            // Kill the remote-access tunnel child on app exit so ngrok/cloudflared
-            // never outlives Pragma.
-            if let tauri::RunEvent::Exit = event {
-                if let Some(tunnel) = app_handle.try_state::<tunnel::TunnelState>() {
-                    tunnel.stop();
-                }
-            }
+            let _ = (app_handle, event);
         });
 }

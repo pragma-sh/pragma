@@ -45,10 +45,7 @@ fi
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
-# Build the opencode plugin so its host-side approval watchers bundle
-# (`dist/pragma-watcher.mjs`) exists; a release app imports it from resources
-# (dev imports the TS source directly). See `resolve_builtin_watcher_main`.
-bun --filter @pragma/opencode-plugin build
+bunx turbo run build --filter=@pragma/claude-code-plugin --filter=@pragma/opencode-plugin --filter=@pragma/cursor-plugin
 bun --filter @pragma/automations build:sidecar
 # Build the plugin catalog sidecar; it statically bundles the built-in agent
 # definitions from the claude-code/opencode/cursor plugin packages.
@@ -72,17 +69,17 @@ cp "$repo_root/packages/automations/dist/pragma-automations" \
 cp "$repo_root/packages/plugins-host/dist/pragma-plugins" \
   "$src_tauri_dir/binaries/pragma-plugins-$triple"
 
-# Remove any plugin JS left over from a previous staging layout. Pragma no longer
-# bundles opencode's *status* plugin dist (`index.mjs`) as a Tauri resource; since
-# tauri.conf.json bundles `resources/**/*`, a stale `resources/pragma/plugins/`
-# would still get bundled, so delete it here.
-rm -rf "$src_tauri_dir/resources/pragma/plugins"
-
-# Stage the opencode approval *watcher* bundle so the release `pragma-watch`
-# sidecar can import it (resolved by `resolve_builtin_watcher_main`).
-mkdir -p "$src_tauri_dir/resources/plugins/opencode"
-cp "$repo_root/packages/opencode-plugin/dist/pragma-watcher.mjs" \
-  "$src_tauri_dir/resources/plugins/opencode/pragma-watcher.mjs"
+plugins_dir_name="$(bun -e 'import { constants } from "@pragma/constants"; process.stdout.write(constants.plugins.bundledDirName)')"
+bundled_plugins_dir="$src_tauri_dir/resources/$plugins_dir_name"
+rm -rf "$bundled_plugins_dir"
+for plugin in claude-code opencode cursor; do
+  source_dir="$repo_root/packages/$plugin-plugin"
+  target_dir="$bundled_plugins_dir/$plugin"
+  mkdir -p "$target_dir"
+  cp "$source_dir/package.json" "$target_dir/package.json"
+  cp -R "$source_dir/dist" "$target_dir/dist"
+  cp -R "$source_dir/assets" "$target_dir/assets"
+done
 
 rm -rf "$src_tauri_dir/resources/pragma/agents"
 
@@ -94,3 +91,4 @@ echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
 echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"
 echo "staged pragma-automations -> src-tauri/binaries/pragma-automations-$triple"
 echo "staged pragma-plugins -> src-tauri/binaries/pragma-plugins-$triple"
+echo "staged bundled plugins -> src-tauri/resources/$plugins_dir_name"

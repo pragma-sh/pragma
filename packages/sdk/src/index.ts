@@ -35,6 +35,7 @@ export type {
   AgentMessage,
   AgentMessageEvent,
   AgentReportPayload,
+  QuestionOption,
   AgentSessionLaunchPayload,
   AgentSessionLaunchResult,
   AgentStreamEvent,

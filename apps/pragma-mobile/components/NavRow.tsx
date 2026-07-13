@@ -2,6 +2,7 @@ import { Children, Fragment, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
 import { hapticSelection } from "@/lib/haptics";
+import { useThemeColors } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { IconSymbol } from "./IconSymbol";
 import { Text } from "./ui/text";
@@ -52,6 +53,7 @@ export interface NavRowProps {
   /** Show the disclosure chevron (default true when onPress is set). */
   chevron?: boolean;
   onPress?: () => void;
+  onLongPress?: () => void;
 }
 
 /** A leading/trailing accessory slot — renders nothing when empty. */
@@ -78,18 +80,28 @@ function RowLabel({ title, subtitle }: { title: string; subtitle?: string }) {
 
 /** The trailing disclosure chevron, when the row shows one. */
 function RowChevron({ show }: { show: boolean }) {
+  const colors = useThemeColors();
   if (!show) return null;
-  return <IconSymbol color="hsl(240 4% 46%)" fallback="›" name="chevron.right" size={16} />;
+  return <IconSymbol color={colors.mutedForeground} fallback="›" name="chevron.right" size={16} />;
 }
 
 /** A single tappable settings-style row. Fires selection haptics on press. */
-export function NavRow({ title, subtitle, leading, trailing, chevron, onPress }: NavRowProps) {
+export function NavRow({
+  title,
+  subtitle,
+  leading,
+  trailing,
+  chevron,
+  onPress,
+  onLongPress,
+}: NavRowProps) {
   const showChevron = chevron ?? Boolean(onPress);
   return (
     <Pressable
       accessibilityRole={onPress ? "button" : "text"}
       className="flex-row items-center gap-3 px-4 py-3 active:bg-accent"
       disabled={!onPress}
+      onLongPress={onLongPress}
       onPress={() => {
         hapticSelection();
         onPress?.();

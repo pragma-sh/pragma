@@ -27,7 +27,7 @@ pub use generated::{
     KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem, Keybindings,
     KeybindingsConfig, Links, NewWorktreeSpec, PairingPayload, PlatformChord, Project, ProjectIcon,
     ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
-    RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
+    QuestionOption, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
     RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit,
     SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree,
     WorktreeChanges, WorktreeStatus,

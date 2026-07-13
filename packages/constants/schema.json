@@ -25,18 +25,42 @@
       "minimum": 1,
       "description": "Maximum number of agents Pragma runs in parallel. A single shared scalar constant used by both the TypeScript frontend and the Rust backend."
     },
-    "app": { "$ref": "#/definitions/AppInfo" },
-    "window": { "$ref": "#/definitions/WindowDefaults" },
-    "links": { "$ref": "#/definitions/Links" },
-    "editorLaunchers": { "$ref": "#/definitions/EditorLaunchers" },
-    "scripts": { "$ref": "#/definitions/Scripts" },
-    "agents": { "$ref": "#/definitions/Agents" },
-    "daemon": { "$ref": "#/definitions/Daemon" },
-    "gateway": { "$ref": "#/definitions/Gateway" },
-    "protocol": { "$ref": "#/definitions/Protocol" },
-    "github": { "$ref": "#/definitions/GitHub" },
-    "plugins": { "$ref": "#/definitions/Plugins" },
-    "tunnel": { "$ref": "#/definitions/Tunnel" }
+    "app": {
+      "$ref": "#/definitions/AppInfo"
+    },
+    "window": {
+      "$ref": "#/definitions/WindowDefaults"
+    },
+    "links": {
+      "$ref": "#/definitions/Links"
+    },
+    "editorLaunchers": {
+      "$ref": "#/definitions/EditorLaunchers"
+    },
+    "scripts": {
+      "$ref": "#/definitions/Scripts"
+    },
+    "agents": {
+      "$ref": "#/definitions/Agents"
+    },
+    "daemon": {
+      "$ref": "#/definitions/Daemon"
+    },
+    "gateway": {
+      "$ref": "#/definitions/Gateway"
+    },
+    "protocol": {
+      "$ref": "#/definitions/Protocol"
+    },
+    "github": {
+      "$ref": "#/definitions/GitHub"
+    },
+    "plugins": {
+      "$ref": "#/definitions/Plugins"
+    },
+    "tunnel": {
+      "$ref": "#/definitions/Tunnel"
+    }
   },
   "definitions": {
     "ProtocolRpcMethod": {
@@ -56,7 +80,8 @@
         "ai",
         "exec",
         "automations",
-        "plugins"
+        "plugins",
+        "tunnel"
       ]
     },
     "ProtocolEventKind": {
@@ -131,17 +156,23 @@
       "properties": {
         "rpcMethods": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ProtocolRpcMethod" },
+          "items": {
+            "$ref": "#/definitions/ProtocolRpcMethod"
+          },
           "uniqueItems": true
         },
         "events": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ProtocolEventKind" },
+          "items": {
+            "$ref": "#/definitions/ProtocolEventKind"
+          },
           "uniqueItems": true
         },
         "errors": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ProtocolErrorCode" },
+          "items": {
+            "$ref": "#/definitions/ProtocolErrorCode"
+          },
           "uniqueItems": true
         }
       }
@@ -194,9 +225,15 @@
         "error"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "description": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
         "path": {
           "type": "string",
           "description": "Absolute host path to the automation source file."
@@ -209,16 +246,36 @@
           "type": "string",
           "description": "Changes whenever the automation source file contents change."
         },
-        "scope": { "$ref": "#/definitions/AutomationScope" },
-        "trust": { "$ref": "#/definitions/AutomationTrust" },
-        "triggerKind": { "$ref": "#/definitions/AutomationTriggerKind" },
-        "status": { "$ref": "#/definitions/AutomationStatus" },
-        "projectId": { "type": ["string", "null"] },
-        "worktreeId": { "type": ["string", "null"] },
-        "worktreeLabel": { "type": ["string", "null"] },
-        "lastRunAt": { "type": ["string", "null"] },
-        "nextRunAt": { "type": ["string", "null"] },
-        "error": { "type": ["string", "null"] }
+        "scope": {
+          "$ref": "#/definitions/AutomationScope"
+        },
+        "trust": {
+          "$ref": "#/definitions/AutomationTrust"
+        },
+        "triggerKind": {
+          "$ref": "#/definitions/AutomationTriggerKind"
+        },
+        "status": {
+          "$ref": "#/definitions/AutomationStatus"
+        },
+        "projectId": {
+          "type": ["string", "null"]
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        },
+        "worktreeLabel": {
+          "type": ["string", "null"]
+        },
+        "lastRunAt": {
+          "type": ["string", "null"]
+        },
+        "nextRunAt": {
+          "type": ["string", "null"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
       }
     },
     "AutomationRootRegistration": {
@@ -228,11 +285,17 @@
       "additionalProperties": false,
       "required": ["projectId", "projectPath", "worktrees"],
       "properties": {
-        "projectId": { "type": "string" },
-        "projectPath": { "type": "string" },
+        "projectId": {
+          "type": "string"
+        },
+        "projectPath": {
+          "type": "string"
+        },
         "worktrees": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AutomationWorktreeRoot" }
+          "items": {
+            "$ref": "#/definitions/AutomationWorktreeRoot"
+          }
         }
       }
     },
@@ -243,10 +306,18 @@
       "additionalProperties": false,
       "required": ["worktreeId", "path", "label", "isMain"],
       "properties": {
-        "worktreeId": { "type": "string" },
-        "path": { "type": "string" },
-        "label": { "type": "string" },
-        "isMain": { "type": "boolean" }
+        "worktreeId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "isMain": {
+          "type": "boolean"
+        }
       }
     },
     "AutomationPendingPayload": {
@@ -256,7 +327,9 @@
       "additionalProperties": false,
       "required": ["automation"],
       "properties": {
-        "automation": { "$ref": "#/definitions/AutomationInfo" }
+        "automation": {
+          "$ref": "#/definitions/AutomationInfo"
+        }
       }
     },
     "AutomationsChangedPayload": {
@@ -268,7 +341,9 @@
       "properties": {
         "automations": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AutomationInfo" }
+          "items": {
+            "$ref": "#/definitions/AutomationInfo"
+          }
         }
       }
     },
@@ -288,11 +363,13 @@
       "properties": {
         "oauthClientId": {
           "type": "string",
-          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret — a distributed desktop app can't keep one secret."
+          "description": "Client id of the registered Pragma GitHub OAuth App (device flow enabled). No client secret \u2014 a distributed desktop app can't keep one secret."
         },
         "scopes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "OAuth scopes requested during the device flow (e.g. `repo`)."
         },
         "deviceCodeUrl": {
@@ -324,12 +401,18 @@
       "description": "The authenticated GitHub user, as surfaced to the UI.",
       "required": ["login", "name", "avatarUrl"],
       "properties": {
-        "login": { "type": "string", "description": "GitHub username (login)." },
+        "login": {
+          "type": "string",
+          "description": "GitHub username (login)."
+        },
         "name": {
           "type": ["string", "null"],
           "description": "Display name; null when the user has not set one."
         },
-        "avatarUrl": { "type": "string", "description": "Avatar image URL." }
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar image URL."
+        }
       }
     },
     "GitHubAuthStatus": {
@@ -349,7 +432,14 @@
         },
         "user": {
           "description": "The authenticated user, or null when not authenticated.",
-          "anyOf": [{ "$ref": "#/definitions/GitHubUser" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitHubUser"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "setupDismissed": {
           "type": "boolean",
@@ -361,10 +451,13 @@
       "title": "BranchSyncStatus",
       "type": "object",
       "additionalProperties": false,
-      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch — the create-PR pre-flight.",
+      "description": "Result of a fetch + ahead/behind comparison against the upstream of a worktree's branch \u2014 the create-PR pre-flight.",
       "required": ["branch", "ahead", "behind", "hasUpstream"],
       "properties": {
-        "branch": { "type": "string", "description": "The worktree's current branch." },
+        "branch": {
+          "type": "string",
+          "description": "The worktree's current branch."
+        },
         "ahead": {
           "type": "integer",
           "minimum": 0,
@@ -388,8 +481,14 @@
       "description": "Owner/repo plus branch context parsed from a worktree's `origin` remote, used to address the GitHub API.",
       "required": ["owner", "repo", "defaultBranch", "headBranch", "parentBranch"],
       "properties": {
-        "owner": { "type": "string", "description": "Repository owner (user or org)." },
-        "repo": { "type": "string", "description": "Repository name (no `.git`)." },
+        "owner": {
+          "type": "string",
+          "description": "Repository owner (user or org)."
+        },
+        "repo": {
+          "type": "string",
+          "description": "Repository name (no `.git`)."
+        },
         "defaultBranch": {
           "type": "string",
           "description": "The repo's default branch (PR base)."
@@ -400,7 +499,7 @@
         },
         "parentBranch": {
           "type": ["string", "null"],
-          "description": "The branch of the worktree's parent worktree — the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
+          "description": "The branch of the worktree's parent worktree \u2014 the branch this worktree was created to merge back into, used as the default PR base. Null for the main/parentless worktree."
         }
       }
     },
@@ -422,7 +521,7 @@
       "title": "Plugins",
       "type": "object",
       "additionalProperties": false,
-      "required": ["configFileName", "storageScopes"],
+      "required": ["bundledDirName", "configFileName", "storageScopes"],
       "description": "Plugin-system constants shared by the Rust config reader and the TypeScript loader.",
       "properties": {
         "configFileName": {
@@ -431,9 +530,16 @@
         },
         "storageScopes": {
           "type": "array",
-          "items": { "type": "string", "enum": ["global", "project"] },
+          "items": {
+            "type": "string",
+            "enum": ["global", "project"]
+          },
           "uniqueItems": true,
           "description": "Plugin storage scopes supported by the host runtime. v1 persists global plugin key/value state; project scope is reserved for project-addressed plugin config/storage layers."
+        },
+        "bundledDirName": {
+          "type": "string",
+          "description": "Directory name (under the app resource dir) holding the plugin bundles shipped with Pragma. Each subdirectory is a normal plugin package (package.json + bundle + assets), resolved by the same manifest readers as user-configured plugins."
         }
       }
     },
@@ -471,7 +577,7 @@
         },
         "defaultUrlPattern": {
           "type": "string",
-          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://…\"` log and plain `https://…` URLs (e.g. cloudflared)."
+          "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://\u2026\"` log and plain `https://\u2026` URLs (e.g. cloudflared)."
         }
       }
     },
@@ -482,8 +588,12 @@
       "required": ["id", "name"],
       "description": "One selectable reasoning-effort level for an agent model. Promoted from @pragma/plugin so the catalog wire type has one source of truth.",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
       }
     },
     "AgentModelEntry": {
@@ -493,11 +603,17 @@
       "required": ["id", "name"],
       "description": "One selectable model for an agent, with optional reasoning levels.",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
         "reasoning": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AgentReasoning" }
+          "items": {
+            "$ref": "#/definitions/AgentReasoning"
+          }
         }
       }
     },
@@ -522,21 +638,107 @@
       "title": "CatalogAgent",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "pluginId", "models"],
+      "required": ["id", "name", "pluginId", "models", "launch"],
       "description": "One launchable agent in the resolved plugin catalog.",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
         "pluginId": {
           "type": "string",
           "description": "Id of the plugin that contributed this agent."
         },
         "icon": {
-          "anyOf": [{ "$ref": "#/definitions/AgentIcon" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentIcon"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "models": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AgentModelEntry" }
+          "items": {
+            "$ref": "#/definitions/AgentModelEntry"
+          }
+        },
+        "launch": {
+          "$ref": "#/definitions/AgentLaunchConfig"
+        }
+      }
+    },
+    "AgentLaunchConfig": {
+      "title": "AgentLaunchConfig",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands"],
+      "description": "Resolved launch commands and terminal-input behavior needed by the persistent host to start an agent without a desktop webview.",
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentLaunchCommand"
+          }
+        },
+        "startupInput": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentStartupInput"
+          }
+        },
+        "prefillDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefillMode": {
+          "enum": ["bracketed", "plain"]
+        },
+        "prefillSubmit": {
+          "type": "string"
+        },
+        "prefillSubmitDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "AgentLaunchCommand": {
+      "title": "AgentLaunchCommand",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "reasoningId", "command"],
+      "properties": {
+        "modelId": {
+          "type": ["string", "null"]
+        },
+        "reasoningId": {
+          "type": ["string", "null"]
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AgentStartupInput": {
+      "title": "AgentStartupInput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delayMs", "data"],
+      "properties": {
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data": {
+          "type": "string"
         }
       }
     },
@@ -549,7 +751,9 @@
       "properties": {
         "agents": {
           "type": "array",
-          "items": { "$ref": "#/definitions/CatalogAgent" }
+          "items": {
+            "$ref": "#/definitions/CatalogAgent"
+          }
         }
       }
     },
@@ -584,9 +788,18 @@
       "additionalProperties": false,
       "required": ["name", "identifier", "version"],
       "properties": {
-        "name": { "type": "string", "description": "Human-readable product name." },
-        "identifier": { "type": "string", "description": "Reverse-DNS bundle identifier." },
-        "version": { "type": "string", "description": "Semantic version string." }
+        "name": {
+          "type": "string",
+          "description": "Human-readable product name."
+        },
+        "identifier": {
+          "type": "string",
+          "description": "Reverse-DNS bundle identifier."
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version string."
+        }
       }
     },
     "WindowDefaults": {
@@ -602,10 +815,22 @@
         "trafficLightInset"
       ],
       "properties": {
-        "defaultWidth": { "type": "integer", "minimum": 1 },
-        "defaultHeight": { "type": "integer", "minimum": 1 },
-        "minWidth": { "type": "integer", "minimum": 1 },
-        "minHeight": { "type": "integer", "minimum": 1 },
+        "defaultWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "defaultHeight": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minHeight": {
+          "type": "integer",
+          "minimum": 1
+        },
         "titlebarHeight": {
           "type": "integer",
           "minimum": 0,
@@ -624,8 +849,14 @@
       "additionalProperties": false,
       "required": ["homepage", "support"],
       "properties": {
-        "homepage": { "type": "string", "format": "uri" },
-        "support": { "type": "string", "format": "uri" }
+        "homepage": {
+          "type": "string",
+          "format": "uri"
+        },
+        "support": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "EditorLaunchers": {
@@ -634,10 +865,14 @@
       "additionalProperties": false,
       "required": ["defaultEditorId", "options"],
       "properties": {
-        "defaultEditorId": { "type": "string" },
+        "defaultEditorId": {
+          "type": "string"
+        },
         "options": {
           "type": "array",
-          "items": { "$ref": "#/definitions/EditorLauncher" }
+          "items": {
+            "$ref": "#/definitions/EditorLauncher"
+          }
         }
       }
     },
@@ -647,8 +882,12 @@
       "additionalProperties": false,
       "required": ["id", "name", "brandIcon", "brandColor", "cliCommand"],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
         "brandIcon": {
           "type": "string",
           "description": "Iconify icon name, preferably from the simple-icons namespace for branded editors."
@@ -699,22 +938,30 @@
       "properties": {
         "setup": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Headless commands run after a worktree is created, from the new worktree root."
         },
         "run": {
           "type": "array",
-          "items": { "$ref": "#/definitions/RunScriptEntry" },
+          "items": {
+            "$ref": "#/definitions/RunScriptEntry"
+          },
           "description": "Interactive commands opened from the workspace header as terminal tabs and optional split layouts."
         },
         "build": {
           "type": "array",
-          "items": { "$ref": "#/definitions/RunScriptEntry" },
+          "items": {
+            "$ref": "#/definitions/RunScriptEntry"
+          },
           "description": "Interactive build commands opened from the workspace header as terminal tabs and optional split layouts."
         },
         "teardown": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Headless commands run before a worktree is deleted, from the target worktree root. Failures block deletion."
         }
       }
@@ -722,19 +969,37 @@
     "RunScriptEntry": {
       "title": "RunScriptEntry",
       "description": "One interactive run-script entry: either a single command string or a split layout tree.",
-      "anyOf": [{ "type": "string" }, { "$ref": "#/definitions/RunScriptSplit" }]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/RunScriptSplit"
+        }
+      ]
     },
     "RunScriptNode": {
       "title": "RunScriptNode",
       "description": "A command string leaf or a nested split layout node.",
-      "anyOf": [{ "type": "string" }, { "$ref": "#/definitions/RunScriptSplit" }]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/RunScriptSplit"
+        }
+      ]
     },
     "RunScriptSplit": {
       "title": "RunScriptSplit",
       "description": "A binary split node. Use exactly one axis: left/right for horizontal, or top/bottom for vertical.",
       "oneOf": [
-        { "$ref": "#/definitions/RunScriptHorizontalSplit" },
-        { "$ref": "#/definitions/RunScriptVerticalSplit" }
+        {
+          "$ref": "#/definitions/RunScriptHorizontalSplit"
+        },
+        {
+          "$ref": "#/definitions/RunScriptVerticalSplit"
+        }
       ]
     },
     "RunScriptHorizontalSplit": {
@@ -743,8 +1008,12 @@
       "additionalProperties": false,
       "required": ["left", "right"],
       "properties": {
-        "left": { "$ref": "#/definitions/RunScriptNode" },
-        "right": { "$ref": "#/definitions/RunScriptNode" }
+        "left": {
+          "$ref": "#/definitions/RunScriptNode"
+        },
+        "right": {
+          "$ref": "#/definitions/RunScriptNode"
+        }
       }
     },
     "RunScriptVerticalSplit": {
@@ -753,8 +1022,12 @@
       "additionalProperties": false,
       "required": ["top", "bottom"],
       "properties": {
-        "top": { "$ref": "#/definitions/RunScriptNode" },
-        "bottom": { "$ref": "#/definitions/RunScriptNode" }
+        "top": {
+          "$ref": "#/definitions/RunScriptNode"
+        },
+        "bottom": {
+          "$ref": "#/definitions/RunScriptNode"
+        }
       }
     },
     "SplitTabLeaf": {
@@ -764,7 +1037,9 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": { "$ref": "#/definitions/TabKind" },
+        "kind": {
+          "$ref": "#/definitions/TabKind"
+        },
         "command": {
           "type": ["string", "null"],
           "description": "Start command for a terminal tab leaf."
@@ -786,8 +1061,12 @@
       "additionalProperties": false,
       "required": ["left", "right"],
       "properties": {
-        "left": { "$ref": "#/definitions/SplitNode" },
-        "right": { "$ref": "#/definitions/SplitNode" }
+        "left": {
+          "$ref": "#/definitions/SplitNode"
+        },
+        "right": {
+          "$ref": "#/definitions/SplitNode"
+        }
       }
     },
     "SplitVertical": {
@@ -797,22 +1076,37 @@
       "additionalProperties": false,
       "required": ["top", "bottom"],
       "properties": {
-        "top": { "$ref": "#/definitions/SplitNode" },
-        "bottom": { "$ref": "#/definitions/SplitNode" }
+        "top": {
+          "$ref": "#/definitions/SplitNode"
+        },
+        "bottom": {
+          "$ref": "#/definitions/SplitNode"
+        }
       }
     },
     "SplitSplit": {
       "title": "SplitSplit",
       "description": "A binary split node: exactly one axis, horizontal (left/right) or vertical (top/bottom). Mirrors RunScriptSplit.",
       "oneOf": [
-        { "$ref": "#/definitions/SplitHorizontal" },
-        { "$ref": "#/definitions/SplitVertical" }
+        {
+          "$ref": "#/definitions/SplitHorizontal"
+        },
+        {
+          "$ref": "#/definitions/SplitVertical"
+        }
       ]
     },
     "SplitNode": {
       "title": "SplitNode",
       "description": "Shared recursive split-pane tree. A node is either a tab-spec leaf or a binary split (left/right for horizontal, top/bottom for vertical). The CLI split layout and the live frontend split layout both use this shape.",
-      "anyOf": [{ "$ref": "#/definitions/SplitTabLeaf" }, { "$ref": "#/definitions/SplitSplit" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SplitTabLeaf"
+        },
+        {
+          "$ref": "#/definitions/SplitSplit"
+        }
+      ]
     },
     "ScriptRunStatus": {
       "title": "ScriptRunStatus",
@@ -826,11 +1120,21 @@
       "additionalProperties": false,
       "required": ["id", "name", "path", "orderIndex", "createdAt"],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "path": { "type": "string" },
-        "orderIndex": { "type": "integer" },
-        "createdAt": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "orderIndex": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        }
       }
     },
     "Worktree": {
@@ -849,18 +1153,34 @@
         "createdAt"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "projectId": { "type": "string" },
-        "parentId": { "type": ["string", "null"] },
-        "branch": { "type": "string" },
-        "title": { "type": ["string", "null"] },
-        "path": { "type": "string" },
-        "isMain": { "type": "boolean" },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": ["string", "null"]
+        },
+        "branch": {
+          "type": "string"
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "isMain": {
+          "type": "boolean"
+        },
         "hidden": {
           "type": "boolean",
           "description": "True when the user has hidden this worktree from the sidebar. Persists across restarts."
         },
-        "createdAt": { "type": "string" }
+        "createdAt": {
+          "type": "string"
+        }
       }
     },
     "TabKind": {
@@ -918,10 +1238,18 @@
       "additionalProperties": false,
       "required": ["id", "name", "status"],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "status": { "$ref": "#/definitions/AgentToolCallStatus" },
-        "summary": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/AgentToolCallStatus"
+        },
+        "summary": {
+          "type": "string"
+        }
       }
     },
     "AgentFileChange": {
@@ -931,8 +1259,12 @@
       "additionalProperties": false,
       "required": ["path", "change"],
       "properties": {
-        "path": { "type": "string" },
-        "change": { "$ref": "#/definitions/AgentFileChangeKind" }
+        "path": {
+          "type": "string"
+        },
+        "change": {
+          "$ref": "#/definitions/AgentFileChangeKind"
+        }
       }
     },
     "AgentMessage": {
@@ -942,19 +1274,35 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "id", "role", "subAgentsActive", "ts"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
-        "id": { "type": "string" },
-        "role": { "$ref": "#/definitions/AgentMessageRole" },
-        "text": { "type": "string" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/AgentMessageRole"
+        },
+        "text": {
+          "type": "string"
+        },
         "toolCalls": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AgentToolCall" }
+          "items": {
+            "$ref": "#/definitions/AgentToolCall"
+          }
         },
         "files": {
           "type": "array",
-          "items": { "$ref": "#/definitions/AgentFileChange" }
+          "items": {
+            "$ref": "#/definitions/AgentFileChange"
+          }
         },
         "subAgentsActive": {
           "type": "integer",
@@ -975,12 +1323,27 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "status"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
-        "status": { "$ref": "#/definitions/AgentStatus" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/AgentStatus"
+        },
         "attentionKind": {
-          "anyOf": [{ "$ref": "#/definitions/AgentAttentionKind" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentAttentionKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "command": {
           "type": "string",
@@ -990,9 +1353,33 @@
           "type": "string",
           "description": "The question the agent is asking. Set when attentionKind is `question` so a non-terminal client can show it and answer remotely."
         },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QuestionOption"
+          },
+          "description": "Answer choices for a `question` attention. Empty/omitted when the question is free-text only or when attentionKind is `command`."
+        },
         "requestId": {
           "type": "string",
           "description": "Correlation id for a command-approval or question round-trip. The reporter sets it on a `command`/`question` attention report and waits for a matching AgentDecision/AgentAnswer before proceeding."
+        }
+      }
+    },
+    "QuestionOption": {
+      "title": "QuestionOption",
+      "description": "A selectable answer to an agent question.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Answer text sent back to the agent when selected."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional explanation shown beneath the answer label."
         }
       }
     },
@@ -1003,10 +1390,18 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "requestId", "approved"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
-        "requestId": { "type": "string" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
         "approved": {
           "type": "boolean",
           "description": "true to run the command, false to reject it."
@@ -1020,10 +1415,18 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "requestId", "dismissed"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
-        "requestId": { "type": "string" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
         "answer": {
           "type": "string",
           "description": "The reply text. Present when the question was answered; omitted when dismissed."
@@ -1041,9 +1444,15 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId", "text"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
         "text": {
           "type": "string",
           "description": "The message text to deliver to the running agent."
@@ -1061,9 +1470,15 @@
       "additionalProperties": false,
       "required": ["agent", "worktreeId", "tabId"],
       "properties": {
-        "agent": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "tabId": { "type": "string" },
+        "agent": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
         "requestId": {
           "type": "string",
           "description": "Optional correlation id when the interrupt targets a specific outstanding request."
@@ -1079,15 +1494,21 @@
       "properties": {
         "projects": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Project" }
+          "items": {
+            "$ref": "#/definitions/Project"
+          }
         },
         "worktrees": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Worktree" }
+          "items": {
+            "$ref": "#/definitions/Worktree"
+          }
         },
         "tabs": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Tab" }
+          "items": {
+            "$ref": "#/definitions/Tab"
+          }
         }
       }
     },
@@ -1098,19 +1519,36 @@
       "additionalProperties": false,
       "required": ["projectId", "agentId", "worktreeId", "newWorktree"],
       "properties": {
-        "projectId": { "type": "string" },
+        "projectId": {
+          "type": "string"
+        },
         "worktreeId": {
           "type": ["string", "null"],
           "description": "Id of an existing worktree to launch into. Mutually exclusive with `newWorktree`."
         },
         "newWorktree": {
           "description": "Describes a fresh worktree to create when `worktreeId` is absent. Mutually exclusive with `worktreeId`.",
-          "anyOf": [{ "$ref": "#/definitions/NewWorktreeSpec" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NewWorktreeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "agentId": { "type": "string" },
-        "modelId": { "type": ["string", "null"] },
-        "reasoningId": { "type": ["string", "null"] },
-        "prompt": { "type": ["string", "null"] }
+        "agentId": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": ["string", "null"]
+        },
+        "reasoningId": {
+          "type": ["string", "null"]
+        },
+        "prompt": {
+          "type": ["string", "null"]
+        }
       }
     },
     "NewWorktreeSpec": {
@@ -1120,9 +1558,15 @@
       "additionalProperties": false,
       "required": ["parentWorktreeId", "branch"],
       "properties": {
-        "parentWorktreeId": { "type": "string" },
-        "branch": { "type": "string" },
-        "title": { "type": ["string", "null"] }
+        "parentWorktreeId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "title": {
+          "type": ["string", "null"]
+        }
       }
     },
     "Tab": {
@@ -1148,11 +1592,21 @@
         "createdAt"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "projectId": { "type": "string" },
-        "worktreeId": { "type": "string" },
-        "kind": { "$ref": "#/definitions/TabKind" },
-        "title": { "type": ["string", "null"] },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TabKind"
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
         "url": {
           "type": ["string", "null"],
           "description": "The current page URL for browser tabs; null for terminal tabs."
@@ -1163,7 +1617,14 @@
         },
         "diffSide": {
           "description": "Which diff side a diff tab shows; null for non-diff tabs.",
-          "anyOf": [{ "$ref": "#/definitions/DiffSide" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffSide"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "prNumber": {
           "type": ["integer", "null"],
@@ -1189,8 +1650,12 @@
           "type": "boolean",
           "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) are ignored while this is true. Always false for non-terminal tabs."
         },
-        "orderIndex": { "type": "integer" },
-        "createdAt": { "type": "string" }
+        "orderIndex": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        }
       }
     },
     "DirEntry": {
@@ -1200,17 +1665,22 @@
       "additionalProperties": false,
       "required": ["name", "path", "isDir"],
       "properties": {
-        "name": { "type": "string", "description": "The entry's file name (no directory part)." },
+        "name": {
+          "type": "string",
+          "description": "The entry's file name (no directory part)."
+        },
         "path": {
           "type": "string",
           "description": "Worktree-relative POSIX path (forward slashes) to the entry."
         },
-        "isDir": { "type": "boolean" }
+        "isDir": {
+          "type": "boolean"
+        }
       }
     },
     "DiffSide": {
       "title": "DiffSide",
-      "description": "Which axis of change a diff/listing record refers to. committed (base branch → HEAD), staged (HEAD → index), and unstaged (index → working tree) are the three listing axes. worktree (base branch → working tree) is the unified review side every Changes-sidebar click opens — it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
+      "description": "Which axis of change a diff/listing record refers to. committed (base branch \u2192 HEAD), staged (HEAD \u2192 index), and unstaged (index \u2192 working tree) are the three listing axes. worktree (base branch \u2192 working tree) is the unified review side every Changes-sidebar click opens \u2014 it compares the file's current on-disk content against what used to be on the worktree at its fork point, regardless of which list the file appears in.",
       "type": "string",
       "enum": ["committed", "staged", "unstaged", "worktree"]
     },
@@ -1234,8 +1704,12 @@
           "type": ["string", "null"],
           "description": "Previous path for a rename; null otherwise."
         },
-        "status": { "$ref": "#/definitions/ChangeStatus" },
-        "side": { "$ref": "#/definitions/DiffSide" },
+        "status": {
+          "$ref": "#/definitions/ChangeStatus"
+        },
+        "side": {
+          "$ref": "#/definitions/DiffSide"
+        },
         "additions": {
           "type": ["integer", "null"],
           "minimum": 0,
@@ -1256,15 +1730,21 @@
       "properties": {
         "committed": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ChangedFile" }
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
         },
         "staged": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ChangedFile" }
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
         },
         "unstaged": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ChangedFile" }
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
         }
       }
     },
@@ -1274,7 +1754,9 @@
       "additionalProperties": false,
       "required": ["path", "oldText", "newText", "binary"],
       "properties": {
-        "path": { "type": "string" },
+        "path": {
+          "type": "string"
+        },
         "oldText": {
           "type": "string",
           "description": "The base-side text; empty when the file was added or is binary."
@@ -1306,7 +1788,9 @@
           "type": "string",
           "description": "Worktree-relative POSIX path (forward slashes) of the changed entry."
         },
-        "kind": { "$ref": "#/definitions/FileChangeKind" }
+        "kind": {
+          "$ref": "#/definitions/FileChangeKind"
+        }
       }
     },
     "FileContents": {
@@ -1315,7 +1799,9 @@
       "additionalProperties": false,
       "required": ["path", "text", "binary", "truncated", "byteSize"],
       "properties": {
-        "path": { "type": "string" },
+        "path": {
+          "type": "string"
+        },
         "text": {
           "type": "string",
           "description": "The decoded UTF-8 text; empty when binary or truncated."
@@ -1341,8 +1827,12 @@
       "additionalProperties": false,
       "required": ["mime", "dataBase64"],
       "properties": {
-        "mime": { "type": "string" },
-        "dataBase64": { "type": "string" }
+        "mime": {
+          "type": "string"
+        },
+        "dataBase64": {
+          "type": "string"
+        }
       }
     },
     "WorktreeStatus": {
@@ -1393,30 +1883,47 @@
         "updatedAt"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "projectId": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
         "worktreeId": {
           "type": ["string", "null"],
           "description": "The worktree backing this card once it starts running; null for a draft."
         },
         "branchName": {
           "type": "string",
-          "description": "Branch the card targets — an existing project worktree branch or a new one to create."
+          "description": "Branch the card targets \u2014 an existing project worktree branch or a new one to create."
         },
-        "prompt": { "type": "string" },
-        "agentId": { "type": "string" },
+        "prompt": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
         "modelId": {
           "type": ["string", "null"],
           "description": "Selected model id for the agent launch; null uses the agent default."
         },
-        "status": { "$ref": "#/definitions/KanbanPromptStatus" },
+        "status": {
+          "$ref": "#/definitions/KanbanPromptStatus"
+        },
         "agentTabId": {
           "type": ["string", "null"],
           "description": "Terminal tab/daemon session id the agent runs in once started; null before launch."
         },
         "completedAction": {
           "description": "Which completion path finished the card; null until completed.",
-          "anyOf": [{ "$ref": "#/definitions/KanbanCompletedAction" }, { "type": "null" }]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KanbanCompletedAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "pullRequestUrl": {
           "type": ["string", "null"],
@@ -1426,13 +1933,19 @@
           "type": ["integer", "null"],
           "description": "Number of the pull request opened during completion, when applicable."
         },
-        "schedulingMode": { "$ref": "#/definitions/KanbanSchedulingMode" },
+        "schedulingMode": {
+          "$ref": "#/definitions/KanbanSchedulingMode"
+        },
         "scheduledFor": {
           "type": ["string", "null"],
           "description": "Reserved for scheduled runs; always null in the manual MVP."
         },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
         "startedAt": {
           "type": ["string", "null"],
           "description": "When the card first moved to inProgress; null before launch."
@@ -1451,9 +1964,14 @@
       "properties": {
         "modifiers": {
           "type": "array",
-          "items": { "type": "string", "enum": ["cmd", "ctrl", "alt", "shift"] }
+          "items": {
+            "type": "string",
+            "enum": ["cmd", "ctrl", "alt", "shift"]
+          }
         },
-        "key": { "type": "string" }
+        "key": {
+          "type": "string"
+        }
       }
     },
     "PlatformChord": {
@@ -1462,8 +1980,12 @@
       "additionalProperties": false,
       "required": ["mac", "linux"],
       "properties": {
-        "mac": { "$ref": "#/definitions/KeybindingChord" },
-        "linux": { "$ref": "#/definitions/KeybindingChord" }
+        "mac": {
+          "$ref": "#/definitions/KeybindingChord"
+        },
+        "linux": {
+          "$ref": "#/definitions/KeybindingChord"
+        }
       }
     },
     "Keybindings": {
@@ -1495,28 +2017,72 @@
         "switchToWorkspace9"
       ],
       "properties": {
-        "nextTab": { "$ref": "#/definitions/PlatformChord" },
-        "previousTab": { "$ref": "#/definitions/PlatformChord" },
-        "closeTopTab": { "$ref": "#/definitions/PlatformChord" },
-        "newTerminalTab": { "$ref": "#/definitions/PlatformChord" },
-        "newBrowserTab": { "$ref": "#/definitions/PlatformChord" },
-        "clearTerminal": { "$ref": "#/definitions/PlatformChord" },
-        "browserReload": { "$ref": "#/definitions/PlatformChord" },
-        "browserDevtools": { "$ref": "#/definitions/PlatformChord" },
-        "browserCopyUrl": { "$ref": "#/definitions/PlatformChord" },
-        "splitHorizontal": { "$ref": "#/definitions/PlatformChord" },
-        "splitVertical": { "$ref": "#/definitions/PlatformChord" },
-        "deleteFile": { "$ref": "#/definitions/PlatformChord" },
-        "scrollTerminalBottom": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace1": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace2": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace3": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace4": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace5": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace6": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace7": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace8": { "$ref": "#/definitions/PlatformChord" },
-        "switchToWorkspace9": { "$ref": "#/definitions/PlatformChord" }
+        "nextTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "previousTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "closeTopTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "newTerminalTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "newBrowserTab": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "clearTerminal": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "browserReload": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "browserDevtools": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "browserCopyUrl": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "splitHorizontal": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "splitVertical": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "deleteFile": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "scrollTerminalBottom": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace1": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace2": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace3": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace4": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace5": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace6": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace7": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace8": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "switchToWorkspace9": {
+          "$ref": "#/definitions/PlatformChord"
+        }
       }
     },
     "KeybindingsConfig": {
@@ -1525,8 +2091,13 @@
       "additionalProperties": false,
       "required": ["version", "bindings"],
       "properties": {
-        "version": { "type": "integer", "minimum": 1 },
-        "bindings": { "$ref": "#/definitions/Keybindings" }
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bindings": {
+          "$ref": "#/definitions/Keybindings"
+        }
       }
     }
   }

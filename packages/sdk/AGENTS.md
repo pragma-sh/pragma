@@ -29,12 +29,12 @@ publishes the approve/deny verdict; and `awaitAgentDecision({ agent, requestId }
 same round-trip the Claude/Cursor blocking hooks drive via `pragma-cli agent
 await-decision`.
 
-For questions: `reportAttention({ kind: "question", question, requestId })` carries the
-question; `client.agents.reportAnswer(...)` publishes the reply (or a `dismissed`
-dismissal); and `awaitAgentAnswer({ agent, requestId })` (or `client.agents.awaitAnswer(...)`)
-blocks until the matching `AgentAnswer` arrives, resolving the reply text — or `null` on
-dismiss/timeout/no-env. This mirrors the decision round-trip (`pragma-cli agent
-await-answer` / `answer`).
+For questions: `reportAttention({ kind: "question", question, options?, requestId })`
+carries the question text and optional answer choices (`{ label, description? }`); `client.agents.reportAnswer(...)`
+publishes the reply (or a `dismissed` dismissal); and `awaitAgentAnswer({ agent, requestId })`
+(or `client.agents.awaitAnswer(...)`) blocks until the matching `AgentAnswer` arrives,
+resolving the reply text — or `null` on dismiss/timeout/no-env. This mirrors the decision
+round-trip (`pragma-cli agent await-answer` / `answer`).
 
 For a **single duplex channel to one running agent**, `client.agents.connect({ agent,
 tabId, worktreeId, prompt? })` returns an `AgentConnection`: async-iterate it to read every

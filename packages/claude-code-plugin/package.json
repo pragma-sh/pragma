@@ -6,24 +6,33 @@
   "files": [
     ".claude-plugin",
     "assets",
+    "dist",
     "hooks",
     "pragma",
     "src"
   ],
+  "type": "module",
   "exports": {
-    "./pragma-agent": "./src/pragma-agent.ts"
+    "./pragma-plugin": "./src/pragma-plugin.ts"
   },
   "scripts": {
+    "build": "bunup src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
   "dependencies": {
-    "@pragma/plugin": "workspace:*"
+    "@pragma/plugin": "workspace:*",
+    "@pragma/watcher-kit": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",
+    "bunup": "^0.16.32",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
+  },
+  "pragma": {
+    "pluginId": "pragma.claude-code",
+    "main": "./dist/pragma-plugin.mjs"
   }
 }

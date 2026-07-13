@@ -7,7 +7,7 @@ use tiny_http::Request;
 use uuid::Uuid;
 
 use crate::error::{GatewayError, GatewayResult};
-use crate::http::response::{empty_response, json_response, ndjson_response};
+use crate::http::response::{empty_response, json_response, stream_ndjson_response};
 use crate::http::router::RouteMatch;
 use crate::http::{read_body, read_json, AppState};
 
@@ -71,10 +71,7 @@ pub fn spawn(
 }
 
 /// Handles `GET /v1/sessions/{id}/events`.
-pub fn events(
-    state: &AppState,
-    matched: &RouteMatch,
-) -> GatewayResult<tiny_http::Response<crate::http::response::NdjsonReader>> {
+pub fn events(request: Request, state: &AppState, matched: &RouteMatch) -> GatewayResult<()> {
     let session_id = param(matched, "id")?;
     // Attach resizes the PTY only when the caller declares its viewport via
     // `cols`+`rows`. A size-less attach (e.g. a plugin watcher tailing output)
@@ -91,7 +88,7 @@ pub fn events(
         .client
         .attach_stream(session_id.clone(), cols.zip(rows))?;
     drop_pending_spawn_stream(state, &session_id);
-    Ok(ndjson_response(stream))
+    stream_ndjson_response(request, stream)
 }
 
 /// Handles `POST /v1/sessions/{id}/input`.
