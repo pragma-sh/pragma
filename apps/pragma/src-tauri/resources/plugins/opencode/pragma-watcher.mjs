@@ -9,7 +9,7 @@ function createBuiltinWatcher(agent, handleDecisions) {
     agent,
     async watch(ctx) {
       const keys = resolveKeys(ctx.config);
-      const seenRequestIds = new Set();
+      const seenRequestIds = new Set;
       while (!ctx.signal.aborted) {
         try {
           await consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds);
@@ -19,7 +19,7 @@ function createBuiltinWatcher(agent, handleDecisions) {
         }
         await delay(RESUBSCRIBE_DELAY_MS, ctx.signal);
       }
-    },
+    }
   };
 }
 var opencodeApprovalWatcher = createBuiltinWatcher("opencode", true);
@@ -30,7 +30,7 @@ function resolveKeys(config) {
   return {
     approveKeys: c.approveKeys ?? DEFAULT_APPROVE_KEYS,
     denyKeys: c.denyKeys ?? DEFAULT_DENY_KEYS,
-    submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS,
+    submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS
   };
 }
 async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) {
@@ -38,7 +38,7 @@ async function consumeControlEvents(ctx, keys, handleDecisions, seenRequestIds) 
     agent: ctx.agentId,
     tabId: ctx.session.tabId,
     worktreeId: ctx.session.worktreeId,
-    signal: ctx.signal,
+    signal: ctx.signal
   });
   for await (const event of connection) {
     if (ctx.signal.aborted) {
@@ -73,23 +73,19 @@ function delay(ms, signal) {
   return new Promise((resolve) => {
     const finish = () => resolve();
     const timer = setTimeout(finish, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        finish();
-      },
-      { once: true },
-    );
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      finish();
+    }, { once: true });
   });
 }
 var pragmaWatcher = {
-  watchers: [opencodeApprovalWatcher, claudeCodeInterjectWatcher, cursorInterjectWatcher],
+  watchers: [opencodeApprovalWatcher, claudeCodeInterjectWatcher, cursorInterjectWatcher]
 };
 var pragma_watcher_default = pragmaWatcher;
 export {
   opencodeApprovalWatcher,
   pragma_watcher_default as default,
   cursorInterjectWatcher,
-  claudeCodeInterjectWatcher,
+  claudeCodeInterjectWatcher
 };
