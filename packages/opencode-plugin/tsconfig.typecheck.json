@@ -2,7 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@pragma/sdk": ["../sdk/src/index.ts"]
+      "@pragma/sdk": ["../sdk/src/index.ts"],
+      "@pragma/watcher-kit": ["../watcher-kit/src/index.ts"]
     }
   }
 }
