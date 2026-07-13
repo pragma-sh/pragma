@@ -1,12 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 /** One resolved plugin manifest: where to import it from and under what id. */
 export interface ResolvedManifest {
   pluginId: string;
+  dir: string;
   mainPath: string;
   config: unknown;
-  scope: "global" | "project";
+  scope: "bundled" | "global" | "project";
   root: string;
 }
 
@@ -22,13 +23,19 @@ interface PragmaConfigFile {
 interface PackageJson {
   name?: string;
   main?: string;
+  pragma?: {
+    pluginId?: string;
+    main?: string;
+  };
 }
 
 const CONFIG_FILE = ".pragma/config.json";
 
 /**
- * Resolves plugin manifests declared in the global `~/.pragma/config.json` and
- * each project root's `.pragma/config.json`, preserving declaration order.
+ * Resolves plugin manifests for all three scopes, preserving declaration
+ * order: the bundled plugins shipped inside the app resources (when
+ * `bundledDir` is given), then the global `~/.pragma/config.json`, then each
+ * project root's `.pragma/config.json`.
  *
  * Mirrors `plugins.rs` `resolve_local_dir` semantics for local-path specifiers
  * (`./`, `../`, `/`, `~/`); non-local specifiers (npm) are skipped here. This is
@@ -39,11 +46,39 @@ const CONFIG_FILE = ".pragma/config.json";
 export async function resolveManifests(
   homeDir: string,
   roots: string[],
+  bundledDir?: string,
 ): Promise<ResolvedManifest[]> {
   const manifests: ResolvedManifest[] = [];
+  if (bundledDir) {
+    manifests.push(...(await resolveBundledDir(bundledDir)));
+  }
   manifests.push(...(await resolveScope(homeDir, "global")));
   for (const root of roots) {
     manifests.push(...(await resolveScope(root, "project")));
+  }
+  return manifests;
+}
+
+/**
+ * Resolves every subdirectory of the bundled-plugins dir as a plugin package.
+ * Bundled plugins carry no user config entry (`config: undefined`).
+ */
+async function resolveBundledDir(bundledDir: string): Promise<ResolvedManifest[]> {
+  let names: string[];
+  try {
+    names = (await readdir(bundledDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .toSorted();
+  } catch {
+    return [];
+  }
+  const manifests: ResolvedManifest[] = [];
+  for (const name of names) {
+    const manifest = await readManifest(join(bundledDir, name), undefined, "bundled", bundledDir);
+    if (manifest) {
+      manifests.push(manifest);
+    }
   }
   return manifests;
 }
@@ -55,7 +90,8 @@ async function resolveScope(
   const entries = await readConfigEntries(join(root, CONFIG_FILE));
   const resolved: ResolvedManifest[] = [];
   for (const entry of entries) {
-    const manifest = await resolveEntry(root, entry, scope);
+    const dir = resolveLocalDir(root, entry.path);
+    const manifest = dir ? await readManifest(dir, entry.config, scope, root) : null;
     if (manifest) {
       resolved.push(manifest);
     }
@@ -72,24 +108,30 @@ async function readConfigEntries(configPath: string): Promise<ConfigEntry[]> {
   }
 }
 
-async function resolveEntry(
+/**
+ * Reads one plugin directory's `package.json` into a manifest. The optional
+ * `pragma` field lets a package expose a Pragma plugin entry distinct from its
+ * npm identity: `pragma.pluginId` overrides `name` as the stable catalog id,
+ * `pragma.main` overrides `main` as the bundle the hosts import.
+ */
+async function readManifest(
+  dir: string,
+  config: unknown,
+  scope: ResolvedManifest["scope"],
   root: string,
-  entry: ConfigEntry,
-  scope: "global" | "project",
 ): Promise<ResolvedManifest | null> {
-  const dir = resolveLocalDir(root, entry.path);
-  if (!dir) {
-    return null;
-  }
   try {
     const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as PackageJson;
-    if (!pkg.name || !pkg.main) {
+    const pluginId = pkg.pragma?.pluginId ?? pkg.name;
+    const main = pkg.pragma?.main ?? pkg.main;
+    if (!pluginId || !main) {
       return null;
     }
     return {
-      pluginId: pkg.name,
-      mainPath: resolve(dir, pkg.main),
-      config: entry.config,
+      pluginId,
+      dir,
+      mainPath: resolve(dir, main),
+      config,
       scope,
       root,
     };

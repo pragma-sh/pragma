@@ -41,13 +41,14 @@ pub fn serve(server: &Server, state: &AppState) {
     }
 }
 
-fn respond(mut request: Request, state: &AppState) {
-    let response = if *request.method() == Method::Options {
-        preflight_response()
-    } else {
-        dispatch(&mut request, state).unwrap_or_else(|error| error_response(&error).boxed())
-    };
-    let _ = request.respond(with_cors(response));
+fn respond(request: Request, state: &AppState) {
+    if *request.method() == Method::Options {
+        let _ = request.respond(with_cors(preflight_response()));
+        return;
+    }
+    if let Err(error) = dispatch(request, state) {
+        eprintln!("gateway dispatch error: {error}");
+    }
 }
 
 /// Answers a CORS preflight so webview clients (`tauri://localhost` in release
@@ -76,42 +77,109 @@ fn header(field: &str, value: &str) -> Header {
     Header::from_bytes(field.as_bytes(), value.as_bytes()).expect("valid header")
 }
 
-fn dispatch(request: &mut Request, state: &AppState) -> GatewayResult<ResponseBox> {
+fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
     let method = request.method().as_str().to_string();
     let url = request.url().to_string();
     let matched = gateway_router()
         .match_route(&method, &url)
         .ok_or(GatewayError::NotFound)?;
 
-    if matched.id != "health" && !authorized(request, &state.token) {
-        return Err(GatewayError::Unauthorized);
+    if matched.id != "health" && !authorized(&request, &state.token) {
+        request.respond(with_cors(
+            error_response(&GatewayError::Unauthorized).boxed(),
+        ))?;
+        return Ok(());
     }
 
-    let response = match matched.id {
-        "health" => routes::health::health(state)?.boxed(),
-        "version" => routes::health::version(state)?.boxed(),
-        "rpc" => routes::rpc::rpc(request, state, &matched)?.boxed(),
-        "sessions.spawn" => routes::sessions::spawn(request, state)?.boxed(),
-        "sessions.events" => routes::sessions::events(state, &matched)?.boxed(),
-        "sessions.input" => routes::sessions::input(request, state, &matched)?.boxed(),
-        "sessions.resize" => routes::sessions::resize(request, state, &matched)?.boxed(),
-        "sessions.kill" => routes::sessions::kill(state, &matched)?.boxed(),
-        "sessions.killForCwd" => routes::sessions::kill_for_cwd(state, &matched)?.boxed(),
-        "agents.reports" => routes::agents::report(request, state)?.boxed(),
-        "agents.messages" => routes::agents::message(request, state)?.boxed(),
-        "agents.decisions" => routes::agents::decision(request, state)?.boxed(),
-        "agents.answers" => routes::agents::answer(request, state)?.boxed(),
-        "agents.inputs" => routes::agents::input(request, state)?.boxed(),
-        "agents.interrupts" => routes::agents::interrupt(request, state)?.boxed(),
-        "agents.catalog" => routes::agents::catalog(state)?.boxed(),
-        "agents.events" => routes::agents::events(state)?.boxed(),
-        "assets.get" => routes::assets::get(state, &matched)?.boxed(),
-        "control" => routes::control::control(request, state, &matched)?.boxed(),
-        "agents.seen" => routes::agents::mark_seen(state, &matched)?.boxed(),
-        "subscriptions.events" => routes::subscriptions::events(state, &matched)?.boxed(),
-        _ => return Err(GatewayError::NotFound),
-    };
-    Ok(response)
+    match matched.id {
+        "health" => respond_json(request, routes::health::health(state)),
+        "version" => respond_json(request, routes::health::version(state)),
+        "rpc" => {
+            let mut req = request;
+            let result = routes::rpc::rpc(&mut req, state, &matched);
+            respond_json(req, result)
+        }
+        "sessions.spawn" => {
+            let mut req = request;
+            let result = routes::sessions::spawn(&mut req, state);
+            respond_json(req, result)
+        }
+        "sessions.events" => routes::sessions::events(request, state, &matched),
+        "sessions.input" => {
+            let mut req = request;
+            let result = routes::sessions::input(&mut req, state, &matched);
+            respond_json(req, result)
+        }
+        "sessions.resize" => {
+            let mut req = request;
+            let result = routes::sessions::resize(&mut req, state, &matched);
+            respond_json(req, result)
+        }
+        "sessions.kill" => respond_json(request, routes::sessions::kill(state, &matched)),
+        "sessions.killForCwd" => {
+            respond_json(request, routes::sessions::kill_for_cwd(state, &matched))
+        }
+        "agents.reports" => {
+            let mut req = request;
+            let result = routes::agents::report(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.messages" => {
+            let mut req = request;
+            let result = routes::agents::message(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.decisions" => {
+            let mut req = request;
+            let result = routes::agents::decision(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.answers" => {
+            let mut req = request;
+            let result = routes::agents::answer(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.inputs" => {
+            let mut req = request;
+            let result = routes::agents::input(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.interrupts" => {
+            let mut req = request;
+            let result = routes::agents::interrupt(&mut req, state);
+            respond_json(req, result)
+        }
+        "agents.catalog" => respond_json(request, routes::agents::catalog(state)),
+        "agents.events" => routes::agents::events(request, state),
+        "assets.get" => respond_json(request, routes::assets::get(state, &matched)),
+        "control" => {
+            let mut req = request;
+            let result = routes::control::control(&mut req, state, &matched);
+            respond_json(req, result)
+        }
+        "agents.seen" => respond_json(request, routes::agents::mark_seen(state, &matched)),
+        "subscriptions.events" => routes::subscriptions::events(request, state, &matched),
+        _ => Ok(request.respond(with_cors(error_response(&GatewayError::NotFound).boxed()))?),
+    }
+}
+
+/// Sends a route's outcome to the client: the successful response, or the
+/// error as a JSON `ErrorBody` with the error's HTTP status. Route failures
+/// must never drop the request — a dropped `tiny_http` request turns into an
+/// empty 500 the SDK cannot explain to the user.
+fn respond_json(
+    request: Request,
+    result: GatewayResult<Response<std::io::Cursor<Vec<u8>>>>,
+) -> GatewayResult<()> {
+    match result {
+        Ok(response) => Ok(request.respond(with_cors(response.boxed()))?),
+        Err(error) => {
+            if !matches!(error, GatewayError::NotFound | GatewayError::Conflict(_)) {
+                eprintln!("gateway route error: {error}");
+            }
+            Ok(request.respond(with_cors(error_response(&error).boxed()))?)
+        }
+    }
 }
 
 fn authorized(request: &Request, token: &str) -> bool {

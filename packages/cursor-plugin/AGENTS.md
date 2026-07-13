@@ -58,8 +58,9 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 | ---------------------- | ------------------- | --------------------------------------------------------------------------------- |
 | `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)                                      |
 | `sessionEnd`           | `cleared`           | `cleared`                                                                         |
-| `beforeSubmitPrompt`   | `started`           | `started` (sets the turn marker)                                                  |
-| `stop`                 | `stopped`           | `stopped`                                                                         |
+| `beforeSubmitPrompt`   | `started`           | `started` + user prompt message (sets the turn marker)                            |
+| `afterAgentResponse`   | `response`          | Assistant response message                                                        |
+| `stop`                 | `stopped`           | `stopped`; `cleared` when Cursor reports `aborted` or `error`                     |
 | `beforeShellExecution` | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
 | `beforeMCPExecution`   | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
 | `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red)                           |
@@ -85,9 +86,9 @@ approve remotely (mirrors Claude Code's `permission` case):
 
 Interjections (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are **not**
 handled by these hooks. Cursor is a PTY TUI with no mid-turn input hook, so the shared
-built-in-agent watcher (`@pragma/opencode-plugin`'s `cursorInterjectWatcher`, registered in
-`apps/pragma/src/plugins/builtin-agents.ts`) delivers the text by writing it into the live
-terminal followed by a submit key. This plugin's hooks stay approval-only.
+watcher delivers the text by writing it into the live terminal, waiting briefly for Cursor's
+paste-aware input to commit it, then writing Enter separately. Sending text and `\r` in one PTY
+write leaves Cursor's reply unsubmitted. This plugin's hooks stay approval-only.
 
 ## AskQuestion — not reported (and why)
 

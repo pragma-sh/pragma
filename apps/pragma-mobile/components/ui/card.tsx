@@ -6,7 +6,12 @@ import { Text } from "./text";
 
 /** Rounded, bordered surface used for grouped content and inbox cards. */
 export function Card({ className, ...props }: ViewProps & { className?: string }) {
-  return <View className={cn("rounded-xl border border-border bg-card", className)} {...props} />;
+  return (
+    <View
+      className={cn("overflow-hidden rounded-2xl border border-border bg-card", className)}
+      {...props}
+    />
+  );
 }
 
 export function CardHeader({ className, ...props }: ViewProps & { className?: string }) {

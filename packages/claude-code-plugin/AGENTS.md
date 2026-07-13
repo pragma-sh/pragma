@@ -28,16 +28,16 @@ means the script works regardless of its executable bit. Keeping the logic in on
 
 ## Hook → status mapping
 
-| Hook                         | `report.sh` arg | Reports                                                                                                 |
-| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `SessionStart`               | `cleared`       | `cleared` (+ tears down any stale watcher)                                                              |
-| `SessionEnd`                 | `cleared`       | `cleared` (+ tears down the watcher)                                                                    |
-| `UserPromptSubmit`           | `started`       | `started` (+ spawns the abort watcher — see below)                                                      |
-| `Stop`                       | `stopped`       | `stopped` (or `cleared` on the rare build where `Stop` trails an interrupt)                             |
-| `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)                                      |
-| `PermissionRequest`          | `permission`    | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below |
-| `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                |
-| `Notification` `idle_prompt` | `idle`          | `cleared` **iff** a turn's marker still exists; else nothing                                            |
+| Hook                         | `report.sh` arg | Reports                                                                                                                                                                                                                                               |
+| ---------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SessionStart`               | `cleared`       | `cleared` status only (+ tears down any stale watcher)                                                                                                                                                                                                |
+| `SessionEnd`                 | `cleared`       | `cleared` status only (+ tears down the watcher)                                                                                                                                                                                                      |
+| `UserPromptSubmit`           | `started`       | `started` + user prompt message (+ spawns the abort watcher — see below)                                                                                                                                                                              |
+| `Stop`                       | `stopped`       | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt                                                                                                                                                           |
+| `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)                                                                                                                                                                                    |
+| `PermissionRequest`          | `permission`    | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below. `AskUserQuestion` branches to `attention --kind question` (+ question + options + requestId) and blocks for the answer — see questions below |
+| `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                                                                                                                                                              |
+| `Notification` `idle_prompt` | `idle`          | `cleared` **iff** a turn's marker still exists; else nothing                                                                                                                                                                                          |
 
 `Stop` always trails `UserPromptSubmit` on a _normal_ turn, so the happy path needs no
 state machine. Cancelled turns fire **no hook at all** — that is the whole problem the
@@ -59,8 +59,9 @@ event. We drive `attention` from them for a ~immediate (<500ms) transition.
 `PermissionRequest` is a **blocking** hook: Claude Code waits for its stdout before
 proceeding. The `permission` case in `report.sh` uses that to approve remotely:
 
-1. It extracts the command from the hook's stdin JSON (`tool_input.command`, via `jq`
-   with a `tool_name` fallback), mints a `requestId`, and reports
+1. It extracts the command from the hook's stdin JSON (`tool_input.command`; Read,
+   Write, and Edit requests render as `<tool> <file path>` rather than raw input JSON),
+   mints a `requestId`, and reports
    `attention --kind command --command <cmd> --request-id <id>` — so a Pragma approval
    toast shows the command with **Approve**/**Deny**.
 2. It then blocks on `pragma-cli agent await-decision --request-id <id>
@@ -71,6 +72,33 @@ proceeding. The `permission` case in `report.sh` uses that to approve remotely:
    so approve runs the tool and deny rejects it, no terminal interaction needed.
 4. On **timeout** (nobody answered / Pragma unavailable) it emits nothing and exits 0, so
    Claude Code falls back to its own native permission prompt. Never hangs a session.
+
+## Answering questions from a Pragma toast (`AskUserQuestion`)
+
+Claude Code routes its interactive `AskUserQuestion` tool through the **same blocking
+`PermissionRequest` hook** as command approvals. Without special-casing it, the question
+surfaced as a `command` attention whose "command" was the raw tool JSON. The `permission`
+case in `report.sh` therefore branches on `tool_name == "AskUserQuestion"`
+(`handle_question`):
+
+1. It parses the question text and answer choices from `tool_input.questions[0]` and
+   reports `attention --kind question --question <text> --options <json> --request-id
+<id>` — so Pragma clients render a real answer UI (radio options + free text), not a
+   command-approval toast.
+2. It blocks on `pragma-cli agent await-answer --request-id <id>` (same
+   `PRAGMA_APPROVAL_TIMEOUT` budget), which unblocks when the app publishes the reply
+   (an `AgentAnswer`).
+3. It emits an **allow** decision whose `updatedInput` carries the reply in the tool's
+   `answers` field, keyed by question text — the same shape Claude Code's own permission
+   component uses to hand collected answers to the tool — so Claude continues with the
+   answer and never shows its terminal question UI.
+4. On **dismiss** it emits a **deny** decision so Claude closes the native question. On
+   **timeout** it emits nothing and exits 0, so Claude falls back to its native prompt.
+
+**Multi-question payloads** (`AskUserQuestion` supports up to 4 questions) are reported
+as a **generic** attention with no round-trip: one free-text reply can't answer them all,
+so Claude's native UI collects those. Same story when `python3` is unavailable (the
+parse helpers are python3-based, like the transcript helpers above).
 
 **Interjections** (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are
 **not** handled by these hooks. They are delivered by the shared built-in-agent watcher

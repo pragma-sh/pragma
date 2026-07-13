@@ -81,6 +81,12 @@ fn run(args: Args) -> GatewayResult<()> {
         gateway_version: env!("CARGO_PKG_VERSION"),
         pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
     };
+    // A plugin catalog assembled before this gateway existed ran without
+    // credentials and dropped agents with gateway-dependent model providers;
+    // reload it now that the discovery file is written. Best-effort.
+    if let Err(error) = state.client.reload_plugins() {
+        eprintln!("plugin catalog reload after discovery write failed: {error}");
+    }
     serve(&server, &state);
     Ok(())
 }

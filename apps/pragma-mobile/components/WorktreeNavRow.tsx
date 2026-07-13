@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 
 import { useWorktreeStatus } from "@/lib/data/data-context";
+import { useThemeColors } from "@/lib/theme";
 import type { Worktree } from "@/lib/types";
 import { worktreeLabel } from "@/lib/worktree-tree";
 import { AgentStatusDot } from "./AgentStatusDot";
@@ -13,11 +14,12 @@ import { NavRow } from "./NavRow";
  */
 export function WorktreeNavRow({ worktree }: { worktree: Worktree }) {
   const status = useWorktreeStatus(worktree.id);
+  const colors = useThemeColors();
   return (
     <NavRow
       leading={
         <IconSymbol
-          color="hsl(240 4% 46%)"
+          color={colors.mutedForeground}
           fallback={worktree.isMain ? "★" : "⎇"}
           name={worktree.isMain ? "circle.fill" : "arrow.triangle.branch"}
           size={18}

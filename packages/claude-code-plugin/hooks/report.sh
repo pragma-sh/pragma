@@ -47,6 +47,7 @@ max_lifetime="${PRAGMA_WATCH_MAX:-86400}"
 # How long a PermissionRequest blocks waiting for a remote approve/deny from a
 # Pragma toast before giving up and letting Claude Code show its own prompt.
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
+dismissed_answer="__PRAGMA_QUESTION_DISMISSED__"
 
 # Reports a status to Pragma, swallowing every failure so a hook never disrupts
 # a Claude Code session (e.g. when pragma-cli or the server is unavailable).
@@ -56,19 +57,207 @@ report() {
 
 # Reports a coarse rich message. Hook payloads are intentionally not parsed here
 # beyond existing transcript handling; this keeps hooks fail-open and portable.
+# AgentMessage.ts is milliseconds since Unix epoch (see @pragma/constants).
+# `date +%s` is seconds — multiply so chat clients that stamp local input with
+# Date.now() don't sort every agent bubble above the user's messages.
+message_ts_ms() {
+  echo $(($(date +%s) * 1000))
+}
+
 message() {
   role="$1"
   text="$2"
   id="${agent}-${tab}-$(date +%s)-$$-$role"
-  ts=$(date +%s)
+  ts="$(message_ts_ms)"
   payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
 
-# Reads the hook's stdin JSON and prints the `transcript_path` field, if any.
-# Claude Code passes a JSON payload on stdin to every command hook.
-transcript_path_from_stdin() {
-  sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p' | head -n 1
+# Content-bearing messages (the user's prompt, the assistant's reply) need real
+# JSON parsing/escaping that POSIX sh cannot do safely; python3 ships with
+# macOS and every mainstream Linux distro. When it's missing these helpers do
+# nothing and the bridge degrades to the coarse status-only messages above.
+py3="$(command -v python3 2>/dev/null || true)"
+
+# Prints a top-level string field from the JSON document passed as $2.
+json_field() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$2" | "$py3" -c '
+import json, sys
+try:
+    value = (json.load(sys.stdin) or {}).get(sys.argv[1])
+except Exception:
+    value = None
+if isinstance(value, str):
+    print(value)
+' "$1" 2>/dev/null
+}
+
+# Prints the transcript path from a hook payload. Prefer real JSON parsing so
+# Claude's whitespace and escaping are handled correctly; retain a portable
+# fallback for hosts without python3.
+transcript_path() {
+  input="$1"
+  value="$(json_field transcript_path "$input")"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Reports a rich message whose text is JSON-escaped (safe for arbitrary
+# content). Silent no-op without python3 or when the text is empty.
+content_message() {
+  role="$1"
+  text="$2"
+  [ -n "$py3" ] && [ -n "$text" ] || return 0
+  id="${agent}-${tab}-$(date +%s)-$$-$role"
+  ts="$(message_ts_ms)"
+  payload=$("$py3" -c '
+import json, sys
+print(json.dumps({
+    "id": sys.argv[1],
+    "role": sys.argv[2],
+    "text": sys.argv[3],
+    "subAgentsActive": 0,
+    "ts": int(sys.argv[4]),
+}))' "$id" "$role" "$text" "$ts" 2>/dev/null)
+  [ -n "$payload" ] || return 0
+  "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
+# Prints the newest assistant text in a Claude Code transcript JSONL — the
+# reply the turn that just stopped produced. Empty output when unavailable.
+last_assistant_text() {
+  tp="$1"
+  [ -n "$py3" ] && [ -n "$tp" ] && [ -f "$tp" ] || return 0
+  "$py3" -c '
+import json, sys
+last = ""
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "assistant":
+        continue
+    content = (obj.get("message") or {}).get("content") or []
+    parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    if any(parts):
+        last = "\n".join(p for p in parts if p)
+print(last)
+' "$tp" 2>/dev/null
+}
+
+# Prints the question text from an AskUserQuestion PermissionRequest payload
+# ($1) when it carries exactly one question. Empty for multi-question payloads
+# (one free-text reply can't answer them all -- those fall back to a generic
+# attention + Claude's native question UI) or without python3.
+question_text() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    questions = ((json.load(sys.stdin) or {}).get("tool_input") or {}).get("questions") or []
+except Exception:
+    questions = []
+if len(questions) == 1 and isinstance(questions[0], dict):
+    text = questions[0].get("question")
+    if isinstance(text, str) and text:
+        print(text)
+' 2>/dev/null
+}
+
+# Prints the single question's answer choices as a QuestionOption JSON array
+# (`[{"label": ..., "description": ...}]`) for `report attention --options`.
+# Empty when there are no usable choices (the report degrades to free-text).
+question_options() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    questions = ((json.load(sys.stdin) or {}).get("tool_input") or {}).get("questions") or []
+except Exception:
+    questions = []
+options = []
+if len(questions) == 1 and isinstance(questions[0], dict):
+    for option in questions[0].get("options") or []:
+        if isinstance(option, dict) and isinstance(option.get("label"), str) and option["label"]:
+            entry = {"label": option["label"]}
+            description = option.get("description")
+            if isinstance(description, str) and description:
+                entry["description"] = description
+            options.append(entry)
+if options:
+    print(json.dumps(options))
+' 2>/dev/null
+}
+
+# Prints the PermissionRequest allow decision that feeds a remote reply ($2)
+# back into AskUserQuestion: `updatedInput.answers` (keyed by question text) is
+# how the permission component supplies collected answers, so Claude continues
+# with the reply and never shows its terminal question UI.
+question_allow_decision() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    tool_input = (json.load(sys.stdin) or {}).get("tool_input") or {}
+except Exception:
+    sys.exit(0)
+questions = tool_input.get("questions") or []
+if len(questions) != 1 or not isinstance(questions[0], dict):
+    sys.exit(0)
+text = questions[0].get("question")
+if not isinstance(text, str) or not text:
+    sys.exit(0)
+updated = dict(tool_input)
+updated["answers"] = {text: sys.argv[1]}
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {"behavior": "allow", "updatedInput": updated},
+    }
+}))
+' "$2" 2>/dev/null
+}
+
+# AskUserQuestion arrives through the same blocking PermissionRequest hook as
+# command approvals. Report it as a `question` attention (text + choices +
+# requestId) so clients render an answer UI instead of a command toast showing
+# raw tool JSON; block on `await-answer` and feed a reply back through an
+# allow decision with pre-filled answers. Dismiss emits a deny decision so the
+# native question closes; timeout emits nothing so Claude falls back to it.
+handle_question() {
+  input="$1"
+  qtext="$(question_text "$input")"
+  if [ -z "$qtext" ]; then
+    # Multi-question or unparseable payload: raise a generic attention and let
+    # Claude's own UI collect the answers.
+    report attention
+    message system "Claude Code is asking a question"
+    return 0
+  fi
+  qopts="$(question_options "$input")"
+  request_id="${agent}-${tab}-$(date +%s)-$$"
+  if [ -n "$qopts" ]; then
+    report attention --kind question --question "$qtext" --options "$qopts" --request-id "$request_id"
+  else
+    report attention --kind question --question "$qtext" --request-id "$request_id"
+  fi
+  message system "Claude Code is asking a question"
+  answer="$("$pragma_cli" agent await-answer \
+    --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" \
+    --dismiss-output "$dismissed_answer" 2>/dev/null)"
+  [ -n "$answer" ] || return 0
+  if [ "$answer" = "$dismissed_answer" ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
+    return 0
+  fi
+  decision="$(question_allow_decision "$input" "$answer")"
+  [ -n "$decision" ] || return 0
+  printf '%s\n' "$decision"
 }
 
 # Extracts a human-readable command string from a PermissionRequest stdin JSON
@@ -77,6 +266,35 @@ transcript_path_from_stdin() {
 # command field, so the approval toast always shows *something* to approve.
 extract_command() {
   input="$1"
+  if [ -n "$py3" ]; then
+    summary=$(printf '%s' "$input" | "$py3" -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin) or {}
+except Exception:
+    sys.exit(0)
+tool_input = payload.get("tool_input") or {}
+if isinstance(tool_input, str):
+    try:
+        tool_input = json.loads(tool_input)
+    except Exception:
+        tool_input = {}
+if not isinstance(tool_input, dict):
+    tool_input = {}
+command = tool_input.get("command")
+if isinstance(command, str) and command:
+    print(command)
+    sys.exit(0)
+tool_name = payload.get("tool_name")
+file_path = tool_input.get("file_path") or tool_input.get("filePath") or tool_input.get("path")
+if tool_name in {"Read", "Write", "Edit"} and isinstance(file_path, str) and file_path:
+    print(f"{tool_name} {file_path}")
+' 2>/dev/null)
+    if [ -n "$summary" ]; then
+      printf '%s' "$summary"
+      return 0
+    fi
+  fi
   if command -v jq >/dev/null 2>&1; then
     cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
     if [ -n "$cmd" ]; then
@@ -84,11 +302,27 @@ extract_command() {
       return 0
     fi
     name=$(printf '%s' "$input" | jq -r '.tool_name // "tool"' 2>/dev/null)
-    args=$(printf '%s' "$input" | jq -rc '.tool_input // {}' 2>/dev/null)
+    path=$(printf '%s' "$input" | jq -r '
+      (.tool_input // {})
+      | if type == "string" then (try fromjson catch {}) else . end
+      | .file_path // .filePath // .path // empty
+    ' 2>/dev/null)
+    case "$name" in
+      Read|Write|Edit)
+        if [ -n "$path" ]; then
+          printf '%s %s' "$name" "$path"
+          return 0
+        fi
+        ;;
+    esac
+    args=$(printf '%s' "$input" | jq -rc '
+      (.tool_input // {})
+      | if type == "string" then (try fromjson catch {}) else . end
+    ' 2>/dev/null)
     printf '%s %s' "$name" "$args"
     return 0
   fi
-  printf '%s' "$input" | sed -n 's/.*"tool_name":"\([^"]*\)".*/\1/p' | head -n 1
+  printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
 }
 
 # Succeeds when the most recent turn in the transcript ended in a user
@@ -164,9 +398,17 @@ case "${1:-}" in
     token="$$-$(date +%s)"
     printf '%s' "$token" >"$marker"
     report started
-    message assistant "Claude Code turn started"
+    # UserPromptSubmit carries the user's prompt: surface it as the chat's user
+    # bubble; fall back to the coarse status line when it can't be extracted.
+    input="$(cat)"
+    prompt="$(json_field prompt "$input")"
+    if [ -n "$prompt" ]; then
+      content_message user "$prompt"
+    else
+      message assistant "Claude Code turn started"
+    fi
     stop_watcher
-    tp="$(transcript_path_from_stdin)"
+    tp="$(transcript_path "$input")"
     if [ -n "$tp" ]; then
       # Pin the watcher to where the transcript stands *now* so a prior turn's
       # interrupt marker (already in the file) can't be mistaken for this turn's
@@ -184,19 +426,29 @@ case "${1:-}" in
     # trail an interrupt.
     stop_watcher
     rm -f "$marker"
-    if turn_interrupted "$(transcript_path_from_stdin)"; then
+    input="$(cat)"
+    tp="$(transcript_path "$input")"
+    if turn_interrupted "$tp"; then
       report cleared
       message system "Claude Code turn interrupted"
     else
       report stopped
-      message assistant "Claude Code turn completed"
+      # Stop carries the completed reply directly on current Claude builds.
+      # Prefer it over rereading the transcript, then retain transcript support
+      # for older builds that omit the field.
+      reply="$(json_field last_assistant_message "$input")"
+      [ -n "$reply" ] || reply="$(last_assistant_text "$tp")"
+      if [ -n "$reply" ]; then
+        content_message assistant "$reply"
+      else
+        message assistant "Claude Code turn completed"
+      fi
     fi
     ;;
   cleared)
     stop_watcher
     rm -f "$marker"
     report cleared
-    message system "Claude Code session cleared"
     ;;
   running)
     # PostToolUse: a tool just finished mid-turn. If a turn is in flight, re-assert
@@ -213,8 +465,10 @@ case "${1:-}" in
     ;;
   permission)
     # PermissionRequest: Claude is asking to run a tool and is BLOCKED on this
-    # hook's stdout. Report a `command` attention carrying the command text and a
-    # unique requestId, then block on `await-decision` for the verdict a Pragma
+    # hook's stdout. AskUserQuestion routes through this same hook, so branch it
+    # to the question flow (question attention + await-answer); everything else
+    # reports a `command` attention carrying the command text and a unique
+    # requestId, then blocks on `await-decision` for the verdict a Pragma
     # approval toast publishes. Emit Claude's PermissionRequest decision JSON so
     # an approve runs the tool and a deny rejects it -- all without the user
     # touching the terminal. On timeout (no one answered) emit nothing so Claude
@@ -222,6 +476,10 @@ case "${1:-}" in
     # stray request outside a turn can't wedge the hook.
     if [ -f "$marker" ]; then
       input="$(cat)"
+      if [ "$(json_field tool_name "$input")" = "AskUserQuestion" ]; then
+        handle_question "$input"
+        exit 0
+      fi
       command_text="$(extract_command "$input")"
       request_id="${agent}-${tab}-$(date +%s)-$$"
       report attention --kind command --command "$command_text" --request-id "$request_id"

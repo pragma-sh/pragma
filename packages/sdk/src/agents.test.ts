@@ -114,6 +114,32 @@ describe("agents", () => {
     });
   });
 
+  it("carries question option descriptions on an attention report", async () => {
+    let body = "";
+    const client = new PragmaClient({
+      baseUrl: "http://127.0.0.1:1",
+      token: "token",
+      fetch: async (_input, init) => {
+        body = String(init?.body);
+        return new Response(null, { status: 202 });
+      },
+    });
+
+    await reportAttention({
+      agent: "cursor",
+      client,
+      kind: "question",
+      question: "Which database?",
+      options: [{ label: "Postgres", description: "Client-server relational database" }],
+      requestId: "req-2",
+      env: { [PRAGMA_ENV_KEYS.tabId]: "tab", [PRAGMA_ENV_KEYS.worktreeId]: "worktree" },
+    });
+
+    expect(JSON.parse(body)).toMatchObject({
+      options: [{ label: "Postgres", description: "Client-server relational database" }],
+    });
+  });
+
   it("posts a decision to the decisions route", async () => {
     let input: string | URL | Request | undefined;
     let body = "";

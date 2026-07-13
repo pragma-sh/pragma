@@ -57,9 +57,8 @@ impl GatewayClient {
 
     /// Sends a brokered control request to the desktop app and returns its
     /// JSON reply. Used by `POST /v1/control/{method}` to route remote
-    /// `agentSessionLaunch` requests to the controller. A missing controller
-    /// (no desktop app connected) maps to `GatewayError::Conflict` so the
-    /// phone can render "Open Pragma on your computer to launch sessions."
+    /// `agentSessionLaunch` requests to the controller, or to the server's
+    /// existing-worktree headless fallback when no controller is connected.
     pub fn control(
         &self,
         method: pragma_constants::ControlMethod,
@@ -74,6 +73,14 @@ impl GatewayClient {
     /// Returns the cached agent catalog assembled by the plugins sidecar.
     pub fn agent_catalog(&self) -> GatewayResult<Value> {
         self.rpc(ProtocolRpcMethod::Plugins, json!({ "action": "catalog" }))
+    }
+
+    /// Asks the host to re-resolve the plugin agent catalog. Called after this
+    /// gateway writes its discovery file: a catalog assembled before then ran
+    /// without gateway credentials and dropped agents whose model providers
+    /// need them.
+    pub fn reload_plugins(&self) -> GatewayResult<Value> {
+        self.rpc(ProtocolRpcMethod::Plugins, json!({ "action": "reload" }))
     }
 
     /// Returns `{ base64, mime }` for a plugin-contributed icon asset by hash.

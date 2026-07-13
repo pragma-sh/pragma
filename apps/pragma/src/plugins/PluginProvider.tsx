@@ -18,7 +18,6 @@ import { setPluginsForScope, type PluginRecord, useActivePlugins } from "./regis
 import { syncPluginCss } from "./css";
 import { PluginCommandKeybindings } from "./commands";
 import { setPluginAgents } from "./agents";
-import { builtinAgentRecords } from "./builtin-agents";
 import { setPluginWatchers } from "./watchers";
 import { setPluginWebViewOpener, setPluginWebViews } from "./webviews";
 
@@ -46,7 +45,6 @@ export function PluginProvider(props: { children: ReactNode }): ReactNode {
   const runtime = usePluginRuntimeState();
   const manifestSignature = useRef<string | null>(null);
 
-  useBuiltinPluginRegistry();
   useRuntimeProject(selectedProject);
   useRuntimeSdk();
   useAgentReportForwarding(activePlugins, runtime);
@@ -61,12 +59,6 @@ export function PluginProvider(props: { children: ReactNode }): ReactNode {
       {props.children}
     </>
   );
-}
-
-function useBuiltinPluginRegistry(): void {
-  useEffect(() => {
-    setPluginsForScope("builtin", null, builtinAgentRecords);
-  }, []);
 }
 
 function useRuntimeProject(project: { id: string; name: string; path: string } | null): void {
@@ -261,7 +253,7 @@ function runDeclarativePluginEvent(
 
 interface ManifestEntryLike {
   specifier: string;
-  scope: "global" | "project";
+  scope: "bundled" | "global" | "project";
   error: string | null;
   config: Record<string, unknown> | null;
   manifest: { mainPath: string; version: string; modifiedMs: number | null } | null;
@@ -305,6 +297,11 @@ async function evaluatePlugins(
     projectIdByPath: (projectPath) => projects.find((project) => project.path === projectPath)?.id,
     onFailure: notifyPluginFailure,
   });
+  setPluginsForScope(
+    "bundled",
+    null,
+    records.filter((record) => record.scope === "bundled"),
+  );
   setPluginsForScope(
     "global",
     null,

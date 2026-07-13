@@ -42,6 +42,16 @@ const pragmaEnv = {
 function testHooks() {
   const reports: Report[] = [];
   const commands: string[] = [];
+  const questions: Array<{
+    question: string;
+    options: Array<{ label: string; description?: string }>;
+  }> = [];
+  const messages: Array<{
+    id: string;
+    role: string;
+    text?: string;
+    toolCalls?: Array<{ name: string; summary?: string }>;
+  }> = [];
   const hooks = createPragmaOpencodeHooks({
     env: pragmaEnv,
     async started() {
@@ -53,7 +63,21 @@ function testHooks() {
     async attention(kind) {
       reports.push(`attention:${kind}`);
     },
-    async message() {},
+    async message(message) {
+      messages.push({
+        id: message.id,
+        role: message.role,
+        ...(message.text ? { text: message.text } : {}),
+        ...(message.toolCalls
+          ? {
+              toolCalls: message.toolCalls.map((call) => ({
+                name: call.name,
+                ...(call.summary ? { summary: call.summary } : {}),
+              })),
+            }
+          : {}),
+      });
+    },
     async cleared() {
       reports.push("cleared");
     },
@@ -61,8 +85,12 @@ function testHooks() {
       reports.push("attention:command");
       commands.push(command);
     },
+    async attentionQuestion(question, options) {
+      reports.push("attention:question");
+      questions.push({ question, options });
+    },
   });
-  return { hooks, reports, commands };
+  return { hooks, reports, commands, questions, messages };
 }
 
 function runtimeEvent(type: string, properties: Record<string, unknown>) {
@@ -245,6 +273,231 @@ describe("Pragma opencode plugin", () => {
     expect(reports).toEqual(["started", "stopped"]);
   });
 
+  it("reports assistant text from message.part.updated after remembering the role", async () => {
+    const { hooks, reports, messages } = testHooks();
+
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "asst-1", role: "assistant", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "asst-1",
+          type: "text",
+          text: "Hello from opencode",
+        },
+      }),
+    );
+    await hooks.event?.(sessionIdleEvent());
+
+    expect(reports).toEqual(["started", "stopped"]);
+    expect(messages).toEqual([
+      { id: "assistant:asst-1", role: "assistant", text: "Hello from opencode" },
+    ]);
+  });
+
+  it("reports an assistant text part before its role event arrives", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "asst-1",
+          type: "text",
+          text: "Streaming before metadata",
+        },
+      }),
+    );
+
+    expect(messages).toEqual([
+      { id: "assistant:asst-1", role: "assistant", text: "Streaming before metadata" },
+    ]);
+  });
+
+  it("upserts streaming assistant text under a stable message id", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "asst-1", role: "assistant", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "asst-1",
+          type: "text",
+          text: "Hel",
+        },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "asst-1",
+          type: "text",
+          text: "Hello",
+        },
+      }),
+    );
+
+    expect(messages).toEqual([
+      { id: "assistant:asst-1", role: "assistant", text: "Hel" },
+      { id: "assistant:asst-1", role: "assistant", text: "Hello" },
+    ]);
+  });
+
+  it("accumulates message.part.delta text for live streaming", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "asst-1", role: "assistant", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.delta", {
+        sessionID: "s1",
+        messageID: "asst-1",
+        partID: "p1",
+        field: "text",
+        delta: "## Lorem ",
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.delta", {
+        sessionID: "s1",
+        messageID: "asst-1",
+        partID: "p1",
+        field: "text",
+        delta: "ipsum\n\n**dolor**",
+      }),
+    );
+
+    expect(messages).toEqual([
+      { id: "assistant:asst-1", role: "assistant", text: "## Lorem " },
+      {
+        id: "assistant:asst-1",
+        role: "assistant",
+        text: "## Lorem ipsum\n\n**dolor**",
+      },
+    ]);
+  });
+
+  it("reports reasoning parts as muted system messages", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "asst-1", role: "assistant", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "reasoning-1",
+          sessionID: "s1",
+          messageID: "asst-1",
+          type: "reasoning",
+          text: "Checking",
+        },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.delta", {
+        sessionID: "s1",
+        messageID: "asst-1",
+        partID: "reasoning-1",
+        field: "text",
+        delta: " dependencies",
+      }),
+    );
+
+    expect(messages).toEqual([
+      {
+        id: "reasoning:asst-1:reasoning-1",
+        role: "system",
+        text: "Checking",
+      },
+      {
+        id: "reasoning:asst-1:reasoning-1",
+        role: "system",
+        text: "Checking dependencies",
+      },
+    ]);
+  });
+
+  it("does not report user text deltas", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "user-1", role: "user", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.delta", {
+        sessionID: "s1",
+        messageID: "user-1",
+        partID: "p1",
+        field: "text",
+        delta: "user typed this",
+      }),
+    );
+
+    expect(messages).toEqual([]);
+  });
+
+  it("does not report user text parts from message.part.updated (chat.message owns those)", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("message.updated", {
+        info: { id: "user-1", role: "user", sessionID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "user-1",
+          type: "text",
+          text: "user typed this",
+        },
+      }),
+    );
+
+    expect(messages).toEqual([]);
+  });
+
+  it("extracts user text from chat.message parts, not the input metadata", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks["chat.message"]?.(
+      { sessionID: "s1" },
+      {
+        message: { id: "u1", role: "user" } as never,
+        parts: [{ id: "p1", type: "text", text: "What files are here?" } as never],
+      },
+    );
+
+    expect(messages).toEqual([
+      { id: expect.stringMatching(/^chat:/), role: "user", text: "What files are here?" },
+    ]);
+  });
+
   it("keeps attention pinned over a concurrent idle (red > green)", async () => {
     const { hooks, reports } = testHooks();
 
@@ -381,14 +634,40 @@ describe("Pragma opencode plugin", () => {
   });
 
   it("reports attention for the question tool via tool.execute.before", async () => {
-    const { hooks, reports } = testHooks();
+    const { hooks, reports, questions, messages } = testHooks();
 
     await hooks["tool.execute.before"]?.(
       { tool: "question", sessionID: "s1", callID: "c1" },
-      { args: {} },
+      {
+        args: {
+          questions: [
+            {
+              question: "Which database?",
+              header: "DB",
+              options: [
+                { label: "Postgres", description: "Relational" },
+                { label: "SQLite", description: "Embedded" },
+              ],
+            },
+          ],
+        },
+      },
     );
 
     expect(reports).toEqual(["attention:question"]);
+    expect(questions).toEqual([
+      {
+        question: "Which database?",
+        options: [
+          { label: "Postgres", description: "Relational" },
+          { label: "SQLite", description: "Embedded" },
+        ],
+      },
+    ]);
+    expect(messages[0]?.toolCalls?.[0]).toMatchObject({
+      name: "question",
+      summary: "Which database?",
+    });
   });
 
   it("reports started for a non-question tool via tool.execute.before", async () => {
@@ -396,11 +675,25 @@ describe("Pragma opencode plugin", () => {
       async (hooks) => {
         await hooks["tool.execute.before"]?.(
           { tool: "bash", sessionID: "s1", callID: "c1" },
-          { args: {} },
+          { args: { command: "npm test" } },
         );
       },
       ["started"],
     );
+  });
+
+  it("summarizes bash tool args as the command, not raw JSON", async () => {
+    const { hooks, messages } = testHooks();
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "bash", sessionID: "s1", callID: "c1" },
+      { args: { command: "npm test", description: "run tests" } },
+    );
+
+    expect(messages[0]?.toolCalls?.[0]).toMatchObject({
+      name: "bash",
+      summary: "npm test",
+    });
   });
 
   it("reports attention for permission via permission.ask hook", async () => {

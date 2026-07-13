@@ -8,6 +8,7 @@ import type {
   AgentInterrupt,
   AgentMessage,
   AgentModelEntry,
+  QuestionOption,
   AgentReasoning,
   AgentReportPayload,
   AgentSessionLaunchPayload,
@@ -26,6 +27,7 @@ export type {
   AgentInterrupt,
   AgentMessage,
   AgentModelEntry,
+  QuestionOption,
   AgentReasoning,
   AgentReportPayload,
   AgentSessionLaunchPayload,
@@ -51,6 +53,8 @@ export interface AgentEvent {
   command?: string | null;
   /** The question awaiting an answer when `attentionKind` is `question`. */
   question?: string | null;
+  /** Answer choices for a `question` attention, when present. */
+  options?: QuestionOption[] | null;
   /** Correlation id for the command/question round-trip, when present. */
   requestId?: string | null;
 }
@@ -98,6 +102,10 @@ export interface ReportOptions {
   kind?: AgentAttentionKind;
   /** Command text for a `command` attention report (shown in the approval toast). */
   command?: string;
+  /** Question text for a `question` attention report (shown in the answer UI). */
+  question?: string;
+  /** Answer choices for a `question` attention report. */
+  options?: QuestionOption[];
   /** Correlation id so a waiting caller can match the resulting decision. */
   requestId?: string;
   client?: import("../client").PragmaClient;

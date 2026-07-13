@@ -20,8 +20,8 @@ Tauri or client presentation code.
   from the client DB, then forward via `PragmaClient::rpc`. The host
   re-validates paths and runs the work on its own disk, so the same command
   serves a local project and an SSH-bridged remote one. Worktree lifecycle
-  operations (exclude setup, create/remove, branch delete, dirty check) and
-  setup/teardown scripts run on the owning host.
+  operations (exclude setup, create/remove, branch delete, dirty check,
+  headless-checkout listing) and setup/teardown scripts run on the owning host.
 - **Still client-local:** `database`, `projects`, `worktrees`, `tabs`, `kanban`,
   `settings` remain metadata in the client DB (`pragma.db`) and return
   `UnsupportedMethod` from core — by design (see `pragma-client/router.rs`).

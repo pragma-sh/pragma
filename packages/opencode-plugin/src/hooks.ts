@@ -1,5 +1,5 @@
 import type { Hooks } from "@opencode-ai/plugin";
-import { type AgentAttentionKind, type AgentMessage } from "@pragma/sdk";
+import { type AgentAttentionKind, type AgentMessage, type QuestionOption } from "@pragma/sdk";
 
 type ReportKey = "started" | "stopped" | "cleared" | `attention:${AgentAttentionKind}`;
 type Environment = Record<string, string | undefined>;
@@ -8,6 +8,10 @@ type RuntimeEvent = OpencodeEvent | { type: string; properties?: Record<string, 
 
 /** What a runtime event asks the reporter to do: re-derive status, reset, or nothing. */
 type EventAction = "sync" | "clear" | "none";
+
+function messageTextKey(messageID: string, partID?: string): string {
+  return partID ? `${messageID}:${partID}` : messageID;
+}
 
 const PRAGMA_ENV_KEYS = [
   "PRAGMA_GATEWAY_URL",
@@ -32,6 +36,11 @@ export interface PragmaReporter {
    * no returnable-decision plugin hook on the current binary).
    */
   attentionCommand(command: string, requestId: string): Promise<void>;
+  /**
+   * Reports a `question` attention carrying the prompt, answer choices, and a
+   * correlation id so a non-terminal client can render radio options and reply.
+   */
+  attentionQuestion(question: string, options: QuestionOption[], requestId: string): Promise<void>;
 }
 
 /**
@@ -50,6 +59,12 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   let attention = false;
   let attentionKind: AgentAttentionKind = "command";
   let lastReported: ReportKey | null = null;
+  /** messageID → role, filled from `message.updated` so text parts can be attributed. */
+  const messageRoles = new Map<string, "user" | "assistant">();
+  /** partID → OpenCode part type, used to distinguish reasoning deltas from final text. */
+  const partTypes = new Map<string, string>();
+  /** messageID/partID → accumulated text from `message.part.delta` events. */
+  const messageText = new Map<string, string>();
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
     "session.status": applySessionStatusEvent,
@@ -58,7 +73,15 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     "session.deleted": applySessionDeletedEvent,
     "server.instance.disposed": () => "clear",
     "permission.replied": applyPermissionRepliedEvent,
+    "message.updated": applyMessageUpdatedEvent,
     "message.part.updated": applyMessagePartEvent,
+  };
+  const chatContentHandlers: Record<string, (event: RuntimeEvent) => Promise<void>> = {
+    "message.updated": async (event) => {
+      rememberMessageRole(event);
+    },
+    "message.part.delta": reportChatDelta,
+    "message.part.updated": reportUpdatedPart,
   };
 
   return {
@@ -72,6 +95,15 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
         await raiseCommandApproval(runtimeEvent);
         return;
       }
+      // Assistant (and other) chat content rides on message.* events; report it
+      // before the status sync so a trailing idle still carries the reply.
+      if (
+        runtimeEvent.type === "message.updated" ||
+        runtimeEvent.type === "message.part.updated" ||
+        runtimeEvent.type === "message.part.delta"
+      ) {
+        await reportChatContent(runtimeEvent);
+      }
       const action = applyEvent(runtimeEvent);
       if (action === "clear") {
         await clear();
@@ -79,12 +111,15 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
         await sync();
       }
     },
-    "chat.message": async (input) => {
+    "chat.message": async (_input, output) => {
       busy = true;
+      const text =
+        textFromParts(output.parts) ??
+        textFromRecord(output.message as unknown as Record<string, unknown>);
       await reporter.message({
         id: messageId("chat"),
         role: "user",
-        text: textFromRecord(input as Record<string, unknown>),
+        ...(text ? { text } : {}),
         subAgentsActive: 0,
         ts: Date.now(),
       });
@@ -97,15 +132,20 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       );
       await sync();
     },
-    "tool.execute.before": async (input) => {
+    "tool.execute.before": async (input, output) => {
+      const args = isRecord(output?.args) ? output.args : {};
       if (input.tool === "question") {
-        raiseAttention("question");
-      } else {
-        busy = true;
+        await raiseQuestionAttention(
+          args,
+          typeof input.callID === "string" ? input.callID : undefined,
+        );
+        // Surface a short human line in the transcript — never the raw args JSON.
+        const parsed = parseQuestionArgs(args);
+        await reporter.message(toolMessage("question", parsed?.prompt ?? "Waiting for an answer"));
+        return;
       }
-      await reporter.message(
-        toolMessage(input.tool, summaryFromRecord(input as Record<string, unknown>)),
-      );
+      busy = true;
+      await reporter.message(toolMessage(input.tool, toolSummary(input.tool, args)));
       await sync();
     },
     "permission.ask": async (input) => {
@@ -227,14 +267,118 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     await reporter.attentionCommand(commandFromPermission(source), permissionRequestId());
   }
 
+  /**
+   * Reports a question attention with the parsed prompt + choices. Pins
+   * `lastReported` so a later generic `sync` does not re-emit a bare
+   * `attention:question` that would drop the question text/options.
+   */
+  async function raiseQuestionAttention(
+    args: Record<string, unknown>,
+    callId: string | undefined,
+  ): Promise<void> {
+    const parsed = parseQuestionArgs(args);
+    attention = true;
+    attentionKind = "question";
+    lastReported = "attention:question";
+    await reporter.attentionQuestion(
+      parsed?.prompt ?? "The agent is asking a question",
+      parsed?.options ?? [],
+      callId ? `opencode-question-${callId}` : permissionRequestId(),
+    );
+  }
+
   function applyPermissionRepliedEvent(): EventAction {
     attention = false;
     busy = true;
     return "sync";
   }
 
+  function applyMessageUpdatedEvent(event: RuntimeEvent): EventAction {
+    rememberMessageRole(event);
+    return "none";
+  }
+
   function applyMessagePartEvent(event: RuntimeEvent): EventAction {
-    return applyMessagePart(event) ? "sync" : "none";
+    return applyQuestionPart(event) ? "sync" : "none";
+  }
+
+  /**
+   * Surfaces chat content from message.* events into Pragma. Status flags stay
+   * in the sync path; this only publishes {@link PragmaReporter.message}.
+   */
+  async function reportChatContent(event: RuntimeEvent): Promise<void> {
+    const handler = chatContentHandlers[event.type];
+    if (handler) await handler(event);
+  }
+
+  async function reportUpdatedPart(event: RuntimeEvent): Promise<void> {
+    const part = partFromEvent(event);
+    if (!part) {
+      return;
+    }
+    rememberPartType(part);
+    const details = assistantTextPart(part);
+    // OpenCode can emit an assistant text part before its message.updated role
+    // event. Only suppress a part once we positively know it belongs to a user;
+    // chat.message already reports those prompts.
+    if (!details || messageRoles.get(details.messageID) === "user") {
+      return;
+    }
+    const key = messageTextKey(details.messageID, details.partID);
+    messageText.set(key, details.text);
+    await reportAssistantText(details.messageID, details.text, details.partType, details.partID);
+  }
+
+  function rememberPartType(part: Record<string, unknown>): void {
+    const partID = typeof part.id === "string" ? part.id : undefined;
+    const partType = typeof part.type === "string" ? part.type : undefined;
+    if (partID && partType) partTypes.set(partID, partType);
+  }
+
+  /** Accumulates OpenCode's incremental text event and publishes a growing snapshot. */
+  async function reportChatDelta(event: RuntimeEvent): Promise<void> {
+    const delta = chatDelta(event, messageRoles);
+    if (!delta) {
+      return;
+    }
+    const key = messageTextKey(delta.messageID, delta.partID);
+    const text = `${messageText.get(key) ?? ""}${delta.text}`;
+    messageText.set(key, text);
+    await reportAssistantText(
+      delta.messageID,
+      text,
+      delta.partID ? partTypes.get(delta.partID) : undefined,
+      delta.partID,
+    );
+  }
+
+  /** Reports one assistant text snapshot under its stable transcript id. */
+  async function reportAssistantText(
+    messageID: string,
+    text: string,
+    partType?: string,
+    partID?: string,
+  ): Promise<void> {
+    const isReasoning = partType === "reasoning";
+    await reporter.message({
+      id: isReasoning ? `reasoning:${messageID}:${partID ?? "part"}` : `assistant:${messageID}`,
+      role: isReasoning ? "system" : "assistant",
+      text,
+      subAgentsActive: 0,
+      ts: Date.now(),
+    });
+  }
+
+  /** Records `message.updated` role so later text parts can be attributed. */
+  function rememberMessageRole(event: RuntimeEvent): void {
+    const properties = event.properties as Record<string, unknown> | undefined;
+    const info = properties?.info;
+    if (!isRecord(info) || typeof info.id !== "string") {
+      return;
+    }
+    if (info.role === "user" || info.role === "assistant") {
+      messageRoles.set(info.id, info.role);
+    }
   }
 
   /** Whether a `session.error` event carries opencode's abort error. */
@@ -249,35 +393,38 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   }
 
   /** Handles only the question tool: raise attention while pending, resume once resolved. */
-  function applyMessagePart(event: RuntimeEvent): boolean {
-    const part = questionPartFromEvent(event);
-    if (!part) {
+  function applyQuestionPart(event: RuntimeEvent): boolean {
+    const part = partFromEvent(event);
+    if (!part || part.type !== "tool" || part.tool !== "question") {
       return false;
     }
     applyQuestionPartState(part);
     return true;
   }
 
-  /** Pulls the `question` tool part out of a `message.part.updated` event, if any. */
-  function questionPartFromEvent(event: RuntimeEvent): Record<string, unknown> | undefined {
+  /** Pulls the `part` record out of a `message.part.updated` event, if any. */
+  function partFromEvent(event: RuntimeEvent): Record<string, unknown> | undefined {
     const properties = event.properties;
     const part = isRecord(properties) && "part" in properties ? properties.part : undefined;
-    if (!isRecord(part) || part.type !== "tool" || part.tool !== "question") {
-      return undefined;
-    }
-    return part;
+    return isRecord(part) ? part : undefined;
   }
 
   /** Updates flags from a question tool part's state: resume when resolved, else raise. */
   function applyQuestionPartState(part: Record<string, unknown>): void {
     const state = isRecord(part.state) ? part.state : undefined;
-    const status = state?.status;
-    if (status === "completed" || status === "error") {
+    if (questionPartFinished(state)) {
       attention = false;
       busy = true;
-    } else {
-      raiseAttention("question");
+      return;
     }
+    // Prefer the structured report (prompt + options) when the part carries
+    // tool input; fall back to a bare attention flag when it doesn't.
+    const input = questionPartInput(state, part);
+    if (input) {
+      void raiseQuestionAttention(input, typeof part.callID === "string" ? part.callID : undefined);
+      return;
+    }
+    raiseAttention("question");
   }
 }
 
@@ -285,6 +432,62 @@ export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function assistantTextPart(
+  part: Record<string, unknown>,
+): { messageID: string; partID: string | undefined; partType: string; text: string } | undefined {
+  const partType = typeof part.type === "string" ? part.type : undefined;
+  if (partType !== "text" && partType !== "reasoning") return undefined;
+  const messageID = typeof part.messageID === "string" ? part.messageID : undefined;
+  const text = typeof part.text === "string" ? part.text.trim() : "";
+  if (!messageID || !text) return undefined;
+  return {
+    messageID,
+    partID: typeof part.id === "string" ? part.id : undefined,
+    partType,
+    text,
+  };
+}
+
+function chatDelta(
+  event: RuntimeEvent,
+  messageRoles: ReadonlyMap<string, "user" | "assistant">,
+): { messageID: string; partID: string | undefined; text: string } | undefined {
+  const properties = event.properties;
+  if (!isRecord(properties) || !isTextDelta(properties)) {
+    return undefined;
+  }
+  const messageID = typeof properties.messageID === "string" ? properties.messageID : undefined;
+  if (!messageID || messageRoles.get(messageID) === "user") {
+    return undefined;
+  }
+  return {
+    messageID,
+    partID: typeof properties.partID === "string" ? properties.partID : undefined,
+    text: properties.delta,
+  };
+}
+
+function isTextDelta(
+  properties: Record<string, unknown>,
+): properties is Record<string, unknown> & { delta: string } {
+  return (
+    (properties.field === undefined || properties.field === "text") &&
+    typeof properties.delta === "string" &&
+    properties.delta.length > 0
+  );
+}
+
+function questionPartFinished(state: Record<string, unknown> | undefined): boolean {
+  return state?.status === "completed" || state?.status === "error";
+}
+
+function questionPartInput(
+  state: Record<string, unknown> | undefined,
+  part: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return isRecord(state?.input) ? state.input : isRecord(part.input) ? part.input : undefined;
 }
 
 /** A unique correlation id for one command-approval round-trip. Opaque. */
@@ -440,6 +643,120 @@ function summaryFromRecord(record: Record<string, unknown>): string | undefined 
   return textFromRecord(record) ?? compactJson(record);
 }
 
+/**
+ * Human-readable one-liner for a tool call. Prefer the tool's primary arg
+ * (command, path, pattern, …) over dumping the whole args object as JSON —
+ * mobile chat renders `summary` as the gray activity line.
+ */
+function toolSummary(tool: string, args: Record<string, unknown>): string | undefined {
+  return TOOL_SUMMARIES[tool.toLowerCase()]?.(args) ?? summaryFromRecord(args);
+}
+
+const TOOL_SUMMARIES: Record<string, (args: Record<string, unknown>) => string | undefined> = {
+  bash: commandSummary,
+  shell: commandSummary,
+  read: pathSummary,
+  write: pathSummary,
+  edit: pathSummary,
+  apply_patch: pathSummary,
+  patch: pathSummary,
+  grep: grepSummary,
+  glob: (args) => firstString(args.pattern, args.glob, args.path),
+  webfetch: (args) => firstString(args.url, args.uri),
+  fetch: (args) => firstString(args.url, args.uri),
+  websearch: (args) => firstString(args.query, args.q, args.search),
+  search: (args) => firstString(args.query, args.q, args.search),
+  todowrite: () => "Updating todos",
+  todo: () => "Updating todos",
+  task: taskSummary,
+  agent: taskSummary,
+};
+
+function commandSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.command, args.cmd, args.script);
+}
+
+function pathSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.filePath, args.filepath, args.path, args.file);
+}
+
+function grepSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.pattern, args.query, args.regex) ?? firstString(args.path, args.include);
+}
+
+function taskSummary(args: Record<string, unknown>): string | undefined {
+  return firstString(args.description, args.prompt, args.text) ?? "Spawning sub-agent";
+}
+
+/**
+ * Pulls the display prompt + radio labels out of OpenCode's question-tool args
+ * (`{ questions: [{ question, header, options: [{ label, description }] }] }`).
+ * Returns undefined when the shape is unrecognizable so callers can fall back.
+ */
+function parseQuestionArgs(
+  args: Record<string, unknown>,
+): { prompt: string; options: QuestionOption[] } | undefined {
+  const questions = Array.isArray(args.questions) ? args.questions : undefined;
+  if (!questions || questions.length === 0) {
+    // Some builds may pass a single prompt at the top level.
+    const single = questionPromptFrom(args);
+    return single;
+  }
+  const prompts = questions.flatMap((item) => {
+    const parsed = isRecord(item) ? questionPromptFrom(item) : undefined;
+    return parsed ? [parsed] : [];
+  });
+  if (prompts.length === 0) {
+    return undefined;
+  }
+  // Multiple questions collapse into one attention card: join prompts, keep
+  // the first question's options (mobile UI is single-select today).
+  const first = prompts[0];
+  if (!first) {
+    return undefined;
+  }
+  return {
+    prompt: prompts.map((p) => p.prompt).join("\n\n"),
+    options: first.options,
+  };
+}
+
+function questionPromptFrom(
+  record: Record<string, unknown>,
+): { prompt: string; options: QuestionOption[] } | undefined {
+  const prompt =
+    firstString(record.question, record.header, record.text, record.message, record.prompt) ??
+    undefined;
+  if (!prompt) {
+    return undefined;
+  }
+  const options = questionOptions(record.options);
+  return { prompt, options };
+}
+
+/** Extracts answer choices from OpenCode `{ label, description }` option objects. */
+function questionOptions(value: unknown): QuestionOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const options: QuestionOption[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      options.push({ label: item.trim() });
+      continue;
+    }
+    if (!isRecord(item)) {
+      continue;
+    }
+    const label = firstString(item.label, item.text, item.value, item.name, item.description);
+    if (label) {
+      const description = firstString(item.description);
+      options.push({ label, ...(description && description !== label ? { description } : {}) });
+    }
+  }
+  return options;
+}
+
 function textFromRecord(record: Record<string, unknown>): string | undefined {
   for (const key of ["text", "message", "command", "description", "summary"]) {
     const value = record[key];
@@ -448,6 +765,23 @@ function textFromRecord(record: Record<string, unknown>): string | undefined {
     }
   }
   return undefined;
+}
+
+/** Joins non-empty text parts from a `chat.message` output (or similar). */
+function textFromParts(parts: unknown): string | undefined {
+  if (!Array.isArray(parts)) {
+    return undefined;
+  }
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (!isRecord(part) || part.type !== "text") {
+      continue;
+    }
+    if (typeof part.text === "string" && part.text.trim()) {
+      chunks.push(part.text.trim());
+    }
+  }
+  return chunks.length > 0 ? chunks.join("\n") : undefined;
 }
 
 function compactJson(value: unknown): string | undefined {

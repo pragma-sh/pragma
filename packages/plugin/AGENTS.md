@@ -9,6 +9,7 @@ loading any plugin bundle.
 ```
 packages/plugin/
 ├── src/index.ts         # Public exports
+├── src/catalog.ts       # Bridge-free agent/plugin declarations for host catalog sidecars
 ├── src/plugin.ts        # definePlugin + API-version stamp
 ├── src/agent.ts         # defineAgent and agent types
 ├── src/watcher.ts       # defineWatcher and watcher context types

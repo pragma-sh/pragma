@@ -48,6 +48,21 @@ pub struct GithubRepoInfo {
     pub head_branch: String,
 }
 
+/// One checkout under `<project>/.pragma/worktrees/` — a worktree the server
+/// may have created headlessly (a phone launching an agent while the desktop
+/// app was closed). `id` is the directory name, i.e. the server-minted
+/// worktree id.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadlessWorktree {
+    /// The checkout's directory name, used as the worktree id.
+    pub id: String,
+    /// Absolute checkout path on the host.
+    pub path: String,
+    /// The branch checked out.
+    pub branch: String,
+}
+
 /// One git operation request. `root` is always the trusted absolute worktree
 /// root; `parent_branch` is the DB-resolved parent branch where a fork-point is
 /// needed.
@@ -134,6 +149,9 @@ pub enum GitRequest {
     DeleteBranch { repo_root: String, branch: String },
     /// True when the worktree at `root` has uncommitted/staged/untracked changes.
     IsDirty { root: String },
+    /// Lists checkouts under `<project_root>/.pragma/worktrees/` with their
+    /// checked-out branches, for headless-worktree adoption.
+    ListHeadlessWorktrees { project_root: String },
 }
 
 /// Dispatches a `git` RPC payload to the matching operation and returns a JSON
@@ -265,9 +283,39 @@ fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
             to_value(delete_branch(Path::new(repo_root), branch)?)?
         }
         GitRequest::IsDirty { root } => to_value(worktree_is_dirty(Path::new(root)))?,
+        GitRequest::ListHeadlessWorktrees { project_root } => {
+            to_value(list_headless_worktrees(Path::new(project_root)))?
+        }
         _ => return Ok(None),
     };
     Ok(Some(value))
+}
+
+/// Lists checkouts under `<project_root>/.pragma/worktrees/`: every directory
+/// containing a `.git` entry with a named branch checked out. A missing
+/// worktrees directory, an unreadable entry, or a detached HEAD yields no row
+/// rather than an error — adoption is best-effort.
+fn list_headless_worktrees(project_root: &Path) -> Vec<HeadlessWorktree> {
+    let Ok(entries) = std::fs::read_dir(project_root.join(PRAGMA_WORKTREES_EXCLUDE)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.join(".git").exists() {
+                return None;
+            }
+            let branch = current_branch(&path)
+                .ok()
+                .filter(|branch| branch != "HEAD")?;
+            Some(HeadlessWorktree {
+                id: entry.file_name().to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
+                branch,
+            })
+        })
+        .collect()
 }
 
 fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
@@ -1197,8 +1245,8 @@ mod tests {
 
     use super::{
         commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
-        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
-        worktree_is_dirty, MergedStatusItem,
+        list_headless_worktrees, merge_worktree_to_parent, merged_status, stage_file, unstage_file,
+        worktree_changes, worktree_is_dirty, MergedStatusItem,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1253,6 +1301,46 @@ mod tests {
         std::mem::forget(main);
         std::mem::forget(child_root);
         (child_path, main_path)
+    }
+
+    #[test]
+    fn lists_headless_worktrees_under_pragma_dir() {
+        let project = tempdir().expect("tempdir");
+        let project_path = project.path().to_path_buf();
+        run(&project_path, &["init", "-b", "main"]);
+        run(&project_path, &["config", "user.email", "test@example.com"]);
+        run(&project_path, &["config", "user.name", "Test"]);
+        std::fs::write(project_path.join("base.txt"), "base\n").expect("write base");
+        commit_all(&project_path, "base commit");
+
+        let worktrees_dir = project_path.join(".pragma/worktrees");
+        std::fs::create_dir_all(&worktrees_dir).expect("worktrees dir");
+        let checkout = worktrees_dir.join("wt-1");
+        run(
+            &project_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                checkout.to_string_lossy().as_ref(),
+            ],
+        );
+        // A stray non-git directory is ignored.
+        std::fs::create_dir_all(worktrees_dir.join("not-a-repo")).expect("stray dir");
+
+        let listed = list_headless_worktrees(&project_path);
+        assert_eq!(listed.len(), 1);
+        let entry = listed.first().expect("one entry");
+        assert_eq!(entry.id, "wt-1");
+        assert_eq!(entry.branch, "feature");
+        assert_eq!(entry.path, checkout.to_string_lossy());
+    }
+
+    #[test]
+    fn headless_listing_is_empty_without_worktrees_dir() {
+        let project = tempdir().expect("tempdir");
+        assert!(list_headless_worktrees(project.path()).is_empty());
     }
 
     #[test]

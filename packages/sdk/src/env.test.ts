@@ -16,6 +16,13 @@ describe("env", () => {
         [PRAGMA_ENV_KEYS.worktreeId]: "worktree",
       }),
     ).toBe(true);
-    expect(hasPragmaEnvironment({})).toBe(false);
+    expect(
+      hasPragmaEnvironment({
+        [PRAGMA_ENV_KEYS.gatewayUrl]: "",
+        [PRAGMA_ENV_KEYS.gatewayToken]: "",
+        [PRAGMA_ENV_KEYS.tabId]: "",
+        [PRAGMA_ENV_KEYS.worktreeId]: "",
+      }),
+    ).toBe(false);
   });
 });

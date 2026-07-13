@@ -12,8 +12,10 @@ pragma-cli agent report --agent <id> started|stopped|attention|cleared
 pragma-cli agent report --agent <id> attention --kind command --command "<cmd>" --request-id <id>
 pragma-cli agent await-decision --agent <id> --request-id <id> [--timeout 300]
 pragma-cli agent decide --agent <id> --request-id <id> --allow|--deny
-# Question/answer: report the question + a correlation id, then block for the reply.
-pragma-cli agent report --agent <id> attention --kind question --question "<q>" --request-id <id>
+# Question/answer: report the question (+ optional JSON answer choices) + a
+# correlation id, then block for the reply.
+pragma-cli agent report --agent <id> attention --kind question --question "<q>" \
+  --options '[{"label":"Yes","description":"..."},{"label":"No"}]' --request-id <id>
 pragma-cli agent await-answer --agent <id> --request-id <id> [--timeout 300]
 pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismiss
 # Interject: publish free-form input to a running agent (the controlling-client side).
@@ -27,9 +29,10 @@ prints nothing and exits non-zero so a blocking harness hook (Claude Code
 `agent decide` is the controlling-client side: it publishes that verdict.
 
 `agent await-answer` mirrors this for questions: it blocks until the matching `AgentAnswer`
-arrives, then prints the reply text (exit 0). A dismissed reply or a timeout prints nothing
-and exits non-zero so the caller can fall back. `agent answer` publishes the reply
-(`--text`) or a dismissal (`--dismiss`).
+arrives, then prints the reply text (exit 0). A dismissed reply or timeout prints nothing
+and exits non-zero so the caller can fall back. Hooks that must distinguish dismissal from
+timeout can pass `--dismiss-output <value>`; dismissal then prints that value and exits 0.
+`agent answer` publishes the reply (`--text`) or a dismissal (`--dismiss`).
 
 `agent input` publishes an `AgentInput` (a free-form interjection) fanned out to agent
 subscribers; the waiting reporter — a harness input hook or a plugin watcher — delivers the

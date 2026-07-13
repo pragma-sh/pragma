@@ -47,6 +47,8 @@ struct PragmaConfigFile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PluginScope {
+    /// Shipped inside the app resource directory.
+    Bundled,
     /// Declared in `~/.pragma/config.json`.
     Global,
     /// Declared in `<project>/.pragma/config.json`.
@@ -94,7 +96,8 @@ pub struct PluginEntryResult {
 pub struct StartWatcherRequest {
     pub plugin_id: String,
     pub plugin_main: String,
-    pub agent_id: String,
+    #[serde(rename = "agentId")]
+    pub _agent_id: String,
     pub watcher_agent: String,
     pub config: serde_json::Value,
     pub session_id: String,
@@ -110,6 +113,14 @@ struct PackageJson {
     name: Option<String>,
     version: Option<String>,
     main: Option<String>,
+    pragma: Option<PragmaPackageJson>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PragmaPackageJson {
+    plugin_id: Option<String>,
+    main: Option<String>,
 }
 
 /// Returns the path of a `.pragma/config.json` under `root` (home or project).
@@ -124,9 +135,11 @@ pub fn config_path(root: impl AsRef<Path>) -> PathBuf {
 pub fn read_manifests(
     home_dir: impl AsRef<Path>,
     project_path: Option<&Path>,
+    resource_dir: Option<&Path>,
 ) -> Vec<PluginEntryResult> {
     let home = home_dir.as_ref();
-    let mut results = read_scope(home, home, PluginScope::Global, None);
+    let mut results = resource_dir.map_or_else(Vec::new, read_bundled_scope);
+    results.extend(read_scope(home, home, PluginScope::Global, None));
     if let Some(project) = project_path {
         results.extend(read_scope(
             project,
@@ -136,6 +149,40 @@ pub fn read_manifests(
         ));
     }
     results
+}
+
+fn read_bundled_scope(resource_dir: &Path) -> Vec<PluginEntryResult> {
+    let relative = Path::new(CONSTANTS.plugins.bundled_dir_name.as_str());
+    let dir = [
+        resource_dir.join(relative),
+        resource_dir.join("resources").join(relative),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_dir())
+    .unwrap_or_else(|| resource_dir.join(relative));
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut plugin_dirs: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    plugin_dirs.sort();
+    plugin_dirs
+        .into_iter()
+        .map(|plugin_dir| {
+            let resolved = read_manifest(&plugin_dir);
+            PluginEntryResult {
+                specifier: plugin_dir.display().to_string(),
+                scope: PluginScope::Bundled,
+                project_path: None,
+                config: None,
+                manifest: resolved.as_ref().ok().cloned(),
+                error: resolved.err(),
+            }
+        })
+        .collect()
 }
 
 /// Reads the bundle source for a resolved plugin `main` file.
@@ -148,56 +195,17 @@ pub fn read_bundle(main_path: &Path) -> AppResult<String> {
     })
 }
 
-/// `mainPath` sentinel a built-in agent uses (it has no on-disk plugin bundle).
-/// The `<name>` suffix selects the staged watcher module. Kept in sync with
-/// `apps/pragma/src/plugins/builtin-agents.ts`.
-const BUILTIN_WATCHER_PREFIX: &str = "pragma-builtin:";
-
-/// Resolves a built-in watcher `mainPath` sentinel to a real module the
-/// `pragma-watch` sidecar can import. Dev imports the workspace TypeScript
-/// source; a release build imports the staged bundle beside the app resources.
-/// Returns `None` (watcher skipped, non-fatal) if no bundle is found in release.
-fn resolve_builtin_watcher_main(sentinel: &str, resource_dir: Option<&Path>) -> Option<PathBuf> {
-    let name = sentinel.strip_prefix(BUILTIN_WATCHER_PREFIX)?;
-    // `pragma-builtin:opencode-watcher` -> the opencode-plugin watcher module.
-    if name != "opencode-watcher" {
-        return None;
-    }
-    if cfg!(debug_assertions) {
-        return Some(workspace_root().join("packages/opencode-plugin/src/pragma-watcher.ts"));
-    }
-    let rel = Path::new("plugins/opencode/pragma-watcher.mjs");
-    resource_dir
-        .into_iter()
-        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
-        .find(|candidate| candidate.exists())
-}
-
-/// Starts a detached `pragma-watch` sidecar for one plugin watcher. Built-in
-/// watchers whose `mainPath` is a `pragma-builtin:` sentinel are resolved to the
-/// staged module; a missing release bundle is a non-fatal skip.
-pub fn start_watcher(request: StartWatcherRequest, resource_dir: Option<&Path>) -> AppResult<()> {
-    let plugin_main = if request.plugin_main.starts_with(BUILTIN_WATCHER_PREFIX) {
-        let Some(path) = resolve_builtin_watcher_main(&request.plugin_main, resource_dir) else {
-            log::warn!(
-                "no watcher bundle for {}; skipping watcher start",
-                request.plugin_main
-            );
-            return Ok(());
-        };
-        path.to_string_lossy().into_owned()
-    } else {
-        request.plugin_main.clone()
-    };
+/// Starts a detached `pragma-watch` sidecar for one plugin watcher.
+pub fn start_watcher(request: StartWatcherRequest) -> AppResult<()> {
     let mut command = watcher_command();
     command
         .args([
             "--pluginId",
             &request.plugin_id,
             "--pluginMain",
-            &plugin_main,
+            &request.plugin_main,
             "--agentId",
-            &request.agent_id,
+            &request.watcher_agent,
             "--watcherAgent",
             &request.watcher_agent,
             "--config",
@@ -346,7 +354,10 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
     let package: PackageJson = serde_json::from_str(&content)
         .map_err(|error| format!("invalid {}: {error}", package_path.display()))?;
     let name = package
-        .name
+        .pragma
+        .as_ref()
+        .and_then(|pragma| pragma.plugin_id.clone())
+        .or(package.name)
         .filter(|name| !name.is_empty())
         .ok_or_else(|| format!("{} is missing \"name\"", package_path.display()))?;
     let version = package
@@ -354,7 +365,9 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
         .filter(|version| !version.is_empty())
         .ok_or_else(|| format!("{} is missing \"version\"", package_path.display()))?;
     let main = package
-        .main
+        .pragma
+        .and_then(|pragma| pragma.main)
+        .or(package.main)
         .filter(|main| !main.is_empty())
         .ok_or_else(|| format!("{} is missing \"main\"", package_path.display()))?;
     let main_path = normalize(&dir.join(&main));
@@ -382,23 +395,6 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn builtin_opencode_watcher_resolves_to_the_workspace_source_in_dev() {
-        // Debug builds import the TypeScript source directly; the path must point
-        // at the opencode-plugin watcher module under the workspace root.
-        let resolved = resolve_builtin_watcher_main("pragma-builtin:opencode-watcher", None);
-        if cfg!(debug_assertions) {
-            let path = resolved.expect("dev resolves the watcher source");
-            assert!(path.ends_with("packages/opencode-plugin/src/pragma-watcher.ts"));
-        }
-    }
-
-    #[test]
-    fn unknown_builtin_watcher_sentinel_resolves_to_none() {
-        assert!(resolve_builtin_watcher_main("pragma-builtin:mystery", None).is_none());
-        assert!(resolve_builtin_watcher_main("not-a-sentinel", None).is_none());
-    }
-
     fn write_config(root: &Path, json: &serde_json::Value) {
         let path = config_path(root);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -420,7 +416,7 @@ mod tests {
     #[test]
     fn missing_config_yields_no_entries() {
         let temp = tempfile::tempdir().unwrap();
-        let results = read_manifests(temp.path(), None);
+        let results = read_manifests(temp.path(), None, None);
         assert!(results.is_empty());
     }
 
@@ -430,7 +426,7 @@ mod tests {
         let path = config_path(temp.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{ not json").unwrap();
-        let results = read_manifests(temp.path(), None);
+        let results = read_manifests(temp.path(), None, None);
         assert_eq!(results.len(), 1);
         assert!(results[0]
             .error
@@ -455,7 +451,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../my-plugin" }] }),
         );
 
-        let results = read_manifests(home, None);
+        let results = read_manifests(home, None, None);
         assert_eq!(results.len(), 1);
         let manifest = results[0].manifest.as_ref().expect("manifest resolved");
         assert_eq!(manifest.name, "my-plugin");
@@ -476,7 +472,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": plugin_dir.display().to_string() }] }),
         );
 
-        let results = read_manifests(home, None);
+        let results = read_manifests(home, None, None);
         assert_eq!(results[0].manifest.as_ref().unwrap().name, "abs-plugin");
     }
 
@@ -487,7 +483,7 @@ mod tests {
             temp.path(),
             &serde_json::json!({ "plugins": [{ "path": "@pragma/some-plugin" }] }),
         );
-        let results = read_manifests(temp.path(), None);
+        let results = read_manifests(temp.path(), None, None);
         assert!(results[0]
             .error
             .as_deref()
@@ -512,7 +508,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../broken" }] }),
         );
 
-        let results = read_manifests(home, None);
+        let results = read_manifests(home, None, None);
         assert!(results[0]
             .error
             .as_deref()
@@ -537,7 +533,7 @@ mod tests {
             &serde_json::json!({ "plugins": [{ "path": "../ghost" }] }),
         );
 
-        let results = read_manifests(home, None);
+        let results = read_manifests(home, None, None);
         assert!(results[0]
             .error
             .as_deref()
@@ -573,7 +569,7 @@ mod tests {
             }),
         );
 
-        let results = read_manifests(&home, Some(&project));
+        let results = read_manifests(&home, Some(&project), None);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].scope, PluginScope::Global);
         assert_eq!(results[0].manifest.as_ref().unwrap().name, "global-plugin");
@@ -610,7 +606,7 @@ mod tests {
             temp.path(),
             &serde_json::json!({ "plugins": [{ "path": fixture.canonicalize().unwrap().display().to_string() }] }),
         );
-        let results = read_manifests(temp.path(), None);
+        let results = read_manifests(temp.path(), None, None);
         let manifest = results[0].manifest.as_ref().expect("fixture resolves");
         assert_eq!(manifest.name, "sample-pragma-plugin");
         assert!(read_bundle(Path::new(&manifest.main_path))

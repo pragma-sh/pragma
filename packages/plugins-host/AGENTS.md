@@ -10,11 +10,14 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken) and `reload`.
+- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken). There is no separate
+  `reload` command — the host re-sends a full `load` with freshly read gateway
+  credentials whenever the catalog must be re-resolved.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + the hash → asset map),
   `error`, `log`.
 
-On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
+On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
+resource directory, global `~/.pragma/config.json`, plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust
 `plugins.rs` `resolve_local_dir` semantics — accepted duplication, flagged as debt until
 resolution moves into `pragma-core`). It imports the built-in agent plugins
@@ -37,19 +40,20 @@ packages/plugins-host/
 └── package.json      # bin: pragma-plugins -> src/cli.ts; build:sidecar compiles dist/pragma-plugins
 ```
 
-## Built-in agents live in the plugin packages
+## Shipped agents live in plugin packages
 
 The three built-in agent definitions (`claude-code`, `opencode`, `cursor`) live in their
-plugin packages' `src/pragma-agent.ts` and are imported here directly. This is the one
-source of truth the catalog sidecar and the in-webview `apps/pragma/src/plugins/builtin-agents.ts`
-share — the webview path re-exports them (overriding `iconPath` with a browser URL and
-attaching the built-in watchers). Do not duplicate agent metadata across packages.
+plugin packages' `src/pragma-plugin.ts`. Staging copies each package's `package.json`,
+`dist/`, and `assets/`; desktop and catalog sidecar discover and import those same bundles.
+Do not statically import shipped packages or duplicate agent metadata here.
 
 ## Catalog wire types
 
 `AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `AgentIcon` are
 promoted into `@pragma/constants` (`schema.json`) so the wire type has one source of
-truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`.
+truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
+agents include resolved launch commands for each model/reasoning selection plus terminal
+input timing, allowing `pragma-server` to launch agents without desktop webview.
 
 ## Assets
 

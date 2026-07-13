@@ -63,6 +63,14 @@ export class SessionsClient {
     });
   }
 
+  /** Renames the workspace tab associated with a session. */
+  rename(sessionId: string, title: string): Promise<void> {
+    return this.transport.request<void>(routes.control("tabRename"), {
+      method: "POST",
+      body: { tabId: sessionId, title },
+    });
+  }
+
   killForCwd(cwd: string, options: { signal?: AbortSignal } = {}): Promise<void> {
     return this.transport.request<void>(`${routes.sessions}?cwd=${encodeURIComponent(cwd)}`, {
       method: "DELETE",

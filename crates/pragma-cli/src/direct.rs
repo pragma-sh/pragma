@@ -301,7 +301,7 @@ pub fn agent_report(
     let tab_id = env("PRAGMA_TAB_ID").map_err(CliError::config)?;
     let fields = report_fields(&args.report);
     let worktree_id = report_worktree(fields.worktree_override)?;
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "agent": args.agent,
         "worktreeId": worktree_id,
         "tabId": tab_id,
@@ -311,6 +311,11 @@ pub fn agent_report(
         "question": fields.question,
         "requestId": fields.request_id,
     });
+    // `options` deserializes into a plain Vec server-side, so the key must be
+    // absent (not null) when no choices were passed.
+    if let Some(raw) = &fields.options {
+        payload["options"] = parse_question_options(raw)?;
+    }
     let frame = RequestFrame {
         request_id: format!("agent-{}", std::process::id()),
         kind: RequestKind::AgentReport,
@@ -535,8 +540,9 @@ fn publish_agent_frame(kind: RequestKind, payload: &serde_json::Value) -> Result
 
 /// Blocks on the agent event stream until a matching [`AgentAnswer`] arrives,
 /// printing the reply text on stdout. Used by a blocking harness hook to turn a
-/// remote question toast into a synchronous answer. A dismissed reply or a
-/// timeout exits non-zero with no output so the caller can fall back.
+/// remote question toast into a synchronous answer. A timeout exits non-zero
+/// with no output so the caller can fall back. Dismissal does the same unless
+/// `--dismiss-output` gives a blocking hook an explicit cancellation marker.
 pub fn agent_await_answer(args: &crate::cli::AgentAwaitAnswerArgs) -> Result<(), CliError> {
     let Server { mut stream } = server::connect()?;
     let request = subscribe_agents_request();
@@ -556,6 +562,11 @@ pub fn agent_await_answer(args: &crate::cli::AgentAwaitAnswerArgs) -> Result<(),
                 if answer.request_id == args.request_id && answer.agent == args.agent =>
             {
                 if answer.dismissed {
+                    if let Some(output) = &args.dismiss_output {
+                        println!("{output}");
+                        let _ = std::io::stdout().flush();
+                        return Ok(());
+                    }
                     return Err(CliError::config("question dismissed without an answer"));
                 }
                 println!("{}", answer.answer.unwrap_or_default());
@@ -595,8 +606,16 @@ struct ReportFields {
     attention_kind: Option<&'static str>,
     command: Option<String>,
     question: Option<String>,
+    options: Option<String>,
     request_id: Option<String>,
     worktree_override: Option<String>,
+}
+
+/// Parses the `--options` JSON into validated [`pragma_protocol::QuestionOption`]s.
+fn parse_question_options(raw: &str) -> Result<serde_json::Value, CliError> {
+    let options: Vec<pragma_protocol::QuestionOption> = serde_json::from_str(raw)
+        .map_err(|err| CliError::config(format!("invalid --options JSON: {err}")))?;
+    serde_json::to_value(options).map_err(|err| CliError::config(err.to_string()))
 }
 
 fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
@@ -606,6 +625,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             attention_kind: None,
             command: None,
             question: None,
+            options: None,
             request_id: None,
             worktree_override: None,
         },
@@ -614,6 +634,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             attention_kind: None,
             command: None,
             question: None,
+            options: None,
             request_id: None,
             worktree_override: worktree_id.clone(),
         },
@@ -621,6 +642,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             kind,
             command,
             question,
+            options,
             request_id,
         } => ReportFields {
             status: "attention",
@@ -630,6 +652,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             }),
             command: command.clone(),
             question: question.clone(),
+            options: options.clone(),
             request_id: request_id.clone(),
             worktree_override: None,
         },
@@ -638,6 +661,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             attention_kind: None,
             command: None,
             question: None,
+            options: None,
             request_id: None,
             worktree_override: worktree_id.clone(),
         },
@@ -655,4 +679,27 @@ fn report_worktree(override_id: Option<String>) -> Result<String, CliError> {
 #[allow(dead_code)]
 pub(crate) fn watch_grace() -> Duration {
     Duration::from_millis(50)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_question_options;
+
+    #[test]
+    fn parses_valid_question_options() {
+        let value =
+            parse_question_options(r#"[{"label":"Yes","description":"Do it"},{"label":"No"}]"#)
+                .expect("valid options JSON parses");
+        let options = value.as_array().expect("options serialize as an array");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0]["label"], "Yes");
+        assert_eq!(options[0]["description"], "Do it");
+        assert_eq!(options[1]["label"], "No");
+    }
+
+    #[test]
+    fn rejects_malformed_question_options() {
+        assert!(parse_question_options("not json").is_err());
+        assert!(parse_question_options(r#"[{"description":"missing label"}]"#).is_err());
+    }
 }

@@ -8,7 +8,7 @@ use thiserror::Error;
 pub use pragma_constants::{
     AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
     AgentReportPayload, AgentSessionLaunchPayload, AgentStatus, ControlMethod, NewWorktreeSpec,
-    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, WorkspaceSnapshot,
+    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption, WorkspaceSnapshot,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -291,6 +291,9 @@ pub enum EventFrame {
         /// The question awaiting an answer, when `status` is a `question` attention.
         #[serde(rename = "question", default, skip_serializing_if = "Option::is_none")]
         question: Option<String>,
+        /// Answer choices for a `question` attention, when present.
+        #[serde(rename = "options", default, skip_serializing_if = "Option::is_none")]
+        options: Option<Vec<QuestionOption>>,
         /// Correlation id for a command-approval or question round-trip, when present.
         #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
@@ -514,6 +517,7 @@ mod tests {
             attention_kind: Some(pragma_constants::AgentAttentionKind::Command),
             command: Some("npm test".to_string()),
             question: None,
+            options: None,
             request_id: Some("req-1".to_string()),
         });
         let mut bytes = Vec::new();

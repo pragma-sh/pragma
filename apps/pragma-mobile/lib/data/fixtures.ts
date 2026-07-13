@@ -108,7 +108,7 @@ export const MOCK_INBOX: InboxItem[] = [
     worktreeLabel: "Checkout v2",
     agent: "claude",
     prompt: "Which state library should the new checkout flow use?",
-    options: ["Zustand", "Redux Toolkit", "React Context only"],
+    options: [{ label: "Zustand" }, { label: "Redux Toolkit" }, { label: "React Context only" }],
   },
   {
     id: "inbox-3",
@@ -130,6 +130,10 @@ export const MOCK_INBOX: InboxItem[] = [
     worktreeLabel: "Mobile app",
     agent: "cursor",
     prompt: "Target the iOS liquid-glass tab bar or a portable blur fallback first?",
-    options: ["Liquid glass (iOS 26)", "Blur fallback", "Both, feature-detected"],
+    options: [
+      { label: "Liquid glass (iOS 26)" },
+      { label: "Blur fallback" },
+      { label: "Both, feature-detected" },
+    ],
   },
 ];
