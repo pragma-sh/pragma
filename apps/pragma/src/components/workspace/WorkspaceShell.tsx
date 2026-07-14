@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useEffectEvent, type MouseEvent } from "react";
+import { useEffect, useEffectEvent, useState, type MouseEvent } from "react";
 import { LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +14,7 @@ import { TabDragProvider } from "@/components/tabs/tab-drag-context";
 import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { SplitHost } from "@/components/workspace/SplitHost";
 import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
+import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import {
   browserDevtools,
@@ -37,7 +38,12 @@ function preventNativeContextMenu(event: MouseEvent): void {
 }
 
 /** Global keyboard shortcuts wired to workspace actions. */
-function useWorkspaceShortcuts(workspace: Workspace, requestClose: (tab: Tab) => void) {
+function useWorkspaceShortcuts(
+  workspace: Workspace,
+  requestClose: (tab: Tab) => void,
+  onOpenCommandPalette: () => void,
+  onOpenCommandMode: () => void,
+) {
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
   useShortcuts({
@@ -78,11 +84,18 @@ function useWorkspaceShortcuts(workspace: Workspace, requestClose: (tab: Tab) =>
     onScrollTerminalBottom: () => {
       if (workspace.activeTabId) terminalManager.scrollToBottom(workspace.activeTabId);
     },
+    onOpenCommandPalette,
+    onOpenCommandMode,
   });
 }
 
 /** Routes native menu shortcuts through the same tab lifecycle as UI controls. */
-function useNativeMenuActions(workspace: Workspace, requestClose: (tab: Tab) => void) {
+function useNativeMenuActions(
+  workspace: Workspace,
+  requestClose: (tab: Tab) => void,
+  onOpenCommandPalette: () => void,
+  onOpenCommandMode: () => void,
+) {
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
     if (action === "tabs.new-terminal") {
       await workspace.createTerminalTab();
@@ -90,6 +103,14 @@ function useNativeMenuActions(workspace: Workspace, requestClose: (tab: Tab) => 
     }
     if (action === "tabs.close-active") {
       if (workspace.activeTab) requestClose(workspace.activeTab);
+      return;
+    }
+    if (action === "workspace.open-command-palette") {
+      onOpenCommandPalette();
+      return;
+    }
+    if (action === "workspace.open-command-mode") {
+      onOpenCommandMode();
       return;
     }
     if (action === "troubleshooting.open-daemon-logs") {
@@ -214,8 +235,24 @@ export function WorkspaceShell() {
   const workspace = useWorkspace();
   const kanban = useKanban();
   const requestClose = useConfirmClose();
-  useWorkspaceShortcuts(workspace, requestClose);
-  useNativeMenuActions(workspace, requestClose);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteMode, setCommandPaletteMode] = useState<"search" | "command">("search");
+  const openCommandPalette = (mode: "search" | "command") => {
+    setCommandPaletteMode(mode);
+    setCommandPaletteOpen(true);
+  };
+  useWorkspaceShortcuts(
+    workspace,
+    requestClose,
+    () => openCommandPalette("search"),
+    () => openCommandPalette("command"),
+  );
+  useNativeMenuActions(
+    workspace,
+    requestClose,
+    () => openCommandPalette("search"),
+    () => openCommandPalette("command"),
+  );
 
   return (
     <RightSidebarProvider>
@@ -251,6 +288,11 @@ export function WorkspaceShell() {
           {/* Always-mounted dialogs (new-session / deep links) so they work in
               both the normal shell and the Kanban board. */}
           <WorkspaceDialogs />
+          <CommandPalette
+            mode={commandPaletteMode}
+            open={commandPaletteOpen}
+            onOpenChange={setCommandPaletteOpen}
+          />
         </main>
       </TabDragProvider>
     </RightSidebarProvider>

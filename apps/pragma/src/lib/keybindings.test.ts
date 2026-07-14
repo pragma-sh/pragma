@@ -65,6 +65,14 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "end" },
         linux: { modifiers: ["ctrl"], key: "end" },
       },
+      openCommandPalette: {
+        mac: { modifiers: ["cmd"], key: "p" },
+        linux: { modifiers: ["ctrl"], key: "p" },
+      },
+      openCommandMode: {
+        mac: { modifiers: ["cmd", "shift"], key: "p" },
+        linux: { modifiers: ["ctrl", "shift"], key: "p" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
