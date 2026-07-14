@@ -478,7 +478,18 @@ shared per-worktree file watcher so filesystem changes refresh the glyph immedia
 `loadLanguageExtension` (`components/editor/codemirror-language.ts`) and the shared dark
 `pragmaHighlightStyle` / `pragmaSyntaxHighlighting` in `codemirror-theme.ts`. Editor
 dirty state is ephemeral in `state/editor-dirty-store.ts` (never in the reducer, never
-persisted); closing a dirty editor routes through `ConfirmCloseProvider`.
+persisted); closing a dirty editor routes through `ConfirmCloseProvider`. The shared
+load/save/dirty/⌘-S lifecycle lives in `components/editor/use-editor-file.tsx`.
+
+**Markdown tabs** — `editor` tabs whose file is markdown (`isMarkdownPath`: `.md` /
+`.markdown` / `.mdown`, **not** `.mdx` — JSX would be mangled) render
+`components/editor/MarkdownView.tsx` instead of `EditorView` (dispatch in
+`SplitHost`'s `PANE_CONTENT_RENDERERS`; the `TabKind` stays `editor`). A top-right
+toggle switches WYSIWYG (TipTap + `tiptap-markdown` for GFM I/O, table kit, task
+lists, `MarkdownToolbar.tsx`) and Raw (the standard CodeMirror surface). Both modes
+share the same file lifecycle; unsaved edits survive the mode switch via
+`currentDocRef`. The `getMarkdown` TipTap helper is shared with the PR body editor
+in `components/editor/tiptap-markdown.ts`.
 
 **Icons:** vscode-icons render offline via `lib/file-icons.ts` (`addCollection` once —
 never let `@iconify/react` fetch over the network). Launcher brand icons come from a
