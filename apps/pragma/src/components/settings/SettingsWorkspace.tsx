@@ -58,40 +58,50 @@ function parsePragmaConfig(contents: string): PragmaConfig {
     throw new Error("config.json root must be an object");
   }
   const config = value as PragmaConfig;
-  if (config.plugins !== undefined) {
-    if (!Array.isArray(config.plugins)) throw new Error("plugins must be an array");
-    for (const [index, plugin] of config.plugins.entries()) {
-      if (!plugin || typeof plugin !== "object" || Array.isArray(plugin)) {
-        throw new Error(`plugins[${index}] must be an object`);
-      }
-      if (typeof plugin.path !== "string" || !plugin.path.trim()) {
-        throw new Error(`plugins[${index}].path must be a non-empty string`);
-      }
-      if (
-        plugin.config !== undefined &&
-        (!plugin.config || typeof plugin.config !== "object" || Array.isArray(plugin.config))
-      ) {
-        throw new Error(`plugins[${index}].config must be an object`);
-      }
-    }
-  }
-  if (config.tunnel !== undefined) {
-    if (!config.tunnel || typeof config.tunnel !== "object" || Array.isArray(config.tunnel)) {
-      throw new Error("tunnel must be an object");
-    }
-    if (config.tunnel.enabled !== undefined && typeof config.tunnel.enabled !== "boolean") {
-      throw new Error("tunnel.enabled must be a boolean");
-    }
-    if (config.tunnel.command !== undefined && typeof config.tunnel.command !== "string") {
-      throw new Error("tunnel.command must be a string");
-    }
-    if (config.tunnel.urlPattern !== undefined && typeof config.tunnel.urlPattern !== "string") {
-      throw new Error("tunnel.urlPattern must be a string");
-    }
-  }
+  validatePlugins(config.plugins);
+  validateTunnel(config.tunnel);
   return config;
 }
 
+function validatePlugins(plugins: PragmaConfig["plugins"]): void {
+  if (plugins === undefined) return;
+  if (!Array.isArray(plugins)) throw new Error("plugins must be an array");
+  for (const [index, plugin] of plugins.entries()) validatePlugin(plugin, index);
+}
+
+// fallow-ignore-next-line complexity -- validates each independent persisted plugin field.
+function validatePlugin(plugin: PluginConfig, index: number): void {
+  if (!plugin || typeof plugin !== "object" || Array.isArray(plugin)) {
+    throw new Error(`plugins[${index}] must be an object`);
+  }
+  if (typeof plugin.path !== "string" || !plugin.path.trim()) {
+    throw new Error(`plugins[${index}].path must be a non-empty string`);
+  }
+  if (
+    plugin.config !== undefined &&
+    (!plugin.config || typeof plugin.config !== "object" || Array.isArray(plugin.config))
+  ) {
+    throw new Error(`plugins[${index}].config must be an object`);
+  }
+}
+
+function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
+  if (tunnel === undefined) return;
+  if (!tunnel || typeof tunnel !== "object" || Array.isArray(tunnel)) {
+    throw new Error("tunnel must be an object");
+  }
+  validateTunnelField(tunnel.enabled, "enabled", "boolean");
+  validateTunnelField(tunnel.command, "command", "string");
+  validateTunnelField(tunnel.urlPattern, "urlPattern", "string");
+}
+
+function validateTunnelField(value: unknown, name: string, type: "boolean" | "string"): void {
+  if (value !== undefined && typeof value !== type) {
+    throw new Error(`tunnel.${name} must be a ${type}`);
+  }
+}
+
+// fallow-ignore-next-line complexity -- coordinates settings loading, queued persistence, and scope constraints.
 export function SettingsWorkspace() {
   const workspace = useWorkspace();
   const shell = useKanban();
@@ -195,69 +205,129 @@ export function SettingsWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 border-r border-sidebar-border bg-sidebar p-3">
-          <SettingsNavItem
-            active={section === "plugins"}
-            icon={<Blocks />}
-            onClick={() => setSection("plugins")}
-          >
-            Plugins
-          </SettingsNavItem>
-          {scope === "global" ? (
-            <>
-              <SettingsNavItem
-                active={section === "github"}
-                icon={<Icon icon="simple-icons:github" />}
-                onClick={() => setSection("github")}
-              >
-                GitHub
-              </SettingsNavItem>
-              <SettingsNavItem
-                active={section === "ai"}
-                icon={<Sparkles />}
-                onClick={() => setSection("ai")}
-              >
-                AI Providers
-              </SettingsNavItem>
-              <SettingsNavItem
-                active={section === "mobile"}
-                icon={<Smartphone />}
-                onClick={() => setSection("mobile")}
-              >
-                Mobile & Gateway
-              </SettingsNavItem>
-            </>
-          ) : null}
-        </aside>
-
-        <main className="min-w-0 flex-1 overflow-auto p-8">
-          <div className="mx-auto max-w-3xl">
-            {loading ? <p className="text-sm text-muted-foreground">Loading settings…</p> : null}
-            {error ? (
-              <SettingsCard title="config.json needs attention">
-                <p className="text-sm text-destructive">{error}</p>
-                <Button className="mt-4" variant="ghost" onClick={() => void load()}>
-                  <RefreshCw /> Reload
-                </Button>
-              </SettingsCard>
-            ) : null}
-            {loaded && section === "plugins" ? (
-              <PluginsSection
-                config={loaded.value}
-                persist={persist}
-                projectPath={workspace.activeProject?.path ?? null}
-                scope={scope}
-              />
-            ) : null}
-            {section === "github" && scope === "global" ? <GitHubSection /> : null}
-            {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
-            {loaded && section === "mobile" && scope === "global" ? (
-              <MobileSection config={loaded.value} persist={persist} />
-            ) : null}
-          </div>
-        </main>
+        <SettingsNavigation scope={scope} section={section} setSection={setSection} />
+        <SettingsContent
+          error={error}
+          loaded={loaded}
+          loading={loading}
+          persist={persist}
+          projectPath={workspace.activeProject?.path ?? null}
+          reload={load}
+          scope={scope}
+          section={section}
+        />
       </div>
     </section>
+  );
+}
+
+function SettingsNavigation({
+  scope,
+  section,
+  setSection,
+}: {
+  scope: ConfigScope;
+  section: Section;
+  setSection: (section: Section) => void;
+}) {
+  return (
+    <aside className="w-64 shrink-0 border-r border-sidebar-border bg-sidebar p-3">
+      <SettingsNavItem
+        active={section === "plugins"}
+        icon={<Blocks />}
+        onClick={() => setSection("plugins")}
+      >
+        Plugins
+      </SettingsNavItem>
+      {scope === "global" ? (
+        <GlobalSettingsNavigation section={section} setSection={setSection} />
+      ) : null}
+    </aside>
+  );
+}
+
+function GlobalSettingsNavigation({
+  section,
+  setSection,
+}: Omit<Parameters<typeof SettingsNavigation>[0], "scope">) {
+  return (
+    <>
+      <SettingsNavItem
+        active={section === "github"}
+        icon={<Icon icon="simple-icons:github" />}
+        onClick={() => setSection("github")}
+      >
+        GitHub
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "ai"}
+        icon={<Sparkles />}
+        onClick={() => setSection("ai")}
+      >
+        AI Providers
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "mobile"}
+        icon={<Smartphone />}
+        onClick={() => setSection("mobile")}
+      >
+        Mobile & Gateway
+      </SettingsNavItem>
+    </>
+  );
+}
+
+// fallow-ignore-next-line complexity -- selects one mutually exclusive settings panel from state.
+function SettingsContent({
+  error,
+  loaded,
+  loading,
+  persist,
+  projectPath,
+  reload,
+  scope,
+  section,
+}: {
+  error: string | null;
+  loaded: LoadedConfig | null;
+  loading: boolean;
+  persist: PersistConfig;
+  projectPath: string | null;
+  reload: () => Promise<void>;
+  scope: ConfigScope;
+  section: Section;
+}) {
+  return (
+    <main className="min-w-0 flex-1 overflow-auto p-8">
+      <div className="mx-auto max-w-3xl">
+        {loading ? <p className="text-sm text-muted-foreground">Loading settings…</p> : null}
+        {error ? <SettingsLoadError error={error} reload={reload} /> : null}
+        {loaded && section === "plugins" ? (
+          <PluginsSection
+            config={loaded.value}
+            persist={persist}
+            projectPath={projectPath}
+            scope={scope}
+          />
+        ) : null}
+        {section === "github" && scope === "global" ? <GitHubSection /> : null}
+        {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
+        {loaded && section === "mobile" && scope === "global" ? (
+          <MobileSection config={loaded.value} persist={persist} />
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+function SettingsLoadError({ error, reload }: { error: string; reload: () => Promise<void> }) {
+  return (
+    <SettingsCard title="config.json needs attention">
+      <p className="text-sm text-destructive">{error}</p>
+      <Button className="mt-4" variant="ghost" onClick={() => void reload()}>
+        <RefreshCw /> Reload
+      </Button>
+    </SettingsCard>
   );
 }
 
@@ -459,24 +529,34 @@ function GitHubSection() {
     }
   }, [signOut]);
 
-  if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading GitHub status…</p>;
-  }
+  if (loading) return <p className="text-sm text-muted-foreground">Loading GitHub status…</p>;
+  if (!authenticated) return <GitHubSignIn />;
+  return <GitHubAccount status={status} signingOut={signingOut} onSignOut={onSignOut} />;
+}
 
-  if (!authenticated) {
-    return (
-      <SettingsCard
-        title="Connect GitHub"
-        description="Manage pull requests, reviews, and merges without leaving your worktree."
-      >
-        <GitHubAuthOptions className="max-w-sm" />
-      </SettingsCard>
-    );
-  }
+function GitHubSignIn() {
+  return (
+    <SettingsCard
+      title="Connect GitHub"
+      description="Manage pull requests, reviews, and merges without leaving your worktree."
+    >
+      <GitHubAuthOptions className="max-w-sm" />
+    </SettingsCard>
+  );
+}
 
+// fallow-ignore-next-line complexity -- account view conditionally renders available profile fields.
+function GitHubAccount({
+  status,
+  signingOut,
+  onSignOut,
+}: {
+  status: ReturnType<typeof useGitHub>["status"];
+  signingOut: boolean;
+  onSignOut: () => Promise<void>;
+}) {
   const user = status?.user ?? null;
   const authMethod = status?.authMethod ?? null;
-
   return (
     <SettingsCard
       title="GitHub account"

@@ -60,23 +60,32 @@ let deviceHeadersPromise: Promise<Record<string, string>> | null = null;
 
 function gatewayHeaders(): Promise<Record<string, string>> {
   if (deviceHeadersPromise) return deviceHeadersPromise;
-  const pending = SecureStore.getItemAsync(DEVICE_ID_STORE_KEY).then(async (storedId) => {
-    const id = storedId ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    if (!storedId) await SecureStore.setItemAsync(DEVICE_ID_STORE_KEY, id);
-    const headers = constants.gateway.deviceHeaders;
-    return {
-      "ngrok-skip-browser-warning": "true",
-      [headers.id]: id,
-      [headers.name]: Platform.OS === "ios" ? "iPhone or iPad" : "Android device",
-      [headers.platform]: Platform.OS,
-      [headers.appVersion]: Constants.expoConfig?.version ?? "unknown",
-    };
-  });
+  const pending = buildGatewayHeaders();
   deviceHeadersPromise = pending.catch((error: unknown) => {
     deviceHeadersPromise = null;
     throw error;
   });
   return deviceHeadersPromise;
+}
+
+async function buildGatewayHeaders(): Promise<Record<string, string>> {
+  const id = await deviceId();
+  const headers = constants.gateway.deviceHeaders;
+  return {
+    "ngrok-skip-browser-warning": "true",
+    [headers.id]: id,
+    [headers.name]: Platform.OS === "ios" ? "iPhone or iPad" : "Android device",
+    [headers.platform]: Platform.OS,
+    [headers.appVersion]: Constants.expoConfig?.version ?? "unknown",
+  };
+}
+
+async function deviceId(): Promise<string> {
+  const storedId = await SecureStore.getItemAsync(DEVICE_ID_STORE_KEY);
+  if (storedId) return storedId;
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  await SecureStore.setItemAsync(DEVICE_ID_STORE_KEY, id);
+  return id;
 }
 
 /** Builds a client for `config` wired to the streaming fetch. */
