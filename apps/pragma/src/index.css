@@ -275,6 +275,37 @@
   }
 }
 
+@layer components {
+  /* TipTap WYSIWYG markdown surface (MarkdownView): GFM constructs that the
+     typography plugin doesn't style. Task lists drop bullets and align their
+     checkboxes; table cell selection gets a visible highlight while editing. */
+  .tiptap ul[data-type="taskList"] {
+    list-style: none;
+    padding-left: 0;
+  }
+  .tiptap ul[data-type="taskList"] li {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .tiptap ul[data-type="taskList"] li > label {
+    flex-shrink: 0;
+    margin-top: 0.2em;
+    user-select: none;
+  }
+  .tiptap ul[data-type="taskList"] li > div {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .tiptap table .selectedCell {
+    background-color: var(--selection);
+  }
+  .tiptap th,
+  .tiptap td {
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.5rem;
+  }
+}
+
 /* macOS vibrancy: the surfaces behind the translucent project rail must not
    paint, or they block the desktop blur from the NSVisualEffectView. These live
    OUTSIDE @layer base on purpose — they have to override Tailwind `bg-*`
