@@ -53,6 +53,10 @@ const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
 const MENU_NEW_TERMINAL_TAB: &str = "tabs.new-terminal";
 /// Menu item id for closing the active tab from the native menu.
 const MENU_CLOSE_ACTIVE_TAB: &str = "tabs.close-active";
+/// Menu item id for opening the project command palette from the native menu.
+const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
+/// Menu item id for opening the palette directly in command mode.
+const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
 /// consistent with their UI controls.
@@ -153,6 +157,20 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+W"),
     )?;
+    let open_command_palette = MenuItem::with_id(
+        app,
+        MENU_OPEN_COMMAND_PALETTE,
+        "Open Command Palette",
+        true,
+        Some("CmdOrCtrl+P"),
+    )?;
+    let open_command_mode = MenuItem::with_id(
+        app,
+        MENU_OPEN_COMMAND_MODE,
+        "Open Command Mode",
+        true,
+        Some("CmdOrCtrl+Shift+P"),
+    )?;
     // Replace File entirely: its default Close Window item keeps Cmd+W even when
     // removed in place on macOS.
     #[cfg(target_os = "macos")]
@@ -162,7 +180,12 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             "file",
             "File",
             true,
-            &[&new_terminal_tab, &close_active_tab],
+            &[
+                &new_terminal_tab,
+                &close_active_tab,
+                &open_command_palette,
+                &open_command_mode,
+            ],
         )?;
         menu.remove_at(1)?;
         menu.insert(&file_menu, 1)?;
@@ -182,6 +205,8 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         // Linux has no default File menu, so surface Pragma tab actions here.
         window_menu.append(&new_terminal_tab)?;
         window_menu.append(&close_active_tab)?;
+        window_menu.append(&open_command_palette)?;
+        window_menu.append(&open_command_mode)?;
     }
     let restart_daemon = MenuItem::with_id(
         app,
@@ -209,6 +234,8 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
                 | MENU_OPEN_DAEMON_LOGS
                 | MENU_NEW_TERMINAL_TAB
                 | MENU_CLOSE_ACTIVE_TAB
+                | MENU_OPEN_COMMAND_PALETTE
+                | MENU_OPEN_COMMAND_MODE
         ) {
             let _ = app.emit(MENU_EVENT, action);
         }
@@ -832,6 +859,8 @@ pub fn run() {
             projects::get_projects_directory,
             ssh_host::connect_remote_project,
             worktrees::list_worktrees,
+            worktrees::touch_worktree_mru,
+            worktrees::list_worktree_mru,
             worktrees::create_worktree,
             worktrees::worktree_status,
             worktrees::rename_worktree,
@@ -870,6 +899,8 @@ pub fn run() {
             fs::write_file,
             fs::rename_file,
             fs::delete_file,
+            fs::palette_search,
+            fs::cancel_palette_search,
             git::worktree_changes,
             git::worktrees_merged_status,
             git::file_diff,
