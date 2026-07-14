@@ -44,6 +44,11 @@ from the registry, where it does not exist) — never register it by name.
 per-event mapping. The reported status is _derived_ (`attention` > `busy` > idle) and
 emitted only on change.
 
+Only root sessions feed that state machine. `session.created` / `session.updated`
+events identify subagent sessions by `info.parentID`; all later events and direct hooks
+carrying those child session IDs are ignored. A child becoming idle or finishing must
+never overwrite its still-running parent's status.
+
 **`busy` is set by:**
 
 - `chat.message`, `command.execute.before`, non-question `tool.execute.before`,
