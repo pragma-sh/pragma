@@ -1,7 +1,9 @@
 import { PragmaClient, PragmaGatewayError, type PragmaClientConfig } from "@pragma/sdk";
 import { fetch as expoFetch } from "expo/fetch";
+import Constants from "expo-constants";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 import {
   createContext,
   useCallback,
@@ -13,6 +15,7 @@ import {
 } from "react";
 
 import type { ConnectionConfig } from "./pairing";
+import { constants } from "@pragma/constants";
 
 // App-wide owner of the single PragmaClient. The chat hook and the live data
 // layer both consume the client from here, so pairing state lives in exactly
@@ -21,6 +24,7 @@ import type { ConnectionConfig } from "./pairing";
 // device is paired for real.
 
 const STORE_KEY = "pragma.connection.v1";
+const DEVICE_ID_STORE_KEY = "pragma.device-id.v1";
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** Whether the app has a verified, usable host connection yet. */
@@ -52,15 +56,45 @@ const streamingFetch = expoFetch as unknown as NonNullable<PragmaClientConfig["f
  * and makes pairing fail with a misleading "couldn't reach the desktop". This
  * header opts out of the interstitial; other hosts ignore the unknown header.
  */
-const GATEWAY_HEADERS: Record<string, string> = { "ngrok-skip-browser-warning": "true" };
+let deviceHeadersPromise: Promise<Record<string, string>> | null = null;
+
+function gatewayHeaders(): Promise<Record<string, string>> {
+  if (deviceHeadersPromise) return deviceHeadersPromise;
+  const pending = buildGatewayHeaders();
+  deviceHeadersPromise = pending.catch((error: unknown) => {
+    deviceHeadersPromise = null;
+    throw error;
+  });
+  return deviceHeadersPromise;
+}
+
+async function buildGatewayHeaders(): Promise<Record<string, string>> {
+  const id = await deviceId();
+  const headers = constants.gateway.deviceHeaders;
+  return {
+    "ngrok-skip-browser-warning": "true",
+    [headers.id]: id,
+    [headers.name]: Platform.OS === "ios" ? "iPhone or iPad" : "Android device",
+    [headers.platform]: Platform.OS,
+    [headers.appVersion]: Constants.expoConfig?.version ?? "unknown",
+  };
+}
+
+async function deviceId(): Promise<string> {
+  const storedId = await SecureStore.getItemAsync(DEVICE_ID_STORE_KEY);
+  if (storedId) return storedId;
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  await SecureStore.setItemAsync(DEVICE_ID_STORE_KEY, id);
+  return id;
+}
 
 /** Builds a client for `config` wired to the streaming fetch. */
-function clientFor(config: ConnectionConfig): PragmaClient {
+async function clientFor(config: ConnectionConfig): Promise<PragmaClient> {
   return new PragmaClient({
     baseUrl: config.url,
     token: config.token,
     fetch: streamingFetch,
-    headers: GATEWAY_HEADERS,
+    headers: await gatewayHeaders(),
   });
 }
 
@@ -76,7 +110,7 @@ export async function probeConnection(config: ConnectionConfig): Promise<ProbeRe
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
-    await clientFor(config).agents.catalog({ signal: controller.signal });
+    await (await clientFor(config)).agents.catalog({ signal: controller.signal });
     return { ok: true };
   } catch (error) {
     return probeFailure(error, controller.signal.aborted);
@@ -128,6 +162,21 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   useRestoredConnection(setStored, setStatus);
 
   const connection = useMemo(() => connectionState(stored), [stored]);
+  const [client, setClient] = useState<PragmaClient | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!stored) {
+      setClient(null);
+      return;
+    }
+    void (async () => {
+      const next = await clientFor(stored.config);
+      if (!cancelled) setClient(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stored]);
 
   const pair = useCallback(async (config: ConnectionConfig, hostName?: string) => {
     const next: StoredState = { config, hostName: hostName ?? null };
@@ -153,27 +202,26 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ConnectionContextValue>(
     () =>
       connectionValue(
-        status,
+        status === "paired" && !client ? "loading" : status,
         connection.config,
-        connection.client,
+        client,
         connection.hostName,
         pair,
         unpair,
         handleUnauthorized,
       ),
-    [status, connection, pair, unpair, handleUnauthorized],
+    [status, connection, client, pair, unpair, handleUnauthorized],
   );
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;
 }
 
 function connectionState(stored: StoredState | null): {
-  client: PragmaClient | null;
   config: ConnectionConfig | null;
   hostName: string | null;
 } {
-  if (!stored) return { client: null, config: null, hostName: null };
-  return { client: clientFor(stored.config), config: stored.config, hostName: stored.hostName };
+  if (!stored) return { config: null, hostName: null };
+  return { config: stored.config, hostName: stored.hostName };
 }
 
 function connectionValue(

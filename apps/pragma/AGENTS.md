@@ -222,11 +222,14 @@ Server-owned state holds child + status (`idle | starting | active(url) | error(
 `tunnel_start` / `tunnel_stop` / `tunnel_status` are thin RPC adapters (+ typed wrappers
 in `src/lib/tauri.ts`), so desktop exit does not kill mobile forwarding.
 
-The `PairDeviceDialog` (Smartphone icon in `ProjectSidebar`) toggles the tunnel and renders
-a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers live in
-`src/lib/pairing.ts`. The tunnel deliberately **survives the modal closing**. "Regenerate
-token" calls `regenerate_gateway_token` (kills gateway, deletes the `gateway-token` file,
-respawns) — paired devices must reconnect.
+The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns mobile
+pairing; the project sidebar has no phone shortcut. `PairDeviceSettings` toggles the
+tunnel and renders a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers
+live in `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
+"Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
+`gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
+`gateway-devices.json`, which the gateway updates from authenticated mobile identity
+headers, and exposes supported global/project `.pragma/config.json` values through forms.
 
 ## Workspace mirror publisher
 
@@ -308,9 +311,10 @@ race, while password/key-passphrase routes stay disconnected until the user reco
 Worktree lifecycle git operations and `.pragma/scripts.json` setup/teardown commands
 route through the owning host via `pragma-core` RPC.
 
-## Native menubar + Troubleshooting menu
+## Native menubar + Settings / Troubleshooting menus
 
-Built once in `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)` plus a
+Built once in `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)`, native
+**Settings…** (`⌘,` on macOS) opening a full-frame workspace with a back button, plus a
 `Troubleshooting` submenu with **Restart Server** and **Open Server Logs**. Menu clicks
 are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them via
 `onMenuAction` in `lib/tauri.ts`. **Restart Server** calls `restart_daemon`

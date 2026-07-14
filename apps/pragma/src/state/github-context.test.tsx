@@ -19,6 +19,7 @@ function status(overrides: Partial<GitHubAuthStatus> = {}): GitHubAuthStatus {
     authenticated: false,
     ghAvailable: false,
     user: null,
+    authMethod: null,
     setupDismissed: false,
     ...overrides,
   };
