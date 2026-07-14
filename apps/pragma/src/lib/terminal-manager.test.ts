@@ -791,6 +791,14 @@ describe("TerminalManager Shift+Enter", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
   });
 
+  it("lets legacy keypress text events reach xterm", async () => {
+    const passthrough = await passthroughHandler();
+
+    expect(passthrough(new KeyboardEvent("keypress", { key: " " }))).toBe(true);
+    expect(passthrough(new KeyboardEvent("keypress", { key: "A", shiftKey: true }))).toBe(true);
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", expect.anything());
+  });
+
   it("does not rewrite Cmd/Ctrl/Alt+Enter so the original keybinding reaches xterm", async () => {
     const passthrough = await passthroughHandler();
     for (const event of [
