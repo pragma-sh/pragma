@@ -50,7 +50,13 @@ export function GitHubProvider({ children }: { children: ReactNode }) {
       // mark setup dismissed so `needsSetup` stays false while still reporting
       // not-authenticated (the PR subtab shows its logged-out state). A later
       // successful refresh replaces this with the real status.
-      setStatus({ authenticated: false, ghAvailable: false, user: null, setupDismissed: true });
+      setStatus({
+        authenticated: false,
+        ghAvailable: false,
+        user: null,
+        authMethod: null,
+        setupDismissed: true,
+      });
     } finally {
       setLoading(false);
     }
