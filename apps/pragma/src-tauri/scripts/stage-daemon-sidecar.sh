@@ -45,7 +45,7 @@ fi
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
-bunx turbo run build --filter=@pragma/claude-code-plugin --filter=@pragma/opencode-plugin --filter=@pragma/cursor-plugin
+bash "$script_dir/stage-bundled-plugins.sh"
 bun --filter @pragma/automations build:sidecar
 # Build the plugin catalog sidecar; it statically bundles the built-in agent
 # definitions from the claude-code/opencode/cursor plugin packages.
@@ -69,18 +69,6 @@ cp "$repo_root/packages/automations/dist/pragma-automations" \
 cp "$repo_root/packages/plugins-host/dist/pragma-plugins" \
   "$src_tauri_dir/binaries/pragma-plugins-$triple"
 
-plugins_dir_name="$(bun -e 'import { constants } from "@pragma/constants"; process.stdout.write(constants.plugins.bundledDirName)')"
-bundled_plugins_dir="$src_tauri_dir/resources/$plugins_dir_name"
-rm -rf "$bundled_plugins_dir"
-for plugin in claude-code opencode cursor; do
-  source_dir="$repo_root/packages/$plugin-plugin"
-  target_dir="$bundled_plugins_dir/$plugin"
-  mkdir -p "$target_dir"
-  cp "$source_dir/package.json" "$target_dir/package.json"
-  cp -R "$source_dir/dist" "$target_dir/dist"
-  cp -R "$source_dir/assets" "$target_dir/assets"
-done
-
 rm -rf "$src_tauri_dir/resources/pragma/agents"
 
 echo "staged pragma-server ($profile) -> src-tauri/binaries/pragma-server-$triple"
@@ -91,4 +79,3 @@ echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
 echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"
 echo "staged pragma-automations -> src-tauri/binaries/pragma-automations-$triple"
 echo "staged pragma-plugins -> src-tauri/binaries/pragma-plugins-$triple"
-echo "staged bundled plugins -> src-tauri/resources/$plugins_dir_name"
