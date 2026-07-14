@@ -111,6 +111,12 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         return;
       }
 
+      // Native menu owns Cmd/Ctrl+T. Some WebViews also deliver the keydown,
+      // which would otherwise create one tab here and another from the menu event.
+      if (action === "newTerminalTab" && isNativeNewTerminalShortcut(event, state.platform)) {
+        return;
+      }
+
       const current = optionsRef.current;
       const simpleKey = SIMPLE_ACTIONS[action];
       if (simpleKey) {
@@ -130,6 +136,11 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [shortcutState]);
+}
+
+function isNativeNewTerminalShortcut(event: KeyboardEvent, platform: KeybindingPlatform): boolean {
+  const primaryModifier = platform === "mac" ? event.metaKey && !event.ctrlKey : event.ctrlKey;
+  return primaryModifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "t";
 }
 
 /** `deleteFile` is a native OS text-editing chord in inputs/terminal/editor; only
