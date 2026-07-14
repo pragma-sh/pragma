@@ -167,6 +167,17 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
   );
 }
 
+/** Picks the limit shown on the collapsed accordion row, if any. */
+function resolvePrimaryLimit(
+  definition: UsageLimitProviderDefinition,
+  result: UsageLimitsResult | undefined,
+): UsageLimit | undefined {
+  if (result?.status !== "ready") {
+    return undefined;
+  }
+  return result.summary ?? result.limits.find((limit) => limit.id === definition.primaryLimitId);
+}
+
 function ProviderAccordionItem({
   provider,
   state,
@@ -175,11 +186,7 @@ function ProviderAccordionItem({
   state: ProviderState;
 }) {
   const definition = provider.contribution;
-  const result = state.result;
-  const primary =
-    result?.status === "ready"
-      ? (result.summary ?? result.limits.find((limit) => limit.id === definition.primaryLimitId))
-      : undefined;
+  const primary = resolvePrimaryLimit(definition, state.result);
 
   return (
     <AccordionItem className="rounded-md border px-2 not-last:mb-1" value={provider.key}>
@@ -195,28 +202,41 @@ function ProviderAccordionItem({
           {primary ? <UsageProgress limit={primary} /> : <ProviderStatus state={state} />}
         </div>
       </AccordionTrigger>
-      <AccordionContent className="flex flex-col gap-3 px-1 pb-3">
-        {result?.status === "ready" ? (
-          result.limits.map((limit) => (
-            <UsageLimitRow key={limit.id} limit={limit} observedAt={result.observedAt} />
-          ))
-        ) : (
-          <ProviderStatus state={state} verbose />
-        )}
-        {state.error && result?.status === "ready" ? (
-          <p className="text-[11px] text-destructive">Update failed: {state.error}</p>
-        ) : null}
-        <Button
-          className="self-start"
-          size="sm"
-          variant="outline"
-          onClick={() => openUsageDashboard(definition.dashboardUrl)}
-        >
-          View dashboard
-          <ArrowUpRight />
-        </Button>
-      </AccordionContent>
+      <ProviderAccordionContent definition={definition} state={state} />
     </AccordionItem>
+  );
+}
+
+function ProviderAccordionContent({
+  definition,
+  state,
+}: {
+  definition: UsageLimitProviderDefinition;
+  state: ProviderState;
+}) {
+  const result = state.result;
+  return (
+    <AccordionContent className="flex flex-col gap-3 px-1 pb-3">
+      {result?.status === "ready" ? (
+        result.limits.map((limit) => (
+          <UsageLimitRow key={limit.id} limit={limit} observedAt={result.observedAt} />
+        ))
+      ) : (
+        <ProviderStatus state={state} verbose />
+      )}
+      {state.error && result?.status === "ready" ? (
+        <p className="text-[11px] text-destructive">Update failed: {state.error}</p>
+      ) : null}
+      <Button
+        className="self-start"
+        size="sm"
+        variant="outline"
+        onClick={() => openUsageDashboard(definition.dashboardUrl)}
+      >
+        View dashboard
+        <ArrowUpRight />
+      </Button>
+    </AccordionContent>
   );
 }
 
@@ -377,13 +397,25 @@ function validateUsageLimitsResult(
 }
 
 function isValidUsageLimit(limit: UsageLimit): boolean {
-  return Boolean(
-    limit.id &&
-    limit.title &&
-    Number.isFinite(limit.used) &&
-    limit.used >= 0 &&
-    (limit.limit === null || (Number.isFinite(limit.limit) && limit.limit > 0)) &&
-    (limit.resetsInMs === undefined ||
-      (Number.isFinite(limit.resetsInMs) && limit.resetsInMs >= 0)),
+  return (
+    Boolean(limit.id) &&
+    Boolean(limit.title) &&
+    hasValidUsedAmount(limit) &&
+    hasValidLimitAmount(limit) &&
+    hasValidResetsIn(limit)
+  );
+}
+
+function hasValidUsedAmount(limit: UsageLimit): boolean {
+  return Number.isFinite(limit.used) && limit.used >= 0;
+}
+
+function hasValidLimitAmount(limit: UsageLimit): boolean {
+  return limit.limit === null || (Number.isFinite(limit.limit) && limit.limit > 0);
+}
+
+function hasValidResetsIn(limit: UsageLimit): boolean {
+  return (
+    limit.resetsInMs === undefined || (Number.isFinite(limit.resetsInMs) && limit.resetsInMs >= 0)
   );
 }

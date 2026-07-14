@@ -494,6 +494,7 @@ function TerminalTabItem({
 }
 
 /** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
+// fallow-ignore-next-line code-duplication
 function TerminalTabEntry({
   tab,
   active,

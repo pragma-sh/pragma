@@ -86,24 +86,37 @@ export async function loadClaudeUsageLimits(ctx: PluginContext): Promise<UsageLi
   if (!result || result.status !== 0) {
     throw new Error(result?.stderr.trim() || "Claude Code usage request failed");
   }
+  return extractUsageFromOutput(result.stdout);
+}
 
-  for (const line of result.stdout.split("\n")) {
-    try {
-      const value: unknown = JSON.parse(line);
-      if (isUsageControlResponse(value)) {
-        if (value.response.subtype === "error") {
-          throw new Error(value.response.error || "Claude Code usage request failed");
-        }
-        return parseClaudeUsage(value.response.response, Date.now());
-      }
-    } catch (cause) {
-      if (cause instanceof SyntaxError) {
-        continue;
-      }
-      throw cause;
+/** Scans NDJSON control-response output for the usage reply and normalizes it. */
+function extractUsageFromOutput(stdout: string): UsageLimitsResult {
+  for (const line of stdout.split("\n")) {
+    const response = tryParseUsageControlResponse(line);
+    if (response === undefined) {
+      continue;
     }
+    if (response.subtype === "error") {
+      throw new Error(response.error || "Claude Code usage request failed");
+    }
+    return parseClaudeUsage(response.response, Date.now());
   }
   throw new Error("Claude Code did not return usage data");
+}
+
+/** Parses one NDJSON line as a usage control response, ignoring non-matching or malformed lines. */
+function tryParseUsageControlResponse(
+  line: string,
+): { subtype: "success"; response: unknown } | { subtype: "error"; error?: string } | undefined {
+  try {
+    const value: unknown = JSON.parse(line);
+    return isUsageControlResponse(value) ? value.response : undefined;
+  } catch (cause) {
+    if (cause instanceof SyntaxError) {
+      return undefined;
+    }
+    throw cause;
+  }
 }
 
 /** Normalizes Claude Code's structured `/usage` response into generic usage limits. */
