@@ -1,11 +1,11 @@
 # packages/claude-code-plugin — @pragma/claude-code-plugin
 
-Static Claude Code plugin that reports agent status into Pragma. Unlike the opencode
+Static Claude Code plugin that reports agent status and plan usage into Pragma. Unlike the opencode
 plugin, **Claude Code has no in-process JS plugin API** — its only live extension point
 is shell-command hooks — so this is the **CLI route, not the SDK**: a real Claude Code
 plugin (`.claude-plugin/plugin.json` + `hooks/hooks.json`) where every hook shells out
 to a single bundled script (`hooks/report.sh`) that calls `pragma-cli`. (The TS here
-is test-only — there is no TS plugin runtime.)
+defines Pragma-side agent, watcher, and usage contributions; Claude never loads it.)
 
 ## File map
 
@@ -15,10 +15,12 @@ packages/claude-code-plugin/
 │   ├── plugin.json          # Plugin manifest (do NOT set hooks here — see gotcha below)
 │   └── marketplace.json     # For `claude plugin marketplace add`
 ├── assets/                  # Claude Code brand assets used by the built-in launcher
+├── src/pragma-plugin.ts     # Agent, watcher, and structured usage-limit declaration
 ├── hooks/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
 │   └── report.sh            # Event → pragma-cli translator (the actual logic)
-└── test/report.test.ts      # Drives report.sh with a fake pragma-cli on PATH
+├── src/pragma-plugin.test.ts # Tests Pragma-side usage and watcher contributions
+└── test/report.test.ts       # Drives report.sh with a fake pragma-cli on PATH
 ```
 
 Each hook in `hooks.json` invokes `sh "$CLAUDE_PLUGIN_ROOT/hooks/report.sh" <event>`.
@@ -32,8 +34,8 @@ means the script works regardless of its executable bit. Keeping the logic in on
 | ---------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SessionStart`               | `cleared`       | `cleared` status only (+ tears down any stale watcher)                                                                                                                                                                                                |
 | `SessionEnd`                 | `cleared`       | `cleared` status only (+ tears down the watcher)                                                                                                                                                                                                      |
-| `UserPromptSubmit`           | `started`       | `started` + user prompt message (+ spawns the abort watcher — see below)                                                                                                                                                                              |
-| `Stop`                       | `stopped`       | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt                                                                                                                                                           |
+| `UserPromptSubmit`           | `started`       | `started` + user prompt message (+ spawns the abort watcher — see below). A synthetic `<task-notification>` prompt (subagent completion auto-resume) reports `started` but renders a system note, never a fake user bubble                            |
+| `Stop`                       | `stopped`       | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt; stays `started` while `background_tasks` reports a running subagent — see below                                                                          |
 | `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)                                                                                                                                                                                    |
 | `PermissionRequest`          | `permission`    | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below. `AskUserQuestion` branches to `attention --kind question` (+ question + options + requestId) and blocks for the answer — see questions below |
 | `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                                                                                                                                                              |
@@ -42,6 +44,33 @@ means the script works regardless of its executable bit. Keeping the logic in on
 `Stop` always trails `UserPromptSubmit` on a _normal_ turn, so the happy path needs no
 state machine. Cancelled turns fire **no hook at all** — that is the whole problem the
 abort watcher below exists to solve.
+
+Claude Code adds `agent_id` to common hook input only when a hook fires inside a
+subagent. `report.sh` consumes every payload before changing marker state and exits
+immediately when that field is present. It also recognizes `hook_event_name` set to
+`SubagentStop` and `agent_transcript_path` as defensive payload-variant signals, so
+subagent tool/stop events cannot overwrite the parent agent's status. For Claude builds
+that emit child completion as a plain `Stop` without those fields, the script pins each
+Pragma tab to the parent `session_id` observed at `SessionStart` / `UserPromptSubmit`
+and ignores events carrying any other session ID.
+
+## Background subagents: a parent `Stop` is not "done"
+
+When the parent launches a background subagent (the `Agent` tool) and ends its own
+inference turn ("agent is searching, standing by"), Claude Code fires a **real parent
+`Stop`** — same session, no `agent_id` — while the subagent is still working. Verified
+against a live session: the subagent's completion later auto-resumes the parent through
+a synthetic `UserPromptSubmit` whose `prompt` is a `<task-notification>` block, followed
+by the final `Stop`. Reporting `stopped` on that intermediate `Stop` flipped the tab to
+the green done dot mid-run — the "subagent finished = session finished" bug.
+
+The fix keys on the `Stop` payload's **`background_tasks`** array: entries like
+`{"type": "subagent", "status": "running", ...}` mean the session is still busy, so
+`report.sh` re-asserts `started`, keeps the marker + abort watcher alive (a cancel during
+the subagent phase must still clear), and surfaces the parent's interim reply as a chat
+message. Only `type == "subagent"` counts — a long-lived background *bash* task (e.g. a
+dev server) must not hold the tab on "running" forever. The final `Stop` (no running
+subagents) reports `stopped` normally.
 
 ## Raising `attention` the instant a prompt appears (`PermissionRequest`)
 
@@ -170,6 +199,12 @@ The cancel _is_, however, written to the session transcript **immediately**: the
 with a trailing `user` message whose text is `[Request interrupted by user]` (or
 `… for tool use`). Since no hook reports it, **we watch for it.**
 
+The match (`interrupt_pattern`) is deliberately the **unescaped** JSONL form
+`"text":"[Request interrupted by user`. The phrase merely _mentioned_ inside tool output —
+e.g. Claude reading this very script into its context — is nested inside another JSON
+string, so its quotes arrive backslash-escaped and never match. Grepping for the bare
+phrase used to false-clear an active turn the moment `report.sh` itself was read.
+
 ### The background watcher
 
 `started` (on `UserPromptSubmit`) spawns a detached background watcher
@@ -222,6 +257,20 @@ claude plugin install pragma-claude-code@pragma
 
 This registers it at **user scope** so it runs in every Claude session, including
 outside Pragma.
+
+## Usage limits
+
+The Pragma plugin sends Claude Code's structured `get_usage` control request through a
+short-lived `claude -p --safe-mode` process. This is the same normalized plan-limit data
+used by `/usage`: the five-hour window, weekly window, and optional app/model windows.
+Claude Code owns Keychain/Linux credential reads, OAuth refresh, and the private
+`GET /api/oauth/usage` call; Pragma never reads or transports an access token. Keep this
+route instead of duplicating Claude's credential storage or refresh protocol.
+
+Claude Code runs the cached plugin copy shown by `claude plugin list --json`, not the
+marketplace source directory directly. After changing this package, refresh the local
+marketplace and reinstall the plugin before testing; an already-running Claude session
+must also restart to load the new hooks.
 
 ## Guard + non-Pragma sessions
 

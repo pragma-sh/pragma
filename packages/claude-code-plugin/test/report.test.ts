@@ -198,6 +198,63 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  it.each(["started", "stopped", "running", "permission", "attention", "idle", "cleared"])(
+    "ignores %s hooks emitted inside a subagent",
+    (event) => {
+      expect(
+        run(event, {
+          stdin: JSON.stringify({
+            hook_event_name: "Stop",
+            agent_id: "agent-child-1",
+            agent_type: "Explore",
+          }),
+        }),
+      ).toEqual([]);
+      expect(existsSync(markerPath())).toBe(false);
+    },
+  );
+
+  it.each([
+    { hook_event_name: "SubagentStop" },
+    { hook_event_name: "Stop", agent_transcript_path: "/tmp/subagents/agent-child.jsonl" },
+  ])("ignores subagent stop payload variants without agent_id", (payload) => {
+    run("started");
+
+    expect(run("stopped", { stdin: JSON.stringify(payload) })).toEqual([
+      "agent report --agent claude-code started",
+    ]);
+    expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("ignores a plain Stop from a child session", () => {
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "parent-session" }),
+    });
+    run("started", {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "parent-session" }),
+    });
+
+    expect(
+      run("stopped", {
+        stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "child-session" }),
+      }),
+    ).toEqual([
+      "agent report --agent claude-code cleared",
+      "agent report --agent claude-code started",
+    ]);
+    expect(existsSync(markerPath())).toBe(true);
+
+    expect(
+      run("stopped", {
+        stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "parent-session" }),
+      }),
+    ).toEqual([
+      "agent report --agent claude-code cleared",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
+    ]);
+  });
+
   it("reports started and marks the turn in flight", () => {
     expect(run("started")).toEqual(["agent report --agent claude-code started"]);
     expect(existsSync(markerPath())).toBe(true);
@@ -209,6 +266,65 @@ describe("report.sh", () => {
         env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },
       }),
     ).toEqual(["agent report --agent claude-code started"]);
+  });
+
+  it("stays running when Stop fires while background subagents are active", () => {
+    run("started");
+    // The parent turn ended but a subagent is still working: Claude auto-resumes
+    // when it finishes, so the session must NOT flip to the green done dot.
+    expect(
+      run("stopped", {
+        stdin: JSON.stringify({
+          hook_event_name: "Stop",
+          last_assistant_message: "Agent searching. Standing by.",
+          background_tasks: [
+            { id: "a1", type: "subagent", status: "running", agent_type: "Explore" },
+          ],
+        }),
+      }),
+    ).toEqual([
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code started",
+    ]);
+    expect(existsSync(markerPath())).toBe(true);
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "Agent searching. Standing by." }),
+    );
+  });
+
+  it("reports stopped normally when background tasks are done or not subagents", () => {
+    run("started");
+    expect(
+      run("stopped", {
+        stdin: JSON.stringify({
+          hook_event_name: "Stop",
+          background_tasks: [
+            { id: "a1", type: "subagent", status: "completed" },
+            { id: "b1", type: "bash", status: "running" },
+          ],
+        }),
+      }),
+    ).toEqual([
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
+    ]);
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("does not render a subagent task-notification as a user chat bubble", () => {
+    run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        prompt: "<task-notification>\n<task-id>a1</task-id>\n</task-notification>",
+      }),
+    });
+    expect(messagePayloads()).not.toContainEqual(expect.objectContaining({ role: "user" }));
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({
+        role: "system",
+        text: "Claude Code resumed after a subagent finished",
+      }),
+    );
   });
 
   it("reports stopped and clears the in-flight marker on normal completion", () => {
@@ -548,6 +664,31 @@ describe("report.sh", () => {
         "agent report --agent claude-code cleared",
       ]);
       expect(existsSync(markerPath())).toBe(false);
+    });
+
+    it("ignores the interrupt phrase embedded inside tool output", async () => {
+      // A tool result that *contains* the marker text (e.g. Claude reading this
+      // very script) arrives JSON-escaped inside another string. Only a real
+      // top-level interrupt user message may clear the turn.
+      const t = transcriptFile([ASSISTANT_DONE]);
+      run("started", { stdin: t.stdin });
+      const toolResult = JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              content: 'grep -q "[Request interrupted by user" plus "text":"docs"',
+            },
+          ],
+        },
+        toolUseResult: { file: { content: INTERRUPTED } },
+      });
+      appendFileSync(t.path, `${toolResult}\n`);
+      await sleep(400);
+      expect(reportCalls()).toEqual(["agent report --agent claude-code started"]);
+      expect(existsSync(markerPath())).toBe(true);
     });
 
     it("ignores a prior turn's interrupt marker while the new turn is thinking", async () => {

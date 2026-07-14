@@ -38,6 +38,7 @@ state_dir="${TMPDIR:-/tmp}"
 # normal end) can tear it down. Both are keyed on PRAGMA_TAB_ID.
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
+session_file="${state_dir}/pragma-cli-${agent}-${tab}.session"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
@@ -148,6 +149,26 @@ for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
         last = "\n".join(p for p in parts if p)
 print(last)
 ' "$tp" 2>/dev/null
+}
+
+# Succeeds when a Stop payload reports at least one subagent still running in
+# `background_tasks`. Such a Stop only ends the parent's *inference turn* — the
+# session keeps working and Claude auto-resumes when the subagent finishes — so
+# reporting `stopped` would flip the tab to done while agents are still active.
+has_running_subagents() {
+  [ -n "$py3" ] || return 1
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    tasks = (json.load(sys.stdin) or {}).get("background_tasks") or []
+except Exception:
+    tasks = []
+running = any(
+    isinstance(t, dict) and t.get("type") == "subagent" and t.get("status") == "running"
+    for t in tasks
+)
+sys.exit(0 if running else 1)
+' 2>/dev/null
 }
 
 # Prints the question text from an AskUserQuestion PermissionRequest payload
@@ -325,6 +346,13 @@ if tool_name in {"Read", "Write", "Edit"} and isinstance(file_path, str) and fil
   printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
 }
 
+# Grep pattern matching a real interrupt user message in transcript JSONL.
+# The cancel line carries the marker as an *unescaped* top-level JSON string
+# (`"text":"[Request interrupted by user…`). The same phrase embedded in tool
+# output (e.g. Claude reading this very script) is nested inside another JSON
+# string, so its quotes arrive backslash-escaped and must never match.
+interrupt_pattern='"text":"\[Request interrupted by user'
+
 # Succeeds when the most recent turn in the transcript ended in a user
 # interruption (cancel/abort). The marker is written as the final user message
 # of the cancelled turn, so we only inspect the tail -- an interruption earlier
@@ -332,7 +360,7 @@ if tool_name in {"Read", "Write", "Edit"} and isinstance(file_path, str) and fil
 turn_interrupted() {
   tp="$1"
   [ -n "$tp" ] && [ -f "$tp" ] || return 1
-  tail -n 5 "$tp" 2>/dev/null | grep -q '\[Request interrupted by user'
+  tail -n 5 "$tp" 2>/dev/null | grep -q "$interrupt_pattern"
 }
 
 # Like turn_interrupted, but scoped to transcript content written *after* `off`
@@ -345,7 +373,7 @@ interrupted_since() {
   off="${2:-0}"
   [ -n "$tp" ] && [ -f "$tp" ] || return 1
   [ -n "$off" ] || off=0
-  tail -c "+$((off + 1))" "$tp" 2>/dev/null | grep -q '\[Request interrupted by user'
+  tail -c "+$((off + 1))" "$tp" 2>/dev/null | grep -q "$interrupt_pattern"
 }
 
 # Stops the current watcher (if any) and forgets its pid. Best-effort: the
@@ -390,6 +418,36 @@ if [ "${1:-}" = "__watch" ]; then
   exit 0
 fi
 
+# Subagent hooks share the parent terminal environment, so without this guard a
+# child Stop/PostToolUse can overwrite the parent turn's status. Current Claude
+# adds `agent_id`; also recognize the explicit event and transcript fields for
+# compatibility with payload variants. Consume stdin before any state mutation.
+input="$(cat)"
+hook_agent_id="$(json_field agent_id "$input")"
+if [ -z "$hook_agent_id" ]; then
+  hook_agent_id=$(printf '%s' "$input" | sed -n 's/.*"agent_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+fi
+hook_event_name="$(json_field hook_event_name "$input")"
+agent_transcript_path="$(json_field agent_transcript_path "$input")"
+if [ -n "$hook_agent_id" ] || [ "$hook_event_name" = "SubagentStop" ] || [ -n "$agent_transcript_path" ]; then
+  exit 0
+fi
+
+# Some Claude builds emit child completion as a plain Stop without any of the
+# subagent fields above. The child still has its own session_id, so pin this tab
+# to the parent session established by SessionStart/UserPromptSubmit and reject
+# every event from a different session before it can alter parent status.
+hook_session_id="$(json_field session_id "$input")"
+case "$hook_event_name" in
+  SessionStart|UserPromptSubmit)
+    [ -z "$hook_session_id" ] || printf '%s' "$hook_session_id" >"$session_file"
+    ;;
+esac
+if [ -n "$hook_session_id" ] && [ -f "$session_file" ]; then
+  parent_session_id="$(cat "$session_file" 2>/dev/null)"
+  [ -z "$parent_session_id" ] || [ "$hook_session_id" = "$parent_session_id" ] || exit 0
+fi
+
 case "${1:-}" in
   started)
     # A new turn is in flight. Tag the marker with a unique token, report
@@ -400,13 +458,21 @@ case "${1:-}" in
     report started
     # UserPromptSubmit carries the user's prompt: surface it as the chat's user
     # bubble; fall back to the coarse status line when it can't be extracted.
-    input="$(cat)"
+    # Subagent completions auto-resume the parent through a synthetic
+    # UserPromptSubmit whose prompt is a `<task-notification>` block the user
+    # never typed -- report `started` for it but don't render a fake bubble.
     prompt="$(json_field prompt "$input")"
-    if [ -n "$prompt" ]; then
-      content_message user "$prompt"
-    else
+    case "$prompt" in
+    "<task-notification>"* | "[SYSTEM NOTIFICATION"*)
+      message system "Claude Code resumed after a subagent finished"
+      ;;
+    "")
       message assistant "Claude Code turn started"
-    fi
+      ;;
+    *)
+      content_message user "$prompt"
+      ;;
+    esac
     stop_watcher
     tp="$(transcript_path "$input")"
     if [ -n "$tp" ]; then
@@ -420,18 +486,35 @@ case "${1:-}" in
     fi
     ;;
   stopped)
-    # `Stop` fires only on normal completion (never on a cancel). Tear down the
-    # watcher and clear the in-flight marker; report the green "done" dot. The
+    # `Stop` fires only on normal completion (never on a cancel). The
     # transcript check is a belt-and-suspenders for any build where Stop might
     # trail an interrupt.
-    stop_watcher
-    rm -f "$marker"
-    input="$(cat)"
     tp="$(transcript_path "$input")"
     if turn_interrupted "$tp"; then
+      stop_watcher
+      rm -f "$marker"
       report cleared
       message system "Claude Code turn interrupted"
+    elif has_running_subagents "$input"; then
+      # The parent's inference turn ended, but background subagents are still
+      # working and Claude auto-resumes (a synthetic UserPromptSubmit) when
+      # they finish -- the session is NOT done. Stay on `started`, keep the
+      # marker and abort watcher alive so a cancel during the subagent phase
+      # is still detected, and surface the parent's interim reply.
+      [ -f "$marker" ] || printf '%s' "$$-$(date +%s)" >"$marker"
+      report started
+      reply="$(json_field last_assistant_message "$input")"
+      [ -n "$reply" ] || reply="$(last_assistant_text "$tp")"
+      if [ -n "$reply" ]; then
+        content_message assistant "$reply"
+      else
+        message assistant "Claude Code is waiting on subagents"
+      fi
     else
+      # Tear down the watcher, clear the in-flight marker, and report the
+      # green "done" dot.
+      stop_watcher
+      rm -f "$marker"
       report stopped
       # Stop carries the completed reply directly on current Claude builds.
       # Prefer it over rereading the transcript, then retain transcript support
@@ -448,6 +531,9 @@ case "${1:-}" in
   cleared)
     stop_watcher
     rm -f "$marker"
+    if [ "$hook_event_name" = "SessionEnd" ]; then
+      rm -f "$session_file"
+    fi
     report cleared
     ;;
   running)
@@ -475,7 +561,6 @@ case "${1:-}" in
     # falls back to its own native permission prompt. Guarded on the marker so a
     # stray request outside a turn can't wedge the hook.
     if [ -f "$marker" ]; then
-      input="$(cat)"
       if [ "$(json_field tool_name "$input")" = "AskUserQuestion" ]; then
         handle_question "$input"
         exit 0
