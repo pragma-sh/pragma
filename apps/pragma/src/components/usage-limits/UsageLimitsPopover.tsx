@@ -363,7 +363,7 @@ export function formatDuration(durationMs: number): string {
   if (minutes < 60) {
     return `${minutes}m`;
   }
-  const hours = Math.ceil(minutes / 60);
+  const hours = Math.ceil(durationMs / (60 * 60_000));
   if (hours < 48) {
     return `${hours}h`;
   }
@@ -380,20 +380,29 @@ function validateUsageLimitsResult(
   if (!Number.isFinite(result.observedAt)) {
     throw new Error(`${provider.title} returned an invalid observation time`);
   }
+  const ids = collectValidLimitIds(provider, result.limits);
+  if (result.summary !== undefined && !isValidUsageLimit(result.summary)) {
+    throw new Error(`${provider.title} returned an invalid summary limit`);
+  }
+  const summaryIsPrimary = result.summary?.id === provider.primaryLimitId;
+  if (!ids.has(provider.primaryLimitId) && !summaryIsPrimary) {
+    throw new Error(`${provider.title} did not return primary limit "${provider.primaryLimitId}"`);
+  }
+  return result;
+}
+
+function collectValidLimitIds(
+  provider: UsageLimitProviderDefinition,
+  limits: readonly UsageLimit[],
+): Set<string> {
   const ids = new Set<string>();
-  for (const limit of result.limits) {
+  for (const limit of limits) {
     if (ids.has(limit.id) || !isValidUsageLimit(limit)) {
       throw new Error(`${provider.title} returned an invalid usage limit`);
     }
     ids.add(limit.id);
   }
-  if (result.summary !== undefined && !isValidUsageLimit(result.summary)) {
-    throw new Error(`${provider.title} returned an invalid summary limit`);
-  }
-  if (!ids.has(provider.primaryLimitId)) {
-    throw new Error(`${provider.title} did not return primary limit "${provider.primaryLimitId}"`);
-  }
-  return result;
+  return ids;
 }
 
 function isValidUsageLimit(limit: UsageLimit): boolean {
