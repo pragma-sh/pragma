@@ -16,6 +16,7 @@ import {
   browserNavigate,
   browserScreenshot,
   browserSetBounds,
+  cancelPaletteSearch,
   clearSplitLayout,
   createFile,
   createFolder,
@@ -25,11 +26,13 @@ import {
   deleteWorktree,
   fileDiff,
   listDirEntries,
+  listWorktreeMru,
   loadProjectScripts,
   listSplits,
   markAgentsSeen,
   mergeWorktreeToParent,
   openWorktree,
+  paletteSearch,
   pathExists,
   readAutomationSource,
   readFile,
@@ -40,6 +43,7 @@ import {
   setWorktreeHidden,
   stageAll,
   stageFile,
+  touchWorktreeMru,
   unstageAll,
   unstageFile,
   worktreeChanges,
@@ -192,6 +196,17 @@ describe("worktree IPC wrappers", () => {
     invokeMock.mockResolvedValue(undefined);
   });
 
+  it("forwards worktree MRU operations", () => {
+    void touchWorktreeMru("worktree");
+    expect(invokeMock).toHaveBeenCalledWith("touch_worktree_mru", {
+      worktreeId: "worktree",
+    });
+    void listWorktreeMru("project");
+    expect(invokeMock).toHaveBeenCalledWith("list_worktree_mru", {
+      projectId: "project",
+    });
+  });
+
   it("worktreeStatus forwards the worktree id", () => {
     void worktreeStatus("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("worktree_status", { worktreeId: "wt-1" });
@@ -282,6 +297,24 @@ describe("filesystem IPC wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("list_dir_entries", {
       worktreeId: "wt-1",
       path: "src",
+    });
+  });
+
+  it("paletteSearch forwards project scope and generation id", () => {
+    void paletteSearch("project", "worktree", "search", "palette");
+    expect(invokeMock).toHaveBeenCalledWith("palette_search", {
+      projectId: "project",
+      worktreeId: "worktree",
+      searchId: "search",
+      query: "palette",
+    });
+  });
+
+  it("cancelPaletteSearch forwards project and search id", () => {
+    void cancelPaletteSearch("project", "search");
+    expect(invokeMock).toHaveBeenCalledWith("cancel_palette_search", {
+      projectId: "project",
+      searchId: "search",
     });
   });
 

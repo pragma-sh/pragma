@@ -74,6 +74,14 @@ function config(): KeybindingsConfig {
         mac: { modifiers: ["cmd"], key: "end" },
         linux: { modifiers: ["ctrl"], key: "end" },
       },
+      openCommandPalette: {
+        mac: { modifiers: ["cmd"], key: "p" },
+        linux: { modifiers: ["ctrl"], key: "p" },
+      },
+      openCommandMode: {
+        mac: { modifiers: ["cmd", "shift"], key: "p" },
+        linux: { modifiers: ["ctrl", "shift"], key: "p" },
+      },
       switchToWorkspace1: {
         mac: { modifiers: ["ctrl"], key: "1" },
         linux: { modifiers: ["alt"], key: "1" },
@@ -138,6 +146,8 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     onSplitVertical: vi.fn(),
     onDeleteSelectedFile: vi.fn(),
     onScrollTerminalBottom: vi.fn(),
+    onOpenCommandPalette: vi.fn(),
+    onOpenCommandMode: vi.fn(),
     ...overrides,
   };
 }
@@ -150,6 +160,58 @@ async function flushLoad() {
 describe("useShortcuts", () => {
   afterEach(() => {
     clearActivePluginCommandKeybindings();
+  });
+
+  it("defers default cmd+p to the native menu on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onOpenCommandPalette = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenCommandPalette })));
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "p" });
+    expect(onOpenCommandPalette).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("defers default cmd+t to the native menu so one keypress creates one tab", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onNewTerminalTab = vi.fn();
+    renderHook(() => useShortcuts(options({ onNewTerminalTab })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, key: "t" });
+
+    expect(onNewTerminalTab).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("handles a remapped command palette chord in the webview", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    const remapped = config();
+    remapped.bindings.openCommandPalette.mac = { modifiers: ["cmd", "shift"], key: "p" };
+    loadKeybindingsMock.mockResolvedValue(remapped);
+    const onOpenCommandPalette = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenCommandPalette })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "p" });
+
+    expect(onOpenCommandPalette).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("defers default cmd+shift+p command mode to the native menu on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onOpenCommandMode = vi.fn();
+    renderHook(() => useShortcuts(options({ onOpenCommandMode })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, shiftKey: true, key: "p" });
+
+    expect(onOpenCommandMode).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("fires onClearTerminal for cmd+k on mac", async () => {
@@ -208,18 +270,15 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it.each([
-    ["mac", { metaKey: true, key: "t" }],
-    ["linux", { ctrlKey: true, key: "t" }],
-  ] as const)("defers the native new-tab chord to the %s menu", async (platform, eventInit) => {
-    getPlatformMock.mockResolvedValue(platform);
+  it("defers default ctrl+t to the native menu on linux", async () => {
+    getPlatformMock.mockResolvedValue("linux");
     loadKeybindingsMock.mockResolvedValue(config());
     const onNewTerminalTab = vi.fn();
 
     renderHook(() => useShortcuts(options({ onNewTerminalTab })));
 
     await flushLoad();
-    const event = dispatchKeydown(eventInit);
+    const event = dispatchKeydown({ ctrlKey: true, key: "t" });
 
     expect(onNewTerminalTab).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
@@ -241,7 +300,7 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("fires onCloseTopTab for cmd+w on mac", async () => {
+  it("defers default cmd+w to the native menu on mac", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
     const onCloseTopTab = vi.fn();
@@ -251,8 +310,8 @@ describe("useShortcuts", () => {
     await flushLoad();
     const event = dispatchKeydown({ metaKey: true, key: "w" });
 
-    expect(onCloseTopTab).toHaveBeenCalledTimes(1);
-    expect(event.defaultPrevented).toBe(true);
+    expect(onCloseTopTab).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("fires onBrowserReload for cmd+r and prevents app reload", async () => {

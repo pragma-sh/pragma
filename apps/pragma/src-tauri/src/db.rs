@@ -21,6 +21,14 @@ pub struct SplitLayout {
     pub layout: String,
 }
 
+/// Client-local worktree recency used only for desktop navigation ordering.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMru {
+    pub worktree_id: String,
+    pub last_used_at: i64,
+}
+
 impl Db {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         if let Some(parent) = path.as_ref().parent() {
@@ -109,13 +117,20 @@ impl Db {
                completed_at        TEXT
               );
               CREATE INDEX IF NOT EXISTS idx_kanban_project ON kanban_cards(project_id);
-              CREATE TABLE IF NOT EXISTS plugin_storage (
+               CREATE TABLE IF NOT EXISTS plugin_storage (
                 plugin_id TEXT NOT NULL,
                 key       TEXT NOT NULL,
                 value     TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                PRIMARY KEY (plugin_id, key)
-              );",
+                 PRIMARY KEY (plugin_id, key)
+               );
+               CREATE TABLE IF NOT EXISTS worktree_mru (
+                 worktree_id  TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
+                 project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 last_used_at INTEGER NOT NULL
+               );
+               CREATE INDEX IF NOT EXISTS idx_worktree_mru_project
+                 ON worktree_mru(project_id, last_used_at DESC);",
         )?;
 
         // Versioned migrations. v2 adds browser-tab columns to `tabs`. Running the
@@ -234,6 +249,10 @@ impl Db {
                 )?;
             }
             conn.execute_batch("PRAGMA user_version = 10;")?;
+        }
+        // v11 adds client-local worktree recency for navigation ordering.
+        if version < 11 {
+            conn.execute_batch("PRAGMA user_version = 11;")?;
         }
         Ok(())
     }
@@ -370,6 +389,39 @@ impl Db {
             .lock()?
             .execute("DELETE FROM worktrees WHERE id = ?1", [worktree_id])?;
         Ok(())
+    }
+
+    /// Upserts a worktree's most-recently-used timestamp.
+    pub fn touch_worktree_mru(&self, worktree_id: &str) -> AppResult<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| AppError::InvalidInput(error.to_string()))?
+            .as_millis();
+        let now = i64::try_from(now)
+            .map_err(|error| AppError::InvalidInput(format!("timestamp overflow: {error}")))?;
+        self.0.lock()?.execute(
+            "INSERT INTO worktree_mru (worktree_id, project_id, last_used_at)
+             SELECT id, project_id, ?2 FROM worktrees WHERE id = ?1
+             ON CONFLICT(worktree_id) DO UPDATE SET last_used_at = excluded.last_used_at",
+            params![worktree_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Lists project worktrees from most to least recently used.
+    pub fn list_worktree_mru(&self, project_id: &str) -> AppResult<Vec<WorktreeMru>> {
+        let conn = self.0.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT worktree_id, last_used_at FROM worktree_mru
+             WHERE project_id = ?1 ORDER BY last_used_at DESC, worktree_id",
+        )?;
+        let rows = stmt.query_map([project_id], |row| {
+            Ok(WorktreeMru {
+                worktree_id: row.get(0)?,
+                last_used_at: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
     pub fn setting(&self, key: &str) -> AppResult<Option<String>> {
@@ -1441,5 +1493,55 @@ mod tests {
             .expect("auto-title should succeed");
         assert_eq!(auto.title.as_deref(), Some("user@host: ~/repo"));
         assert!(auto.user_renamed);
+    }
+
+    #[test]
+    fn worktree_mru_orders_upserts_and_cascades() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/mru-repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .find(|worktree| worktree.is_main)
+            .expect("main worktree");
+        let child = db
+            .insert_worktree(
+                "mru-child",
+                &project.id,
+                &main.id,
+                "feature/mru",
+                None,
+                "/tmp/mru-repo-child",
+            )
+            .expect("child should insert");
+        db.touch_worktree_mru(&main.id).expect("touch main");
+        db.0.lock()
+            .expect("lock")
+            .execute(
+                "UPDATE worktree_mru SET last_used_at = 1 WHERE worktree_id = ?1",
+                [&main.id],
+            )
+            .expect("age main");
+        db.touch_worktree_mru(&child.id).expect("touch child");
+        assert_eq!(
+            db.list_worktree_mru(&project.id)
+                .expect("list mru")
+                .into_iter()
+                .map(|row| row.worktree_id)
+                .collect::<Vec<_>>(),
+            [child.id.clone(), main.id]
+        );
+        db.delete_worktree(&child.id).expect("delete child");
+        let remaining = db
+            .list_worktree_mru(&project.id)
+            .expect("list after delete");
+        assert_eq!(remaining.len(), 1);
     }
 }

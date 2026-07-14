@@ -1,6 +1,7 @@
 mod auth;
 mod client;
 mod config;
+mod devices;
 mod error;
 mod http;
 mod routes;
@@ -81,6 +82,11 @@ fn run(args: Args) -> GatewayResult<()> {
         token: config.token,
         gateway_version: env!("CARGO_PKG_VERSION"),
         pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
+        devices: Arc::new(Mutex::new(devices::DeviceRegistry::new(
+            config
+                .socket_path
+                .with_file_name(CONSTANTS.gateway.devices_file.as_str()),
+        ))),
     };
     // Model providers may invoke slow host tools. Keep catalog refresh off the
     // startup path so clients can use the newly advertised gateway immediately.

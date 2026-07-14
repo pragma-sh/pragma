@@ -31,6 +31,10 @@ interface UseShortcutsOptions {
   onDeleteSelectedFile: () => void;
   /** Scrolls the active terminal viewport to the bottom (live cursor row). */
   onScrollTerminalBottom: () => void;
+  /** Opens project command palette. */
+  onOpenCommandPalette: () => void;
+  /** Opens project command palette directly in command mode. */
+  onOpenCommandMode: () => void;
 }
 
 interface ShortcutState {
@@ -57,7 +61,16 @@ const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
   splitHorizontal: "onSplitHorizontal",
   splitVertical: "onSplitVertical",
   scrollTerminalBottom: "onScrollTerminalBottom",
+  openCommandPalette: "onOpenCommandPalette",
+  openCommandMode: "onOpenCommandMode",
 };
+
+const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
+  "closeTopTab",
+  "newTerminalTab",
+  "openCommandPalette",
+  "openCommandMode",
+]);
 
 /** Registers window-level keyboard shortcuts driven by `~/.pragma/keybindings.json`. */
 export function useShortcuts(options: UseShortcutsOptions): void {
@@ -111,9 +124,13 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         return;
       }
 
-      // Native menu owns Cmd/Ctrl+T. Some WebViews also deliver the keydown,
-      // which would otherwise create one tab here and another from the menu event.
-      if (action === "newTerminalTab" && isNativeNewTerminalShortcut(event, state.platform)) {
+      // Native menu accelerators own default chords that macOS/WebKit may consume
+      // before the webview. Avoid running both native and webview handlers while
+      // preserving configurable non-default chords.
+      if (
+        NATIVE_MENU_ACTIONS.has(action) &&
+        actionForEvent(event, defaultKeybindingsConfig, state.platform) === action
+      ) {
         return;
       }
 
@@ -136,11 +153,6 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [shortcutState]);
-}
-
-function isNativeNewTerminalShortcut(event: KeyboardEvent, platform: KeybindingPlatform): boolean {
-  const primaryModifier = platform === "mac" ? event.metaKey && !event.ctrlKey : event.ctrlKey;
-  return primaryModifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "t";
 }
 
 /** `deleteFile` is a native OS text-editing chord in inputs/terminal/editor; only

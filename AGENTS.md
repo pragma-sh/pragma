@@ -138,6 +138,9 @@ than no guide.
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`). Shipped defaults for
   such settings belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`) so Rust and TS
   agree, never hard-coded in one language.
+- Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`;
+  native `Cmd+,` opens it on macOS. Host-only mobile pairing and gateway device history
+  live under its global scope.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.

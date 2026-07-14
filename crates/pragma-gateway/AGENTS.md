@@ -16,6 +16,9 @@
   keeps the token stable across gateway restarts so paired remote devices are not
   disconnected on every respawn. The desktop `regenerate_gateway_token` command deletes
   this file (and kills the gateway) to force a fresh token. `--token` still overrides.
+- Persist authenticated mobile installation metadata in `gateway-devices.json` beside
+  `daemon.sock`. Mobile sends installation-scoped identity headers on every request;
+  gateway updates first/last-seen timestamps only after bearer authentication.
 - On startup, refuse if a live gateway with the **same** protocol version already serves
   the discovery file; a live gateway with a **different** protocol version (leftover from
   a previous app build) is killed and replaced — otherwise a protocol bump deadlocks

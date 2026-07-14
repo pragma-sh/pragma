@@ -7,6 +7,7 @@ mod agent_notifications;
 mod ai;
 mod automations;
 mod browser;
+mod config_file;
 mod control;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
@@ -53,6 +54,12 @@ const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
 const MENU_NEW_TERMINAL_TAB: &str = "tabs.new-terminal";
 /// Menu item id for closing the active tab from the native menu.
 const MENU_CLOSE_ACTIVE_TAB: &str = "tabs.close-active";
+/// Menu item id for opening the project command palette from the native menu.
+const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
+/// Menu item id for opening the palette directly in command mode.
+const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
+/// Menu item id for opening the full-frame Settings view.
+const MENU_OPEN_SETTINGS: &str = "settings.open";
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
 /// consistent with their UI controls.
@@ -139,50 +146,7 @@ fn install_deep_links(app: &tauri::App) {
 /// listeners see it, and `WebKit` may consume Cmd+T for a browser tab.
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
-    let new_terminal_tab = MenuItem::with_id(
-        app,
-        MENU_NEW_TERMINAL_TAB,
-        "New Terminal Tab",
-        true,
-        Some("CmdOrCtrl+T"),
-    )?;
-    let close_active_tab = MenuItem::with_id(
-        app,
-        MENU_CLOSE_ACTIVE_TAB,
-        "Close Tab",
-        true,
-        Some("CmdOrCtrl+W"),
-    )?;
-    // Replace File entirely: its default Close Window item keeps Cmd+W even when
-    // removed in place on macOS.
-    #[cfg(target_os = "macos")]
-    {
-        let file_menu = Submenu::with_id_and_items(
-            app,
-            "file",
-            "File",
-            true,
-            &[&new_terminal_tab, &close_active_tab],
-        )?;
-        menu.remove_at(1)?;
-        menu.insert(&file_menu, 1)?;
-        let window_menu = menu
-            .get("window")
-            .and_then(|item| item.as_submenu().cloned());
-        if let Some(window_menu) = window_menu {
-            // The default macOS Window menu also owns Cmd+W for closing the window.
-            window_menu.remove_at(3)?;
-        }
-    }
-    #[cfg(target_os = "linux")]
-    if let Some(window_menu) = menu
-        .get("window")
-        .and_then(|item| item.as_submenu().cloned())
-    {
-        // Linux has no default File menu, so surface Pragma tab actions here.
-        window_menu.append(&new_terminal_tab)?;
-        window_menu.append(&close_active_tab)?;
-    }
+    install_workspace_menu(app, &menu)?;
     let restart_daemon = MenuItem::with_id(
         app,
         MENU_RESTART_DAEMON,
@@ -209,10 +173,142 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
                 | MENU_OPEN_DAEMON_LOGS
                 | MENU_NEW_TERMINAL_TAB
                 | MENU_CLOSE_ACTIVE_TAB
+                | MENU_OPEN_COMMAND_PALETTE
+                | MENU_OPEN_COMMAND_MODE
+                | MENU_OPEN_SETTINGS
         ) {
             let _ = app.emit(MENU_EVENT, action);
         }
     });
+    Ok(())
+}
+
+/// Installs native workspace actions, including accelerators `WebKit` may consume.
+fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> tauri::Result<()> {
+    let open_settings = MenuItem::with_id(
+        app,
+        MENU_OPEN_SETTINGS,
+        "Settings…",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
+    let new_terminal_tab = MenuItem::with_id(
+        app,
+        MENU_NEW_TERMINAL_TAB,
+        "New Terminal Tab",
+        true,
+        Some("CmdOrCtrl+T"),
+    )?;
+    let close_active_tab = MenuItem::with_id(
+        app,
+        MENU_CLOSE_ACTIVE_TAB,
+        "Close Tab",
+        true,
+        Some("CmdOrCtrl+W"),
+    )?;
+    let open_command_palette = MenuItem::with_id(
+        app,
+        MENU_OPEN_COMMAND_PALETTE,
+        "Open Command Palette",
+        true,
+        Some("CmdOrCtrl+P"),
+    )?;
+    let open_command_mode = MenuItem::with_id(
+        app,
+        MENU_OPEN_COMMAND_MODE,
+        "Open Command Mode",
+        true,
+        Some("CmdOrCtrl+Shift+P"),
+    )?;
+
+    #[cfg(target_os = "macos")]
+    install_macos_workspace_menu(
+        app,
+        menu,
+        &open_settings,
+        &new_terminal_tab,
+        &close_active_tab,
+        &open_command_palette,
+        &open_command_mode,
+    )?;
+    #[cfg(target_os = "linux")]
+    install_linux_workspace_menu(
+        menu,
+        &open_settings,
+        &new_terminal_tab,
+        &close_active_tab,
+        &open_command_palette,
+        &open_command_mode,
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_workspace_menu(
+    app: &tauri::AppHandle,
+    menu: &Menu<tauri::Wry>,
+    open_settings: &MenuItem<tauri::Wry>,
+    new_terminal_tab: &MenuItem<tauri::Wry>,
+    close_active_tab: &MenuItem<tauri::Wry>,
+    open_command_palette: &MenuItem<tauri::Wry>,
+    open_command_mode: &MenuItem<tauri::Wry>,
+) -> tauri::Result<()> {
+    // Tauri's default app submenu has a generated id, so resolve its stable
+    // first position rather than looking up an id that does not exist.
+    if let Some(app_menu) = menu
+        .items()?
+        .into_iter()
+        .next()
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        app_menu.insert(open_settings, 2)?;
+    }
+    // Replace File entirely: its default Close Window item keeps Cmd+W even when
+    // removed in place on macOS.
+    let file_menu = Submenu::with_id_and_items(
+        app,
+        "file",
+        "File",
+        true,
+        &[
+            new_terminal_tab,
+            close_active_tab,
+            open_command_palette,
+            open_command_mode,
+        ],
+    )?;
+    menu.remove_at(1)?;
+    menu.insert(&file_menu, 1)?;
+    if let Some(window_menu) = menu
+        .get("window")
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        // The default macOS Window menu also owns Cmd+W for closing the window.
+        window_menu.remove_at(3)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_workspace_menu(
+    menu: &Menu<tauri::Wry>,
+    open_settings: &MenuItem<tauri::Wry>,
+    new_terminal_tab: &MenuItem<tauri::Wry>,
+    close_active_tab: &MenuItem<tauri::Wry>,
+    open_command_palette: &MenuItem<tauri::Wry>,
+    open_command_mode: &MenuItem<tauri::Wry>,
+) -> tauri::Result<()> {
+    if let Some(window_menu) = menu
+        .get("window")
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        // Linux has no default File menu, so surface Pragma tab actions here.
+        window_menu.append(open_settings)?;
+        window_menu.append(new_terminal_tab)?;
+        window_menu.append(close_active_tab)?;
+        window_menu.append(open_command_palette)?;
+        window_menu.append(open_command_mode)?;
+    }
     Ok(())
 }
 
@@ -301,6 +397,12 @@ async fn regenerate_gateway_token(
     pty: tauri::State<'_, PtyClient>,
 ) -> AppResult<pty::GatewayConnectionInfo> {
     pty.regenerate_gateway_token()
+}
+
+/// Lists mobile installations that have authenticated with the local gateway.
+#[tauri::command]
+async fn gateway_devices(pty: tauri::State<'_, PtyClient>) -> AppResult<Vec<pty::GatewayDevice>> {
+    pty.gateway_devices()
 }
 
 /// Starts the remote-access tunnel exposing the local gateway, returning the
@@ -821,6 +923,9 @@ pub fn run() {
             start_plugin_watcher,
             gateway_connection_info,
             regenerate_gateway_token,
+            gateway_devices,
+            config_file::read_config,
+            config_file::write_config,
             tunnel_start,
             tunnel_stop,
             tunnel_status,
@@ -843,6 +948,8 @@ pub fn run() {
             projects::get_projects_directory,
             ssh_host::connect_remote_project,
             worktrees::list_worktrees,
+            worktrees::touch_worktree_mru,
+            worktrees::list_worktree_mru,
             worktrees::create_worktree,
             worktrees::worktree_status,
             worktrees::rename_worktree,
@@ -881,6 +988,8 @@ pub fn run() {
             fs::write_file,
             fs::rename_file,
             fs::delete_file,
+            fs::palette_search,
+            fs::cancel_palette_search,
             git::worktree_changes,
             git::worktrees_merged_status,
             git::file_diff,

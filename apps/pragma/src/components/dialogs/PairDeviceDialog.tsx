@@ -8,12 +8,9 @@ import { constants } from "@pragma/constants";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Label } from "@/components/ui/label";
-import { ModalShell } from "@/components/ui/modal-shell";
 import { Switch } from "@/components/ui/switch";
-import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { errorMessage } from "@/lib/errors";
 import { encodePairingPayload } from "@/lib/pairing";
-import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import {
   gatewayConnectionInfo,
   getAppInfo,
@@ -26,11 +23,6 @@ import {
 
 /** How often the tunnel status is polled while the dialog is open. */
 const STATUS_POLL_MS = 1500;
-
-interface PairDeviceDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
 
 interface PairingTunnel {
   status: TunnelStatus;
@@ -129,68 +121,39 @@ function usePairingTunnel(open: boolean): PairingTunnel {
   return { status, token, hostName, busy, error, refreshStatus, toggleRemote, regenerateToken };
 }
 
-/**
- * Pair-a-device modal: flips the remote-access tunnel on/off and renders a QR
- * of the {@link PairingPayload} (public URL + gateway token) for a phone to
- * scan. The tunnel deliberately survives the modal closing — closing does not
- * stop it — so users can pair, close, and re-open without dropping devices.
- */
-export function PairDeviceDialog({ open, onOpenChange }: PairDeviceDialogProps) {
-  useEscapeToClose(open, () => onOpenChange(false));
-  useSuppressNativeOverlayWhile(open);
+/** Inline pairing controls used by full-frame Settings. */
+export function PairDeviceSettings() {
   const { status, token, hostName, busy, error, toggleRemote, regenerateToken } =
-    usePairingTunnel(open);
-
-  if (!open) {
-    return null;
-  }
-
+    usePairingTunnel(true);
   const enabled = status.state === "active" || status.state === "starting";
   const url = status.state === "active" ? status.value : "";
 
   return (
-    <ModalShell>
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Pair a device</h2>
-        <p className="text-sm text-muted-foreground">
-          Expose this host over a secure tunnel and scan the code from the Pragma mobile app.
-        </p>
-      </div>
-
-      <div className="mt-5 flex items-center justify-between rounded-lg border p-3">
+    <div>
+      <div className="flex items-center justify-between rounded-lg border p-3">
         <div className="space-y-0.5">
-          <Label htmlFor="remote-access">Remote access</Label>
+          <Label htmlFor="settings-remote-access">Remote access</Label>
           <p className="text-xs text-muted-foreground">{tunnelHint(status)}</p>
         </div>
         <Switch
-          id="remote-access"
+          id="settings-remote-access"
           checked={enabled}
           disabled={busy}
           onCheckedChange={(next) => void toggleRemote(next)}
         />
       </div>
-
       {status.state === "error" ? (
         <p className="mt-3 text-sm text-destructive">{status.value}</p>
       ) : null}
-
-      {url ? (
-        <PairingQr url={url} token={token} hostName={hostName} />
-      ) : status.state === "starting" ? (
+      {url ? <PairingQr url={url} token={token} hostName={hostName} /> : null}
+      {status.state === "starting" ? (
         <p className="mt-4 text-center text-sm text-muted-foreground">Starting tunnel…</p>
       ) : null}
-
       {url ? (
         <ManualSection url={url} token={token} onRegenerate={regenerateToken} busy={busy} />
       ) : null}
-
       {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
-      <div className="mt-5 flex justify-end">
-        <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Done
-        </Button>
-      </div>
-    </ModalShell>
+    </div>
   );
 }
 
