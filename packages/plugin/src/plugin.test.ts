@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PLUGIN_API_VERSION } from "./generated/version";
 import { defineWebView, openWebView } from "./contributions";
 import { definePlugin, type PluginDefinitionInput } from "./plugin";
+import { defineUsageLimitProvider } from "./usage-limits";
 
 describe("definePlugin", () => {
   it("stamps the compiled-against @pragma/plugin version", () => {
@@ -33,6 +34,19 @@ describe("definePlugin", () => {
     const plugin = definePlugin({ name: "Test Plugin", ui: { webViews: [webView] } });
 
     expect(plugin.ui?.webViews).toEqual([webView]);
+  });
+
+  it("preserves usage-limit providers", () => {
+    const provider = defineUsageLimitProvider({
+      id: "cursor",
+      title: "Cursor",
+      dashboardUrl: "https://cursor.com/dashboard/spending",
+      primaryLimitId: "plan",
+      load: async () => ({ status: "ready", observedAt: 1, limits: [] }),
+    });
+    const plugin = definePlugin({ name: "Test Plugin", usageLimits: [provider] });
+
+    expect(plugin.usageLimits).toEqual([provider]);
   });
 });
 

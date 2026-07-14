@@ -13,6 +13,7 @@ import { PLUGIN_API_VERSION } from "./generated/version";
 import type { PluginContext } from "./types";
 import type { PluginDeepLinkEvent } from "./types";
 import type { WatcherDefinition } from "./watcher";
+import type { UsageLimitProviderDefinition } from "./usage-limits";
 
 /** Infers a config schema's parsed output type, defaulting to `unknown` when no schema is given. */
 export type InferConfig<TConfigSchema extends ZodTypeAny> =
@@ -60,6 +61,7 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   settings?: PluginSettingsContributions;
   keybindings?: PluginKeybindingsContributions;
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
+  usageLimits?: UsageLimitProviderDefinition<InferConfig<TConfigSchema>>[];
   css?: string;
   activate?: (ctx: PluginContext<InferConfig<TConfigSchema>>) => void | (() => void);
 }
