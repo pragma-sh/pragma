@@ -157,13 +157,13 @@ fn register_search(search_id: &str) -> CoreResult<Arc<AtomicBool>> {
     let mut active = ACTIVE_SEARCHES
         .lock()
         .map_err(|error| CoreError::Operation(error.to_string()))?;
+    if let Some(previous) = active.remove(search_id) {
+        previous.store(true, Ordering::Relaxed);
+    }
     if active.len() >= MAX_CONCURRENT_SEARCHES {
         return Err(CoreError::Operation(
             "too many concurrent palette searches".to_string(),
         ));
-    }
-    if let Some(previous) = active.remove(search_id) {
-        previous.store(true, Ordering::Relaxed);
     }
     let cancelled = Arc::new(AtomicBool::new(false));
     active.insert(search_id.to_string(), Arc::clone(&cancelled));
@@ -299,16 +299,19 @@ fn palette_search(
                         line.to_lowercase()
                             .find(query_folded.as_deref().unwrap_or(query))
                     };
-                    let Some(column) = column else {
+                    let Some(byte_column) = column else {
                         continue;
                     };
+                    // Byte offset -> 1-based char column so CodeMirror (UTF-16
+                    // code units) lands on the right position for non-ASCII lines.
+                    let char_column = line[..byte_column].chars().count() + 1;
                     code_matches.push(PaletteSearchMatch {
                         worktree_id: search_root.worktree_id.clone(),
                         path: path.clone(),
                         kind: "code",
                         score: 1.0,
                         line: Some(u32::try_from(line_index + 1).unwrap_or(u32::MAX)),
-                        column: Some(u32::try_from(column + 1).unwrap_or(u32::MAX)),
+                        column: Some(u32::try_from(char_column).unwrap_or(u32::MAX)),
                         snippet: Some(bounded_snippet(line)),
                     });
                     if code_matches.len() >= MAX_SEARCH_RESULTS {
