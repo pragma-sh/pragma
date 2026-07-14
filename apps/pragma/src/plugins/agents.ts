@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react";
 
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { AgentDefinition, PluginContext } from "@pragma/plugin";
 import type { PragmaClient } from "@pragma/sdk";
 
 import type { AgentConfig, AgentModel, AgentModelSelection, RawAgentModel } from "@/lib/tauri";
 
 import { notifyFromPlugin } from "./host-hooks";
+import { resolvePluginAssetPath } from "./assets";
 import type { PluginRecord } from "./registry";
 
 interface RuntimeServices {
@@ -126,7 +126,7 @@ function toAgentConfig(
   return {
     id: pluginAgentId(pluginId, definition.id),
     name: definition.name,
-    iconPath: resolveIconPath(definition.iconPath, record),
+    iconPath: resolvePluginAssetPath(definition.iconPath, record),
     iconDataUrl: null,
     start: definition.launch.command,
     startupInput: definition.startupInput ?? null,
@@ -143,25 +143,6 @@ export function pluginAgentId(pluginId: string, agentId: string): string {
   return agentId.includes(".") ? agentId : `${pluginId}.${agentId}`;
 }
 
-function resolveIconPath(iconPath: string | undefined, record: PluginRecord): string | null {
-  if (!iconPath) {
-    return null;
-  }
-  if (isBrowserUrl(iconPath)) {
-    return iconPath;
-  }
-  const absolutePath = iconPath.startsWith("/")
-    ? iconPath
-    : record.dir
-      ? `${record.dir.replace(/\/$/, "")}/${iconPath.replace(/^\.\//, "")}`
-      : iconPath;
-  return absolutePath.startsWith("/") ? convertFileSrc(absolutePath) : absolutePath;
-}
-
-function isBrowserUrl(iconPath: string): boolean {
-  return /^(?:data:|blob:|https?:)/.test(iconPath);
-}
-
 function toRawAgentModel(model: RawAgentModel): RawAgentModel {
   return { id: model.id, name: model.name, reasoning: model.reasoning ?? [] };
 }
@@ -176,6 +157,7 @@ function pluginContext(record: PluginAgentRecord): PluginContext {
   }
   return {
     pluginId: record.pluginId,
+    ...(record.record.dir === undefined ? {} : { pluginDir: record.record.dir }),
     config: record.record.config,
     project: runtime.project,
     sdk: runtime.sdk,
