@@ -200,6 +200,21 @@ interface ToolbarAction {
   run: (editor: Editor) => void;
 }
 
+/** Builds a toolbar action for a simple mark/node toggle (bold, lists, quote, ...). */
+function toggleAction(
+  label: string,
+  icon: LucideIcon,
+  markOrNodeName: string,
+  toggle: (chain: ReturnType<Editor["chain"]>) => ReturnType<Editor["chain"]>,
+): ToolbarAction {
+  return {
+    label,
+    icon,
+    isActive: (e) => e.isActive(markOrNodeName),
+    run: (e) => toggle(e.chain().focus()).run(),
+  };
+}
+
 /**
  * Toolbar actions grouped into divider-separated sections. Every action maps to
  * a markdown construct GFM can express (headings, emphasis, lists, task lists,
@@ -227,64 +242,19 @@ const TOOLBAR_SECTIONS: ToolbarAction[][] = [
     run: (e: Editor) => e.chain().focus().toggleHeading({ level }).run(),
   })),
   [
-    {
-      label: "Bold",
-      icon: Bold,
-      isActive: (e) => e.isActive("bold"),
-      run: (e) => e.chain().focus().toggleBold().run(),
-    },
-    {
-      label: "Italic",
-      icon: Italic,
-      isActive: (e) => e.isActive("italic"),
-      run: (e) => e.chain().focus().toggleItalic().run(),
-    },
-    {
-      label: "Strikethrough",
-      icon: Strikethrough,
-      isActive: (e) => e.isActive("strike"),
-      run: (e) => e.chain().focus().toggleStrike().run(),
-    },
-    {
-      label: "Inline code",
-      icon: Code,
-      isActive: (e) => e.isActive("code"),
-      run: (e) => e.chain().focus().toggleCode().run(),
-    },
+    toggleAction("Bold", Bold, "bold", (c) => c.toggleBold()),
+    toggleAction("Italic", Italic, "italic", (c) => c.toggleItalic()),
+    toggleAction("Strikethrough", Strikethrough, "strike", (c) => c.toggleStrike()),
+    toggleAction("Inline code", Code, "code", (c) => c.toggleCode()),
   ],
   [
-    {
-      label: "Bullet list",
-      icon: List,
-      isActive: (e) => e.isActive("bulletList"),
-      run: (e) => e.chain().focus().toggleBulletList().run(),
-    },
-    {
-      label: "Ordered list",
-      icon: ListOrdered,
-      isActive: (e) => e.isActive("orderedList"),
-      run: (e) => e.chain().focus().toggleOrderedList().run(),
-    },
-    {
-      label: "Task list",
-      icon: ListTodo,
-      isActive: (e) => e.isActive("taskList"),
-      run: (e) => e.chain().focus().toggleTaskList().run(),
-    },
+    toggleAction("Bullet list", List, "bulletList", (c) => c.toggleBulletList()),
+    toggleAction("Ordered list", ListOrdered, "orderedList", (c) => c.toggleOrderedList()),
+    toggleAction("Task list", ListTodo, "taskList", (c) => c.toggleTaskList()),
   ],
   [
-    {
-      label: "Blockquote",
-      icon: Quote,
-      isActive: (e) => e.isActive("blockquote"),
-      run: (e) => e.chain().focus().toggleBlockquote().run(),
-    },
-    {
-      label: "Code block",
-      icon: SquareCode,
-      isActive: (e) => e.isActive("codeBlock"),
-      run: (e) => e.chain().focus().toggleCodeBlock().run(),
-    },
+    toggleAction("Blockquote", Quote, "blockquote", (c) => c.toggleBlockquote()),
+    toggleAction("Code block", SquareCode, "codeBlock", (c) => c.toggleCodeBlock()),
     {
       label: "Horizontal rule",
       icon: Minus,
