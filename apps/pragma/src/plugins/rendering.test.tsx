@@ -116,7 +116,7 @@ describe("plugin rendering helpers", () => {
 
     render(<TopperProbe align="right" />);
 
-    expect(screen.getByText("topper:1")).toBeInTheDocument();
+    expect(screen.getByText("global::topper:1")).toBeInTheDocument();
   });
 
   it("returns sidebar cards", () => {
