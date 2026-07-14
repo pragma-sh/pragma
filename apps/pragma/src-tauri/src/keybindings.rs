@@ -95,6 +95,8 @@ fn default_config() -> KeybindingsConfig {
             split_vertical: chord("cmd+shift", "/", "ctrl+shift", "/"),
             delete_file: chord("cmd", "backspace", "ctrl", "delete"),
             scroll_terminal_bottom: chord("cmd", "end", "ctrl", "end"),
+            open_command_palette: chord("cmd", "p", "ctrl", "p"),
+            open_command_mode: chord("cmd+shift", "p", "ctrl+shift", "p"),
             switch_to_workspace1: chord("ctrl", "1", "alt", "1"),
             switch_to_workspace2: chord("ctrl", "2", "alt", "2"),
             switch_to_workspace3: chord("ctrl", "3", "alt", "3"),

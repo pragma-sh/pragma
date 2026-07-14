@@ -13,6 +13,14 @@ const listeners = new Set<() => void>();
 const messageListeners = new Set<() => void>();
 const statuses: WorktreeMap = new Map();
 const messages: AgentWorktreeMessageMap = new Map();
+export interface AgentStatusEntry {
+  worktreeId: string;
+  tabId: string;
+  agent: string;
+  status: AgentStatus;
+}
+let statusSnapshot: AgentStatusEntry[] = [];
+const EMPTY_STATUS_SNAPSHOT: AgentStatusEntry[] = [];
 
 const priority: Record<AgentStatus, number> = {
   cleared: 0,
@@ -258,6 +266,16 @@ export function subscribeAgentStatuses(listener: () => void): () => void {
   return subscribe(listener);
 }
 
+/** Returns stable all-entry runtime snapshot for project-level navigation surfaces. */
+function agentStatusSnapshot(): AgentStatusEntry[] {
+  return statusSnapshot;
+}
+
+/** Subscribes to all live agent entries while preserving external-store snapshot identity. */
+export function useAgentStatusSnapshot(): AgentStatusEntry[] {
+  return useSyncExternalStore(subscribe, agentStatusSnapshot, () => EMPTY_STATUS_SNAPSHOT);
+}
+
 /** Subscribes to rich agent message changes. */
 export function subscribeAgentMessages(listener: () => void): () => void {
   messageListeners.add(listener);
@@ -288,6 +306,14 @@ function subscribe(listener: () => void): () => void {
 }
 
 function emit(): void {
+  statusSnapshot = [];
+  for (const [worktreeId, tabs] of statuses) {
+    for (const [tabId, agents] of tabs) {
+      for (const [agent, status] of agents) {
+        statusSnapshot.push({ worktreeId, tabId, agent, status });
+      }
+    }
+  }
   for (const listener of listeners) {
     listener();
   }

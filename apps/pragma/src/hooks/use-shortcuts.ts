@@ -31,6 +31,10 @@ interface UseShortcutsOptions {
   onDeleteSelectedFile: () => void;
   /** Scrolls the active terminal viewport to the bottom (live cursor row). */
   onScrollTerminalBottom: () => void;
+  /** Opens project command palette. */
+  onOpenCommandPalette: () => void;
+  /** Opens project command palette directly in command mode. */
+  onOpenCommandMode: () => void;
 }
 
 interface ShortcutState {
@@ -57,7 +61,16 @@ const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
   splitHorizontal: "onSplitHorizontal",
   splitVertical: "onSplitVertical",
   scrollTerminalBottom: "onScrollTerminalBottom",
+  openCommandPalette: "onOpenCommandPalette",
+  openCommandMode: "onOpenCommandMode",
 };
+
+const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
+  "closeTopTab",
+  "newTerminalTab",
+  "openCommandPalette",
+  "openCommandMode",
+]);
 
 /** Registers window-level keyboard shortcuts driven by `~/.pragma/keybindings.json`. */
 export function useShortcuts(options: UseShortcutsOptions): void {
@@ -108,6 +121,16 @@ export function useShortcuts(options: UseShortcutsOptions): void {
       // `cmd+k`) so the plugin handler owns the chord instead of the built-in
       // app shortcut. Mirrors the bubble check in `terminal-manager.ts`.
       if (hasPluginCommandForEvent(event)) {
+        return;
+      }
+
+      // Native menu accelerators own default chords that macOS/WebKit may consume
+      // before the webview. Avoid running both native and webview handlers while
+      // preserving configurable non-default chords.
+      if (
+        NATIVE_MENU_ACTIONS.has(action) &&
+        actionForEvent(event, defaultKeybindingsConfig, state.platform) === action
+      ) {
         return;
       }
 

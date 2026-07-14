@@ -4,7 +4,7 @@ use pragma_constants::{Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
 use tauri::State;
 
-use crate::db::Db;
+use crate::db::{Db, WorktreeMru};
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::hosts::Hosts;
@@ -13,6 +13,16 @@ use crate::scripts;
 #[tauri::command]
 pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Worktree>> {
     db.list_worktrees(&project_id)
+}
+
+#[tauri::command]
+pub fn touch_worktree_mru(db: State<'_, Db>, worktree_id: String) -> AppResult<()> {
+    db.touch_worktree_mru(&worktree_id)
+}
+
+#[tauri::command]
+pub fn list_worktree_mru(db: State<'_, Db>, project_id: String) -> AppResult<Vec<WorktreeMru>> {
+    db.list_worktree_mru(&project_id)
 }
 
 #[tauri::command(async)]

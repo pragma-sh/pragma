@@ -99,9 +99,13 @@ function MarkdownWysiwyg({
   // Re-seed only when the file reloads from disk underneath a blurred editor
   // (live preview of agent edits); comparing serialized markdown avoids
   // clobbering the cursor on the editor's own updates echoing back.
+  // `emitUpdate: false` keeps this programmatic re-sync from firing `onUpdate`
+  // (which would report a normalized-but-unequal markdown string as an edit
+  // and mark the tab dirty, e.g. right after mount when the serializer's
+  // round-trip of `doc` doesn't byte-match it).
   useEffect(() => {
     if (!editor || editor.isFocused) return;
-    if (getMarkdown(editor) !== doc) editor.commands.setContent(doc);
+    if (getMarkdown(editor) !== doc) editor.commands.setContent(doc, { emitUpdate: false });
   }, [editor, doc]);
 
   // Keep the bar (and its mode toggle) up while TipTap is still instantiating.

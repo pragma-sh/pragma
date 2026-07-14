@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { type Extension, Prec } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { EditorView as CodeMirrorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 
 import { loadLanguageExtension } from "@/components/editor/codemirror-language";
@@ -14,6 +14,7 @@ import {
   useEditorSave,
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
+import { clearEditorLocation, useEditorLocation } from "@/state/editor-location-store";
 
 /** Resolve a language grammar lazily by filename; plain text on no match. */
 export function useEditorLanguage(filePath: string | null): Extension | null {
@@ -73,6 +74,8 @@ export function EditorView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
+  const viewRef = useRef<CodeMirrorView | null>(null);
+  const location = useEditorLocation(tabId);
   const { state, load } = useEditorFileLoader(tab, savedDocRef, currentDocRef);
   const languageExtension = useEditorLanguage(filePath);
   const save = useEditorSave(tabId, worktreeId, filePath, savedDocRef);
@@ -80,6 +83,20 @@ export function EditorView({ tab }: { tab: Tab }) {
   const saveKeymap = useEditorKeymap(save);
   const extensions = useEditorExtensions(languageExtension, saveKeymap);
   const handleSaveShortcut = useSaveShortcut(save, currentDocRef);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (state.kind !== "ready" || !view || !location) return;
+    const lineNumber = Math.min(location.line, view.state.doc.lines);
+    const line = view.state.doc.line(lineNumber);
+    const anchor = Math.min(line.to, line.from + location.column - 1);
+    view.dispatch({
+      selection: { anchor },
+      effects: CodeMirrorView.scrollIntoView(anchor, { y: "center" }),
+    });
+    view.focus();
+    clearEditorLocation(tabId, location.generation);
+  }, [location, state, tabId]);
 
   const placeholder = renderLoadState(state, load);
   if (placeholder) return placeholder;
@@ -92,6 +109,9 @@ export function EditorView({ tab }: { tab: Tab }) {
         extensions={extensions}
         height="100%"
         onChange={onChange}
+        onCreateEditor={(view) => {
+          viewRef.current = view;
+        }}
         theme="none"
         value={state.kind === "ready" ? state.doc : ""}
       />

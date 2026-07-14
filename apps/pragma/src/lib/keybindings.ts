@@ -12,6 +12,22 @@ const MODIFIERS = ["cmd", "ctrl", "alt", "shift"] as const;
 
 type Modifier = (typeof MODIFIERS)[number];
 
+function primaryChord(key: string, shift = false): PlatformChord {
+  const macModifiers: KeybindingChord["modifiers"] = shift ? ["cmd", "shift"] : ["cmd"];
+  const linuxModifiers: KeybindingChord["modifiers"] = shift ? ["ctrl", "shift"] : ["ctrl"];
+  return {
+    mac: { modifiers: macModifiers, key },
+    linux: { modifiers: linuxModifiers, key },
+  };
+}
+
+function workspaceChord(key: string): PlatformChord {
+  return {
+    mac: { modifiers: ["ctrl"], key },
+    linux: { modifiers: ["alt"], key },
+  };
+}
+
 /** Built-in keybindings used until the user config has loaded. */
 export const defaultKeybindingsConfig: KeybindingsConfig = {
   version: 1,
@@ -24,86 +40,31 @@ export const defaultKeybindingsConfig: KeybindingsConfig = {
       mac: { modifiers: ["ctrl", "shift"], key: "tab" },
       linux: { modifiers: ["alt", "shift"], key: "tab" },
     },
-    closeTopTab: {
-      mac: { modifiers: ["cmd"], key: "w" },
-      linux: { modifiers: ["ctrl"], key: "w" },
-    },
-    newTerminalTab: {
-      mac: { modifiers: ["cmd"], key: "t" },
-      linux: { modifiers: ["ctrl"], key: "t" },
-    },
-    newBrowserTab: {
-      mac: { modifiers: ["cmd"], key: "b" },
-      linux: { modifiers: ["ctrl"], key: "b" },
-    },
-    clearTerminal: {
-      mac: { modifiers: ["cmd"], key: "k" },
-      linux: { modifiers: ["ctrl"], key: "k" },
-    },
-    browserReload: {
-      mac: { modifiers: ["cmd"], key: "r" },
-      linux: { modifiers: ["ctrl"], key: "r" },
-    },
-    browserDevtools: {
-      mac: { modifiers: ["cmd", "shift"], key: "i" },
-      linux: { modifiers: ["ctrl", "shift"], key: "i" },
-    },
-    browserCopyUrl: {
-      mac: { modifiers: ["cmd", "shift"], key: "c" },
-      linux: { modifiers: ["ctrl", "shift"], key: "c" },
-    },
-    splitHorizontal: {
-      mac: { modifiers: ["cmd"], key: "/" },
-      linux: { modifiers: ["ctrl"], key: "/" },
-    },
-    splitVertical: {
-      mac: { modifiers: ["cmd", "shift"], key: "/" },
-      linux: { modifiers: ["ctrl", "shift"], key: "/" },
-    },
+    closeTopTab: primaryChord("w"),
+    newTerminalTab: primaryChord("t"),
+    newBrowserTab: primaryChord("b"),
+    clearTerminal: primaryChord("k"),
+    browserReload: primaryChord("r"),
+    browserDevtools: primaryChord("i", true),
+    browserCopyUrl: primaryChord("c", true),
+    splitHorizontal: primaryChord("/"),
+    splitVertical: primaryChord("/", true),
     deleteFile: {
       mac: { modifiers: ["cmd"], key: "backspace" },
       linux: { modifiers: ["ctrl"], key: "delete" },
     },
-    scrollTerminalBottom: {
-      mac: { modifiers: ["cmd"], key: "end" },
-      linux: { modifiers: ["ctrl"], key: "end" },
-    },
-    switchToWorkspace1: {
-      mac: { modifiers: ["ctrl"], key: "1" },
-      linux: { modifiers: ["alt"], key: "1" },
-    },
-    switchToWorkspace2: {
-      mac: { modifiers: ["ctrl"], key: "2" },
-      linux: { modifiers: ["alt"], key: "2" },
-    },
-    switchToWorkspace3: {
-      mac: { modifiers: ["ctrl"], key: "3" },
-      linux: { modifiers: ["alt"], key: "3" },
-    },
-    switchToWorkspace4: {
-      mac: { modifiers: ["ctrl"], key: "4" },
-      linux: { modifiers: ["alt"], key: "4" },
-    },
-    switchToWorkspace5: {
-      mac: { modifiers: ["ctrl"], key: "5" },
-      linux: { modifiers: ["alt"], key: "5" },
-    },
-    switchToWorkspace6: {
-      mac: { modifiers: ["ctrl"], key: "6" },
-      linux: { modifiers: ["alt"], key: "6" },
-    },
-    switchToWorkspace7: {
-      mac: { modifiers: ["ctrl"], key: "7" },
-      linux: { modifiers: ["alt"], key: "7" },
-    },
-    switchToWorkspace8: {
-      mac: { modifiers: ["ctrl"], key: "8" },
-      linux: { modifiers: ["alt"], key: "8" },
-    },
-    switchToWorkspace9: {
-      mac: { modifiers: ["ctrl"], key: "9" },
-      linux: { modifiers: ["alt"], key: "9" },
-    },
+    scrollTerminalBottom: primaryChord("end"),
+    openCommandPalette: primaryChord("p"),
+    openCommandMode: primaryChord("p", true),
+    switchToWorkspace1: workspaceChord("1"),
+    switchToWorkspace2: workspaceChord("2"),
+    switchToWorkspace3: workspaceChord("3"),
+    switchToWorkspace4: workspaceChord("4"),
+    switchToWorkspace5: workspaceChord("5"),
+    switchToWorkspace6: workspaceChord("6"),
+    switchToWorkspace7: workspaceChord("7"),
+    switchToWorkspace8: workspaceChord("8"),
+    switchToWorkspace9: workspaceChord("9"),
   },
 };
 

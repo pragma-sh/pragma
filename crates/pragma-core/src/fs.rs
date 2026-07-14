@@ -8,11 +8,14 @@
 //! whichever host owns the socket — local for local projects, the remote box for
 //! SSH-bridged projects.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use pragma_constants::{DirEntry, FileContents};
 use serde::{Deserialize, Serialize};
@@ -24,6 +27,44 @@ use crate::{CoreError, CoreResult};
 /// Files larger than this are reported as `truncated` and never read into memory
 /// or returned across the wire.
 const MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_SEARCH_QUERY_BYTES: usize = 256;
+const MAX_SEARCH_ROOTS: usize = 64;
+const MAX_SEARCH_RESULTS: usize = 100;
+const MAX_SEARCH_ENTRIES: usize = 100_000;
+const MAX_SEARCH_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SEARCH_SNIPPET_BYTES: usize = 512;
+const MIN_FILE_MATCH_SCORE: f64 = 0.45;
+const MAX_CONCURRENT_SEARCHES: usize = 2;
+
+static ACTIVE_SEARCHES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// One trusted worktree root included in a project palette search.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaletteSearchRoot {
+    pub worktree_id: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaletteSearchMatch {
+    worktree_id: String,
+    path: String,
+    kind: &'static str,
+    score: f64,
+    line: Option<u32>,
+    column: Option<u32>,
+    snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaletteSearchResponse {
+    matches: Vec<PaletteSearchMatch>,
+    truncated: bool,
+}
 
 /// One filesystem operation request. `root` is the trusted absolute worktree
 /// root; all other paths are worktree-relative.
@@ -54,6 +95,17 @@ pub enum FsRequest {
     },
     /// Deletes a file or empty directory.
     Delete { root: String, path: String },
+    /// Searches filenames and literal code lines across trusted worktree roots.
+    PaletteSearch {
+        search_id: String,
+        roots: Vec<PaletteSearchRoot>,
+        query: String,
+        include_files: bool,
+        include_code: bool,
+        deadline_ms: u64,
+    },
+    /// Cancels an active palette search. Safe when the id is already complete.
+    CancelPaletteSearch { search_id: String },
 }
 
 /// Dispatches a `filesystem` RPC payload to the matching operation and returns a
@@ -74,7 +126,264 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
         } => to_value(write_file(&root, &path, &contents)?),
         FsRequest::Rename { root, from, to } => to_value(rename(&root, &from, &to)?),
         FsRequest::Delete { root, path } => to_value(delete(&root, &path)?),
+        FsRequest::PaletteSearch {
+            search_id,
+            roots,
+            query,
+            include_files,
+            include_code,
+            deadline_ms,
+        } => to_value(palette_search(
+            &search_id,
+            &roots,
+            &query,
+            include_files,
+            include_code,
+            deadline_ms,
+        )?),
+        FsRequest::CancelPaletteSearch { search_id } => {
+            cancel_palette_search(&search_id);
+            to_value(())
+        }
     }
+}
+
+fn register_search(search_id: &str) -> CoreResult<Arc<AtomicBool>> {
+    if search_id.is_empty() {
+        return Err(CoreError::InvalidPayload(
+            "search id is required".to_string(),
+        ));
+    }
+    let mut active = ACTIVE_SEARCHES
+        .lock()
+        .map_err(|error| CoreError::Operation(error.to_string()))?;
+    if let Some(previous) = active.remove(search_id) {
+        previous.store(true, Ordering::Relaxed);
+    }
+    if active.len() >= MAX_CONCURRENT_SEARCHES {
+        return Err(CoreError::Operation(
+            "too many concurrent palette searches".to_string(),
+        ));
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    active.insert(search_id.to_string(), Arc::clone(&cancelled));
+    Ok(cancelled)
+}
+
+fn cancel_palette_search(search_id: &str) {
+    if let Ok(active) = ACTIVE_SEARCHES.lock() {
+        if let Some(cancelled) = active.get(search_id) {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+fn unregister_search(search_id: &str) {
+    if let Ok(mut active) = ACTIVE_SEARCHES.lock() {
+        active.remove(search_id);
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn palette_search(
+    search_id: &str,
+    roots: &[PaletteSearchRoot],
+    query: &str,
+    include_files: bool,
+    include_code: bool,
+    deadline_ms: u64,
+) -> CoreResult<PaletteSearchResponse> {
+    let query = query.trim();
+    if query.is_empty() || query.len() > MAX_SEARCH_QUERY_BYTES {
+        return Err(CoreError::InvalidPayload(
+            "query must contain 1 to 256 bytes".to_string(),
+        ));
+    }
+    if roots.is_empty() || roots.len() > MAX_SEARCH_ROOTS {
+        return Err(CoreError::InvalidPayload(
+            "palette search requires 1 to 64 roots".to_string(),
+        ));
+    }
+
+    let cancelled = register_search(search_id)?;
+    let result = (|| {
+        let deadline = Instant::now() + Duration::from_millis(deadline_ms.clamp(1, 5_000));
+        let smart_case = query.chars().any(char::is_uppercase);
+        let query_folded = (!smart_case).then(|| query.to_lowercase());
+        let mut file_matches = Vec::new();
+        let mut code_matches = Vec::new();
+        let mut entries_seen = 0_usize;
+        let mut bytes_seen = 0_u64;
+        let mut truncated = false;
+
+        'roots: for search_root in roots {
+            let root = Path::new(&search_root.root).canonicalize()?;
+            let mut builder = ignore::WalkBuilder::new(&root);
+            builder
+                .standard_filters(true)
+                .git_ignore(true)
+                .git_global(true)
+                .git_exclude(true)
+                .parents(true)
+                .hidden(false)
+                .follow_links(false);
+            for entry in builder.build() {
+                if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                    truncated = true;
+                    break 'roots;
+                }
+                entries_seen += 1;
+                if entries_seen > MAX_SEARCH_ENTRIES {
+                    truncated = true;
+                    break 'roots;
+                }
+                let Ok(entry) = entry else {
+                    continue;
+                };
+                let Some(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if !file_type.is_file() {
+                    continue;
+                }
+                let Ok(relative) = entry.path().strip_prefix(&root) else {
+                    continue;
+                };
+                let path = relative
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                let filename = relative
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+
+                if include_files && file_matches.len() < MAX_SEARCH_RESULTS {
+                    if let Some(score) = fuzzy_score(&filename, &path, query) {
+                        if score >= MIN_FILE_MATCH_SCORE {
+                            file_matches.push(PaletteSearchMatch {
+                                worktree_id: search_root.worktree_id.clone(),
+                                path: path.clone(),
+                                kind: "file",
+                                score,
+                                line: None,
+                                column: None,
+                                snippet: None,
+                            });
+                        }
+                    }
+                }
+
+                if !include_code || code_matches.len() >= MAX_SEARCH_RESULTS {
+                    continue;
+                }
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                if metadata.len() > MAX_READ_BYTES {
+                    continue;
+                }
+                bytes_seen = bytes_seen.saturating_add(metadata.len());
+                if bytes_seen > MAX_SEARCH_TOTAL_BYTES {
+                    truncated = true;
+                    break 'roots;
+                }
+                let Ok(bytes) = std::fs::read(entry.path()) else {
+                    continue;
+                };
+                let Ok(text) = String::from_utf8(bytes) else {
+                    continue;
+                };
+                for (line_index, line) in text.lines().enumerate() {
+                    let column = if smart_case {
+                        line.find(query)
+                    } else {
+                        line.to_lowercase()
+                            .find(query_folded.as_deref().unwrap_or(query))
+                    };
+                    let Some(byte_column) = column else {
+                        continue;
+                    };
+                    // Byte offset -> 1-based char column so CodeMirror (UTF-16
+                    // code units) lands on the right position for non-ASCII lines.
+                    let char_column = line[..byte_column].chars().count() + 1;
+                    code_matches.push(PaletteSearchMatch {
+                        worktree_id: search_root.worktree_id.clone(),
+                        path: path.clone(),
+                        kind: "code",
+                        score: 1.0,
+                        line: Some(u32::try_from(line_index + 1).unwrap_or(u32::MAX)),
+                        column: Some(u32::try_from(char_column).unwrap_or(u32::MAX)),
+                        snippet: Some(bounded_snippet(line)),
+                    });
+                    if code_matches.len() >= MAX_SEARCH_RESULTS {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if file_matches.len() >= MAX_SEARCH_RESULTS
+                    && code_matches.len() >= MAX_SEARCH_RESULTS
+                {
+                    truncated = true;
+                    break 'roots;
+                }
+            }
+        }
+        let mut matches = file_matches;
+        matches.extend(code_matches);
+        matches.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.worktree_id.cmp(&b.worktree_id))
+        });
+        Ok(PaletteSearchResponse { matches, truncated })
+    })();
+    unregister_search(search_id);
+    result
+}
+
+fn fuzzy_score(filename: &str, path: &str, query: &str) -> Option<f64> {
+    let filename = filename.to_lowercase();
+    let path = path.to_lowercase();
+    let query = query.to_lowercase();
+    if filename == query {
+        return Some(1.0);
+    }
+    if filename.starts_with(&query) {
+        return Some(0.9);
+    }
+    if filename.contains(&query) {
+        return Some(0.8);
+    }
+    if path.contains(&query) {
+        return Some(0.7);
+    }
+    let mut query_chars = query.chars();
+    let mut wanted = query_chars.next()?;
+    let mut matched = 0_usize;
+    for character in filename.chars() {
+        if character == wanted {
+            matched += 1;
+            let Some(next) = query_chars.next() else {
+                let matched = u32::try_from(matched).unwrap_or(u32::MAX);
+                let filename_len =
+                    u32::try_from(filename.chars().count().max(1)).unwrap_or(u32::MAX);
+                return Some(0.45 + 0.2 * (f64::from(matched) / f64::from(filename_len)));
+            };
+            wanted = next;
+        }
+    }
+    None
+}
+
+fn bounded_snippet(line: &str) -> String {
+    if line.len() <= MAX_SEARCH_SNIPPET_BYTES {
+        return line.to_string();
+    }
+    let mut end = MAX_SEARCH_SNIPPET_BYTES;
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].to_string()
 }
 
 fn to_value<T: Serialize>(value: T) -> CoreResult<Value> {
@@ -338,7 +647,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{gitignored, resolve_in_worktree, MAX_READ_BYTES};
+    use super::{
+        gitignored, palette_search, resolve_in_worktree, PaletteSearchRoot, MAX_READ_BYTES,
+    };
 
     fn git_init(path: &std::path::Path) {
         Command::new("git")
@@ -407,5 +718,81 @@ mod tests {
     #[test]
     fn max_read_cap_is_two_mib() {
         assert_eq!(MAX_READ_BYTES, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn palette_search_returns_relative_file_and_code_matches() {
+        let dir = tempdir().expect("tempdir");
+        git_init(dir.path());
+        std::fs::create_dir(dir.path().join("src")).expect("mkdir");
+        std::fs::write(
+            dir.path().join("src/CommandPalette.tsx"),
+            "const commandPalette = true;\n",
+        )
+        .expect("write");
+        let response = palette_search(
+            "search-relative",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: dir.path().to_string_lossy().into_owned(),
+            }],
+            "commandPalette",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search");
+        assert!(response
+            .matches
+            .iter()
+            .any(|item| { item.path == "src/CommandPalette.tsx" && item.kind == "file" }));
+        assert!(response.matches.iter().any(|item| {
+            item.path == "src/CommandPalette.tsx" && item.kind == "code" && item.line == Some(1)
+        }));
+    }
+
+    #[test]
+    fn palette_search_excludes_gitignored_file_and_code_matches() {
+        let dir = tempdir().expect("tempdir");
+        git_init(dir.path());
+        std::fs::write(dir.path().join(".gitignore"), "ignored/\n").expect("write gitignore");
+        std::fs::create_dir(dir.path().join("ignored")).expect("mkdir ignored");
+        std::fs::write(
+            dir.path().join("ignored/README.md"),
+            "gitignored_search_sentinel\n",
+        )
+        .expect("write ignored file");
+        std::fs::write(dir.path().join("README.md"), "kept content\n").expect("write kept file");
+
+        let response = palette_search(
+            "search-gitignored",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: dir.path().to_string_lossy().into_owned(),
+            }],
+            "gitignored_search_sentinel",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search");
+
+        assert!(response.matches.is_empty());
+    }
+
+    #[test]
+    fn palette_code_search_uses_smart_case() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("code.rs"), "Palette palette\n").expect("write");
+        let roots = [PaletteSearchRoot {
+            worktree_id: "worktree".to_string(),
+            root: dir.path().to_string_lossy().into_owned(),
+        }];
+        let lower = palette_search("search-lower", &roots, "palette", false, true, 1_000)
+            .expect("lower search");
+        let upper = palette_search("search-upper", &roots, "Palette", false, true, 1_000)
+            .expect("upper search");
+        assert_eq!(lower.matches[0].column, Some(1));
+        assert_eq!(upper.matches[0].column, Some(1));
     }
 }

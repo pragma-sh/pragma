@@ -17,6 +17,12 @@ vi.mock("@/lib/file-watch", () => ({
   },
 }));
 vi.mock("@codemirror/language-data", () => ({ languages: [] }));
+// The toolbar reads live formatting state via useEditorState, which the fake
+// editor below doesn't implement; it's irrelevant to the re-seed behavior
+// under test here.
+vi.mock("@/components/editor/MarkdownToolbar", () => ({
+  MarkdownToolbar: () => <div aria-label="toolbar" />,
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 // CodeMirror's DOM measurement is unreliable under jsdom, so back it with a
@@ -33,11 +39,29 @@ vi.mock("@uiw/react-codemirror", () => ({
 
 // ProseMirror can't lay out under jsdom; stub the TipTap surface with a
 // contenteditable placeholder that only proves which mode is mounted.
+// `mockEditor` defaults to null (editor still instantiating) and individual
+// tests can swap in a fake editor instance to exercise the re-seed effect.
+let mockEditor: unknown = null;
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => null,
+  useEditor: () => mockEditor,
   useEditorState: () => ({}),
   EditorContent: () => <div aria-label="wysiwyg editor" />,
 }));
+
+/** A fake TipTap editor exposing just the surface the re-seed effect touches. */
+function fakeEditor({
+  isFocused = false,
+  serializedMarkdown,
+}: {
+  isFocused?: boolean;
+  serializedMarkdown: string;
+}) {
+  return {
+    isFocused,
+    storage: { markdown: { getMarkdown: () => serializedMarkdown } },
+    commands: { setContent: vi.fn() },
+  };
+}
 
 import { isMarkdownPath, MarkdownView } from "./MarkdownView";
 import { isTabDirty } from "@/state/editor-dirty-store";
@@ -66,6 +90,7 @@ function markdownTab(): Tab {
 afterEach(cleanup);
 beforeEach(() => {
   fileChangeListener = null;
+  mockEditor = null;
   readFileMock.mockReset();
   writeFileMock.mockReset();
   readFileMock.mockResolvedValue({
@@ -155,6 +180,16 @@ describe("MarkdownView", () => {
 
     await Promise.resolve();
     expect(readFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-seeds a normalized serialization without emitting an update", async () => {
+    const editor = fakeEditor({ serializedMarkdown: "# Hello\n" });
+    mockEditor = editor;
+    render(<MarkdownView tab={markdownTab()} />);
+
+    await waitFor(() => expect(editor.commands.setContent).toHaveBeenCalled());
+    expect(editor.commands.setContent).toHaveBeenCalledWith("# Hello", { emitUpdate: false });
+    expect(isTabDirty("md-1")).toBe(false);
   });
 
   it("shows a placeholder for oversized files", async () => {
