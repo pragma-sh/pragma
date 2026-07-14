@@ -34,7 +34,7 @@ fn worktree_root(db: &Db, worktree_id: &str) -> AppResult<String> {
 }
 
 /// Sends a `filesystem` RPC and decodes its JSON response into `T`.
-fn fs_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &FsRequest) -> AppResult<T> {
+pub(crate) fn fs_rpc<T: DeserializeOwned>(pty: &PtyClient, request: &FsRequest) -> AppResult<T> {
     let payload = serde_json::to_value(request)?;
     let value = pty.rpc(ProtocolRpcMethod::Filesystem, payload)?;
     Ok(serde_json::from_value(value)?)

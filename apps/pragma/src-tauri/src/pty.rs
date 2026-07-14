@@ -337,6 +337,22 @@ impl PtyClient {
         self.gateway_connection_info()
     }
 
+    /// Lists mobile installations that have successfully authenticated with the gateway.
+    pub fn gateway_devices(&self) -> AppResult<Vec<GatewayDevice>> {
+        let socket_path = self.inner.socket_path();
+        let path = socket_path.with_file_name(CONSTANTS.gateway.devices_file.as_str());
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let devices: std::collections::BTreeMap<String, GatewayDevice> =
+            serde_json::from_str(&contents)?;
+        let mut devices: Vec<_> = devices.into_values().collect();
+        devices.sort_by_key(|device| std::cmp::Reverse(device.last_seen_at));
+        Ok(devices)
+    }
+
     /// Reads the host server's advertised protocol version (used to verify a
     /// remote `pragma-server` is compatible before routing a project to it).
     pub fn server_protocol_version(&self) -> AppResult<u64> {
@@ -391,6 +407,18 @@ impl PtyClient {
     fn log_path(&self) -> PathBuf {
         self.inner.log_path()
     }
+}
+
+/// Mobile installation observed through authenticated gateway requests.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayDevice {
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+    pub app_version: String,
+    pub first_seen_at: u64,
+    pub last_seen_at: u64,
 }
 
 /// Resolves the isolation channel for this build from its product name.

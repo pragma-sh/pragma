@@ -45,7 +45,7 @@ import {
 import { useWorkspace } from "@/state/workspace-context";
 
 /** Which surface the workspace is showing: normal shell, Kanban board, or automations. */
-type WorkspaceMode = "normal" | "kanban" | "automations";
+type WorkspaceMode = "normal" | "kanban" | "automations" | "settings";
 
 /** Fields a draft card carries when created or edited. */
 interface KanbanDraftInput {
@@ -62,6 +62,10 @@ interface KanbanContextValue {
   openBoard: () => void;
   /** Opens the host automations workspace. */
   openAutomations: () => void;
+  /** Opens the full-frame Settings workspace. */
+  openSettings: () => void;
+  /** Leaves Settings for the surface that opened it. */
+  closeSettings: () => void;
   /** Exits the board to the normal shell without leaving a return affordance. */
   exitBoard: () => void;
   /** Returns to the board (the "Back to Kanban" control). */
@@ -481,6 +485,8 @@ function useKanbanBoardMode(projectId: string | null): {
   backToKanbanAvailable: boolean;
   openBoard: () => void;
   openAutomations: () => void;
+  openSettings: () => void;
+  closeSettings: () => void;
   exitBoard: () => void;
   returnToKanban: () => void;
   setBackToKanbanAvailable: (value: boolean) => void;
@@ -488,6 +494,7 @@ function useKanbanBoardMode(projectId: string | null): {
 } {
   const [mode, setMode] = useState<WorkspaceMode>("normal");
   const [backToKanbanAvailable, setBackToKanbanAvailable] = useState(false);
+  const settingsReturnMode = useRef<Exclude<WorkspaceMode, "settings">>("normal");
   const openBoard = useCallback(() => {
     setBackToKanbanAvailable(false);
     setMode("kanban");
@@ -495,6 +502,16 @@ function useKanbanBoardMode(projectId: string | null): {
   const openAutomations = useCallback(() => {
     setBackToKanbanAvailable(false);
     setMode("automations");
+  }, []);
+  const openSettings = useCallback(() => {
+    setBackToKanbanAvailable(false);
+    setMode((current) => {
+      if (current !== "settings") settingsReturnMode.current = current;
+      return "settings";
+    });
+  }, []);
+  const closeSettings = useCallback(() => {
+    setMode(settingsReturnMode.current);
   }, []);
   const exitBoard = useCallback(() => {
     setBackToKanbanAvailable(false);
@@ -514,6 +531,8 @@ function useKanbanBoardMode(projectId: string | null): {
     backToKanbanAvailable,
     openBoard,
     openAutomations,
+    openSettings,
+    closeSettings,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -539,6 +558,8 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     backToKanbanAvailable,
     openBoard,
     openAutomations,
+    openSettings,
+    closeSettings,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -563,9 +584,11 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<KanbanContextValue>(
     () => ({
-      mode: projectId || mode === "automations" ? mode : "normal",
+      mode: projectId || mode === "automations" || mode === "settings" ? mode : "normal",
       openBoard,
       openAutomations,
+      openSettings,
+      closeSettings,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,
@@ -587,6 +610,8 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
       mode,
       openBoard,
       openAutomations,
+      openSettings,
+      closeSettings,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,
