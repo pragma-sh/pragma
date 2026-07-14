@@ -76,6 +76,7 @@ export type {
   KanbanPromptCard,
   GitHub,
   GitHubUser,
+  GitHubAuthMethod,
   GitHubAuthStatus,
   BranchSyncStatus,
   GitHubRepoRef,

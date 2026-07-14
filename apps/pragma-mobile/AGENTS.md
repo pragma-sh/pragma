@@ -37,6 +37,9 @@ paired with a desktop — streams live agent chat and launches new sessions.
     RN's `fetch` is — instead of proxying; without the header the SDK gets HTML,
     JSON parsing fails, and pairing dies with a misleading "couldn't reach the
     desktop". Other hosts ignore the unknown header.
+  - **Device history:** `clientFor()` also sends installation id, platform, display
+    label, and app version headers. Installation id has its own SecureStore key so
+    unpairing does not create a new device in desktop gateway history.
 - **Chat** (`chat/[tabId].tsx`): `lib/use-agent-connection.ts` opens a duplex
   `client.agents.connect()` on screen focus and closes on blur, folding events
   into the **pure** `lib/transcript-store.ts` (upsert-by-id, ts ordering,

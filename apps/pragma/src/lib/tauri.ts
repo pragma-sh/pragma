@@ -1031,7 +1031,32 @@ export type MenuAction =
   | "workspace.open-command-palette"
   | "workspace.open-command-mode"
   | "troubleshooting.restart-daemon"
-  | "troubleshooting.open-daemon-logs";
+  | "troubleshooting.open-daemon-logs"
+  | "settings.open";
+
+/** Config file selected by Settings. */
+export type ConfigScope = "global" | "project";
+
+/** Raw config document plus its host-resolved display path. */
+export interface ConfigDocument {
+  exists: boolean;
+  contents: string;
+  path: string;
+}
+
+/** Reads global or project `.pragma/config.json`. */
+export function readConfig(scope: ConfigScope, projectId?: string | null): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_config", { scope, projectId: projectId ?? null });
+}
+
+/** Writes global or project `.pragma/config.json`. */
+export function writeConfig(
+  scope: ConfigScope,
+  contents: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke("write_config", { scope, projectId: projectId ?? null, contents });
+}
 
 /** Subscribes to native menubar actions. */
 export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
@@ -1262,6 +1287,21 @@ export function gatewayConnectionInfo(): Promise<GatewayConnectionInfo> {
  */
 export function regenerateGatewayToken(): Promise<GatewayConnectionInfo> {
   return invoke<GatewayConnectionInfo>("regenerate_gateway_token");
+}
+
+/** Mobile installation observed through authenticated gateway requests. */
+export interface GatewayDevice {
+  id: string;
+  name: string;
+  platform: string;
+  appVersion: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
+/** Lists devices that have successfully authenticated with this gateway. */
+export function gatewayDevices(): Promise<GatewayDevice[]> {
+  return invoke<GatewayDevice[]>("gateway_devices");
 }
 
 /** Remote-access tunnel lifecycle state (mirrors the Rust `TunnelStatus`). */

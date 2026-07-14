@@ -178,8 +178,10 @@ function usePluginLoading(
       }
     };
     void run();
+    window.addEventListener("pragma:config-changed", run);
     return () => {
       cancelled = true;
+      window.removeEventListener("pragma:config-changed", run);
     };
   }, [projects, selectedPath, manifestSignature]);
 }

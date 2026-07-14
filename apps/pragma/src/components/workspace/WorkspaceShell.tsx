@@ -7,6 +7,7 @@ import { useConfirmClose } from "@/components/editor/confirm-close";
 import type { Tab } from "@pragma/constants";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
 import { Button } from "@/components/ui/button";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
@@ -96,7 +97,12 @@ function useNativeMenuActions(
   onOpenCommandPalette: () => void,
   onOpenCommandMode: () => void,
 ) {
+  const shell = useKanban();
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
+    if (action === "settings.open") {
+      shell.openSettings();
+      return;
+    }
     if (action === "tabs.new-terminal") {
       await workspace.createTerminalTab();
       return;
@@ -272,6 +278,8 @@ export function WorkspaceShell() {
               Kanban and the normal shell keep the project sidebar mounted. */}
           {kanban.mode === "automations" ? (
             <AutomationsWorkspace />
+          ) : kanban.mode === "settings" ? (
+            <SettingsWorkspace />
           ) : (
             <>
               <ProjectSidebar />

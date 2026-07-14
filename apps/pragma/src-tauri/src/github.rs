@@ -16,7 +16,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
-    BranchSyncStatus, FileDiff, GitHubAuthStatus, GitHubRepoRef, GitHubUser, CONSTANTS,
+    BranchSyncStatus, FileDiff, GitHubAuthMethod, GitHubAuthStatus, GitHubRepoRef, GitHubUser,
+    CONSTANTS,
 };
 use pragma_core::git::{GitRequest, GithubRepoInfo};
 use serde::de::DeserializeOwned;
@@ -30,6 +31,10 @@ use crate::pty::PtyClient;
 /// Settings key holding the "user skipped GitHub setup" flag (persisted in the
 /// `settings` table — it isn't a secret).
 const SETUP_DISMISSED_KEY: &str = "github.setupDismissed";
+/// Settings key recording how the stored token was obtained (`deviceFlow` /
+/// `cli`), so the Settings UI can display the auth method. Cleared (set empty)
+/// on sign-out; an empty/unknown value reads back as `None`.
+const AUTH_METHOD_KEY: &str = "github.authMethod";
 /// Filename (under the app data dir) holding the GitHub token.
 const TOKEN_FILE_NAME: &str = "github-token";
 /// User-Agent sent on every GitHub HTTP request (GitHub requires one).
@@ -176,15 +181,23 @@ pub async fn github_auth_status(
     tokens: State<'_, TokenStore>,
 ) -> AppResult<GitHubAuthStatus> {
     let setup_dismissed = db.setting(SETUP_DISMISSED_KEY)?.as_deref() == Some("true");
+    let auth_method = db
+        .setting(AUTH_METHOD_KEY)?
+        .and_then(|value| value.parse::<GitHubAuthMethod>().ok());
     let token = tokens.read();
-    let status =
-        tauri::async_runtime::spawn_blocking(move || auth_status_impl(token, setup_dismissed))
-            .await
-            .map_err(|error| AppError::GitHub(format!("auth status task failed: {error}")))?;
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        auth_status_impl(token, auth_method, setup_dismissed)
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("auth status task failed: {error}")))?;
     Ok(status)
 }
 
-fn auth_status_impl(token: Option<String>, setup_dismissed: bool) -> GitHubAuthStatus {
+fn auth_status_impl(
+    token: Option<String>,
+    auth_method: Option<GitHubAuthMethod>,
+    setup_dismissed: bool,
+) -> GitHubAuthStatus {
     // Best-effort user fetch: a network error leaves `user` empty without
     // dropping the authenticated state, so offline launches still skip the modal.
     let user = token.as_deref().and_then(|token| fetch_user(token).ok());
@@ -192,6 +205,8 @@ fn auth_status_impl(token: Option<String>, setup_dismissed: bool) -> GitHubAuthS
         authenticated: token.is_some(),
         gh_available: gh_is_authenticated(),
         user,
+        // A stale method with no token means nothing; only report it alongside one.
+        auth_method: if token.is_some() { auth_method } else { None },
         setup_dismissed,
     }
 }
@@ -202,10 +217,11 @@ pub fn github_token(tokens: State<'_, TokenStore>) -> Option<String> {
     tokens.read()
 }
 
-/// Clears the stored token (sign out).
+/// Clears the stored token and its recorded auth method (sign out).
 #[tauri::command]
-pub fn github_sign_out(tokens: State<'_, TokenStore>) -> AppResult<()> {
-    tokens.clear()
+pub fn github_sign_out(db: State<'_, Db>, tokens: State<'_, TokenStore>) -> AppResult<()> {
+    tokens.clear()?;
+    db.set_setting(AUTH_METHOD_KEY, "")
 }
 
 /// Persists the "user skipped GitHub setup" flag so the modal never returns.
@@ -248,17 +264,22 @@ fn gh_token() -> AppResult<String> {
 }
 
 /// Adopts the `gh` CLI's token into the on-disk [`TokenStore`] (the `0600` token
-/// file) and returns the user.
+/// file), records the auth method, and returns the user.
 #[tauri::command]
-pub async fn github_use_cli_token(tokens: State<'_, TokenStore>) -> AppResult<GitHubUser> {
+pub async fn github_use_cli_token(
+    db: State<'_, Db>,
+    tokens: State<'_, TokenStore>,
+) -> AppResult<GitHubUser> {
     let store = (*tokens).clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let user = tauri::async_runtime::spawn_blocking(move || {
         let token = gh_token()?;
         store.write(&token)?;
         fetch_user(&token)
     })
     .await
-    .map_err(|error| AppError::GitHub(format!("gh token task failed: {error}")))?
+    .map_err(|error| AppError::GitHub(format!("gh token task failed: {error}")))??;
+    db.set_setting(AUTH_METHOD_KEY, &GitHubAuthMethod::Cli.to_string())?;
+    Ok(user)
 }
 
 // ---------------------------------------------------------------------------
@@ -361,20 +382,23 @@ fn parse_token_response(body: &str) -> PollOutcome {
 }
 
 /// Polls the token endpoint until the user authorizes (or the flow fails),
-/// stores the token in the on-disk [`TokenStore`] (the `0600` token file), and
-/// returns the authenticated user.
+/// stores the token in the on-disk [`TokenStore`] (the `0600` token file),
+/// records the auth method, and returns the authenticated user.
 #[tauri::command]
 pub async fn github_poll_device_flow(
+    db: State<'_, Db>,
     tokens: State<'_, TokenStore>,
     device_code: String,
     interval: u64,
 ) -> AppResult<GitHubUser> {
     let store = (*tokens).clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let user = tauri::async_runtime::spawn_blocking(move || {
         poll_device_flow_impl(&store, &device_code, interval)
     })
     .await
-    .map_err(|error| AppError::GitHub(format!("device flow poll task failed: {error}")))?
+    .map_err(|error| AppError::GitHub(format!("device flow poll task failed: {error}")))??;
+    db.set_setting(AUTH_METHOD_KEY, &GitHubAuthMethod::DeviceFlow.to_string())?;
+    Ok(user)
 }
 
 fn poll_device_flow_impl(
@@ -635,6 +659,21 @@ mod tests {
         store.clear().expect("clear");
         assert_eq!(store.read(), None);
         store.clear().expect("clear missing");
+    }
+
+    #[test]
+    fn auth_method_setting_round_trips() {
+        use pragma_constants::GitHubAuthMethod;
+        // The settings row stores `Display` output and reads back via `FromStr`;
+        // both must agree on the wire values the frontend expects.
+        for method in [GitHubAuthMethod::DeviceFlow, GitHubAuthMethod::Cli] {
+            let stored = method.to_string();
+            assert_eq!(stored.parse::<GitHubAuthMethod>().ok(), Some(method));
+        }
+        assert_eq!(GitHubAuthMethod::DeviceFlow.to_string(), "deviceFlow");
+        assert_eq!(GitHubAuthMethod::Cli.to_string(), "cli");
+        // The cleared (sign-out) sentinel must read back as no method.
+        assert!("".parse::<GitHubAuthMethod>().is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod agent_notifications;
 mod ai;
 mod automations;
 mod browser;
+mod config_file;
 mod control;
 mod db;
 #[allow(clippy::all, clippy::pedantic, dead_code)]
@@ -57,6 +58,8 @@ const MENU_CLOSE_ACTIVE_TAB: &str = "tabs.close-active";
 const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
 /// Menu item id for opening the palette directly in command mode.
 const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
+/// Menu item id for opening the full-frame Settings view.
+const MENU_OPEN_SETTINGS: &str = "settings.open";
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
 /// consistent with their UI controls.
@@ -143,6 +146,13 @@ fn install_deep_links(app: &tauri::App) {
 /// listeners see it, and `WebKit` may consume Cmd+T for a browser tab.
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
+    let open_settings = MenuItem::with_id(
+        app,
+        MENU_OPEN_SETTINGS,
+        "Settings…",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
     let new_terminal_tab = MenuItem::with_id(
         app,
         MENU_NEW_TERMINAL_TAB,
@@ -175,6 +185,16 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     // removed in place on macOS.
     #[cfg(target_os = "macos")]
     {
+        // Tauri's default app submenu has a generated id, so resolve its stable
+        // first position rather than looking up an id that does not exist.
+        if let Some(app_menu) = menu
+            .items()?
+            .into_iter()
+            .next()
+            .and_then(|item| item.as_submenu().cloned())
+        {
+            app_menu.insert(&open_settings, 2)?;
+        }
         let file_menu = Submenu::with_id_and_items(
             app,
             "file",
@@ -203,6 +223,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .and_then(|item| item.as_submenu().cloned())
     {
         // Linux has no default File menu, so surface Pragma tab actions here.
+        window_menu.append(&open_settings)?;
         window_menu.append(&new_terminal_tab)?;
         window_menu.append(&close_active_tab)?;
         window_menu.append(&open_command_palette)?;
@@ -236,6 +257,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
                 | MENU_CLOSE_ACTIVE_TAB
                 | MENU_OPEN_COMMAND_PALETTE
                 | MENU_OPEN_COMMAND_MODE
+                | MENU_OPEN_SETTINGS
         ) {
             let _ = app.emit(MENU_EVENT, action);
         }
@@ -317,6 +339,12 @@ async fn regenerate_gateway_token(
     pty: tauri::State<'_, PtyClient>,
 ) -> AppResult<pty::GatewayConnectionInfo> {
     pty.regenerate_gateway_token()
+}
+
+/// Lists mobile installations that have authenticated with the local gateway.
+#[tauri::command]
+async fn gateway_devices(pty: tauri::State<'_, PtyClient>) -> AppResult<Vec<pty::GatewayDevice>> {
+    pty.gateway_devices()
 }
 
 /// Starts the remote-access tunnel exposing the local gateway, returning the
@@ -837,6 +865,9 @@ pub fn run() {
             start_plugin_watcher,
             gateway_connection_info,
             regenerate_gateway_token,
+            gateway_devices,
+            config_file::read_config,
+            config_file::write_config,
             tunnel_start,
             tunnel_stop,
             tunnel_status,

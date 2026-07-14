@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Clock, LayoutGrid, Plus, Smartphone } from "lucide-react";
+import { ChevronDown, Clock, LayoutGrid, Plus, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
-import { PairDeviceDialog } from "@/components/dialogs/PairDeviceDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
@@ -19,7 +18,6 @@ import { cn } from "@/lib/utils";
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
-  const [pairDialogOpen, setPairDialogOpen] = useState(false);
   const workspace = useWorkspace();
   const kanban = useKanban();
   const cycle = useProjectCycle();
@@ -73,12 +71,12 @@ export function ProjectSidebar() {
             <Clock />
           </Button>
           <Button
-            aria-label="Pair a device"
+            aria-label="Open settings"
             size="icon-sm"
             variant="ghost"
-            onClick={() => setPairDialogOpen(true)}
+            onClick={kanban.openSettings}
           >
-            <Smartphone />
+            <Settings />
           </Button>
           <Button
             aria-label="Add project"
@@ -100,7 +98,6 @@ export function ProjectSidebar() {
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
-      <PairDeviceDialog open={pairDialogOpen} onOpenChange={setPairDialogOpen} />
     </aside>
   );
 }
