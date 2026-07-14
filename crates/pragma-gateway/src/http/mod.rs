@@ -10,6 +10,7 @@ use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCo
 
 use crate::auth::verify_bearer;
 use crate::client::GatewayClient;
+use crate::devices::DeviceRegistry;
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::response::error_response;
 use crate::routes;
@@ -30,6 +31,8 @@ pub struct AppState {
     pub gateway_version: &'static str,
     /// Recently spawned session streams, kept briefly to cover race-to-attach.
     pub pending_spawn_streams: PendingSpawnStreams,
+    /// Authenticated mobile device history.
+    pub devices: Arc<Mutex<DeviceRegistry>>,
 }
 
 /// Runs the blocking `tiny_http` accept loop.
@@ -58,12 +61,21 @@ fn respond(request: Request, state: &AppState) {
 fn preflight_response() -> ResponseBox {
     let mut response = Response::from_data(Vec::new()).with_status_code(StatusCode(204));
     response.add_header(header("access-control-allow-methods", "GET, POST, DELETE"));
-    response.add_header(header(
-        "access-control-allow-headers",
-        "authorization, content-type",
-    ));
+    response.add_header(header("access-control-allow-headers", &allowed_headers()));
     response.add_header(header("access-control-max-age", "86400"));
     response.boxed()
+}
+
+fn allowed_headers() -> String {
+    let gateway = &pragma_constants::CONSTANTS.gateway;
+    format!(
+        "{}, content-type, {}, {}, {}, {}",
+        gateway.token_header,
+        gateway.device_headers.id,
+        gateway.device_headers.name,
+        gateway.device_headers.platform,
+        gateway.device_headers.app_version,
+    )
 }
 
 /// Adds the CORS allow-origin header every gateway response needs so webview
@@ -89,6 +101,13 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
             error_response(&GatewayError::Unauthorized).boxed(),
         ))?;
         return Ok(());
+    }
+    if matched.id != "health" {
+        if let Ok(devices) = state.devices.lock() {
+            if let Err(error) = devices.record(&request) {
+                eprintln!("gateway device registry error: {error}");
+            }
+        }
     }
 
     match matched.id {
@@ -209,7 +228,7 @@ pub fn read_body(request: &mut Request) -> GatewayResult<Vec<u8>> {
 mod tests {
     use tiny_http::Response;
 
-    use super::{preflight_response, with_cors};
+    use super::{allowed_headers, preflight_response, with_cors};
 
     fn header_value(response: &tiny_http::ResponseBox, field: &'static str) -> Option<String> {
         response
@@ -222,6 +241,7 @@ mod tests {
     #[test]
     fn preflight_allows_sdk_methods_and_headers() {
         let response = preflight_response();
+        let expected_headers = allowed_headers();
         assert_eq!(response.status_code().0, 204);
         assert_eq!(
             header_value(&response, "access-control-allow-methods").as_deref(),
@@ -229,7 +249,7 @@ mod tests {
         );
         assert_eq!(
             header_value(&response, "access-control-allow-headers").as_deref(),
-            Some("authorization, content-type")
+            Some(expected_headers.as_str())
         );
     }
 
