@@ -8,6 +8,7 @@ mod routes;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use auth::{read_or_create_token, remove_stale_or_refuse, write_discovery, GatewayDiscovery};
 use clap::Parser;
@@ -81,12 +82,14 @@ fn run(args: Args) -> GatewayResult<()> {
         gateway_version: env!("CARGO_PKG_VERSION"),
         pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
     };
-    // A plugin catalog assembled before this gateway existed ran without
-    // credentials and dropped agents with gateway-dependent model providers;
-    // reload it now that the discovery file is written. Best-effort.
-    if let Err(error) = state.client.reload_plugins() {
-        eprintln!("plugin catalog reload after discovery write failed: {error}");
-    }
+    // Model providers may invoke slow host tools. Keep catalog refresh off the
+    // startup path so clients can use the newly advertised gateway immediately.
+    let plugin_client = state.client.clone();
+    thread::spawn(move || {
+        if let Err(error) = plugin_client.reload_plugins() {
+            eprintln!("plugin catalog reload after discovery write failed: {error}");
+        }
+    });
     serve(&server, &state);
     Ok(())
 }
