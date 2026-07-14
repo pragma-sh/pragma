@@ -153,6 +153,42 @@ describe("SettingsWorkspace", () => {
     expect(screen.getByLabelText("URL pattern")).toBeInTheDocument();
   });
 
+  it("resyncs tunnel inputs after a failed save reloads config", async () => {
+    vi.mocked(readConfig)
+      .mockResolvedValueOnce({
+        exists: true,
+        path: "/home/user/.pragma/config.json",
+        contents: JSON.stringify({
+          tunnel: { command: "stale-command", urlPattern: "https://stale.example/{port}" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        exists: true,
+        path: "/home/user/.pragma/config.json",
+        contents: JSON.stringify({
+          tunnel: { command: "fresh-command", urlPattern: "https://fresh.example/{port}" },
+        }),
+      });
+    vi.mocked(writeConfig).mockRejectedValueOnce(new Error("disk write failed"));
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Mobile & Gateway" }));
+    const command = screen.getByLabelText("Command");
+    const urlPattern = screen.getByLabelText("URL pattern");
+    expect(command).toHaveValue("stale-command");
+    expect(urlPattern).toHaveValue("https://stale.example/{port}");
+
+    fireEvent.change(command, { target: { value: "unsaved-command" } });
+    fireEvent.blur(command);
+
+    await waitFor(() => expect(readConfig).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(command).toHaveValue("fresh-command");
+      expect(urlPattern).toHaveValue("https://fresh.example/{port}");
+    });
+  });
+
   it("shows the GitHub auth options when signed out", async () => {
     render(<SettingsWorkspace />);
 

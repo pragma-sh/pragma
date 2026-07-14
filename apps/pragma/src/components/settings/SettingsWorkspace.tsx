@@ -646,6 +646,13 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
     tunnel.urlPattern ?? constants.tunnel.defaultUrlPattern,
   );
 
+  useEffect(() => {
+    setCommand(tunnel.command ?? constants.tunnel.defaultCommand);
+  }, [tunnel.command]);
+  useEffect(() => {
+    setUrlPattern(tunnel.urlPattern ?? constants.tunnel.defaultUrlPattern);
+  }, [tunnel.urlPattern]);
+
   function saveTunnel(patch: Partial<NonNullable<PragmaConfig["tunnel"]>>): Promise<void> {
     return persist((current) => ({
       ...current,
@@ -671,7 +678,9 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
           className="mt-1 font-mono text-xs"
           value={command}
           onChange={(event) => setCommand(event.target.value)}
-          onBlur={() => command !== tunnel.command && void saveTunnel({ command })}
+          onBlur={() => {
+            if (command !== tunnel.command) void saveTunnel({ command }).catch(() => undefined);
+          }}
         />
         <label className="mt-4 block text-sm font-medium" htmlFor="tunnel-url-pattern">
           URL pattern
@@ -681,7 +690,10 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
           className="mt-1 font-mono text-xs"
           value={urlPattern}
           onChange={(event) => setUrlPattern(event.target.value)}
-          onBlur={() => urlPattern !== tunnel.urlPattern && void saveTunnel({ urlPattern })}
+          onBlur={() => {
+            if (urlPattern !== tunnel.urlPattern)
+              void saveTunnel({ urlPattern }).catch(() => undefined);
+          }}
         />
       </SettingsCard>
     </div>
