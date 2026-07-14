@@ -38,7 +38,7 @@ apps/pragma/
 │   └── main.tsx
 └── src-tauri/                   # Rust backend
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
-    ├── src/db.rs                # SQLite migrations + typed CRUD (v8 = kanban_cards)
+    ├── src/db.rs                # SQLite migrations + typed CRUD (v11 = worktree_mru)
     ├── src/kanban.rs            # Tauri commands for the prompt Kanban board (CRUD + move)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
@@ -517,6 +517,39 @@ key (`activeSelection`) via `get_active_selection` / `set_active_selection` — 
 stores the string verbatim (same pattern as split layouts). The mount-time `reload`
 rehydrates via `hydrate-selection`; a persist effect writes on every selection change,
 gated by `didHydrateRef` and deduped by `lastPersistedRef`.
+
+## Project command palette
+
+`Cmd+P` (macOS) / `Ctrl+P` (Linux) opens
+`components/command-palette/CommandPalette.tsx`. It searches only non-hidden worktrees
+in selected project. Local worktree/tab/agent rows render immediately; PR discovery and
+host filename/code search hydrate independently. Selecting a worktree scopes palette
+without navigating; Backspace on empty scoped query clears scope. Agent status rows resolve
+their qualified agent id through the plugin catalog and render the agent's bundled icon.
+Escape returns from a scoped worktree or editor submenu before closing the palette.
+Active run/build commands appear as running-script rows with their worktree. Enter opens
+the script tab; Shift+Enter closes that script tab through normal managed-script cleanup.
+
+Filename/code search is one bounded `palette_search` Tauri call. Tauri resolves trusted
+roots from SQLite and routes them to owning host; `pragma-core::fs` returns only relative
+paths, excludes gitignored files, and supports cancellation/deadlines. File rows show the
+filename with full path and worktree at right so duplicate names remain distinguishable.
+`worktree_mru` is client-local SQLite state,
+touched by centralized workspace-selection effect. Cross-worktree file/tab actions use
+explicit `activateTabLocation` / `openFileLocation` APIs to avoid stale selection races;
+code matches use ephemeral `editor-location-store.ts` to reveal source line.
+
+Typing `>` enters command mode; `Cmd+Shift+P` / `Ctrl+Shift+P` opens it directly.
+Commands reuse existing workspace actions for remote access, server troubleshooting,
+tab/view navigation, and editor launch. Editor commands drill into non-hidden worktrees
+sorted by `worktree_mru`; remote worktrees remain visible but disabled because editor
+launchers run on the local client.
+
+Default tab close/new and command-palette chords are native menu accelerators because
+macOS/WebKit may consume them before webview listeners. `useShortcuts` defers those exact
+default chords to native menu events to prevent duplicate actions; remapped chords remain
+webview-handled. Xterm suppresses only legacy `keypress` Enter duplicates, never printable
+keypress events needed for shifted input.
 
 ## Prompt Kanban board
 
