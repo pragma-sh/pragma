@@ -1,14 +1,18 @@
 import {
   defineAgent,
   definePlugin,
+  defineUsageLimitProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
+  type UsageLimit,
+  type UsageLimitsResult,
 } from "@pragma/plugin/catalog";
 import { createTuiWatcher } from "@pragma/watcher-kit";
 
 /** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
+const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits.py";
 
 /**
  * Pragma plugin for Cursor Agent, bundled to `dist/pragma-plugin.mjs` and
@@ -19,6 +23,17 @@ const INTERJECT_SUBMIT_DELAY_MS = 200;
 export const cursorAgentPlugin: PluginDefinition = definePlugin({
   name: "Cursor Agent",
   description: "Launch Cursor Agent from Pragma.",
+  usageLimits: [
+    defineUsageLimitProvider({
+      id: "cursor",
+      title: "Cursor",
+      dashboardUrl: "https://cursor.com/dashboard/spending",
+      iconPath: "assets/cursor.svg",
+      primaryLimitId: "api",
+      refreshIntervalMs: 15_000,
+      load: loadCursorUsageLimits,
+    }),
+  ],
   watchers: [
     createTuiWatcher({
       agent: "cursor",
@@ -64,6 +79,115 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const cwd = ctx.project?.path ?? "/tmp";
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
   return result?.stdout ?? "";
+}
+
+/** Loads Cursor account usage using credentials created by `cursor-agent login`. */
+export async function loadCursorUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
+  const cwd = ctx.project?.path ?? "/tmp";
+  const bundledHelper = ctx.pluginDir ? `${ctx.pluginDir}/assets/usage-limits.py` : null;
+  const helperFallback = bundledHelper
+    ? `elif test -f ${shellQuote(bundledHelper)}; then helper=${shellQuote(bundledHelper)}; `
+    : "";
+  const script = `if test -f "${INSTALLED_CURSOR_USAGE_HELPER}"; then helper="${INSTALLED_CURSOR_USAGE_HELPER}"; ${helperFallback}else exit 20; fi; python3 "$helper"`;
+  const command = `/bin/sh -c ${shellQuote(script)}`;
+  const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
+  if (result?.status === 20) {
+    return {
+      status: "unavailable",
+      reason: "not-configured",
+      message: "Reinstall the Cursor integration to enable usage limits.",
+    };
+  }
+  if (!result || result.status !== 0) {
+    throw new Error(result?.stderr.trim() || "Cursor usage helper failed");
+  }
+  const value: unknown = JSON.parse(result.stdout);
+  if (isUnavailableResult(value)) {
+    return value;
+  }
+  return parseCursorUsageSummary(value, Date.now());
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/** Normalizes Cursor's private usage-summary response into generic usage limits. */
+export function parseCursorUsageSummary(value: unknown, observedAt: number): UsageLimitsResult {
+  if (!isRecord(value)) {
+    throw new Error("Cursor usage response was not an object");
+  }
+  const resetTime = parseDate(value.billingCycleEnd);
+  const resetsInMs = resetTime === null ? undefined : Math.max(0, resetTime - observedAt);
+  const individual = recordValue(value.individualUsage);
+  const plan = recordValue(individual?.plan);
+  const apiPercent = usagePercent(plan?.apiPercentUsed);
+  const firstPartyPercent = usagePercent(plan?.autoPercentUsed);
+  if (apiPercent === null || firstPartyPercent === null) {
+    return {
+      status: "unavailable",
+      reason: "unsupported",
+      message: "Cursor did not return API and first-party usage for this account.",
+    };
+  }
+  const reset = resetsInMs === undefined ? {} : { resetsInMs };
+  const limits: UsageLimit[] = [
+    { id: "api", title: "API usage", used: apiPercent, limit: 100, ...reset },
+    {
+      id: "first-party",
+      title: "First-party usage",
+      used: firstPartyPercent,
+      limit: 100,
+      ...reset,
+    },
+  ];
+  return {
+    status: "ready",
+    observedAt,
+    summary: {
+      id: "average",
+      title: "Average usage",
+      used: (apiPercent + firstPartyPercent) / 2,
+      limit: 100,
+      ...reset,
+    },
+    limits,
+  };
+}
+
+function usagePercent(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(100, Math.max(0, value))
+    : null;
+}
+
+function parseDate(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUnavailableResult(
+  value: unknown,
+): value is UsageLimitsResult & { status: "unavailable" } {
+  return (
+    isRecord(value) &&
+    value.status === "unavailable" &&
+    (value.reason === "not-configured" ||
+      value.reason === "authentication-required" ||
+      value.reason === "unsupported") &&
+    typeof value.message === "string"
+  );
 }
 
 /** Parses Cursor Agent's `models` output into model entries with effort levels. */
