@@ -146,6 +146,45 @@ fn install_deep_links(app: &tauri::App) {
 /// listeners see it, and `WebKit` may consume Cmd+T for a browser tab.
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
+    install_workspace_menu(app, &menu)?;
+    let restart_daemon = MenuItem::with_id(
+        app,
+        MENU_RESTART_DAEMON,
+        "Restart Server",
+        true,
+        None::<&str>,
+    )?;
+    let open_logs = MenuItem::with_id(
+        app,
+        MENU_OPEN_DAEMON_LOGS,
+        "Open Server Logs",
+        true,
+        None::<&str>,
+    )?;
+    let troubleshooting =
+        Submenu::with_items(app, "Troubleshooting", true, &[&restart_daemon, &open_logs])?;
+    menu.append(&troubleshooting)?;
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        let action = event.id().as_ref();
+        if matches!(
+            action,
+            MENU_RESTART_DAEMON
+                | MENU_OPEN_DAEMON_LOGS
+                | MENU_NEW_TERMINAL_TAB
+                | MENU_CLOSE_ACTIVE_TAB
+                | MENU_OPEN_COMMAND_PALETTE
+                | MENU_OPEN_COMMAND_MODE
+                | MENU_OPEN_SETTINGS
+        ) {
+            let _ = app.emit(MENU_EVENT, action);
+        }
+    });
+    Ok(())
+}
+
+/// Installs native workspace actions, including accelerators `WebKit` may consume.
+fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> tauri::Result<()> {
     let open_settings = MenuItem::with_id(
         app,
         MENU_OPEN_SETTINGS,
@@ -181,87 +220,95 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+Shift+P"),
     )?;
+
+    #[cfg(target_os = "macos")]
+    install_macos_workspace_menu(
+        app,
+        menu,
+        &open_settings,
+        &new_terminal_tab,
+        &close_active_tab,
+        &open_command_palette,
+        &open_command_mode,
+    )?;
+    #[cfg(target_os = "linux")]
+    install_linux_workspace_menu(
+        menu,
+        &open_settings,
+        &new_terminal_tab,
+        &close_active_tab,
+        &open_command_palette,
+        &open_command_mode,
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_workspace_menu(
+    app: &tauri::AppHandle,
+    menu: &Menu<tauri::Wry>,
+    open_settings: &MenuItem<tauri::Wry>,
+    new_terminal_tab: &MenuItem<tauri::Wry>,
+    close_active_tab: &MenuItem<tauri::Wry>,
+    open_command_palette: &MenuItem<tauri::Wry>,
+    open_command_mode: &MenuItem<tauri::Wry>,
+) -> tauri::Result<()> {
+    // Tauri's default app submenu has a generated id, so resolve its stable
+    // first position rather than looking up an id that does not exist.
+    if let Some(app_menu) = menu
+        .items()?
+        .into_iter()
+        .next()
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        app_menu.insert(open_settings, 2)?;
+    }
     // Replace File entirely: its default Close Window item keeps Cmd+W even when
     // removed in place on macOS.
-    #[cfg(target_os = "macos")]
+    let file_menu = Submenu::with_id_and_items(
+        app,
+        "file",
+        "File",
+        true,
+        &[
+            new_terminal_tab,
+            close_active_tab,
+            open_command_palette,
+            open_command_mode,
+        ],
+    )?;
+    menu.remove_at(1)?;
+    menu.insert(&file_menu, 1)?;
+    if let Some(window_menu) = menu
+        .get("window")
+        .and_then(|item| item.as_submenu().cloned())
     {
-        // Tauri's default app submenu has a generated id, so resolve its stable
-        // first position rather than looking up an id that does not exist.
-        if let Some(app_menu) = menu
-            .items()?
-            .into_iter()
-            .next()
-            .and_then(|item| item.as_submenu().cloned())
-        {
-            app_menu.insert(&open_settings, 2)?;
-        }
-        let file_menu = Submenu::with_id_and_items(
-            app,
-            "file",
-            "File",
-            true,
-            &[
-                &new_terminal_tab,
-                &close_active_tab,
-                &open_command_palette,
-                &open_command_mode,
-            ],
-        )?;
-        menu.remove_at(1)?;
-        menu.insert(&file_menu, 1)?;
-        let window_menu = menu
-            .get("window")
-            .and_then(|item| item.as_submenu().cloned());
-        if let Some(window_menu) = window_menu {
-            // The default macOS Window menu also owns Cmd+W for closing the window.
-            window_menu.remove_at(3)?;
-        }
+        // The default macOS Window menu also owns Cmd+W for closing the window.
+        window_menu.remove_at(3)?;
     }
-    #[cfg(target_os = "linux")]
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_workspace_menu(
+    menu: &Menu<tauri::Wry>,
+    open_settings: &MenuItem<tauri::Wry>,
+    new_terminal_tab: &MenuItem<tauri::Wry>,
+    close_active_tab: &MenuItem<tauri::Wry>,
+    open_command_palette: &MenuItem<tauri::Wry>,
+    open_command_mode: &MenuItem<tauri::Wry>,
+) -> tauri::Result<()> {
     if let Some(window_menu) = menu
         .get("window")
         .and_then(|item| item.as_submenu().cloned())
     {
         // Linux has no default File menu, so surface Pragma tab actions here.
-        window_menu.append(&open_settings)?;
-        window_menu.append(&new_terminal_tab)?;
-        window_menu.append(&close_active_tab)?;
-        window_menu.append(&open_command_palette)?;
-        window_menu.append(&open_command_mode)?;
+        window_menu.append(open_settings)?;
+        window_menu.append(new_terminal_tab)?;
+        window_menu.append(close_active_tab)?;
+        window_menu.append(open_command_palette)?;
+        window_menu.append(open_command_mode)?;
     }
-    let restart_daemon = MenuItem::with_id(
-        app,
-        MENU_RESTART_DAEMON,
-        "Restart Server",
-        true,
-        None::<&str>,
-    )?;
-    let open_logs = MenuItem::with_id(
-        app,
-        MENU_OPEN_DAEMON_LOGS,
-        "Open Server Logs",
-        true,
-        None::<&str>,
-    )?;
-    let troubleshooting =
-        Submenu::with_items(app, "Troubleshooting", true, &[&restart_daemon, &open_logs])?;
-    menu.append(&troubleshooting)?;
-    app.set_menu(menu)?;
-    app.on_menu_event(|app, event| {
-        let action = event.id().as_ref();
-        if matches!(
-            action,
-            MENU_RESTART_DAEMON
-                | MENU_OPEN_DAEMON_LOGS
-                | MENU_NEW_TERMINAL_TAB
-                | MENU_CLOSE_ACTIVE_TAB
-                | MENU_OPEN_COMMAND_PALETTE
-                | MENU_OPEN_COMMAND_MODE
-                | MENU_OPEN_SETTINGS
-        ) {
-            let _ = app.emit(MENU_EVENT, action);
-        }
-    });
     Ok(())
 }
 
