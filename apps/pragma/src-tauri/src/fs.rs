@@ -9,8 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
-use pragma_constants::{DirEntry, FileContents, ProtocolRpcMethod};
-use pragma_core::fs::FsRequest;
+use pragma_constants::{DirEntry, FileContents, PaletteSearchResponse, ProtocolRpcMethod};
+use pragma_core::fs::{FsRequest, PaletteSearchRoot};
 use serde::de::DeserializeOwned;
 use tauri::State;
 
@@ -166,4 +166,72 @@ pub async fn delete_file(
     let root = worktree_root(&db, &worktree_id)?;
     let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::Delete { root, path })
+}
+
+/// Runs one bounded filename/code search across visible worktrees in a project.
+#[tauri::command]
+pub async fn palette_search(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    project_id: String,
+    worktree_id: Option<String>,
+    search_id: String,
+    query: String,
+) -> AppResult<PaletteSearchResponse> {
+    let worktrees = db
+        .list_worktrees(&project_id)?
+        .into_iter()
+        .filter(|worktree| !worktree.hidden)
+        .filter(|worktree| worktree_id.as_ref().map_or(true, |id| id == &worktree.id))
+        .collect::<Vec<_>>();
+    let route = worktrees
+        .first()
+        .ok_or_else(|| AppError::InvalidInput("project has no visible worktrees".to_string()))?;
+    let roots = worktrees
+        .iter()
+        .map(|worktree| PaletteSearchRoot {
+            worktree_id: worktree.id.clone(),
+            root: worktree.path.clone(),
+        })
+        .collect();
+    let include_code = query.trim().chars().count() >= 2;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &route.id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_rpc(
+            &pty,
+            &FsRequest::PaletteSearch {
+                search_id,
+                roots,
+                query,
+                include_files: true,
+                include_code,
+                deadline_ms: 750,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::Daemon(format!("palette search task failed: {error}")))?
+}
+
+/// Cancels an active project palette search on its owning host.
+#[tauri::command]
+pub async fn cancel_palette_search(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    project_id: String,
+    search_id: String,
+) -> AppResult<()> {
+    let route = db
+        .list_worktrees(&project_id)?
+        .into_iter()
+        .find(|worktree| !worktree.hidden)
+        .ok_or_else(|| AppError::InvalidInput("project has no visible worktrees".to_string()))?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &route.id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_rpc(&pty, &FsRequest::CancelPaletteSearch { search_id })
+    })
+    .await
+    .map_err(|error| AppError::Daemon(format!("palette cancel task failed: {error}")))?
 }

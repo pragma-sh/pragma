@@ -16,6 +16,7 @@ import type {
   Project,
   ProjectIcon,
   ProjectScriptsConfig,
+  PaletteSearchResponse,
   Tab,
   TabKind,
   WorktreeChanges,
@@ -445,6 +446,22 @@ export function listWorktrees(projectId: string): Promise<Worktree[]> {
   return invoke<Worktree[]>("list_worktrees", { projectId });
 }
 
+/** Client-local worktree recency row used by navigation surfaces. */
+export interface WorktreeMru {
+  worktreeId: string;
+  lastUsedAt: number;
+}
+
+/** Records a worktree selection as most recently used. */
+export function touchWorktreeMru(worktreeId: string): Promise<void> {
+  return invoke("touch_worktree_mru", { worktreeId });
+}
+
+/** Lists a project's worktrees from most to least recently used. */
+export function listWorktreeMru(projectId: string): Promise<WorktreeMru[]> {
+  return invoke<WorktreeMru[]>("list_worktree_mru", { projectId });
+}
+
 /**
  * Returns, for each given worktree id, whether it belongs to an SSH-routed
  * remote project. Batched to avoid one IPC round trip per worktree.
@@ -680,6 +697,26 @@ export function renameFile(worktreeId: string, fromPath: string, toPath: string)
  */
 export function deleteFile(worktreeId: string, path: string): Promise<void> {
   return invoke("delete_file", { worktreeId, path });
+}
+
+/** Searches filenames and literal code across visible worktrees in one project. */
+export function paletteSearch(
+  projectId: string,
+  worktreeId: string | null,
+  searchId: string,
+  query: string,
+): Promise<PaletteSearchResponse> {
+  return invoke<PaletteSearchResponse>("palette_search", {
+    projectId,
+    worktreeId,
+    searchId,
+    query,
+  });
+}
+
+/** Cancels an in-flight host palette search. */
+export function cancelPaletteSearch(projectId: string, searchId: string): Promise<void> {
+  return invoke("cancel_palette_search", { projectId, searchId });
 }
 
 /**
@@ -991,6 +1028,8 @@ export function onBrowserFocusRequest(
 export type MenuAction =
   | "tabs.new-terminal"
   | "tabs.close-active"
+  | "workspace.open-command-palette"
+  | "workspace.open-command-mode"
   | "troubleshooting.restart-daemon"
   | "troubleshooting.open-daemon-logs"
   | "settings.open";

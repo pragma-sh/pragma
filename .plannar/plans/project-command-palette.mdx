@@ -1,0 +1,782 @@
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
+# Project Command Palette
+
+Build a VS Code-style command palette for the currently selected project. `Cmd+P` on
+macOS and `Ctrl+P` on Linux opens one shadcn/cmdk dialog spanning every visible worktree
+in that project. Results combine workspace metadata, GitHub pull requests, live agents,
+terminal sessions, filenames, and matching code lines without searching other projects.
+
+<Card className="my-4">
+  <CardHeader>
+    <CardTitle>Outcome</CardTitle>
+    <CardDescription>One fast navigation surface, with host-safe search</CardDescription>
+  </CardHeader>
+  <CardContent className="space-y-2 text-sm">
+    <ul className="list-disc space-y-1 pl-5">
+      <li>
+        Opens immediately with bounded defaults; slow filesystem, terminal, and GitHub sources
+        hydrate independently.
+      </li>
+      <li>
+        Selecting a worktree enters a temporary scope. A synthetic <strong>Go to worktree</strong>{" "}
+        row becomes the first result; other categories narrow to that worktree.
+      </li>
+      <li>
+        Non-empty queries use fuzzy matching for metadata and filenames, literal smart-case matching
+        for code, and a minimum similarity threshold. A category with no accepted result is omitted
+        completely.
+      </li>
+      <li>Similarity always wins. Worktree recency breaks equal-score ties.</li>
+      <li>
+        Search executes on the host owning the project, so local and SSH-backed worktrees behave
+        identically.
+      </li>
+      <li>
+        Terminal commands remain runtime-only. They are searchable but never written to SQLite,
+        logs, or workspace mirrors.
+      </li>
+    </ul>
+  </CardContent>
+</Card>
+
+## Resolved Product Decisions
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Area</TableHead>
+      <TableHead>Decision</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell className="font-medium">Project scope</TableCell>
+      <TableCell>
+        Only the selected project's worktrees and data. Never return another project's results.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Hidden worktrees</TableCell>
+      <TableCell>Exclude hidden worktrees and every result belonging to them.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">PR action</TableCell>
+      <TableCell>
+        Switch worktree, expand the right sidebar, and select its Pull Request subtab.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Agent hierarchy</TableCell>
+      <TableCell>
+        Agents is one top-level category with state subcategories: <code>attention</code> = Needs
+        attention, <code>running</code> = In progress, <code>done</code> = Finished.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Weak matches</TableCell>
+      <TableCell>
+        Reject results below a tuned fuzzy threshold. Omit empty sections instead of showing weak
+        suggestions.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell className="font-medium">Code search</TableCell>
+      <TableCell>
+        Case-insensitive literal search unless the query contains uppercase, then case-sensitive. No
+        user regex in v1.
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Interaction Preview
+
+This mock demonstrates broad defaults, query filtering, and worktree scoping. Actual UI
+uses generated shadcn `CommandDialog`, keyboard selection, semantic theme tokens, and
+virtualized or bounded rows rather than this static prototype.
+
+<Playground>
+  <div bind="scope:'all'" className="hidden" />
+  <div className="mx-auto max-w-2xl rounded-xl border bg-zinc-950 p-2 text-sm text-zinc-100 shadow-2xl">
+    <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+      <span className="text-zinc-500">⌕</span>
+      <input
+        bind="query:''"
+        className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600"
+        placeholder="Search worktrees, PRs, agents, files, terminals, code..."
+      />
+      <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-500">esc</span>
+    </div>
+
+    {scope !== "all" && (
+      <div className="border-b border-white/10 p-2">
+        <button
+          onClick={() => setScope("all")}
+          className="w-full rounded-md bg-cyan-500/10 px-3 py-2 text-left text-cyan-200 hover:bg-cyan-500/20"
+        >
+          <span className="font-medium">Go to worktree</span>
+          <span className="ml-2 text-xs text-cyan-400">feature/palette</span>
+        </button>
+      </div>
+    )}
+
+    <div className="max-h-96 space-y-3 overflow-auto p-2">
+      {scope === "all" && (query === "" || "feature/palette".includes(query.toLowerCase())) && (
+        <section>
+          <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Worktrees</div>
+          <button
+            onClick={() => { setScope("palette"); setQuery(""); }}
+            className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left hover:bg-white/10"
+          >
+            <span>feature/palette</span>
+            <span className="text-xs text-zinc-500">select to scope</span>
+          </button>
+          <button className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left hover:bg-white/10">
+            <span>main</span>
+            <span className="text-xs text-zinc-500">2m ago</span>
+          </button>
+        </section>
+      )}
+
+      {(query === "" || "command palette search".includes(query.toLowerCase())) && (
+        <section>
+          <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Pull requests</div>
+          <button className="w-full rounded-md px-2 py-2 text-left hover:bg-white/10">
+            <span className="text-violet-300">#184</span>
+            <span className="ml-2">Add project command palette</span>
+          </button>
+        </section>
+      )}
+
+      {(query === "" || "opencode palette".includes(query.toLowerCase())) && (
+        <section>
+          <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Agents</div>
+          <div className="px-2 py-1 text-[11px] font-medium text-red-300">Needs attention</div>
+          <div className="ml-2 border-l border-white/10 pl-2">
+            <button className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left hover:bg-white/10">
+              <span>opencode · implementation</span>
+              <span className="text-xs text-zinc-500">feature/palette</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {(query === "" || "CommandPalette.tsx".toLowerCase().includes(query.toLowerCase())) && (
+        <section>
+          <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Files</div>
+          <button className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left hover:bg-white/10">
+            <span>CommandPalette.tsx</span>
+            <span className="text-xs text-zinc-500">feature/palette · src/components</span>
+          </button>
+        </section>
+      )}
+
+      {query.toLowerCase().includes("palette") && (
+        <section>
+          <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Code</div>
+          <button className="w-full rounded-md px-2 py-2 text-left hover:bg-white/10">
+            <div className="flex justify-between"><span>WorkspaceShell.tsx:218</span><span className="text-xs text-zinc-500">feature/palette</span></div>
+            <code className="mt-1 block truncate text-xs text-zinc-400">setCommandPaletteOpen(true)</code>
+          </button>
+        </section>
+      )}
+    </div>
+
+  </div>
+</Playground>
+
+## Architecture
+
+<Tabs defaultValue="frontend" className="my-4">
+  <TabsList>
+    <TabsTrigger value="frontend">Frontend</TabsTrigger>
+    <TabsTrigger value="search">Host search</TabsTrigger>
+    <TabsTrigger value="metadata">Metadata</TabsTrigger>
+    <TabsTrigger value="navigation">Navigation</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="frontend" className="space-y-3">
+
+### Palette composition
+
+Add shadcn's command primitive with `bunx shadcn@latest add command`; this introduces
+`cmdk` and `apps/pragma/src/components/ui/command.tsx`. Build feature UI under
+`apps/pragma/src/components/command-palette/`, not inside the generated primitive.
+
+Add `fuzzysort` to `apps/pragma/package.json`. Set `shouldFilter={false}` on cmdk:
+Pragma must rank already-loaded local rows and asynchronous host rows consistently,
+apply worktree-recency tie breaks, and omit categories after thresholding.
+
+```text
+components/command-palette/
+├── CommandPalette.tsx          dialog, input, groups, keyboard behavior
+├── use-command-palette.ts      query generation and source orchestration
+├── palette-results.ts          source joins, category caps, section omission
+├── palette-ranking.ts          fuzzysort adapters and accepted-match thresholds
+└── palette-navigation.ts       target-specific actions
+```
+
+Mount `CommandPalette` inside `RightSidebarProvider` in
+`components/workspace/WorkspaceShell.tsx`. Wrap its open lifetime with
+`useSuppressNativeOverlayWhile(open)` so native browser views cannot cover the dialog.
+
+Local palette state is intentionally ephemeral:
+
+```ts
+type PaletteState = {
+  open: boolean;
+  query: string;
+  scopedWorktreeId: string | null;
+  generation: number;
+};
+```
+
+Closing resets query and scope. Worktree selection sets scope without navigating and
+clears query. Backspace on an empty scoped query returns to all visible worktrees.
+Escape closes the dialog. Project change closes and resets the palette.
+
+### Shortcut
+
+Add `openCommandPalette` to shared keybinding schema and Rust/TS defaults:
+
+- macOS: `Cmd+P`
+- Linux: `Ctrl+P`
+
+Extend `UseShortcutsOptions`, `SIMPLE_ACTIONS`, and `useWorkspaceShortcuts`. Existing
+capture-phase handling means the shortcut works while xterm is focused; existing plugin
+command precedence remains unchanged.
+
+  </TabsContent>
+
+  <TabsContent value="search" className="space-y-3">
+
+### One host-owned search operation
+
+Do not recursively call `listDirEntries` from React and do not depend on a user-installed
+`rg`. Both approaches fail on remote worktrees or create per-keystroke RPC storms.
+
+Add `crates/pragma-core/src/search.rs` and extend `FsRequest` in
+`crates/pragma-core/src/fs.rs` with bounded search and cancellation operations. Add Rust
+dependencies:
+
+- `ignore` for recursive traversal matching gitignore/global-ignore semantics
+- `nucleo-matcher` for fast fuzzy filename candidate scoring
+- `grep-searcher` plus `grep-regex` for bounded in-process literal line search
+
+`SearchService` belongs to `Core`, shared across server connections. It owns active
+search cancellation tokens and concurrency permits. Do not add a persistent content
+index in v1; measure traversal latency first. A later filename-only cache can sit behind
+the same contract without changing UI APIs.
+
+```rust
+enum FsRequest {
+    // existing operations
+    PaletteSearch {
+        search_id: String,
+        roots: Vec<PaletteSearchRoot>,
+        query: String,
+        include_files: bool,
+        include_code: bool,
+        file_limit: u32,
+        code_limit: u32,
+        deadline_ms: u64,
+    },
+    CancelPaletteSearch { search_id: String },
+}
+```
+
+Tauri receives only `projectId`, optional `worktreeId`, query, and search id. It validates
+membership, removes hidden worktrees, resolves trusted absolute roots from SQLite, and
+routes one RPC through the project's owning `PragmaClient`. Absolute roots exist only on
+the native-client-to-host boundary; responses contain worktree-relative paths only.
+
+Hard bounds:
+
+- 256-byte query
+- 64 worktree roots
+- 100 filename candidates and 100 code candidates before frontend caps
+- 512-byte code snippet
+- 2 MiB maximum searchable file
+- no symlink traversal outside canonical worktree roots
+- skip `.git`, ignored, binary, and oversized files
+- two concurrent palette searches per host
+- deadline checked during traversal; cancellation checked between files and line batches
+
+Bump `daemon.protocolVersion` so an old remote server cannot appear compatible while
+lacking the new filesystem operation.
+
+  </TabsContent>
+
+  <TabsContent value="metadata" className="space-y-3">
+
+### Worktree MRU
+
+Creation time is not recency. Add SQLite migration v11 with a client-local table:
+
+```sql
+CREATE TABLE worktree_mru (
+  worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  last_used_at INTEGER NOT NULL
+);
+CREATE INDEX idx_worktree_mru_project
+  ON worktree_mru(project_id, last_used_at DESC);
+```
+
+Touch MRU from one selection effect in `WorkspaceProvider`, not individual click paths.
+This captures sidebar clicks, agent notifications, deep links, PR actions, and palette
+navigation. Expose a project MRU query through `lib/tauri.ts`; keep MRU out of shared
+`Worktree`, `WorkspaceSnapshot`, and host mirror types because it is desktop-user UI state.
+
+### Terminal title and last command
+
+Titles already persist through OSC 0/2. Last command does not exist and must not be
+guessed from PTY input or scrollback. Add shell integration for zsh, bash, and fish that
+emits a private, base64-encoded OSC marker from preexec. Preserve user hooks and fall
+back to normal shell startup when integration is unsupported.
+
+Extend the server OSC parser in `crates/pragma-server/src/session.rs` to strip and decode
+the marker, cap it, reject malformed/control-character payloads, and store the latest
+command in session runtime metadata. Expose a batched terminal-metadata server RPC keyed
+by session/tab id. Treat values as untrusted display text.
+
+<Alert>
+  <AlertTitle>Command privacy boundary</AlertTitle>
+  <AlertDescription>
+
+Never persist last commands, include them in `WorkspaceSnapshot`, write them to logs, or
+send them to telemetry. Runtime memory is sufficient for palette search and avoids making
+possibly sensitive command arguments durable.
+
+  </AlertDescription>
+</Alert>
+
+### Agents and pull requests
+
+Add a stable all-entry snapshot hook to `state/agent-status-store.ts`, preserving
+`worktreeId`, `tabId`, agent id, and status. Filter it to current project-visible
+worktrees before grouping.
+
+Keep GitHub data in `lib/github.ts`. Resolve repository refs for visible worktrees with
+bounded concurrency, group by origin/upstream repository, fetch open PRs once per unique
+repository, then map branch heads back to worktrees. Include drafts. Cache successful
+results briefly and abort on dialog close/project change. Signed-out, rate-limited, and
+partial failures affect only the PR section.
+
+  </TabsContent>
+
+  <TabsContent value="navigation" className="space-y-3">
+
+### Target-aware actions
+
+Current `openFileTab` captures the selected worktree, so dispatching a worktree switch
+and immediately opening a file can target the old worktree. Extend workspace APIs to
+accept explicit locations:
+
+```ts
+activateTabLocation(projectId: string, worktreeId: string, tabId: string): Promise<void>;
+openFileLocation(input: {
+  projectId: string;
+  worktreeId: string;
+  path: string;
+  line?: number;
+  column?: number;
+}): Promise<void>;
+```
+
+Reuse existing `activateLocation` internals without creating agent back-navigation for
+ordinary palette actions. Extend editor-tab deduplication using the explicit worktree.
+
+For code results, add `state/editor-location-store.ts` modeled after
+`review-focus-store.ts`. `EditorView` captures the CodeMirror view, consumes a pending
+line/column after file load, clamps stale positions, selects the match, scrolls it to
+center, and focuses the editor.
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Result</TableHead>
+      <TableHead>Action</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Worktree row</TableCell>
+      <TableCell>Enter scope; do not navigate.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Go to worktree</TableCell>
+      <TableCell>Select scoped worktree and close.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Pull request</TableCell>
+      <TableCell>
+        Select worktree, leave Kanban/automation mode if needed, expand right sidebar, select{" "}
+        <code>pullRequest</code>.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Agent</TableCell>
+      <TableCell>
+        Reuse <code>navigateToAgentLocation</code> so existing Go back behavior remains.
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>File</TableCell>
+      <TableCell>Open or focus editor tab in explicit worktree.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Terminal</TableCell>
+      <TableCell>Activate explicit worktree and terminal tab.</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Code</TableCell>
+      <TableCell>Open explicit file and reveal matching line/column.</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+  </TabsContent>
+</Tabs>
+
+## Ranking and Section Rules
+
+Top-level categories keep fixed order. Agent states are nested subcategories, not peer
+categories:
+
+```text
+Go to worktree
+Worktrees
+Pull requests
+Agents
+  Needs attention
+  In progress
+  Finished
+Files
+Terminal tabs
+Code
+```
+
+For a non-empty query:
+
+1. Fuzzy metadata and filename candidates with category-specific searchable fields.
+2. Reject candidates below the configured normalized acceptance threshold.
+3. Omit any section whose accepted row list is empty.
+4. Sort accepted rows by similarity descending, then worktree `last_used_at` descending, then stable label/id.
+5. Never let recency promote a weaker match over a stronger match.
+
+Use `fuzzysort` for frontend-owned rows and `nucleo-matcher` for host filename discovery.
+Do not compare raw scores across libraries. Normalize each matcher to an internal
+`0..1` quality and verify equivalent match classes with shared fixtures: exact, token
+exact, prefix, contiguous substring, compact subsequence, sparse subsequence, rejected.
+Start with a conservative `0.45` acceptance threshold and tune using fixture-based tests,
+not ad hoc production exceptions. Code results are accepted only on actual literal line
+matches; no code match means no Code section.
+
+Search fields:
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Category</TableHead>
+      <TableHead>Fields</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Worktrees</TableCell>
+      <TableCell>Title, branch</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Pull requests</TableCell>
+      <TableCell>Number, title, head branch</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Agents</TableCell>
+      <TableCell>Agent display name/id, tab title</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Files</TableCell>
+      <TableCell>Filename is primary; relative parent path is secondary</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Terminal tabs</TableCell>
+      <TableCell>Tab title, runtime last command</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Code</TableCell>
+      <TableCell>Literal line contents; filename/path only break equal matches</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+Empty query uses bounded defaults without disk/content scans:
+
+- Worktrees: current first, then MRU, cap 8.
+- PRs: cached open PRs, cap 6.
+- Agents: one category containing Needs attention, In progress, and Finished subcategories; live entries use status priority and MRU order, cap 5 per subcategory. Omit an empty subcategory, and omit Agents when all three are empty.
+- Files: currently open editor/diff file tabs, deduplicated by worktree and path, cap 8.
+- Terminal tabs: current first, then MRU worktree and tab creation order, cap 8.
+- Code: omitted until at least two non-whitespace query characters.
+- Any empty default category is omitted.
+
+## Async Behavior
+
+The dialog and local defaults render in the first frame. On each non-empty query:
+
+- Debounce host search by 100 ms.
+- Increment a generation id and cancel the previous host request.
+- Use `useDeferredValue` for result ranking/rendering while keeping input controlled and urgent.
+- Use `startTransition` when committing result arrays.
+- Require exact project, scope, query, and generation match before accepting a response.
+- Abort PR refresh independently from host search.
+- Keep loading and errors category-local; never toast per keystroke.
+
+Remote disconnect, timeout, or one failed worktree leaves local categories usable. Show a
+small non-selectable Files/Code error row only when that source was requested; do not
+mistake an error for a no-match section. Deleting or hiding a scoped worktree clears scope
+and reruns the current-project query.
+
+## Implementation Sequence
+
+<Accordion type="single" collapsible defaultValue="phase-1" className="my-4">
+  <AccordionItem value="phase-1">
+    <AccordionTrigger>1. UI shell, shortcut, and local results</AccordionTrigger>
+    <AccordionContent>
+
+Generate shadcn command, add `fuzzysort`, wire keybindings, mount palette with native
+overlay suppression, implement current-project filtering, worktree scope, terminal-tab
+rows, and the Agents category with state subcategories. Add ranking thresholds and omit
+empty subcategories/sections from day one.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="phase-2">
+    <AccordionTrigger>2. MRU and safe navigation</AccordionTrigger>
+    <AccordionContent>
+
+Add SQLite MRU migration and centralized touch effect. Introduce explicit worktree/tab/file
+location APIs plus editor line-focus store. Verify cross-worktree actions cannot race
+captured React selection.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="phase-3">
+    <AccordionTrigger>3. Host filename and code search</AccordionTrigger>
+    <AccordionContent>
+
+Add shared search result types, stateful core search service, bounded traversal, fuzzy
+filename matching, literal code search, cancellation, async Tauri adapters, remote routing,
+and protocol version bump.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="phase-4">
+    <AccordionTrigger>4. PR aggregation and terminal commands</AccordionTrigger>
+    <AccordionContent>
+
+Batch GitHub open-PR discovery by repository. Add shell preexec integration and runtime
+terminal metadata RPC. Keep both sources optional so failures never block palette basics.
+
+    </AccordionContent>
+
+  </AccordionItem>
+  <AccordionItem value="phase-5">
+    <AccordionTrigger>5. Hardening and documentation</AccordionTrigger>
+    <AccordionContent>
+
+Run local/SSH integration tests, profile representative large repositories, tune thresholds
+through fixed fixtures, and update affected `AGENTS.md` files plus architecture,
+shared-constants, code-quality, and Tauri-command skills when workflows change.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+## Test Plan
+
+<Tabs defaultValue="frontend-tests" className="my-4">
+  <TabsList>
+    <TabsTrigger value="frontend-tests">Frontend</TabsTrigger>
+    <TabsTrigger value="rust-tests">Rust</TabsTrigger>
+    <TabsTrigger value="integration-tests">Integration</TabsTrigger>
+  </TabsList>
+  <TabsContent value="frontend-tests">
+    <ul className="list-disc space-y-1 pl-5">
+      <li>
+        <code>Cmd+P</code>/<code>Ctrl+P</code> opens from terminal, editor, and browser tabs; plugin
+        binding precedence still wins.
+      </li>
+      <li>Current project only; hidden worktrees and their children never contribute rows.</li>
+      <li>
+        Selecting worktree scopes without navigation; Go row stays first; empty Backspace clears
+        scope.
+      </li>
+      <li>
+        Exact/prefix/good fuzzy matches render; below-threshold matches and their sections are
+        omitted.
+      </li>
+      <li>Similarity outranks MRU; MRU resolves equal similarity; stable id resolves final tie.</li>
+      <li>
+        Agents renders as one category; attention/running/done rows nest under Needs attention/In
+        progress/Finished subcategories.
+      </li>
+      <li>
+        Empty agent state subcategories are omitted; Agents is omitted when every state is empty.
+      </li>
+      <li>PR action opens target worktree's right-sidebar PR subtab.</li>
+      <li>File, terminal, agent, and code actions target correct worktree; code reveals line.</li>
+      <li>Stale host/GitHub responses cannot replace a newer query or scope.</li>
+      <li>Empty-query defaults are bounded and Code is absent.</li>
+      <li>Native overlay suppression remains active for dialog lifetime.</li>
+    </ul>
+  </TabsContent>
+  <TabsContent value="rust-tests">
+    <ul className="list-disc space-y-1 pl-5">
+      <li>MRU migration, upsert ordering, and cascade deletion.</li>
+      <li>Search validates roots/options and returns relative paths only.</li>
+      <li>
+        <code>.git</code>, ignored, binary, oversized, and escaping symlink files are skipped.
+      </li>
+      <li>Filename match quality fixtures enforce accepted/rejected classes and result caps.</li>
+      <li>
+        Code smart-case behavior, one-based line/column, bounded snippets, and long-line handling.
+      </li>
+      <li>Cancellation/deadline stops traversal and removes active-search state.</li>
+      <li>
+        OSC command marker works across split read buffers; malformed/oversized payloads disappear
+        safely.
+      </li>
+      <li>
+        zsh/bash/fish integration preserves existing hooks and unsupported shells launch normally.
+      </li>
+      <li>Terminal command metadata stays memory-only and bounded.</li>
+    </ul>
+  </TabsContent>
+  <TabsContent value="integration-tests">
+    <ul className="list-disc space-y-1 pl-5">
+      <li>Local and mocked SSH projects return identical relative filename/code results.</li>
+      <li>Cancel request travels on a separate pooled connection and stops active host work.</li>
+      <li>Remote disconnect produces partial palette state rather than closing/freezing dialog.</li>
+      <li>Multiple visible worktrees obey host concurrency and deadline limits.</li>
+      <li>
+        GitHub branch-to-PR mapping handles origin, forks/upstream, drafts, auth loss, and rate
+        limits.
+      </li>
+      <li>
+        Representative warm local query meets 100 ms filename target; code starts returning within
+        250 ms or hits bounded deadline.
+      </li>
+    </ul>
+  </TabsContent>
+</Tabs>
+
+## Main Files
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Area</TableHead>
+      <TableHead>Expected files</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Shared contracts</TableCell>
+      <TableCell>
+        <code>packages/constants/schema.json</code>, <code>values.json</code>, generated TS/Rust
+        types
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Palette UI</TableCell>
+      <TableCell>
+        <code>components/command-palette/*</code>, <code>components/ui/command.tsx</code>,{" "}
+        <code>WorkspaceShell.tsx</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Keyboard</TableCell>
+      <TableCell>
+        <code>lib/keybindings.ts</code>, <code>hooks/use-shortcuts.ts</code>,{" "}
+        <code>src-tauri/src/keybindings.rs</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Workspace navigation</TableCell>
+      <TableCell>
+        <code>state/workspace-context.tsx</code>, <code>state/editor-location-store.ts</code>,{" "}
+        <code>components/editor/EditorView.tsx</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Local persistence</TableCell>
+      <TableCell>
+        <code>src-tauri/src/db.rs</code>, Tauri command registration, <code>lib/tauri.ts</code>
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Host search</TableCell>
+      <TableCell>
+        <code>crates/pragma-core/src/search.rs</code>, <code>fs.rs</code>, core/server wiring, Cargo
+        manifests
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Runtime terminal metadata</TableCell>
+      <TableCell>
+        <code>pragma-server/src/session.rs</code>, registry/RPC code, protocol frames, Tauri PTY
+        adapter
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>PR discovery</TableCell>
+      <TableCell>
+        <code>lib/github.ts</code>, GitHub tests, palette source hook
+      </TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Agents</TableCell>
+      <TableCell>
+        <code>state/agent-status-store.ts</code> and tests
+      </TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+## Acceptance Criteria
+
+- <Badge>Scope</Badge> Results come only from non-hidden worktrees under selected project.
+- <Badge>Speed</Badge> Shortcut opens local defaults immediately; typing never waits on Rust, SSH,
+  or GitHub.
+- <Badge>Quality</Badge> Weak fuzzy results are rejected and empty result sections are absent.
+- <Badge>Order</Badge> Similarity sorts first; persisted worktree MRU breaks ties.
+- <Badge>Navigation</Badge> Every row reaches correct worktree and destination without selection
+  races.
+- <Badge>Remote</Badge> Filename/code search runs on owning host with relative-path responses.
+- <Badge>Privacy</Badge> Last command is runtime-only, bounded, untrusted, and never
+  persisted/logged.
+- <Badge>Resilience</Badge> Stale responses, partial errors, and disconnected hosts cannot overwrite
+  current results or freeze palette.

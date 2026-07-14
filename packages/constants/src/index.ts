@@ -67,6 +67,8 @@ export type {
   FileChange,
   FileChangeKind,
   FileContents,
+  PaletteSearchMatch,
+  PaletteSearchResponse,
   ProjectIcon,
   KanbanPromptStatus,
   KanbanCompletedAction,

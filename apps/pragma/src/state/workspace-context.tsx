@@ -69,6 +69,7 @@ import {
   listSplits,
   listTabs,
   listWorktrees,
+  touchWorktreeMru,
   markAgentsSeen,
   onBrowserFocusRequest,
   onBrowserMeta,
@@ -98,6 +99,7 @@ import {
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
 import { startWatcherForAgentSession } from "@/plugins/watchers";
+import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
   agentStatusesForTab,
@@ -152,6 +154,15 @@ interface WorkspaceState {
 type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
 
 type InteractiveScriptKind = "run" | "build";
+
+/** One active interactive project script shown in cross-worktree navigation. */
+interface RunningScript {
+  worktreeId: string;
+  tabId: string;
+  name: string;
+  kind: InteractiveScriptKind;
+  stopping: boolean;
+}
 
 type RunScriptsState = {
   worktreeId: string;
@@ -234,6 +245,8 @@ type WorkspaceAction =
 interface WorkspaceContextValue extends WorkspaceState {
   /** Tabs belonging to the selected worktree (the visible set). */
   tabs: Tab[];
+  /** Every tab loaded for the selected project, across worktrees. */
+  projectTabs: Tab[];
   selectedWorktreeId: string | null;
   activeTabId: string | null;
   activeProject: Project | null;
@@ -275,6 +288,14 @@ interface WorkspaceContextValue extends WorkspaceState {
   openWorktreeInEditor: (worktreeId: string, editorId?: string | null) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
   setActiveTab: (tabId: string | null) => void;
+  activateTabLocation: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
+  openFileLocation: (input: {
+    projectId: string;
+    worktreeId: string;
+    path: string;
+    line?: number;
+    column?: number;
+  }) => Promise<void>;
   /** Reports whether a worktree has uncommitted, staged, or untracked changes. */
   getWorktreeStatus: (worktreeId: string) => Promise<WorktreeStatus>;
   /** Removes a worktree from disk + SQLite, optionally deletes its branch. */
@@ -302,6 +323,7 @@ interface WorkspaceContextValue extends WorkspaceState {
   runScriptsConfigError: string | null;
   runScriptsState: RunScriptsState;
   buildScriptsState: RunScriptsState;
+  runningScripts: RunningScript[];
   runScripts: () => Promise<void>;
   buildScripts: () => Promise<void>;
   stopRunScripts: () => Promise<void>;
@@ -1796,7 +1818,7 @@ function recordAgentBackLocation(
 async function loadProjectWorkspace(
   projectId: string,
   dispatch: (action: WorkspaceAction) => void,
-): Promise<void> {
+): Promise<Tab[]> {
   dispatch({ type: "select-project", projectId });
   const [worktrees, tabs, splits] = await Promise.all([
     listWorktrees(projectId),
@@ -1806,6 +1828,7 @@ async function loadProjectWorkspace(
   dispatch({ type: "set-worktrees", projectId, worktrees });
   dispatch({ type: "set-tabs", tabs });
   dispatch({ type: "set-splits", projectId, worktreeRoots: parseStoredSplits(splits) });
+  return tabs;
 }
 
 /** Resolves the owning project for a new tab from an explicit worktree, then the selection. */
@@ -3145,6 +3168,16 @@ function useSelectionPersistence(
   }, [didHydrateRef, lastPersistedRef, state.selectedProjectId, state.selectedWorktreeByProject]);
 }
 
+/** Records every resolved worktree selection through one centralized effect. */
+function useWorktreeMruPersistence(state: WorkspaceState, didHydrateRef: RefObject<boolean>): void {
+  const projectId = state.selectedProjectId;
+  const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : null;
+  useEffect(() => {
+    if (!didHydrateRef.current || !worktreeId) return;
+    void touchWorktreeMru(worktreeId).catch(() => undefined);
+  }, [didHydrateRef, worktreeId]);
+}
+
 /** Latches seen attention/done statuses for a tab, clears its green dot, marks seen. */
 function latchAndClearSeenTab(tabId: string): void {
   let hasDone = false;
@@ -3188,6 +3221,7 @@ function useManagedScripts(
 ): {
   runScriptsState: RunScriptsState;
   buildScriptsState: RunScriptsState;
+  runningScripts: RunningScript[];
   startManagedScripts: (kind: InteractiveScriptKind) => Promise<void>;
   runScripts: () => Promise<void>;
   buildScripts: () => Promise<void>;
@@ -3205,6 +3239,19 @@ function useManagedScripts(
   const buildScriptsState = useMemo(
     () => managedScriptsStateForKind(managedScriptsState, selectedWorktreeId, "build"),
     [managedScriptsState, selectedWorktreeId],
+  );
+  const runningScripts = useMemo(
+    () =>
+      Object.values(managedScriptsState).flatMap((scripts) =>
+        scripts.tabIds.map((tabId) => ({
+          worktreeId: scripts.worktreeId,
+          tabId,
+          name: scripts.kind,
+          kind: scripts.kind,
+          stopping: scripts.stopping,
+        })),
+      ),
+    [managedScriptsState],
   );
 
   const startManagedScripts = useCallback(
@@ -3292,6 +3339,7 @@ function useManagedScripts(
   return {
     runScriptsState,
     buildScriptsState,
+    runningScripts,
     startManagedScripts,
     runScripts,
     buildScripts,
@@ -3738,8 +3786,13 @@ function useAgentManagement({
   dispatch: WorkspaceDispatch;
   visibleTabIdsRef: RefObject<Set<string>>;
 }) {
-  const { agentBackLocation, setAgentBackLocation, navigateToAgentLocation, goBackFromAgent } =
-    useAgentNavigation(stateRef, dispatch);
+  const {
+    agentBackLocation,
+    setAgentBackLocation,
+    activateLocation,
+    navigateToAgentLocation,
+    goBackFromAgent,
+  } = useAgentNavigation(stateRef, dispatch);
   const { resolveProjectForWorktree, isTabCurrentlyViewed } = useWorktreeResolution(
     stateRef,
     worktreeProjectIdRef,
@@ -3760,6 +3813,7 @@ function useAgentManagement({
   return {
     agentBackLocation,
     setAgentBackLocation,
+    activateLocation,
     navigateToAgentLocation,
     goBackFromAgent,
     resolveProjectForWorktree,
@@ -3874,6 +3928,7 @@ function useWorkspacePersistence(
 ): void {
   useSplitPersist(state);
   useSelectionPersistence(state, didHydrateRef, lastPersistedRef);
+  useWorktreeMruPersistence(state, didHydrateRef);
 }
 
 /** Worktree actions, split layout, managed scripts, visible tabs, and split actions. */
@@ -3927,6 +3982,7 @@ function useWorkspaceActions({
   const {
     runScriptsState,
     buildScriptsState,
+    runningScripts,
     runScripts,
     buildScripts,
     stopRunScripts,
@@ -3986,6 +4042,7 @@ function useWorkspaceActions({
       buildScriptsAvailable,
       runScriptsState,
       buildScriptsState,
+      runningScripts,
       runScripts,
       buildScripts,
       stopRunScripts,
@@ -4013,6 +4070,7 @@ function useWorkspaceActions({
       buildScriptsAvailable,
       runScriptsState,
       buildScriptsState,
+      runningScripts,
       runScripts,
       buildScripts,
       stopRunScripts,
@@ -4046,10 +4104,58 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const {
     agentBackLocation,
     setAgentBackLocation,
+    activateLocation,
     navigateToAgentLocation,
     goBackFromAgent,
     resolveProjectForWorktree,
   } = useAgentManagement({ stateRef, worktreeProjectIdRef, dispatch, visibleTabIdsRef });
+
+  const activateTabLocation = useCallback(
+    (projectId: string, worktreeId: string, tabId: string) =>
+      activateLocation(projectId, worktreeId, tabId, false),
+    [activateLocation],
+  );
+
+  const openFileLocation = useCallback(
+    async (input: {
+      projectId: string;
+      worktreeId: string;
+      path: string;
+      line?: number;
+      column?: number;
+    }) => {
+      const projectTabs =
+        stateRef.current.selectedProjectId === input.projectId
+          ? stateRef.current.tabs
+          : await loadProjectWorkspace(input.projectId, dispatch);
+      let tab = projectTabs.find(
+        (candidate) =>
+          candidate.kind === "editor" &&
+          candidate.worktreeId === input.worktreeId &&
+          candidate.filePath === input.path,
+      );
+      if (!tab) {
+        tab = await createTabCommand(
+          input.projectId,
+          input.worktreeId,
+          "editor",
+          basename(input.path),
+          undefined,
+          input.path,
+          null,
+        );
+        dispatch({ type: "add-tab", tab });
+      }
+      if (input.line) requestEditorLocation(tab.id, input.line, input.column ?? 1);
+      dispatch({
+        type: "select-worktree",
+        projectId: input.projectId,
+        worktreeId: input.worktreeId,
+      });
+      dispatch({ type: "set-active-tab", worktreeId: input.worktreeId, tabId: tab.id });
+    },
+    [stateRef],
+  );
 
   const { reload, selectProject, refreshProject, selectWorktree } = useProjectSelection(
     state,
@@ -4119,6 +4225,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       ...state,
       ...workspaceActions,
       tabs: workspaceActions.visibleTabs,
+      projectTabs: state.tabs,
       selectedWorktreeId,
       activeProject,
       selectedWorktree,
@@ -4138,6 +4245,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       closeTab,
       renameTerminalTab,
       setActiveTab,
+      activateTabLocation,
+      openFileLocation,
       runScriptsConfigError,
       agentBackAvailable: !!agentBackLocation && agentBackLocation.expiresAt >= Date.now(),
       navigateToAgentLocation,
@@ -4165,6 +4274,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       closeTab,
       renameTerminalTab,
       setActiveTab,
+      activateTabLocation,
+      openFileLocation,
       runScriptsConfigError,
       agentBackLocation,
       navigateToAgentLocation,

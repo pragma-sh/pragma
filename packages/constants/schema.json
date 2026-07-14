@@ -1854,6 +1854,54 @@
         }
       }
     },
+    "PaletteSearchMatch": {
+      "title": "PaletteSearchMatch",
+      "description": "One host-owned command-palette filename or literal code match.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "path", "kind", "score"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "path": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "code"]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "column": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "snippet": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "PaletteSearchResponse": {
+      "title": "PaletteSearchResponse",
+      "description": "Bounded host search results for visible worktrees in one project.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "truncated"],
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PaletteSearchMatch" }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
     "ProjectIcon": {
       "title": "ProjectIcon",
       "type": "object",
@@ -2039,6 +2087,8 @@
         "splitVertical",
         "deleteFile",
         "scrollTerminalBottom",
+        "openCommandPalette",
+        "openCommandMode",
         "switchToWorkspace1",
         "switchToWorkspace2",
         "switchToWorkspace3",
@@ -2087,6 +2137,12 @@
           "$ref": "#/definitions/PlatformChord"
         },
         "scrollTerminalBottom": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "openCommandPalette": {
+          "$ref": "#/definitions/PlatformChord"
+        },
+        "openCommandMode": {
           "$ref": "#/definitions/PlatformChord"
         },
         "switchToWorkspace1": {

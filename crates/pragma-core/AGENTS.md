@@ -30,6 +30,10 @@ Tauri or client presentation code.
   `git` RPC, because they must execute on the host that owns the worktree path.
 - Request payload enums (`fs::FsRequest`, `git::GitRequest`) are the client↔core
   contract; both sides depend on this crate to build/parse them.
+- `FsRequest::PaletteSearch` performs bounded filename and smart-case literal code
+  search across client-resolved worktree roots while honoring gitignore rules. It enforces
+  root/query/file/result/byte limits, deadlines, two-search concurrency, and cancellation;
+  responses contain only worktree-relative paths.
 - All `git` subprocess calls go through `process_env::command` so a GUI-launched
   host still finds `git` on `PATH`.
 
