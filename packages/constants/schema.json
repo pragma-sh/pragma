@@ -415,12 +415,18 @@
         }
       }
     },
+    "GitHubAuthMethod": {
+      "title": "GitHubAuthMethod",
+      "type": "string",
+      "description": "How the stored GitHub token was obtained: the OAuth device flow or adoption of the gh CLI's token.",
+      "enum": ["deviceFlow", "cli"]
+    },
     "GitHubAuthStatus": {
       "title": "GitHubAuthStatus",
       "type": "object",
       "additionalProperties": false,
       "description": "Drives the setup modal and the Pull Request subtab: whether a token is stored, whether the gh CLI is an option, the signed-in user, and whether setup was skipped.",
-      "required": ["authenticated", "ghAvailable", "user", "setupDismissed"],
+      "required": ["authenticated", "ghAvailable", "user", "authMethod", "setupDismissed"],
       "properties": {
         "authenticated": {
           "type": "boolean",
@@ -435,6 +441,17 @@
           "anyOf": [
             {
               "$ref": "#/definitions/GitHubUser"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authMethod": {
+          "description": "How the stored token was obtained, or null when not authenticated (or stored by a build that predates method tracking).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GitHubAuthMethod"
             },
             {
               "type": "null"
@@ -547,7 +564,7 @@
       "title": "Gateway",
       "type": "object",
       "additionalProperties": false,
-      "required": ["discoveryFile", "tokenFile", "tokenHeader"],
+      "required": ["discoveryFile", "tokenFile", "devicesFile", "tokenHeader", "deviceHeaders"],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
         "discoveryFile": {
@@ -558,9 +575,25 @@
           "type": "string",
           "description": "Filename written beside daemon.sock holding the persistent 0600 bearer token, so the token survives gateway restarts and stays stable across paired devices until explicitly regenerated."
         },
+        "devicesFile": {
+          "type": "string",
+          "description": "Filename written beside daemon.sock holding devices that successfully authenticated with the gateway."
+        },
         "tokenHeader": {
           "type": "string",
           "description": "HTTP authorization header name used for bearer-token authentication."
+        },
+        "deviceHeaders": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "platform", "appVersion"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "platform": { "type": "string" },
+            "appVersion": { "type": "string" }
+          },
+          "description": "HTTP headers carrying installation-scoped mobile device metadata."
         }
       }
     },
