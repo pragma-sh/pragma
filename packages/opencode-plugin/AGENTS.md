@@ -44,10 +44,15 @@ from the registry, where it does not exist) — never register it by name.
 per-event mapping. The reported status is _derived_ (`attention` > `busy` > idle) and
 emitted only on change.
 
-Only root sessions feed that state machine. `session.created` / `session.updated`
-events identify subagent sessions by `info.parentID`; all later events and direct hooks
-carrying those child session IDs are ignored. A child becoming idle or finishing must
-never overwrite its still-running parent's status.
+Status sends are serialized through one promise queue. OpenCode can invoke adjacent
+event hooks concurrently; without serialization, a slow `started` HTTP request from an
+earlier turn could arrive after its `stopped` request and leave the tab incorrectly busy.
+
+Only root sessions feed normal status and transcript handling. `session.created` /
+`session.updated` events identify subagent sessions by `info.parentID`; child lifecycle
+is tracked separately so a parent idle cannot report finished while any of its children
+remain active. Child classification survives partial `session.updated` payloads that omit
+`parentID`, and only the parent's final idle after all children finish reports stopped.
 
 **`busy` is set by:**
 

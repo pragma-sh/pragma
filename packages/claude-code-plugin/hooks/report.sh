@@ -39,6 +39,7 @@ state_dir="${TMPDIR:-/tmp}"
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
 session_file="${state_dir}/pragma-cli-${agent}-${tab}.session"
+children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
@@ -169,6 +170,43 @@ running = any(
 )
 sys.exit(0 if running else 1)
 ' 2>/dev/null
+}
+
+# Claude's SubagentStart/SubagentStop hooks provide durable accounting when
+# several children overlap. Stop.background_tasks is retained as a fallback.
+child_marker() {
+  child_id="$1"
+  child_key=$(printf '%s' "$child_id" | cksum | tr -d '[:space:]')
+  printf '%s/%s' "$children_dir" "$child_key"
+}
+
+track_subagent() {
+  child_id="$1"
+  [ -n "$child_id" ] || return 0
+  mkdir -p "$children_dir"
+  : >"$(child_marker "$child_id")"
+}
+
+untrack_subagent() {
+  child_id="$1"
+  [ -n "$child_id" ] || return 0
+  rm -f "$(child_marker "$child_id")"
+  rmdir "$children_dir" 2>/dev/null || true
+}
+
+has_tracked_subagents() {
+  [ -d "$children_dir" ] || return 1
+  for child in "$children_dir"/*; do
+    [ -f "$child" ] && return 0
+  done
+  return 1
+}
+
+clear_subagents() {
+  if [ -d "$children_dir" ]; then
+    rm -f "$children_dir"/*
+    rmdir "$children_dir" 2>/dev/null || true
+  fi
 }
 
 # Prints the question text from an AskUserQuestion PermissionRequest payload
@@ -429,6 +467,16 @@ if [ -z "$hook_agent_id" ]; then
 fi
 hook_event_name="$(json_field hook_event_name "$input")"
 agent_transcript_path="$(json_field agent_transcript_path "$input")"
+if [ "${1:-}" = "subagent-start" ]; then
+  track_subagent "$hook_agent_id"
+  [ -f "$marker" ] || printf '%s' "$$-$(date +%s)" >"$marker"
+  report started
+  exit 0
+fi
+if [ "${1:-}" = "subagent-stop" ]; then
+  untrack_subagent "$hook_agent_id"
+  exit 0
+fi
 if [ -n "$hook_agent_id" ] || [ "$hook_event_name" = "SubagentStop" ] || [ -n "$agent_transcript_path" ]; then
   exit 0
 fi
@@ -495,7 +543,7 @@ case "${1:-}" in
       rm -f "$marker"
       report cleared
       message system "Claude Code turn interrupted"
-    elif has_running_subagents "$input"; then
+    elif has_running_subagents "$input" || has_tracked_subagents; then
       # The parent's inference turn ended, but background subagents are still
       # working and Claude auto-resumes (a synthetic UserPromptSubmit) when
       # they finish -- the session is NOT done. Stay on `started`, keep the
@@ -531,6 +579,7 @@ case "${1:-}" in
   cleared)
     stop_watcher
     rm -f "$marker"
+    clear_subagents
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
     fi

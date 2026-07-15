@@ -35,7 +35,9 @@ means the script works regardless of its executable bit. Keeping the logic in on
 | `SessionStart`               | `cleared`       | `cleared` status only (+ tears down any stale watcher)                                                                                                                                                                                                |
 | `SessionEnd`                 | `cleared`       | `cleared` status only (+ tears down the watcher)                                                                                                                                                                                                      |
 | `UserPromptSubmit`           | `started`       | `started` + user prompt message (+ spawns the abort watcher — see below). A synthetic `<task-notification>` prompt (subagent completion auto-resume) reports `started` but renders a system note, never a fake user bubble                            |
-| `Stop`                       | `stopped`       | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt; stays `started` while `background_tasks` reports a running subagent — see below                                                                          |
+| `Stop`                       | `stopped`       | `stopped` + `last_assistant_message` (or transcript fallback); `cleared` after an interrupt; stays `started` while tracked subagents or `background_tasks` remain active — see below                                                                  |
+| `SubagentStart`              | `subagent-start`| Tracks each active child and re-asserts `started`                                                                                                                                                                                                     |
+| `SubagentStop`               | `subagent-stop` | Removes only that child; final status remains owned by the parent `Stop`                                                                                                                                                                              |
 | `PostToolUse`                | `running`       | `started` **iff** a turn's marker exists; else nothing (see below)                                                                                                                                                                                    |
 | `PermissionRequest`          | `permission`    | `attention --kind command` (+ command + requestId) **and blocks for the verdict** — see approvals below. `AskUserQuestion` branches to `attention --kind question` (+ question + options + requestId) and blocks for the answer — see questions below |
 | `Elicitation`                | `attention`     | `attention` (no `--kind`) **iff** a marker exists — MCP input, fast path                                                                                                                                                                              |
@@ -64,7 +66,12 @@ a synthetic `UserPromptSubmit` whose `prompt` is a `<task-notification>` block, 
 by the final `Stop`. Reporting `stopped` on that intermediate `Stop` flipped the tab to
 the green done dot mid-run — the "subagent finished = session finished" bug.
 
-The fix keys on the `Stop` payload's **`background_tasks`** array: entries like
+The bridge tracks every **`SubagentStart` / `SubagentStop`** by `agent_id` in per-tab
+marker files, so overlapping children cannot collapse into one boolean. A parent `Stop`
+stays `started` while any marker remains; each child stop removes only its own marker,
+and the parent's final `Stop` owns the finished report. Session start/end clear stale
+markers. The `Stop` payload's **`background_tasks`** array remains a compatibility
+fallback: entries like
 `{"type": "subagent", "status": "running", ...}` mean the session is still busy, so
 `report.sh` re-asserts `started`, keeps the marker + abort watcher alive (a cancel during
 the subagent phase must still clear), and surfaces the parent's interim reply as a chat

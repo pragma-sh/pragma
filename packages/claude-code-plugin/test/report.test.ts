@@ -61,6 +61,10 @@ function markerPath(): string {
   return join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.active`);
 }
 
+function subagentDir(): string {
+  return join(tmpEnvDir, `pragma-cli-claude-code-${TAB_ID}.subagents`);
+}
+
 /** Runs report.sh for one event and returns the recorded pragma-cli calls. */
 function run(
   event: string,
@@ -292,6 +296,42 @@ describe("report.sh", () => {
     );
   });
 
+  it("tracks multiple subagents until the parent completes after the last child", () => {
+    run("started");
+    run("subagent-start", {
+      stdin: JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "child-1" }),
+    });
+    run("subagent-start", {
+      stdin: JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "child-2" }),
+    });
+
+    run("subagent-stop", {
+      stdin: JSON.stringify({ hook_event_name: "SubagentStop", agent_id: "child-1" }),
+    });
+    run("stopped", { stdin: JSON.stringify({ hook_event_name: "Stop" }) });
+    expect(reportCalls()).not.toContain("agent report --agent claude-code stopped");
+
+    run("subagent-stop", {
+      stdin: JSON.stringify({ hook_event_name: "SubagentStop", agent_id: "child-2" }),
+    });
+    run("stopped", { stdin: JSON.stringify({ hook_event_name: "Stop" }) });
+
+    expect(reportCalls().at(-1)).toBe("agent report --agent claude-code stopped");
+    expect(existsSync(subagentDir())).toBe(false);
+  });
+
+  it("clears tracked subagents when the Claude session ends", () => {
+    run("started");
+    run("subagent-start", {
+      stdin: JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "child-1" }),
+    });
+    expect(existsSync(subagentDir())).toBe(true);
+
+    run("cleared", { stdin: JSON.stringify({ hook_event_name: "SessionEnd" }) });
+
+    expect(existsSync(subagentDir())).toBe(false);
+  });
+
   it("reports stopped normally when background tasks are done or not subagents", () => {
     run("started");
     expect(
@@ -334,6 +374,20 @@ describe("report.sh", () => {
       "agent report --agent claude-code stopped",
     ]);
     expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("reports finished after each consecutive agent turn", () => {
+    run("started");
+    run("stopped");
+    run("started");
+    run("stopped");
+
+    expect(reportCalls()).toEqual([
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
+    ]);
   });
 
   it("surfaces the user's prompt as a user chat message on started", () => {

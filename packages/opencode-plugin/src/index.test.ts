@@ -179,6 +179,54 @@ describe("Pragma opencode plugin", () => {
     );
   });
 
+  it("reports finished after each consecutive agent turn", async () => {
+    await expectReports(
+      async (hooks) => {
+        await hooks.event?.(sessionStatus("busy"));
+        await hooks.event?.(sessionStatus("idle"));
+        await hooks.event?.(sessionStatus("busy"));
+        await hooks.event?.(sessionStatus("idle"));
+      },
+      ["started", "stopped", "started", "stopped"],
+    );
+  });
+
+  it("preserves report order when consecutive lifecycle events overlap", async () => {
+    const reports: Report[] = [];
+    let releaseStarted: (() => void) | undefined;
+    const startedGate = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    const hooks = createPragmaOpencodeHooks({
+      env: pragmaEnv,
+      async started() {
+        await startedGate;
+        reports.push("started");
+      },
+      async stopped() {
+        reports.push("stopped");
+      },
+      async attention(kind) {
+        reports.push(`attention:${kind}`);
+      },
+      async attentionCommand() {},
+      async attentionQuestion() {},
+      async message() {},
+      async cleared() {
+        reports.push("cleared");
+      },
+    });
+
+    const started = hooks.event?.(sessionStatus("busy"));
+    const stopped = hooks.event?.(sessionStatus("idle"));
+    await Promise.resolve();
+    expect(reports).toEqual([]);
+
+    releaseStarted?.();
+    await Promise.all([started, stopped]);
+    expect(reports).toEqual(["started", "stopped"]);
+  });
+
   it("ignores child-session activity while reporting the parent session", async () => {
     const { hooks, reports } = testHooks();
     await hooks.event?.(sessionStatus("busy"));
@@ -208,6 +256,39 @@ describe("Pragma opencode plugin", () => {
 
     await hooks.event?.(sessionIdleEvent());
     expect(reports).toEqual(["started", "stopped"]);
+  });
+
+  it("keeps the parent running until all subagents finish and the parent idles", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
+    );
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-2", parentID: "s1" } }),
+    );
+
+    await hooks.event?.(sessionIdleEvent());
+    await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-1" }));
+    await hooks.event?.(sessionIdleEvent());
+    await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-2" }));
+
+    expect(reports).toEqual(["started"]);
+
+    await hooks.event?.(sessionIdleEvent());
+    expect(reports).toEqual(["started", "stopped"]);
+  });
+
+  it("keeps child classification when session.updated omits parentID", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
+    );
+    await hooks.event?.(runtimeEvent("session.updated", { info: { id: "child-1" } }));
+    await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-1" }));
+
+    expect(reports).toEqual(["started"]);
   });
 
   it("reports started on retry session status", async () => {

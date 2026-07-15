@@ -59,14 +59,16 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   let attention = false;
   let attentionKind: AgentAttentionKind = "command";
   let lastReported: ReportKey | null = null;
+  let reportQueue = Promise.resolve();
   /** messageID → role, filled from `message.updated` so text parts can be attributed. */
   const messageRoles = new Map<string, "user" | "assistant">();
   /** partID → OpenCode part type, used to distinguish reasoning deltas from final text. */
   const partTypes = new Map<string, string>();
   /** messageID/partID → accumulated text from `message.part.delta` events. */
   const messageText = new Map<string, string>();
-  /** Child session ids created for subagents. Only root-session activity drives Pragma. */
-  const childSessions = new Set<string>();
+  /** Child session id → parent session id. Child lifecycle keeps its parent busy. */
+  const childSessions = new Map<string, string>();
+  const activeChildSessions = new Set<string>();
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
     "session.status": applySessionStatusEvent,
@@ -91,6 +93,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       const runtimeEvent = event as RuntimeEvent;
       rememberSessionKind(runtimeEvent);
       if (isChildSessionEvent(runtimeEvent)) {
+        if (applyChildSessionEvent(runtimeEvent)) {
+          await sync();
+        }
         return;
       }
       // A permission request: report the command + a requestId so a Pragma
@@ -201,10 +206,45 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       return;
     }
     if (typeof info.parentID === "string" && info.parentID) {
-      childSessions.add(info.id);
-    } else {
-      childSessions.delete(info.id);
+      childSessions.set(info.id, info.parentID);
+      if (event.type === "session.created") {
+        activeChildSessions.add(info.id);
+        busy = true;
+      }
     }
+  }
+
+  function applyChildSessionEvent(event: RuntimeEvent): boolean {
+    const sessionId = sessionIdFromEvent(event);
+    if (!sessionId) {
+      return false;
+    }
+    if (event.type === "session.created") {
+      activeChildSessions.add(sessionId);
+      busy = true;
+      return true;
+    }
+    if (event.type === "session.status") {
+      const status = isRecord(event.properties) ? event.properties.status : undefined;
+      if (isRecord(status) && status.type === "idle") {
+        activeChildSessions.delete(sessionId);
+      } else {
+        activeChildSessions.add(sessionId);
+        busy = true;
+      }
+      return true;
+    }
+    if (
+      event.type === "session.idle" ||
+      event.type === "session.error" ||
+      event.type === "session.deleted"
+    ) {
+      activeChildSessions.delete(sessionId);
+      if (event.type === "session.deleted") {
+        childSessions.delete(sessionId);
+      }
+    }
+    return false;
   }
 
   function isChildSessionEvent(event: RuntimeEvent): boolean {
@@ -223,11 +263,13 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   async function clear(): Promise<void> {
     busy = false;
     attention = false;
+    childSessions.clear();
+    activeChildSessions.clear();
     if (lastReported === "cleared") {
       return;
     }
     lastReported = "cleared";
-    await reporter.cleared();
+    await queueReport(() => reporter.cleared());
   }
 
   function currentReport(): ReportKey {
@@ -254,12 +296,18 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     }
     lastReported = next;
     if (next === "started") {
-      await reporter.started();
+      await queueReport(() => reporter.started());
     } else if (next === "stopped") {
-      await reporter.stopped();
+      await queueReport(() => reporter.stopped());
     } else {
-      await reporter.attention(attentionKind);
+      await queueReport(() => reporter.attention(attentionKind));
     }
+  }
+
+  function queueReport(send: () => Promise<void>): Promise<void> {
+    const pending = reportQueue.then(send);
+    reportQueue = pending.catch(() => undefined);
+    return pending;
   }
 
   /** Updates the flags for a runtime event and returns the action to take. */
@@ -273,8 +321,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     return "sync";
   }
 
-  function applySessionIdleEvent(): EventAction {
-    busy = false;
+  function applySessionIdleEvent(event: RuntimeEvent): EventAction {
+    const sessionId = sessionIdFromEvent(event);
+    busy = hasActiveChildren(sessionId);
     return "sync";
   }
 
@@ -287,13 +336,36 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     }
     busy = false;
     attention = false;
+    removeChildren(sessionIdFromEvent(event));
     return "sync";
   }
 
-  function applySessionDeletedEvent(): EventAction {
+  function applySessionDeletedEvent(event: RuntimeEvent): EventAction {
     busy = false;
     attention = false;
+    removeChildren(sessionIdFromEvent(event));
     return "sync";
+  }
+
+  function hasActiveChildren(parentId: string | undefined): boolean {
+    for (const childId of activeChildSessions) {
+      if (!parentId || childSessions.get(childId) === parentId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function removeChildren(parentId: string | undefined): void {
+    if (!parentId) {
+      return;
+    }
+    for (const [childId, childParentId] of childSessions) {
+      if (childParentId === parentId) {
+        childSessions.delete(childId);
+        activeChildSessions.delete(childId);
+      }
+    }
   }
 
   /**
@@ -306,7 +378,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     attention = true;
     attentionKind = "command";
     lastReported = "attention:command";
-    await reporter.attentionCommand(commandFromPermission(source), permissionRequestId());
+    await queueReport(() =>
+      reporter.attentionCommand(commandFromPermission(source), permissionRequestId()),
+    );
   }
 
   /**
@@ -322,10 +396,12 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     attention = true;
     attentionKind = "question";
     lastReported = "attention:question";
-    await reporter.attentionQuestion(
-      parsed?.prompt ?? "The agent is asking a question",
-      parsed?.options ?? [],
-      callId ? `opencode-question-${callId}` : permissionRequestId(),
+    await queueReport(() =>
+      reporter.attentionQuestion(
+        parsed?.prompt ?? "The agent is asking a question",
+        parsed?.options ?? [],
+        callId ? `opencode-question-${callId}` : permissionRequestId(),
+      ),
     );
   }
 
