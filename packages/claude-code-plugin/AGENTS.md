@@ -68,7 +68,7 @@ The fix keys on the `Stop` payload's **`background_tasks`** array: entries like
 `{"type": "subagent", "status": "running", ...}` mean the session is still busy, so
 `report.sh` re-asserts `started`, keeps the marker + abort watcher alive (a cancel during
 the subagent phase must still clear), and surfaces the parent's interim reply as a chat
-message. Only `type == "subagent"` counts — a long-lived background *bash* task (e.g. a
+message. Only `type == "subagent"` counts — a long-lived background _bash_ task (e.g. a
 dev server) must not hold the tab on "running" forever. The final `Stop` (no running
 subagents) reports `stopped` normally.
 
