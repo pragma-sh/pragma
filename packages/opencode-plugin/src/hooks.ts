@@ -65,6 +65,8 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   const partTypes = new Map<string, string>();
   /** messageID/partID → accumulated text from `message.part.delta` events. */
   const messageText = new Map<string, string>();
+  /** Child session ids created for subagents. Only root-session activity drives Pragma. */
+  const childSessions = new Set<string>();
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
     "session.status": applySessionStatusEvent,
@@ -87,6 +89,10 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   return {
     event: async ({ event }) => {
       const runtimeEvent = event as RuntimeEvent;
+      rememberSessionKind(runtimeEvent);
+      if (isChildSessionEvent(runtimeEvent)) {
+        return;
+      }
       // A permission request: report the command + a requestId so a Pragma
       // approval toast appears, and pin the red dot. opencode exposes no
       // decision-returning plugin hook on the current binary, so the paired
@@ -112,6 +118,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       }
     },
     "chat.message": async (_input, output) => {
+      if (isChildSessionId(_input.sessionID)) {
+        return;
+      }
       busy = true;
       const text =
         textFromParts(output.parts) ??
@@ -126,6 +135,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       await sync();
     },
     "command.execute.before": async (input) => {
+      if (isChildSessionId(input.sessionID)) {
+        return;
+      }
       busy = true;
       await reporter.message(
         toolMessage("command", summaryFromRecord(input as Record<string, unknown>)),
@@ -133,6 +145,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       await sync();
     },
     "tool.execute.before": async (input, output) => {
+      if (isChildSessionId(input.sessionID)) {
+        return;
+      }
       const args = isRecord(output?.args) ? output.args : {};
       if (input.tool === "question") {
         await raiseQuestionAttention(
@@ -149,6 +164,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       await sync();
     },
     "permission.ask": async (input) => {
+      if (isRecord(input) && isChildSessionId(input.sessionID)) {
+        return;
+      }
       // Kept for opencode builds that DO call this hook (absent from the verified
       // binary). Same command-approval report as the `permission.asked` event.
       await raiseCommandApproval(input);
@@ -171,6 +189,30 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   function raiseAttention(kind: AgentAttentionKind): void {
     attention = true;
     attentionKind = kind;
+  }
+
+  function rememberSessionKind(event: RuntimeEvent): void {
+    if (event.type !== "session.created" && event.type !== "session.updated") {
+      return;
+    }
+    const properties = event.properties;
+    const info = isRecord(properties) && isRecord(properties.info) ? properties.info : undefined;
+    if (!info || typeof info.id !== "string") {
+      return;
+    }
+    if (typeof info.parentID === "string" && info.parentID) {
+      childSessions.add(info.id);
+    } else {
+      childSessions.delete(info.id);
+    }
+  }
+
+  function isChildSessionEvent(event: RuntimeEvent): boolean {
+    return isChildSessionId(sessionIdFromEvent(event));
+  }
+
+  function isChildSessionId(sessionId: unknown): boolean {
+    return typeof sessionId === "string" && childSessions.has(sessionId);
   }
 
   /**
@@ -432,6 +474,26 @@ export type { Environment };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function sessionIdFromEvent(event: RuntimeEvent): string | undefined {
+  if (!isRecord(event.properties)) {
+    return undefined;
+  }
+  const properties = event.properties as Record<string, unknown>;
+  if (typeof properties.sessionID === "string") {
+    return properties.sessionID;
+  }
+  for (const key of ["info", "part", "permission"]) {
+    const nested = properties[key];
+    if (isRecord(nested) && typeof nested.sessionID === "string") {
+      return nested.sessionID;
+    }
+    if (key === "info" && isRecord(nested) && typeof nested.id === "string") {
+      return nested.id;
+    }
+  }
+  return undefined;
 }
 
 function assistantTextPart(

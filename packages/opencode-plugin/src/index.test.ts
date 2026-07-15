@@ -179,6 +179,37 @@ describe("Pragma opencode plugin", () => {
     );
   });
 
+  it("ignores child-session activity while reporting the parent session", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(sessionStatus("busy"));
+    await hooks.event?.(
+      runtimeEvent("session.created", {
+        info: { id: "child-1", parentID: "s1" },
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("session.status", { sessionID: "child-1", status: { type: "busy" } }),
+    );
+    await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-1" }));
+    await hooks.event?.(
+      runtimeEvent("permission.asked", {
+        id: "child-permission",
+        sessionID: "child-1",
+        type: "bash",
+        metadata: { command: "npm test" },
+      }),
+    );
+    await hooks["tool.execute.before"]?.(
+      { tool: "bash", sessionID: "child-1", callID: "child-call" },
+      { args: { command: "npm test" } },
+    );
+
+    expect(reports).toEqual(["started"]);
+
+    await hooks.event?.(sessionIdleEvent());
+    expect(reports).toEqual(["started", "stopped"]);
+  });
+
   it("reports started on retry session status", async () => {
     await expectEventReports(sessionStatus("retry"), ["started"]);
   });

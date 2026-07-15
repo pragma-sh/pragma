@@ -9,8 +9,10 @@ Static Cursor Agent CLI integration that reports agent status into Pragma. Curso
 
 ```
 packages/cursor-plugin/
+├── src/pragma-plugin.ts       # Agent, watcher, and usage-limit declarations
 ├── assets/
-│   └── cursor.svg            # Cursor brand asset used by the built-in launcher
+│   ├── cursor.svg            # Cursor brand asset used by the built-in launcher
+│   └── usage-limits.py       # CLI-authenticated Cursor usage-summary fetcher
 ├── hooks/
 │   ├── report.sh              # Event → pragma-cli translator
 │   └── hooks.fragment.json    # Hook entries merged by install-local.sh
@@ -130,6 +132,8 @@ bun run --filter @pragma/cursor-plugin install:local
 
 This copies hooks to `~/.pragma/plugins/cursor/hooks/`, merges hook entries into
 `~/.cursor/hooks.json`, and updates CLI + permissions settings (see above).
+It also installs the usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
+reuses `cursor-agent login` credentials and never persists or prints access tokens.
 Re-run after updating the package. Removes legacy launcher assets if present.
 
 If install fails with "cannot write" inside a sandboxed agent, run the same command
@@ -147,7 +151,7 @@ falling back to `pragma-cli` from `PATH`.
 
 ## Built-in launcher
 
-The launchable Cursor entry is defined **here** in `src/pragma-agent.ts`. This is now
+The launchable Cursor entry is defined **here** in `src/pragma-plugin.ts`. This is now
 the single source of truth: the `pragma-plugins` catalog sidecar
 (`@pragma/plugins-host`) imports it directly to assemble the agent catalog, and
 `apps/pragma/src/plugins/builtin-agents.ts` re-exports it (overriding `iconPath` with a

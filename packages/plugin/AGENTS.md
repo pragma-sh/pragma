@@ -14,6 +14,7 @@ packages/plugin/
 ├── src/agent.ts         # defineAgent and agent types
 ├── src/watcher.ts       # defineWatcher and watcher context types
 ├── src/contributions.ts # UI slot, web view, and command contribution helpers
+├── src/usage-limits.ts  # Host-rendered provider usage-limit declarations
 ├── src/hooks.ts         # Hook delegates onto __PRAGMA__.hooks
 ├── src/bridge.ts        # __PRAGMA__ bridge/action contract
 ├── src/react*.ts        # React/ReactDOM/jsx-runtime shims

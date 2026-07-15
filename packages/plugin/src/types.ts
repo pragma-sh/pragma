@@ -22,6 +22,8 @@ export interface PluginNotifyOptions {
 export interface PluginContext<TConfig = unknown> {
   /** This plugin's stable id, derived from its `package.json` name. */
   pluginId: string;
+  /** Absolute plugin package directory when available in this runtime. */
+  pluginDir?: string;
   /** This plugin's user-supplied config, already validated against its `config` schema. */
   config: TConfig;
   /** The active project, or `null` when no project is selected. */

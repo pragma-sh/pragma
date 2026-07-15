@@ -48,6 +48,7 @@ apps/pragma/
     ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
     ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
+    ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
     ├── icons/                   # Production app icons
     └── icons-dev/               # Dev icons
@@ -281,7 +282,9 @@ it before `cargo check` because Tauri validates `externalBin` paths during compi
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using
-`CONSTANTS.plugins.bundledDirName`. `binaries/` is
+`CONSTANTS.plugins.bundledDirName`. While `tauri dev` is running, use
+`bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
+frontend mtime poll then hot-reloads the staged bundle. `binaries/` is
 git-ignored.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**

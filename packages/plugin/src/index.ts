@@ -66,6 +66,15 @@ export type {
   PluginUiContributions,
 } from "./plugin";
 export { definePlugin } from "./plugin";
+export type {
+  UsageLimit,
+  UsageLimitProviderDefinition,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+} from "./usage-limits";
+export { defineUsageLimitProvider } from "./usage-limits";
 export type { WatcherContext, WatcherDefinition } from "./watcher";
 export { defineWatcher } from "./watcher";
 export type {

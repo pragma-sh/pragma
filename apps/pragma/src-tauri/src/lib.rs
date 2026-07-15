@@ -351,11 +351,22 @@ fn read_plugin_manifests(
 ) -> AppResult<Vec<plugins::PluginEntryResult>> {
     let home = app_handle.path().home_dir()?;
     let resource_dir = app_handle.path().resource_dir().ok();
-    Ok(plugins::read_manifests(
+    let results = plugins::read_manifests(
         home,
         project_path.as_deref().map(std::path::Path::new),
         resource_dir.as_deref(),
-    ))
+    );
+    // Plugin icons load through the asset protocol (`convertFileSrc`), which
+    // only serves paths explicitly allowed in its scope. Plugin dirs are
+    // arbitrary (bundled, global, or project-declared), so grant each one
+    // here rather than trying to enumerate them statically in tauri.conf.json.
+    let scope = app_handle.asset_protocol_scope();
+    for result in &results {
+        if let Some(manifest) = &result.manifest {
+            let _ = scope.allow_directory(&manifest.dir, true);
+        }
+    }
+    Ok(results)
 }
 
 /// Reads the JavaScript source of a resolved plugin bundle file.

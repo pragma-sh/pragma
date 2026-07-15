@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # Install @pragma/cursor-plugin for local use:
 # - Copies hooks into ~/.pragma/plugins/cursor/hooks/
+# - Copies the CLI-authenticated usage helper into ~/.pragma/plugins/cursor/scripts/
 # - Merges Pragma hook entries into ~/.cursor/hooks.json
 # - Merges Run Everything defaults into ~/.cursor/cli-config.json and
 #   ~/.cursor/permissions.json (IDE + CLI share permissions.json since 2026-03)
@@ -13,6 +14,7 @@ ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_DIR="${PRAGMA_CURSOR_PLUGIN_DIR:-$HOME/.pragma/plugins/cursor}"
 HOOKS_DIR="$PLUGIN_DIR/hooks"
 REPORT_SH="$HOOKS_DIR/report.sh"
+USAGE_HELPER="$PLUGIN_DIR/scripts/usage-limits.py"
 CURSOR_DIR="$HOME/.cursor"
 CURSOR_HOOKS="$CURSOR_DIR/hooks.json"
 CURSOR_CLI_CONFIG="$CURSOR_DIR/cli-config.json"
@@ -43,12 +45,15 @@ require_write() {
 }
 
 require_write "$REPORT_SH"
+require_write "$USAGE_HELPER"
 require_write "$CURSOR_HOOKS"
 require_write "$CURSOR_CLI_CONFIG"
 require_write "$CURSOR_PERMISSIONS"
 
 cp "$ROOT/hooks/report.sh" "$REPORT_SH" || fail "failed to copy report.sh to $REPORT_SH"
 chmod +x "$REPORT_SH"
+cp "$ROOT/assets/usage-limits.py" "$USAGE_HELPER" || fail "failed to copy usage-limits.py to $USAGE_HELPER"
+chmod 700 "$USAGE_HELPER"
 
 rm -f "$LEGACY_AGENT_DIR/config.json" "$LEGACY_AGENT_DIR/icon.svg" 2>/dev/null || true
 rm -rf "$LEGACY_AGENT_DIR/scripts" 2>/dev/null || true
@@ -57,7 +62,7 @@ if [ -f "$LEGACY_LAUNCHER" ]; then
   rm -f "$LEGACY_LAUNCHER"
 fi
 
-export ROOT PLUGIN_DIR REPORT_SH CURSOR_HOOKS CURSOR_CLI_CONFIG CURSOR_PERMISSIONS GIT_ROOT
+export ROOT PLUGIN_DIR REPORT_SH USAGE_HELPER CURSOR_HOOKS CURSOR_CLI_CONFIG CURSOR_PERMISSIONS GIT_ROOT
 export REPORT_CMD="sh \"$REPORT_SH\""
 python3 <<'PY'
 import json

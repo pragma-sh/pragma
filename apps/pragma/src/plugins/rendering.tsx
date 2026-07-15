@@ -6,6 +6,7 @@ import type {
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
+  UsageLimitProviderDefinition,
 } from "@pragma/plugin";
 
 import { PluginBoundary, notifyFromPlugin, usePluginRuntimeState } from "./host-hooks";
@@ -40,6 +41,13 @@ export function usePluginSidebarCards(
   activeProjectId: string | null,
 ): VisiblePluginContribution<SidebarCardDefinition>[] {
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarCards);
+}
+
+/** Returns active providers for the shared usage-limits display. */
+export function usePluginUsageLimitProviders(
+  activeProjectId: string | null,
+): VisiblePluginContribution<UsageLimitProviderDefinition>[] {
+  return useVisibleContributions(activeProjectId, (definition) => definition.usageLimits);
 }
 
 function useVisibleContributions<TContribution extends object>(
@@ -80,7 +88,7 @@ function contributionKey(record: PluginRecord, contribution: object, index: numb
       : "title" in contribution
         ? String(contribution.title)
         : String(index);
-  return `${record.pluginId}:${id}`;
+  return `${record.scope}:${record.projectId ?? ""}:${record.pluginId}:${id}`;
 }
 
 type PluginRuntime = ReturnType<typeof usePluginRuntimeState>;
@@ -97,19 +105,24 @@ function shouldShow<TConfig>(
     return false;
   }
   try {
-    return Boolean(when(pluginContext(record, runtime) as PluginContext<TConfig>));
+    return Boolean(when(pluginContextForRecord(record, runtime) as PluginContext<TConfig>));
   } catch (cause) {
     console.error(`plugin "${record.pluginId}" contribution guard threw`, cause);
     return false;
   }
 }
 
-function pluginContext(record: PluginRecord, runtime: PluginRuntime): PluginContext {
+/** Builds callback context for a loaded plugin record. */
+export function pluginContextForRecord(
+  record: PluginRecord,
+  runtime: PluginRuntime,
+): PluginContext {
   if (!runtime.sdk) {
     throw new Error("Plugin SDK is not connected yet");
   }
   return {
     pluginId: record.pluginId,
+    ...(record.dir === undefined ? {} : { pluginDir: record.dir }),
     config: record.config,
     project: runtime.project,
     sdk: runtime.sdk,

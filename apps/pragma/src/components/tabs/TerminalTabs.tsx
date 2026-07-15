@@ -40,6 +40,7 @@ import { useConfirmClose } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
 import { editorLaunchers } from "@/lib/editor-launchers";
 import { isMacPlatform } from "@/lib/platform";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
@@ -493,6 +494,7 @@ function TerminalTabItem({
 }
 
 /** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
+// fallow-ignore-next-line code-duplication
 function TerminalTabEntry({
   tab,
   active,
@@ -688,6 +690,7 @@ export function TerminalTabs() {
           />
           <div className="flex shrink-0 items-center justify-end gap-1">
             <PluginTopperItems items={rightTopperItems} />
+            <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
             <EditorLauncherMenu
               disabled={editorDisabled}
               onSelect={openEditor}
