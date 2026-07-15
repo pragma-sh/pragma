@@ -3,22 +3,14 @@ import { useEffect, useRef } from "react";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Link } from "@tiptap/extension-link";
 import { Placeholder } from "@tiptap/extension-placeholder";
-import { type Editor, EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { common, createLowlight } from "lowlight";
 import { Markdown } from "tiptap-markdown";
 
+import { getMarkdown } from "@/components/editor/tiptap-markdown";
+
 const lowlight = createLowlight(common);
-
-/** The `tiptap-markdown` storage slot, which has no bundled TS types. */
-interface MarkdownStorage {
-  markdown: { getMarkdown: () => string };
-}
-
-/** Reads the editor's current document as markdown via the `tiptap-markdown` storage. */
-function getMarkdown(editor: Editor): string {
-  return (editor.storage as unknown as MarkdownStorage).markdown.getMarkdown();
-}
 
 /**
  * A small rich-text editor whose **I/O is markdown**. TipTap renders a WYSIWYG
