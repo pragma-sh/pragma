@@ -34,6 +34,9 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "github" => ProtocolRpcMethod::Github,
         "ai" => ProtocolRpcMethod::Ai,
         "exec" => ProtocolRpcMethod::Exec,
+        "automations" => ProtocolRpcMethod::Automations,
+        "plugins" => ProtocolRpcMethod::Plugins,
+        "tunnel" => ProtocolRpcMethod::Tunnel,
         _ => return None,
     })
 }
@@ -49,6 +52,10 @@ mod tests {
         assert!(matches!(
             parse_method("filesystem"),
             Some(ProtocolRpcMethod::Filesystem)
+        ));
+        assert!(matches!(
+            parse_method("plugins"),
+            Some(ProtocolRpcMethod::Plugins)
         ));
         assert!(parse_method("missing").is_none());
     }
