@@ -14,7 +14,7 @@ mod generated {
 }
 
 pub use generated::{
-    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFileChange,
+    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
     AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
     AgentMessageRole, AgentModelEntry, AgentReasoning, AgentReportKind, AgentReportPayload,
     AgentSessionLaunchPayload, AgentStatus, AgentToolCall, AgentToolCallStatus, Agents, AppInfo,

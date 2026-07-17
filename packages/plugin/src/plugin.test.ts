@@ -4,6 +4,9 @@ import { defineWebView, openWebView } from "./contributions";
 import { definePlugin, type PluginDefinitionInput } from "./plugin";
 import { defineUsageLimitProvider } from "./usage-limits";
 
+const onInstall = () => {};
+const onPragmaLoad = () => {};
+
 describe("definePlugin", () => {
   it("stamps the compiled-against @pragma/plugin version", () => {
     const plugin = definePlugin({ name: "Test Plugin" });
@@ -15,10 +18,14 @@ describe("definePlugin", () => {
       name: "Test Plugin",
       description: "A plugin",
       commands: [],
+      onInstall,
+      onPragmaLoad,
     });
     expect(plugin.name).toBe("Test Plugin");
     expect(plugin.description).toBe("A plugin");
     expect(plugin.commands).toEqual([]);
+    expect(plugin.onInstall).toBe(onInstall);
+    expect(plugin.onPragmaLoad).toBe(onPragmaLoad);
   });
 
   it("never lets a caller override the stamped version", () => {

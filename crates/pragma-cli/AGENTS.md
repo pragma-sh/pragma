@@ -53,6 +53,9 @@ scenarios validate exact prompt/options, listed and custom answers, dismissal, a
 request-id isolation rather than accepting any generic question attention.
 Stream-integrity message and attention invariants are scoped to that runtime agent so
 unrelated agents reporting concurrently cannot fail the selected integration.
+Agent catalog `excludeFeatures` entries skip matching optional scenario groups with an
+explicit reason. `command-no-permission` verifies a safe shell command completes and
+raises no command-attention event; command approval remains a separate capability group.
 `question-free-text` requires an assistant message echoing the exact marker and accepts
 two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
 `questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's

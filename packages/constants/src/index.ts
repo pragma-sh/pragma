@@ -88,6 +88,7 @@ export type {
   PairingPayload,
   AgentReasoning,
   AgentModelEntry,
+  AgentFeature,
   AgentIcon,
   AgentLaunchCommand,
   AgentLaunchConfig,
