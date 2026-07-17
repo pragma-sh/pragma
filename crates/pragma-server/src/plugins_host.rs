@@ -17,6 +17,8 @@ use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(not(test))]
+use std::time::Instant;
 
 use base64::Engine;
 use pragma_constants::CONSTANTS;
@@ -35,6 +37,8 @@ const PLUGIN_ROOTS_FILE: &str = "plugin-roots.json";
 const ASSET_MAX_BYTES: u64 = 256 * 1024;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(5);
 const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
+#[cfg(not(test))]
+const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
 
 type UsageLimitsSender = SyncSender<Result<Value, String>>;
 type PendingUsageLimits = Arc<Mutex<HashMap<String, UsageLimitsSender>>>;
@@ -133,6 +137,7 @@ pub struct PluginsRegistry {
     pending_usage_limits: PendingUsageLimits,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
+    server_boot_id: String,
 }
 
 impl PluginsRegistry {
@@ -154,6 +159,7 @@ impl PluginsRegistry {
             pending_usage_limits: Arc::clone(&pending_usage_limits),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
+            server_boot_id: uuid::Uuid::new_v4().to_string(),
         });
         thread::spawn(move || {
             for event in rx {
@@ -208,6 +214,27 @@ impl PluginsRegistry {
                 }
             }
         });
+        #[cfg(not(test))]
+        {
+            let initial_registry = Arc::clone(&registry);
+            thread::spawn(move || {
+                let deadline = Instant::now() + INITIAL_GATEWAY_WAIT;
+                while initial_registry.gateway_credentials().is_none() && Instant::now() < deadline
+                {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                if initial_registry
+                    .load_state
+                    .lock()
+                    .is_ok_and(|state| *state != LoadState::NotStarted)
+                {
+                    return;
+                }
+                if let Err(error) = initial_registry.reload() {
+                    eprintln!("initial plugin load failed: {error}");
+                }
+            });
+        }
         registry
     }
 
@@ -347,6 +374,8 @@ impl PluginsRegistry {
             "bundledDir": bundled_plugins_dir(),
             "gatewayUrl": gateway_url,
             "gatewayToken": gateway_token,
+            "stateDir": self.server_dir,
+            "serverBootId": self.server_boot_id,
         }))?;
         Ok(state)
     }
