@@ -1,0 +1,46 @@
+{
+  "name": "@pragma/pi-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pi CLI extension that reports agent status to Pragma.",
+  "files": [
+    "assets",
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./pragma-plugin": "./dist/pragma-plugin.mjs"
+  },
+  "scripts": {
+    "build": "bunup src/index.ts src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/plugin": "workspace:*",
+    "@pragma/sdk": "workspace:*",
+    "@pragma/watcher-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@types/node": "^24.12.3",
+    "bunup": "^0.16.32",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.mjs"
+    ]
+  },
+  "pragma": {
+    "pluginId": "pragma.pi",
+    "main": "./dist/pragma-plugin.mjs"
+  }
+}
