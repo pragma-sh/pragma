@@ -22,6 +22,7 @@ mod icons;
 mod kanban;
 mod keybindings;
 mod plugins;
+mod ports;
 pub(crate) use pragma_core::process_env;
 mod projects;
 mod pty;
@@ -990,6 +991,7 @@ pub fn run() {
             fs::delete_file,
             fs::palette_search,
             fs::cancel_palette_search,
+            ports::list_open_ports,
             git::worktree_changes,
             git::worktrees_merged_status,
             git::file_diff,

@@ -26,10 +26,13 @@ import type {
   AgentReportPayload,
   AutomationInfo,
   AutomationRootRegistration,
+  OpenPort,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+
+export type { OpenPort } from "@pragma/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -530,6 +533,11 @@ export function projectIcon(projectId: string): Promise<ProjectIcon | null> {
 /** Lists persisted tabs (terminal and browser) for a project. */
 export function listTabs(projectId: string): Promise<Tab[]> {
   return invoke<Tab[]>("list_tabs", { projectId });
+}
+
+/** Lists TCP listeners owned by processes launched from visible terminal tabs. */
+export function listOpenPorts(projectId: string): Promise<OpenPort[]> {
+  return invoke<OpenPort[]>("list_open_ports", { projectId });
 }
 
 /**

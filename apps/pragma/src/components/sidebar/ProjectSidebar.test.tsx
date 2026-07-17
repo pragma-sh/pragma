@@ -35,6 +35,7 @@ vi.mock("@/plugins/rendering", () => ({
 
 vi.mock("@/components/sidebar/WorktreeTree", () => ({ WorktreeTree: () => null }));
 vi.mock("@/components/sidebar/ProjectSwitcher", () => ({ ProjectSwitcher: () => null }));
+vi.mock("@/components/sidebar/OpenPortsCard", () => ({ OpenPortsCard: () => null }));
 vi.mock("@/components/dialogs/CreateProjectDialog", () => ({ CreateProjectDialog: () => null }));
 vi.mock("@/components/dialogs/CreateWorktreeDialog", () => ({ CreateWorktreeDialog: () => null }));
 

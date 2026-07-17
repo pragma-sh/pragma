@@ -551,6 +551,14 @@ Escape returns from a scoped worktree or editor submenu before closing the palet
 Active run/build commands appear as running-script rows with their worktree. Enter opens
 the script tab; Shift+Enter closes that script tab through normal managed-script cleanup.
 
+Open TCP listeners appear in both the left-sidebar Ports card and regular palette search.
+`open-ports-context.tsx` polls one project-scoped `list_open_ports` command and shares the
+snapshot between both surfaces. The host only returns sockets whose PID is the live terminal
+shell or one of its descendants; the frontend additionally requires a matching visible,
+persisted terminal tab. Enter/click focuses that tab, while palette Shift+Enter closes the tab
+through normal PTY cleanup. Never broaden this to host-wide listeners: Pragma internals and
+processes not launched from a user terminal tab must stay hidden.
+
 Filename/code search is one bounded `palette_search` Tauri call. Tauri resolves trusted
 roots from SQLite and routes them to owning host; `pragma-core::fs` returns only relative
 paths, excludes gitignored files, and supports cancellation/deadlines. File rows show the
