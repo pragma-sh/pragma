@@ -25,13 +25,13 @@ pub use generated::{
     FileChange, FileChangeKind, FileContents, FileDiff, Gateway, GitHub, GitHubAuthMethod,
     GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
     KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
-    Keybindings, KeybindingsConfig, Links, NewWorktreeSpec, PairingPayload, PaletteSearchMatch,
-    PaletteSearchMatchKind, PaletteSearchResponse, PlatformChord, Project, ProjectIcon,
-    ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
-    QuestionOption, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit,
-    SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeStatus,
+    Keybindings, KeybindingsConfig, Links, NewWorktreeSpec, OpenPort, PairingPayload,
+    PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, PlatformChord, Project,
+    ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind,
+    ProtocolRpcMethod, QuestionOption, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
+    RunScriptSplit, RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode,
+    SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults,
+    WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
