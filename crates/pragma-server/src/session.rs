@@ -113,6 +113,8 @@ impl OutputCoalescer {
 
 pub struct Session {
     id: String,
+    worktree_id: String,
+    root_pid: Option<u32>,
     /// Absolute path the shell was launched from. Used to identify which
     /// sessions to terminate when their worktree is deleted on disk.
     cwd: String,
@@ -145,7 +147,7 @@ impl Session {
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("PRAGMA_TAB_ID", &id);
-        command.env("PRAGMA_WORKTREE_ID", worktree_id);
+        command.env("PRAGMA_WORKTREE_ID", &worktree_id);
         command.env("PRAGMA_DAEMON_SOCKET", server_socket);
         command.env("PRAGMA_SERVER_SOCKET", server_socket);
         if let Some(gateway) = gateway_env(server_socket) {
@@ -157,6 +159,7 @@ impl Session {
             command.env("PATH", path_with_cli_dir(&cli_path));
         }
         let child = pair.slave.spawn_command(command)?;
+        let root_pid = child.process_id();
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
         drop(pair.slave);
@@ -164,6 +167,8 @@ impl Session {
 
         let session = Arc::new(Self {
             id,
+            worktree_id,
+            root_pid,
             cwd,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
@@ -235,6 +240,27 @@ impl Session {
     /// Returns the absolute path the shell was launched from.
     pub fn cwd(&self) -> &str {
         &self.cwd
+    }
+
+    /// Returns terminal tab id used as daemon session id.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns worktree owning this terminal session.
+    pub fn worktree_id(&self) -> &str {
+        &self.worktree_id
+    }
+
+    /// Returns root login-shell PID only while child is still running. Exited,
+    /// unattached sessions can remain registered until replay; excluding them
+    /// prevents a recycled PID from attributing an unrelated host listener.
+    pub fn live_root_pid(&self) -> Option<u32> {
+        let mut child = self.child.lock().ok()?;
+        match child.as_mut()?.try_wait() {
+            Ok(None) => self.root_pid,
+            Ok(Some(_)) | Err(_) => None,
+        }
     }
 
     fn start_reader(session: Arc<Self>, mut reader: Box<dyn Read + Send>) {
