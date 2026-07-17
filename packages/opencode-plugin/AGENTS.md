@@ -202,3 +202,6 @@ gets its provider appended in parentheses (e.g. `Claude Sonnet 4 (anthropic)`), 
 from the `provider` field or the `provider/model` id prefix. Fast variants stay separate
 model entries when opencode exposes separate IDs. Reasoning is omitted unless opencode
 exposes reliable per-model reasoning levels.
+
+OpenCode exposes no account usage provider, so its agent declares `usageLimits` in
+`excludeFeatures`; verification skips that optional scenario explicitly.

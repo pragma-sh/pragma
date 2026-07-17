@@ -12,7 +12,7 @@ packages/cursor-plugin/
 ├── src/pragma-plugin.ts       # Agent, watcher, and usage-limit declarations
 ├── assets/
 │   ├── cursor.svg            # Cursor brand asset used by the built-in launcher
-│   └── usage-limits.py       # CLI-authenticated Cursor usage-summary fetcher
+│   └── usage-limits-cli.ts   # CLI-authenticated Cursor usage-summary fetcher source
 ├── hooks/
 │   ├── report.sh              # Event → pragma-cli translator
 │   └── hooks.fragment.json    # Hook entries merged by install-local.sh
@@ -124,6 +124,10 @@ Agent CLI; see `packages/claude-code-plugin/AGENTS.md` if transcript polling for
 is wanted later (it relies on Cursor writing an interrupt marker to the transcript,
 which has not been confirmed).
 
+The built-in `--force` launcher cannot exercise approval prompts, so the agent declares
+`questions`, `commandApproval`, and `abort` in `excludeFeatures`. `agent verify` skips those
+unsupported scenario groups instead of treating known host limitations as failures.
+
 ## Installation
 
 ```bash
@@ -132,7 +136,7 @@ bun run --filter @pragma/cursor-plugin install:local
 
 This copies hooks to `~/.pragma/plugins/cursor/hooks/`, merges hook entries into
 `~/.cursor/hooks.json`, and updates CLI + permissions settings (see above).
-It also installs the usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
+It also installs the compiled TypeScript usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
 reuses `cursor-agent login` credentials and never persists or prints access tokens.
 Re-run after updating the package. Removes legacy launcher assets if present.
 

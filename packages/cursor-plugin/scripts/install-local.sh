@@ -14,7 +14,7 @@ ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_DIR="${PRAGMA_CURSOR_PLUGIN_DIR:-$HOME/.pragma/plugins/cursor}"
 HOOKS_DIR="$PLUGIN_DIR/hooks"
 REPORT_SH="$HOOKS_DIR/report.sh"
-USAGE_HELPER="$PLUGIN_DIR/scripts/usage-limits.py"
+USAGE_HELPER="$PLUGIN_DIR/scripts/usage-limits"
 CURSOR_DIR="$HOME/.cursor"
 CURSOR_HOOKS="$CURSOR_DIR/hooks.json"
 CURSOR_CLI_CONFIG="$CURSOR_DIR/cli-config.json"
@@ -52,7 +52,7 @@ require_write "$CURSOR_PERMISSIONS"
 
 cp "$ROOT/hooks/report.sh" "$REPORT_SH" || fail "failed to copy report.sh to $REPORT_SH"
 chmod +x "$REPORT_SH"
-cp "$ROOT/assets/usage-limits.py" "$USAGE_HELPER" || fail "failed to copy usage-limits.py to $USAGE_HELPER"
+cp "$ROOT/dist/usage-limits" "$USAGE_HELPER" || fail "failed to copy usage-limits to $USAGE_HELPER"
 chmod 700 "$USAGE_HELPER"
 
 rm -f "$LEGACY_AGENT_DIR/config.json" "$LEGACY_AGENT_DIR/icon.svg" 2>/dev/null || true
