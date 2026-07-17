@@ -13,7 +13,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -34,6 +34,10 @@ const PLUGIN_ROOTS_FILE: &str = "plugin-roots.json";
 /// Icons are capped at 256 KB so base64-in-JSON asset delivery stays cheap.
 const ASSET_MAX_BYTES: u64 = 256 * 1024;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(5);
+const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
+
+type UsageLimitsSender = SyncSender<Result<Value, String>>;
+type PendingUsageLimits = Arc<Mutex<HashMap<String, UsageLimitsSender>>>;
 
 #[derive(Debug, Error)]
 pub enum PluginsError {
@@ -87,7 +91,11 @@ enum LoadState {
 
 /// Events emitted by the `pragma-plugins` sidecar on stdout.
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum SidecarEvent {
     Ready,
     Catalog {
@@ -105,6 +113,13 @@ enum SidecarEvent {
         #[serde(default)]
         message: Option<String>,
     },
+    UsageLimits {
+        request_id: String,
+        #[serde(default)]
+        providers: Option<Value>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 }
 
 /// Owns the supervised sidecar plus the cached catalog + asset map.
@@ -115,6 +130,7 @@ pub struct PluginsRegistry {
     assets: Arc<Mutex<HashMap<String, AssetEntry>>>,
     watchers: Arc<Mutex<Vec<WatcherSpec>>>,
     publish_revision: Arc<(Mutex<u64>, Condvar)>,
+    pending_usage_limits: PendingUsageLimits,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
 }
@@ -126,6 +142,7 @@ impl PluginsRegistry {
         let assets = Arc::new(Mutex::new(HashMap::new()));
         let watchers = Arc::new(Mutex::new(Vec::new()));
         let publish_revision = Arc::new((Mutex::new(0), Condvar::new()));
+        let pending_usage_limits = Arc::new(Mutex::new(HashMap::new()));
         let roots = load_persisted_roots(&server_dir);
         let registry = Arc::new(Self {
             server_dir,
@@ -134,6 +151,7 @@ impl PluginsRegistry {
             assets: Arc::clone(&assets),
             watchers: Arc::clone(&watchers),
             publish_revision: Arc::clone(&publish_revision),
+            pending_usage_limits: Arc::clone(&pending_usage_limits),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
         });
@@ -171,6 +189,21 @@ impl PluginsRegistry {
                             eprintln!("pragma-plugins: {message}");
                         }
                     }
+                    SidecarEvent::UsageLimits {
+                        request_id,
+                        providers,
+                        error,
+                    } => {
+                        let sender = pending_usage_limits
+                            .lock()
+                            .ok()
+                            .and_then(|mut pending| pending.remove(&request_id));
+                        if let Some(sender) = sender {
+                            let result = error
+                                .map_or_else(|| Ok(providers.unwrap_or_else(|| json!([]))), Err);
+                            let _ = sender.send(result);
+                        }
+                    }
                     SidecarEvent::Ready => {}
                 }
             }
@@ -178,7 +211,7 @@ impl PluginsRegistry {
         registry
     }
 
-    /// Handles a `plugins` RPC: `catalog`, `registerRoots`, `readAsset`, `reload`.
+    /// Handles public `plugins` RPC actions.
     pub fn handle_rpc(&self, payload: &Value) -> Result<Value, PluginsError> {
         let action = payload
             .get("action")
@@ -194,6 +227,7 @@ impl PluginsRegistry {
                 Ok(json!({ "ok": true }))
             }
             "readAsset" => self.read_asset(payload),
+            "usageLimits" => self.usage_limits(payload),
             "reload" => {
                 self.reload()?;
                 Ok(json!({ "ok": true }))
@@ -363,6 +397,40 @@ impl PluginsRegistry {
             .map_err(|err| PluginsError::Operation(format!("read asset: {err}")))?;
         let base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
         Ok(json!({ "base64": base64, "mime": entry.mime }))
+    }
+
+    fn usage_limits(&self, payload: &Value) -> Result<Value, PluginsError> {
+        self.ensure_catalog_fresh()?;
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.pending_usage_limits
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?
+            .insert(request_id.clone(), sender);
+        let mut command = json!({
+            "type": "usageLimits",
+            "requestId": request_id,
+        });
+        if let Some(plugin_id) = payload.get("pluginId").and_then(Value::as_str) {
+            command["pluginId"] = Value::String(plugin_id.to_string());
+        }
+        if let Err(error) = self.sidecar.send(&command) {
+            if let Ok(mut pending) = self.pending_usage_limits.lock() {
+                pending.remove(&request_id);
+            }
+            return Err(error);
+        }
+        let result = receiver
+            .recv_timeout(USAGE_LIMITS_TIMEOUT)
+            .map_err(|error| {
+                if let Ok(mut pending) = self.pending_usage_limits.lock() {
+                    pending.remove(&request_id);
+                }
+                PluginsError::Operation(format!("wait for usage limits: {error}"))
+            })?;
+        result
+            .map(|providers| json!({ "providers": providers }))
+            .map_err(PluginsError::Operation)
     }
 }
 
@@ -595,6 +663,14 @@ mod tests {
         )
         .expect("catalog event must parse");
         assert!(matches!(event, SidecarEvent::Catalog { .. }));
+    }
+
+    #[test]
+    fn parses_usage_limits_event() {
+        let event: SidecarEvent =
+            serde_json::from_str(r#"{"type":"usageLimits","requestId":"req-1","providers":[]}"#)
+                .expect("usage limits event must parse");
+        assert!(matches!(event, SidecarEvent::UsageLimits { .. }));
     }
 
     #[test]

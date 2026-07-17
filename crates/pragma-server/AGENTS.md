@@ -33,7 +33,8 @@ never blanks the catalog — a respawn re-runs `load` and the cache holds until 
 publish arrives. Public RPC domain `ProtocolRpcMethod::Plugins` actions: `catalog` (returns the
 cached catalog), `registerRoots` (project roots, sharing the same desktop RPC that
 registers automation roots), `readAsset` (base64 + mime, validated lowercase-hex sha256),
-and `reload` (re-sends `load` with freshly read gateway credentials; the gateway calls it
+`usageLimits` (correlated sidecar load, optionally filtered by plugin id), and `reload`
+(re-sends `load` with freshly read gateway credentials; the gateway calls it
 right after writing its discovery file). Registered roots are persisted to
 `plugin-roots.json` beside the socket and reloaded on startup, so a server restarted while
 the desktop is closed still resolves project-contributed agents for headless launches. The
