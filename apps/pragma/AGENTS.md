@@ -487,6 +487,9 @@ shared per-worktree file watcher so filesystem changes refresh the glyph immedia
 dirty state is ephemeral in `state/editor-dirty-store.ts` (never in the reducer, never
 persisted); closing a dirty editor routes through `ConfirmCloseProvider`. The shared
 load/save/dirty/⌘-S lifecycle lives in `components/editor/use-editor-file.tsx`.
+`vite.config.ts` must dedupe `@codemirror/state`: CodeMirror validates extensions with
+`instanceof`, and separate direct / transitive copies crash optimized builds. Do not alias
+the package to its physical `dist` file; that bypasses package-aware dynamic language loading.
 
 **Markdown tabs** — `editor` tabs whose file is markdown (`isMarkdownPath`: `.md` /
 `.markdown` / `.mdown`, **not** `.mdx` — JSX would be mangled) render

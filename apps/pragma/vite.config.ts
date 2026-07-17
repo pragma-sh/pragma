@@ -15,6 +15,9 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // CodeMirror validates extensions with `instanceof`. Bun's isolated linker
+    // and Rolldown can otherwise expose separate direct/transitive state copies.
+    dedupe: ["@codemirror/state"],
   },
   // Prevent Vite from obscuring Rust errors.
   clearScreen: false,
