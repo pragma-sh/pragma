@@ -51,6 +51,8 @@ would never see it. It runs all scenarios by default, retries
 LLM-dependent behavior with fresh sessions, and exits non-zero on any failure. Question
 scenarios validate exact prompt/options, listed and custom answers, dismissal, and wrong
 request-id isolation rather than accepting any generic question attention.
+Stream-integrity message and attention invariants are scoped to that runtime agent so
+unrelated agents reporting concurrently cannot fail the selected integration.
 `question-free-text` requires an assistant message echoing the exact marker and accepts
 two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
 `questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's

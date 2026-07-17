@@ -403,7 +403,7 @@ fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome
     let mut timestamps: HashMap<String, u64> = HashMap::new();
     for event in ctx.ledger.events_since(0) {
         match event {
-            VerifyEvent::AgentMessage { ref message } => {
+            VerifyEvent::AgentMessage { ref message } if message.agent == ctx.runtime_agent_id => {
                 if let Some(previous) = timestamps.insert(message.id.clone(), message.ts) {
                     if message.ts < previous {
                         return Err(format!("message {} timestamp moved backward", message.id));
@@ -411,21 +411,27 @@ fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome
                 }
             }
             VerifyEvent::Agent {
+                ref agent,
                 status: AgentStatus::Attention,
                 attention_kind: Some(AgentAttentionKind::Question),
                 question,
                 request_id,
                 ..
-            } if question.as_deref().is_none_or(str::is_empty) || request_id.is_none() => {
+            } if agent == ctx.runtime_agent_id
+                && (question.as_deref().is_none_or(str::is_empty) || request_id.is_none()) =>
+            {
                 return Err("question attention omitted question/requestId".to_string());
             }
             VerifyEvent::Agent {
+                ref agent,
                 status: AgentStatus::Attention,
                 attention_kind: Some(AgentAttentionKind::Command),
                 command,
                 request_id,
                 ..
-            } if command.as_deref().is_none_or(str::is_empty) || request_id.is_none() => {
+            } if agent == ctx.runtime_agent_id
+                && (command.as_deref().is_none_or(str::is_empty) || request_id.is_none()) =>
+            {
                 return Err("command attention omitted command/requestId".to_string());
             }
             _ => {}
