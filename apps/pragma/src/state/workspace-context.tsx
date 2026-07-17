@@ -3015,7 +3015,7 @@ function useProjectLoading(
         request.worktreePath,
         agent,
         request.prompt ?? undefined,
-        { modelId: request.modelId, reasoningId: request.reasoningId },
+        { modelId: request.modelId, reasoningId: request.reasoningId, modelCmd: request.modelCmd },
       )
         .then(() =>
           startWatcherForAgentSession({

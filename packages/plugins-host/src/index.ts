@@ -9,3 +9,4 @@ export {
   type ResolvedPlugin,
 } from "./catalog";
 export { resolveManifests, type ResolvedManifest } from "./manifest";
+export { loadUsageLimits, type ResolvedUsageLimits } from "./usage-limits";

@@ -192,6 +192,20 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/codex-plugin": {
+      "name": "@pragma/codex-plugin",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pragma/plugin": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/constants": {
       "name": "@pragma/constants",
       "version": "0.0.0",
@@ -283,7 +297,7 @@
     },
     "packages/plugin": {
       "name": "@pragma/plugin",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@pragma/constants": "workspace:*",
         "@pragma/sdk": "workspace:*",
@@ -1179,6 +1193,8 @@
     "@pragma/automations": ["@pragma/automations@workspace:packages/automations"],
 
     "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
+
+    "@pragma/codex-plugin": ["@pragma/codex-plugin@workspace:packages/codex-plugin"],
 
     "@pragma/constants": ["@pragma/constants@workspace:packages/constants"],
 

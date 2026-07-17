@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createTuiWatcher, questionAnswerKeys } from "./index";
+import { createTuiWatcher, questionAnswerKeys, questionFallbackMessage } from "./index";
 
 /** Decision-handling watcher (opencode's shape). */
 const approvalWatcher = createTuiWatcher({ agent: "opencode", handleDecisions: true });
@@ -9,6 +9,19 @@ const interjectWatcher = createTuiWatcher({
   agent: "claude-code",
   handleDecisions: false,
   interjectSubmitDelayMs: 1,
+});
+/** Question-only watcher for agents whose command approvals use blocking hooks. */
+const questionWatcher = createTuiWatcher({
+  agent: "codex",
+  handleDecisions: false,
+  handleQuestionAnswers: true,
+});
+/** Question watcher for a TUI whose question prompt has no free-text editor (Codex). */
+const fallbackQuestionWatcher = createTuiWatcher({
+  agent: "codex",
+  handleDecisions: false,
+  handleQuestionAnswers: true,
+  questionFreeTextMode: "interject",
 });
 
 interface DecisionEvent {
@@ -309,6 +322,15 @@ describe("createTuiWatcher with handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledWith("\x1b");
   });
 
+  it("ignores an answer whose request id has no matching question", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-q", ["3", "4", "5"]),
+      answer("4", { requestId: "wrong-id" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
   it("dedupes a replayed question answer after reconnect", async () => {
     const sendKeys = vi.fn(async () => {});
     const controller = new AbortController();
@@ -358,5 +380,49 @@ describe("createTuiWatcher without handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledTimes(2);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "do the thing");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
+  });
+
+  it("can answer questions without handling command decisions", async () => {
+    const { ctx, sendKeys } = context([
+      decision(true),
+      questionAttention("req-q", ["A", "B"]),
+      answer("B"),
+    ]);
+    await questionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledTimes(1);
+    expect(sendKeys).toHaveBeenCalledWith("2");
+  });
+});
+
+describe("questionFreeTextMode: interject", () => {
+  it("builds a single-line follow-up prompt from question and answer", () => {
+    expect(questionFallbackMessage("Which\n  marker?", "  alpha\nbeta ")).toBe(
+      'Answer to question "Which marker?": alpha beta',
+    );
+  });
+
+  it("selects the fallback row, aborts the response, then interjects the answer", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-q", ["A", "B"]),
+      answer("forty-two"),
+    ]);
+    await fallbackQuestionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, 'Answer to question "Which?": forty-two\r');
+    expect(sendKeys).toHaveBeenCalledTimes(3);
+  });
+
+  it("still answers listed options with digits and dismissals with Escape", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-1", ["A", "B"]),
+      answer("B", { requestId: "req-1" }),
+      questionAttention("req-2", ["A", "B"]),
+      answer(null, { requestId: "req-2" }),
+    ]);
+    await fallbackQuestionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "2");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b");
+    expect(sendKeys).toHaveBeenCalledTimes(2);
   });
 });

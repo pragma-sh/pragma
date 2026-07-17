@@ -1,0 +1,601 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+# Agent-plugin skill + `pragma-cli agent verify`
+
+Two deliverables that close the loop on building agent integrations:
+
+<div className="grid grid-cols-2 gap-4">
+
+<Card>
+
+<CardHeader>
+
+<CardTitle>A — `skills/agent-plugin` skill</CardTitle>
+
+<CardDescription>Teaches an agent how to build a Pragma agent plugin</CardDescription>
+
+</CardHeader>
+
+<CardContent>
+
+New canonical `skills/` dir at repo root, symlinked into `.agents/skills/`. Opens with the hooks-API / TypeScript / default-provider decision tree, documents both reporting routes and the pragma-plugin side, ends with the mandatory verify loop.
+
+</CardContent>
+
+</Card>
+
+<Card>
+
+<CardHeader>
+
+<CardTitle>B — `pragma-cli agent verify`</CardTitle>
+
+<CardDescription>End-to-end scenario harness for agent integrations</CardDescription>
+
+</CardHeader>
+
+<CardContent>
+
+New Rust subcommand that launches the **real** agent with crafted prompts and asserts every status transition on the gateway — the same HTTP surface the mobile app consumes. Per-scenario pass/fail in plain text, `--json`, and `--toon`.
+
+</CardContent>
+
+</Card>
+
+</div>
+
+<Alert className="mt-4">
+
+<AlertTitle>Key finding: no PTY-input core change needed</AlertTitle>
+
+<AlertDescription>
+
+The server already writes any client's input frames to a session (`crates/pragma-server/src/main.rs:209`), and the gateway already exposes `POST /v1/sessions/{'{id}'}/input`. Abort emulation is a plain HTTP call. The **only** core additions are a `usageLimits` action in the plugins-host sidecar and its passthrough in `crates/pragma-server/src/plugins_host.rs:188` (owner-approved).
+
+</AlertDescription>
+
+</Alert>
+
+<Tabs defaultValue="skill" className="mt-6">
+
+<TabsList>
+
+<TabsTrigger value="skill">A — Skill</TabsTrigger>
+
+<TabsTrigger value="verify">B — Verify command</TabsTrigger>
+
+<TabsTrigger value="scenarios">Scenario matrix</TabsTrigger>
+
+<TabsTrigger value="sequencing">Sequencing & risks</TabsTrigger>
+
+</TabsList>
+
+<TabsContent value="skill">
+
+## A — `skills/agent-plugin`
+
+### Layout & symlink
+
+`.claude/skills` is already a directory-level symlink to `.agents/skills`, so one new symlink covers every editor:
+
+```bash
+mkdir -p skills/agent-plugin/references
+ln -s ../../skills/agent-plugin .agents/skills/agent-plugin
+```
+
+<Table>
+
+<TableHeader>
+
+<TableRow>
+  <TableHead>File</TableHead>
+  <TableHead>Content</TableHead>
+</TableRow>
+
+</TableHeader>
+
+<TableBody>
+
+<TableRow>
+  <TableCell>`skills/agent-plugin/SKILL.md`</TableCell>
+  <TableCell>
+    Trigger file, ~180 lines. Compresses `CREATE_PLUGIN.md` / `SDK.md` / `CLI.md` — points at them,
+    never duplicates.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`references/cli-reference.md`</TableCell>
+  <TableCell>
+    Flag-by-flag `pragma-cli agent ...` contract (report / message / decide / answer / await-* /
+    input / verify), incl. the ms-timestamp gotcha.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`references/patterns.md`</TableCell>
+  <TableCell>
+    Hard cases in full: claude-code transcript-watcher abort detection, sub-agent tracking on both
+    routes, both usage-limit provider implementations.
+  </TableCell>
+</TableRow>
+
+</TableBody>
+
+</Table>
+
+### SKILL.md frontmatter
+
+```yaml
+---
+name: agent-plugin
+description: Use when building or modifying a Pragma agent plugin — an
+  integration that makes a host TUI coding agent (opencode, Claude Code,
+  Cursor, or a new tool) report status into Pragma and appear in the
+  launcher. Covers the hooks-vs-TypeScript decision tree, @pragma/sdk and
+  pragma-cli reporting, defineAgent/createTuiWatcher/defineUsageLimitProvider,
+  registration, bundling, and pragma-cli agent verify.
+---
+```
+
+### Section outline
+
+1. **Intro & scope** — agent plugins only (agents / watchers / usage-limits); explicitly _not_ sidebar tabs, cards, webviews, commands, keybindings, css. Pointers to `CREATE_PLUGIN.md`, `SDK.md`, `CLI.md`.
+2. **Decision tree** (opens the working content):
+   - Supports TypeScript/JS in-process plugins? Yes → **SDK route** (`@pragma/sdk`, model: `packages/opencode-plugin`).
+   - No TS plugins but has a hooks API? → **CLI route** (POSIX `sh` hook script shelling to `pragma-cli agent report`, models: `packages/claude-code-plugin`, `packages/cursor-plugin`).
+   - No hooks _and_ no plugin API? → **Watcher route**: a `createTuiWatcher` in the pragma-plugin observes the PTY output stream (`ctx.output`), derives status by parsing the TUI's rendered output (busy spinners, prompt markers, question/approval UI), reports via the watcher's SDK context, and drives approvals/answers with `sendKeys` (`handleDecisions: true`). Least robust — document the parsing-fragility tradeoff.
+   - TUI has a default AI provider with account usage? Yes → also add `defineUsageLimitProvider`.
+3. **The four reports** — `started`/`stopped`/`attention`/`cleared` semantics, the two iron rules (`stopped` only after `started`; abort/crash → `cleared`, never `stopped`), env guard (`PRAGMA_SERVER_SOCKET` check, silent no-op outside Pragma), never disrupt the host (swallow reporting errors).
+4. **SDK route** — reporter construction from `packages/opencode-plugin/src/index.ts:49`, the two-flag `busy`/`attention` state machine from `src/hooks.ts:275`, child-session tracking, `MessageAbortedError` → clear, `reportMessage` streaming with stable ids, requestId round-trips.
+5. **CLI route** — hook manifest mapping, `report.sh` patterns from `packages/claude-code-plugin/hooks/report.sh`: per-tab markers, detached transcript watcher for hosts with no cancel hook, blocking `PermissionRequest` → `attention --kind command --request-id` → `await-decision` → verdict JSON; questions via `await-answer --dismiss-output`. Cursor deltas: hook fragments + `install-local.sh`, `startupInput`.
+6. **Exact CLI contract** — condensed table; full version in `references/cli-reference.md`.
+7. **Pragma-plugin side** — `defineAgent` full field reference (`packages/plugin/src/agent.ts:49`: id must equal the `--agent` id, `launch.command`, models static/async, `args` builders, `startupInput`, `prefill*`), `definePlugin` agent-relevant fields only, `createTuiWatcher` (`handleDecisions: true` when no decision-returning hook exists — opencode; `false` when a blocking hook exists — claude-code/cursor), `defineUsageLimitProvider` shape and both real examples.
+8. **Bundling & registration** — `package.json` `pragma.pluginId`/`pragma.main`, bunup build to `dist/pragma-plugin.mjs`, dev registration via `.pragma/config.json` `plugins[]`, host-tool install via the host's own mechanism (one line each).
+9. **Verify loop (mandatory close)** — `pragma-cli agent verify --agent <id> --abort-input '\x1b'`; fix and re-run until every scenario passes; never hand off with failures. Plus `bun run check` and package Vitest tests.
+10. **Checklist** — statuses empirically verified, env guard, cleared-on-load/exit, id parity, usage-limit provider when applicable, verify all green, AGENTS.md updated.
+
+### AGENTS.md touchpoints
+
+- Root `AGENTS.md` "Mirror it in the skills" list: add `agent-plugin`.
+- Root structure table: add top-level `skills/` row ("canonical first-party skill sources, symlinked into `.agents/skills`").
+- Do **not** touch `skills-lock.json` (vendored third-party skills only).
+
+<Alert>
+
+<AlertTitle>Stale doc found during exploration</AlertTitle>
+
+<AlertDescription>
+
+`packages/opencode-plugin/AGENTS.md` file map references `pragma-agent.ts` / `pragma-watcher.ts`; actual files are `pragma-plugin.ts` + `hooks.ts`. Fix in the same change (repo self-improvement rule).
+
+</AlertDescription>
+
+</Alert>
+
+</TabsContent>
+
+<TabsContent value="verify">
+
+## B — `pragma-cli agent verify`
+
+Drives the whole run through the **gateway HTTP API** — catalog, launch (`POST /v1/control/agentSessionLaunch`, falls back to `launch_agent_headless` when no desktop is connected), NDJSON event stream, decision/answer posts, PTY input for abort bytes, session kill. Exercising the gateway _is_ the mobile-compat test.
+
+### CLI surface
+
+```rust
+// crates/pragma-cli/src/cli.rs — new AgentCommand variant
+Verify(AgentVerifyArgs),
+
+pub struct AgentVerifyArgs {
+    #[arg(long)] pub agent: String,               // agent id from the catalog
+    /// Abort emulation bytes, escapes supported: \e \x1b \r \n \t \xNN
+    #[arg(long = "abort-input", default_value = "\\x1b")]
+    pub abort_input: String,
+    #[arg(long)] pub worktree: Option<String>,    // default $PRAGMA_WORKTREE_ID
+    #[arg(long)] pub model: Option<String>,       // default: first catalog model
+    #[arg(long = "scenario")] pub scenarios: Vec<String>, // filter, repeatable
+    #[arg(long)] pub fail_fast: bool,             // default: run all, report all
+    #[arg(long, default_value_t = 2)] pub attempts: u32,  // LLM nondeterminism
+    #[arg(long, default_value_t = 120)] pub step_timeout: u64,
+    #[arg(long)] pub include_slow: bool,          // decision-timeout scenario
+    #[arg(long)] pub prompts: Option<String>,     // JSON prompt overrides
+}
+```
+
+Output rides the existing global `--json` / `--toon` flags (`crates/pragma-cli/src/output.rs`); plain text renders via `Output::list`. Exit non-zero when any scenario fails (skips don't fail).
+
+### Module layout — `crates/pragma-cli/src/agent_verify/`
+
+<Table>
+
+<TableHeader>
+
+<TableRow>
+  <TableHead>Module</TableHead>
+  <TableHead>Responsibility</TableHead>
+</TableRow>
+
+</TableHeader>
+
+<TableBody>
+
+<TableRow>
+  <TableCell>`mod.rs`</TableCell>
+  <TableCell>
+    Orchestration: resolve gateway, catalog check, workspace-snapshot projectId lookup, ledger
+    start, scenario loop, report.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`gateway.rs`</TableCell>
+  <TableCell>
+    Discovery (env `PRAGMA_GATEWAY_URL`/`TOKEN`, else discovery file beside the server socket) +
+    typed blocking `reqwest` client for every route verify touches. Behind a `trait VerifyApi` so
+    scenarios are testable against a fake.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`events.rs`</TableCell>
+  <TableCell>
+    Strict serde mirror of the gateway NDJSON contract (`deny_unknown_fields`) + `Ledger`: collector
+    thread, cursor-based `wait_for`/`collect_since`, `schema_errors` bucket. Every consumed line
+    doubles as mobile-schema validation.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`engine.rs`</TableCell>
+  <TableCell>
+    `ScenarioCtx` helpers (`await_status`, `await_attention`, `await_settled`), session-per-scenario
+    lifecycle with Drop-guard kill, retry policy (retry `Timeout`/`UnexpectedAgentBehavior`, never
+    `Infra` or schema violations).
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`scenarios.rs`</TableCell>
+  <TableCell>
+    Plain function table `ScenarioDef {"{ id, name, slow, run }"}` — the matrix in the next tab.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`prompts.rs`</TableCell>
+  <TableCell>
+    Baked-in crafted prompt templates + `--prompts` JSON override merge + `parse_escapes` for abort
+    bytes.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`report.rs`</TableCell>
+  <TableCell>
+    `VerifyReport` / `ScenarioResult` (status, attempts, duration, failure, capped evidence events)
+    serializable for json/toon.
+  </TableCell>
+</TableRow>
+
+</TableBody>
+
+</Table>
+
+### Design decisions
+
+- **Session per scenario.** Each scenario launches fresh with its crafted prompt as the launch prefill — failure isolation, no mid-turn prompt delivery problems. Teardown kills the PTY and waits for settle.
+- **Prompt templates live in the CLI**, overridable via `--prompts file.json` keyed by scenario id. Not a `defineAgent.verify` field: `CatalogAgent` doesn't carry it and the schema/typify churn isn't worth it now; can layer in later without breaking anything.
+- **Continue-on-failure default** (`--fail-fast` opt-in): full report is what plugin authors need.
+- **Requirement mapping — "interrupt" kind:** `AgentAttentionKind` is only `question | command` in `schema.json`. Interrupt coverage maps to the existing `AgentInterrupt` fan-out event (`POST /v1/agents/interrupts` → watcher sends ESC). No schema change.
+
+### Files touched
+
+Create: the seven `agent_verify/` modules above.
+
+Modify:
+
+- `crates/pragma-cli/src/cli.rs` — Verify variant + parse tests
+- `crates/pragma-cli/src/main.rs` — dispatch
+- `crates/pragma-cli/Cargo.toml` — add `pragma-client`, `reqwest` (blocking; already pinned in the lockfile via gateway — hoist to workspace deps)
+- `packages/plugins-host/src/cli.ts` + new `usage-limits.ts` — `{'{action:"usageLimits", pluginId}'}` invoking each `usageLimits[].load(ctx)`, reusing the `PluginContext` plumbing async `models` already uses
+- `crates/pragma-server/src/plugins_host.rs:188` — allow `usageLimits` passthrough
+
+### Testing story
+
+- `events.rs`: synthetic NDJSON via `impl Read` — parse all variants, strict rejection → `schema_errors`, wait/timeout/cursor semantics.
+- `engine.rs`: `TestFeeder` injects delayed events from another thread.
+- `prompts.rs`: escape parsing (`\x1b`, `\e`, bad hex → error).
+- `report.rs`: JSON snapshot + TOON round-trip, mirroring `output.rs` tests.
+- Scenario logic: `ScriptedAgent` fake behind `trait VerifyApi` replays scripted event sequences — every scenario's happy + failure path runs in `cargo test` with no LLM, no server.
+- Full-stack run stays manual: `pragma-cli agent verify --agent opencode` against a dev server.
+
+</TabsContent>
+
+<TabsContent value="scenarios">
+
+## Scenario matrix
+
+All assertions scoped to `agent == args.agent && tabId == session.tab_id`, from a cursor taken before each step. Statuses: `running | attention | done | cleared`.
+
+<Table>
+
+<TableHeader>
+
+<TableRow>
+  <TableHead>Scenario</TableHead>
+  <TableHead>Drive</TableHead>
+  <TableHead>Pass criteria</TableHead>
+</TableRow>
+
+</TableHeader>
+
+<TableBody>
+
+<TableRow>
+  <TableCell>
+    `catalog` <Badge variant="outline">gate</Badge>
+  </TableCell>
+  <TableCell>`GET /v1/agents/catalog`</TableCell>
+  <TableCell>
+    Agent present; models non-empty; launch command non-empty; icon asset resolves via `GET
+    /v1/assets/{"{hash}"}`. Absent agent → all else skipped.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`basic-reply`</TableCell>
+  <TableCell>"Reply with two sentences, no tools, no questions."</TableCell>
+  <TableCell>
+    `running` → ≥1 assistant `agentMessage` with text → `done`. Per message id: `ts` non-decreasing,
+    final text non-empty.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`question-answer`</TableCell>
+  <TableCell>
+    Prompt forces a Red/Blue question; answer `options[0]` via `POST /v1/agents/answers`
+  </TableCell>
+  <TableCell>
+    `attention(kind=question)` with question text, ≥2 options, non-null `requestId`; after answer →
+    leaves attention, settles `done`.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`question-dismiss`</TableCell>
+  <TableCell>Same stem; post dismissal</TableCell>
+  <TableCell>Attention clears; settles; no stuck `attention`.</TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`question-free-text`</TableCell>
+  <TableCell>Free-text question; answer with marker string</TableCell>
+  <TableCell>
+    Options empty/absent; `AgentAnswer` echo with matching `requestId`; settles.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`command-allow`</TableCell>
+  <TableCell>Prompt runs `echo pragma-verify-approval`; approve</TableCell>
+  <TableCell>
+    `attention(kind=command)` carries command text + `requestId`; decision echo; back to `running`;
+    settles `done`.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`command-deny`</TableCell>
+  <TableCell>
+    Deny variant; first post a decision with a <em>wrong</em> requestId
+  </TableCell>
+  <TableCell>
+    Wrong-id decision does NOT clear attention (proves correlation); real deny clears; settles
+    without executing.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>
+    `decision-timeout` <Badge variant="secondary">slow</Badge>
+  </TableCell>
+  <TableCell>Approval prompt; never decide (`--include-slow` only)</TableCell>
+  <TableCell>
+    Attention persists with stable `requestId`; after hook timeout the agent falls back; session not
+    wedged. Advisory.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`subagent`</TableCell>
+  <TableCell>
+    "Spawn two parallel sub-agents; each writes a ~200-word explanation of a coding concept (one:
+    memoization, two: tail recursion)." Longer-running so concurrent tracking is observable.
+  </TableCell>
+  <TableCell>
+    ≥1 message reaching `subAgentsActive ≥ 2` (concurrency observed); status stays `running` the
+    whole time — no premature `done` while sub-agents active; settles `done`, final `subAgentsActive
+    == 0` (soft); assistant output mentions both concepts (soft).
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`abort-mid-run`</TableCell>
+  <TableCell>
+    Long counting prompt; once running, `POST /v1/sessions/{"{id}"}/input` with abort bytes
+  </TableCell>
+  <TableCell>
+    Settles (`done`/`cleared`) within timeout; no lingering `running`/`attention`.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`interrupt-event`</TableCell>
+  <TableCell>Long prompt; `POST /v1/agents/interrupts`</TableCell>
+  <TableCell>
+    `agentInterrupt` fan-out observed; watcher delivers ESC → settles. Skipped-with-reason when
+    plugin has no watcher.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`abort-mid-question`</TableCell>
+  <TableCell>Question prompt; abort bytes instead of answering</TableCell>
+  <TableCell>
+    Attention clears; late answer for the dead `requestId` does not resurrect it.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`abort-mid-approval`</TableCell>
+  <TableCell>Approval prompt; abort instead of deciding</TableCell>
+  <TableCell>Same clearing assertions for `kind=command`.</TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`crash-exit`</TableCell>
+  <TableCell>Basic prompt; once running, `DELETE /v1/sessions/{"{id}"}` (PTY kill)</TableCell>
+  <TableCell>Status settles to `cleared`/`done` — no stuck `running`.</TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>`usage-limits`</TableCell>
+  <TableCell>`POST /v1/rpc/plugins` `{'{action:"usageLimits"}'}` (new sidecar action)</TableCell>
+  <TableCell>
+    `ready` with well-formed `limits[]` OR `unavailable` with valid reason — both pass;
+    thrown/request error fails. Skipped when no provider defined.
+  </TableCell>
+</TableRow>
+
+<TableRow>
+  <TableCell>
+    `stream-integrity` <Badge variant="outline">always last</Badge>
+  </TableCell>
+  <TableCell>Computed over the whole run's ledger</TableCell>
+  <TableCell>
+    Zero `schema_errors`; every attention event carries its paired field; per-message-id `ts`
+    ordering; keepalive `ready` lines observed.
+  </TableCell>
+</TableRow>
+
+</TableBody>
+
+</Table>
+
+States added beyond the original request (approved): decision round-trip allow+deny with requestId-correlation negative test, interrupt fan-out + cleared, abort mid-question / mid-approval, message-streaming integrity, crash/exit settle, catalog sanity, decision-timeout (slow).
+
+</TabsContent>
+
+<TabsContent value="sequencing">
+
+## Sequencing
+
+1. **Skill first** (independent, no compile risk): `skills/agent-plugin/` + references + symlink + root `AGENTS.md` updates + opencode `AGENTS.md` staleness fix. Verify section written against the CLI interface below.
+2. CLI scaffolding: `cli.rs` / `main.rs` / `Cargo.toml` + `parse_escapes` — compiles green, `verify` returns a stub report.
+3. `gateway.rs` discovery + catalog + `catalog` scenario end-to-end.
+4. `events.rs` ledger + strict schema + tests.
+5. `engine.rs` session lifecycle + `report.rs`.
+6. Scenarios without plugin round-trips: `basic-reply`, `abort-mid-run`, `crash-exit`.
+7. Attention round-trips: question ×3, command ×2, `subagent`, interrupt/abort ×3; then `decision-timeout` behind `--include-slow`.
+8. plugins-host `usageLimits` action + scenario.
+9. `stream-integrity` + `ScriptedAgent` test coverage.
+10. Full-stack manual run against opencode + claude-code plugins; `bun run check`.
+
+<Separator className="my-4" />
+
+## Risks & open items
+
+<Accordion type="multiple">
+
+<AccordionItem value="llm">
+
+<AccordionTrigger>LLM prompt obedience (main flakiness source)</AccordionTrigger>
+
+<AccordionContent>
+
+Real agents may answer without using the question tool, refuse, or vary. Mitigations: per-scenario retries with fresh sessions (`--attempts`, default 2), tuned templates ending with explicit stop instructions, `--prompts` overrides for per-agent tuning, `UnexpectedAgentBehavior` classified as retryable. "100% certainty" reads as: every scenario must pass, but a scenario passes on any successful attempt.
+
+</AccordionContent>
+
+</AccordionItem>
+
+<AccordionItem value="interrupt-kind">
+
+<AccordionTrigger>"Interrupt" attention kind — schema decision</AccordionTrigger>
+
+<AccordionContent>
+
+`AgentAttentionKind` in `packages/constants/schema.json` is `question | command` only. Plan covers interrupt via the existing `AgentInterrupt` fan-out event. If you want a literal third attention kind, that's a schema + typify + SDK + plugins change — out of scope here unless you say otherwise.
+
+</AccordionContent>
+
+</AccordionItem>
+
+<AccordionItem value="workspace">
+
+<AccordionTrigger>Workspace snapshot precondition</AccordionTrigger>
+
+<AccordionContent>
+
+Headless launch needs a published workspace snapshot to resolve `projectId` for the target worktree. Verify surfaces this as a clear config error ("open the project in Pragma once, or pass ids explicitly"), never as a scenario failure.
+
+</AccordionContent>
+
+</AccordionItem>
+
+<AccordionItem value="prefill">
+
+<AccordionTrigger>Prefill delivery race</AccordionTrigger>
+
+<AccordionContent>
+
+Launch prompt delivery is a fixed-delay PTY write (`schedule_agent_launch`); a slow agent binary can miss it. The "no `running` within timeout" failure names this mode explicitly in the evidence so authors tune `prefillDelayMs` rather than chase ghosts.
+
+</AccordionContent>
+
+</AccordionItem>
+
+<AccordionItem value="watcher">
+
+<AccordionTrigger>Interrupt scenario needs a live watcher</AccordionTrigger>
+
+<AccordionContent>
+
+Headless launches start plugin watchers best-effort. When no watcher is declared, interrupt fan-out lands nowhere; verify distinguishes via "no settle after interrupt, but settle after direct abort bytes" and reports skipped-with-reason.
+
+</AccordionContent>
+
+</AccordionItem>
+
+</Accordion>
+
+<Separator className="my-4" />
+
+## Verification of this work itself
+
+- Skill: symlink resolves from `.claude/skills/agent-plugin/SKILL.md`; skill loads in a fresh session.
+- Verify command: `cargo test -p pragma-cli` (ledger/engine/prompts/report/scripted scenarios), `bun run check`, then a live run `pragma-cli agent verify --agent opencode --abort-input '\x1b'` and `--agent claude` with `--json` and `--toon` outputs eyeballed.
+
+</TabsContent>
+
+</Tabs>

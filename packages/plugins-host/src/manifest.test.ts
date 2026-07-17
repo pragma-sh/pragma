@@ -81,6 +81,20 @@ describe("resolveManifests", () => {
     expect(manifests[0]?.config).toBeUndefined();
   });
 
+  it("preserves configured plugin order while resolving manifests concurrently", async () => {
+    const root = makeRoot();
+    writePluginDir(root, "first", "pragma.first", "plugin.mjs");
+    writePluginDir(root, "second", "pragma.second", "plugin.mjs");
+    writeConfig(root, [{ path: "./first" }, { path: "./second" }]);
+
+    const manifests = await resolveManifests(makeRoot(), [root]);
+
+    expect(manifests.map((manifest) => manifest.pluginId)).toEqual([
+      "pragma.first",
+      "pragma.second",
+    ]);
+  });
+
   it("treats a missing bundled dir as empty", async () => {
     expect(await resolveManifests(makeRoot(), [], "/does/not/exist")).toEqual([]);
   });

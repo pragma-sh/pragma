@@ -139,6 +139,44 @@ describe("assembleCatalog", () => {
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     expect(assets[hash!]?.path).toBe(join(dir, "rel.svg"));
   });
+
+  it("resolves model providers concurrently while preserving agent order", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let secondStarted = false;
+    const plugins: ResolvedPlugin[] = [
+      plugin("p.one", {
+        agents: [
+          {
+            id: "first",
+            name: "First",
+            launch: { command: ["first"] },
+            models: () =>
+              new Promise((resolve) => {
+                releaseFirst = () => resolve([]);
+              }),
+          },
+          {
+            id: "second",
+            name: "Second",
+            launch: { command: ["second"] },
+            models: async () => {
+              secondStarted = true;
+              return [];
+            },
+          },
+        ],
+      }),
+    ];
+
+    const result = assembleCatalog(plugins, ctx);
+
+    expect(secondStarted).toBe(true);
+    releaseFirst?.();
+    expect((await result).catalog.agents.map((agent) => agent.id)).toEqual([
+      "p.one.first",
+      "p.one.second",
+    ]);
+  });
 });
 
 describe("assembleWatchers", () => {

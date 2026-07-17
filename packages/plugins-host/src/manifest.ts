@@ -48,15 +48,12 @@ export async function resolveManifests(
   roots: string[],
   bundledDir?: string,
 ): Promise<ResolvedManifest[]> {
-  const manifests: ResolvedManifest[] = [];
-  if (bundledDir) {
-    manifests.push(...(await resolveBundledDir(bundledDir)));
-  }
-  manifests.push(...(await resolveScope(homeDir, "global")));
-  for (const root of roots) {
-    manifests.push(...(await resolveScope(root, "project")));
-  }
-  return manifests;
+  const manifests = await Promise.all([
+    ...(bundledDir ? [resolveBundledDir(bundledDir)] : []),
+    resolveScope(homeDir, "global"),
+    ...roots.map((root) => resolveScope(root, "project")),
+  ]);
+  return manifests.flat();
 }
 
 /**
@@ -73,14 +70,10 @@ async function resolveBundledDir(bundledDir: string): Promise<ResolvedManifest[]
   } catch {
     return [];
   }
-  const manifests: ResolvedManifest[] = [];
-  for (const name of names) {
-    const manifest = await readManifest(join(bundledDir, name), undefined, "bundled", bundledDir);
-    if (manifest) {
-      manifests.push(manifest);
-    }
-  }
-  return manifests;
+  const manifests = await Promise.all(
+    names.map((name) => readManifest(join(bundledDir, name), undefined, "bundled", bundledDir)),
+  );
+  return manifests.filter((manifest): manifest is ResolvedManifest => manifest !== null);
 }
 
 async function resolveScope(
@@ -88,15 +81,13 @@ async function resolveScope(
   scope: "global" | "project",
 ): Promise<ResolvedManifest[]> {
   const entries = await readConfigEntries(join(root, CONFIG_FILE));
-  const resolved: ResolvedManifest[] = [];
-  for (const entry of entries) {
-    const dir = resolveLocalDir(root, entry.path);
-    const manifest = dir ? await readManifest(dir, entry.config, scope, root) : null;
-    if (manifest) {
-      resolved.push(manifest);
-    }
-  }
-  return resolved;
+  const manifests = await Promise.all(
+    entries.map((entry) => {
+      const dir = resolveLocalDir(root, entry.path);
+      return dir ? readManifest(dir, entry.config, scope, root) : null;
+    }),
+  );
+  return manifests.filter((manifest): manifest is ResolvedManifest => manifest !== null);
 }
 
 async function readConfigEntries(configPath: string): Promise<ConfigEntry[]> {

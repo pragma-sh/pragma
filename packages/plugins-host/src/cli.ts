@@ -1,4 +1,5 @@
 /** `pragma-plugins` host-side sidecar: resolves the agent catalog + icon assets. */
+import { stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import type { PluginContext, PluginDefinition } from "@pragma/plugin";
@@ -7,6 +8,7 @@ import { readStdinLines } from "@pragma/sidecar-kit";
 
 import { assembleCatalog, assembleWatchers, type ResolvedPlugin } from "./catalog";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
+import { loadUsageLimits } from "./usage-limits";
 
 interface LoadCommand {
   type: "load";
@@ -17,7 +19,19 @@ interface LoadCommand {
   gatewayToken: string;
 }
 
-type Command = LoadCommand;
+interface UsageLimitsCommand {
+  type: "usageLimits";
+  requestId: string;
+  pluginId?: string;
+}
+
+type Command = LoadCommand | UsageLimitsCommand;
+
+interface LoadedState {
+  plugins: ResolvedPlugin[];
+  sdk: PragmaClient;
+  root?: string;
+}
 
 // Static agent definitions must be available while the gateway discovery file
 // is still being written. Dynamic model providers fail individually, and the
@@ -45,7 +59,7 @@ function contextFor(sdk: PragmaClient, pluginId: string, root: string | undefine
 
 async function loadPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | undefined> {
   try {
-    const imported = (await import(pathToFileURL(manifest.mainPath).href)) as {
+    const imported = (await import(await bundleImportUrl(manifest.mainPath))) as {
       default?: PluginDefinition;
     };
     return imported.default
@@ -63,6 +77,22 @@ async function loadPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | 
   }
 }
 
+/**
+ * Builds the import URL for a plugin bundle with its mtime as a query
+ * parameter. The sidecar is long-lived and `reload` re-imports every bundle;
+ * without cache-busting, the ESM module cache would keep serving the bytes
+ * from the first import even after the bundle is rebuilt on disk.
+ */
+async function bundleImportUrl(mainPath: string): Promise<string> {
+  const url = pathToFileURL(mainPath);
+  try {
+    url.searchParams.set("mtime", String((await stat(mainPath)).mtimeMs));
+  } catch {
+    // A missing bundle fails at import() below with the real error.
+  }
+  return url.href;
+}
+
 async function resolvePlugins(roots: string[], bundledDir?: string): Promise<ResolvedPlugin[]> {
   const home = process.env.HOME ?? "";
   const manifests = await resolveManifests(home, roots, bundledDir);
@@ -70,7 +100,11 @@ async function resolvePlugins(roots: string[], bundledDir?: string): Promise<Res
   return plugins.filter((plugin): plugin is ResolvedPlugin => plugin !== undefined);
 }
 
-async function load(command: LoadCommand): Promise<void> {
+async function load(command: LoadCommand): Promise<{
+  state: LoadedState;
+  catalog: Awaited<ReturnType<typeof assembleCatalog>>;
+  watchers: ReturnType<typeof assembleWatchers>;
+}> {
   const roots = command.roots ?? [];
   const sdk = new PragmaClient({
     baseUrl: command.gatewayUrl || UNAVAILABLE_GATEWAY_URL,
@@ -80,7 +114,7 @@ async function load(command: LoadCommand): Promise<void> {
   // A single shared context (first root as project) resolves async model
   // providers, which shell out through the SDK to the local gateway.
   const ctx = contextFor(sdk, "pragma.catalog", roots[0]);
-  const { catalog, assets } = await assembleCatalog(plugins, ctx, (pluginId, agentId, error) =>
+  const catalog = await assembleCatalog(plugins, ctx, (pluginId, agentId, error) =>
     emit({
       type: "log",
       pluginId,
@@ -88,28 +122,63 @@ async function load(command: LoadCommand): Promise<void> {
       message: `agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`,
     }),
   );
-  emit({ type: "catalog", catalog, assets, watchers: assembleWatchers(plugins) });
-}
-
-async function handle(command: Command): Promise<void> {
-  switch (command.type) {
-    case "load":
-      return load(command);
-    default:
-      return;
-  }
+  return {
+    state: { plugins, sdk, root: roots[0] },
+    catalog,
+    watchers: assembleWatchers(plugins),
+  };
 }
 
 class StdinLines {
+  private loaded: LoadedState | undefined;
+
   constructor() {
     readStdinLines((line) => void this.dispatch(line));
   }
 
   private async dispatch(line: string): Promise<void> {
     try {
-      await handle(JSON.parse(line) as Command);
+      const command = JSON.parse(line) as Command;
+      if (command.type === "load") {
+        const loaded = await load(command);
+        this.loaded = loaded.state;
+        emit({
+          type: "catalog",
+          catalog: loaded.catalog.catalog,
+          assets: loaded.catalog.assets,
+          watchers: loaded.watchers,
+        });
+        return;
+      }
+      await this.handleUsageLimits(command);
     } catch (error) {
       emitError(error);
+    }
+  }
+
+  private async handleUsageLimits(command: UsageLimitsCommand): Promise<void> {
+    if (!this.loaded) {
+      emit({
+        type: "usageLimits",
+        requestId: command.requestId,
+        error: "plugin catalog has not loaded",
+      });
+      return;
+    }
+    try {
+      const providers = await loadUsageLimits(
+        this.loaded.plugins,
+        this.loaded.sdk,
+        this.loaded.root,
+        command.pluginId,
+      );
+      emit({ type: "usageLimits", requestId: command.requestId, providers });
+    } catch (error) {
+      emit({
+        type: "usageLimits",
+        requestId: command.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

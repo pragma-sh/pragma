@@ -75,6 +75,22 @@ describe("modelLaunchArgs", () => {
       "low",
     ]);
   });
+
+  it("splits a raw modelCmd and ignores catalog args", () => {
+    expect(
+      modelLaunchArgs(agents[1]!, {
+        modelId: "gpt-5.5",
+        reasoningId: "high",
+        modelCmd: "--model moonshot/kimi-k3",
+      }),
+    ).toEqual(["--model", "moonshot/kimi-k3"]);
+  });
+
+  it("treats a blank modelCmd as absent", () => {
+    expect(
+      modelLaunchArgs(agents[1]!, { modelId: "gpt-5.5", reasoningId: null, modelCmd: "  " }),
+    ).toEqual(["--model", "gpt-5.5"]);
+  });
 });
 
 describe("resolveDeepLinkAgentSelection", () => {

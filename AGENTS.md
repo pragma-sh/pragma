@@ -53,10 +53,11 @@ than no guide.
   package, move a file, change a command, bump a tool, adopt a new pattern → update the
   matching AGENTS.md (root and/or child) in the same commit. Because `CLAUDE.md` is a
   symlink to the root AGENTS.md, both humans and agents stay in sync automatically.
-- **Mirror it in the skills.** The `.agents/skills/*` files (symlinked to
-  `.claude/skills/`) summarize parts of this guide. If you change a workflow here,
-  update the relevant skill (`pragma-architecture`, `shared-constants`, `tauri-command`,
-  `code-quality`) too, and add a new skill when you add a substantial new workflow.
+- **Mirror it in the skills.** Canonical first-party skill sources live under `skills/`
+  and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes). If you
+  change a workflow here, update the relevant skill (`pragma-architecture`,
+  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`) too, and add a new
+  skill when you add a substantial new workflow.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
   AGENTS.md) so the next person (or agent) doesn't rediscover it.
@@ -113,6 +114,7 @@ than no guide.
 │   ├── opencode-plugin/         # opencode integration → see packages/opencode-plugin/AGENTS.md
 │   ├── claude-code-plugin/      # Claude Code integration → see packages/claude-code-plugin/AGENTS.md
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
+│   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
@@ -122,6 +124,7 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
+├── skills/                       # Canonical first-party skill sources; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -129,7 +132,7 @@ than no guide.
 ├── commitlint.config.js         # Conventional Commits rules
 ├── .oxlintrc.json / .oxfmtrc.json
 ├── .husky/                      # Git hooks
-└── .agents/skills/              # Agent skills (symlinked to .claude/skills)
+└── .agents/skills/              # Installed skill view (also exposed through .claude/skills)
 ```
 
 **Where things go:**

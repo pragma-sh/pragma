@@ -1012,6 +1012,9 @@ struct AgentSessionLaunchArgs {
     agent_id: String,
     model_id: Option<String>,
     reasoning_id: Option<String>,
+    /// Raw model command snippet (for example `--model moonshot/kimi-k3`)
+    /// appended to the base launch command instead of catalog model args.
+    model_cmd: Option<String>,
     prompt: Option<String>,
 }
 
@@ -1098,6 +1101,7 @@ fn agent_session_launch(
             "agentId": args.agent_id,
             "modelId": args.model_id,
             "reasoningId": args.reasoning_id,
+            "modelCmd": args.model_cmd,
             "prompt": args.prompt,
         }),
     );

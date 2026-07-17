@@ -13,17 +13,16 @@ packages/opencode-plugin/
 ├── src/
 │   ├── index.ts             # PragmaOpencodePlugin entry point
 │   ├── hooks.ts             # Two-flag state machine (busy + attention)
-│   ├── pragma-agent.ts      # Built-in agent definition (loaded by pragma-plugins sidecar)
-│   └── pragma-watcher.ts    # Host-side approval watcher (loaded by pragma-watch)
+│   └── pragma-plugin.ts     # Agent + watcher definition loaded by plugin sidecars
 └── dist/
     ├── index.mjs            # opencode status plugin (Bunup; git-ignored)
-    └── pragma-watcher.mjs   # Approval watcher bundle
+    └── pragma-plugin.mjs    # Agent/watcher bundle
 ```
 
 The status plugin (`dist/index.mjs`) is registered in **opencode's own** `plugin` config
-(see _Installation_). The **approval watcher** (`dist/pragma-watcher.mjs`) is a separate
-concern: `stage-daemon-sidecar.sh` stages it into the app resources, and the `pragma-watch`
-sidecar imports it when Pragma launches the built-in opencode agent (see _Command approval_).
+(see _Installation_). Agent and watcher contributions share `dist/pragma-plugin.mjs`;
+`stage-daemon-sidecar.sh` stages it into app resources, and plugin sidecars import it for
+catalog and live watcher behavior.
 
 ## Installation
 
@@ -135,7 +134,7 @@ split across two pieces:
 <id>` (requestId is `opencode-question-<callID>` when known). That drives the mobile
    AttentionDock / Inbox answer UI.
 
-2. **Host-side (`pragma-watcher.ts`):** the shared built-in-agent watcher bundle, loaded by
+2. **Host-side (`pragma-plugin.ts`):** the shared TUI watcher declaration, loaded by
    the `pragma-watch` sidecar for a launched session. Each watcher `connect`s a duplex agent
    channel scoped to **its** agent + tab (`ctx.sdk.agents.connect({ agent: ctx.agentId, ... })`)
    and drives the live terminal from it:
@@ -168,12 +167,10 @@ split across two pieces:
    own answer" row (`options.length + 1`), types the text, and Enter-submits; dismiss /
    empty reply sends Escape. Helper: `questionAnswerKeys`.
 
-The watchers are registered against the built-in `opencode`, `claude-code`, and `cursor`
-agents in `apps/pragma/src/plugins/builtin-agents.ts` (a `pragma-builtin:opencode-watcher`
-`mainPath` sentinel the Rust side resolves to this package's `pragma-watcher` module; the
-sidecar selects the entry whose `agent` matches the launched agent). opencode approval /
-question answering additionally requires the opencode status plugin (installed in opencode);
-interjection works for any built-in agent Pragma launches.
+Each built-in plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
+reports matching bundle metadata to server, which starts `pragma-watch` for a headless
+launch. opencode approval/question answering additionally requires opencode status plugin
+(installed in opencode); interjection works for any watcher-backed built-in agent.
 
 **`dispose` (agent process exiting) reports `cleared`**, not `stopped` — quitting
 opencode removes the indicator; finishing a turn (`session.idle`) still reports `done`.
@@ -190,12 +187,10 @@ accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` un
 
 ## Built-in launcher
 
-The launchable OpenCode entry is defined **here** in `src/pragma-agent.ts` — this is now
-the single source of truth. The `pragma-plugins` catalog sidecar
-(`@pragma/plugins-host`) imports it directly to assemble the agent catalog, and
-`apps/pragma/src/plugins/builtin-agents.ts` re-exports it (overriding `iconPath` with a
-browser URL and attaching the built-in watcher) so the webview path shares the same
-definition. Its icon asset stays in this package under `assets/`, not in Pragma core.
+The launchable OpenCode entry is defined **here** in `src/pragma-plugin.ts` — this is now
+the single source of truth. The `pragma-plugins` catalog sidecar imports its built bundle
+to assemble agent catalog and watcher metadata. Its icon asset stays in this package
+under `assets/`, not in Pragma core.
 
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.

@@ -31,6 +31,11 @@ export interface TuiWatcherConfig {
    * (Enter). Set to `""` to type the text without submitting.
    */
   submitKeys?: string;
+  /**
+   * Bytes written to abort the agent's in-flight response during the
+   * `interject` free-text fallback. Default Escape (`\x1b`).
+   */
+  abortKeys?: string;
 }
 
 /** How a plugin's agent wants the shared TUI watcher to behave. */
@@ -46,10 +51,25 @@ export interface TuiWatcherOptions {
    */
   handleDecisions: boolean;
   /**
+   * Handle question answers even when command decisions use a blocking hook.
+   * Defaults to `handleDecisions`.
+   */
+  handleQuestionAnswers?: boolean;
+  /**
    * Pause between typing an interjection's text and sending the submit keys,
    * for paste-aware TUIs that need to commit the text first. Default 0.
    */
   interjectSubmitDelayMs?: number;
+  /**
+   * How a free-text answer that matches no listed option reaches the TUI.
+   * `"editor"` (default): the question prompt has a real custom-answer editor
+   * (opencode's "Type your own answer" row) — open it, type, submit.
+   * `"interject"`: the prompt's generated last row is a plain fallback answer
+   * with no editor (Codex's "None of the above") — select it, abort the
+   * response the agent starts from that non-answer, then submit the real
+   * answer as a follow-up prompt (`Answer to question "<question>": <answer>`).
+   */
+  questionFreeTextMode?: "editor" | "interject";
 }
 
 const DEFAULT_APPROVE_KEYS = "\r";
@@ -57,12 +77,20 @@ const RIGHT_ARROW = "\x1b[C";
 const DOWN_ARROW = "\x1b[B";
 const DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 const DEFAULT_SUBMIT_KEYS = "\r";
+/** Escape aborts an in-flight response in the TUIs this watcher targets. */
+const DEFAULT_ABORT_KEYS = "\x1b";
 /** Escape rejects the question prompt when not editing free-text. */
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
 const QUESTION_DIGIT_MAX = 9;
 /** Lets the TUI mount its custom-answer editor before typing into it. */
 const QUESTION_OTHER_INPUT_DELAY_MS = 150;
+/**
+ * `interject` fallback pacing: lets the TUI resume its turn after the fallback
+ * row is selected before Escape aborts it, then lets the composer settle after
+ * the abort before the follow-up answer is typed.
+ */
+const QUESTION_FALLBACK_STEP_DELAY_MS = 500;
 
 /** Backoff before re-subscribing after the agent event stream drops. */
 const RESUBSCRIBE_DELAY_MS = 500;
@@ -73,27 +101,31 @@ const RESUBSCRIBE_DELAY_MS = 500;
  * `pragma-watch` sidecar for every launched session of that agent.
  */
 export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<unknown> {
-  const { agent, handleDecisions, interjectSubmitDelayMs = 0 } = options;
+  const {
+    agent,
+    handleDecisions,
+    handleQuestionAnswers = handleDecisions,
+    interjectSubmitDelayMs = 0,
+    questionFreeTextMode = "editor",
+  } = options;
   return {
     agent,
     async watch(ctx: WatcherContext<unknown>): Promise<void> {
       const watcherContext = ctx as WatcherContext<TuiWatcherConfig>;
-      const keys = resolveKeys(watcherContext.config);
-      const seenRequestIds = new Set<string>();
-      /** Options from the latest `question` attention, keyed by requestId. */
-      const questionOptionsByRequestId = new Map<string, string[]>();
+      const runtime: WatcherRuntime = {
+        keys: resolveKeys(watcherContext.config),
+        handleDecisions,
+        handleQuestionAnswers,
+        interjectSubmitDelayMs,
+        questionFreeTextMode,
+        seenRequestIds: new Set<string>(),
+        questionsByRequestId: new Map<string, CachedQuestion>(),
+      };
 
       while (!ctx.signal.aborted) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one live connection at a time; reconnect only after the previous stream ends.
-          await consumeControlEvents(
-            watcherContext,
-            keys,
-            handleDecisions,
-            interjectSubmitDelayMs,
-            seenRequestIds,
-            questionOptionsByRequestId,
-          );
+          await consumeControlEvents(watcherContext, runtime);
         } catch {
           // Stream error (not an abort): fall through to re-connect below.
         }
@@ -111,6 +143,24 @@ interface ControlKeys {
   approveKeys: string;
   denyKeys: string;
   submitKeys: string;
+  abortKeys: string;
+}
+
+/** Question metadata cached from a live `question` attention report. */
+interface CachedQuestion {
+  question: string;
+  options: string[];
+}
+
+/** Per-session watcher state and resolved behavior shared by every handler. */
+interface WatcherRuntime {
+  keys: ControlKeys;
+  handleDecisions: boolean;
+  handleQuestionAnswers: boolean;
+  interjectSubmitDelayMs: number;
+  questionFreeTextMode: "editor" | "interject";
+  seenRequestIds: Set<string>;
+  questionsByRequestId: Map<string, CachedQuestion>;
 }
 
 /** Resolves the effective keystrokes from config, applying the defaults. */
@@ -120,6 +170,7 @@ function resolveKeys(config: TuiWatcherConfig | undefined): ControlKeys {
     approveKeys: c.approveKeys ?? DEFAULT_APPROVE_KEYS,
     denyKeys: c.denyKeys ?? DEFAULT_DENY_KEYS,
     submitKeys: c.submitKeys ?? DEFAULT_SUBMIT_KEYS,
+    abortKeys: c.abortKeys ?? DEFAULT_ABORT_KEYS,
   };
 }
 
@@ -131,11 +182,7 @@ function resolveKeys(config: TuiWatcherConfig | undefined): ControlKeys {
  */
 async function consumeControlEvents(
   ctx: WatcherContext<TuiWatcherConfig>,
-  keys: ControlKeys,
-  handleDecisions: boolean,
-  interjectSubmitDelayMs: number,
-  seenRequestIds: Set<string>,
-  questionOptionsByRequestId: Map<string, string[]>,
+  runtime: WatcherRuntime,
 ): Promise<void> {
   const connection = await ctx.sdk.agents.connect({
     agent: ctx.agentId,
@@ -147,79 +194,77 @@ async function consumeControlEvents(
     if (ctx.signal.aborted) {
       return;
     }
-    await handleControlEvent(
-      ctx,
-      keys,
-      handleDecisions,
-      interjectSubmitDelayMs,
-      seenRequestIds,
-      questionOptionsByRequestId,
-      event,
-    );
+    await handleControlEvent(ctx, runtime, event);
   }
 }
 
 /** Applies one stream event: a deduped command/question verdict or an interjection. */
 async function handleControlEvent(
   ctx: WatcherContext<TuiWatcherConfig>,
-  keys: ControlKeys,
-  handleDecisions: boolean,
-  interjectSubmitDelayMs: number,
-  seenRequestIds: Set<string>,
-  questionOptionsByRequestId: Map<string, string[]>,
+  runtime: WatcherRuntime,
   event: AgentStreamEvent,
 ): Promise<void> {
-  // Remember question choices from attention reports so an AgentAnswer can be
-  // turned into the matching TUI digit / free-text keystroke sequence.
-  if (event.type === "agent" && handleDecisions) {
-    rememberQuestionOptions(questionOptionsByRequestId, event);
+  // Remember question text/choices from attention reports so an AgentAnswer
+  // can be turned into the matching TUI digit / free-text keystroke sequence.
+  if (event.type === "agent" && runtime.handleQuestionAnswers) {
+    rememberQuestion(runtime.questionsByRequestId, event);
     return;
   }
-  if (handleDecisions && (await handleDecision(ctx, keys, seenRequestIds, event))) {
+  if (runtime.handleDecisions && (await handleDecision(ctx, runtime, event))) {
     return;
   }
-  if (
-    handleDecisions &&
-    (await handleAnswer(ctx, seenRequestIds, questionOptionsByRequestId, event))
-  ) {
+  if (runtime.handleQuestionAnswers && (await handleAnswer(ctx, runtime, event))) {
     return;
   }
   if (event.type === "agentInput") {
-    await handleInterjection(ctx, keys.submitKeys, interjectSubmitDelayMs, event.input.text);
+    await handleInterjection(
+      ctx,
+      runtime.keys.submitKeys,
+      runtime.interjectSubmitDelayMs,
+      event.input.text,
+    );
   }
 }
 
 async function handleDecision(
   ctx: WatcherContext<TuiWatcherConfig>,
-  keys: ControlKeys,
-  seenRequestIds: Set<string>,
+  runtime: WatcherRuntime,
   event: AgentStreamEvent,
 ): Promise<boolean> {
   if (event.type !== "agentDecision") return false;
-  if (seenRequestIds.has(event.decision.requestId)) return true;
-  seenRequestIds.add(event.decision.requestId);
-  await writeKeys(ctx, event.decision.approved ? keys.approveKeys : keys.denyKeys);
+  if (runtime.seenRequestIds.has(event.decision.requestId)) return true;
+  runtime.seenRequestIds.add(event.decision.requestId);
+  await writeKeys(ctx, event.decision.approved ? runtime.keys.approveKeys : runtime.keys.denyKeys);
   return true;
 }
 
+// fallow-ignore-next-line complexity -- correlates answer lifecycle with TUI-specific delivery modes.
 async function handleAnswer(
   ctx: WatcherContext<TuiWatcherConfig>,
-  seenRequestIds: Set<string>,
-  questionOptionsByRequestId: Map<string, string[]>,
+  runtime: WatcherRuntime,
   event: AgentStreamEvent,
 ): Promise<boolean> {
   if (event.type !== "agentAnswer") return false;
   const { answer } = event;
-  if (seenRequestIds.has(answer.requestId)) return true;
-  seenRequestIds.add(answer.requestId);
-  const options = questionOptionsByRequestId.get(answer.requestId) ?? [];
-  questionOptionsByRequestId.delete(answer.requestId);
+  const cached = runtime.questionsByRequestId.get(answer.requestId);
+  if (!cached) return true;
+  if (runtime.seenRequestIds.has(answer.requestId)) return true;
+  runtime.seenRequestIds.add(answer.requestId);
+  runtime.questionsByRequestId.delete(answer.requestId);
   const reply = answer.answer?.trim() ?? null;
-  if (!answer.dismissed && reply && !options.includes(reply)) {
-    await writeFreeTextAnswer(ctx, options.length, reply);
+  if (!answer.dismissed && reply && !cached.options.includes(reply)) {
+    if (runtime.questionFreeTextMode === "interject") {
+      await writeFallbackInterjectAnswer(ctx, runtime, cached, reply);
+    } else {
+      await writeFreeTextAnswer(ctx, cached.options.length, reply);
+    }
     return true;
   }
-  const strokes = questionAnswerKeys({ dismissed: answer.dismissed, reply, options });
+  const strokes = questionAnswerKeys({
+    dismissed: answer.dismissed,
+    reply,
+    options: cached.options,
+  });
   if (strokes) await writeKeys(ctx, strokes);
   return true;
 }
@@ -233,6 +278,46 @@ async function writeFreeTextAnswer(
   await writeKeys(ctx, openOtherEditorKeys(optionCount));
   await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
   if (!ctx.signal.aborted) await writeKeys(ctx, `${reply}\r`);
+}
+
+/**
+ * Free-text delivery for TUIs whose question prompt has no custom-answer
+ * editor (Codex): the virtual last row is a plain fallback answer ("None of
+ * the above"). Select it to resolve the prompt, abort the response the agent
+ * starts from that non-answer, then submit the real answer as a follow-up
+ * prompt so the agent reads it at the start of a fresh turn.
+ */
+async function writeFallbackInterjectAnswer(
+  ctx: WatcherContext<TuiWatcherConfig>,
+  runtime: WatcherRuntime,
+  cached: CachedQuestion,
+  reply: string,
+): Promise<void> {
+  await writeKeys(ctx, openOtherEditorKeys(cached.options.length));
+  await delay(QUESTION_FALLBACK_STEP_DELAY_MS, ctx.signal);
+  if (ctx.signal.aborted) return;
+  await writeKeys(ctx, runtime.keys.abortKeys);
+  await delay(QUESTION_FALLBACK_STEP_DELAY_MS, ctx.signal);
+  if (ctx.signal.aborted) return;
+  await handleInterjection(
+    ctx,
+    runtime.keys.submitKeys,
+    runtime.interjectSubmitDelayMs,
+    questionFallbackMessage(cached.question, reply),
+  );
+}
+
+/**
+ * Builds the follow-up prompt that carries a free-text answer after the
+ * `interject` fallback aborted the agent's response. Single line: the target
+ * TUIs submit on Enter, so embedded newlines would send a partial message.
+ */
+export function questionFallbackMessage(question: string, reply: string): string {
+  return `Answer to question "${flattenWhitespace(question)}": ${flattenWhitespace(reply)}`;
+}
+
+function flattenWhitespace(value: string): string {
+  return value.replaceAll(/\s+/g, " ").trim();
 }
 
 async function handleInterjection(
@@ -251,11 +336,12 @@ async function handleInterjection(
 }
 
 /**
- * Caches option labels for a live `question` attention so a later answer can
- * pick the matching TUI digit. Drops the cache when attention clears.
+ * Caches question text and option labels for a live `question` attention so a
+ * later answer can pick the matching TUI digit or rebuild the question in the
+ * `interject` fallback prompt.
  */
-function rememberQuestionOptions(
-  cache: Map<string, string[]>,
+function rememberQuestion(
+  cache: Map<string, CachedQuestion>,
   event: Extract<AgentStreamEvent, { type: "agent" }>,
 ): void {
   if (
@@ -267,7 +353,7 @@ function rememberQuestionOptions(
     const options = (event.options ?? [])
       .map((option) => option.label)
       .filter((option) => option.trim() !== "");
-    cache.set(event.requestId, options);
+    cache.set(event.requestId, { question: event.question ?? "", options });
   }
   // Orphaned entries (cleared/aborted without an AgentAnswer) are tiny and are
   // overwritten the next time the same requestId is reused; the answer handler

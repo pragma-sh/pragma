@@ -101,17 +101,21 @@ export async function assembleCatalog(
   ctx: PluginContext,
   onError: (pluginId: string, agentId: string, error: unknown) => void = () => {},
 ): Promise<CatalogResult> {
-  const agents: CatalogAgent[] = [];
   const assets: Record<string, IconAsset> = {};
-  for (const plugin of plugins) {
-    for (const agent of plugin.definition.agents ?? []) {
+  const entries = plugins.flatMap((plugin) =>
+    (plugin.definition.agents ?? []).map((agent) => ({ agent, plugin })),
+  );
+  const resolvedAgents = await Promise.all(
+    entries.map(async ({ agent, plugin }) => {
       try {
-        agents.push(await catalogAgent(agent, plugin, ctx, assets));
+        return await catalogAgent(agent, plugin, ctx, assets);
       } catch (error) {
         onError(plugin.pluginId, agent.id, error);
+        return null;
       }
-    }
-  }
+    }),
+  );
+  const agents = resolvedAgents.filter((agent): agent is CatalogAgent => agent !== null);
   return { catalog: { agents }, assets };
 }
 

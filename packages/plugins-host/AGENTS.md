@@ -10,11 +10,11 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken). There is no separate
-  `reload` command — the host re-sends a full `load` with freshly read gateway
-  credentials whenever the catalog must be re-resolved.
-- **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + the hash → asset map),
-  `error`, `log`.
+- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken) and correlated
+  `usageLimits` (`requestId` + optional `pluginId`). There is no separate `reload`
+  command — host re-sends full `load` with fresh gateway credentials.
+- **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
+  correlated `usageLimits`, `error`, `log`.
 
 On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
 resource directory, global `~/.pragma/config.json`, plus
@@ -34,6 +34,7 @@ packages/plugins-host/
 │   ├── cli.ts        # Sidecar entry: stdin loop, resolves + assembles catalog, emits events
 │   ├── catalog.ts    # assembleCatalog, resolveModels, hashIcon, mimeForIcon, ICON_MAX_BYTES
 │   ├── manifest.ts   # resolveManifests: global + project .pragma/config.json plugins
+│   ├── usage-limits.ts # Loads plugin usage-limit providers with plugin-specific context
 │   ├── index.ts      # Re-exports for tests/consumers
 │   ├── catalog.test.ts
 │   └── manifest.test.ts

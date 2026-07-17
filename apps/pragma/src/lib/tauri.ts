@@ -117,6 +117,12 @@ export interface RawAgentModel {
 export interface AgentModelSelection {
   modelId: string | null;
   reasoningId: string | null;
+  /**
+   * Raw model command snippet (for example `--model moonshot/kimi-k3`) appended to the
+   * agent's base launch command instead of catalog model/reasoning args. Overrides
+   * `modelId`/`reasoningId` when set. Brokered launches only — the UI never sets it.
+   */
+  modelCmd?: string | null;
 }
 
 /** Subscribes to daemon-forwarded agent status reports. */
@@ -242,6 +248,8 @@ export interface AgentSessionLaunchRequest {
   agentId: string;
   modelId: string | null;
   reasoningId: string | null;
+  /** Raw model command overriding catalog model args; see {@link AgentModelSelection.modelCmd}. */
+  modelCmd?: string | null;
   prompt: string | null;
 }
 
