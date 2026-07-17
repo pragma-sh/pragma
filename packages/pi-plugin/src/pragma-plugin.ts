@@ -81,31 +81,40 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   return result?.stdout ?? "";
 }
 
+const YES_NO = new Set(["yes", "no"]);
+
+function isPiModelRow(
+  fields: string[],
+): fields is [string, string, string, string, string, string] {
+  if (fields.length !== 6 || fields.some((field) => field === "")) return false;
+  const [provider, , , , thinking, images] = fields as [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (provider === "provider") return false;
+  return YES_NO.has(thinking) && YES_NO.has(images);
+}
+
+function parsePiModelLine(line: string): AgentModelEntry | null {
+  const fields = line.trim().split(/\s+/);
+  if (!isPiModelRow(fields)) return null;
+  const [provider, model, , , thinking] = fields;
+  const entry: AgentModelEntry = {
+    id: `${provider}/${model}`,
+    name: `${model} (${provider})`,
+  };
+  if (thinking === "yes") entry.reasoning = PI_REASONING_LEVELS;
+  return entry;
+}
+
 /** Parses `pi --list-models` table output into launcher model entries. */
 export function parsePiModels(output: string): AgentModelEntry[] {
-  return output.split("\n").flatMap((line) => {
-    const [provider, model, context, maxOutput, thinking, images, ...rest] = line
-      .trim()
-      .split(/\s+/);
-    if (
-      !provider ||
-      provider === "provider" ||
-      !model ||
-      !context ||
-      !maxOutput ||
-      !thinking ||
-      !images ||
-      rest.length > 0 ||
-      !["yes", "no"].includes(thinking) ||
-      !["yes", "no"].includes(images)
-    ) {
-      return [];
-    }
-    const entry: AgentModelEntry = {
-      id: `${provider}/${model}`,
-      name: `${model} (${provider})`,
-    };
-    if (thinking === "yes") entry.reasoning = PI_REASONING_LEVELS;
-    return [entry];
-  });
+  return output
+    .split("\n")
+    .map(parsePiModelLine)
+    .filter((entry): entry is AgentModelEntry => entry !== null);
 }
