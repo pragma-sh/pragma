@@ -15,6 +15,8 @@ pub struct ScenarioCtx<'a> {
     pub plugin_id: &'a str,
     pub runtime_agent_id: &'a str,
     pub model_id: Option<&'a str>,
+    /// Raw model command from `--pick-model-cmd`; overrides `model_id` at launch.
+    pub model_cmd: Option<&'a str>,
     pub timeout: Duration,
     pub abort_input: &'a [u8],
 }
@@ -28,6 +30,7 @@ impl<'a> ScenarioCtx<'a> {
             self.worktree_id,
             self.catalog_agent_id,
             self.model_id,
+            self.model_cmd,
             prompt,
         )?;
         Ok(ScenarioSession {
@@ -296,6 +299,7 @@ mod tests {
             _worktree_id: &str,
             _agent_id: &str,
             _model_id: Option<&str>,
+            _model_cmd: Option<&str>,
             _prompt: &str,
         ) -> Result<LaunchResult, String> {
             Ok(LaunchResult {

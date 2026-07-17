@@ -21,7 +21,8 @@ pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismis
 # Interject: publish free-form input to a running agent (the controlling-client side).
 pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
 # End-to-end integration verification through the gateway/mobile API surface.
-pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b']
+pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b'] \
+  [--model <id> | --pick-model-cmd "<raw model args>"]
 ```
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
@@ -55,6 +56,13 @@ two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
 `questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's
 fallback row (Codex's "None of the above"), aborts the response, and resubmits the
 answer as an `Answer to question ...` follow-up prompt whose turn carries the marker.
+
+`--pick-model-cmd` (mutually exclusive with `--model`) sends the raw snippet as the
+launch payload's `modelCmd` instead of a catalog `modelId`: the headless server appends
+it to the agent's base catalog launch command, and a connected desktop appends it (split
+on whitespace) in place of the plugin's model/reasoning arg builders. Use it for models
+the catalog does not list — for example the cheapest subagent-capable model, to save
+tokens during verification.
 
 `pragma-cli agent start` is brokered through the app but is not supported for
 plugin-defined agents; launch agents from the Pragma UI so the frontend can run JS

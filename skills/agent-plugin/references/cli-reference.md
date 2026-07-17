@@ -73,6 +73,10 @@ Options:
   `\r`, `\n`, `\t`, and `\\`.
 - `--worktree <id>`: defaults to `PRAGMA_WORKTREE_ID`.
 - `--model <id>`: defaults to first catalog model.
+- `--pick-model-cmd <args>`: raw model command appended to the agent's base launch
+  command instead of a catalog model (for example `--pick-model-cmd "--model moonshot/kimi-k3"`).
+  Overrides `--model`. Use it to verify with the cheapest subagent-capable model the
+  catalog does not list, to save tokens.
 - `--scenario <id>`: repeatable scenario filter.
 - `--attempts <n>`: fresh-session attempts for nondeterministic behavior; default 2.
 - `--step-timeout <seconds>`: per-step budget; default 120.

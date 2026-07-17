@@ -345,6 +345,7 @@ impl Registry {
             &args.agent_id,
             args.model_id.as_deref(),
             args.reasoning_id.as_deref(),
+            args.model_cmd.as_deref(),
         )?;
         let tab_id = Uuid::new_v4().to_string();
         let _events = self
@@ -525,12 +526,16 @@ impl Registry {
     }
 
     /// Resolves an agent's launch spec + shell command from the plugin catalog
-    /// for the selected model/reasoning combination.
+    /// for the selected model/reasoning combination. A `model_cmd` snippet
+    /// (for example `--model moonshot/kimi-k3`) overrides the catalog
+    /// selection: the base launch command (no model/reasoning args) is used
+    /// and the snippet is appended verbatim.
     fn resolve_agent_launch(
         &self,
         agent_id: &str,
         model_id: Option<&str>,
         reasoning_id: Option<&str>,
+        model_cmd: Option<&str>,
     ) -> Result<(String, Value, String), String> {
         let catalog = self
             .plugins
@@ -540,6 +545,12 @@ impl Registry {
             .as_array()
             .and_then(|agents| agents.iter().find(|agent| agent["id"] == agent_id))
             .ok_or_else(|| format!("agent not found: {agent_id}"))?;
+        // A raw model command bypasses catalog model/reasoning matching and
+        // launches from the base command instead.
+        let (model_id, reasoning_id) = match model_cmd {
+            Some(_) => (None, None),
+            None => (model_id, reasoning_id),
+        };
         let command = agent["launch"]["commands"]
             .as_array()
             .and_then(|commands| {
@@ -558,6 +569,10 @@ impl Registry {
             })
             .collect::<Result<Vec<_>, _>>()?
             .join(" ");
+        let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
+            Some(model_cmd) => format!("{command} {model_cmd}"),
+            None => command,
+        };
         let plugin_id = agent["pluginId"]
             .as_str()
             .ok_or_else(|| "agent catalog entry has no plugin id".to_string())?

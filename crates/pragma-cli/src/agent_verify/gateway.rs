@@ -30,6 +30,7 @@ pub trait VerifyApi: Send + Sync {
         worktree_id: &str,
         agent_id: &str,
         model_id: Option<&str>,
+        model_cmd: Option<&str>,
         prompt: &str,
     ) -> Result<LaunchResult, String>;
     fn answer(
@@ -155,6 +156,7 @@ impl VerifyApi for HttpVerifyApi {
         worktree_id: &str,
         agent_id: &str,
         model_id: Option<&str>,
+        model_cmd: Option<&str>,
         prompt: &str,
     ) -> Result<LaunchResult, String> {
         self.post_json(
@@ -166,6 +168,7 @@ impl VerifyApi for HttpVerifyApi {
                 "agentId": agent_id,
                 "modelId": model_id,
                 "reasoningId": null,
+                "modelCmd": model_cmd,
                 "prompt": prompt,
             }),
         )

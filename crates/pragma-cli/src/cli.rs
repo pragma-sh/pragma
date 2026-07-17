@@ -438,8 +438,18 @@ pub struct AgentVerifyArgs {
     #[arg(long, value_name = "ID")]
     pub worktree: Option<String>,
     /// Model id. Defaults to the first catalog model.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "pick_model_cmd")]
     pub model: Option<String>,
+    /// Raw model command appended to the agent's base launch command instead of
+    /// a catalog model (for example `--pick-model-cmd "--model moonshot/kimi-k3"`).
+    /// Use it to verify against models the catalog does not list, such as the
+    /// cheapest subagent-capable model, to save tokens.
+    #[arg(
+        long = "pick-model-cmd",
+        value_name = "ARGS",
+        allow_hyphen_values = true
+    )]
+    pub pick_model_cmd: Option<String>,
     /// Run only this scenario. Repeat to select several.
     #[arg(long = "scenario", value_name = "ID")]
     pub scenarios: Vec<String>,
@@ -714,6 +724,8 @@ mod tests {
             "basic-reply",
             "--attempts",
             "3",
+            "--pick-model-cmd",
+            "--model moonshot/kimi-k3",
         ])
         .expect("agent verify parses");
         let TopCommand::Agent {
@@ -726,6 +738,27 @@ mod tests {
         assert_eq!(args.scenarios, ["basic-reply"]);
         assert_eq!(args.attempts, 3);
         assert_eq!(args.abort_input, "\\x1b");
+        assert_eq!(
+            args.pick_model_cmd.as_deref(),
+            Some("--model moonshot/kimi-k3")
+        );
+        assert_eq!(args.model, None);
+    }
+
+    #[test]
+    fn agent_verify_rejects_model_with_pick_model_cmd() {
+        let result = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "verify",
+            "--agent",
+            "opencode",
+            "--model",
+            "gpt-5",
+            "--pick-model-cmd",
+            "--model moonshot/kimi-k3",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

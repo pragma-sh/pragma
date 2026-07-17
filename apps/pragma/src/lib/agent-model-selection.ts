@@ -64,6 +64,12 @@ export function modelLaunchArgs(
   agent: AgentConfig,
   selection: AgentModelSelection | null | undefined,
 ): string[] {
+  // A raw model command (brokered `--pick-model-cmd` launches) bypasses the
+  // plugin/catalog arg builders entirely.
+  const modelCmd = selection?.modelCmd?.trim();
+  if (modelCmd) {
+    return modelCmd.split(/\s+/);
+  }
   const pluginArgs = pluginAgentLaunchArgs(agent.id, selection);
   if (pluginArgs !== null) {
     return pluginArgs;

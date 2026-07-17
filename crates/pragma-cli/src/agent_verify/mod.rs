@@ -47,7 +47,12 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
     let worktree_id = crate::server::worktree_id(args.worktree.clone())?;
     let workspace = api.workspace_snapshot().map_err(CliError::config)?;
     let project_id = project_for_worktree(&workspace, &worktree_id).map_err(CliError::config)?;
-    let model_id = resolve_model(catalog_agent, args.model.as_deref()).map_err(CliError::config)?;
+    let model_cmd = resolve_model_cmd(args.pick_model_cmd.as_deref()).map_err(CliError::config)?;
+    let model_id = if model_cmd.is_some() {
+        None
+    } else {
+        Some(resolve_model(catalog_agent, args.model.as_deref()).map_err(CliError::config)?)
+    };
     let runtime_agent_id = runtime_agent_id(&catalog_agent.id);
     let ledger = Ledger::collect(api.event_reader().map_err(CliError::config)?);
     let selected: HashSet<&str> = args.scenarios.iter().map(String::as_str).collect();
@@ -59,7 +64,8 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
         catalog_agent_id: &catalog_agent.id,
         plugin_id: &catalog_agent.plugin_id,
         runtime_agent_id: &runtime_agent_id,
-        model_id: Some(model_id),
+        model_id,
+        model_cmd,
         timeout: Duration::from_secs(args.step_timeout),
         abort_input: &abort_input,
     };
@@ -211,6 +217,22 @@ fn resolve_model<'a>(agent: &'a CatalogAgent, requested: Option<&str>) -> Result
         .ok_or_else(|| format!("agent {} has no models", agent.id))
 }
 
+/// Normalizes `--pick-model-cmd`: blank/whitespace-only values are rejected so
+/// a quoted empty flag cannot silently launch the agent's default model.
+fn resolve_model_cmd(requested: Option<&str>) -> Result<Option<&str>, String> {
+    match requested {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Err("--pick-model-cmd must not be empty".to_string())
+            } else {
+                Ok(Some(trimmed))
+            }
+        }
+    }
+}
+
 fn project_for_worktree(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> Result<String, String> {
     let project_id = snapshot
         .worktrees
@@ -320,5 +342,15 @@ mod tests {
         assert_eq!(runtime_agent_id("pragma.opencode"), "opencode");
         assert_eq!(runtime_agent_id("pragma.claude-code"), "claude-code");
         assert_eq!(runtime_agent_id("codex"), "codex");
+    }
+
+    #[test]
+    fn resolve_model_cmd_trims_and_rejects_blank() {
+        assert_eq!(resolve_model_cmd(None), Ok(None));
+        assert_eq!(
+            resolve_model_cmd(Some("  --model moonshot/kimi-k3 ")),
+            Ok(Some("--model moonshot/kimi-k3"))
+        );
+        assert!(resolve_model_cmd(Some("   ")).is_err());
     }
 }

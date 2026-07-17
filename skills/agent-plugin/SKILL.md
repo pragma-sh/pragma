@@ -222,6 +222,19 @@ Use `--scenario <id>` while iterating, `--prompts <file.json>` for host-specific
 tuning, and `--include-slow` before final handoff. Re-run until every applicable scenario
 passes. Skips need explicit capability reasons; failures are not handoff-ready.
 
+Verification burns real LLM tokens. Pick the **cheapest available model that can still
+spawn sub-agents** (the `subagent` scenario requires sub-agent capability) instead of the
+catalog default. When that model is not in the plugin's catalog model list, pass its raw
+launch flags with `--pick-model-cmd`:
+
+```sh
+pragma-cli agent verify --agent <catalog-id> --pick-model-cmd "--model moonshot/kimi-k3"
+```
+
+`--pick-model-cmd` appends the snippet to the agent's base launch command and overrides
+`--model`; check the host's own model list (for example `opencode models`) for the
+cheapest subagent-capable id before running the full suite.
+
 `question-free-text` requires the agent to echo the exact marker back, and accepts two
 delivery paths: the marker arriving in the same turn (custom-answer editor), or the
 `questionFreeTextMode: "interject"` secondary path — fallback row selected, response
