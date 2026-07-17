@@ -52,7 +52,7 @@ export const piAgentPlugin: PluginDefinition = definePlugin({
         parsePiModels(
           await execFirst(
             ctx,
-            "pi --list-models 2>/dev/null || \"${SHELL:-/bin/sh}\" -lic 'pi --list-models' 2>/dev/null",
+            "pi --list-models 2>/dev/null || \"${SHELL:-/bin/sh}\" -lc 'pi --list-models' 2>/dev/null",
           ),
         ),
       permissionModes: [],
