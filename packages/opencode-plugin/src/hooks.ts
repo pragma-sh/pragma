@@ -101,7 +101,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       // A permission request: report the command + a requestId so a Pragma
       // approval toast appears, and pin the red dot. opencode exposes no
       // decision-returning plugin hook on the current binary, so the paired
-      // watcher answers the verdict with `sendKeys` (see pragma-watcher.ts).
+      // watcher answers the verdict with `sendKeys` (see pragma-plugin.ts).
       if (runtimeEvent.type === "permission.asked" || runtimeEvent.type === "permission.updated") {
         await raiseCommandApproval(runtimeEvent);
         return;
