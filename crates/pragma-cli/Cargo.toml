@@ -17,6 +17,7 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 pragma-constants = { path = "../../packages/constants" }
 pragma-protocol = { path = "../pragma-protocol" }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toon-format = "0.5"

@@ -4,12 +4,14 @@
 //! single objects); `--json` emits structured JSON, `--toon` emits
 //! token-efficient TOON. `worktree list` and the GUI-driven commands need the
 //! app; `tab read`, `agent status`, `agent report`, and `agent message` are direct-to-server
-//! and work with the app closed.
+//! and work with the app closed. `agent verify` uses the authenticated gateway
+//! to exercise the same HTTP/NDJSON surface as mobile clients.
 
 use std::process::ExitCode;
 
 use clap::Parser;
 
+mod agent_verify;
 mod broker;
 mod cli;
 mod commands;
@@ -66,6 +68,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Answer(args) => direct::agent_answer(args, out),
             AgentCommand::AwaitAnswer(args) => direct::agent_await_answer(args),
             AgentCommand::Input(args) => direct::agent_input(args, out),
+            AgentCommand::Verify(args) => agent_verify::run(args, out),
         },
     }
 }

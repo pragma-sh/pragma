@@ -5347,6 +5347,7 @@ dependencies = [
  "comfy-table",
  "pragma-constants",
  "pragma-protocol",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",

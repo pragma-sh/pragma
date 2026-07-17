@@ -20,6 +20,8 @@ pragma-cli agent await-answer --agent <id> --request-id <id> [--timeout 300]
 pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismiss
 # Interject: publish free-form input to a running agent (the controlling-client side).
 pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
+# End-to-end integration verification through the gateway/mobile API surface.
+pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b']
 ```
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
@@ -38,6 +40,21 @@ timeout can pass `--dismiss-output <value>`; dismissal then prints that value an
 subscribers; the waiting reporter — a harness input hook or a plugin watcher — delivers the
 text into the running agent's turn. It is fire-and-forget (no verdict to wait for) and is the
 CLI side of the SDK's `client.agents.connect(...).send(text)`.
+
+`agent verify` discovers the local gateway, launches fresh real-agent sessions from the
+plugin catalog, drives question/decision/abort scenarios over HTTP, and strictly parses
+the same NDJSON event stream mobile consumes. Events are scoped by the RUNTIME agent id
+(final segment of the catalog id), exactly like mobile's stream filter — a plugin
+reporting under the qualified catalog id fails verification because those consumers
+would never see it. It runs all scenarios by default, retries
+LLM-dependent behavior with fresh sessions, and exits non-zero on any failure. Question
+scenarios validate exact prompt/options, listed and custom answers, dismissal, and wrong
+request-id isolation rather than accepting any generic question attention.
+`question-free-text` requires an assistant message echoing the exact marker and accepts
+two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
+`questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's
+fallback row (Codex's "None of the above"), aborts the response, and resubmits the
+answer as an `Answer to question ...` follow-up prompt whose turn carries the marker.
 
 `pragma-cli agent start` is brokered through the app but is not supported for
 plugin-defined agents; launch agents from the Pragma UI so the frontend can run JS

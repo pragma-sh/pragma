@@ -422,6 +422,42 @@ pub enum AgentCommand {
     /// delivers the text into the agent's turn. The controlling-client side of
     /// an interject.
     Input(AgentInputArgs),
+    /// Launch the real agent and verify its integration through the gateway API.
+    Verify(AgentVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AgentVerifyArgs {
+    /// Agent id from the plugin catalog (unqualified built-in ids are accepted).
+    #[arg(long)]
+    pub agent: String,
+    /// Abort emulation bytes. Supports `\e`, `\xNN`, `\r`, `\n`, and `\t`.
+    #[arg(long = "abort-input", default_value = "\\x1b")]
+    pub abort_input: String,
+    /// Target worktree. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID")]
+    pub worktree: Option<String>,
+    /// Model id. Defaults to the first catalog model.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Run only this scenario. Repeat to select several.
+    #[arg(long = "scenario", value_name = "ID")]
+    pub scenarios: Vec<String>,
+    /// Stop after the first failed scenario.
+    #[arg(long)]
+    pub fail_fast: bool,
+    /// Fresh-session attempts per scenario.
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(1..))]
+    pub attempts: u32,
+    /// Per-step timeout in seconds.
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
+    pub step_timeout: u64,
+    /// Include slow/advisory timeout scenarios.
+    #[arg(long)]
+    pub include_slow: bool,
+    /// JSON file mapping scenario ids to prompt overrides.
+    #[arg(long, value_name = "FILE")]
+    pub prompts: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -664,6 +700,32 @@ mod tests {
         assert_eq!(args.agent, "opencode");
         assert_eq!(args.text, "focus on the tests");
         assert_eq!(args.request_id, None);
+    }
+
+    #[test]
+    fn agent_verify_parses() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "agent",
+            "verify",
+            "--agent",
+            "opencode",
+            "--scenario",
+            "basic-reply",
+            "--attempts",
+            "3",
+        ])
+        .expect("agent verify parses");
+        let TopCommand::Agent {
+            agent: AgentCommand::Verify(args),
+        } = cli.command
+        else {
+            panic!("expected agent verify");
+        };
+        assert_eq!(args.agent, "opencode");
+        assert_eq!(args.scenarios, ["basic-reply"]);
+        assert_eq!(args.attempts, 3);
+        assert_eq!(args.abort_input, "\\x1b");
     }
 
     #[test]
