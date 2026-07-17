@@ -26,7 +26,8 @@ export interface UsageLimitsReady {
 export type UsageLimitsUnavailableReason =
   | "not-configured"
   | "authentication-required"
-  | "unsupported";
+  | "unsupported"
+  | "error";
 
 /** A provider state that requires user or platform action before loading. */
 export interface UsageLimitsUnavailable {

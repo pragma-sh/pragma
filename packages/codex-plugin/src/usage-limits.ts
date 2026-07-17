@@ -1,7 +1,8 @@
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
 
 const RATE_LIMITS_REQUEST_ID = 2;
-const APP_SERVER_DRAIN_SECONDS = 1;
+// Keep stdin open long enough for slower app-server processes to flush their response.
+const APP_SERVER_DRAIN_SECONDS = 3;
 const APP_SERVER_MESSAGES = [
   {
     method: "initialize",

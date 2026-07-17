@@ -138,6 +138,7 @@ it("requests usage through Codex app-server without exposing credentials", async
   expect(request?.cwd).toBe("/project");
   expect(request?.commands[0]).toContain("codex app-server --stdio");
   expect(request?.commands[0]).toContain("account/rateLimits/read");
+  expect(request?.commands[0]).toContain("sleep 3");
   expect(request?.commands[0]).not.toContain("python");
 });
 

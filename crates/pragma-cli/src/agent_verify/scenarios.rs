@@ -497,7 +497,7 @@ fn validate_usage_result(value: &serde_json::Value) -> Result<(), String> {
             let message = value.get("message").and_then(serde_json::Value::as_str);
             if matches!(
                 reason,
-                Some("not-configured" | "authentication-required" | "unsupported")
+                Some("not-configured" | "authentication-required" | "unsupported" | "error")
             ) && message.is_some_and(|message| !message.trim().is_empty())
             {
                 Ok(())
@@ -567,6 +567,12 @@ mod tests {
             "status": "unavailable",
             "reason": "authentication-required",
             "message": "Sign in"
+        }))
+        .is_ok());
+        assert!(validate_usage_result(&json!({
+            "status": "unavailable",
+            "reason": "error",
+            "message": "Provider failed"
         }))
         .is_ok());
         assert!(validate_usage_result(&json!({ "status": "ready", "limits": [] })).is_err());

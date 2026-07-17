@@ -22,14 +22,40 @@ export async function loadUsageLimits(
     .filter((plugin) => !pluginId || plugin.pluginId === pluginId)
     .flatMap((plugin) => {
       const ctx = contextFor(plugin, sdk, root);
-      return (plugin.definition.usageLimits ?? []).map(async (provider) => ({
+      return (plugin.definition.usageLimits ?? []).map((provider) => ({
         pluginId: plugin.pluginId,
         providerId: provider.id,
         title: provider.title,
-        result: await provider.load(ctx),
+        load: provider.load(ctx),
       }));
     });
-  return Promise.all(loads);
+  const results = await Promise.allSettled(loads.map((load) => load.load));
+  return results.flatMap((result, index) => {
+    const load = loads[index];
+    if (!load) {
+      return [];
+    }
+    return [
+      {
+        pluginId: load.pluginId,
+        providerId: load.providerId,
+        title: load.title,
+        result:
+          result.status === "fulfilled"
+            ? result.value
+            : unavailableResult(load.title, result.reason),
+      },
+    ];
+  });
+}
+
+function unavailableResult(title: string, reason: unknown): UsageLimitsResult {
+  const detail = reason instanceof Error ? reason.message : String(reason);
+  return {
+    status: "unavailable",
+    reason: "error",
+    message: detail || `${title} usage limits could not be loaded.`,
+  };
 }
 
 function contextFor(
