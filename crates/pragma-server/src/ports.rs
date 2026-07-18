@@ -45,7 +45,44 @@ fn list_processes() -> Result<HashMap<u32, ProcessInfo>, String> {
     if !output.status.success() {
         return Err(format!("process inspection exited with {}", output.status));
     }
-    Ok(parse_processes(&String::from_utf8_lossy(&output.stdout)))
+    let mut processes = parse_processes(&String::from_utf8_lossy(&output.stdout));
+    enrich_truncated_names(&mut processes);
+    Ok(processes)
+}
+
+/// `ps comm=` is sourced from the kernel's `TASK_COMM_LEN` field, which Linux
+/// caps at 15 characters — longer names (`vite-dev-server`, `python3-watchdog`)
+/// arrive already truncated. `/proc/<pid>/cmdline` carries the untruncated
+/// argv[0], so on Linux we prefer it when available, falling back to the
+/// `ps`-derived name for processes that exit before we can read it (or when
+/// `/proc` is unavailable, e.g. inside some sandboxes). macOS's `ps comm=` is
+/// not subject to this cap, so no enrichment is needed there.
+#[cfg(target_os = "linux")]
+fn enrich_truncated_names(processes: &mut HashMap<u32, ProcessInfo>) {
+    for (pid, info) in processes.iter_mut() {
+        if let Some(name) = linux_cmdline_name(*pid) {
+            info.name = name;
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn enrich_truncated_names(_processes: &mut HashMap<u32, ProcessInfo>) {}
+
+#[cfg(target_os = "linux")]
+fn linux_cmdline_name(pid: u32) -> Option<String> {
+    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let arg0 = bytes
+        .split(|&byte| byte == 0)
+        .find(|segment| !segment.is_empty())?;
+    let arg0 = std::str::from_utf8(arg0).ok()?;
+    Some(
+        Path::new(arg0)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(arg0)
+            .to_string(),
+    )
 }
 
 fn parse_processes(output: &str) -> HashMap<u32, ProcessInfo> {
