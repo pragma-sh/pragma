@@ -212,6 +212,7 @@ function useBaseRepoSelection(repo: GitHubRepoRef): {
 }
 
 /** Pre-flight gating + the final PR open after the checks pass or are confirmed. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePaletteAsyncData, useWorkspaceListeners, ProjectScriptButton, TerminalTabItem); not extractable logic.
 function usePrSubmit({
   repo,
   worktreeId,

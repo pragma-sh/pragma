@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { planBuildScripts, planInteractiveScripts, planRunScripts } from "./scripts";
+import { planInteractiveScripts, planNamedScript } from "./scripts";
 
-describe("planRunScripts", () => {
+describe("planNamedScript", () => {
   it("plans a string entry as one normal command", () => {
-    expect(planRunScripts(["bun run dev"])).toEqual({
+    expect(planNamedScript("run", ["bun run dev"])).toEqual({
       commands: ["bun run dev"],
       items: [{ commandIndexes: [0], layout: null }],
     });
@@ -12,7 +12,7 @@ describe("planRunScripts", () => {
 
   it("plans nested horizontal and vertical split entries", () => {
     expect(
-      planRunScripts([
+      planNamedScript("run", [
         {
           left: "bun run dev",
           right: {
@@ -46,23 +46,23 @@ describe("planRunScripts", () => {
     });
   });
 
-  it("uses the script kind in validation errors", () => {
-    expect(() => planBuildScripts([" "])).toThrow("build[0] must not be empty");
+  it("uses the script name in validation errors", () => {
+    expect(() => planNamedScript("build", [" "])).toThrow("build[0] must not be empty");
     expect(() => planInteractiveScripts([" "], "custom")).toThrow("custom[0] must not be empty");
   });
 
   it("rejects empty commands", () => {
-    expect(() => planRunScripts([" "])).toThrow("run[0] must not be empty");
+    expect(() => planNamedScript("run", [" "])).toThrow("run[0] must not be empty");
   });
 
   it("rejects mixed split axes", () => {
-    expect(() => planRunScripts([{ left: "a", top: "b" } as never])).toThrow(
+    expect(() => planNamedScript("run", [{ left: "a", top: "b" } as never])).toThrow(
       "exactly one split axis",
     );
   });
 
   it("rejects unknown split keys", () => {
-    expect(() => planRunScripts([{ left: "a", right: "b", center: "c" } as never])).toThrow(
+    expect(() => planNamedScript("run", [{ left: "a", right: "b", center: "c" } as never])).toThrow(
       "run[0] has unknown key center",
     );
   });

@@ -53,6 +53,7 @@ import {
 } from "@/plugins/rendering";
 import { useTabAgentStatus } from "@/state/agent-status-store";
 import {
+  type ScriptButtonInfo,
   type SplitDirection,
   type SplitGroupNode,
   type SplitLayoutNode,
@@ -95,48 +96,90 @@ const splitControls: Array<{
   { direction: "vertical", label: "Split vertical", icon: Rows2 },
 ];
 
+/** Fallback icon for a script button when it has no `icon` in `.pragma/scripts.json`. */
+function fallbackScriptIcon(name: string): typeof Play {
+  if (name === "run") return Play;
+  if (name === "build") return Hammer;
+  return SquareTerminal;
+}
+
+function scriptLabel(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function scriptRunLabel(name: string): string {
+  if (name === "run") return "Run project scripts";
+  if (name === "build") return "Build project scripts";
+  return `Run ${scriptLabel(name)}`;
+}
+
+function scriptNoneLabel(name: string): string {
+  if (name === "run" || name === "build") return `No project ${name} scripts`;
+  return `No ${name} scripts configured`;
+}
+
+function scriptButtonIcon(button: ScriptButtonInfo, isActive: boolean, IdleIcon: typeof Play) {
+  if (isActive) return <Square className="size-3.5" />;
+  if (button.icon) return <Icon icon={button.icon} className="size-3.5" />;
+  return <IdleIcon className="size-3.5" />;
+}
+
+function scriptButtonTooltip({
+  button,
+  isActive,
+  stopping,
+  configError,
+  runLabel,
+}: {
+  button: ScriptButtonInfo;
+  isActive: boolean;
+  stopping: boolean;
+  configError: string | null;
+  runLabel: string;
+}): string {
+  if (isActive) return stopping ? "Stopping…" : "Stop project scripts";
+  if (configError) return configError;
+  if (button.available) return runLabel;
+  return scriptNoneLabel(button.name);
+}
+
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePrSubmit, useWorkspaceListeners); not extractable logic.
 function ProjectScriptButton({
-  activeState,
-  available,
+  button,
+  isActive,
+  stopping,
   configError,
   disabled,
-  idleIcon: IdleIcon,
-  labels,
   onRun,
   onStop,
 }: {
-  activeState: ReturnType<typeof useWorkspace>["runScriptsState"];
-  available: boolean;
+  button: ScriptButtonInfo;
+  isActive: boolean;
+  stopping: boolean;
   configError: string | null;
   disabled: boolean;
-  idleIcon: typeof Play;
-  labels: { run: string; stop: string; none: string };
   onRun: () => void;
   onStop: () => void;
 }) {
+  const IdleIcon = fallbackScriptIcon(button.name);
+  const runLabel = scriptRunLabel(button.name);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="inline-flex">
           <Button
             disabled={disabled}
-            onClick={() => void (activeState ? onStop() : onRun())}
+            onClick={() => void (isActive ? onStop() : onRun())}
             size="icon-sm"
-            variant={activeState ? "destructive" : "success"}
-            aria-label={activeState ? labels.stop : labels.run}
+            variant={isActive ? "destructive" : "success"}
+            aria-label={isActive ? "Stop project scripts" : runLabel}
           >
-            {activeState ? <Square className="size-3.5" /> : <IdleIcon className="size-3.5" />}
+            {scriptButtonIcon(button, isActive, IdleIcon)}
           </Button>
         </span>
       </TooltipTrigger>
       <TooltipContent>
-        {activeState
-          ? labels.stop
-          : configError
-            ? configError
-            : available
-              ? labels.run
-              : labels.none}
+        {scriptButtonTooltip({ button, isActive, stopping, configError, runLabel })}
       </TooltipContent>
     </Tooltip>
   );
@@ -238,51 +281,33 @@ function useSplitSummary(workspace: Workspace) {
   return { split, parentTabId, splitDirection, splitIsActive, topTabs };
 }
 
-/** The left side of the toolbar: agents menu, run/build script buttons, go-back. */
+/** The left side of the toolbar: agents menu, run/build/custom script buttons, go-back. */
 function TerminalToolbar({
   workspace,
-  runDisabled,
-  buildDisabled,
   topperItems,
 }: {
   workspace: Workspace;
-  runDisabled: boolean;
-  buildDisabled: boolean;
   topperItems: VisiblePluginContribution<TopperItemDefinition>[];
 }) {
-  const runState = workspace.runScriptsState;
-  const buildState = workspace.buildScriptsState;
   return (
     <div className="flex min-w-0 items-center gap-1">
       <AgentsMenu />
-      <ProjectScriptButton
-        activeState={runState}
-        available={workspace.runScriptsAvailable}
-        configError={workspace.runScriptsConfigError}
-        disabled={runDisabled}
-        idleIcon={Play}
-        labels={{
-          run: "Run project scripts",
-          stop: "Stop project scripts",
-          none: "No project run scripts",
-        }}
-        onRun={() => void workspace.runScripts()}
-        onStop={() => void workspace.stopRunScripts()}
-      />
-      <ProjectScriptButton
-        activeState={buildState}
-        available={workspace.buildScriptsAvailable}
-        configError={workspace.runScriptsConfigError}
-        disabled={buildDisabled}
-        idleIcon={Hammer}
-        labels={{
-          run: "Build project scripts",
-          stop: "Stop project scripts",
-          none: "No project build scripts",
-        }}
-        onRun={() => void workspace.buildScripts()}
-        onStop={() => void workspace.stopBuildScripts()}
-      />
+      {workspace.scriptButtons.map((button) => {
+        const active = workspace.activeScripts.find((script) => script.name === button.name);
+        const disabled = computeScriptButtonDisabled(button, workspace);
+        return (
+          <ProjectScriptButton
+            key={button.name}
+            button={button}
+            isActive={!!active}
+            stopping={!!active?.stopping}
+            configError={workspace.runScriptsConfigError}
+            disabled={disabled}
+            onRun={() => void workspace.runScript(button.name)}
+            onStop={() => void workspace.stopScript(button.name)}
+          />
+        );
+      })}
       <PluginTopperItems items={topperItems} />
       {workspace.agentBackAvailable ? (
         <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>
@@ -310,24 +335,11 @@ function PluginTopperItems({
   ));
 }
 
-/** Whether the "Run" project-script button is disabled given current run/build state. */
-function computeRunDisabled(
-  runState: Workspace["runScriptsState"],
-  buildState: Workspace["buildScriptsState"],
-  workspace: Workspace,
-): boolean {
-  if (runState) return runState.stopping;
-  return !workspace.selectedWorktree || !workspace.runScriptsAvailable || !!buildState;
-}
-
-/** Whether the "Build" project-script button is disabled given current build/run state. */
-function computeBuildDisabled(
-  buildState: Workspace["buildScriptsState"],
-  runState: Workspace["runScriptsState"],
-  workspace: Workspace,
-): boolean {
-  if (buildState) return buildState.stopping;
-  return !workspace.selectedWorktree || !workspace.buildScriptsAvailable || !!runState;
+/** Whether a script button is disabled: a script can't be re-run while it's already active. */
+function computeScriptButtonDisabled(button: ScriptButtonInfo, workspace: Workspace): boolean {
+  const active = workspace.activeScripts.find((script) => script.name === button.name);
+  if (active) return active.stopping;
+  return !workspace.selectedWorktree || !button.available;
 }
 
 /** Shared inline-rename state for terminal tabs (only one tab renames at a time). */
@@ -407,6 +419,7 @@ function SplitParentTab({
 }
 
 /** One regular top-bar tab: drag handle, rename input, close button, context menu. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePrSubmit); not extractable logic.
 function TerminalTabItem({
   tab,
   active,
@@ -653,16 +666,6 @@ export function TerminalTabs() {
   const editorDisabled =
     !workspace.selectedWorktree ||
     workspace.remoteWorktrees[workspace.selectedWorktree.id] === true;
-  const runDisabled = computeRunDisabled(
-    workspace.runScriptsState,
-    workspace.buildScriptsState,
-    workspace,
-  );
-  const buildDisabled = computeBuildDisabled(
-    workspace.buildScriptsState,
-    workspace.runScriptsState,
-    workspace,
-  );
 
   const openEditor = useCallback(
     (editor: EditorLauncher) => {
@@ -682,12 +685,7 @@ export function TerminalTabs() {
           className="flex h-9 items-center justify-between gap-2 border-b border-sidebar-border px-2"
           onMouseDown={startWindowDrag}
         >
-          <TerminalToolbar
-            buildDisabled={buildDisabled}
-            topperItems={leftTopperItems}
-            runDisabled={runDisabled}
-            workspace={workspace}
-          />
+          <TerminalToolbar topperItems={leftTopperItems} workspace={workspace} />
           <div className="flex shrink-0 items-center justify-end gap-1">
             <PluginTopperItems items={rightTopperItems} />
             <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />

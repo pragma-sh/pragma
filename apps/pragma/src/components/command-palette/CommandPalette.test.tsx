@@ -35,7 +35,6 @@ const { activateTabLocation, closeTab, onOpenChange, workspace } = vi.hoisted(()
           worktreeId: "worktree",
           tabId: "script-tab",
           name: "run",
-          kind: "run",
           stopping: false,
         },
       ],
