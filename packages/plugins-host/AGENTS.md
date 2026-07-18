@@ -10,7 +10,7 @@ last publish so a crash never blanks the catalog).
 Spawns under `pragma-server` (`crates/pragma-server/src/plugins_host.rs`), reads NDJSON
 commands on stdin, and emits NDJSON events on stdout:
 
-- **Commands** (stdin): `load` (roots + gatewayUrl + gatewayToken) and correlated
+- **Commands** (stdin): `load` (roots + gateway credentials + stateDir + serverBootId) and correlated
   `usageLimits` (`requestId` + optional `pluginId`). There is no separate `reload`
   command — host re-sends full `load` with fresh gateway credentials.
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
@@ -26,6 +26,12 @@ via Bun `import()` (the `pragma-watch` precedent), resolves async model provider
 `PragmaClient` pointed at the local gateway, hashes icon files (`sha256`, 256 KB cap), and
 assembles the `AgentCatalog`.
 
+Plugin lifecycle hooks run asynchronously after catalog publication, so slow setup cannot block
+agent discovery. `onInstall` is persisted once per plugin id in `plugin-lifecycle.json` under the
+server state directory; `onPragmaLoad` is persisted against the Rust server's boot id. Each
+successful callback is persisted before the next starts. Hooks must still be idempotent across
+the unavoidable process-crash boundary between external effects and marker write.
+
 ## File map
 
 ```
@@ -35,6 +41,7 @@ packages/plugins-host/
 │   ├── catalog.ts    # assembleCatalog, resolveModels, hashIcon, mimeForIcon, ICON_MAX_BYTES
 │   ├── manifest.ts   # resolveManifests: global + project .pragma/config.json plugins
 │   ├── usage-limits.ts # Loads plugin usage-limit providers with plugin-specific context
+│   ├── lifecycle.ts # Executes onInstall/onPragmaLoad with durable dedupe markers
 │   ├── index.ts      # Re-exports for tests/consumers
 │   ├── catalog.test.ts
 │   └── manifest.test.ts

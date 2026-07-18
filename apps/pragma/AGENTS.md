@@ -187,6 +187,9 @@ directory to `PATH` so bundled plugins can report status even when the user's sh
 doesn't include it. The app still emits a UI warning if that directory is not on the
 app's startup `$PATH`.
 
+Agent definitions may also declare typed `excludeFeatures`; this metadata crosses the
+shared catalog so `agent verify` skips unsupported optional capability groups.
+
 Model providers may be static arrays or async plugin functions. Pragma resolves model
 lists lazily when the selector submenu is hovered/focused and caches the last result.
 Host-specific CLI parsing belongs in the plugin agent's model provider, not Rust/Tauri

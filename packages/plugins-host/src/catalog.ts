@@ -16,6 +16,8 @@ export const ICON_MAX_BYTES = 256 * 1024;
 /** A loaded plugin definition plus the manifest facts the hosts need. */
 export interface ResolvedPlugin {
   pluginId: string;
+  scope: "bundled" | "global" | "project";
+  root: string;
   /** Absolute plugin directory (relative icon paths resolve against it). */
   dir: string;
   /** Absolute path of the imported bundle (`pragma-watch` re-imports it). */
@@ -152,6 +154,7 @@ async function catalogAgent(
     pluginId: plugin.pluginId,
     models,
     launch,
+    ...(agent.excludeFeatures ? { excludeFeatures: agent.excludeFeatures } : {}),
     ...(icon ? { icon } : {}),
   };
 }

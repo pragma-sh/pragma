@@ -12,6 +12,8 @@ function resolvedPlugin(
 ): ResolvedPlugin {
   return {
     pluginId: `${id}.agent`,
+    scope: "bundled",
+    root: "/plugins",
     dir: `/plugins/${id}`,
     mainPath: `/plugins/${id}/dist/main.mjs`,
     config: undefined,
@@ -41,6 +43,8 @@ describe("loadUsageLimits", () => {
     const plugins: ResolvedPlugin[] = [
       {
         pluginId: "test.agent",
+        scope: "project",
+        root: "/repo",
         dir: "/plugins/agent",
         mainPath: "/plugins/agent/dist/main.mjs",
         config: { account: "work" },

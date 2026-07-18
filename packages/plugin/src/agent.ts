@@ -1,3 +1,5 @@
+import type { AgentFeature as SharedAgentFeature } from "@pragma/constants";
+
 import type { PluginIcon } from "./contributions";
 import type { PluginContext } from "./types";
 
@@ -39,6 +41,9 @@ export interface AgentArgsBuilder {
   permissionMode: (permissionModeId: string) => string[];
 }
 
+/** Optional agent capabilities that can be excluded from `pragma-cli agent verify`. */
+export type AgentFeature = SharedAgentFeature;
+
 /**
  * Declares an agent a plugin makes launchable from Pragma. Field names below
  * `launch`/`models`/`permissionModes`/`args` are new, JS-only additions;
@@ -56,6 +61,8 @@ export interface AgentDefinition<TConfig = unknown> {
   models: AgentModelEntry[] | ((ctx: PluginContext<TConfig>) => Promise<AgentModelEntry[]>);
   permissionModes: AgentPermissionMode[];
   args: AgentArgsBuilder;
+  /** Capabilities this agent does not support; matching verification scenarios are skipped. */
+  excludeFeatures?: AgentFeature[];
   startupInput?: AgentStartupInput[];
   prefillDelayMs?: number;
   prefillMode?: "bracketed" | "plain";

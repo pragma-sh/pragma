@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pragma_constants::{AgentAttentionKind, AgentStatus};
+use pragma_constants::{AgentAttentionKind, AgentFeature, AgentStatus};
 
 use super::engine::ScenarioCtx;
 use super::events::VerifyEvent;
@@ -19,103 +19,165 @@ pub struct ScenarioDef {
     pub id: &'static str,
     pub name: &'static str,
     pub slow: bool,
+    pub features: &'static [AgentFeature],
     pub run: fn(&ScenarioCtx<'_>, &Prompts) -> Result<Outcome, String>,
 }
 
 /// Ordered scenario table. Stream integrity must remain last.
+// Declarative entries stay inline so execution order and capability mapping can be audited together.
+#[allow(clippy::too_many_lines)]
 pub fn definitions() -> &'static [ScenarioDef] {
     &[
         ScenarioDef {
             id: "basic-reply",
             name: "basic reply",
             slow: false,
+            features: &[],
             run: basic_reply,
+        },
+        ScenarioDef {
+            id: "command-no-permission",
+            name: "command without permission",
+            slow: false,
+            features: &[AgentFeature::Commands],
+            run: command_no_permission,
         },
         ScenarioDef {
             id: "question-answer",
             name: "question answer",
             slow: false,
+            features: &[AgentFeature::Questions],
             run: question_answer,
         },
         ScenarioDef {
             id: "question-dismiss",
             name: "question dismiss",
             slow: false,
+            features: &[AgentFeature::Questions],
             run: question_dismiss,
         },
         ScenarioDef {
             id: "question-free-text",
             name: "question free text",
             slow: false,
+            features: &[AgentFeature::Questions],
             run: question_free_text,
         },
         ScenarioDef {
             id: "command-allow",
             name: "command allow",
             slow: false,
+            features: &[AgentFeature::CommandApproval],
             run: command_allow,
         },
         ScenarioDef {
             id: "command-deny",
             name: "command deny",
             slow: false,
+            features: &[AgentFeature::CommandApproval],
             run: command_deny,
         },
         ScenarioDef {
             id: "decision-timeout",
             name: "decision timeout",
             slow: true,
+            features: &[AgentFeature::CommandApproval],
             run: decision_timeout,
         },
         ScenarioDef {
             id: "subagent",
             name: "parallel sub-agents",
             slow: false,
+            features: &[AgentFeature::Subagents],
             run: subagent,
         },
         ScenarioDef {
             id: "abort-mid-run",
             name: "abort mid-run",
             slow: false,
+            features: &[AgentFeature::Abort],
             run: abort_mid_run,
         },
         ScenarioDef {
             id: "interrupt-event",
             name: "interrupt event",
             slow: false,
+            features: &[AgentFeature::Interrupt],
             run: interrupt_event,
         },
         ScenarioDef {
             id: "abort-mid-question",
             name: "abort mid-question",
             slow: false,
+            features: &[AgentFeature::Questions, AgentFeature::Abort],
             run: abort_mid_question,
         },
         ScenarioDef {
             id: "abort-mid-approval",
             name: "abort mid-approval",
             slow: false,
+            features: &[AgentFeature::CommandApproval, AgentFeature::Abort],
             run: abort_mid_approval,
         },
         ScenarioDef {
             id: "crash-exit",
             name: "crash/exit settle",
             slow: false,
+            features: &[],
             run: crash_exit,
         },
         ScenarioDef {
             id: "usage-limits",
             name: "usage limits",
             slow: false,
+            features: &[AgentFeature::UsageLimits],
             run: usage_limits,
         },
         ScenarioDef {
             id: "stream-integrity",
             name: "stream integrity",
             slow: false,
+            features: &[],
             run: stream_integrity,
         },
     ]
+}
+
+fn command_no_permission(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, String> {
+    let earliest = unix_seconds()?.saturating_sub(5);
+    let mut session = ctx.launch(prompts.get("command-no-permission")?)?;
+    session.await_running()?;
+    let message = session.await_assistant_message()?;
+    let latest = unix_seconds()?.saturating_add(5);
+    let reported_current_time = message.text.as_deref().is_some_and(|text| {
+        text.split(|character: char| !character.is_ascii_digit())
+            .filter_map(|value| value.parse::<u64>().ok())
+            .any(|value| (earliest..=latest).contains(&value))
+    });
+    if !reported_current_time {
+        return Err("safe command output omitted a current Unix timestamp".to_string());
+    }
+    require_done(session.await_settled()?)?;
+    if session.scoped_events_since_start().iter().any(|event| {
+        matches!(
+            event,
+            VerifyEvent::Agent {
+                status: AgentStatus::Attention,
+                attention_kind: Some(AgentAttentionKind::Command),
+                ..
+            }
+        )
+    }) {
+        return Err("safe command unexpectedly requested permission".to_string());
+    }
+    Ok(Outcome::Passed)
+}
+
+fn unix_seconds() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|error| format!("system clock predates Unix epoch: {error}"))
 }
 
 fn basic_reply(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, String> {

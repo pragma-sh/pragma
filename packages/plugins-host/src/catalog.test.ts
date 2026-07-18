@@ -64,6 +64,8 @@ describe("resolveModels", () => {
 function plugin(pluginId: string, definition: unknown, dir = "/plugins/one"): ResolvedPlugin {
   return {
     pluginId,
+    scope: "bundled",
+    root: "/plugins",
     dir,
     mainPath: join(dir, "plugin.mjs"),
     config: undefined,
@@ -82,6 +84,7 @@ describe("assembleCatalog", () => {
             name: "Good",
             iconPath,
             launch: { command: ["good"] },
+            excludeFeatures: ["questions", "subagents"],
             models: [{ id: "m", name: "M" }],
             args: { model: (id: string) => ["--model", id] },
           },
@@ -104,6 +107,7 @@ describe("assembleCatalog", () => {
     const [agent] = catalog.agents;
     expect(agent?.id).toBe("p.one.good");
     expect(agent?.pluginId).toBe("p.one");
+    expect(agent?.excludeFeatures).toEqual(["questions", "subagents"]);
     expect(agent?.launch.commands).toEqual([
       { modelId: null, reasoningId: null, command: ["good"] },
       { modelId: "m", reasoningId: null, command: ["good", "--model", "m"] },

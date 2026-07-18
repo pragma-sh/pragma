@@ -133,8 +133,17 @@ Contribute launcher with `defineAgent`:
 - `startupInput`: timed pre-TUI gates.
 - `prefillDelayMs`, `prefillMode`, `prefillSubmit`, `prefillSubmitDelayMs`: agent-owned
   prompt delivery behavior.
+- `excludeFeatures`: declare unsupported optional capabilities (`questions`,
+  `commandApproval`, `commands`, `subagents`, `abort`, `interrupt`, `usageLimits`) so
+  `agent verify` skips scenarios the host cannot implement.
 
 Attach `createTuiWatcher`:
+
+Use `@pragma/watcher-kit` for basic agent prompting operations: interjections, command
+decisions, question answers, and prompt submit timing. Do not reimplement its connection,
+replay, request-id dedupe, or TUI-key logic in each extension. Inside the Pragma monorepo,
+install it in the extension package as `"@pragma/watcher-kit": "workspace:*"`; external
+plugins install the published package normally.
 
 - `handleDecisions: true` when host lacks a decision-returning hook (OpenCode).
 - `handleDecisions: false` when blocking hooks return decisions (Claude Code, Cursor).
@@ -255,6 +264,8 @@ restart host before live run.
 - Question/decision request ids round-trip.
 - Usage-limit provider included when host exposes account limits.
 - Every script uses TypeScript, except necessary POSIX `sh` hooks or wrappers.
+- Unsupported optional capabilities are listed in `excludeFeatures`; skipped verifier
+  scenarios carry that explicit reason.
 - `agent verify` applicable scenarios all pass, including abort and stream integrity.
 - Package tests and `bun run check` pass.
 - Relevant `AGENTS.md` updated with new workflow or gotcha.

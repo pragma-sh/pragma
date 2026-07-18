@@ -667,6 +667,20 @@
         }
       }
     },
+    "AgentFeature": {
+      "title": "AgentFeature",
+      "type": "string",
+      "description": "Optional agent capability used to exclude unsupported agent-verification scenarios.",
+      "enum": [
+        "questions",
+        "commandApproval",
+        "commands",
+        "subagents",
+        "abort",
+        "interrupt",
+        "usageLimits"
+      ]
+    },
     "CatalogAgent": {
       "title": "CatalogAgent",
       "type": "object",
@@ -699,6 +713,14 @@
           "items": {
             "$ref": "#/definitions/AgentModelEntry"
           }
+        },
+        "excludeFeatures": {
+          "type": "array",
+          "description": "Capabilities the agent declares unsupported; agent verification skips matching scenarios.",
+          "items": {
+            "$ref": "#/definitions/AgentFeature"
+          },
+          "uniqueItems": true
         },
         "launch": {
           "$ref": "#/definitions/AgentLaunchConfig"
