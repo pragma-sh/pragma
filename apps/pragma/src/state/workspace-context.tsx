@@ -153,7 +153,7 @@ interface WorkspaceState {
 }
 
 /** Prior split layout saved before interactive scripts temporarily replace it. */
-type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
+export type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
 
 /** One active interactive project script shown in cross-worktree navigation. */
 interface RunningScript {
@@ -172,7 +172,7 @@ export interface ScriptButtonInfo {
 }
 
 /** One running instance of a named script within a worktree. */
-type ManagedScriptEntry = {
+export type ManagedScriptEntry = {
   worktreeId: string;
   name: string;
   tabIds: string[];
@@ -186,7 +186,7 @@ type ManagedScriptEntry = {
  * multiple different scripts (e.g. `run` and `lint`) can run concurrently in
  * the same worktree; the same named script can only run once at a time.
  */
-type ManagedScriptsState = Record<string, Record<string, ManagedScriptEntry>>;
+export type ManagedScriptsState = Record<string, Record<string, ManagedScriptEntry>>;
 
 /** The interactive scripts currently running for a worktree, if any. */
 function activeManagedScripts(
@@ -200,7 +200,7 @@ function activeManagedScripts(
   return Object.values(scripts).map(({ name, stopping }) => ({ name, stopping }));
 }
 
-type WorkspaceAction =
+export type WorkspaceAction =
   | { type: "load-start" }
   | { type: "load-error"; error: string }
   | { type: "set-projects"; projects: Project[] }
@@ -478,6 +478,53 @@ function restoreRunScriptsSplitSnapshot(
   } else {
     dispatch({ type: "clear-split-root", worktreeId });
   }
+}
+
+/**
+ * Pops `scriptName` off its worktree's layout stack and reconciles its snapshot.
+ * Concurrent scripts with split layouts each overwrite the whole worktree root, so
+ * their "restore to this on stop" snapshots form a stack in push order. If a newer
+ * script's layout is still on top, that script's layout must stay visible — instead
+ * this splices `scriptName` out by handing its snapshot to the next-newer script, so
+ * that script's own eventual stop restores past `scriptName` instead of pointing at
+ * `scriptName`'s now-stale pane/tab ids. Only when `scriptName` is topmost (nothing
+ * newer above it) does the snapshot actually get applied to the visible layout.
+ */
+export function popScriptLayout(
+  dispatch: React.Dispatch<WorkspaceAction>,
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
+  layoutStackRef: RefObject<Record<string, string[]>>,
+  worktreeId: string,
+  scriptName: string,
+  snapshot: RunScriptsSplitSnapshot,
+): void {
+  const stack = layoutStackRef.current[worktreeId] ?? [];
+  const index = stack.indexOf(scriptName);
+  const above = index === -1 ? undefined : stack[index + 1];
+  const nextStack = stack.filter((entry) => entry !== scriptName);
+  if (nextStack.length > 0) {
+    layoutStackRef.current = { ...layoutStackRef.current, [worktreeId]: nextStack };
+  } else {
+    const { [worktreeId]: _removed, ...rest } = layoutStackRef.current;
+    layoutStackRef.current = rest;
+  }
+  if (above) {
+    setManagedScriptsState((current) => {
+      const aboveEntry = current[worktreeId]?.[above];
+      if (!aboveEntry) {
+        return current;
+      }
+      return {
+        ...current,
+        [worktreeId]: {
+          ...current[worktreeId],
+          [above]: { ...aboveEntry, splitSnapshot: snapshot },
+        },
+      };
+    });
+    return;
+  }
+  restoreRunScriptsSplitSnapshot(dispatch, worktreeId, snapshot);
 }
 
 function materializeRunScriptLayout(
@@ -1641,6 +1688,8 @@ interface ManagedScriptRunContext {
   setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
   splitRootByWorktree: WorkspaceState["splitRootByWorktree"];
   closeTab: (tabId: string) => Promise<unknown>;
+  /** Push order of scripts that have overwritten the worktree's split root, oldest first. */
+  layoutStackRef: RefObject<Record<string, string[]>>;
 }
 
 /** Capitalizes a script name for a terminal tab title (`lint` -> `Lint`). */
@@ -1713,6 +1762,13 @@ function applyRunScriptItemLayout(
           ? (ctx.splitRootByWorktree[ctx.worktreeId] ?? null)
           : null,
     } satisfies RunScriptsSplitSnapshot);
+  if (!splitSnapshot) {
+    const stack = ctx.layoutStackRef.current[ctx.worktreeId] ?? [];
+    ctx.layoutStackRef.current = {
+      ...ctx.layoutStackRef.current,
+      [ctx.worktreeId]: [...stack, ctx.scriptName],
+    };
+  }
   ctx.dispatch({
     type: "set-split-root",
     worktreeId: ctx.worktreeId,
@@ -1796,7 +1852,14 @@ async function handleManagedScriptsFailure(
     return rest;
   });
   if (splitSnapshot) {
-    restoreRunScriptsSplitSnapshot(ctx.dispatch, ctx.worktreeId, splitSnapshot);
+    popScriptLayout(
+      ctx.dispatch,
+      ctx.setManagedScriptsState,
+      ctx.layoutStackRef,
+      ctx.worktreeId,
+      ctx.scriptName,
+      splitSnapshot,
+    );
   }
   await Promise.all(startedTabIds.map((tabId) => ctx.closeTab(tabId)));
   toast.error(`Failed to run project ${ctx.scriptName} scripts: ${errorMessage(cause)}`);
@@ -3289,6 +3352,7 @@ function useManagedScripts(
   const selectedWorktreeId = state.selectedProjectId
     ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
     : null;
+  const layoutStackRef = useRef<Record<string, string[]>>({});
   const activeScripts = useMemo(
     () => activeManagedScripts(managedScriptsState, selectedWorktreeId),
     [managedScriptsState, selectedWorktreeId],
@@ -3326,6 +3390,7 @@ function useManagedScripts(
         setManagedScriptsState,
         splitRootByWorktree: state.splitRootByWorktree,
         closeTab,
+        layoutStackRef,
       };
       const startedTabIds: string[] = [];
       let splitSnapshot: RunScriptsSplitSnapshot | null = null;
@@ -3369,7 +3434,14 @@ function useManagedScripts(
         },
       }));
       if (current.splitSnapshot) {
-        restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
+        popScriptLayout(
+          dispatch,
+          setManagedScriptsState,
+          layoutStackRef,
+          current.worktreeId,
+          name,
+          current.splitSnapshot,
+        );
       }
       await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
       setManagedScriptsState((previous) => {
