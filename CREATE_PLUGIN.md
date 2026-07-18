@@ -185,11 +185,18 @@ import { defineAgent, definePlugin } from "@pragma/plugin";
 
 export default definePlugin({
   name: "Example Agent",
+  onInstall: async (ctx) => {
+    await ctx.sdk.exec.run({ cwd: ctx.project?.path ?? "/tmp", commands: ["example setup"] });
+  },
+  onPragmaLoad: (ctx) => {
+    ctx.notify("Example Agent loaded");
+  },
   agents: [
     defineAgent({
       id: "example",
       name: "Example",
       launch: { command: ["example", "--interactive"] },
+      excludeFeatures: ["questions"],
       models: [{ id: "default", name: "Default" }],
       args: {
         model: (modelId) => ["--model", modelId],
@@ -206,6 +213,13 @@ export default definePlugin({
 - `launch.command` — argv used to launch the tool in a Pragma terminal.
 - `models` — optional static array or async model provider.
 - `args` — optional model/reasoning/permission-mode launch-argument builders.
+- `excludeFeatures` — typed unsupported capabilities. `agent verify` skips their scenarios.
+
+`definePlugin` also accepts server lifecycle callbacks. `onInstall` runs once when this Pragma
+installation first discovers the plugin id. `onPragmaLoad` runs once per Pragma server boot.
+Both receive plugin-specific `PluginContext`; failures are logged and retried on a later load.
+Keep callbacks idempotent: Pragma persists each successful completion immediately, but no
+process can atomically combine an external side effect with its local completion marker.
 
 ### Optional model discovery
 

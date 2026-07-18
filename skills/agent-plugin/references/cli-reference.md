@@ -86,3 +86,7 @@ Options:
 
 Exit is non-zero when any scenario fails. Skips do not fail. Plain output is a table;
 global `--json` and `--toon` serialize same report.
+
+Catalog agents may declare `excludeFeatures`. Verification skips scenarios mapped to an
+excluded capability. `command-no-permission` remains separate from command-approval tests:
+it runs a safe command and fails if command attention appears.

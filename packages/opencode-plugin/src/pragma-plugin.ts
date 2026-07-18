@@ -27,6 +27,7 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/opencode.svg",
       launch: { command: ["opencode"] },
+      excludeFeatures: ["usageLimits"],
       prefillDelayMs: 6000,
       models: async (ctx) =>
         parseOpenCodeModels(

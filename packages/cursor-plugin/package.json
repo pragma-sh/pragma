@@ -16,7 +16,8 @@
     "./pragma-plugin": "./src/pragma-plugin.ts"
   },
   "scripts": {
-    "build": "bunup src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "build": "bunup src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs && bun build src/usage-limits-cli.ts --compile --minify --outfile dist/usage-limits",
+    "preinstall:local": "bun run build",
     "install:local": "sh scripts/install-local.sh",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",

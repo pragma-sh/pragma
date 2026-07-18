@@ -148,7 +148,7 @@ it("runs the bundled helper without passing credentials through the command", as
   expect(capturedRequest).toEqual({
     cwd: "/project",
     commands: [
-      expect.stringContaining("/Applications/Pragma App/plugins/cursor/assets/usage-limits.py"),
+      expect.stringContaining("/Applications/Pragma App/plugins/cursor/dist/usage-limits"),
     ],
   });
   expect(capturedRequest?.commands[0]).not.toContain("WorkosCursorSessionToken");

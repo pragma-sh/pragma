@@ -100,16 +100,15 @@ const mockWorkspace: WorkspaceContextValue = {
   splitActivePane: vi.fn(),
   splitTabAtPane: vi.fn(),
   moveTabToPane: vi.fn(),
-  runScriptsAvailable: false,
-  buildScriptsAvailable: false,
+  scriptButtons: [
+    { name: "run", icon: null, available: false },
+    { name: "build", icon: null, available: false },
+  ],
   runScriptsConfigError: null,
-  runScriptsState: null,
-  buildScriptsState: null,
+  activeScripts: [],
   runningScripts: [],
-  runScripts: vi.fn(),
-  buildScripts: vi.fn(),
-  stopRunScripts: vi.fn(),
-  stopBuildScripts: vi.fn(),
+  runScript: vi.fn(),
+  stopScript: vi.fn(),
 };
 
 vi.mock("@/state/workspace-context", () => ({
@@ -126,8 +125,11 @@ afterEach(() => {
   mockWorkspace.selectedWorktree = null;
   mockWorkspace.selectedWorktreeId = "worktree";
   mockWorkspace.remoteWorktrees = {};
-  mockWorkspace.runScriptsAvailable = false;
-  mockWorkspace.runScriptsState = null;
+  mockWorkspace.scriptButtons = [
+    { name: "run", icon: null, available: false },
+    { name: "build", icon: null, available: false },
+  ];
+  mockWorkspace.activeScripts = [];
   vi.clearAllMocks();
 });
 
@@ -166,12 +168,15 @@ describe("TerminalTabs", () => {
       hidden: false,
       createdAt: "now",
     };
-    mockWorkspace.runScriptsAvailable = true;
+    mockWorkspace.scriptButtons = [
+      { name: "run", icon: null, available: true },
+      { name: "build", icon: null, available: false },
+    ];
     render(<TerminalTabs />);
 
     await userEvent.click(screen.getByLabelText("Run project scripts"));
 
-    expect(mockWorkspace.runScripts).toHaveBeenCalled();
+    expect(mockWorkspace.runScript).toHaveBeenCalledWith("run");
   });
 
   it("disables the editor launcher for remote worktrees", async () => {
@@ -208,34 +213,60 @@ describe("TerminalTabs", () => {
       hidden: false,
       createdAt: "now",
     };
-    mockWorkspace.buildScriptsAvailable = true;
+    mockWorkspace.scriptButtons = [
+      { name: "run", icon: null, available: false },
+      { name: "build", icon: null, available: true },
+    ];
     render(<TerminalTabs />);
 
     await userEvent.click(screen.getByLabelText("Build project scripts"));
 
-    expect(mockWorkspace.buildScripts).toHaveBeenCalled();
+    expect(mockWorkspace.runScript).toHaveBeenCalledWith("build");
   });
 
   it("stops managed project scripts while running", async () => {
-    mockWorkspace.runScriptsState = {
-      worktreeId: "worktree",
-      tabIds: ["one"],
-      stopping: false,
-      splitSnapshot: null,
-    };
+    mockWorkspace.activeScripts = [{ name: "run", stopping: false }];
     render(<TerminalTabs />);
 
     await userEvent.click(screen.getByLabelText("Stop project scripts"));
 
-    expect(mockWorkspace.stopRunScripts).toHaveBeenCalled();
+    expect(mockWorkspace.stopScript).toHaveBeenCalledWith("run");
   });
 
   it("does not show scripts from another worktree as running", () => {
     mockWorkspace.selectedWorktreeId = "other-worktree";
-    mockWorkspace.runScriptsState = null;
+    mockWorkspace.activeScripts = [];
     render(<TerminalTabs />);
 
     expect(screen.getByLabelText("Run project scripts")).toBeInTheDocument();
     expect(screen.queryByLabelText("Stop project scripts")).not.toBeInTheDocument();
+  });
+
+  it("lets a different script start while one is already running", async () => {
+    mockWorkspace.selectedWorktree = {
+      id: "worktree",
+      projectId: "project",
+      parentId: null,
+      branch: "main",
+      title: null,
+      path: "/tmp/project",
+      isMain: true,
+      hidden: false,
+      createdAt: "now",
+    };
+    mockWorkspace.scriptButtons = [
+      { name: "run", icon: null, available: true },
+      { name: "build", icon: null, available: true },
+    ];
+    mockWorkspace.activeScripts = [{ name: "run", stopping: false }];
+    render(<TerminalTabs />);
+
+    expect(screen.getByLabelText("Stop project scripts")).not.toBeDisabled();
+    const buildButton = screen.getByLabelText("Build project scripts");
+    expect(buildButton).not.toBeDisabled();
+
+    await userEvent.click(buildButton);
+
+    expect(mockWorkspace.runScript).toHaveBeenCalledWith("build");
   });
 });

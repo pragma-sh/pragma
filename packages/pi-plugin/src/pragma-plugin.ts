@@ -30,6 +30,7 @@ export const piAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/pi-badge.svg",
       launch: { command: ["pi"] },
+      excludeFeatures: ["questions", "commandApproval", "subagents", "usageLimits"],
       prefillDelayMs: 2000,
       prefillMode: "plain",
       prefillSubmit: "\r",

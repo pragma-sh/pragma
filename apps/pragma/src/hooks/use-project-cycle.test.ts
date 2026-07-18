@@ -77,16 +77,15 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     splitActivePane: vi.fn(),
     splitTabAtPane: vi.fn(),
     moveTabToPane: vi.fn(),
-    runScriptsAvailable: false,
-    buildScriptsAvailable: false,
+    scriptButtons: [
+      { name: "run", icon: null, available: false },
+      { name: "build", icon: null, available: false },
+    ],
     runScriptsConfigError: null,
-    runScriptsState: null,
-    buildScriptsState: null,
+    activeScripts: [],
     runningScripts: [],
-    runScripts: vi.fn(),
-    buildScripts: vi.fn(),
-    stopRunScripts: vi.fn(),
-    stopBuildScripts: vi.fn(),
+    runScript: vi.fn(),
+    stopScript: vi.fn(),
   } as WorkspaceContextValue;
   return { mockWorkspace: workspace, selectProjectMock: selectProject };
 });

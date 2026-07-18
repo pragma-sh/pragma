@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -13,17 +14,24 @@ use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
-const SCRIPT_CONFIG_PATH: &str = ".pragma/scripts.json";
-
 /// Validated project script config returned to the frontend and used by
-/// backend lifecycle hooks. `run` stays as JSON because the Rust side only
-/// validates and echoes the frontend-owned split tree.
+/// backend lifecycle hooks. Each `runScripts` entry's `command` stays as JSON
+/// because the Rust side only validates and echoes the frontend-owned split
+/// tree. Keyed by `BTreeMap` for a deterministic (alphabetical) button order
+/// in the header, since `serde_json::Map` does not preserve source order.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LoadedProjectScripts {
     pub setup: Vec<String>,
-    pub run: Vec<Value>,
-    pub build: Vec<Value>,
+    #[serde(rename = "runScripts")]
+    pub run_scripts: BTreeMap<String, ScriptDefinition>,
     pub teardown: Vec<String>,
+}
+
+/// One named interactive script: its commands and the header button's icon.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScriptDefinition {
+    pub command: Vec<Value>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +67,7 @@ pub fn load_project_scripts_on_host(
     pty: &PtyClient,
     project_root: &str,
 ) -> AppResult<LoadedProjectScripts> {
-    let config_path = Path::new(project_root).join(SCRIPT_CONFIG_PATH);
+    let config_path = Path::new(project_root).join(CONSTANTS.scripts.config_path.as_str());
     match read_scripts_json(pty, project_root) {
         Some(raw) => parse_config(&raw, &config_path),
         None => Ok(LoadedProjectScripts::default()),
@@ -71,7 +79,7 @@ pub fn load_project_scripts_on_host(
 fn read_scripts_json(pty: &PtyClient, project_root: &str) -> Option<String> {
     let request = FsRequest::ReadFile {
         root: project_root.to_string(),
-        path: SCRIPT_CONFIG_PATH.to_string(),
+        path: CONSTANTS.scripts.config_path.to_string(),
     };
     let payload = serde_json::to_value(request).ok()?;
     let value = pty.rpc(ProtocolRpcMethod::Filesystem, payload).ok()?;
@@ -182,10 +190,39 @@ fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {
     })?;
     Ok(LoadedProjectScripts {
         setup: string_array_from_value(object.get("setup"))?,
-        run: interactive_array_from_value(object.get("run"))?,
-        build: interactive_array_from_value(object.get("build"))?,
+        run_scripts: runscripts_from_value(object.get("runScripts"))?,
         teardown: string_array_from_value(object.get("teardown"))?,
     })
+}
+
+fn runscripts_from_value(value: Option<&Value>) -> AppResult<BTreeMap<String, ScriptDefinition>> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| AppError::InvalidInput("runScripts must be a JSON object".to_string()))?;
+    object
+        .iter()
+        .map(|(name, entry)| Ok((name.clone(), script_definition_from_value(entry, name)?)))
+        .collect()
+}
+
+fn script_definition_from_value(value: &Value, name: &str) -> AppResult<ScriptDefinition> {
+    let object = value.as_object().ok_or_else(|| {
+        AppError::InvalidInput(format!("runScripts.{name} must be a JSON object"))
+    })?;
+    let command = interactive_array_from_value(object.get("command"))?;
+    let icon = match object.get("icon") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(icon)) => Some(icon.clone()),
+        Some(_) => {
+            return Err(AppError::InvalidInput(format!(
+                "runScripts.{name}.icon must be a string"
+            )))
+        }
+    };
+    Ok(ScriptDefinition { command, icon })
 }
 
 fn interactive_array_from_value(value: Option<&Value>) -> AppResult<Vec<Value>> {
@@ -220,7 +257,7 @@ fn validate_config(value: &Value, path: &Path) -> AppResult<()> {
         AppError::InvalidInput(format!("{} must contain a JSON object", path.display()))
     })?;
     for key in object.keys() {
-        if !matches!(key.as_str(), "setup" | "run" | "build" | "teardown") {
+        if !matches!(key.as_str(), "setup" | "runScripts" | "teardown") {
             return Err(AppError::InvalidInput(format!(
                 "{} has unknown key `{key}`",
                 path.display()
@@ -229,8 +266,44 @@ fn validate_config(value: &Value, path: &Path) -> AppResult<()> {
     }
     validate_command_array(object.get("setup"), path, "setup")?;
     validate_command_array(object.get("teardown"), path, "teardown")?;
-    validate_interactive_script_array(object.get("run"), path, "run")?;
-    validate_interactive_script_array(object.get("build"), path, "build")?;
+    validate_runscripts(object.get("runScripts"), path)?;
+    Ok(())
+}
+
+fn validate_runscripts(value: Option<&Value>, path: &Path) -> AppResult<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let object = value.as_object().ok_or_else(|| {
+        AppError::InvalidInput(format!("{}.runScripts must be an object", path.display()))
+    })?;
+    for (name, entry) in object {
+        let field = format!("runScripts.{name}");
+        let entry_object = entry.as_object().ok_or_else(|| {
+            AppError::InvalidInput(format!("{}.{field} must be an object", path.display()))
+        })?;
+        for key in entry_object.keys() {
+            if !matches!(key.as_str(), "command" | "icon") {
+                return Err(AppError::InvalidInput(format!(
+                    "{}.{field} has unknown key `{key}`",
+                    path.display()
+                )));
+            }
+        }
+        validate_interactive_script_array(
+            entry_object.get("command"),
+            path,
+            &format!("{field}.command"),
+        )?;
+        if let Some(icon) = entry_object.get("icon") {
+            if !icon.is_null() && !icon.is_string() {
+                return Err(AppError::InvalidInput(format!(
+                    "{}.{field}.icon must be a string",
+                    path.display()
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -368,34 +441,50 @@ mod tests {
     fn empty_object_is_empty_config() {
         let config = parse("{}").expect("parse");
         assert!(config.setup.is_empty());
-        assert!(config.run.is_empty());
-        assert!(config.build.is_empty());
+        assert!(config.run_scripts.is_empty());
         assert!(config.teardown.is_empty());
     }
 
     #[test]
-    fn accepts_top_level_build_string_entries() {
+    fn accepts_build_script_with_icon() {
         let config = parse(
-            r#"{ "build": ["cargo build", { "left": "cargo build -p foo", "right": "cargo build -p bar" }] }"#,
+            r#"{ "runScripts": { "build": { "command": ["cargo build", { "left": "cargo build -p foo", "right": "cargo build -p bar" }], "icon": "lucide:hammer" } } }"#,
         )
         .expect("parse");
-        assert_eq!(config.build.len(), 2);
-        assert_eq!(config.build[0].as_str(), Some("cargo build"));
+        let build = &config.run_scripts["build"];
+        assert_eq!(build.command.len(), 2);
+        assert_eq!(build.command[0].as_str(), Some("cargo build"));
+        assert_eq!(build.icon.as_deref(), Some("lucide:hammer"));
     }
 
     #[test]
-    fn accepts_top_level_run_string_entries() {
+    fn accepts_run_script_without_icon() {
         let config = parse(
-            r#"{ "run": ["npm test", { "left": "npm run dev", "right": "npm run test:watch" }] }"#,
+            r#"{ "runScripts": { "run": { "command": ["npm test", { "left": "npm run dev", "right": "npm run test:watch" }] } } }"#,
         )
         .expect("parse");
-        assert_eq!(config.run.len(), 2);
-        assert_eq!(config.run[0].as_str(), Some("npm test"));
+        let run = &config.run_scripts["run"];
+        assert_eq!(run.command.len(), 2);
+        assert_eq!(run.command[0].as_str(), Some("npm test"));
+        assert_eq!(run.icon, None);
+    }
+
+    #[test]
+    fn accepts_custom_named_script() {
+        let config = parse(
+            r#"{ "runScripts": { "lint": { "command": ["bun run lint"], "icon": "lucide:check" } } }"#,
+        )
+        .expect("parse");
+        let lint = &config.run_scripts["lint"];
+        assert_eq!(lint.command.len(), 1);
+        assert_eq!(lint.icon.as_deref(), Some("lucide:check"));
     }
 
     #[test]
     fn rejects_invalid_run_split() {
-        let error = parse(r#"{ "run": [{ "left": "a", "top": "b" }] }"#).expect_err("invalid");
+        let error =
+            parse(r#"{ "runScripts": { "run": { "command": [{ "left": "a", "top": "b" }] } } }"#)
+                .expect_err("invalid");
         assert!(error.to_string().contains("exactly one split axis"));
     }
 
@@ -409,5 +498,12 @@ mod tests {
     fn rejects_unknown_keys() {
         let error = parse(r#"{ "nope": [] }"#).expect_err("unknown");
         assert!(error.to_string().contains("unknown key `nope`"));
+    }
+
+    #[test]
+    fn rejects_unknown_script_definition_keys() {
+        let error = parse(r#"{ "runScripts": { "run": { "command": [], "bogus": true } } }"#)
+            .expect_err("unknown");
+        assert!(error.to_string().contains("unknown key `bogus`"));
     }
 }

@@ -62,7 +62,8 @@
     ]
   },
   "scripts": {
-    "maxConcurrentCommands": 4
+    "maxConcurrentCommands": 4,
+    "configPath": ".pragma/scripts.json"
   },
   "agents": {
     "startDelayMs": 500

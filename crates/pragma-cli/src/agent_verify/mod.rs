@@ -78,6 +78,13 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
             results.push(skipped_result(scenario, "requires --include-slow"));
             continue;
         }
+        if excludes_scenario(scenario, catalog_agent.exclude_features.as_deref()) {
+            results.push(skipped_result(
+                scenario,
+                "agent declares this feature unsupported",
+            ));
+            continue;
+        }
         let result = execute_scenario(scenario, &context, &prompts, args.attempts);
         let failed = matches!(result.status, ScenarioStatus::Failed);
         results.push(result);
@@ -87,6 +94,18 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
     }
 
     finish(out, args.agent.clone(), results, ledger.schema_errors())
+}
+
+fn excludes_scenario(
+    scenario: &scenarios::ScenarioDef,
+    excluded: Option<&[pragma_constants::AgentFeature]>,
+) -> bool {
+    excluded.is_some_and(|excluded| {
+        scenario
+            .features
+            .iter()
+            .any(|feature| excluded.contains(feature))
+    })
 }
 
 fn execute_scenario(
@@ -329,6 +348,8 @@ fn finish(
 
 #[cfg(test)]
 mod tests {
+    use pragma_constants::AgentFeature;
+
     use super::*;
 
     #[test]
@@ -352,5 +373,25 @@ mod tests {
             Ok(Some("--model moonshot/kimi-k3"))
         );
         assert!(resolve_model_cmd(Some("   ")).is_err());
+    }
+
+    #[test]
+    fn excludes_scenarios_matching_any_required_feature() {
+        let abort_question = definitions()
+            .iter()
+            .find(|scenario| scenario.id == "abort-mid-question")
+            .expect("abort question scenario");
+        assert!(excludes_scenario(
+            abort_question,
+            Some(&[AgentFeature::Abort])
+        ));
+        assert!(excludes_scenario(
+            abort_question,
+            Some(&[AgentFeature::Questions])
+        ));
+        assert!(!excludes_scenario(
+            abort_question,
+            Some(&[AgentFeature::Commands])
+        ));
     }
 }

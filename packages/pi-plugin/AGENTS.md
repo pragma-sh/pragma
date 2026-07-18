@@ -43,8 +43,9 @@ package and run `/reload` in Pi after changing the extension bundle.
 
 Quit the desktop app first so verification uses the fresh headless catalog. Verify only
 stock Pi capabilities: `basic-reply`, `abort-mid-run`, `interrupt-event`, `crash-exit`,
-and `stream-integrity`. Question, command-approval, and sub-agent scenarios are expected
-to fail because Pi does not provide those features by default.
+and `stream-integrity`. Question, command-approval, and sub-agent scenarios are skipped
+through `excludeFeatures` because Pi does not provide those features by default. Usage
+limits are excluded too because Pi exposes no account-limit provider.
 
 ## Branding
 

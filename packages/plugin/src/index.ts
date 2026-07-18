@@ -1,6 +1,7 @@
 export type {
   AgentArgsBuilder,
   AgentDefinition,
+  AgentFeature,
   AgentModelEntry,
   AgentPermissionMode,
   AgentReasoning,

@@ -12,7 +12,7 @@ import { createTuiWatcher } from "@pragma/watcher-kit";
 
 /** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
-const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits.py";
+const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits";
 
 /**
  * Pragma plugin for Cursor Agent, bundled to `dist/pragma-plugin.mjs` and
@@ -48,6 +48,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/cursor.svg",
       launch: { command: ["agent", "--force", "--approve-mcps"] },
+      excludeFeatures: ["questions", "commandApproval", "abort"],
       startupInput: [{ delayMs: 5000, data: "a" }],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -84,11 +85,11 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
 /** Loads Cursor account usage using credentials created by `cursor-agent login`. */
 export async function loadCursorUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
   const cwd = ctx.project?.path ?? "/tmp";
-  const bundledHelper = ctx.pluginDir ? `${ctx.pluginDir}/assets/usage-limits.py` : null;
+  const bundledHelper = ctx.pluginDir ? `${ctx.pluginDir}/dist/usage-limits` : null;
   const helperFallback = bundledHelper
     ? `elif test -f ${shellQuote(bundledHelper)}; then helper=${shellQuote(bundledHelper)}; `
     : "";
-  const script = `if test -f "${INSTALLED_CURSOR_USAGE_HELPER}"; then helper="${INSTALLED_CURSOR_USAGE_HELPER}"; ${helperFallback}else exit 20; fi; python3 "$helper"`;
+  const script = `if test -x "${INSTALLED_CURSOR_USAGE_HELPER}"; then helper="${INSTALLED_CURSOR_USAGE_HELPER}"; ${helperFallback}else exit 20; fi; "$helper"`;
   const command = `/bin/sh -c ${shellQuote(script)}`;
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
   if (result?.status === 20) {

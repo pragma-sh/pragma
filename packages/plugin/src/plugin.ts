@@ -63,6 +63,10 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
   usageLimits?: UsageLimitProviderDefinition<InferConfig<TConfigSchema>>[];
   css?: string;
+  /** Runs once when Pragma first discovers this plugin installation. */
+  onInstall?: (ctx: PluginContext<InferConfig<TConfigSchema>>) => void | Promise<void>;
+  /** Runs once during every Pragma server boot. */
+  onPragmaLoad?: (ctx: PluginContext<InferConfig<TConfigSchema>>) => void | Promise<void>;
   activate?: (ctx: PluginContext<InferConfig<TConfigSchema>>) => void | (() => void);
 }
 

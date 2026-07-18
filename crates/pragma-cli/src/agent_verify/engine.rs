@@ -39,6 +39,7 @@ impl<'a> ScenarioCtx<'a> {
             agent_id: self.runtime_agent_id,
             timeout: self.timeout,
             launch,
+            start_cursor: cursor,
             cursor,
             active: true,
         })
@@ -61,6 +62,7 @@ pub struct ScenarioSession<'a> {
     agent_id: &'a str,
     timeout: Duration,
     launch: LaunchResult,
+    start_cursor: usize,
     cursor: usize,
     active: bool,
 }
@@ -185,6 +187,14 @@ impl ScenarioSession<'_> {
     pub fn scoped_events_since_cursor(&self) -> Vec<VerifyEvent> {
         self.ledger
             .events_since(self.cursor)
+            .into_iter()
+            .filter(|event| self.is_scoped(event))
+            .collect()
+    }
+
+    pub fn scoped_events_since_start(&self) -> Vec<VerifyEvent> {
+        self.ledger
+            .events_since(self.start_cursor)
             .into_iter()
             .filter(|event| self.is_scoped(event))
             .collect()
@@ -354,6 +364,7 @@ mod tests {
                 worktree_id: "w".to_string(),
                 tab_id: "t".to_string(),
             },
+            start_cursor: 0,
             cursor: 0,
             active: false,
         }

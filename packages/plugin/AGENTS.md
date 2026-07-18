@@ -25,7 +25,8 @@ packages/plugin/
 ## Rules
 
 - Keep this package browser-safe and side-effect-light. It must not import app internals.
-- `definePlugin` is the only place the baked `PLUGIN_API_VERSION` is stamped.
+- `definePlugin` is the only place the baked `PLUGIN_API_VERSION` is stamped. Server-side
+  `onInstall` / `onPragmaLoad` execution belongs to `@pragma/plugins-host`.
 - Runtime shims must fail loudly when `globalThis.__PRAGMA__` is absent.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
   `react/jsx-runtime` to `@pragma/plugin` subpaths.

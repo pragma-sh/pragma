@@ -7,6 +7,7 @@ import { PragmaClient } from "@pragma/sdk";
 import { readStdinLines } from "@pragma/sidecar-kit";
 
 import { assembleCatalog, assembleWatchers, type ResolvedPlugin } from "./catalog";
+import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
 import { loadUsageLimits } from "./usage-limits";
 
@@ -17,6 +18,8 @@ interface LoadCommand {
   bundledDir?: string;
   gatewayUrl: string;
   gatewayToken: string;
+  stateDir: string;
+  serverBootId: string;
 }
 
 interface UsageLimitsCommand {
@@ -65,6 +68,8 @@ async function loadPlugin(manifest: ResolvedManifest): Promise<ResolvedPlugin | 
     return imported.default
       ? {
           pluginId: manifest.pluginId,
+          scope: manifest.scope,
+          root: manifest.root,
           dir: manifest.dir,
           mainPath: manifest.mainPath,
           config: manifest.config,
@@ -131,9 +136,13 @@ async function load(command: LoadCommand): Promise<{
 
 class StdinLines {
   private loaded: LoadedState | undefined;
+  private queue = Promise.resolve();
+  private lifecycleQueue = Promise.resolve();
 
   constructor() {
-    readStdinLines((line) => void this.dispatch(line));
+    readStdinLines((line) => {
+      this.queue = this.queue.then(() => this.dispatch(line));
+    });
   }
 
   private async dispatch(line: string): Promise<void> {
@@ -148,12 +157,42 @@ class StdinLines {
           assets: loaded.catalog.assets,
           watchers: loaded.watchers,
         });
+        this.scheduleLifecycles(command, loaded.state);
         return;
       }
       await this.handleUsageLimits(command);
     } catch (error) {
       emitError(error);
     }
+  }
+
+  private scheduleLifecycles(command: LoadCommand, state: LoadedState): void {
+    this.lifecycleQueue = this.lifecycleQueue.then(async () => {
+      try {
+        await runPluginLifecycles(
+          state.plugins,
+          state.sdk,
+          state.root,
+          command.stateDir,
+          command.serverBootId,
+          (pluginId, hook, error) =>
+            emit({
+              type: "log",
+              pluginId,
+              level: "error",
+              message: `${hook}: ${error instanceof Error ? error.message : String(error)}`,
+            }),
+        );
+      } catch (error) {
+        emit({
+          type: "log",
+          pluginId: "pragma.lifecycle",
+          level: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return undefined;
+    });
   }
 
   private async handleUsageLimits(command: UsageLimitsCommand): Promise<void> {

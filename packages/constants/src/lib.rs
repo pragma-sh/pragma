@@ -14,7 +14,7 @@ mod generated {
 }
 
 pub use generated::{
-    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFileChange,
+    AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
     AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
     AgentMessageRole, AgentModelEntry, AgentReasoning, AgentReportKind, AgentReportPayload,
     AgentSessionLaunchPayload, AgentStatus, AgentToolCall, AgentToolCallStatus, Agents, AppInfo,
@@ -28,10 +28,11 @@ pub use generated::{
     Keybindings, KeybindingsConfig, Links, NewWorktreeSpec, OpenPort, PairingPayload,
     PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, PlatformChord, Project,
     ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind,
-    ProtocolRpcMethod, QuestionOption, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
-    RunScriptSplit, RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode,
-    SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults,
-    WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeStatus,
+    ProtocolRpcMethod, QuestionOption, RunScriptDefinition, RunScriptEntry,
+    RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
+    ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical,
+    Tab, TabKind, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
+    WorktreeStatus,
 };
 
 /// The parsed, shared constants.

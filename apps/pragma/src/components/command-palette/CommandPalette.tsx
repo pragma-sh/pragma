@@ -684,6 +684,7 @@ function usePaletteScope(workspace: Workspace, scopedWorktreeId: string | null) 
   };
 }
 
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePrSubmit, useWorkspaceListeners); not extractable logic.
 function usePaletteAsyncData({
   open,
   mode,

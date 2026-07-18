@@ -80,6 +80,7 @@ fn hex(value: u8) -> Result<u8, String> {
 fn defaults() -> HashMap<String, String> {
     [
         ("basic-reply", "Reply with exactly two short sentences. Do not use tools and do not ask questions."),
+        ("command-no-permission", "Run this safe shell command exactly, then report its numeric output: date +%s. Do not ask for permission and do not substitute another command."),
         ("question-answer", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
         ("question-dismiss", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
         ("question-free-text", "Use your interactive question tool now. Ask exactly: What verification marker should I use? Offer exactly Alpha and Beta, then stop and wait. The verifier will answer with custom free text. The answer may arrive directly or as a follow-up message starting with: Answer to question. Either way, once you have it, reply with the exact marker text you received."),
