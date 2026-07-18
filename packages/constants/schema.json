@@ -940,12 +940,17 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Shared script execution limits used by project lifecycle scripts.",
-      "required": ["maxConcurrentCommands"],
+      "required": ["maxConcurrentCommands", "configPath"],
       "properties": {
         "maxConcurrentCommands": {
           "type": "integer",
           "minimum": 1,
           "description": "Maximum number of headless project script commands Pragma runs at once. Interactive run scripts create terminal tabs and are not limited by this value."
+        },
+        "configPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Project-root-relative POSIX path of the optional project script config file. Read by the Rust backend and matched against worktree file-watch events by the frontend to hot-reload script buttons."
         }
       }
     },
@@ -967,7 +972,7 @@
       "title": "ProjectScriptsConfig",
       "type": "object",
       "additionalProperties": false,
-      "description": "Project-owned `.pragma/scripts.json` lifecycle scripts. The file is optional; omitted keys behave as empty arrays.",
+      "description": "Project-owned `.pragma/scripts.json` lifecycle scripts. The file is optional; omitted keys behave as empty.",
       "properties": {
         "setup": {
           "type": "array",
@@ -976,19 +981,12 @@
           },
           "description": "Headless commands run after a worktree is created, from the new worktree root."
         },
-        "run": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/RunScriptEntry"
+        "runScripts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RunScriptDefinition"
           },
-          "description": "Interactive commands opened from the workspace header as terminal tabs and optional split layouts."
-        },
-        "build": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/RunScriptEntry"
-          },
-          "description": "Interactive build commands opened from the workspace header as terminal tabs and optional split layouts."
+          "description": "Interactive scripts opened from the workspace header as terminal tabs and optional split layouts, keyed by name. The `run` and `build` keys are the default entries the header always reserves buttons for; any other key is a custom script and renders its own header button."
         },
         "teardown": {
           "type": "array",
@@ -996,6 +994,26 @@
             "type": "string"
           },
           "description": "Headless commands run before a worktree is deleted, from the target worktree root. Failures block deletion."
+        }
+      }
+    },
+    "RunScriptDefinition": {
+      "title": "RunScriptDefinition",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "description": "One named interactive script: the commands it opens and the icon its header button uses.",
+      "properties": {
+        "command": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RunScriptEntry"
+          },
+          "description": "Interactive commands opened as terminal tabs and optional split layouts."
+        },
+        "icon": {
+          "type": ["string", "null"],
+          "description": "Iconify icon name shown on the script's header button. Omitted for `run`/`build` falls back to the built-in play/hammer icons; omitted for a custom script falls back to a generic terminal icon."
         }
       }
     },

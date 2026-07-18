@@ -28,10 +28,10 @@ pub use generated::{
     Keybindings, KeybindingsConfig, Links, NewWorktreeSpec, PairingPayload, PaletteSearchMatch,
     PaletteSearchMatchKind, PaletteSearchResponse, PlatformChord, Project, ProjectIcon,
     ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
-    QuestionOption, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit,
-    SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeStatus,
+    QuestionOption, RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
+    RunScriptSplit, RunScriptVerticalSplit, ScriptRunStatus, Scripts, SplitHorizontal, SplitNode,
+    SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, Tunnel, WindowDefaults,
+    WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeStatus,
 };
 
 /// The parsed, shared constants.
