@@ -26,6 +26,7 @@ export type {
   AutomationPendingPayload,
   AutomationsChangedPayload,
   ProjectScriptsConfig,
+  RunScriptDefinition,
   RunScriptEntry,
   RunScriptNode,
   RunScriptSplit,

@@ -37,14 +37,9 @@ export function planInteractiveScripts(
   return { commands, items };
 }
 
-/** Flattens interactive run-script entries into commands plus split templates. */
-export function planRunScripts(entries: RunScriptEntry[]): PlannedRunScripts {
-  return planInteractiveScripts(entries, "run");
-}
-
-/** Flattens interactive build-script entries into commands plus split templates. */
-export function planBuildScripts(entries: RunScriptEntry[]): PlannedRunScripts {
-  return planInteractiveScripts(entries, "build");
+/** Flattens a named script's interactive entries into commands plus split templates. */
+export function planNamedScript(name: string, entries: RunScriptEntry[]): PlannedRunScripts {
+  return planInteractiveScripts(entries, name);
 }
 
 function planNode(node: RunScriptNode, commands: string[], path: string): RunScriptLayoutTemplate {

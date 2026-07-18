@@ -1,5 +1,8 @@
 {
   "setup": ["bun install", "cd .plannar && npm install"],
-  "run": ["bun run dev"],
-  "build": ["bun run --filter pragma tauri:build"]
+  "runScripts": {
+    "run": { "command": ["bun run dev"] },
+    "build": { "command": ["bun run --filter pragma tauri:build"] },
+    "mobile": { "command": ["bun run dev:mobile:ios"], "icon": "lucide:smartphone" }
+  }
 }

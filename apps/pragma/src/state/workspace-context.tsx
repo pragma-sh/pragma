@@ -13,6 +13,7 @@ import {
 } from "react";
 import { useRequiredContext } from "@/lib/context";
 
+import { constants } from "@pragma/constants";
 import type {
   AgentReportPayload,
   DiffSide,
@@ -27,6 +28,7 @@ import type {
 import { toast } from "sonner";
 
 import { errorMessage } from "@/lib/errors";
+import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { BROWSER_START_URL } from "@/lib/browser-manager";
 import { EMPTY_MODEL_SELECTION, resolveDeepLinkAgentSelection } from "@/lib/agent-model-selection";
 import { refreshAgentModels } from "@/lib/agent-model-cache";
@@ -151,51 +153,54 @@ interface WorkspaceState {
 }
 
 /** Prior split layout saved before interactive scripts temporarily replace it. */
-type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
-
-type InteractiveScriptKind = "run" | "build";
+export type RunScriptsSplitSnapshot = { root: SplitLayoutNode | null };
 
 /** One active interactive project script shown in cross-worktree navigation. */
 interface RunningScript {
   worktreeId: string;
   tabId: string;
   name: string;
-  kind: InteractiveScriptKind;
   stopping: boolean;
 }
 
-type RunScriptsState = {
+/** One script's header button: `run`/`build` are always present; other keys are custom scripts. */
+export interface ScriptButtonInfo {
+  name: string;
+  /** Iconify icon name from `.pragma/scripts.json`; null falls back to a built-in icon. */
+  icon: string | null;
+  available: boolean;
+}
+
+/** One running instance of a named script within a worktree. */
+export type ManagedScriptEntry = {
   worktreeId: string;
+  name: string;
   tabIds: string[];
   stopping: boolean;
   /** Non-null when scripts applied a split layout that overwrote the worktree root. */
   splitSnapshot: RunScriptsSplitSnapshot | null;
-} | null;
+};
 
-/** Active interactive scripts, isolated by worktree so other worktrees stay usable. */
-type ManagedScriptsState = Record<
-  string,
-  NonNullable<RunScriptsState> & { kind: InteractiveScriptKind }
->;
+/**
+ * Active interactive scripts, isolated by worktree and keyed by script name so
+ * multiple different scripts (e.g. `run` and `lint`) can run concurrently in
+ * the same worktree; the same named script can only run once at a time.
+ */
+export type ManagedScriptsState = Record<string, Record<string, ManagedScriptEntry>>;
 
-function managedScriptsStateForKind(
+/** The interactive scripts currently running for a worktree, if any. */
+function activeManagedScripts(
   state: ManagedScriptsState,
   worktreeId: string | null,
-  kind: InteractiveScriptKind,
-): RunScriptsState {
+): Array<{ name: string; stopping: boolean }> {
   const scripts = worktreeId ? state[worktreeId] : undefined;
-  if (!scripts || scripts.kind !== kind) {
-    return null;
+  if (!scripts) {
+    return [];
   }
-  return {
-    worktreeId: scripts.worktreeId,
-    tabIds: scripts.tabIds,
-    stopping: scripts.stopping,
-    splitSnapshot: scripts.splitSnapshot,
-  };
+  return Object.values(scripts).map(({ name, stopping }) => ({ name, stopping }));
 }
 
-type WorkspaceAction =
+export type WorkspaceAction =
   | { type: "load-start" }
   | { type: "load-error"; error: string }
   | { type: "set-projects"; projects: Project[] }
@@ -317,17 +322,15 @@ interface WorkspaceContextValue extends WorkspaceState {
     placement: SplitPlacement,
   ) => void;
   moveTabToPane: (tabId: string, paneId: string) => void;
-  runScriptsAvailable: boolean;
-  buildScriptsAvailable: boolean;
+  /** Header script buttons in display order: `run`, `build`, then any custom scripts alphabetically. */
+  scriptButtons: ScriptButtonInfo[];
   /** Set when `.pragma/scripts.json` fails to load or parse; null when valid or not yet loaded. */
   runScriptsConfigError: string | null;
-  runScriptsState: RunScriptsState;
-  buildScriptsState: RunScriptsState;
+  /** The interactive scripts currently running for the selected worktree. */
+  activeScripts: Array<{ name: string; stopping: boolean }>;
   runningScripts: RunningScript[];
-  runScripts: () => Promise<void>;
-  buildScripts: () => Promise<void>;
-  stopRunScripts: () => Promise<void>;
-  stopBuildScripts: () => Promise<void>;
+  runScript: (name: string) => Promise<void>;
+  stopScript: (name: string) => Promise<void>;
   agentBackAvailable?: boolean;
   navigateToAgentLocation?: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
   goBackFromAgent?: () => Promise<void>;
@@ -475,6 +478,53 @@ function restoreRunScriptsSplitSnapshot(
   } else {
     dispatch({ type: "clear-split-root", worktreeId });
   }
+}
+
+/**
+ * Pops `scriptName` off its worktree's layout stack and reconciles its snapshot.
+ * Concurrent scripts with split layouts each overwrite the whole worktree root, so
+ * their "restore to this on stop" snapshots form a stack in push order. If a newer
+ * script's layout is still on top, that script's layout must stay visible — instead
+ * this splices `scriptName` out by handing its snapshot to the next-newer script, so
+ * that script's own eventual stop restores past `scriptName` instead of pointing at
+ * `scriptName`'s now-stale pane/tab ids. Only when `scriptName` is topmost (nothing
+ * newer above it) does the snapshot actually get applied to the visible layout.
+ */
+export function popScriptLayout(
+  dispatch: React.Dispatch<WorkspaceAction>,
+  setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
+  layoutStackRef: RefObject<Record<string, string[]>>,
+  worktreeId: string,
+  scriptName: string,
+  snapshot: RunScriptsSplitSnapshot,
+): void {
+  const stack = layoutStackRef.current[worktreeId] ?? [];
+  const index = stack.indexOf(scriptName);
+  const above = index === -1 ? undefined : stack[index + 1];
+  const nextStack = stack.filter((entry) => entry !== scriptName);
+  if (nextStack.length > 0) {
+    layoutStackRef.current = { ...layoutStackRef.current, [worktreeId]: nextStack };
+  } else {
+    const { [worktreeId]: _removed, ...rest } = layoutStackRef.current;
+    layoutStackRef.current = rest;
+  }
+  if (above) {
+    setManagedScriptsState((current) => {
+      const aboveEntry = current[worktreeId]?.[above];
+      if (!aboveEntry) {
+        return current;
+      }
+      return {
+        ...current,
+        [worktreeId]: {
+          ...current[worktreeId],
+          [above]: { ...aboveEntry, splitSnapshot: snapshot },
+        },
+      };
+    });
+    return;
+  }
+  restoreRunScriptsSplitSnapshot(dispatch, worktreeId, snapshot);
 }
 
 function materializeRunScriptLayout(
@@ -1633,11 +1683,18 @@ interface ManagedScriptRunContext {
   projectId: string;
   worktreeId: string;
   cwd: string;
-  kind: InteractiveScriptKind;
+  scriptName: string;
   dispatch: (action: WorkspaceAction) => void;
   setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
   splitRootByWorktree: WorkspaceState["splitRootByWorktree"];
   closeTab: (tabId: string) => Promise<unknown>;
+  /** Push order of scripts that have overwritten the worktree's split root, oldest first. */
+  layoutStackRef: RefObject<Record<string, string[]>>;
+}
+
+/** Capitalizes a script name for a terminal tab title (`lint` -> `Lint`). */
+function scriptTabTitle(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 /** Creates one script tab, registers it, and records progress in the managed-scripts state. */
@@ -1652,7 +1709,7 @@ async function createScriptTabForCommand(
     ctx.projectId,
     ctx.worktreeId,
     "terminal",
-    ctx.kind === "run" ? "Run" : "Build",
+    scriptTabTitle(ctx.scriptName),
   );
   startedTabIds.push(tab.id);
   tabIdsByCommand[commandIndex] = tab.id;
@@ -1675,11 +1732,14 @@ async function createScriptTabForCommand(
   ctx.setManagedScriptsState((current) => ({
     ...current,
     [ctx.worktreeId]: {
-      kind: ctx.kind,
-      worktreeId: ctx.worktreeId,
-      tabIds: [...startedTabIds],
-      stopping: false,
-      splitSnapshot,
+      ...current[ctx.worktreeId],
+      [ctx.scriptName]: {
+        name: ctx.scriptName,
+        worktreeId: ctx.worktreeId,
+        tabIds: [...startedTabIds],
+        stopping: false,
+        splitSnapshot,
+      },
     },
   }));
 }
@@ -1702,6 +1762,13 @@ function applyRunScriptItemLayout(
           ? (ctx.splitRootByWorktree[ctx.worktreeId] ?? null)
           : null,
     } satisfies RunScriptsSplitSnapshot);
+  if (!splitSnapshot) {
+    const stack = ctx.layoutStackRef.current[ctx.worktreeId] ?? [];
+    ctx.layoutStackRef.current = {
+      ...ctx.layoutStackRef.current,
+      [ctx.worktreeId]: [...stack, ctx.scriptName],
+    };
+  }
   ctx.dispatch({
     type: "set-split-root",
     worktreeId: ctx.worktreeId,
@@ -1736,12 +1803,12 @@ async function runManagedScriptPlan(
   config: Awaited<ReturnType<typeof loadProjectScripts>>,
   startedTabIds: string[],
 ): Promise<RunScriptsSplitSnapshot | null> {
-  const entries = ctx.kind === "run" ? (config.run ?? []) : (config.build ?? []);
+  const entries = config.runScripts?.[ctx.scriptName]?.command ?? [];
   if (entries.length === 0) {
-    toast.info(`No ${ctx.kind} scripts configured for this project`);
+    toast.info(`No ${ctx.scriptName} scripts configured for this project`);
     return null;
   }
-  const plan = planInteractiveScripts(entries, ctx.kind);
+  const plan = planInteractiveScripts(entries, ctx.scriptName);
   const tabIdsByCommand: string[] = [];
   let splitSnapshot: RunScriptsSplitSnapshot | null = null;
   for (const item of plan.items) {
@@ -1773,14 +1840,29 @@ async function handleManagedScriptsFailure(
   cause: unknown,
 ): Promise<void> {
   ctx.setManagedScriptsState((current) => {
-    const { [ctx.worktreeId]: _, ...remaining } = current;
-    return remaining;
+    const scripts = current[ctx.worktreeId];
+    if (!scripts) {
+      return current;
+    }
+    const { [ctx.scriptName]: _, ...remaining } = scripts;
+    if (Object.keys(remaining).length > 0) {
+      return { ...current, [ctx.worktreeId]: remaining };
+    }
+    const { [ctx.worktreeId]: __, ...rest } = current;
+    return rest;
   });
   if (splitSnapshot) {
-    restoreRunScriptsSplitSnapshot(ctx.dispatch, ctx.worktreeId, splitSnapshot);
+    popScriptLayout(
+      ctx.dispatch,
+      ctx.setManagedScriptsState,
+      ctx.layoutStackRef,
+      ctx.worktreeId,
+      ctx.scriptName,
+      splitSnapshot,
+    );
   }
   await Promise.all(startedTabIds.map((tabId) => ctx.closeTab(tabId)));
-  toast.error(`Failed to run project ${ctx.kind} scripts: ${errorMessage(cause)}`);
+  toast.error(`Failed to run project ${ctx.scriptName} scripts: ${errorMessage(cause)}`);
 }
 
 /** Records the location to offer "Go back" to before navigating away. */
@@ -1936,8 +2018,18 @@ function alertUnseenAgentStatus(payload: AgentReportPayload, ctx: AgentReportCon
   }
 }
 
-/** Loads (and reloads) the active project's `.pragma/scripts.json` config + error. */
-function useProjectScriptsConfig(selectedProjectId: string | null): {
+/** Delay between a `.pragma/scripts.json` change event and the config reload, coalescing bursts. */
+const SCRIPTS_CONFIG_RELOAD_DEBOUNCE_MS = 200;
+
+/**
+ * Loads (and reloads) the active project's `.pragma/scripts.json` config + error.
+ * Watches the file through the project's main worktree so edits apply live,
+ * without reopening the project.
+ */
+function useProjectScriptsConfig(
+  selectedProjectId: string | null,
+  mainWorktreeId: string | null,
+): {
   runScriptsConfig: ProjectScriptsConfig | null;
   runScriptsConfigError: string | null;
   setRunScriptsConfig: (config: ProjectScriptsConfig | null) => void;
@@ -1952,25 +2044,49 @@ function useProjectScriptsConfig(selectedProjectId: string | null): {
       return;
     }
     let cancelled = false;
-    loadProjectScripts(selectedProjectId)
-      .then((config) => {
-        if (!cancelled) {
-          setRunScriptsConfig(config);
-          setRunScriptsConfigError(null);
-        }
-        return undefined;
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setRunScriptsConfig(null);
-          setRunScriptsConfigError(errorMessage(cause));
-        }
-        return undefined;
-      });
+    // `notifyOnError` is set for watcher-triggered reloads: the user just
+    // edited the file, so surface a broken config as a toast instead of only
+    // the script buttons' tooltip.
+    const load = (notifyOnError: boolean) =>
+      loadProjectScripts(selectedProjectId)
+        .then((config) => {
+          if (!cancelled) {
+            setRunScriptsConfig(config);
+            setRunScriptsConfigError(null);
+          }
+          return undefined;
+        })
+        .catch((cause) => {
+          if (!cancelled) {
+            setRunScriptsConfig(null);
+            setRunScriptsConfigError(errorMessage(cause));
+            if (notifyOnError) {
+              toast.error(`Failed to reload project scripts: ${errorMessage(cause)}`);
+            }
+          }
+          return undefined;
+        });
+    void load(false);
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = mainWorktreeId
+      ? subscribeToWorktreeFiles(mainWorktreeId, (change) => {
+          if (change.path !== constants.scripts.configPath) {
+            return;
+          }
+          if (reloadTimer !== null) {
+            clearTimeout(reloadTimer);
+          }
+          reloadTimer = setTimeout(() => void load(true), SCRIPTS_CONFIG_RELOAD_DEBOUNCE_MS);
+        })
+      : null;
     return () => {
       cancelled = true;
+      if (reloadTimer !== null) {
+        clearTimeout(reloadTimer);
+      }
+      unsubscribe?.();
     };
-  }, [selectedProjectId]);
+  }, [selectedProjectId, mainWorktreeId]);
   return { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError };
 }
 
@@ -2874,16 +2990,25 @@ function useTabLifecycle(
         await closeTabCommand(tabId);
         dispatch({ type: "remove-tab", tabId });
         setManagedScriptsState((current) => {
-          for (const [worktreeId, scripts] of Object.entries(current)) {
-            if (!scripts.tabIds.includes(tabId)) {
-              continue;
+          for (const [worktreeId, byName] of Object.entries(current)) {
+            for (const [name, scripts] of Object.entries(byName)) {
+              if (!scripts.tabIds.includes(tabId)) {
+                continue;
+              }
+              const tabIds = scripts.tabIds.filter((id) => id !== tabId);
+              if (tabIds.length > 0) {
+                return {
+                  ...current,
+                  [worktreeId]: { ...byName, [name]: { ...scripts, tabIds } },
+                };
+              }
+              const { [name]: _, ...remainingByName } = byName;
+              if (Object.keys(remainingByName).length > 0) {
+                return { ...current, [worktreeId]: remainingByName };
+              }
+              const { [worktreeId]: __, ...remaining } = current;
+              return remaining;
             }
-            const tabIds = scripts.tabIds.filter((id) => id !== tabId);
-            if (tabIds.length > 0) {
-              return { ...current, [worktreeId]: { ...scripts, tabIds } };
-            }
-            const { [worktreeId]: _, ...remaining } = current;
-            return remaining;
           }
           return current;
         });
@@ -3209,7 +3334,7 @@ function useVisibleTabAgentSeen(visibleTabIds: Set<string>): void {
   }, [visibleTabIds]);
 }
 
-/** Interactive run/build scripts: start, stop, and per-kind derived state. */
+/** Interactive project scripts (`run`, `build`, and any custom names): start, stop, derived state. */
 function useManagedScripts(
   state: WorkspaceState,
   dispatch: WorkspaceDispatch,
@@ -3219,46 +3344,39 @@ function useManagedScripts(
   setRunScriptsConfig: (config: ProjectScriptsConfig | null) => void,
   setRunScriptsConfigError: (error: string | null) => void,
 ): {
-  runScriptsState: RunScriptsState;
-  buildScriptsState: RunScriptsState;
+  activeScripts: Array<{ name: string; stopping: boolean }>;
   runningScripts: RunningScript[];
-  startManagedScripts: (kind: InteractiveScriptKind) => Promise<void>;
-  runScripts: () => Promise<void>;
-  buildScripts: () => Promise<void>;
-  stopManagedScripts: (kind: InteractiveScriptKind) => Promise<void>;
-  stopRunScripts: () => Promise<void>;
-  stopBuildScripts: () => Promise<void>;
+  runScript: (name: string) => Promise<void>;
+  stopScript: (name: string) => Promise<void>;
 } {
   const selectedWorktreeId = state.selectedProjectId
     ? (state.selectedWorktreeByProject[state.selectedProjectId] ?? null)
     : null;
-  const runScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, selectedWorktreeId, "run"),
-    [managedScriptsState, selectedWorktreeId],
-  );
-  const buildScriptsState = useMemo(
-    () => managedScriptsStateForKind(managedScriptsState, selectedWorktreeId, "build"),
+  const layoutStackRef = useRef<Record<string, string[]>>({});
+  const activeScripts = useMemo(
+    () => activeManagedScripts(managedScriptsState, selectedWorktreeId),
     [managedScriptsState, selectedWorktreeId],
   );
   const runningScripts = useMemo(
     () =>
-      Object.values(managedScriptsState).flatMap((scripts) =>
-        scripts.tabIds.map((tabId) => ({
-          worktreeId: scripts.worktreeId,
-          tabId,
-          name: scripts.kind,
-          kind: scripts.kind,
-          stopping: scripts.stopping,
-        })),
+      Object.values(managedScriptsState).flatMap((byName) =>
+        Object.values(byName).flatMap((scripts) =>
+          scripts.tabIds.map((tabId) => ({
+            worktreeId: scripts.worktreeId,
+            tabId,
+            name: scripts.name,
+            stopping: scripts.stopping,
+          })),
+        ),
       ),
     [managedScriptsState],
   );
 
-  const startManagedScripts = useCallback(
-    async (kind: InteractiveScriptKind) => {
+  const runScript = useCallback(
+    async (name: string) => {
       const projectId = state.selectedProjectId;
       const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId || managedScriptsState[worktreeId]) {
+      if (!projectId || !worktreeId || managedScriptsState[worktreeId]?.[name]) {
         return;
       }
       const cwd =
@@ -3267,11 +3385,12 @@ function useManagedScripts(
         projectId,
         worktreeId,
         cwd,
-        kind,
+        scriptName: name,
         dispatch,
         setManagedScriptsState,
         splitRootByWorktree: state.splitRootByWorktree,
         closeTab,
+        layoutStackRef,
       };
       const startedTabIds: string[] = [];
       let splitSnapshot: RunScriptsSplitSnapshot | null = null;
@@ -3298,28 +3417,43 @@ function useManagedScripts(
     ],
   );
 
-  const runScripts = useCallback(() => startManagedScripts("run"), [startManagedScripts]);
-  const buildScripts = useCallback(() => startManagedScripts("build"), [startManagedScripts]);
-
-  const stopManagedScripts = useCallback(
-    async (kind: InteractiveScriptKind) => {
+  const stopScript = useCallback(
+    async (name: string) => {
       const worktreeId = state.selectedProjectId
         ? state.selectedWorktreeByProject[state.selectedProjectId]
         : undefined;
-      const current = worktreeId ? managedScriptsState[worktreeId] : undefined;
-      if (!current || current.kind !== kind) {
+      const current = worktreeId ? managedScriptsState[worktreeId]?.[name] : undefined;
+      if (!current) {
         return;
       }
       setManagedScriptsState((previous) => ({
         ...previous,
-        [current.worktreeId]: { ...current, stopping: true },
+        [current.worktreeId]: {
+          ...previous[current.worktreeId],
+          [name]: { ...current, stopping: true },
+        },
       }));
       if (current.splitSnapshot) {
-        restoreRunScriptsSplitSnapshot(dispatch, current.worktreeId, current.splitSnapshot);
+        popScriptLayout(
+          dispatch,
+          setManagedScriptsState,
+          layoutStackRef,
+          current.worktreeId,
+          name,
+          current.splitSnapshot,
+        );
       }
       await Promise.all(current.tabIds.map((tabId) => closeTab(tabId)));
       setManagedScriptsState((previous) => {
-        const { [current.worktreeId]: _, ...remaining } = previous;
+        const byName = previous[current.worktreeId];
+        if (!byName) {
+          return previous;
+        }
+        const { [name]: _, ...remainingByName } = byName;
+        if (Object.keys(remainingByName).length > 0) {
+          return { ...previous, [current.worktreeId]: remainingByName };
+        }
+        const { [current.worktreeId]: __, ...remaining } = previous;
         return remaining;
       });
     },
@@ -3333,20 +3467,7 @@ function useManagedScripts(
     ],
   );
 
-  const stopRunScripts = useCallback(() => stopManagedScripts("run"), [stopManagedScripts]);
-  const stopBuildScripts = useCallback(() => stopManagedScripts("build"), [stopManagedScripts]);
-
-  return {
-    runScriptsState,
-    buildScriptsState,
-    runningScripts,
-    startManagedScripts,
-    runScripts,
-    buildScripts,
-    stopManagedScripts,
-    stopRunScripts,
-    stopBuildScripts,
-  };
+  return { activeScripts, runningScripts, runScript, stopScript };
 }
 
 /** Worktree open/status/delete/rename/hide actions. */
@@ -3898,6 +4019,7 @@ function useTabManagement({
 }
 
 /** Project loading plus browser and terminal metadata listeners. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated hooks (usePaletteAsyncData, usePrSubmit); not extractable logic.
 function useWorkspaceListeners({
   state,
   dispatch,
@@ -3976,18 +4098,22 @@ function useWorkspaceActions({
     splitRepresentativeTabId,
   } = useSplitLayout(state, selectedWorktreeId);
 
-  const runScriptsAvailable = (runScriptsConfig?.run?.length ?? 0) > 0;
-  const buildScriptsAvailable = (runScriptsConfig?.build?.length ?? 0) > 0;
+  // `run`/`build` are always reserved header buttons even when unconfigured;
+  // any other `runScripts` key renders its own custom button, alphabetically.
+  const scriptButtons: ScriptButtonInfo[] = useMemo(() => {
+    const configured = runScriptsConfig?.runScripts ?? {};
+    const names = new Set(["run", "build", ...Object.keys(configured)]);
+    const order = (name: string) => (name === "run" ? 0 : name === "build" ? 1 : 2);
+    return [...names]
+      .map((name) => ({
+        name,
+        icon: configured[name]?.icon ?? null,
+        available: (configured[name]?.command.length ?? 0) > 0,
+      }))
+      .toSorted((a, b) => order(a.name) - order(b.name) || a.name.localeCompare(b.name));
+  }, [runScriptsConfig]);
 
-  const {
-    runScriptsState,
-    buildScriptsState,
-    runningScripts,
-    runScripts,
-    buildScripts,
-    stopRunScripts,
-    stopBuildScripts,
-  } = useManagedScripts(
+  const { activeScripts, runningScripts, runScript, stopScript } = useManagedScripts(
     state,
     dispatch,
     closeTab,
@@ -4038,15 +4164,11 @@ function useWorkspaceActions({
       focusedPaneId,
       activeTabId,
       activeTab,
-      runScriptsAvailable,
-      buildScriptsAvailable,
-      runScriptsState,
-      buildScriptsState,
+      scriptButtons,
+      activeScripts,
       runningScripts,
-      runScripts,
-      buildScripts,
-      stopRunScripts,
-      stopBuildScripts,
+      runScript,
+      stopScript,
       focusPane,
       setPaneActiveTab,
       splitTabAtPane,
@@ -4066,15 +4188,11 @@ function useWorkspaceActions({
       focusedPaneId,
       activeTabId,
       activeTab,
-      runScriptsAvailable,
-      buildScriptsAvailable,
-      runScriptsState,
-      buildScriptsState,
+      scriptButtons,
+      activeScripts,
       runningScripts,
-      runScripts,
-      buildScripts,
-      stopRunScripts,
-      stopBuildScripts,
+      runScript,
+      stopScript,
       focusPane,
       setPaneActiveTab,
       splitTabAtPane,
@@ -4088,8 +4206,14 @@ function useWorkspaceActions({
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
   const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>({});
+  const mainWorktreeId = useMemo(() => {
+    const worktrees = state.selectedProjectId
+      ? state.worktrees[state.selectedProjectId]
+      : undefined;
+    return worktrees?.find((worktree) => worktree.isMain)?.id ?? null;
+  }, [state.selectedProjectId, state.worktrees]);
   const { runScriptsConfig, runScriptsConfigError, setRunScriptsConfig, setRunScriptsConfigError } =
-    useProjectScriptsConfig(state.selectedProjectId);
+    useProjectScriptsConfig(state.selectedProjectId, mainWorktreeId);
   const {
     stateRef,
     tabsRef,
