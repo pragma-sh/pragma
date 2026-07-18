@@ -1,5 +1,6 @@
 mod automations;
 mod plugins_host;
+mod ports;
 mod registry;
 mod session;
 mod tunnel;
@@ -459,6 +460,40 @@ fn parse_data<T: serde::de::DeserializeOwned>(data: &str) -> Result<T, HandledRe
     serde_json::from_str(data).map_err(|err| HandledRequestError::Request(err.to_string()))
 }
 
+fn handle_ports_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PortsRequest {
+        worktree_ids: Vec<String>,
+    }
+    let payload = serde_json::from_value::<PortsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    Ok(match registry.list_open_ports(&payload.worktree_ids) {
+        Ok(ports) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(
+                serde_json::to_value(ports)
+                    .map_err(|error| HandledRequestError::Request(error.to_string()))?,
+            ),
+            error: None,
+        },
+        Err(error) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message: error.to_string(),
+            }),
+        },
+    })
+}
+
 fn handle_rpc_request(
     request: RequestFrame,
     registry: &Registry,
@@ -526,6 +561,9 @@ fn handle_rpc_request(
                 }),
             },
         });
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Ports) {
+        return handle_ports_rpc(request_id, rpc.payload, registry);
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {

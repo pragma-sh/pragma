@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
+import { OpenPortsCard } from "@/components/sidebar/OpenPortsCard";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { startWindowDrag } from "@/lib/window-drag";
@@ -92,6 +93,7 @@ export function ProjectSidebar() {
         <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
       </div>
       <div className="p-3">
+        <OpenPortsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />
         <ProjectSwitcher />

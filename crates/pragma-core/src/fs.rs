@@ -34,7 +34,7 @@ const MAX_SEARCH_ENTRIES: usize = 100_000;
 const MAX_SEARCH_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SEARCH_SNIPPET_BYTES: usize = 512;
 const MIN_FILE_MATCH_SCORE: f64 = 0.45;
-const MAX_CONCURRENT_SEARCHES: usize = 2;
+const MAX_CONCURRENT_SEARCHES: usize = if cfg!(test) { 1_024 } else { 2 };
 
 static ACTIVE_SEARCHES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -218,16 +218,7 @@ fn palette_search(
 
         'roots: for search_root in roots {
             let root = Path::new(&search_root.root).canonicalize()?;
-            let mut builder = ignore::WalkBuilder::new(&root);
-            builder
-                .standard_filters(true)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .parents(true)
-                .hidden(false)
-                .follow_links(false);
-            for entry in builder.build() {
+            for relative in search_paths(&root) {
                 if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
                     truncated = true;
                     break 'roots;
@@ -237,18 +228,13 @@ fn palette_search(
                     truncated = true;
                     break 'roots;
                 }
-                let Ok(entry) = entry else {
+                let entry_path = root.join(&relative);
+                let Ok(metadata) = entry_path.symlink_metadata() else {
                     continue;
                 };
-                let Some(file_type) = entry.file_type() else {
-                    continue;
-                };
-                if !file_type.is_file() {
+                if !metadata.file_type().is_file() {
                     continue;
                 }
-                let Ok(relative) = entry.path().strip_prefix(&root) else {
-                    continue;
-                };
                 let path = relative
                     .to_string_lossy()
                     .replace(std::path::MAIN_SEPARATOR, "/");
@@ -275,9 +261,6 @@ fn palette_search(
                 if !include_code || code_matches.len() >= MAX_SEARCH_RESULTS {
                     continue;
                 }
-                let Ok(metadata) = entry.metadata() else {
-                    continue;
-                };
                 if metadata.len() > MAX_READ_BYTES {
                     continue;
                 }
@@ -286,7 +269,7 @@ fn palette_search(
                     truncated = true;
                     break 'roots;
                 }
-                let Ok(bytes) = std::fs::read(entry.path()) else {
+                let Ok(bytes) = std::fs::read(entry_path) else {
                     continue;
                 };
                 let Ok(text) = String::from_utf8(bytes) else {
@@ -339,6 +322,69 @@ fn palette_search(
     })();
     unregister_search(search_id);
     result
+}
+
+/// Returns tracked and untracked-but-not-ignored files for Git worktrees.
+/// `git ls-files --exclude-standard` is authoritative for `.gitignore`,
+/// `.git/info/exclude`, global excludes, and linked-worktree metadata. Non-Git
+/// roots retain the ignore-walker fallback used before project Git adoption.
+fn search_paths(root: &Path) -> Vec<PathBuf> {
+    let git_paths = process_env::git()
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            output
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+                .map(|path| PathBuf::from(String::from_utf8_lossy(path).into_owned()))
+                .filter(|path| is_searchable_relative_path(path))
+                .take(MAX_SEARCH_ENTRIES + 1)
+                .collect()
+        });
+    git_paths.unwrap_or_else(|| {
+        let mut builder = ignore::WalkBuilder::new(root);
+        builder
+            .standard_filters(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .parents(true)
+            .hidden(false)
+            .follow_links(false)
+            .filter_entry(|entry| entry.file_name() != ".git");
+        builder
+            .build()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .is_some_and(|file_type| file_type.is_file())
+            })
+            .filter_map(|entry| entry.path().strip_prefix(root).ok().map(Path::to_path_buf))
+            .filter(|path| is_searchable_relative_path(path))
+            .take(MAX_SEARCH_ENTRIES + 1)
+            .collect()
+    })
+}
+
+fn is_searchable_relative_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && !path.components().any(|component| match component {
+            Component::ParentDir => true,
+            Component::Normal(name) => name == ".git",
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => false,
+        })
 }
 
 fn fuzzy_score(filename: &str, path: &str, query: &str) -> Option<f64> {
@@ -771,6 +817,123 @@ mod tests {
                 root: dir.path().to_string_lossy().into_owned(),
             }],
             "gitignored_search_sentinel",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search");
+
+        assert!(response.matches.is_empty());
+    }
+
+    #[test]
+    fn palette_search_excludes_gitignored_files_in_linked_worktree() {
+        let dir = tempdir().expect("tempdir");
+        let repo = dir.path().join("repo");
+        let worktree = dir.path().join("worktree");
+        std::fs::create_dir(&repo).expect("mkdir repo");
+        git_init(&repo);
+        let commit = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Pragma Test",
+                "-c",
+                "user.email=test@pragma.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ])
+            .current_dir(&repo)
+            .output()
+            .expect("git commit");
+        assert!(commit.status.success());
+        let add_worktree = Command::new("git")
+            .args(["worktree", "add", "--detach"])
+            .arg(&worktree)
+            .current_dir(&repo)
+            .output()
+            .expect("git worktree add");
+        assert!(add_worktree.status.success());
+        std::fs::write(repo.join(".git/info/exclude"), "ignored/\n").expect("write exclude");
+        std::fs::create_dir(worktree.join("ignored")).expect("mkdir ignored");
+        std::fs::write(
+            worktree.join("ignored/README.md"),
+            "linked_worktree_ignored_sentinel\n",
+        )
+        .expect("write ignored file");
+
+        let response = palette_search(
+            "search-linked-worktree-gitignored",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: worktree.to_string_lossy().into_owned(),
+            }],
+            "linked_worktree_ignored_sentinel",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search");
+
+        assert!(response.matches.is_empty());
+        let git_pointer = palette_search(
+            "search-linked-worktree-dot-git",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: worktree.to_string_lossy().into_owned(),
+            }],
+            "gitdir:",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search git pointer");
+        assert!(git_pointer.matches.is_empty());
+    }
+
+    #[test]
+    fn palette_search_honors_git_info_exclude() {
+        let dir = tempdir().expect("tempdir");
+        git_init(dir.path());
+        std::fs::write(dir.path().join(".git/info/exclude"), "generated.txt\n")
+            .expect("write exclude");
+        std::fs::write(
+            dir.path().join("generated.txt"),
+            "git_info_exclude_sentinel\n",
+        )
+        .expect("write ignored file");
+
+        let response = palette_search(
+            "search-git-info-exclude",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: dir.path().to_string_lossy().into_owned(),
+            }],
+            "git_info_exclude_sentinel",
+            true,
+            true,
+            1_000,
+        )
+        .expect("search");
+
+        assert!(response.matches.is_empty());
+    }
+
+    #[test]
+    fn palette_search_never_scans_dot_git() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join(".git")).expect("mkdir .git");
+        std::fs::write(dir.path().join(".git/config"), "dot_git_search_sentinel\n")
+            .expect("write git metadata");
+
+        let response = palette_search(
+            "search-dot-git",
+            &[PaletteSearchRoot {
+                worktree_id: "worktree".to_string(),
+                root: dir.path().to_string_lossy().into_owned(),
+            }],
+            "dot_git_search_sentinel",
             true,
             true,
             1_000,

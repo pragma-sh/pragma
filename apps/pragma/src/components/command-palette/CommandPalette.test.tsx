@@ -28,7 +28,22 @@ const { activateTabLocation, closeTab, onOpenChange, workspace } = vi.hoisted(()
           },
         ],
       },
-      projectTabs: [],
+      projectTabs: [
+        {
+          id: "port-tab",
+          projectId: "project",
+          worktreeId: "worktree",
+          kind: "terminal",
+          title: "Dev server",
+          url: null,
+          filePath: null,
+          diffSide: null,
+          prNumber: null,
+          userRenamed: false,
+          orderIndex: 1,
+          createdAt: "now",
+        },
+      ],
       remoteWorktrees: {},
       runningScripts: [
         {
@@ -62,6 +77,18 @@ vi.mock("@/state/right-sidebar-context", () => ({
 
 vi.mock("@/state/agent-status-store", () => ({
   useAgentStatusSnapshot: () => [],
+}));
+
+vi.mock("@/state/open-ports-context", () => ({
+  useOpenPorts: () => [
+    {
+      port: 4173,
+      process: "vite",
+      pid: 123,
+      tabId: "port-tab",
+      worktreeId: "worktree",
+    },
+  ],
 }));
 
 vi.mock("@/hooks/use-agents-list", () => ({
@@ -117,6 +144,39 @@ describe("CommandPalette running scripts", () => {
     expect(closeTab).toHaveBeenCalledWith("script-tab");
     expect(activateTabLocation).not.toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("CommandPalette ports", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    render(<CommandPalette mode="search" onOpenChange={onOpenChange} open />);
+  });
+
+  it.each(["4173", "vite"])("finds a port by %s and opens its terminal", (query) => {
+    const input = screen.getByPlaceholderText(/Search worktrees/) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: query } });
+    const item = screen.getByText("4173").closest<HTMLElement>("[cmdk-item]");
+    expect(item).not.toBeNull();
+
+    fireEvent.click(item!);
+
+    expect(activateTabLocation).toHaveBeenCalledWith("project", "worktree", "port-tab");
+  });
+
+  it("closes a port's terminal with Shift+Enter", () => {
+    const item = screen.getByText("4173").closest<HTMLElement>("[cmdk-item]");
+    document.querySelectorAll("[cmdk-item]").forEach((candidate) => {
+      candidate.setAttribute("data-selected", String(candidate === item));
+    });
+
+    fireEvent.keyDown(screen.getByPlaceholderText(/Search worktrees/), {
+      key: "Enter",
+      shiftKey: true,
+    });
+
+    expect(closeTab).toHaveBeenCalledWith("port-tab");
+    expect(activateTabLocation).not.toHaveBeenCalled();
   });
 });
 

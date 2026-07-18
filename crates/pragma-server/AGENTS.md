@@ -7,6 +7,7 @@ scrollback, raw output, and agent-status strengths.
 ## Responsibilities
 
 - Spawning and managing PTY sessions.
+- Discovering TCP listeners owned by live PTY shell process trees.
 - Coalescing and broadcasting PTY output.
 - Tracking runtime agent status in memory.
 - Serving `pragma-core` RPC and snapshot-then-delta event subscriptions over the
@@ -156,3 +157,11 @@ click still sees the verdict without making approvals durable state.
 Free-form `AgentInput` always uses watcher delivery because each agent owns its TUI-specific
 submit keys and timing. Headless launches start their watcher from `watchers.rs`, so mobile
 replies keep working without a desktop-started watcher process.
+
+## Port Inventory
+
+`ProtocolRpcMethod::Ports` returns TCP listeners attributable to requested worktrees. Each
+session records its root shell PID; `ports.rs` walks current process ancestry and accepts only
+that shell or descendants before joining listener PIDs to tab/worktree ids. This ancestry
+filter is the security and UX boundary: never return unattributed host listeners, Pragma
+internals, or daemonized processes reparented outside the tab's process tree.

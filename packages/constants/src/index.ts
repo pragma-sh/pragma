@@ -70,6 +70,7 @@ export type {
   FileContents,
   PaletteSearchMatch,
   PaletteSearchResponse,
+  OpenPort,
   ProjectIcon,
   KanbanPromptStatus,
   KanbanCompletedAction,

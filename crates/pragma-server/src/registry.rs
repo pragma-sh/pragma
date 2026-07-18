@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
-    AgentSessionLaunchPayload, NewWorktreeSpec, ProtocolEventKind, Tab, TabKind, Worktree,
+    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, Tab, TabKind, Worktree,
 };
 use pragma_core::git::GitRequest;
 use pragma_core::watcher::WorktreeWatcher;
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::automations::{AutomationError, AutomationsRegistry};
 use crate::plugins_host::{PluginsError, PluginsRegistry};
+use crate::ports::{self, SessionOwner};
 use crate::session::{Session, SessionError};
 use crate::tunnel::{TunnelError, TunnelRegistry};
 
@@ -33,6 +34,8 @@ pub enum RegistryError {
     Session(#[from] SessionError),
     #[error("filesystem watcher failed: {0}")]
     Watcher(String),
+    #[error("port inspection failed: {0}")]
+    Ports(String),
     #[error("lock poisoned")]
     LockPoisoned,
 }
@@ -256,6 +259,31 @@ impl Registry {
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, AutomationError> {
         self.automations.handle_rpc(payload)
+    }
+
+    /// Lists listeners attributable to terminal sessions in requested worktrees.
+    pub fn list_open_ports(&self, worktree_ids: &[String]) -> Result<Vec<OpenPort>, RegistryError> {
+        let allowed = worktree_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let owners = sessions
+            .values()
+            .filter(|session| allowed.contains(session.worktree_id()))
+            .filter_map(|session| {
+                Some(SessionOwner {
+                    tab_id: session.id().to_string(),
+                    worktree_id: session.worktree_id().to_string(),
+                    root_pid: session.live_root_pid()?,
+                })
+            })
+            .collect::<Vec<_>>();
+        drop(sessions);
+        ports::list_open_ports(&owners).map_err(RegistryError::Ports)
     }
 
     pub fn subscribe_automation_pending(

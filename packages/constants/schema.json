@@ -81,7 +81,8 @@
         "exec",
         "automations",
         "plugins",
-        "tunnel"
+        "tunnel",
+        "ports"
       ]
     },
     "ProtocolEventKind": {
@@ -1252,6 +1253,33 @@
           "description": "True when the user has hidden this worktree from the sidebar. Persists across restarts."
         },
         "createdAt": {
+          "type": "string"
+        }
+      }
+    },
+    "OpenPort": {
+      "title": "OpenPort",
+      "description": "A TCP listening port owned by a process descended from a live Pragma terminal tab shell.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "process", "pid", "tabId", "worktreeId"],
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "process": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "worktreeId": {
           "type": "string"
         }
       }

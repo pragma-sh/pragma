@@ -70,6 +70,15 @@ mod anyhow_pty {
 
 type PtyChild = Box<dyn portable_pty::Child + Send>;
 
+/// Whether [`Session::live_root_pid`] has already reaped the child's exit
+/// status, and if so, what it was.
+#[derive(Default)]
+enum ReapedExitCode {
+    #[default]
+    NotReaped,
+    Reaped(Option<i32>),
+}
+
 /// A unit of work handed from the PTY reader thread to the coalescer thread.
 /// `Output` carries raw, OSC-stripped terminal bytes (no UTF-8 decode — output
 /// ships as binary all the way to xterm); `Title` and `Exit` are control events
@@ -113,12 +122,21 @@ impl OutputCoalescer {
 
 pub struct Session {
     id: String,
+    worktree_id: String,
+    root_pid: Option<u32>,
     /// Absolute path the shell was launched from. Used to identify which
     /// sessions to terminate when their worktree is deleted on disk.
     cwd: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Option<PtyChild>>,
+    /// Exit code reaped by [`Session::live_root_pid`], if it won the race with
+    /// the reader thread's own `wait()`. `try_wait` issues a `waitpid(WNOHANG)`
+    /// on Unix, so if it observes exit at the exact moment the shell dies it
+    /// reaps the zombie and consumes the exit status; a later `wait()` call by
+    /// the reader thread would then get `ECHILD` and silently lose the code.
+    /// Stashing it here lets the reader thread recover it instead of re-waiting.
+    reaped_exit_code: Mutex<ReapedExitCode>,
     scrollback: Mutex<Scrollback>,
     subscribers: Mutex<Vec<Sender<EventFrame>>>,
     output_tx: Sender<OutputMsg>,
@@ -145,7 +163,7 @@ impl Session {
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("PRAGMA_TAB_ID", &id);
-        command.env("PRAGMA_WORKTREE_ID", worktree_id);
+        command.env("PRAGMA_WORKTREE_ID", &worktree_id);
         command.env("PRAGMA_DAEMON_SOCKET", server_socket);
         command.env("PRAGMA_SERVER_SOCKET", server_socket);
         if let Some(gateway) = gateway_env(server_socket) {
@@ -157,6 +175,7 @@ impl Session {
             command.env("PATH", path_with_cli_dir(&cli_path));
         }
         let child = pair.slave.spawn_command(command)?;
+        let root_pid = child.process_id();
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
         drop(pair.slave);
@@ -164,10 +183,13 @@ impl Session {
 
         let session = Arc::new(Self {
             id,
+            worktree_id,
+            root_pid,
             cwd,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             child: Mutex::new(Some(child)),
+            reaped_exit_code: Mutex::new(ReapedExitCode::NotReaped),
             scrollback: Mutex::new(Scrollback::new(SCROLLBACK_LIMIT)),
             subscribers: Mutex::new(Vec::new()),
             output_tx,
@@ -237,6 +259,37 @@ impl Session {
         &self.cwd
     }
 
+    /// Returns terminal tab id used as daemon session id.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns worktree owning this terminal session.
+    pub fn worktree_id(&self) -> &str {
+        &self.worktree_id
+    }
+
+    /// Returns root login-shell PID only while child is still running. Exited,
+    /// unattached sessions can remain registered until replay; excluding them
+    /// prevents a recycled PID from attributing an unrelated host listener.
+    pub fn live_root_pid(&self) -> Option<u32> {
+        let mut child = self.child.lock().ok()?;
+        match child.as_mut()?.try_wait() {
+            Ok(None) => self.root_pid,
+            Ok(Some(status)) => {
+                // We just reaped the zombie ourselves — stash the exit code so
+                // the reader thread's later `wait()` (which would otherwise
+                // get `ECHILD` and lose it) can recover it instead.
+                let code = i32::try_from(status.exit_code()).unwrap_or(i32::MAX);
+                if let Ok(mut reaped) = self.reaped_exit_code.lock() {
+                    *reaped = ReapedExitCode::Reaped(Some(code));
+                }
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
     fn start_reader(session: Arc<Self>, mut reader: Box<dyn Read + Send>) {
         // The reader thread only strips OSC titles; a dedicated coalescer thread
         // batches the resulting output so a redraw burst becomes one broadcast
@@ -272,13 +325,22 @@ impl Session {
                 };
                 let _ = tx.send(msg);
             }
-            let code = session
-                .child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.take())
-                .and_then(|mut child| child.wait().ok())
-                .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
+            let cached_code = session.reaped_exit_code.lock().ok().and_then(|mut reaped| {
+                match std::mem::take(&mut *reaped) {
+                    ReapedExitCode::Reaped(code) => Some(code),
+                    ReapedExitCode::NotReaped => None,
+                }
+            });
+            let code = match cached_code {
+                Some(code) => code,
+                None => session
+                    .child
+                    .lock()
+                    .ok()
+                    .and_then(|mut child| child.take())
+                    .and_then(|mut child| child.wait().ok())
+                    .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX)),
+            };
             let _ = tx.send(OutputMsg::Exit(code));
         });
     }

@@ -34,5 +34,6 @@ pub fn method_name(method: ProtocolRpcMethod) -> &'static str {
         ProtocolRpcMethod::Automations => "automations",
         ProtocolRpcMethod::Plugins => "plugins",
         ProtocolRpcMethod::Tunnel => "tunnel",
+        ProtocolRpcMethod::Ports => "ports",
     }
 }

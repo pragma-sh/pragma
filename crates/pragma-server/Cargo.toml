@@ -13,6 +13,7 @@ anyhow = "1"
 base64 = { workspace = true }
 chrono = { workspace = true }
 daemonize = "0.5"
+netstat2 = { workspace = true }
 portable-pty = "0.8"
 pragma-constants = { path = "../../packages/constants" }
 pragma-core = { path = "../pragma-core" }

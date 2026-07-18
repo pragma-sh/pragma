@@ -14,6 +14,7 @@ import {
   FolderGit2,
   GitPullRequest,
   MonitorUp,
+  Network,
   SquareTerminal,
   Terminal,
 } from "lucide-react";
@@ -33,10 +34,17 @@ import {
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { findPullRequestForBranch, type PullRequestSummary } from "@/lib/github";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
-import { cancelPaletteSearch, githubRepoRef, listWorktreeMru, paletteSearch } from "@/lib/tauri";
+import {
+  cancelPaletteSearch,
+  githubRepoRef,
+  listWorktreeMru,
+  paletteSearch,
+  type OpenPort,
+} from "@/lib/tauri";
 import { useAgentStatusSnapshot } from "@/state/agent-status-store";
 import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
+import { useOpenPorts } from "@/state/open-ports-context";
 import { useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { CommandMode } from "./CommandMode";
@@ -104,7 +112,7 @@ function clearEditorSelection(
   return true;
 }
 
-function closeSelectedRunningScript(
+function closeSelectedTerminal(
   event: React.KeyboardEvent<HTMLInputElement>,
   commandMode: boolean,
   closeTab: Workspace["closeTab"],
@@ -113,8 +121,8 @@ function closeSelectedRunningScript(
   if (event.key !== "Enter" || !event.shiftKey || commandMode) return;
   const selected = event.currentTarget
     .closest("[cmdk-root]")
-    ?.querySelector<HTMLElement>('[cmdk-item][data-selected="true"][data-running-script-tab-id]');
-  const tabId = selected?.dataset.runningScriptTabId;
+    ?.querySelector<HTMLElement>('[cmdk-item][data-selected="true"][data-close-tab-id]');
+  const tabId = selected?.dataset.closeTabId;
   if (!tabId) return;
   event.preventDefault();
   event.stopPropagation();
@@ -164,7 +172,7 @@ function ScopeResults({
         <CommandGroup heading="Running scripts">
           {runningScriptRows.map((script) => (
             <CommandItem
-              data-running-script-tab-id={script.tabId}
+              data-close-tab-id={script.tabId}
               disabled={script.stopping}
               key={script.tabId}
               onSelect={() => {
@@ -200,6 +208,43 @@ function ScopeResults({
         </CommandGroup>
       ) : null}
     </>
+  );
+}
+
+function PortResults({
+  rows,
+  worktreeById,
+  tabById,
+  activateTab,
+}: {
+  rows: OpenPort[];
+  worktreeById: Map<string, Worktree>;
+  tabById: Map<string, Tab>;
+  activateTab: (tab: Tab) => void;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <CommandGroup heading="Ports">
+      {rows.map((port) => {
+        const tab = tabById.get(port.tabId);
+        if (!tab) return null;
+        return (
+          <CommandItem
+            data-close-tab-id={port.tabId}
+            key={`${port.tabId}:${port.port}`}
+            onSelect={() => activateTab(tab)}
+            value={`port:${port.port}:${port.process}:${port.tabId}`}
+          >
+            <Network />
+            <span className="font-mono tabular-nums">{port.port}</span>
+            <span className="truncate">{port.process}</span>
+            <span className="ml-auto min-w-0 truncate pl-4 text-xs text-muted-foreground">
+              {tabLabel(tab)} · {worktreeLabel(worktreeById.get(port.worktreeId))}
+            </span>
+          </CommandItem>
+        );
+      })}
+    </CommandGroup>
   );
 }
 
@@ -571,7 +616,8 @@ function usePaletteSources() {
   const rightSidebar = useRightSidebar();
   const agents = useAgentsList();
   const agentEntries = useAgentStatusSnapshot();
-  return { workspace, github, kanban, rightSidebar, agents, agentEntries };
+  const ports = useOpenPorts();
+  return { workspace, github, kanban, rightSidebar, agents, agentEntries, ports };
 }
 
 function usePaletteState() {
@@ -685,12 +731,14 @@ function usePaletteRows({
   workspace,
   agents,
   agentEntries,
+  ports,
   state,
   scope,
 }: {
   workspace: Workspace;
   agents: Agent[];
   agentEntries: AgentEntry[];
+  ports: OpenPort[];
   state: ReturnType<typeof usePaletteState>;
   scope: ReturnType<typeof usePaletteScope>;
 }) {
@@ -746,6 +794,20 @@ function usePaletteRows({
     (row) => recency(row.worktreeId),
     (row) => `${row.worktreeId}:${row.pullRequest.number}`,
   ).slice(0, 6);
+  const tabById = new Map(
+    workspace.projectTabs.filter((tab) => tab.kind === "terminal").map((tab) => [tab.id, tab]),
+  );
+  const portRows = rankPaletteItems(
+    ports.filter(
+      (port) =>
+        scope.activeWorktreeIds.has(port.worktreeId) &&
+        tabById.get(port.tabId)?.worktreeId === port.worktreeId,
+    ),
+    state.deferredQuery,
+    (port) => [String(port.port), port.process],
+    (port) => recency(port.worktreeId),
+    (port) => `${port.tabId}:${port.port}`,
+  ).slice(0, 8);
   return {
     agentById: new Map(agents.map((agent) => [agent.id, agent])),
     worktreeRows,
@@ -754,6 +816,8 @@ function usePaletteRows({
     openFileRows,
     agentRows,
     prRows,
+    portRows,
+    tabById,
     fileMatches: state.hostMatches.filter((match) => match.kind === "file").slice(0, 20),
     codeMatches:
       state.deferredQuery.trim().length >= 2
@@ -843,7 +907,7 @@ function usePaletteActions({
     ) {
       return;
     }
-    closeSelectedRunningScript(event, commandMode, workspace.closeTab, close);
+    closeSelectedTerminal(event, commandMode, workspace.closeTab, close);
   };
   return {
     close,
@@ -859,7 +923,8 @@ function usePaletteActions({
 
 /** Project-scoped command palette spanning visible worktrees and async host sources. */
 export function CommandPalette({ open, onOpenChange, mode }: CommandPaletteProps) {
-  const { workspace, github, kanban, rightSidebar, agents, agentEntries } = usePaletteSources();
+  const { workspace, github, kanban, rightSidebar, agents, agentEntries, ports } =
+    usePaletteSources();
   const state = usePaletteState();
   useSuppressNativeOverlayWhile(open);
   const scope = usePaletteScope(workspace, state.scopedWorktreeId);
@@ -874,7 +939,7 @@ export function CommandPalette({ open, onOpenChange, mode }: CommandPaletteProps
     scope,
     commandMode,
   });
-  const rows = usePaletteRows({ workspace, agents, agentEntries, state, scope });
+  const rows = usePaletteRows({ workspace, agents, agentEntries, ports, state, scope });
   const actions = usePaletteActions({
     onOpenChange,
     workspace,
@@ -902,7 +967,7 @@ export function CommandPalette({ open, onOpenChange, mode }: CommandPaletteProps
               ? state.selectedEditorId
                 ? "Search worktrees..."
                 : "Search commands..."
-              : "Search worktrees, scripts, PRs, agents, files, terminals, code..."
+              : "Search worktrees, ports, scripts, PRs, agents, files, terminals, code..."
           }
           value={state.query}
         />
@@ -932,6 +997,12 @@ export function CommandPalette({ open, onOpenChange, mode }: CommandPaletteProps
               worktreeRows={rows.worktreeRows}
             />
             <PullRequestResults openPullRequest={actions.openPullRequest} rows={rows.prRows} />
+            <PortResults
+              activateTab={actions.activateTab}
+              rows={rows.portRows}
+              tabById={rows.tabById}
+              worktreeById={scope.worktreeById}
+            />
             <AgentResults
               agentsById={rows.agentById}
               close={actions.close}
