@@ -127,6 +127,10 @@ pub enum GitRequest {
     GithubDefaultPrTitle { root: String },
     /// Fetches `origin` and reports ahead/behind against the branch upstream.
     GithubFetchAndSync { root: String },
+    /// Pulls the current branch, aborting and restoring HEAD on merge conflicts.
+    GithubPullBranch { root: String },
+    /// Pulls then pushes the current branch to `origin`.
+    GithubSyncBranch { root: String },
     /// Pushes the current branch to `origin`, setting the upstream.
     GithubPushBranch { root: String },
     /// Deletes the current branch from `origin`.
@@ -247,6 +251,8 @@ fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::GithubFetchAndSync { root } => {
             to_value(github_fetch_and_sync(Path::new(root))?)?
         }
+        GitRequest::GithubPullBranch { root } => to_value(github_pull_branch(Path::new(root))?)?,
+        GitRequest::GithubSyncBranch { root } => to_value(github_sync_branch(Path::new(root))?)?,
         GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
         GitRequest::GithubDeleteRemoteBranch { root } => {
             to_value(github_delete_remote_branch(Path::new(root))?)?
@@ -629,8 +635,16 @@ fn github_default_pr_title(root: &Path) -> String {
 /// Fetches origin and reports the current branch's ahead/behind status.
 fn github_fetch_and_sync(root: &Path) -> CoreResult<BranchSyncStatus> {
     let branch = current_branch(root)?;
-    let _ = git_stdout(root, &["fetch", "origin"]);
-    let has_upstream = git_stdout(
+    if git_stdout(root, &["remote", "get-url", "origin"]).is_err() {
+        return Ok(BranchSyncStatus {
+            branch,
+            ahead: 0,
+            behind: 0,
+            has_upstream: false,
+        });
+    }
+    git_stdout(root, &["fetch", "origin"])?;
+    let Some(upstream) = git_stdout(
         root,
         &[
             "rev-parse",
@@ -639,18 +653,22 @@ fn github_fetch_and_sync(root: &Path) -> CoreResult<BranchSyncStatus> {
             "@{upstream}",
         ],
     )
-    .is_ok();
-    if !has_upstream {
+    .ok() else {
         return Ok(BranchSyncStatus {
             branch,
             ahead: 0,
             behind: 0,
             has_upstream: false,
         });
-    }
+    };
     let counts = git_stdout(
         root,
-        &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{upstream}...HEAD"),
+        ],
     )?;
     let (behind, ahead) = parse_ahead_behind(&counts);
     Ok(BranchSyncStatus {
@@ -661,10 +679,68 @@ fn github_fetch_and_sync(root: &Path) -> CoreResult<BranchSyncStatus> {
     })
 }
 
+/// Pulls remote commits into the current branch. Dirty worktrees are refused;
+/// conflicted merges are aborted so local commits and files remain unchanged.
+fn github_pull_branch(root: &Path) -> CoreResult<()> {
+    if worktree_is_dirty(root) {
+        return Err(CoreError::InvalidPayload(
+            "Cannot pull with uncommitted changes. Commit or stash them first; no files were changed."
+                .to_string(),
+        ));
+    }
+    let branch = current_branch(root)?;
+    git_stdout(root, &["fetch", "origin"])?;
+    let target = git_stdout(
+        root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )
+    .ok()
+    .or_else(|| existing_remote_branch(root, &branch));
+    let Some(target) = target else {
+        return Ok(());
+    };
+
+    let output = process_env::git()
+        .args(["-C", &path_string(root), "merge", "--no-edit", &target])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    if has_unmerged_paths(root)? {
+        git_stdout(root, &["merge", "--abort"])?;
+        return Err(CoreError::Operation(
+            "Remote changes conflict with local commits. Pull was aborted; local commits and files were preserved."
+                .to_string(),
+        ));
+    }
+    Err(CoreError::Operation(command_output(
+        &output.stdout,
+        &output.stderr,
+    )))
+}
+
+/// Pulls first, then pushes the resulting branch to origin.
+fn github_sync_branch(root: &Path) -> CoreResult<()> {
+    github_pull_branch(root)?;
+    github_push_branch(root)
+}
+
 /// Pushes the current branch to origin and sets its upstream.
 fn github_push_branch(root: &Path) -> CoreResult<()> {
     let branch = current_branch(root)?;
     git_stdout(root, &["push", "-u", "origin", &branch]).map(|_| ())
+}
+
+fn existing_remote_branch(root: &Path, branch: &str) -> Option<String> {
+    let remote = format!("origin/{branch}");
+    git_stdout(root, &["rev-parse", "--verify", &remote])
+        .ok()
+        .map(|_| remote)
 }
 
 /// Deletes the current branch from origin.
@@ -966,22 +1042,45 @@ fn has_unmerged_paths(root: &Path) -> CoreResult<bool> {
     }
 }
 
-/// Resolves the fork-point merge-base of `HEAD` and the parent branch. `None`
-/// for a parentless worktree, a missing HEAD, or unrelated histories.
+/// Resolves the fork-point merge-base of `HEAD` and the parent branch. A
+/// parentless worktree falls back to its upstream/current remote branch so
+/// committed changes on main and externally-created branches remain visible.
 fn base_merge_base(root: &Path, parent_branch: Option<&str>) -> CoreResult<Option<String>> {
-    let Some(parent_branch) = parent_branch else {
+    let comparison_ref = parent_branch
+        .map(str::to_string)
+        .or_else(|| remote_comparison_ref(root));
+    let Some(comparison_ref) = comparison_ref else {
         return Ok(None);
     };
     let output = process_env::git()
         .arg("-C")
         .arg(path_string(root))
-        .args(["merge-base", "HEAD", parent_branch])
+        .args(["merge-base", "HEAD", &comparison_ref])
         .output()?;
     if !output.status.success() {
         return Ok(None);
     }
     let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok((!sha.is_empty()).then_some(sha))
+}
+
+fn remote_comparison_ref(root: &Path) -> Option<String> {
+    git_stdout(
+        root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )
+    .ok()
+    .or_else(|| {
+        current_branch(root)
+            .ok()
+            .and_then(|branch| existing_remote_branch(root, &branch))
+    })
+    .or_else(|| existing_remote_branch(root, &default_branch(root)))
 }
 
 fn merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
@@ -1241,12 +1340,13 @@ mod tests {
     use std::process::Command;
 
     use pragma_constants::{ChangeStatus, DiffSide};
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
     use super::{
         commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
-        list_headless_worktrees, merge_worktree_to_parent, merged_status, stage_file, unstage_file,
-        worktree_changes, worktree_is_dirty, MergedStatusItem,
+        github_fetch_and_sync, github_pull_branch, github_sync_branch, list_headless_worktrees,
+        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
+        worktree_is_dirty, MergedStatusItem,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1273,6 +1373,49 @@ mod tests {
                 message,
             ],
         );
+    }
+
+    fn stdout(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git command");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn project_with_remote() -> (TempDir, TempDir, TempDir) {
+        let remote = tempdir().expect("remote tempdir");
+        run(remote.path(), &["init", "--bare"]);
+
+        let local = tempdir().expect("local tempdir");
+        run(local.path(), &["init", "-b", "main"]);
+        run(local.path(), &["config", "user.email", "test@example.com"]);
+        run(local.path(), &["config", "user.name", "Test"]);
+        run(
+            local.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote.path().to_string_lossy().as_ref(),
+            ],
+        );
+        std::fs::write(local.path().join("base.txt"), "base\n").expect("write base");
+        commit_all(local.path(), "base commit");
+        run(local.path(), &["push", "-u", "origin", "main"]);
+        run(remote.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+        let peer = tempdir().expect("peer tempdir");
+        run(
+            peer.path(),
+            &["clone", remote.path().to_string_lossy().as_ref(), "."],
+        );
+        run(peer.path(), &["config", "user.email", "test@example.com"]);
+        run(peer.path(), &["config", "user.name", "Test"]);
+        (remote, local, peer)
     }
 
     /// Builds a `main` worktree plus a `feature` child forked from main and
@@ -1385,6 +1528,19 @@ mod tests {
     }
 
     #[test]
+    fn parentless_worktree_lists_commits_ahead_of_upstream() {
+        let (_remote, local, _peer) = project_with_remote();
+        std::fs::write(local.path().join("local.txt"), "local\n").expect("write local");
+        commit_all(local.path(), "local commit");
+
+        let changes = worktree_changes(local.path(), None).expect("changes");
+        assert!(changes
+            .committed
+            .iter()
+            .any(|change| change.path == "local.txt" && change.status == ChangeStatus::Added));
+    }
+
+    #[test]
     fn staged_diff_uses_head_as_old_and_index_as_new() {
         let (child_path, _main_path) = project_with_child();
         std::fs::write(child_path.join("base.txt"), "staged\n").expect("modify base");
@@ -1471,6 +1627,83 @@ mod tests {
             .expect_err("merge should conflict")
             .to_string();
         assert!(message.contains("Merge conflicts detected"));
+    }
+
+    #[test]
+    fn remote_status_and_pull_fast_forward() {
+        let (_remote, local, peer) = project_with_remote();
+        std::fs::write(peer.path().join("remote.txt"), "remote\n").expect("write remote");
+        commit_all(peer.path(), "remote commit");
+        run(peer.path(), &["push", "origin", "main"]);
+
+        let status = github_fetch_and_sync(local.path()).expect("status");
+        assert_eq!(status.behind, 1);
+        assert_eq!(status.ahead, 0);
+        github_pull_branch(local.path()).expect("pull");
+        assert_eq!(
+            std::fs::read_to_string(local.path().join("remote.txt")).expect("read remote"),
+            "remote\n"
+        );
+    }
+
+    #[test]
+    fn new_branch_without_upstream_is_not_behind_default_branch() {
+        let (_remote, local, peer) = project_with_remote();
+        run(local.path(), &["checkout", "--no-track", "-b", "feature"]);
+
+        std::fs::write(peer.path().join("remote.txt"), "remote\n").expect("write remote");
+        commit_all(peer.path(), "remote commit");
+        run(peer.path(), &["push", "origin", "main"]);
+
+        let status = github_fetch_and_sync(local.path()).expect("status");
+        assert!(!status.has_upstream);
+        assert_eq!(status.behind, 0);
+        assert_eq!(status.ahead, 0);
+    }
+
+    #[test]
+    fn conflicted_pull_aborts_and_preserves_local_commit() {
+        let (_remote, local, peer) = project_with_remote();
+        std::fs::write(local.path().join("base.txt"), "local\n").expect("write local");
+        commit_all(local.path(), "local commit");
+        let local_head = stdout(local.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(peer.path().join("base.txt"), "remote\n").expect("write remote");
+        commit_all(peer.path(), "remote commit");
+        run(peer.path(), &["push", "origin", "main"]);
+
+        let message = github_pull_branch(local.path())
+            .expect_err("pull should conflict")
+            .to_string();
+        assert!(message.contains("Pull was aborted"));
+        assert_eq!(stdout(local.path(), &["rev-parse", "HEAD"]), local_head);
+        assert_eq!(
+            std::fs::read_to_string(local.path().join("base.txt")).expect("read local"),
+            "local\n"
+        );
+        assert!(!worktree_is_dirty(local.path()));
+    }
+
+    #[test]
+    fn sync_refuses_dirty_files_and_pushes_clean_commits() {
+        let (_remote, local, peer) = project_with_remote();
+        std::fs::write(local.path().join("draft.txt"), "draft\n").expect("write draft");
+        let message = github_sync_branch(local.path())
+            .expect_err("dirty sync should fail")
+            .to_string();
+        assert!(message.contains("no files were changed"));
+        assert_eq!(
+            std::fs::read_to_string(local.path().join("draft.txt")).expect("read draft"),
+            "draft\n"
+        );
+
+        commit_all(local.path(), "local commit");
+        github_sync_branch(local.path()).expect("sync");
+        run(peer.path(), &["fetch", "origin"]);
+        assert_eq!(
+            stdout(peer.path(), &["rev-parse", "origin/main"]),
+            stdout(local.path(), &["rev-parse", "HEAD"])
+        );
     }
 
     #[test]

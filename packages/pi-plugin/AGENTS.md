@@ -11,13 +11,14 @@ catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pra
 
 ## Lifecycle mapping
 
-| Pi event                                                 | Pragma report |
-| -------------------------------------------------------- | ------------- |
-| extension/session load                                   | `cleared`     |
-| `agent_start`                                            | `started`     |
-| normal `agent_end` after a start                         | `stopped`     |
-| `agent_end` containing assistant `stopReason: "aborted"` | `cleared`     |
-| `session_shutdown`                                       | `cleared`     |
+| Pi event                                                 | Pragma report                                 |
+| -------------------------------------------------------- | --------------------------------------------- |
+| extension/session load                                   | `cleared`                                     |
+| `agent_start`                                            | `started`                                     |
+| normal `agent_end` after a start                         | `stopped`                                     |
+| `agent_end` containing assistant `stopReason: "aborted"` | `cleared`                                     |
+| `session_shutdown`                                       | `cleared`                                     |
+| first `before_agent_start` prompt after each `cleared`   | `session-name` (first prompt line, ~48 chars) |
 
 Pi 0.80.10 emits `agent_end` after Escape abort and records the final assistant message
 with `stopReason: "aborted"`; do not report that event as stopped. The integration does

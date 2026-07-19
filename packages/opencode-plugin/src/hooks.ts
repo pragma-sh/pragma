@@ -13,6 +13,38 @@ function messageTextKey(messageID: string, partID?: string): string {
   return partID ? `${messageID}:${partID}` : messageID;
 }
 
+/** Chat-content-bearing runtime event types. */
+const CHAT_EVENT_TYPES = new Set(["message.updated", "message.part.updated", "message.part.delta"]);
+
+/** Parsed `session.created`/`session.updated` info payload. */
+interface SessionEventInfo {
+  id: string;
+  parentId: string | null;
+  title: string | null;
+}
+
+/** Extracts session id/parent/title from a session lifecycle event, if any. */
+function sessionEventInfo(event: RuntimeEvent): SessionEventInfo | null {
+  if (event.type !== "session.created" && event.type !== "session.updated") {
+    return null;
+  }
+  const properties = event.properties;
+  const info = isRecord(properties) && isRecord(properties.info) ? properties.info : null;
+  if (!info || typeof info.id !== "string") {
+    return null;
+  }
+  return {
+    id: info.id,
+    parentId: typeof info.parentID === "string" && info.parentID ? info.parentID : null,
+    title: sessionInfoTitle(info),
+  };
+}
+
+function sessionInfoTitle(info: Record<string, unknown>): string | null {
+  const title = typeof info.title === "string" ? info.title.trim() : "";
+  return title || null;
+}
+
 const PRAGMA_ENV_KEYS = [
   "PRAGMA_GATEWAY_URL",
   "PRAGMA_GATEWAY_TOKEN",
@@ -29,6 +61,8 @@ export interface PragmaReporter {
   message(message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">): Promise<void>;
   /** Removes the tab's indicator entirely (agent process exited), not a green "done". */
   cleared(): Promise<void>;
+  /** Reports the session's display name so Pragma can rename the hosting tab. */
+  sessionName(name: string): Promise<void>;
   /**
    * Reports a `command` attention carrying the command text + a correlation id.
    * Drives the Pragma approval toast; the paired host-side watcher answers the
@@ -88,10 +122,13 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     "message.part.updated": reportUpdatedPart,
   };
 
+  let lastSessionName: string | null = null;
+
   return {
     event: async ({ event }) => {
       const runtimeEvent = event as RuntimeEvent;
       rememberSessionKind(runtimeEvent);
+      await maybeReportSessionName(runtimeEvent);
       if (isChildSessionEvent(runtimeEvent)) {
         if (applyChildSessionEvent(runtimeEvent)) {
           await sync();
@@ -108,11 +145,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       }
       // Assistant (and other) chat content rides on message.* events; report it
       // before the status sync so a trailing idle still carries the reply.
-      if (
-        runtimeEvent.type === "message.updated" ||
-        runtimeEvent.type === "message.part.updated" ||
-        runtimeEvent.type === "message.part.delta"
-      ) {
+      if (CHAT_EVENT_TYPES.has(runtimeEvent.type)) {
         await reportChatContent(runtimeEvent);
       }
       const action = applyEvent(runtimeEvent);
@@ -197,21 +230,32 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   }
 
   function rememberSessionKind(event: RuntimeEvent): void {
-    if (event.type !== "session.created" && event.type !== "session.updated") {
+    const info = sessionEventInfo(event);
+    if (!info?.parentId) {
       return;
     }
-    const properties = event.properties;
-    const info = isRecord(properties) && isRecord(properties.info) ? properties.info : undefined;
-    if (!info || typeof info.id !== "string") {
+    childSessions.set(info.id, info.parentId);
+    if (event.type === "session.created") {
+      activeChildSessions.add(info.id);
+      busy = true;
+    }
+  }
+
+  /**
+   * Mirrors the parent session's title into a Pragma session-name report so
+   * the hosting tab tracks opencode's own session naming (including renames
+   * and session switches). Child (subagent) sessions never rename the tab.
+   */
+  async function maybeReportSessionName(event: RuntimeEvent): Promise<void> {
+    const info = sessionEventInfo(event);
+    if (!info || childSessions.has(info.id)) {
       return;
     }
-    if (typeof info.parentID === "string" && info.parentID) {
-      childSessions.set(info.id, info.parentID);
-      if (event.type === "session.created") {
-        activeChildSessions.add(info.id);
-        busy = true;
-      }
+    if (!info.title || info.title === lastSessionName) {
+      return;
     }
+    lastSessionName = info.title;
+    await reporter.sessionName(info.title);
   }
 
   function applyChildSessionEvent(event: RuntimeEvent): boolean {
@@ -225,13 +269,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       return true;
     }
     if (event.type === "session.status") {
-      const status = isRecord(event.properties) ? event.properties.status : undefined;
-      if (isRecord(status) && status.type === "idle") {
-        activeChildSessions.delete(sessionId);
-      } else {
-        activeChildSessions.add(sessionId);
-        busy = true;
-      }
+      applyChildStatusEvent(sessionId, event);
       return true;
     }
     if (
@@ -245,6 +283,19 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       }
     }
     return false;
+  }
+
+  function applyChildStatusEvent(sessionId: string, event: RuntimeEvent): void {
+    const properties = isRecord(event.properties)
+      ? (event.properties as Record<string, unknown>)
+      : undefined;
+    const status = properties?.status;
+    if (isRecord(status) && status.type === "idle") {
+      activeChildSessions.delete(sessionId);
+    } else {
+      activeChildSessions.add(sessionId);
+      busy = true;
+    }
   }
 
   function isChildSessionEvent(event: RuntimeEvent): boolean {

@@ -630,6 +630,15 @@ pub enum AgentReportCommand {
         #[arg(long = "request-id")]
         request_id: Option<String>,
     },
+    /// Reports the human-readable name of the agent's active session without
+    /// changing the agent's status. Pragma renames the hosting tab (unless the
+    /// user renamed it manually). Report again on every rename or session switch.
+    #[command(name = "session-name")]
+    SessionName {
+        /// The session's display name.
+        #[arg(long)]
+        name: String,
+    },
     /// Clears the tab's indicator entirely instead of leaving a `done`/green dot.
     /// Use when the agent process exits rather than finishing a turn.
     Cleared {

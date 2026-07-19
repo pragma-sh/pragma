@@ -19,6 +19,7 @@ offset_file="${state_prefix}.offset"
 watcher_file="${state_prefix}.watcher"
 question_file="${state_prefix}.question"
 messages_file="${state_prefix}.messages"
+session_name_marker="${state_prefix}.named"
 subagent_dir="${state_prefix}.subagents"
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 watch_interval="${PRAGMA_WATCH_INTERVAL:-1}"
@@ -83,6 +84,19 @@ print(json.dumps({
 ' "$stable_id" "$role" "$text" "$active" "$ts" 2>/dev/null)
   [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
+report_session_name_once() {
+  prompt="$1"
+  [ -n "$prompt" ] && [ ! -f "$session_name_marker" ] || return 0
+  name=$(printf '%s' "$prompt" | sed -n '/[^[:space:]]/ { s/^[[:space:]]*//; s/[[:space:]]*$//; p; q; }')
+  if [ "$(printf '%s' "$name" | wc -c | tr -d ' ')" -gt 48 ]; then
+    name="$(printf '%s' "$name" | cut -c 1-47)…"
+  fi
+  name=$(printf '%s' "$name" | sed 's/[[:space:]]*$//')
+  [ -n "$name" ] || return 0
+  report session-name --name "$name"
+  : >"$session_name_marker"
 }
 
 safe_id() {
@@ -343,6 +357,7 @@ case "${1:-}" in
     ;;
   cleared)
     clear_state
+    rm -f "$session_name_marker"
     report cleared
     ;;
   started)
@@ -359,6 +374,7 @@ case "${1:-}" in
     printf '%s' "$offset" >"$offset_file"
     report started
     if [ -n "$prompt" ]; then
+      report_session_name_once "$prompt"
       content_message user "$prompt" "codex-${token}-user"
     fi
     start_abort_watcher "$transcript" "$token" "$offset"

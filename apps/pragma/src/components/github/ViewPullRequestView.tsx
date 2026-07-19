@@ -3,7 +3,7 @@ import { errorMessage } from "@/lib/errors";
 
 import type { ChangedFile, GitHubRepoRef } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { Check, CheckCircle2, CircleDot, Loader2, X, XCircle } from "lucide-react";
+import { Check, CheckCircle2, ChevronUp, CircleDot, Loader2, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
@@ -23,6 +23,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -32,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   type ChecksStatus,
+  type CheckStatusItem,
   type GitHubActor,
   type IssueComment,
   type PullFile,
@@ -618,29 +626,64 @@ function MergeCard({
   );
 }
 
-/** Renders the combined checks state as the merge-card summary line. */
-function ChecksSummary({ checks }: { checks: ChecksStatus | null }) {
+function CheckStateIcon({ state }: { state: CheckStatusItem["state"] }) {
+  if (state === "success") return <CheckCircle2 className="size-3.5 text-success" />;
+  if (state === "failure") return <XCircle className="size-3.5 text-destructive" />;
+  return <CircleDot className="size-3.5 text-warning" />;
+}
+
+/** Renders aggregate check counts and an expandable per-check status list. */
+export function ChecksSummary({ checks }: { checks: ChecksStatus | null }) {
   if (!checks || checks.state === "none") {
     return <p className="text-xs text-muted-foreground">No checks reported.</p>;
   }
-  if (checks.state === "success") {
-    return (
-      <p className="inline-flex items-center gap-1 text-xs text-success">
-        <CheckCircle2 className="size-4" /> All {checks.total} checks passed
-      </p>
-    );
-  }
-  if (checks.state === "failure") {
-    return (
-      <p className="inline-flex items-center gap-1 text-xs text-destructive">
-        <XCircle className="size-4" /> {checks.failed} of {checks.total} checks failed
-      </p>
-    );
-  }
+  const summary =
+    checks.state === "success"
+      ? `All ${checks.total} checks passed`
+      : checks.state === "failure"
+        ? `${checks.failed} of ${checks.total} checks failed`
+        : `${checks.passed}/${checks.total} checks complete`;
   return (
-    <p className="inline-flex items-center gap-1 text-xs text-warning">
-      <CircleDot className="size-4" /> {checks.passed}/{checks.total} checks complete
-    </p>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={`${summary}. Show check details`}
+          className="h-auto w-full justify-start gap-2 px-1 py-1 text-xs"
+          variant="ghost"
+        >
+          <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
+          <span className="inline-flex items-center gap-0.5 text-success" title="Succeeded">
+            <CheckCircle2 className="size-3.5" /> {checks.passed}
+          </span>
+          <span className="inline-flex items-center gap-0.5 text-destructive" title="Failed">
+            <XCircle className="size-3.5" /> {checks.failed}
+          </span>
+          <span className="inline-flex items-center gap-0.5 text-warning" title="In progress">
+            <CircleDot className="size-3.5" /> {checks.pending}
+          </span>
+          <ChevronUp className="size-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>GitHub checks</DropdownMenuLabel>
+        {checks.items.map((item) => (
+          <DropdownMenuItem
+            className="justify-between"
+            disabled={!item.url}
+            key={`${item.name}-${item.url ?? item.state}`}
+            onSelect={() => {
+              if (item.url) void browserOpenExternal(item.url);
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <CheckStateIcon state={item.state} />
+              <span className="truncate">{item.name}</span>
+            </span>
+            <span className="text-[10px] capitalize text-muted-foreground">{item.state}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

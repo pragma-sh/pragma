@@ -168,16 +168,34 @@ describe("findPullRequestForBranch", () => {
 describe("getChecksStatus", () => {
   it("reports success when every check and status passed", async () => {
     octokit.rest.checks.listForRef.mockResolvedValue({
-      data: { check_runs: [{ status: "completed", conclusion: "success" }] },
+      data: {
+        check_runs: [
+          {
+            name: "build",
+            status: "completed",
+            conclusion: "success",
+            details_url: "https://github.com/acme/widget/actions/1",
+          },
+        ],
+      },
     });
     octokit.rest.repos.getCombinedStatusForRef.mockResolvedValue({
-      data: { statuses: [{ state: "success" }] },
+      data: { statuses: [{ context: "coverage", state: "success", target_url: null }] },
     });
     expect(await getChecksStatus(repo, "abc")).toEqual({
       state: "success",
       total: 2,
       passed: 2,
       failed: 0,
+      pending: 0,
+      items: [
+        {
+          name: "build",
+          state: "success",
+          url: "https://github.com/acme/widget/actions/1",
+        },
+        { name: "coverage", state: "success", url: null },
+      ],
     });
   });
 

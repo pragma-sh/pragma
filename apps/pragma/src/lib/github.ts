@@ -134,11 +134,20 @@ export interface ReviewThread {
 }
 
 /** Combined CI/status summary for a ref (the merge card). */
+export interface CheckStatusItem {
+  name: string;
+  state: "success" | "failure" | "pending";
+  url: string | null;
+}
+
+/** Combined CI/status summary for a ref (the merge card). */
 export interface ChecksStatus {
   state: "success" | "failure" | "pending" | "neutral" | "none";
   total: number;
   passed: number;
   failed: number;
+  pending: number;
+  items: CheckStatusItem[];
 }
 
 /** Supported merge strategies. */
@@ -640,35 +649,34 @@ export async function unresolveReviewThread(threadId: string): Promise<void> {
   );
 }
 
-/** Tallies one check run into the passed/failed/pending counters. */
-function tallyCheckRun(
-  run: { status: string; conclusion: string | null },
-  counts: ChecksCounts,
-): void {
-  if (run.status !== "completed") {
-    counts.pending += 1;
-  } else if (run.conclusion === "success" || run.conclusion === "neutral") {
-    counts.passed += 1;
-  } else if (run.conclusion === "failure" || run.conclusion === "timed_out") {
-    counts.failed += 1;
-  }
+/** Normalizes one check run into the status rendered by the checks dropdown. */
+function checkRunState(run: {
+  status: string;
+  conclusion: string | null;
+}): CheckStatusItem["state"] {
+  if (run.status !== "completed") return "pending";
+  if (run.conclusion === "success" || run.conclusion === "neutral" || run.conclusion === "skipped")
+    return "success";
+  return "failure";
 }
 
-/** Tallies one commit status into the passed/failed/pending counters. */
-function tallyStatus(state: string, counts: ChecksCounts): void {
-  if (state === "success") {
-    counts.passed += 1;
-  } else if (state === "failure" || state === "error") {
-    counts.failed += 1;
-  } else {
-    counts.pending += 1;
-  }
+/** Normalizes one legacy commit status for the checks dropdown. */
+function commitStatusState(state: string): CheckStatusItem["state"] {
+  if (state === "success") return "success";
+  if (state === "failure" || state === "error") return "failure";
+  return "pending";
 }
 
 interface ChecksCounts {
   passed: number;
   failed: number;
   pending: number;
+}
+
+function tallyItem(item: CheckStatusItem, counts: ChecksCounts): void {
+  if (item.state === "success") counts.passed += 1;
+  else if (item.state === "failure") counts.failed += 1;
+  else counts.pending += 1;
 }
 
 /** Derives the rollup state from counts: failure > pending > success > none. */
@@ -694,19 +702,28 @@ export async function getChecksStatus(repo: GitHubRepoRef, ref: string): Promise
     octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref }),
   ]);
 
+  const items: CheckStatusItem[] = [
+    ...checks.data.check_runs.map((run) => ({
+      name: run.name || "GitHub check",
+      state: checkRunState(run),
+      url: run.details_url ?? null,
+    })),
+    ...combined.data.statuses.map((status) => ({
+      name: status.context || "Commit status",
+      state: commitStatusState(status.state),
+      url: status.target_url ?? null,
+    })),
+  ];
   const counts: ChecksCounts = { passed: 0, failed: 0, pending: 0 };
-  for (const run of checks.data.check_runs) {
-    tallyCheckRun(run, counts);
-  }
-  for (const status of combined.data.statuses) {
-    tallyStatus(status.state, counts);
-  }
+  for (const item of items) tallyItem(item, counts);
 
   return {
     state: checksStateFromCounts(counts),
-    total: counts.passed + counts.failed + counts.pending,
+    total: items.length,
     passed: counts.passed,
     failed: counts.failed,
+    pending: counts.pending,
+    items,
   };
 }
 

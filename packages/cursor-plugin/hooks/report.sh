@@ -27,6 +27,7 @@ state_dir="${TMPDIR:-/tmp}"
 # the attention/running reports so a stray event outside a turn can't flash a
 # phantom status onto an already-finished turn.
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
+session_name_marker="${state_dir}/pragma-cli-${agent}-${tab}.named"
 # How long beforeShellExecution/beforeMCPExecution blocks waiting for a remote
 # approve/deny from a Pragma toast before letting Cursor use its own prompt.
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
@@ -107,6 +108,19 @@ print(json.dumps({
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
 
+report_session_name_once() {
+  prompt="$1"
+  [ -n "$prompt" ] && [ ! -f "$session_name_marker" ] || return 0
+  name=$(printf '%s' "$prompt" | sed -n '/[^[:space:]]/ { s/^[[:space:]]*//; s/[[:space:]]*$//; p; q; }')
+  if [ "$(printf '%s' "$name" | wc -c | tr -d ' ')" -gt 48 ]; then
+    name="$(printf '%s' "$name" | cut -c 1-47)…"
+  fi
+  name=$(printf '%s' "$name" | sed 's/[[:space:]]*$//')
+  [ -n "$name" ] || return 0
+  report session-name --name "$name"
+  : >"$session_name_marker"
+}
+
 case "${1:-}" in
   started)
     # A new turn is in flight: tag the marker and report running.
@@ -115,6 +129,7 @@ case "${1:-}" in
     input="$(cat)"
     prompt="$(json_field prompt "$input")"
     if [ -n "$prompt" ]; then
+      report_session_name_once "$prompt"
       content_message user "$prompt"
     else
       message assistant "Cursor Agent turn started"
@@ -131,6 +146,7 @@ case "${1:-}" in
     ;;
   cleared)
     rm -f "$marker"
+    rm -f "$session_name_marker"
     report cleared
     ;;
   response)

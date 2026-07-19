@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { GitHubRepoRef } from "@pragma/constants";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { browserOpenExternal, github, workspace } = vi.hoisted(() => ({
   browserOpenExternal: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock("@/lib/github", () => github);
 vi.mock("@/lib/tauri", () => ({ browserOpenExternal, githubDeleteRemoteBranch: vi.fn() }));
 vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
 
-import { ViewPullRequestView } from "./ViewPullRequestView";
+import { ChecksSummary, ViewPullRequestView } from "./ViewPullRequestView";
 
 const repo: GitHubRepoRef = {
   owner: "acme",
@@ -63,6 +63,11 @@ beforeEach(() => {
   ]);
   github.listPullFiles.mockResolvedValue([]);
   github.listReviewThreads.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
 });
 
 describe("ViewPullRequestView", () => {
@@ -101,5 +106,82 @@ describe("ViewPullRequestView", () => {
         "https://github.com/acme/widget/commit/a1b2c3d4e5f6",
       );
     });
+  });
+});
+
+describe("ChecksSummary", () => {
+  it("shows aggregate state circles and expands each GitHub check", async () => {
+    render(
+      <ChecksSummary
+        checks={{
+          state: "failure",
+          total: 3,
+          passed: 1,
+          failed: 1,
+          pending: 1,
+          items: [
+            { name: "build", state: "success", url: null },
+            { name: "lint", state: "failure", url: null },
+            { name: "test", state: "pending", url: null },
+          ],
+        }}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: /1 of 3 checks failed/i });
+    expect(trigger).toHaveTextContent("1 of 3 checks failed");
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+
+    expect(await screen.findByText("build")).toBeInTheDocument();
+    expect(screen.getByText("lint")).toBeInTheDocument();
+    expect(screen.getByText("test")).toBeInTheDocument();
+  });
+
+  it("opens a check's external URL when selecting its status", async () => {
+    render(
+      <ChecksSummary
+        checks={{
+          state: "success",
+          total: 1,
+          passed: 1,
+          failed: 0,
+          pending: 0,
+          items: [{ name: "Greptile review", state: "success", url: "https://app.greptile.com" }],
+        }}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: /all 1 checks passed/i }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByText("Greptile review"));
+
+    expect(browserOpenExternal).toHaveBeenCalledWith("https://app.greptile.com");
+  });
+
+  it("does not open a URL for a check that has none", async () => {
+    render(
+      <ChecksSummary
+        checks={{
+          state: "pending",
+          total: 1,
+          passed: 0,
+          failed: 0,
+          pending: 1,
+          items: [{ name: "test", state: "pending", url: null }],
+        }}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: /0\/1 checks complete/i }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByText("test"));
+
+    expect(browserOpenExternal).not.toHaveBeenCalled();
   });
 });

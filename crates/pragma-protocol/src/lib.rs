@@ -282,7 +282,17 @@ pub enum EventFrame {
         #[serde(rename = "tabId")]
         tab_id: String,
         agent: String,
-        status: AgentStatus,
+        /// Effective agent status; `None` only for a status-less report (a
+        /// `session-name` rename before any status was ever reported).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<AgentStatus>,
+        /// Human-readable session name, when the agent has reported one.
+        #[serde(
+            rename = "sessionName",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_name: Option<String>,
         #[serde(rename = "attentionKind")]
         attention_kind: Option<AgentAttentionKind>,
         /// The command awaiting approval, when `status` is a `command` attention.
@@ -513,7 +523,8 @@ mod tests {
             worktree_id: "w".to_string(),
             tab_id: "t".to_string(),
             agent: "claude-code".to_string(),
-            status: AgentStatus::Attention,
+            status: Some(AgentStatus::Attention),
+            session_name: Some("Fix flaky tests".to_string()),
             attention_kind: Some(pragma_constants::AgentAttentionKind::Command),
             command: Some("npm test".to_string()),
             question: None,

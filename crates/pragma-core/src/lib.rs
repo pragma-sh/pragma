@@ -15,6 +15,7 @@ pub mod fs;
 pub mod git;
 pub mod process_env;
 pub mod rpc;
+pub mod tabs;
 pub mod watcher;
 
 /// Result type for host-side core operations.

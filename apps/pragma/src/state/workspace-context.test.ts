@@ -39,6 +39,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     pluginViewId: null,
     pluginPayload: null,
     pluginDedupeKey: null,
+    agentId: null,
     userRenamed: false,
     orderIndex: 0,
     createdAt: "now",
@@ -641,5 +642,74 @@ describe("workspaceReducer", () => {
     });
     expect(afterAuto.tabs[0]?.title).toBe("Build");
     expect(afterAuto.tabs[0]?.userRenamed).toBe(true);
+  });
+
+  it("set-tab-agent takes the agent's name and locks the shell out of the title", () => {
+    const state = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "set-tab-agent", tabId: "one", agentId: "plugin:claude-code", title: "Claude Code" },
+    );
+    expect(state.tabs[0]?.agentId).toBe("plugin:claude-code");
+    expect(state.tabs[0]?.title).toBe("Claude Code");
+
+    // Agent tabs ignore shell OSC titles — the TUI's own escape sequences must
+    // not fight the agent's session name.
+    const afterAuto = workspaceReducer(state, {
+      type: "set-auto-title",
+      tabId: "one",
+      title: "shell wants this",
+    });
+    expect(afterAuto.tabs[0]?.title).toBe("Claude Code");
+  });
+
+  it("set-tab-agent keeps a user-renamed title while still tagging the agent", () => {
+    const renamed = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "rename-tab", tabId: "one", title: "My run" },
+    );
+    const state = workspaceReducer(renamed, {
+      type: "set-tab-agent",
+      tabId: "one",
+      agentId: "plugin:claude-code",
+      title: "Claude Code",
+    });
+    expect(state.tabs[0]?.agentId).toBe("plugin:claude-code");
+    expect(state.tabs[0]?.title).toBe("My run");
+  });
+
+  it("set-session-title renames agent tabs and can rename repeatedly", () => {
+    const withAgent = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "set-tab-agent", tabId: "one", agentId: "plugin:opencode", title: "opencode" },
+    );
+    const first = workspaceReducer(withAgent, {
+      type: "set-session-title",
+      tabId: "one",
+      title: "Fix flaky tests",
+    });
+    expect(first.tabs[0]?.title).toBe("Fix flaky tests");
+
+    // A rename or session switch reports a new name; the tab follows it.
+    const second = workspaceReducer(first, {
+      type: "set-session-title",
+      tabId: "one",
+      title: "Port CI to Linux",
+    });
+    expect(second.tabs[0]?.title).toBe("Port CI to Linux");
+    expect(second.tabs[0]?.userRenamed).toBe(false);
+  });
+
+  it("set-session-title never clobbers a user rename", () => {
+    const renamed = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "rename-tab", tabId: "one", title: "Keep me" },
+    );
+    const state = workspaceReducer(renamed, {
+      type: "set-session-title",
+      tabId: "one",
+      title: "Agent name",
+    });
+    expect(state.tabs[0]?.title).toBe("Keep me");
+    expect(state.tabs[0]?.userRenamed).toBe(true);
   });
 });

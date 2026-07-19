@@ -4,6 +4,7 @@ import {
   reportAttention,
   reportCleared,
   reportMessage,
+  reportSessionName,
   reportStarted,
   reportStopped,
   type AgentAttentionKind,
@@ -74,6 +75,7 @@ function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter
     message: (message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">) =>
       report(() => reportMessage({ agent, env, message })),
     cleared: () => report(() => reportCleared({ agent, env })),
+    sessionName: (name: string) => report(() => reportSessionName({ agent, env, name })),
   };
 
   async function report(run: () => Promise<unknown>): Promise<void> {

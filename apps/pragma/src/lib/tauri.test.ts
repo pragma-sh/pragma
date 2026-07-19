@@ -25,6 +25,8 @@ import {
   deleteFile,
   deleteWorktree,
   fileDiff,
+  githubPullBranch,
+  githubSyncBranch,
   listDirEntries,
   listWorktreeMru,
   loadProjectScripts,
@@ -454,6 +456,14 @@ describe("git changes IPC wrappers", () => {
   it("mergeWorktreeToParent forwards the worktree id", () => {
     void mergeWorktreeToParent("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("merge_worktree_to_parent", { worktreeId: "wt-1" });
+  });
+
+  it("remote pull and sync forward the worktree id", () => {
+    void githubPullBranch("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("github_pull_branch", { worktreeId: "wt-1" });
+    invokeMock.mockReset();
+    void githubSyncBranch("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("github_sync_branch", { worktreeId: "wt-1" });
   });
 });
 

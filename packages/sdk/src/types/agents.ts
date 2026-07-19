@@ -47,7 +47,10 @@ export interface AgentEvent {
   worktreeId: string;
   tabId: string;
   agent: string;
-  status: AgentStatus;
+  /** Effective status; null/absent only for a status-less session-name report. */
+  status?: AgentStatus | null;
+  /** Session display name last reported by the agent, when present. */
+  sessionName?: string | null;
   attentionKind: AgentAttentionKind | null;
   /** The command awaiting approval when `attentionKind` is `command`. */
   command?: string | null;
@@ -112,6 +115,12 @@ export interface ReportOptions {
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
 }
+
+/** Options for {@link reportSessionName}: a session display name plus routing. */
+export type ReportSessionNameOptions = Omit<ReportOptions, "kind"> & {
+  /** The session's human-readable display name. */
+  name: string;
+};
 
 export type ReportMessageOptions = Omit<ReportOptions, "kind"> & {
   message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId"> &

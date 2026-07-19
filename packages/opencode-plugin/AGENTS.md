@@ -2,7 +2,9 @@
 
 ESM opencode plugin that reports agent status into Pragma. Built with Bunup
 (ESM-only). Imports opencode plugin types from `@opencode-ai/plugin`, reacts to
-opencode hooks/events, and reports `started` / `stopped` / `attention` / `cleared`
+opencode hooks/events, and reports `started` / `stopped` / `attention` / `cleared` /
+`session-name` (the parent session's title from `session.created`/`session.updated`,
+deduplicated, so Pragma renames the hosting tab on create/rename/switch)
 through `@pragma/sdk`.
 
 ## File map

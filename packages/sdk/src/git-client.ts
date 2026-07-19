@@ -77,6 +77,14 @@ export class GitClient {
     return this.rpc("githubFetchAndSync", payload);
   }
 
+  githubPullBranch(payload: { root: string }): Promise<void> {
+    return this.rpc("githubPullBranch", payload);
+  }
+
+  githubSyncBranch(payload: { root: string }): Promise<void> {
+    return this.rpc("githubSyncBranch", payload);
+  }
+
   githubPushBranch(payload: { root: string }): Promise<void> {
     return this.rpc("githubPushBranch", payload);
   }

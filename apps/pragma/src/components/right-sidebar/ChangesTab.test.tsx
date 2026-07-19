@@ -6,7 +6,7 @@ import type {
   WorktreeChanges,
 } from "@pragma/constants";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const worktreeChangesMock = vi.fn();
 const discardUnstagedFileMock = vi.fn();
@@ -16,7 +16,8 @@ const stageAllMock = vi.fn();
 const unstageFileMock = vi.fn();
 const unstageAllMock = vi.fn();
 const commitStagedMock = vi.fn();
-const mergeWorktreeToParentMock = vi.fn();
+const githubFetchAndSyncMock = vi.fn();
+const githubSyncBranchMock = vi.fn();
 const aiGenerateCommitMessageMock = vi.fn();
 const deleteWorktreeMock = vi.fn();
 const getWorktreeStatusMock = vi.fn();
@@ -73,7 +74,8 @@ vi.mock("@/lib/tauri", () => ({
   unstageFile: (...args: unknown[]) => unstageFileMock(...args),
   unstageAll: (...args: unknown[]) => unstageAllMock(...args),
   commitStaged: (...args: unknown[]) => commitStagedMock(...args),
-  mergeWorktreeToParent: (...args: unknown[]) => mergeWorktreeToParentMock(...args),
+  githubFetchAndSync: (...args: unknown[]) => githubFetchAndSyncMock(...args),
+  githubSyncBranch: (...args: unknown[]) => githubSyncBranchMock(...args),
   aiGenerateCommitMessage: (...args: unknown[]) => aiGenerateCommitMessageMock(...args),
 }));
 
@@ -99,6 +101,15 @@ function change(path: string, status: ChangeStatus, side: DiffSide): ChangedFile
   return { path, oldPath: null, status, side, additions: null, deletions: null };
 }
 
+beforeEach(() => {
+  githubFetchAndSyncMock.mockResolvedValue({
+    branch: "feature",
+    ahead: 0,
+    behind: 0,
+    hasUpstream: true,
+  });
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -112,7 +123,8 @@ afterEach(() => {
   unstageFileMock.mockReset();
   unstageAllMock.mockReset();
   commitStagedMock.mockReset();
-  mergeWorktreeToParentMock.mockReset();
+  githubFetchAndSyncMock.mockReset();
+  githubSyncBranchMock.mockReset();
   deleteWorktreeMock.mockReset();
   getWorktreeStatusMock.mockReset();
   openDiffTabMock.mockReset();
@@ -392,32 +404,7 @@ describe("ChangesTab", () => {
     expect(screen.queryByPlaceholderText("Shift + tab to generate")).toBeNull();
   });
 
-  it("shows merge when a child worktree only has committed changes", async () => {
-    workspaceMock = {
-      ...workspaceMock,
-      selectedWorktreeId: "child",
-      selectedWorktree: childWorktree,
-      worktrees: { p: [parentWorktree, childWorktree] },
-    };
-    worktreeChangesMock
-      .mockResolvedValueOnce(
-        changes({
-          committed: [change("src/app.ts", "modified", "committed")],
-        }),
-      )
-      .mockResolvedValueOnce(changes());
-    mergeWorktreeToParentMock.mockResolvedValue(undefined);
-    render(<ChangesTab />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Merge into main" }));
-
-    await vi.waitFor(() => expect(mergeWorktreeToParentMock).toHaveBeenCalledWith("child"));
-    await vi.waitFor(() =>
-      expect(screen.getByRole("button", { name: "Delete worktree" })).toBeTruthy(),
-    );
-  });
-
-  it("surfaces merge conflicts without replacing the merge action", async () => {
+  it("shows remote sync counts when a child worktree only has committed changes", async () => {
     workspaceMock = {
       ...workspaceMock,
       selectedWorktreeId: "child",
@@ -429,17 +416,83 @@ describe("ChangesTab", () => {
         committed: [change("src/app.ts", "modified", "committed")],
       }),
     );
-    mergeWorktreeToParentMock.mockRejectedValue(new Error("Merge conflicts detected in main"));
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "feature",
+      ahead: 2,
+      behind: 1,
+      hasUpstream: true,
+    });
+    githubSyncBranchMock.mockResolvedValue(undefined);
     render(<ChangesTab />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Merge into main" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sync with remote" }));
+
+    await vi.waitFor(() => expect(githubSyncBranchMock).toHaveBeenCalledWith("child"));
+    expect(screen.getByTitle("1 commit(s) to pull")).toHaveTextContent("1");
+    expect(screen.getByTitle("2 commit(s) to push")).toHaveTextContent("2");
+  });
+
+  it("replaces commit controls for any clean worktree with committed changes", async () => {
+    workspaceMock = {
+      ...workspaceMock,
+      selectedWorktreeId: "orphan",
+      selectedWorktree: { ...childWorktree, id: "orphan", parentId: null },
+      worktrees: { p: [{ ...childWorktree, id: "orphan", parentId: null }] },
+    };
+    worktreeChangesMock.mockResolvedValue(
+      changes({
+        committed: [change("src/app.ts", "modified", "committed")],
+      }),
+    );
+    render(<ChangesTab />);
+
+    expect(await screen.findByRole("button", { name: "Sync with remote" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Commit message")).not.toBeInTheDocument();
+  });
+
+  it("shows sync for a clean main branch that differs from its remote", async () => {
+    worktreeChangesMock.mockResolvedValue(changes());
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "main",
+      ahead: 1,
+      behind: 0,
+      hasUpstream: true,
+    });
+    render(<ChangesTab />);
+
+    expect(await screen.findByRole("button", { name: "Sync with remote" })).toBeInTheDocument();
+    expect(screen.getByTitle("1 commit(s) to push")).toHaveTextContent("1");
+  });
+
+  it("surfaces sync conflicts without replacing the sync action", async () => {
+    workspaceMock = {
+      ...workspaceMock,
+      selectedWorktreeId: "child",
+      selectedWorktree: childWorktree,
+      worktrees: { p: [parentWorktree, childWorktree] },
+    };
+    worktreeChangesMock.mockResolvedValue(
+      changes({
+        committed: [change("src/app.ts", "modified", "committed")],
+      }),
+    );
+    githubSyncBranchMock.mockRejectedValue(
+      new Error("Remote changes conflict with local commits. Pull was aborted."),
+    );
+    render(<ChangesTab />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sync with remote" }));
 
     const { toast } = await import("sonner");
     await vi.waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Merge conflicts detected in main"),
+      expect(toast.error).toHaveBeenCalledWith(
+        "Remote changes conflict with local commits. Pull was aborted.",
+      ),
     );
-    expect(await screen.findByText("Merge conflicts detected in main")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Merge into main" })).toBeTruthy();
+    expect(
+      await screen.findByText("Remote changes conflict with local commits. Pull was aborted."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sync with remote" })).toBeTruthy();
   });
 
   it("shows the delete worktree action after a child has no remaining changes", async () => {
