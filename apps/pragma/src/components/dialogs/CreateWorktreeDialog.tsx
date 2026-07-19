@@ -135,25 +135,34 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
     setError(null);
   }
 
+  function canStartSubmit(projectId: string | null): projectId is string {
+    return Boolean(projectId && workspace.selectedWorktreeId && canSubmit && !busy);
+  }
+
+  /** Blocks creation only when the main worktree is behind the remote; otherwise proceeds. */
+  async function checkMainAndCreate(projectId: string) {
+    const main = (workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain);
+    if (!main) {
+      throw new Error("Project main worktree was not found.");
+    }
+    const status = await fetchMainSyncStatus(main.id);
+    if (status && status.behind > 0) {
+      setBehind(status.behind);
+      setMainWorktreeId(main.id);
+      return;
+    }
+    await createAndLaunch();
+  }
+
   async function submit() {
     const projectId = workspace.selectedProjectId;
-    if (!projectId || !workspace.selectedWorktreeId || !canSubmit || busy) {
+    if (!canStartSubmit(projectId)) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const main = (workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain);
-      if (!main) {
-        throw new Error("Project main worktree was not found.");
-      }
-      const status = await fetchMainSyncStatus(main.id);
-      if (status && status.behind > 0) {
-        setBehind(status.behind);
-        setMainWorktreeId(main.id);
-        return;
-      }
-      await createAndLaunch();
+      await checkMainAndCreate(projectId);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
