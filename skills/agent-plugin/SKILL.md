@@ -55,6 +55,15 @@ Translate verified host lifecycle into four reports:
 | `attention` | `attention`    | question or command approval becomes visible |
 | `cleared`   | removed        | load reset, process exit/crash, or abort     |
 
+Also report the session's display name with `session-name` (SDK
+`reportSessionName({ agent, env, name })`, CLI
+`pragma-cli agent report --agent <id> session-name --name "<name>"`). It is
+status-less: Pragma renames the hosting tab to it unless the user renamed the tab
+manually. Report it on session create, on every rename, and on every session
+switch. If the host exposes no session title, derive one from the first user
+prompt per session (first line, ~48 chars), or declare `sessionName` in
+`excludeFeatures`. `agent verify` runs a `session-name` scenario unless excluded.
+
 Enforce both rules:
 
 - Emit `stopped` only after `started`. Bare idle must not create a phantom done dot.
@@ -79,8 +88,8 @@ Build reporter like `packages/opencode-plugin/src/index.ts`:
 - Resolve stable `agent` id once.
 - Guard environment before calling SDK.
 - Catch every report failure; optional debug logging only.
-- Use `reportStarted`, `reportStopped`, `reportAttention`, `reportCleared`, and
-  `reportMessage` instead of constructing transport payloads.
+- Use `reportStarted`, `reportStopped`, `reportAttention`, `reportCleared`,
+  `reportSessionName`, and `reportMessage` instead of constructing transport payloads.
 - Keep message ids stable while streaming updates. `ts` is Unix milliseconds, not
   seconds. Preserve non-decreasing timestamps per id.
 - Carry `requestId` from attention through decision/answer round-trips.
@@ -141,8 +150,8 @@ Contribute launcher with `defineAgent`:
 - `prefillDelayMs`, `prefillMode`, `prefillSubmit`, `prefillSubmitDelayMs`: agent-owned
   prompt delivery behavior.
 - `excludeFeatures`: declare unsupported optional capabilities (`questions`,
-  `commandApproval`, `commands`, `subagents`, `abort`, `interrupt`, `usageLimits`) so
-  `agent verify` skips scenarios the host cannot implement.
+  `commandApproval`, `commands`, `subagents`, `abort`, `interrupt`, `usageLimits`,
+  `sessionName`) so `agent verify` skips scenarios the host cannot implement.
 
 Attach `createTuiWatcher`:
 

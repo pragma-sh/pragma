@@ -24,7 +24,8 @@ pub enum VerifyEvent {
         worktree_id: String,
         tab_id: String,
         agent: String,
-        status: AgentStatus,
+        status: Option<AgentStatus>,
+        session_name: Option<String>,
         attention_kind: Option<AgentAttentionKind>,
         command: Option<String>,
         question: Option<String>,
@@ -274,7 +275,7 @@ mod tests {
                 matches!(
                     event,
                     VerifyEvent::Agent {
-                        status: AgentStatus::Done,
+                        status: Some(AgentStatus::Done),
                         ..
                     }
                 )

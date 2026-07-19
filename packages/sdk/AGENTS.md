@@ -18,8 +18,11 @@ Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL`
 
 Use `@pragma/sdk` in any JS/TS plugin or consumer that needs gateway access or agent
 status reporting. The top-level `reportStarted` / `reportStopped` / `reportAttention` /
-`reportCleared` helpers return `Promise<void>` and no-op unless
+`reportCleared` / `reportSessionName` helpers return `Promise<void>` and no-op unless
 `hasPragmaEnvironment()` sees gateway URL/token plus tab/worktree env.
+`reportSessionName({ agent, env, name })` is status-less: it renames the hosting tab
+to the session's display name (manual tab renames win); call it on session create,
+rename, and switch.
 
 For command-approval: `reportAttention({ kind: "command", command, requestId })` carries
 the command + a correlation id to the approval toast; `client.agents.reportDecision(...)`

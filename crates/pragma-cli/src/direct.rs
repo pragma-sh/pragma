@@ -236,7 +236,7 @@ fn agent_row(event: EventFrame) -> Option<AgentStatusRow> {
             worktree_id,
             tab_id,
             agent,
-            status: status_wire(status),
+            status: status.map_or_else(|| "unknown".to_string(), status_wire),
             attention_kind: attention_kind.map(attention_wire),
         })
     } else {
@@ -337,6 +337,7 @@ pub fn agent_report(
         "worktreeId": worktree_id,
         "tabId": tab_id,
         "status": fields.status,
+        "sessionName": fields.session_name,
         "attentionKind": fields.attention_kind,
         "command": fields.command,
         "question": fields.question,
@@ -633,7 +634,8 @@ fn message_payload(args: &crate::cli::AgentMessageArgs) -> Result<String, CliErr
 
 /// The wire fields derived from a `report` subcommand.
 struct ReportFields {
-    status: &'static str,
+    status: Option<&'static str>,
+    session_name: Option<String>,
     attention_kind: Option<&'static str>,
     command: Option<String>,
     question: Option<String>,
@@ -652,7 +654,8 @@ fn parse_question_options(raw: &str) -> Result<serde_json::Value, CliError> {
 fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
     match report {
         crate::cli::AgentReportCommand::Started => ReportFields {
-            status: "running",
+            status: Some("running"),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -661,7 +664,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             worktree_override: None,
         },
         crate::cli::AgentReportCommand::Stopped { worktree_id } => ReportFields {
-            status: "done",
+            status: Some("done"),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -676,7 +680,8 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             options,
             request_id,
         } => ReportFields {
-            status: "attention",
+            status: Some("attention"),
+            session_name: None,
             attention_kind: kind.map(|k| match k {
                 crate::cli::AttentionKindArg::Question => "question",
                 crate::cli::AttentionKindArg::Command => "command",
@@ -687,8 +692,19 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             request_id: request_id.clone(),
             worktree_override: None,
         },
+        crate::cli::AgentReportCommand::SessionName { name } => ReportFields {
+            status: None,
+            session_name: Some(name.clone()),
+            attention_kind: None,
+            command: None,
+            question: None,
+            options: None,
+            request_id: None,
+            worktree_override: None,
+        },
         crate::cli::AgentReportCommand::Cleared { worktree_id } => ReportFields {
-            status: "cleared",
+            status: Some("cleared"),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,

@@ -21,6 +21,7 @@ import type {
   ConnectOptions,
   ReportMessageOptions,
   ReportOptions,
+  ReportSessionNameOptions,
 } from "./types/agents";
 
 /** Agent status gateway namespace. */
@@ -93,6 +94,15 @@ export class AgentsClient {
 
   reportCleared(options: ReportOptions): Promise<void> {
     return reportWithClient(this, options, "cleared", null);
+  }
+
+  /**
+   * Reports the human-readable name of the agent's active session without
+   * changing status. Pragma renames the hosting tab (user renames win). Call
+   * again on every rename or session switch.
+   */
+  reportSessionName(options: ReportSessionNameOptions): Promise<void> {
+    return reportWithClient(this, options, null, null, options.name);
   }
 
   /** Returns the resolved agent catalog assembled by the plugins sidecar. */
@@ -338,6 +348,15 @@ export function reportCleared(options: ReportOptions): Promise<void> {
   return reportWithStatus(options, "cleared", null);
 }
 
+/**
+ * Reports the session's display name without changing agent status. Pragma
+ * renames the hosting tab unless the user renamed it manually; report again on
+ * every rename or session switch.
+ */
+export function reportSessionName(options: ReportSessionNameOptions): Promise<void> {
+  return reportWithStatus(options, null, null, options.name);
+}
+
 /** Reports one rich agent message. No-ops unless Pragma gateway env is present. */
 export async function reportMessage(options: ReportMessageOptions): Promise<void> {
   if (!options.client && !hasPragmaEnvironment(options.env)) {
@@ -430,6 +449,7 @@ async function reportWithStatus(
   options: ReportOptions,
   status: AgentReportPayload["status"],
   attentionKind: AgentReportPayload["attentionKind"],
+  sessionName?: string,
 ): Promise<void> {
   if (!options.client && !hasPragmaEnvironment(options.env)) {
     return;
@@ -442,7 +462,7 @@ async function reportWithStatus(
         token: readEnv(PRAGMA_ENV_KEYS.gatewayToken, options.env),
       }),
     );
-  await reportWithClient(agents, options, status, attentionKind);
+  await reportWithClient(agents, options, status, attentionKind, sessionName);
 }
 
 async function reportWithClient(
@@ -450,6 +470,7 @@ async function reportWithClient(
   options: ReportOptions,
   status: AgentReportPayload["status"],
   attentionKind: AgentReportPayload["attentionKind"],
+  sessionName?: string,
 ): Promise<void> {
   const worktreeId = options.worktreeId ?? readEnv(PRAGMA_ENV_KEYS.worktreeId, options.env);
   const tabId = readEnv(PRAGMA_ENV_KEYS.tabId, options.env);
@@ -457,19 +478,30 @@ async function reportWithClient(
     return;
   }
   await agents.report(
-    {
-      agent: options.agent,
-      worktreeId,
-      tabId,
-      status,
-      attentionKind,
-      ...(options.command ? { command: options.command } : {}),
-      ...(options.question ? { question: options.question } : {}),
-      ...(options.options && options.options.length > 0 ? { options: options.options } : {}),
-      ...(options.requestId ? { requestId: options.requestId } : {}),
-    },
+    reportPayload(options, { worktreeId, tabId }, status, attentionKind, sessionName),
     { signal: options.signal },
   );
+}
+
+function reportPayload(
+  options: ReportOptions,
+  routing: { worktreeId: string; tabId: string },
+  status: AgentReportPayload["status"],
+  attentionKind: AgentReportPayload["attentionKind"],
+  sessionName?: string,
+): AgentReportPayload {
+  return {
+    agent: options.agent,
+    worktreeId: routing.worktreeId,
+    tabId: routing.tabId,
+    status,
+    attentionKind,
+    ...(sessionName ? { sessionName } : {}),
+    ...(options.command ? { command: options.command } : {}),
+    ...(options.question ? { question: options.question } : {}),
+    ...(options.options && options.options.length > 0 ? { options: options.options } : {}),
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  };
 }
 
 async function reportMessageWithClient(

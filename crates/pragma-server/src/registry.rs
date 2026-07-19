@@ -532,6 +532,7 @@ impl Registry {
             plugin_view_id: None,
             plugin_payload: None,
             plugin_dedupe_key: None,
+            agent_id: None,
             user_renamed: false,
             order_index: 0,
             created_at: now_timestamp(),
@@ -798,7 +799,6 @@ impl Registry {
     }
 
     pub fn report_agent(&self, payload: AgentReportPayload) -> Result<(), RegistryError> {
-        let event = agent_event(&payload);
         let key = (
             payload.worktree_id.clone(),
             payload.tab_id.clone(),
@@ -808,6 +808,19 @@ impl Registry {
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
+        // Merge with the stored entry: a status-less report (`session-name`)
+        // must not disturb the last status, and a status report without a
+        // session name must not drop the last reported name.
+        let mut payload = payload;
+        if let Some(prev) = statuses.get(&key) {
+            if payload.status.is_none() {
+                payload.status = prev.status;
+            }
+            if payload.session_name.is_none() {
+                payload.session_name.clone_from(&prev.session_name);
+            }
+        }
+        let event = agent_event(&payload);
         // `cleared` is stored like every other status: it marks an idle-but-live
         // agent session (a fresh TUI before its first turn, or a finished one),
         // so a late subscriber — e.g. a paired phone's worktree list — still
@@ -1125,8 +1138,8 @@ impl Registry {
     pub fn mark_agents_seen_for_tab(&self, tab_id: &str) {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
             for ((_, status_tab_id, _), payload) in statuses.iter_mut() {
-                if status_tab_id == tab_id && matches!(payload.status, AgentStatus::Done) {
-                    payload.status = AgentStatus::Cleared;
+                if status_tab_id == tab_id && matches!(payload.status, Some(AgentStatus::Done)) {
+                    payload.status = Some(AgentStatus::Cleared);
                 }
             }
         }
@@ -1255,6 +1268,7 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
         tab_id: payload.tab_id.clone(),
         agent: payload.agent.clone(),
         status: payload.status,
+        session_name: payload.session_name.clone(),
         attention_kind: payload.attention_kind,
         command: payload.command.clone(),
         question: payload.question.clone(),
@@ -1429,7 +1443,8 @@ mod tests {
             agent: "opencode".to_string(),
             worktree_id: "worktree-1".to_string(),
             tab_id: "tab-1".to_string(),
-            status,
+            status: Some(status),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -1500,11 +1515,54 @@ mod tests {
             matches!(
                 after.as_slice(),
                 [EventFrame::Agent {
-                    status: AgentStatus::Cleared,
+                    status: Some(AgentStatus::Cleared),
                     ..
                 }]
             ),
             "cleared keeps the session listed as idle so late subscribers see it exists"
+        );
+    }
+
+    #[test]
+    fn session_name_report_preserves_status_and_carries_forward() {
+        let registry = Registry::default();
+        registry
+            .report_agent(agent_payload(AgentStatus::Running))
+            .expect("running report should store");
+
+        // A status-less session-name rename must not disturb the stored status.
+        let mut rename = agent_payload(AgentStatus::Running);
+        rename.status = None;
+        rename.session_name = Some("Fix flaky tests".to_string());
+        registry.report_agent(rename).expect("rename should store");
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            matches!(
+                snapshot.as_slice(),
+                [EventFrame::Agent {
+                    status: Some(AgentStatus::Running),
+                    session_name: Some(name),
+                    ..
+                }] if name == "Fix flaky tests"
+            ),
+            "rename keeps the running status and stores the name"
+        );
+
+        // A later status report without a name keeps the last reported name.
+        registry
+            .report_agent(agent_payload(AgentStatus::Done))
+            .expect("done report should store");
+        let (after, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            matches!(
+                after.as_slice(),
+                [EventFrame::Agent {
+                    status: Some(AgentStatus::Done),
+                    session_name: Some(name),
+                    ..
+                }] if name == "Fix flaky tests"
+            ),
+            "status change carries the session name forward"
         );
     }
 
@@ -1748,7 +1806,8 @@ mod tests {
             agent: agent.to_string(),
             worktree_id: "worktree-1".to_string(),
             tab_id: tab.to_string(),
-            status,
+            status: Some(status),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -1771,7 +1830,9 @@ mod tests {
         let mut remaining: Vec<(String, AgentStatus)> = snapshot
             .into_iter()
             .filter_map(|event| match event {
-                pragma_protocol::EventFrame::Agent { tab_id, status, .. } => Some((tab_id, status)),
+                pragma_protocol::EventFrame::Agent { tab_id, status, .. } => {
+                    status.map(|status| (tab_id, status))
+                }
                 _ => None,
             })
             .collect();
@@ -1978,7 +2039,8 @@ mod tests {
                 agent: "opencode".to_string(),
                 worktree_id: "worktree-1".to_string(),
                 tab_id: id.clone(),
-                status: AgentStatus::Running,
+                status: Some(AgentStatus::Running),
+                session_name: None,
                 attention_kind: None,
                 command: None,
                 question: None,
