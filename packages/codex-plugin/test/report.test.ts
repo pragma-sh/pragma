@@ -369,7 +369,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await waitFor(() => reports().length > 2);
+    await waitFor(() => reports().at(-1) === "agent report --agent codex started");
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
@@ -407,7 +407,7 @@ describe("report.sh", () => {
       current.path,
       `${JSON.stringify({ type: "event_msg", payload: { type: "turn_aborted" } })}\n`,
     );
-    await waitFor(() => reports().length > 1);
+    await waitFor(() => reports().at(-1) === "agent report --agent codex cleared");
     expect(reports()).toEqual([
       "agent report --agent codex started",
       "agent report --agent codex session-name --name Fix auth",
