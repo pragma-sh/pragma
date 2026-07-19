@@ -34,6 +34,21 @@ type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shift
   preventDefault: () => void;
 };
 
+/**
+ * Fetches the main worktree's sync status, treating a failed fetch (offline,
+ * auth lapsed, remote unreachable) as "status unknown" rather than an error —
+ * matching the ChangesTab behaviour so a flaky fetch never blocks creation.
+ */
+async function fetchMainSyncStatus(
+  mainWorktreeId: string,
+): Promise<Awaited<ReturnType<typeof githubFetchAndSync>> | null> {
+  try {
+    return await githubFetchAndSync(mainWorktreeId);
+  } catch {
+    return null;
+  }
+}
+
 /** Text fields for the new worktree: branch name, display title, agent prompt. */
 function useWorktreeFormFields(): {
   branch: string;
@@ -132,13 +147,7 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       if (!main) {
         throw new Error("Project main worktree was not found.");
       }
-      let status: Awaited<ReturnType<typeof githubFetchAndSync>> | null = null;
-      try {
-        status = await githubFetchAndSync(main.id);
-      } catch {
-        // If we cannot fetch the remote status (offline / auth issue), proceed
-        // with creation rather than blocking — matching the ChangesTab behaviour.
-      }
+      const status = await fetchMainSyncStatus(main.id);
       if (status && status.behind > 0) {
         setBehind(status.behind);
         setMainWorktreeId(main.id);
