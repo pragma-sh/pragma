@@ -4,6 +4,8 @@ import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
 import { GitPullRequest, Globe, PanelsTopLeft, ScrollText, SquareTerminal } from "lucide-react";
 
+import { AgentIcon } from "@/components/agents/AgentIcon";
+import { useAgentsList } from "@/hooks/use-agents-list";
 import { fileIconId } from "@/lib/file-icons";
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
@@ -29,9 +31,14 @@ export function tabTitle(tab: Tab): string {
   return tab.title?.trim() || defaultTabTitle(tab.kind);
 }
 
-/** Renders a tab kind icon, using the page favicon for browser tabs when available. */
+/**
+ * Renders a tab kind icon, using the launched agent's icon for agent terminal
+ * tabs and the page favicon for browser tabs when available.
+ */
 export function TabIcon({ tab }: { tab: Tab }) {
   const [failed, setFailed] = useState(false);
+  const agents = useAgentsList();
+  const agent = tab.agentId ? agents.find((candidate) => candidate.id === tab.agentId) : undefined;
   const favicon = useMemo(() => {
     if (!tab.url || tab.kind !== "browser") {
       return null;
@@ -60,6 +67,9 @@ export function TabIcon({ tab }: { tab: Tab }) {
   }
 
   if (tab.kind !== "browser") {
+    if (agent) {
+      return <AgentIcon agent={agent} className="size-3.5 shrink-0" />;
+    }
     return <SquareTerminal className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 

@@ -37,7 +37,12 @@ const priority: Record<AgentStatus, number> = {
  * lingers — distinct from `done`, which keeps a green "finished, go look" dot.
  */
 export function applyAgentReport(payload: AgentReportPayload): AgentStatus | null {
-  if (payload.status === "cleared") {
+  const status = payload.status;
+  if (!status) {
+    // Status-less report (a session-name rename): the indicator is untouched.
+    return statuses.get(payload.worktreeId)?.get(payload.tabId)?.get(payload.agent) ?? null;
+  }
+  if (status === "cleared") {
     return removeAgent(payload.worktreeId, payload.tabId, payload.agent);
   }
   let tabs = statuses.get(payload.worktreeId);
@@ -51,7 +56,7 @@ export function applyAgentReport(payload: AgentReportPayload): AgentStatus | nul
     tabs.set(payload.tabId, agents);
   }
   const previous = agents.get(payload.agent) ?? null;
-  agents.set(payload.agent, payload.status);
+  agents.set(payload.agent, status);
   emit();
   return previous;
 }

@@ -25,6 +25,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::git::GitLocks;
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
@@ -529,6 +530,55 @@ pub async fn github_fetch_and_sync(
     })
     .await
     .map_err(|error| AppError::GitHub(format!("fetch task failed: {error}")))?
+}
+
+/// Pulls the worktree branch from its upstream. The host refuses dirty trees
+/// and aborts conflicted merges before returning an error.
+#[tauri::command]
+pub async fn github_pull_branch(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    locks: State<'_, GitLocks>,
+    worktree_id: String,
+) -> AppResult<()> {
+    let worktree = db.worktree(&worktree_id)?;
+    let lock = locks.lock_for(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock()?;
+        host_git(
+            &pty,
+            &GitRequest::GithubPullBranch {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("pull task failed: {error}")))?
+}
+
+/// Pulls the worktree branch, then pushes it to origin.
+#[tauri::command]
+pub async fn github_sync_branch(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    locks: State<'_, GitLocks>,
+    worktree_id: String,
+) -> AppResult<()> {
+    let worktree = db.worktree(&worktree_id)?;
+    let lock = locks.lock_for(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock()?;
+        host_git(
+            &pty,
+            &GitRequest::GithubSyncBranch {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("sync task failed: {error}")))?
 }
 
 /// Pushes the worktree's branch to `origin`, setting upstream, before opening a

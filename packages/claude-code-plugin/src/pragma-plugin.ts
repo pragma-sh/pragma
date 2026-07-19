@@ -43,7 +43,9 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
       dashboardUrl: "https://claude.ai/new#settings/usage",
       iconPath: "assets/claude-code.svg",
       primaryLimitId: "five-hour",
-      refreshIntervalMs: 60_000,
+      // Each refresh spawns a headless `claude -p` session that queries Anthropic's
+      // strictly rate-limited OAuth usage endpoint; polling faster causes 429s.
+      refreshIntervalMs: 300_000,
       load: loadClaudeUsageLimits,
     }),
   ],
@@ -124,12 +126,18 @@ export function parseClaudeUsage(value: unknown, observedAt: number): UsageLimit
   if (!isRecord(value)) {
     throw new Error("Claude Code usage response was not an object");
   }
-  if (value.rate_limits_available !== true || !isRecord(value.rate_limits)) {
+  if (value.rate_limits_available !== true) {
     return {
       status: "unavailable",
       reason: "authentication-required",
       message: "Sign in to Claude Code with a subscription to load usage limits.",
     };
+  }
+  if (!isRecord(value.rate_limits)) {
+    // Signed in, but the CLI's usage fetch returned no data — usually a transient
+    // 429 from the usage endpoint. Throwing (instead of returning "unavailable")
+    // keeps the host's last snapshot and triggers its retry backoff.
+    throw new Error("Claude Code usage data is temporarily unavailable (rate limited)");
   }
 
   const rateLimits = value.rate_limits;

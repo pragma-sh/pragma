@@ -39,7 +39,17 @@ state_dir="${TMPDIR:-/tmp}"
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
 session_file="${state_dir}/pragma-cli-${agent}-${tab}.session"
+# Holds the session_id whose name was already reported, so each session (incl.
+# a /resume switch to another session) names the tab exactly once.
+named_file="${state_dir}/pragma-cli-${agent}-${tab}.sessionname"
 children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
+# The session id that owns the in-flight marker. `/clear` fires SessionEnd (old
+# session) + SessionStart (new session) while the user's next prompt may already
+# have started a turn in the NEW session; hook processes race, and a late
+# `cleared` landing after that `started` would wipe the marker and mute every
+# marker-guarded report for the rest of the turn. This file lets `cleared` tell
+# a stale clear from a legitimate one.
+turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
@@ -106,6 +116,31 @@ transcript_path() {
     return 0
   fi
   printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Prints a tab-title-sized session name derived from the prompt's first line.
+# Silent no-op without python3 (the session simply stays unnamed).
+session_name_from_prompt() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import sys
+lines = sys.stdin.read().strip().splitlines()
+line = lines[0].strip() if lines else ""
+print(line if len(line) <= 48 else line[:47].rstrip() + "\u2026")
+' 2>/dev/null
+}
+
+# Claude Code exposes no conversation title to hooks, so the session is named
+# after its first real user prompt; switching sessions renames on that
+# session's first prompt. Pragma preserves manual tab renames regardless.
+report_session_name() {
+  prompt_text="$1"
+  [ -n "$hook_session_id" ] || return 0
+  [ "$(cat "$named_file" 2>/dev/null)" = "$hook_session_id" ] && return 0
+  session_name="$(session_name_from_prompt "$prompt_text")"
+  [ -n "$session_name" ] || return 0
+  report session-name --name "$session_name"
+  printf '%s' "$hook_session_id" >"$named_file"
 }
 
 # Reports a rich message whose text is JSON-escaped (safe for arbitrary
@@ -310,12 +345,25 @@ handle_question() {
     --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" \
     --dismiss-output "$dismissed_answer" 2>/dev/null)"
   [ -n "$answer" ] || return 0
+  # The turn resumes the moment a reply (or dismissal) goes back to Claude, and
+  # no hook is guaranteed to fire next (a deny never runs the tool, so no
+  # PostToolUse). Re-assert `started` here so the tab drops back to "in
+  # progress" instead of staying stuck on the question attention. Guarded on the
+  # marker so a turn the abort watcher cleared meanwhile stays cleared.
   if [ "$answer" = "$dismissed_answer" ]; then
+    if [ -f "$marker" ]; then
+      report started
+      message system "Question dismissed"
+    fi
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
     return 0
   fi
   decision="$(question_allow_decision "$input" "$answer")"
   [ -n "$decision" ] || return 0
+  if [ -f "$marker" ]; then
+    report started
+    message system "Question answered"
+  fi
   printf '%s\n' "$decision"
 }
 
@@ -441,7 +489,7 @@ run_watcher() {
       # Re-check the token right before acting so we never clear a turn that
       # started in the gap between the poll and now.
       [ "$(cat "$marker" 2>/dev/null)" = "$token" ] || exit 0
-      rm -f "$marker"
+      rm -f "$marker" "$turn_session_file"
       report cleared
       exit 0
     fi
@@ -503,6 +551,7 @@ case "${1:-}" in
     # turn's transcript and token.
     token="$$-$(date +%s)"
     printf '%s' "$token" >"$marker"
+    printf '%s' "$hook_session_id" >"$turn_session_file"
     report started
     # UserPromptSubmit carries the user's prompt: surface it as the chat's user
     # bubble; fall back to the coarse status line when it can't be extracted.
@@ -519,6 +568,7 @@ case "${1:-}" in
       ;;
     *)
       content_message user "$prompt"
+      report_session_name "$prompt"
       ;;
     esac
     stop_watcher
@@ -540,7 +590,7 @@ case "${1:-}" in
     tp="$(transcript_path "$input")"
     if turn_interrupted "$tp"; then
       stop_watcher
-      rm -f "$marker"
+      rm -f "$marker" "$turn_session_file"
       report cleared
       message system "Claude Code turn interrupted"
     elif has_running_subagents "$input" || has_tracked_subagents; then
@@ -562,7 +612,7 @@ case "${1:-}" in
       # Tear down the watcher, clear the in-flight marker, and report the
       # green "done" dot.
       stop_watcher
-      rm -f "$marker"
+      rm -f "$marker" "$turn_session_file"
       report stopped
       # Stop carries the completed reply directly on current Claude builds.
       # Prefer it over rereading the transcript, then retain transcript support
@@ -577,11 +627,24 @@ case "${1:-}" in
     fi
     ;;
   cleared)
+    # `/clear` fires SessionEnd + SessionStart while the user's next prompt may
+    # already have started a turn in the NEW session. The session pinning above
+    # discards the old session's late SessionEnd, but SessionStart re-pins to
+    # its own (new) session id first — so a SessionStart landing *after* that
+    # session's first `started` would wipe the live marker and mute every
+    # marker-guarded report for the rest of the turn. Skip the clear when the
+    # in-flight turn already belongs to this same session.
+    if [ "$hook_event_name" = "SessionStart" ] && [ -f "$marker" ] &&
+      [ -n "$hook_session_id" ] &&
+      [ "$(cat "$turn_session_file" 2>/dev/null)" = "$hook_session_id" ]; then
+      exit 0
+    fi
     stop_watcher
-    rm -f "$marker"
+    rm -f "$marker" "$turn_session_file"
     clear_subagents
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
+      rm -f "$named_file"
     fi
     report cleared
     ;;
@@ -620,11 +683,18 @@ case "${1:-}" in
       message system "Claude Code needs approval"
       verdict="$("$pragma_cli" agent await-decision \
         --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" 2>/dev/null)"
+      # Either verdict resumes the turn at once. An allowed tool will also fire
+      # PostToolUse when it finishes, but a denied one never runs — without this
+      # re-assert the tab would stay stuck on the command attention until Stop.
+      # Guarded on the marker so a turn the abort watcher cleared meanwhile
+      # stays cleared.
       case "$verdict" in
         allow)
+          [ -f "$marker" ] && report started
           printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
           ;;
         deny)
+          [ -f "$marker" ] && report started
           printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
           ;;
         *)
@@ -655,7 +725,7 @@ case "${1:-}" in
     # Claude Code build emits it, a lingering marker still clears the turn.)
     if [ -f "$marker" ]; then
       stop_watcher
-      rm -f "$marker"
+      rm -f "$marker" "$turn_session_file"
       report cleared
       message system "Claude Code turn cleared"
     fi

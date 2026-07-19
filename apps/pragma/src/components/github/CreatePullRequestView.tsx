@@ -273,7 +273,7 @@ function usePrSubmit({
           worktreeChanges(worktreeId),
         ]);
         sync = synced;
-        if (sync.behind > 0) {
+        if (sync.hasUpstream && sync.behind > 0) {
           setPreflight({ kind: "behind", behind: sync.behind });
           return;
         }

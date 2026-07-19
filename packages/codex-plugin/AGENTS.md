@@ -48,7 +48,7 @@ Official references:
 | Codex hook                      | Script event     | Pragma behavior                                                               |
 | ------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
 | `SessionStart`                  | `cleared`        | Clears stale status, watcher, and child markers                               |
-| `UserPromptSubmit`              | `started`        | Reports running, stores turn marker/transcript offset, starts abort watcher   |
+| `UserPromptSubmit`              | `started`        | Reports running; first prompt derives `session-name`; starts abort watcher    |
 | `Stop`                          | `stopped`        | Reports done only with an active turn marker and no active children           |
 | `SubagentStart`                 | `subagent-start` | Tracks child by `agent_id`, reasserts running                                 |
 | `SubagentStop`                  | `subagent-stop`  | Removes only matching child; parent `Stop` owns done                          |
@@ -79,6 +79,10 @@ plugins), so reports under `pragma.codex` are silently invisible to them; `agent
 scopes events by the runtime id only to catch exactly that. The script exits immediately
 outside Pragma and swallows every reporting failure. `stopped` is impossible without an
 active marker, preventing bare `Stop` from creating a phantom done dot.
+
+Codex exposes no reliable native session title through its hook payloads. `report.sh`
+derives one from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it
+once per session, and resets that state on `SessionStart`.
 
 ## Permission decisions
 

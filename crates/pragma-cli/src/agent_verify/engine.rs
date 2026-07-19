@@ -92,12 +92,32 @@ impl ScenarioSession<'_> {
         self.await_status(|status| matches!(status, AgentStatus::Done | AgentStatus::Cleared))
     }
 
+    /// Waits for a session-name report WITHOUT advancing the session cursor
+    /// (the name often rides on — or arrives beside — status events the
+    /// scenario still needs), returning the reported name.
+    pub fn await_session_name(&mut self) -> Result<String, String> {
+        let found = self.wait_peek(|event| {
+            matches!(
+                event,
+                VerifyEvent::Agent { session_name: Some(name), .. } if !name.trim().is_empty()
+            )
+        })?;
+        let VerifyEvent::Agent {
+            session_name: Some(name),
+            ..
+        } = found.event
+        else {
+            return Err("expected session name event".to_string());
+        };
+        Ok(name)
+    }
+
     pub fn await_attention(&mut self, kind: AgentAttentionKind) -> Result<Attention, String> {
         let found = self.wait(|event| {
             matches!(
                 event,
                 VerifyEvent::Agent {
-                    status: AgentStatus::Attention,
+                    status: Some(AgentStatus::Attention),
                     attention_kind: Some(found),
                     ..
                 } if *found == kind
@@ -219,9 +239,13 @@ impl ScenarioSession<'_> {
         predicate: impl Fn(AgentStatus) -> bool,
     ) -> Result<AgentStatus, String> {
         let found = self.wait(
-            |event| matches!(event, VerifyEvent::Agent { status, .. } if predicate(*status)),
+            |event| matches!(event, VerifyEvent::Agent { status: Some(status), .. } if predicate(*status)),
         )?;
-        let VerifyEvent::Agent { status, .. } = found.event else {
+        let VerifyEvent::Agent {
+            status: Some(status),
+            ..
+        } = found.event
+        else {
             return Err("expected agent status".to_string());
         };
         Ok(status)

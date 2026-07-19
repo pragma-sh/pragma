@@ -140,8 +140,8 @@ describe("CreatePullRequestView pre-flight", () => {
     expect(onCreated).toHaveBeenCalled();
   });
 
-  it("pushes the branch first when it has no upstream", async () => {
-    githubFetchAndSync.mockResolvedValue(sync({ behind: 0, hasUpstream: false }));
+  it("pushes a branch without an upstream even when its status reports a stale behind count", async () => {
+    githubFetchAndSync.mockResolvedValue(sync({ behind: 3, hasUpstream: false }));
     worktreeChanges.mockResolvedValue(changes());
     await renderReady();
 

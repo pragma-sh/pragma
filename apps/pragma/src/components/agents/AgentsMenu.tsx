@@ -35,6 +35,7 @@ export function AgentsMenu() {
     if (!tab) {
       return;
     }
+    void workspace.markTabAgent(tab.id, agent);
     startAgentInTab(tab.id, agent);
     if (workspace.selectedWorktree) {
       void startWatcherForAgentSession({

@@ -602,6 +602,15 @@ export function setTabTitle(tabId: string, title: string): Promise<Tab> {
   return invoke<Tab>("set_tab_title", { tabId, title });
 }
 
+/**
+ * Records which agent was launched into a terminal tab and seeds the tab's
+ * title with the agent's display name (user renames win). The tab shows the
+ * agent's icon and ignores shell OSC titles from then on.
+ */
+export function setTabAgent(tabId: string, agentId: string, title: string): Promise<void> {
+  return invoke("set_tab_agent", { tabId, agentId, title });
+}
+
 /** Persists the current page URL for a browser tab (session restore). */
 export function setTabUrl(tabId: string, url: string): Promise<Tab> {
   return invoke<Tab>("set_tab_url", { tabId, url });
@@ -901,6 +910,16 @@ export function githubDefaultPrTitle(worktreeId: string): Promise<string> {
 /** Fetches `origin` and returns the branch's ahead/behind vs upstream (create pre-flight). */
 export function githubFetchAndSync(worktreeId: string): Promise<BranchSyncStatus> {
   return invoke<BranchSyncStatus>("github_fetch_and_sync", { worktreeId });
+}
+
+/** Pulls a clean branch, automatically aborting a conflicted merge. */
+export function githubPullBranch(worktreeId: string): Promise<void> {
+  return invoke("github_pull_branch", { worktreeId });
+}
+
+/** Pulls a clean branch, then pushes it to `origin`. */
+export function githubSyncBranch(worktreeId: string): Promise<void> {
+  return invoke("github_sync_branch", { worktreeId });
 }
 
 /** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */

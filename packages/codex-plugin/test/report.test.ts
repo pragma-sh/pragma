@@ -138,6 +138,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// The abort watcher polls in the background (PRAGMA_WATCH_INTERVAL=0.1s), so
+// a fixed sleep before asserting on its output flakes under a loaded CI box.
+// Poll for the expected state instead, capped by a generous timeout.
+async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) return;
+    await sleep(20);
+  }
+}
+
 describe("report.sh", () => {
   it("no-ops outside Pragma", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -159,6 +170,7 @@ describe("report.sh", () => {
     });
     expect(reports()).toEqual([
       "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
       "agent report --agent codex stopped",
     ]);
     expect(messages()).toEqual([
@@ -175,6 +187,35 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  it("derives the session name from only the first prompt", () => {
+    run("started", {
+      stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth\nwith regression tests" }),
+    });
+    run("stopped", { stdin: JSON.stringify({ turn_id: "turn-1" }) });
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Second turn" }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
+  });
+
+  it("marks a truncated session name with an ellipsis", () => {
+    const prompt = "x".repeat(49);
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      `agent report --agent codex session-name --name ${"x".repeat(47)}…`,
+    ]);
+  });
+
+  it("derives a new session name after session clear", () => {
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "First session" }) });
+    run("cleared");
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Next session" }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent codex session-name --name First session",
+      "agent report --agent codex session-name --name Next session",
+    ]);
+  });
+
   it("streams transcript assistant markdown during the turn and never duplicates it on stop", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
@@ -185,7 +226,7 @@ describe("report.sh", () => {
         payload: { type: "agent_message", message: "Interim: reading **files**." },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => messages().length > 1);
     expect(messages().at(-1)).toEqual(
       expect.objectContaining({
         id: "codex-turn-1-assistant-000",
@@ -193,7 +234,10 @@ describe("report.sh", () => {
         text: "Interim: reading **files**.",
       }),
     );
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
 
     // The final reply lands in the transcript just before Stop fires; the stop
     // handler must sync it (watcher may not have polled yet) exactly once and
@@ -317,7 +361,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().at(-1)?.includes(" attention ") ?? false);
     expect(reports().at(-1)).toBe(
       'agent report --agent codex attention --kind question --question Choose Red or Blue? --options [{"label":"Red","description":"Warm"},{"label":"Blue","description":"Cool"}] --request-id call-question-1',
     );
@@ -333,7 +377,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().at(-1) === "agent report --agent codex started");
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
@@ -358,7 +402,10 @@ describe("report.sh", () => {
       })}\n`,
     );
     await sleep(500);
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
   });
 
   it("abort watcher clears current turn", async () => {
@@ -368,9 +415,10 @@ describe("report.sh", () => {
       current.path,
       `${JSON.stringify({ type: "event_msg", payload: { type: "turn_aborted" } })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().at(-1) === "agent report --agent codex cleared");
     expect(reports()).toEqual([
       "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
       "agent report --agent codex cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
@@ -380,7 +428,10 @@ describe("report.sh", () => {
     const current = transcript([{ type: "event_msg", payload: { type: "turn_aborted" } }]);
     run("started", { stdin: current.input });
     await sleep(350);
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
     expect(existsSync(markerPath())).toBe(true);
   });
 });

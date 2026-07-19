@@ -8,6 +8,8 @@ crate's debug binary).
 
 ```sh
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
+# Session name: status-less report that renames the hosting tab (user renames win).
+pragma-cli agent report --agent <id> session-name --name "<name>"
 # Command approval: report the command + a correlation id, then block for the verdict.
 pragma-cli agent report --agent <id> attention --kind command --command "<cmd>" --request-id <id>
 pragma-cli agent await-decision --agent <id> --request-id <id> [--timeout 300]
