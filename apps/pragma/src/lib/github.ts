@@ -76,6 +76,22 @@ export interface IssueComment {
   user: GitHubActor | null;
 }
 
+/** A Git author attached to a pull-request commit. */
+export interface PullRequestCommitAuthor {
+  name: string;
+  user: GitHubActor | null;
+}
+
+/** One commit shown in a pull request's conversation timeline. */
+export interface PullRequestCommit {
+  authors: PullRequestCommitAuthor[];
+  committedAt: string;
+  message: string;
+  sha: string;
+  status: ChecksStatus["state"];
+  url: string;
+}
+
 /** A file changed in a PR (review file list). */
 export interface PullFile {
   path: string;
@@ -355,6 +371,120 @@ export async function createIssueComment(
     createdAt: comment.created_at,
     user: comment.user ? { login: comment.user.login, avatarUrl: comment.user.avatar_url } : null,
   };
+}
+
+/** GraphQL response shape for {@link listPullRequestCommits}. */
+interface PullRequestCommitsResponse {
+  repository: {
+    pullRequest: {
+      commits: {
+        pageInfo: {
+          endCursor: string | null;
+          hasNextPage: boolean;
+        };
+        nodes: Array<{
+          commit: {
+            authors: {
+              nodes: Array<{
+                name: string;
+                user: { login: string; avatarUrl: string } | null;
+              }>;
+            };
+            committedDate: string;
+            messageHeadline: string;
+            oid: string;
+            statusCheckRollup: { state: string } | null;
+            url: string;
+          };
+        }>;
+      };
+    };
+  };
+}
+
+const PULL_REQUEST_COMMITS_QUERY = `
+  query ($owner: String!, $repo: String!, $number: Int!, $after: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        commits(first: 100, after: $after) {
+          pageInfo { endCursor hasNextPage }
+          nodes {
+            commit {
+              authors(first: 10) {
+                nodes {
+                  name
+                  user { login avatarUrl }
+                }
+              }
+              committedDate
+              messageHeadline
+              oid
+              statusCheckRollup { state }
+              url
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/** Maps GitHub's GraphQL check-rollup state to the UI's compact status vocabulary. */
+function toChecksState(state: string | null): ChecksStatus["state"] {
+  switch (state) {
+    case "SUCCESS":
+      return "success";
+    case "FAILURE":
+    case "ERROR":
+      return "failure";
+    case "PENDING":
+    case "EXPECTED":
+      return "pending";
+    default:
+      return "none";
+  }
+}
+
+/**
+ * Lists commits in a PR with every Git author (including co-authors), its commit
+ * time, diff URL, and CI rollup. GitHub exposes this richer commit metadata only
+ * through GraphQL.
+ */
+export async function listPullRequestCommits(
+  repo: GitHubRepoRef,
+  prNumber: number,
+): Promise<PullRequestCommit[]> {
+  const octokit = await client();
+  const commits: PullRequestCommit[] = [];
+  let after: string | null = null;
+  do {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- GitHub cursor pagination is sequential.
+    const data: PullRequestCommitsResponse = await octokit.graphql<PullRequestCommitsResponse>(
+      PULL_REQUEST_COMMITS_QUERY,
+      {
+        owner: repo.owner,
+        repo: repo.repo,
+        number: prNumber,
+        after,
+      },
+    );
+    const connection = data.repository.pullRequest.commits;
+    commits.push(
+      ...connection.nodes.map(({ commit }) => ({
+        authors: commit.authors.nodes.map((author) => ({
+          name: author.name,
+          user: author.user ? { login: author.user.login, avatarUrl: author.user.avatarUrl } : null,
+        })),
+        committedAt: commit.committedDate,
+        message: commit.messageHeadline,
+        sha: commit.oid,
+        status: toChecksState(commit.statusCheckRollup?.state ?? null),
+        url: commit.url,
+      })),
+    );
+    after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+  } while (after);
+  return commits;
 }
 
 /** Lists the files changed in a PR (the review file list). */

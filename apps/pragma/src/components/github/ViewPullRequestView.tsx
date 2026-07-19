@@ -3,7 +3,7 @@ import { errorMessage } from "@/lib/errors";
 
 import type { ChangedFile, GitHubRepoRef } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { CheckCircle2, CircleDot, Loader2, XCircle } from "lucide-react";
+import { Check, CheckCircle2, CircleDot, Loader2, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
@@ -36,10 +36,12 @@ import {
   type IssueComment,
   type PullFile,
   type PullRequestSummary,
+  type PullRequestCommit,
   type ReviewThread,
   createIssueComment,
   getChecksStatus,
   listIssueComments,
+  listPullRequestCommits,
   listPullFiles,
   listReviewThreads,
   mergePullRequest,
@@ -77,12 +79,13 @@ function toChangedFile(file: PullFile): ChangedFile {
 
 interface PullData {
   comments: IssueComment[];
+  commits: PullRequestCommit[];
   files: PullFile[];
   threads: ReviewThread[];
   checks: ChecksStatus;
 }
 
-/** Loads the PR's comments, files, review threads, and checks. */
+/** Loads the PR's conversation, files, review threads, and checks. */
 function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
   const [data, setData] = useState<PullData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,14 +93,15 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
 
   const load = useCallback(async () => {
     try {
-      const [comments, files, threads, checks] = await Promise.all([
+      const [comments, commits, files, threads, checks] = await Promise.all([
         listIssueComments(repo, pr.number),
+        listPullRequestCommits(repo, pr.number),
         listPullFiles(repo, pr.number),
         listReviewThreads(repo, pr.number),
         getChecksStatus(repo, pr.headSha),
       ]);
       if (active.current) {
-        setData({ comments, files, threads, checks });
+        setData({ comments, commits, files, threads, checks });
       }
     } catch (cause) {
       if (active.current) {
@@ -130,12 +134,41 @@ function useUnresolvedByPath(threads: ReviewThread[] | undefined) {
   }, [threads]);
 }
 
-/** The read-only conversation: error / loading / empty / comment cards. */
+type ConversationItem =
+  | { kind: "comment"; timestamp: string; value: IssueComment }
+  | { kind: "commit"; timestamp: string; value: PullRequestCommit };
+
+/** Combines PR conversation events in their GitHub-visible chronological order. */
+function conversationItems(
+  comments: IssueComment[],
+  commits: PullRequestCommit[],
+): ConversationItem[] {
+  return [
+    ...comments.map(
+      (comment): ConversationItem => ({
+        kind: "comment",
+        timestamp: comment.createdAt,
+        value: comment,
+      }),
+    ),
+    ...commits.map(
+      (commit): ConversationItem => ({
+        kind: "commit",
+        timestamp: commit.committedAt,
+        value: commit,
+      }),
+    ),
+  ].toSorted((left, right) => left.timestamp.localeCompare(right.timestamp));
+}
+
+/** The read-only conversation: error / loading / empty / comment and commit events. */
 function Conversation({
   comments,
+  commits,
   error,
 }: {
   comments: IssueComment[] | null;
+  commits: PullRequestCommit[] | null;
   error: string | null;
 }) {
   let body: React.ReactNode;
@@ -143,10 +176,18 @@ function Conversation({
     body = <p className="text-xs text-destructive">{error}</p>;
   } else if (!comments) {
     body = <p className="text-xs text-muted-foreground">Loading…</p>;
-  } else if (comments.length === 0) {
-    body = <p className="text-xs text-muted-foreground">No comments yet.</p>;
+  } else if (!commits) {
+    body = <p className="text-xs text-muted-foreground">Loading…</p>;
+  } else if (comments.length === 0 && commits.length === 0) {
+    body = <p className="text-xs text-muted-foreground">No activity yet.</p>;
   } else {
-    body = comments.map((comment) => <CommentCard comment={comment} key={comment.id} />);
+    body = conversationItems(comments, commits).map((item) =>
+      item.kind === "comment" ? (
+        <CommentCard comment={item.value} key={`comment-${item.value.id}`} />
+      ) : (
+        <CommitCard commit={item.value} key={`commit-${item.value.sha}`} />
+      ),
+    );
   }
   return (
     <section className="flex flex-col gap-2">
@@ -246,7 +287,11 @@ export function ViewPullRequestView({
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3 text-sm">
       <HeaderCard pr={pr} />
-      <Conversation comments={data?.comments ?? null} error={error} />
+      <Conversation
+        comments={data?.comments ?? null}
+        commits={data?.commits ?? null}
+        error={error}
+      />
       <ChangedFilesSection
         changedFiles={changedFiles}
         prNumber={pr.number}
@@ -355,6 +400,70 @@ function CommentCard({ comment }: { comment: IssueComment }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/** One clickable commit log entry, arranged like GitHub's PR timeline event. */
+function CommitCard({ commit }: { commit: PullRequestCommit }) {
+  const status =
+    commit.status === "success" ? (
+      <Check aria-label="Checks passed" className="size-4 text-success" />
+    ) : commit.status === "failure" ? (
+      <X aria-label="Checks failed" className="size-4 text-destructive" />
+    ) : commit.status === "pending" ? (
+      <CircleDot aria-label="Checks pending" className="size-4 text-warning" />
+    ) : null;
+
+  return (
+    <button
+      className="group flex w-full items-center gap-2 rounded-md border border-transparent px-1 py-1.5 text-left hover:border-border hover:bg-muted/30"
+      onClick={() => void browserOpenExternal(commit.url)}
+      title="Open commit diff on GitHub"
+      type="button"
+    >
+      <div className="flex shrink-0 -space-x-1.5">
+        {commit.authors.map((author, index) => (
+          <CommitAuthorAvatar
+            author={author}
+            index={index}
+            key={`${author.name}-${author.user?.login ?? index}`}
+          />
+        ))}
+      </div>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground underline-offset-2 group-hover:underline">
+        {commit.message}
+      </span>
+      {status ? (
+        <span className="shrink-0" title={`Checks ${commit.status}`}>
+          {status}
+        </span>
+      ) : null}
+      <span className="shrink-0 font-mono text-xs text-muted-foreground underline-offset-2 group-hover:underline">
+        {commit.sha.slice(0, 7)}
+      </span>
+    </button>
+  );
+}
+
+/** Compact overlapping author avatars, including co-authors from the commit trailer. */
+function CommitAuthorAvatar({
+  author,
+  index,
+}: {
+  author: PullRequestCommit["authors"][number];
+  index: number;
+}) {
+  return (
+    <Avatar
+      className="size-5 border border-background"
+      style={{ zIndex: 10 - index }}
+      title={author.user?.login ?? author.name}
+    >
+      {author.user ? <AvatarImage alt={author.user.login} src={author.user.avatarUrl} /> : null}
+      <AvatarFallback className="text-[8px]">
+        {author.name.slice(0, 1).toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
   );
 }
 
