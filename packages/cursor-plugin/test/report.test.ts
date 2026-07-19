@@ -134,6 +134,14 @@ describe("cursor report.sh", () => {
     ]);
   });
 
+  it("marks a truncated session name with an ellipsis", () => {
+    const prompt = "x".repeat(49);
+    run("started", { stdin: JSON.stringify({ prompt }) });
+    expect(reportCalls().filter((call) => call.includes(" session-name "))).toEqual([
+      `agent report --agent cursor session-name --name ${"x".repeat(47)}…`,
+    ]);
+  });
+
   it("uses PRAGMA_CLI when it is set", () => {
     run("started", {
       env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },

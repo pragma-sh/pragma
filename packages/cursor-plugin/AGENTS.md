@@ -125,7 +125,7 @@ is wanted later (it relies on Cursor writing an interrupt marker to the transcri
 which has not been confirmed).
 
 Cursor exposes no reliable native session title in hook payloads. `report.sh` derives one
-from the first prompt's first nonblank line (up to 48 characters), reports it once per
+from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it once per
 session, and resets that state on `sessionStart` / `sessionEnd`.
 
 The built-in `--force` launcher cannot exercise approval prompts, so the agent declares

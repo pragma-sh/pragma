@@ -38,7 +38,7 @@ apps/pragma/
 │   └── main.tsx
 └── src-tauri/                   # Rust backend
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
-    ├── src/db.rs                # SQLite migrations + typed CRUD (v11 = worktree_mru)
+    ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
     ├── src/kanban.rs            # Tauri commands for the prompt Kanban board (CRUD + move)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
@@ -244,8 +244,8 @@ headers, and exposes supported global/project `.pragma/config.json` values throu
 launcher. `WorkspacePublisher` is managed Tauri state: a cheap cloneable handle whose
 `trigger()` sends a non-blocking signal to a single worker thread. The worker drains
 bursts with a ~250ms idle debounce, reads all rows from `Db` (`list_projects` +
-`list_all_worktrees` + `list_all_tabs` — added to `db.rs` for this purpose), and sends
-`PublishWorkspace` over the `PtyClient`. The work never runs on the macOS main thread.
+`list_all_worktrees` + `list_all_tabs`), groups them by owning host, and sends each
+host its `PublishWorkspace` snapshot. The work never runs on the macOS main thread.
 Mutation commands (`create_tab`, `close_tab`, `rename_tab`, `set_tab_*`,
 `create_plugin_webview_tab`, `create_worktree`, `rename_worktree`, `hide_worktree`,
 `delete_worktree`, `add_project`, `clone_project`) and brokered `control.rs` handlers
@@ -401,8 +401,8 @@ out via `onTitle(tabId, listener)`; workspace context dispatches `set-auto-title
 Tauri command, which sets `user_renamed = 1` server-side), the title is permanently
 locked against future shell pushes.
 
-**Agent tabs:** launching an agent tags the tab (`Tab.agentId`, `set_tab_agent`
-command, `set-tab-agent` action) — the tab shows the agent's icon, its title seeds
+**Agent tabs:** launching an agent tags the tab through the owning daemon (`Tab.agentId`,
+`set_tab_agent` RPC adapter, `set-tab-agent` action) — the tab shows the agent's icon, its title seeds
 with the agent's display name, and shell OSC titles are ignored entirely. Agent
 `session-name` reports arrive on the agent event bridge and dispatch
 `set-session-title`, renaming the tab on session create/rename/switch;

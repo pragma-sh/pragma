@@ -34,8 +34,10 @@ mod worktrees;
 
 use pragma_client::router::RouterDb;
 use pragma_constants::{
-    AgentDecision, AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, Tab, TabKind, CONSTANTS,
+    AgentDecision, AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, ProtocolRpcMethod, Tab,
+    TabKind, CONSTANTS,
 };
+use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager};
@@ -650,9 +652,32 @@ fn project_icon(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Optio
     icons::project_icon(&db, project_id)
 }
 
-#[tauri::command]
-fn list_tabs(db: tauri::State<'_, Db>, project_id: String) -> AppResult<Vec<Tab>> {
-    db.list_tabs(&project_id)
+#[tauri::command(async)]
+fn list_tabs(
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
+    project_id: String,
+) -> AppResult<Vec<Tab>> {
+    let mut tabs = db.list_tabs(&project_id)?;
+    let tab_ids = tabs.iter().map(|tab| tab.id.clone()).collect();
+    let Ok(pty) = hosts.for_project(&db, &project_id) else {
+        return Ok(tabs);
+    };
+    let request = TabsRequest::ListAgents { tab_ids };
+    let Ok(value) = pty.rpc(ProtocolRpcMethod::Tabs, serde_json::to_value(request)?) else {
+        return Ok(tabs);
+    };
+    let metadata: Vec<TabAgentMetadata> = serde_json::from_value(value)?;
+    for tab in &mut tabs {
+        let Some(agent) = metadata.iter().find(|agent| agent.tab_id == tab.id) else {
+            continue;
+        };
+        tab.agent_id = Some(agent.agent_id.clone());
+        if !tab.user_renamed {
+            tab.title.clone_from(&agent.title);
+        }
+    }
+    Ok(tabs)
 }
 
 // A tab carries enough locating data (kind/title/url/file/diff side) that the
@@ -738,14 +763,21 @@ fn rename_tab(
 /// Persists a shell-driven tab title (OSC 0/2) without touching the
 /// `user_renamed` flag. The frontend reducer is responsible for refusing
 /// to apply the update when the user has explicitly renamed the tab.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_tab_title(
     db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
     publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
     tab_id: String,
     title: String,
 ) -> AppResult<Tab> {
     let tab = db.set_tab_title(&tab_id, &title)?;
+    if let Ok(pty) = hosts.for_project(&db, &tab.project_id) {
+        let _ = pty.rpc(
+            ProtocolRpcMethod::Tabs,
+            serde_json::to_value(TabsRequest::SetTitle { tab_id, title })?,
+        );
+    }
     publisher.trigger();
     Ok(tab)
 }
@@ -753,17 +785,25 @@ fn set_tab_title(
 /// Records which agent was launched into a terminal tab and seeds the tab's
 /// title with the agent's display name (user renames win). The tab shows the
 /// agent's icon and ignores shell OSC titles from then on.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_tab_agent(
     db: tauri::State<'_, Db>,
-    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    hosts: tauri::State<'_, Hosts>,
     tab_id: String,
     agent_id: String,
     title: String,
-) -> AppResult<Tab> {
-    let tab = db.set_tab_agent(&tab_id, &agent_id, &title)?;
-    publisher.trigger();
-    Ok(tab)
+) -> AppResult<()> {
+    let tab = db.tab(&tab_id)?;
+    let pty = hosts.for_project(&db, &tab.project_id)?;
+    pty.rpc(
+        ProtocolRpcMethod::Tabs,
+        serde_json::to_value(TabsRequest::SetAgent {
+            tab: Box::new(tab),
+            agent_id,
+            title,
+        })?,
+    )?;
+    Ok(())
 }
 
 /// Persists the current page URL for a browser tab (session restore).
@@ -878,8 +918,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Mirror the workspace (projects/worktrees/tabs) to pragma-server so a paired
     // phone can render the session launcher without being the controller. Debounced
     // on a worker thread; never reads SQLite on the mac main thread.
-    let workspace_publisher =
-        workspace_mirror::WorkspacePublisher::start(app.handle().clone(), pty.clone());
+    let workspace_publisher = workspace_mirror::WorkspacePublisher::start(app.handle().clone());
     // Seed the server's cached snapshot at launch so a phone pairing with a
     // freshly-started desktop sees its projects/worktrees/tabs immediately,
     // rather than an empty list until the first mutation triggers a publish.

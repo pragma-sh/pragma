@@ -3205,7 +3205,9 @@ function useProjectLoading(
         agentId: agent.id,
         title: agent.name,
       });
-      void setTabAgentCommand(request.tabId, agent.id, agent.name).catch(() => undefined);
+      void setTabAgentCommand(request.tabId, agent.id, agent.name).catch((cause) => {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      });
       void startBackgroundAgentSession(
         request.tabId,
         request.worktreeId,

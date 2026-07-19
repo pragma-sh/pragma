@@ -22,8 +22,9 @@ Tauri or client presentation code.
   serves a local project and an SSH-bridged remote one. Worktree lifecycle
   operations (exclude setup, create/remove, branch delete, dirty check,
   headless-checkout listing) and setup/teardown scripts run on the owning host.
-- **Still client-local:** `database`, `projects`, `worktrees`, `tabs`, `kanban`,
-  `settings` remain metadata in the client DB (`pragma.db`) and return
+- **Migrating metadata:** legacy project/worktree/tab rows remain in the client
+  DB, but daemon-owned terminal agent metadata now uses the `tabs` RPC so it
+  persists with the host that owns the PTY. Other metadata domains still return
   `UnsupportedMethod` from core — by design (see `pragma-client/router.rs`).
 - GitHub API/auth and AI are intentionally kept as local sidecars, not core RPC.
   Worktree-scoped git operations that support the GitHub PR flow still belong in the

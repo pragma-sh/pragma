@@ -81,7 +81,7 @@ outside Pragma and swallows every reporting failure. `stopped` is impossible wit
 active marker, preventing bare `Stop` from creating a phantom done dot.
 
 Codex exposes no reliable native session title through its hook payloads. `report.sh`
-derives one from the first prompt's first nonblank line (up to 48 characters), reports it
+derives one from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it
 once per session, and resets that state on `SessionStart`.
 
 ## Permission decisions

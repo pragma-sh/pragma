@@ -494,6 +494,47 @@ fn handle_ports_rpc(
     })
 }
 
+fn handle_tabs_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let request = serde_json::from_value::<pragma_core::tabs::TabsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    let result = match request {
+        pragma_core::tabs::TabsRequest::SetAgent {
+            tab,
+            agent_id,
+            title,
+        } => registry
+            .set_tab_agent(*tab, &agent_id, &title)
+            .and(Ok(serde_json::Value::Null)),
+        pragma_core::tabs::TabsRequest::SetTitle { tab_id, title } => registry
+            .set_agent_tab_title(&tab_id, &title)
+            .and(Ok(serde_json::Value::Null)),
+        pragma_core::tabs::TabsRequest::ListAgents { tab_ids } => registry
+            .tab_agent_metadata(&tab_ids)
+            .and_then(|tabs| serde_json::to_value(tabs).map_err(|error| error.to_string())),
+    };
+    Ok(match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+            }),
+        },
+    })
+}
+
 fn handle_rpc_request(
     request: RequestFrame,
     registry: &Registry,
@@ -564,6 +605,9 @@ fn handle_rpc_request(
     }
     if matches!(rpc.method, ProtocolRpcMethod::Ports) {
         return handle_ports_rpc(request_id, rpc.payload, registry);
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Tabs) {
+        return handle_tabs_rpc(request_id, rpc.payload, registry);
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {

@@ -633,17 +633,6 @@ impl Db {
         self.tab(tab_id)
     }
 
-    /// Records which agent was launched into a terminal tab and seeds the
-    /// tab's title with the agent's display name (unless the user already
-    /// renamed the tab). Agent tabs ignore shell OSC titles from then on.
-    pub fn set_tab_agent(&self, tab_id: &str, agent_id: &str, title: &str) -> AppResult<Tab> {
-        self.0.lock()?.execute(
-            "UPDATE tabs SET agent_id = ?1, title = CASE WHEN user_renamed = 1 THEN title ELSE ?2 END WHERE id = ?3",
-            params![agent_id, title, tab_id],
-        )?;
-        self.tab(tab_id)
-    }
-
     /// Persists the current page URL for a browser tab so the session restores.
     pub fn set_tab_url(&self, tab_id: &str, url: &str) -> AppResult<Tab> {
         self.0.lock()?.execute(

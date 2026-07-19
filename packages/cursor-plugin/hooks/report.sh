@@ -111,7 +111,11 @@ print(json.dumps({
 report_session_name_once() {
   prompt="$1"
   [ -n "$prompt" ] && [ ! -f "$session_name_marker" ] || return 0
-  name=$(printf '%s' "$prompt" | sed -n '/[^[:space:]]/ { s/^[[:space:]]*//; s/[[:space:]]*$//; p; q; }' | cut -c 1-48 | sed 's/[[:space:]]*$//')
+  name=$(printf '%s' "$prompt" | sed -n '/[^[:space:]]/ { s/^[[:space:]]*//; s/[[:space:]]*$//; p; q; }')
+  if [ "$(printf '%s' "$name" | wc -c | tr -d ' ')" -gt 48 ]; then
+    name="$(printf '%s' "$name" | cut -c 1-47)…"
+  fi
+  name=$(printf '%s' "$name" | sed 's/[[:space:]]*$//')
   [ -n "$name" ] || return 0
   report session-name --name "$name"
   : >"$session_name_marker"

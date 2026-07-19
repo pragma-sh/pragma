@@ -198,6 +198,14 @@ describe("report.sh", () => {
     ]);
   });
 
+  it("marks a truncated session name with an ellipsis", () => {
+    const prompt = "x".repeat(49);
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      `agent report --agent codex session-name --name ${"x".repeat(47)}…`,
+    ]);
+  });
+
   it("derives a new session name after session clear", () => {
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "First session" }) });
     run("cleared");

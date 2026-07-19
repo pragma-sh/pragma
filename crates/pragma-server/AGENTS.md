@@ -62,10 +62,11 @@ passed as `--agentId`, matching status reports and mobile interjections.
 ## Workspace mirror store
 
 `registry.rs` caches the latest `WorkspaceSnapshot` (projects/worktrees/tabs) the
-desktop app publishes via `RequestKind::PublishWorkspace`. `publish_workspace`
-replaces the cache, **persists it to `workspace.json` beside the socket** (so
-headless launches survive server restarts while the app stays closed), and fans
-a `Delta` carrying the full replacement snapshot to `workspace` subscribers (v1
+desktop app publishes via `RequestKind::PublishWorkspace`. The desktop routes each
+project's snapshot to its owning host. `publish_workspace` preserves daemon-owned
+agent tab metadata, **persists it to `workspace.json` beside the socket** (so
+headless launches survive server restarts while the app stays closed), and fans a
+`Delta` carrying the full replacement snapshot to `workspace` subscribers (v1
 keeps deltas trivial — every delta is a full replacement; row-level deltas are a
 later optimization). `subscribe_workspace` returns the cached snapshot (or an
 empty payload before the first publish) plus the delta receiver. A remote client
@@ -83,6 +84,11 @@ desktop uses, then merges the new worktree + terminal tab into the mirrored snap
 source of truth: on its next publish it **adopts** headless-created worktrees from disk
 (see `adopt_headless_worktrees` in `apps/pragma/src-tauri/src/workspace_mirror.rs`);
 headless tab rows stay ephemeral until then.
+
+`ProtocolRpcMethod::Tabs` currently owns terminal agent metadata only. `setAgent`
+records the agent id and default title in the host snapshot; `listAgents` lets the
+desktop overlay that durable metadata over legacy local tab rows after restart. Do
+not add tab persistence back to the Tauri SQLite shell.
 
 ## Socket And Access Control
 
