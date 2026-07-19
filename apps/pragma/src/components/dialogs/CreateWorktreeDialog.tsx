@@ -132,8 +132,14 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
       if (!main) {
         throw new Error("Project main worktree was not found.");
       }
-      const status = await githubFetchAndSync(main.id);
-      if (status.behind > 0) {
+      let status: Awaited<ReturnType<typeof githubFetchAndSync>> | null = null;
+      try {
+        status = await githubFetchAndSync(main.id);
+      } catch {
+        // If we cannot fetch the remote status (offline / auth issue), proceed
+        // with creation rather than blocking — matching the ChangesTab behaviour.
+      }
+      if (status && status.behind > 0) {
         setBehind(status.behind);
         setMainWorktreeId(main.id);
         return;

@@ -688,8 +688,8 @@ interface SyncActionProps {
 
 /** Sync action, styled like the commit button: full-width with pull/push counts. */
 function SyncAction({ disabled, error, onSync, status }: SyncActionProps) {
-  const behind = status?.behind ?? 0;
-  const ahead = status?.ahead ?? 0;
+  const behind = status ? String(status.behind) : "–";
+  const ahead = status ? String(status.ahead) : "–";
   return (
     <div className="flex flex-col gap-1 border-b border-border/60 px-2 py-2">
       <Button
@@ -701,10 +701,16 @@ function SyncAction({ disabled, error, onSync, status }: SyncActionProps) {
         title="Sync with remote (pull, then push)"
         variant="default"
       >
-        <span className="inline-flex items-center gap-px" title={`${behind} commit(s) to pull`}>
+        <span
+          className="inline-flex items-center gap-px"
+          title={status ? `${behind} commit(s) to pull` : "Sync status unknown"}
+        >
           <ArrowDown className="size-3.5" /> {behind}
         </span>
-        <span className="inline-flex items-center gap-px" title={`${ahead} commit(s) to push`}>
+        <span
+          className="inline-flex items-center gap-px"
+          title={status ? `${ahead} commit(s) to push` : "Sync status unknown"}
+        >
           <ArrowUp className="size-3.5" /> {ahead}
         </span>
         Sync
