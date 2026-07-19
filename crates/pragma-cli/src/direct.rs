@@ -11,8 +11,8 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, RequestFrame, RequestKind,
-    ResponseFrame, ServerFrame,
+    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolError, RequestFrame,
+    RequestKind, ResponseFrame, ServerFrame,
 };
 use uuid::Uuid;
 
@@ -151,6 +151,12 @@ pub struct AgentStatusRow {
     pub attention_kind: Option<String>,
 }
 
+/// How long `agent status` waits for additional snapshot rows after the
+/// subscribe ack before deciding the server's stored-status burst is done.
+/// Separate from `tab read`'s [`READ_TIMEOUT`] so the two drains can be tuned
+/// independently (a snapshot with many registered agents may need longer).
+const AGENT_SNAPSHOT_TIMEOUT: Duration = READ_TIMEOUT;
+
 /// Subscribes to agent status, prints the snapshot (one row per agent), and
 /// with `--watch` keeps streaming deltas until the subscription ends.
 pub fn agent_status(
@@ -161,23 +167,16 @@ pub fn agent_status(
     let request = subscribe_agents_request();
     write_json_frame(&mut stream, &request)?;
     let mut rows: Vec<AgentStatusRow> = Vec::new();
+    // The server acks the subscription *before* streaming the stored-status
+    // snapshot, so breaking on the ack would always render an empty table.
+    // Read up to the ack first, then drain the snapshot until a short idle
+    // gap marks it complete (the snapshot has no end-of-list delimiter).
     loop {
         match read_json_frame::<ServerFrame>(&mut stream) {
-            Ok(ServerFrame::Event(EventFrame::Agent {
-                worktree_id,
-                tab_id,
-                agent,
-                status,
-                attention_kind,
-                ..
-            })) => {
-                rows.push(AgentStatusRow {
-                    worktree_id,
-                    tab_id,
-                    agent,
-                    status: status_wire(status),
-                    attention_kind: attention_kind.map(attention_wire),
-                });
+            Ok(ServerFrame::Event(event)) => {
+                if let Some(row) = agent_row(event) {
+                    rows.push(row);
+                }
             }
             Ok(ServerFrame::Response(ResponseFrame { ok, error, .. })) => {
                 if !ok {
@@ -185,21 +184,64 @@ pub fn agent_status(
                         error.unwrap_or_else(|| "agent subscription rejected".to_string()),
                     ));
                 }
-                // Snapshot fully delivered once a non-Agent frame arrives; the
-                // server interleaves the ack with the snapshot, so break after
-                // we've seen the ack and at least one agent... but an empty
-                // snapshot has no Agent frames. To be safe, break on the ack.
                 break;
             }
             Ok(_) => {}
             Err(error) => return Err(CliError::from(error)),
         }
     }
+    let _ = stream.set_read_timeout(Some(AGENT_SNAPSHOT_TIMEOUT));
+    loop {
+        match read_json_frame::<ServerFrame>(&mut stream) {
+            Ok(ServerFrame::Event(event)) => {
+                if let Some(row) = agent_row(event) {
+                    rows.push(row);
+                }
+            }
+            Ok(_) => {}
+            Err(ProtocolError::Io(ref e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                // Idle gap: the snapshot is fully delivered.
+                break;
+            }
+            // A real I/O or protocol error mid-drain (e.g. the server hung up):
+            // surface it instead of silently rendering a truncated table.
+            Err(error) => return Err(CliError::from(error)),
+        }
+    }
     render_status(&rows, out);
     if args.watch {
+        let _ = stream.set_read_timeout(None);
         stream_deltas(&mut stream, args, out)?;
     }
     Ok(())
+}
+
+/// Converts an agent status event into a printable row; `None` for other events.
+fn agent_row(event: EventFrame) -> Option<AgentStatusRow> {
+    if let EventFrame::Agent {
+        worktree_id,
+        tab_id,
+        agent,
+        status,
+        attention_kind,
+        ..
+    } = event
+    {
+        Some(AgentStatusRow {
+            worktree_id,
+            tab_id,
+            agent,
+            status: status_wire(status),
+            attention_kind: attention_kind.map(attention_wire),
+        })
+    } else {
+        None
+    }
 }
 
 fn stream_deltas(
@@ -209,20 +251,9 @@ fn stream_deltas(
 ) -> Result<(), CliError> {
     loop {
         match read_json_frame::<ServerFrame>(stream) {
-            Ok(ServerFrame::Event(EventFrame::Agent {
-                worktree_id,
-                tab_id,
-                agent,
-                status,
-                attention_kind,
-                ..
-            })) => {
-                let row = AgentStatusRow {
-                    worktree_id,
-                    tab_id,
-                    agent,
-                    status: status_wire(status),
-                    attention_kind: attention_kind.map(attention_wire),
+            Ok(ServerFrame::Event(event)) => {
+                let Some(row) = agent_row(event) else {
+                    continue;
                 };
                 if args.worktree.is_some()
                     && args

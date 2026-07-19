@@ -571,6 +571,18 @@ describe("report.sh", () => {
     });
   });
 
+  it.each(["allow", "deny"])(
+    "drops back to in progress after a %s verdict resumes the turn",
+    (verdict) => {
+      run("started");
+      // A deny never runs the tool, so no PostToolUse follows -- the verdict
+      // itself must restore the running status or the tab stays on attention.
+      runRaw("permission", { stdin: PERMISSION_STDIN, env: { PRAGMA_TEST_DECISION: verdict } });
+      expect(reportCalls().at(-1)).toBe("agent report --agent claude-code started");
+      expect(existsSync(markerPath())).toBe(true);
+    },
+  );
+
   it("emits nothing (defers to Claude's own prompt) when no verdict arrives", () => {
     run("started");
     const output = runRaw("permission", { stdin: PERMISSION_STDIN });
@@ -621,6 +633,31 @@ describe("report.sh", () => {
         },
       },
     });
+  });
+
+  it("drops back to in progress after a remote reply resumes the turn", () => {
+    run("started");
+    // Answering restores the question tool's flow; nothing else is guaranteed
+    // to report before the next tool finishes, so the reply itself must flip
+    // the tab from the question attention back to running.
+    runRaw("permission", { stdin: QUESTION_STDIN, env: { PRAGMA_TEST_ANSWER: "OAuth" } });
+    expect(reportCalls().at(-1)).toBe("agent report --agent claude-code started");
+    expect(existsSync(markerPath())).toBe(true);
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "system", text: "Question answered" }),
+    );
+  });
+
+  it("drops back to in progress after a remote dismissal", () => {
+    run("started");
+    runRaw("permission", {
+      stdin: QUESTION_STDIN,
+      env: { PRAGMA_TEST_ANSWER: "__PRAGMA_QUESTION_DISMISSED__" },
+    });
+    expect(reportCalls().at(-1)).toBe("agent report --agent claude-code started");
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "system", text: "Question dismissed" }),
+    );
   });
 
   it("denies a remotely dismissed question so Claude closes its native prompt", () => {
@@ -687,6 +724,65 @@ describe("report.sh", () => {
   it("ignores PostToolUse outside a turn (no marker)", () => {
     // No turn in flight -> a stray PostToolUse must not flash a phantom running.
     expect(run("running")).toEqual([]);
+  });
+
+  it("keeps a live turn when its own session's SessionStart lands late (/clear race)", () => {
+    // /clear fires SessionEnd + SessionStart while the user's next prompt may
+    // already have started a turn in the NEW session. A late SessionStart must
+    // not wipe that turn's marker -- doing so mutes every marker-guarded
+    // report (attention, running) for the rest of the turn.
+    run("started", {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-b" }),
+    });
+    expect(
+      run("cleared", {
+        stdin: JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: "session-b",
+          source: "clear",
+        }),
+      }),
+    ).toEqual(["agent report --agent claude-code started"]);
+    expect(existsSync(markerPath())).toBe(true);
+  });
+
+  it("still clears on SessionStart when no turn of that session is in flight", () => {
+    run("started", {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-a" }),
+    });
+    run("stopped", { stdin: JSON.stringify({ hook_event_name: "Stop", session_id: "session-a" }) });
+    expect(
+      run("cleared", {
+        stdin: JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: "session-b",
+          source: "clear",
+        }),
+      }),
+    ).toEqual([
+      "agent report --agent claude-code started",
+      "agent report --agent claude-code stopped",
+      "agent report --agent claude-code cleared",
+    ]);
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("discards the old session's late SessionEnd after a new session took over", () => {
+    // Session pinning: once the new session reported, the old session's
+    // trailing SessionEnd (fired by /clear) must not clear the new turn.
+    run("started", {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-b" }),
+    });
+    expect(
+      run("cleared", {
+        stdin: JSON.stringify({
+          hook_event_name: "SessionEnd",
+          session_id: "session-a",
+          reason: "clear",
+        }),
+      }),
+    ).toEqual(["agent report --agent claude-code started"]);
+    expect(existsSync(markerPath())).toBe(true);
   });
 
   it("reports cleared and removes the marker on session start/end", () => {

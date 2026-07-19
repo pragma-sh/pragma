@@ -106,6 +106,13 @@ For one question, report `attention --kind question --question ... --options ...
 --request-id ...`, block with `await-answer`, and translate answer/dismissal into host's
 hook result. Fall back to native UI when payload cannot be represented faithfully.
 
+After any verdict or answer resolves the block, **re-assert `started` before returning
+the decision** (guarded on the turn being in flight). A denied tool never runs, so no
+post-tool hook follows — without the re-assert the tab stays stuck on attention until
+the turn ends. If session start/end hooks race a new session's first turn (e.g. Claude
+Code `/clear`), guard the clear on which session owns the in-flight turn, or the late
+clear mutes every turn-guarded report (see `packages/claude-code-plugin/AGENTS.md`).
+
 If host emits no abort hook, use an empirically verified secondary signal. Claude Code
 watches transcript bytes after current turn's starting offset; do not grep entire tail,
 because stale interrupt markers clear later turns. See `references/patterns.md`.

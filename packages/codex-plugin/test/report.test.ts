@@ -138,6 +138,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// The abort watcher polls in the background (PRAGMA_WATCH_INTERVAL=0.1s), so
+// a fixed sleep before asserting on its output flakes under a loaded CI box.
+// Poll for the expected state instead, capped by a generous timeout.
+async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) return;
+    await sleep(20);
+  }
+}
+
 describe("report.sh", () => {
   it("no-ops outside Pragma", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -185,7 +196,7 @@ describe("report.sh", () => {
         payload: { type: "agent_message", message: "Interim: reading **files**." },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => messages().length > 1);
     expect(messages().at(-1)).toEqual(
       expect.objectContaining({
         id: "codex-turn-1-assistant-000",
@@ -317,7 +328,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().length > 1);
     expect(reports().at(-1)).toBe(
       'agent report --agent codex attention --kind question --question Choose Red or Blue? --options [{"label":"Red","description":"Warm"},{"label":"Blue","description":"Cool"}] --request-id call-question-1',
     );
@@ -333,7 +344,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().length > 2);
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
@@ -368,7 +379,7 @@ describe("report.sh", () => {
       current.path,
       `${JSON.stringify({ type: "event_msg", payload: { type: "turn_aborted" } })}\n`,
     );
-    await sleep(500);
+    await waitFor(() => reports().length > 1);
     expect(reports()).toEqual([
       "agent report --agent codex started",
       "agent report --agent codex cleared",

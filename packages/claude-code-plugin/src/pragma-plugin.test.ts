@@ -63,6 +63,11 @@ it("requires subscription rate limits and a five-hour window", () => {
     status: "unavailable",
     reason: "authentication-required",
   });
+  // Signed in but the usage fetch came back empty (e.g. a 429 from the usage
+  // endpoint): must throw so the host keeps its last snapshot, not report signed-out.
+  expect(() => parseClaudeUsage({ rate_limits_available: true, rate_limits: null }, 1)).toThrow(
+    /temporarily unavailable/,
+  );
   expect(
     parseClaudeUsage(
       {
