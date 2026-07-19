@@ -1,8 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { ChangedFile, WorktreeChanges } from "@pragma/constants";
-import { GitMerge, Minus, Plus, Undo2 } from "lucide-react";
+import type { BranchSyncStatus, ChangedFile, WorktreeChanges } from "@pragma/constants";
+import { ArrowDown, ArrowUp, Minus, Plus, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
@@ -30,7 +30,8 @@ import {
   commitStaged,
   discardAllUnstaged,
   discardUnstagedFile,
-  mergeWorktreeToParent,
+  githubFetchAndSync,
+  githubSyncBranch,
   stageAll,
   stageFile,
   unstageAll,
@@ -56,6 +57,7 @@ type StagingOp = (worktreeId: string) => Promise<void>;
  * first load update the lists in place without flashing the loading state.
  */
 const CHANGES_REFRESH_INTERVAL_MS = 2000;
+const BRANCH_SYNC_REFRESH_INTERVAL_MS = 10_000;
 
 /** True when two polled change sets are identical, so state can be kept as-is. */
 function sameChanges(a: WorktreeChanges, b: WorktreeChanges): boolean {
@@ -144,35 +146,16 @@ function buildUnstagedActions(
   };
 }
 
-/** Whether the top controls should switch from commit to merge/delete. */
-function computeCanMergeOrDelete(
+/** Whether the top controls should switch from commit to sync/delete. */
+function computeCanSyncOrDelete(
   selectedWorktree: { isMain: boolean; parentId: string | null } | null,
   changes: WorktreeChanges,
+  syncStatus: BranchSyncStatus | null,
 ): boolean {
-  return Boolean(
-    selectedWorktree &&
-    !selectedWorktree.isMain &&
-    selectedWorktree.parentId &&
-    changes.staged.length === 0 &&
-    changes.unstaged.length === 0,
-  );
-}
-
-/** Resolve the parent worktree's display label for the merge button. */
-function resolveParentLabel(
-  workspace: ReturnType<typeof useWorkspace>,
-  selectedWorktree: {
-    parentId: string | null;
-    projectId: string;
-    title: string | null;
-    branch: string;
-  } | null,
-): string {
-  if (!selectedWorktree?.parentId) return "parent";
-  const parent = (workspace.worktrees[selectedWorktree.projectId] ?? []).find(
-    (worktree) => worktree.id === selectedWorktree.parentId,
-  );
-  return parent?.title ?? parent?.branch ?? "parent";
+  if (changes.staged.length > 0 || changes.unstaged.length > 0) return false;
+  if (changes.committed.length > 0) return true;
+  if (syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0)) return true;
+  return Boolean(selectedWorktree && !selectedWorktree.isMain && selectedWorktree.parentId);
 }
 
 /** Resolve the current worktree's display label for the delete button. */
@@ -341,39 +324,65 @@ function useChangesDiscard(
   return { pending, setPending, onConfirmDiscard, closeDiscard };
 }
 
-/** Merge the worktree into its parent, surfacing merge errors inline. */
-function useChangesMerge(
-  worktreeId: string | null,
-  refresh: () => Promise<void>,
-): {
-  merging: boolean;
-  mergeError: string | null;
-  onMerge: () => void;
+/** Polls remote branch counts for the compact sync control. */
+function useBranchSyncStatus(worktreeId: string | null): {
+  status: BranchSyncStatus | null;
+  refresh: () => Promise<void>;
 } {
-  const [merging, setMerging] = useState(false);
-  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [status, setStatus] = useState<BranchSyncStatus | null>(null);
+  const activeWorktree = useRef<string | null>(null);
+  const refresh = useCallback(async () => {
+    if (!worktreeId) return;
+    try {
+      const next = await githubFetchAndSync(worktreeId);
+      if (activeWorktree.current === worktreeId) setStatus(next);
+    } catch {
+      if (activeWorktree.current === worktreeId) setStatus(null);
+    }
+  }, [worktreeId]);
   useEffect(() => {
-    setMergeError(null);
+    activeWorktree.current = worktreeId;
+    setStatus(null);
+    if (!worktreeId) return;
+    return startRefreshLoop(refresh, BRANCH_SYNC_REFRESH_INTERVAL_MS);
+  }, [worktreeId, refresh]);
+  return { status, refresh };
+}
+
+/** Pulls then pushes the branch, surfacing conflicts inline and via toast. */
+function useChangesSync(
+  worktreeId: string | null,
+  refreshChanges: () => Promise<void>,
+  refreshStatus: () => Promise<void>,
+): {
+  syncing: boolean;
+  syncError: string | null;
+  onSync: () => void;
+} {
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  useEffect(() => {
+    setSyncError(null);
   }, [worktreeId]);
 
-  const onMerge = useCallback(async () => {
-    if (!worktreeId || merging) return;
-    setMerging(true);
-    setMergeError(null);
+  const onSync = useCallback(async () => {
+    if (!worktreeId || syncing) return;
+    setSyncing(true);
+    setSyncError(null);
     try {
-      await mergeWorktreeToParent(worktreeId);
-      toast.success("Merged worktree into parent");
-      await refresh();
+      await githubSyncBranch(worktreeId);
+      toast.success("Synced branch with remote");
+      await Promise.all([refreshChanges(), refreshStatus()]);
     } catch (cause) {
       const message = errorMessage(cause);
-      setMergeError(message);
+      setSyncError(message);
       toast.error(message);
     } finally {
-      setMerging(false);
+      setSyncing(false);
     }
-  }, [worktreeId, merging, refresh]);
+  }, [worktreeId, syncing, refreshChanges, refreshStatus]);
 
-  return { merging, mergeError, onMerge };
+  return { syncing, syncError, onSync };
 }
 
 /**
@@ -385,8 +394,8 @@ function useChangesMerge(
  * `worktree` diff side), folding committed + staged + unstaged changes into one
  * review view. Unstaged files can be staged
  * or discarded; staged files can be unstaged or committed. Once a child
- * worktree has only committed changes, the top controls switch to merge, then
- * to the shared delete-worktree dialog after the committed diff is gone.
+ * worktree has only committed changes, the top controls switch to remote sync,
+ * then to the shared delete-worktree dialog after the committed diff is gone.
  */
 export function ChangesTab() {
   const workspace = useWorkspace();
@@ -394,6 +403,13 @@ export function ChangesTab() {
   const worktreeId = workspace.selectedWorktreeId;
 
   const { state, refresh } = useChangesRefresh(worktreeId);
+  const shouldLoadSyncStatus =
+    state.kind === "ready" &&
+    state.changes.staged.length === 0 &&
+    state.changes.unstaged.length === 0;
+  const { status: syncStatus, refresh: refreshSyncStatus } = useBranchSyncStatus(
+    shouldLoadSyncStatus ? worktreeId : null,
+  );
   const { pending, setPending, onConfirmDiscard, closeDiscard } = useChangesDiscard(
     worktreeId,
     refresh,
@@ -402,7 +418,7 @@ export function ChangesTab() {
   const stagedCount = state.kind === "ready" ? state.changes.staged.length : 0;
   const { commitMessage, setCommitMessage, committing, generating, onSubmit, onGenerate } =
     useChangesCommit(worktreeId, refresh, stagedCount);
-  const { merging, mergeError, onMerge } = useChangesMerge(worktreeId, refresh);
+  const { syncing, syncError, onSync } = useChangesSync(worktreeId, refresh, refreshSyncStatus);
 
   const openDiff = useCallback(
     (file: ChangedFile) => void workspace.openDiffTab(file.path, "worktree"),
@@ -433,25 +449,24 @@ export function ChangesTab() {
 
   const changes = state.changes;
   const selectedWorktree = workspace.selectedWorktree;
-  const canMergeOrDelete = computeCanMergeOrDelete(selectedWorktree, changes);
-  const parentLabel = resolveParentLabel(workspace, selectedWorktree);
+  const canSyncOrDelete = computeCanSyncOrDelete(selectedWorktree, changes, syncStatus);
   const worktreeLabel = resolveWorktreeLabel(selectedWorktree);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-auto py-1">
       <ChangesTopAction
         aiAvailable={aiAvailable}
-        canMergeOrDelete={canMergeOrDelete}
+        canSyncOrDelete={canSyncOrDelete}
         commitMessage={commitMessage}
         committedCount={changes.committed.length}
         generating={generating}
-        merging={merging}
-        mergeError={mergeError}
+        syncing={syncing}
+        syncError={syncError}
+        syncStatus={syncStatus}
         onCommitMessageChange={setCommitMessage}
         onGenerate={onGenerate}
-        onMerge={onMerge}
+        onSync={onSync}
         onSubmit={onSubmit}
-        parentLabel={parentLabel}
         selectedWorktree={selectedWorktree}
         stagedCount={changes.staged.length}
         worktreeLabel={worktreeLabel}
@@ -486,42 +501,35 @@ export function ChangesTab() {
 
 interface ChangesTopActionProps {
   aiAvailable: boolean;
-  canMergeOrDelete: boolean;
+  canSyncOrDelete: boolean;
   commitMessage: string;
   committedCount: number;
   generating: boolean;
-  merging: boolean;
-  mergeError: string | null;
+  syncing: boolean;
+  syncError: string | null;
+  syncStatus: BranchSyncStatus | null;
   onCommitMessageChange: (value: string) => void;
   onGenerate: () => void;
-  onMerge: () => void;
+  onSync: () => void;
   onSubmit: () => void;
-  parentLabel: string;
   selectedWorktree: { id: string } | null;
   stagedCount: number;
   worktreeLabel: string;
   busy: boolean;
 }
 
-/** Render the merge or delete control when the worktree is fully committed. */
-function renderMergeAction(
+/** Render the sync or delete control when the worktree is fully committed. */
+function renderSyncAction(
   committedCount: number,
   selectedWorktree: { id: string } | null,
-  merging: boolean,
-  mergeError: string | null,
-  onMerge: () => void,
-  parentLabel: string,
+  syncing: boolean,
+  syncError: string | null,
+  syncStatus: BranchSyncStatus | null,
+  onSync: () => void,
   worktreeLabel: string,
 ): ReactNode {
-  if (committedCount > 0) {
-    return (
-      <MergeAction
-        disabled={merging}
-        error={mergeError}
-        onMerge={onMerge}
-        parentLabel={parentLabel}
-      />
-    );
+  if (committedCount > 0 || (syncStatus && (syncStatus.ahead > 0 || syncStatus.behind > 0))) {
+    return <SyncAction disabled={syncing} error={syncError} onSync={onSync} status={syncStatus} />;
   }
   if (selectedWorktree) {
     return <MergedDeleteAction worktreeId={selectedWorktree.id} worktreeLabel={worktreeLabel} />;
@@ -529,33 +537,33 @@ function renderMergeAction(
   return null;
 }
 
-/** Top-of-tab control: commit input, or merge/delete once staged+unstaged clear. */
+/** Top-of-tab control: commit input, or sync/delete once staged+unstaged clear. */
 function ChangesTopAction({
   aiAvailable,
-  canMergeOrDelete,
+  canSyncOrDelete,
   commitMessage,
   committedCount,
   generating,
-  merging,
-  mergeError,
+  syncing,
+  syncError,
+  syncStatus,
   onCommitMessageChange,
   onGenerate,
-  onMerge,
+  onSync,
   onSubmit,
-  parentLabel,
   selectedWorktree,
   stagedCount,
   worktreeLabel,
   busy,
 }: ChangesTopActionProps) {
-  if (canMergeOrDelete) {
-    return renderMergeAction(
+  if (canSyncOrDelete) {
+    return renderSyncAction(
       committedCount,
       selectedWorktree,
-      merging,
-      mergeError,
-      onMerge,
-      parentLabel,
+      syncing,
+      syncError,
+      syncStatus,
+      onSync,
       worktreeLabel,
     );
   }
@@ -613,20 +621,39 @@ function DiscardConfirmDialog({
   );
 }
 
-interface MergeActionProps {
+interface SyncActionProps {
   disabled: boolean;
   error: string | null;
-  onMerge: () => void;
-  parentLabel: string;
+  onSync: () => void;
+  status: BranchSyncStatus | null;
 }
 
-/** Merge action shown after all staged/unstaged work has been committed. */
-function MergeAction({ disabled, error, onMerge, parentLabel }: MergeActionProps) {
+/** Sync action, styled like the commit button: full-width with pull/push counts. */
+function SyncAction({ disabled, error, onSync, status }: SyncActionProps) {
   return (
-    <div className="flex flex-col gap-2 border-b border-border/60 px-2 py-2">
-      <Button className="h-8 w-full" disabled={disabled} onClick={onMerge} size="sm">
-        <GitMerge data-icon="inline-start" />
-        {disabled ? "Merging…" : `Merge into ${parentLabel}`}
+    <div className="flex flex-col gap-1 border-b border-border/60 px-2 py-2">
+      <Button
+        aria-label="Sync with remote"
+        className="h-7 w-full"
+        disabled={disabled}
+        onClick={onSync}
+        size="sm"
+        title="Sync with remote (pull, then push)"
+        variant="default"
+      >
+        <span
+          className="inline-flex items-center gap-px"
+          title={`${status?.behind ?? 0} commit(s) to pull`}
+        >
+          <ArrowDown className="size-3.5" /> {status?.behind ?? 0}
+        </span>
+        <span
+          className="inline-flex items-center gap-px"
+          title={`${status?.ahead ?? 0} commit(s) to push`}
+        >
+          <ArrowUp className="size-3.5" /> {status?.ahead ?? 0}
+        </span>
+        Sync
       </Button>
       {error ? <p className="text-xs leading-relaxed text-destructive">{error}</p> : null}
     </div>

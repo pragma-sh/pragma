@@ -98,7 +98,7 @@ builds re-prompt on every launch. The plaintext file has no signature check.
 
 Also in Rust: OAuth **Device Flow** polling (`reqwest` blocking, no client
 secret/PKCE), `gh` CLI detection/adoption, `origin`→`owner/repo`, fetch+ahead/behind,
-push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
+conflict-aborting pull/sync, push, the local `base...HEAD` PR file diff, and remote-branch delete. Worktree-scoped
 GitHub git operations must run through the owning host's `git` RPC so remote project
 paths are evaluated on the remote host, not the desktop client. The
 `oauthClientId`, scopes, and endpoint URLs are in `@pragma/constants` (`github` block);
@@ -108,7 +108,9 @@ Auth state is held by `state/github-context.tsx` (`useGitHub`) and gates both th
 full-screen `GitHubSetupModal` and the **Pull Request** right-sidebar subtab. The PR
 subtab (`right-sidebar/PullRequestTab`) resolves logged-out → create
 (`CreatePullRequestView`, TipTap markdown editor) → view (`ViewPullRequestView`). A PR
-review opens a `pr-review` `TabKind` (v7 `pr_number` column) rendered through
+view keeps each check-run/status name and state; its merge card shows passed/failed/pending
+counts and expands to a per-check dropdown. A PR review opens a `pr-review` `TabKind`
+(v7 `pr_number` column) rendered through
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
 (fed by `github_pr_file_diff`), and inline thread resolve/unresolve.
@@ -474,11 +476,14 @@ confirmation** — `git checkout -- <path>` / `git clean -fd` is the recovery pa
 without re-flashing the loading state. **Clicking any file opens one unified diff**
 (`DiffSide::Worktree` = base merge-base → working tree). `ChangeGroup` is generic over
 per-row `fileActions` and per-header `headerActions`. Staging is reversible
-(no confirmation); discard is irreversible (confirmation `AlertDialog`).
+(no confirmation); discard is irreversible (confirmation `AlertDialog`). Committed
+changes use the Pragma parent branch as their baseline, falling back to the Git upstream
+or matching remote branch for main/parentless worktrees.
 
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
-lifecycle actions: committed changes show `merge_worktree_to_parent`; a fully
-merged/no-change child shows `WorktreeDeleteDialog`. The left sidebar polls
+lifecycle actions: committed changes show compact remote sync with ahead/behind counts;
+a no-change child shows `WorktreeDeleteDialog`. Sync pulls first, auto-aborts conflicts,
+then pushes. The left sidebar polls
 `worktrees_merged_status` for the merge glyph as a fallback, and also subscribes to the
 shared per-worktree file watcher so filesystem changes refresh the glyph immediately.
 
@@ -529,6 +534,10 @@ Clipboard reads/writes go through `navigator.clipboard` with a try/catch surfaci
 errors via `toast.error(…)`.
 
 ## Worktree lifecycle
+
+`CreateWorktreeDialog` fetches the project main worktree's remote status before creation.
+When main is behind, it offers cancel, create without pulling, or pull then create; a
+conflicted pull auto-aborts and leaves the filled form and local work intact.
 
 `Worktree` rows carry a `hidden` boolean (v3 migration). Hidden rows are filtered out of
 the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` and

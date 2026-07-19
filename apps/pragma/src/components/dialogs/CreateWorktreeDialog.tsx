@@ -2,6 +2,16 @@ import { useState } from "react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Input } from "@/components/ui/input";
@@ -9,8 +19,9 @@ import { Label } from "@/components/ui/label";
 import { useAgentSelection } from "@/hooks/use-agent-selection";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { rememberModelSelection } from "@/lib/agent-model-selection";
+import { errorMessage } from "@/lib/errors";
 import { isMacPlatform } from "@/lib/platform";
-import { createWorktree } from "@/lib/tauri";
+import { createWorktree, githubFetchAndSync, githubPullBranch } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface CreateWorktreeDialogProps {
@@ -45,6 +56,9 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [behind, setBehind] = useState(0);
+  const [mainWorktreeId, setMainWorktreeId] = useState<string | null>(null);
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
@@ -54,37 +68,68 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
 
   const canSubmit = branch.trim().length > 0;
 
+  async function createAndLaunch() {
+    const projectId = workspace.selectedProjectId;
+    const parentId = workspace.selectedWorktreeId;
+    if (!projectId || !parentId) return;
+    const worktree = await createWorktree(projectId, parentId, branch, title.trim() || undefined);
+    // Load the new worktree into state first so its terminal tab resolves its
+    // cwd to the new worktree path.
+    await workspace.refreshProject(projectId);
+    const prompt = message.trim();
+    if (prompt && selectedAgent) {
+      rememberModelSelection(selectedAgent.id, modelSelection);
+      await workspace.startSession(worktree.id, selectedAgent, prompt, modelSelection);
+    } else {
+      workspace.selectWorktree(worktree.id);
+      await workspace.createTerminalTab(worktree.id);
+    }
+    onOpenChange(false);
+    setBranch("");
+    setTitle("");
+    setMessage("");
+    setError(null);
+  }
+
   async function submit() {
-    if (!workspace.selectedProjectId || !workspace.selectedWorktreeId || !canSubmit) {
+    const projectId = workspace.selectedProjectId;
+    if (!projectId || !workspace.selectedWorktreeId || !canSubmit || busy) {
       return;
     }
+    setBusy(true);
+    setError(null);
     try {
-      const worktree = await createWorktree(
-        workspace.selectedProjectId,
-        workspace.selectedWorktreeId,
-        branch,
-        title.trim() || undefined,
-      );
-      // Load the new worktree into state first so its terminal tab resolves its
-      // cwd to the new worktree path.
-      await workspace.refreshProject(workspace.selectedProjectId);
-      const prompt = message.trim();
-      if (prompt && selectedAgent) {
-        // A prompt was written: launch an agent session seeded with it.
-        rememberModelSelection(selectedAgent.id, modelSelection);
-        await workspace.startSession(worktree.id, selectedAgent, prompt, modelSelection);
-      } else {
-        // No prompt: just open a terminal in the new worktree.
-        workspace.selectWorktree(worktree.id);
-        await workspace.createTerminalTab(worktree.id);
+      const main = (workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain);
+      if (!main) {
+        throw new Error("Project main worktree was not found.");
       }
-      onOpenChange(false);
-      setBranch("");
-      setTitle("");
-      setMessage("");
-      setError(null);
+      const status = await githubFetchAndSync(main.id);
+      if (status.behind > 0) {
+        setBehind(status.behind);
+        setMainWorktreeId(main.id);
+        return;
+      }
+      await createAndLaunch();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCreate(pullFirst: boolean) {
+    if (busy) return;
+    const mainId = mainWorktreeId;
+    setMainWorktreeId(null);
+    setBusy(true);
+    setError(null);
+    try {
+      if (pullFirst && mainId) await githubPullBranch(mainId);
+      await createAndLaunch();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -164,15 +209,40 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button disabled={busy} type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!canSubmit}>
-            Create worktree
+          <Button type="submit" disabled={!canSubmit || busy}>
+            {busy ? "Checking main…" : "Create worktree"}
             <span className="ml-2 text-xs opacity-70">{submitShortcut}</span>
           </Button>
         </div>
       </form>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) setMainWorktreeId(null);
+        }}
+        open={mainWorktreeId !== null}
+      >
+        <AlertDialogContent className="data-[size=default]:sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
+            <AlertDialogDescription>
+              Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
+              worktree?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="outline" onClick={() => void confirmCreate(false)}>
+              Create without syncing
+            </Button>
+            <AlertDialogAction onClick={() => void confirmCreate(true)}>
+              Sync and create
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ModalShell>
   );
 }

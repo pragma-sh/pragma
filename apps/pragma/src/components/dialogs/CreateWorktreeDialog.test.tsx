@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const listPluginAgentsMock = vi.fn();
 const resolvePluginAgentModelsMock = vi.fn();
 const createWorktreeMock = vi.fn();
+const githubFetchAndSyncMock = vi.fn();
+const githubPullBranchMock = vi.fn();
 const startSessionMock = vi.fn();
 const refreshProjectMock = vi.fn();
 const selectWorktreeMock = vi.fn();
@@ -14,6 +16,8 @@ const createTerminalTabMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
+  githubFetchAndSync: (...args: unknown[]) => githubFetchAndSyncMock(...args),
+  githubPullBranch: (...args: unknown[]) => githubPullBranchMock(...args),
 }));
 
 vi.mock("@/plugins/agents", () => ({
@@ -57,6 +61,7 @@ const workspaceMock = {
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   selectedWorktree: { id: "main", isMain: true } as Partial<Worktree>,
+  worktrees: { p: [{ ...newWorktree, id: "main", isMain: true, parentId: null }] },
   refreshProject: refreshProjectMock,
   startSession: startSessionMock,
   selectWorktree: selectWorktreeMock,
@@ -78,6 +83,13 @@ describe("CreateWorktreeDialog", () => {
       { id: "sonnet", name: "Sonnet", reasoning: [] },
     ]);
     createWorktreeMock.mockResolvedValue(newWorktree);
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "main",
+      ahead: 0,
+      behind: 0,
+      hasUpstream: true,
+    });
+    githubPullBranchMock.mockResolvedValue(undefined);
     refreshProjectMock.mockResolvedValue(undefined);
     startSessionMock.mockResolvedValue({ id: "tab" });
     createTerminalTabMock.mockResolvedValue({ id: "tab" });
@@ -168,5 +180,47 @@ describe("CreateWorktreeDialog", () => {
     expect(screen.getByRole("button", { name: /Create worktree/ })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
     expect(screen.getByRole("button", { name: /Create worktree/ })).toBeEnabled();
+  });
+
+  it("asks to pull when main is behind before creating", async () => {
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "main",
+      ahead: 0,
+      behind: 2,
+      hasUpstream: true,
+    });
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+
+    expect(await screen.findByText("Main is behind remote")).toBeInTheDocument();
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Sync and create" }));
+
+    await waitFor(() => expect(githubPullBranchMock).toHaveBeenCalledWith("main"));
+    await waitFor(() => expect(createWorktreeMock).toHaveBeenCalled());
+  });
+
+  it("keeps form values and aborts creation when pull conflicts", async () => {
+    githubFetchAndSyncMock.mockResolvedValue({
+      branch: "main",
+      ahead: 1,
+      behind: 1,
+      hasUpstream: true,
+    });
+    githubPullBranchMock.mockRejectedValue(
+      new Error("Remote changes conflict with local commits. Pull was aborted."),
+    );
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    const branchInput = screen.getByLabelText("Branch name") as HTMLInputElement;
+    fireEvent.change(branchInput, { target: { value: "feature" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sync and create" }));
+
+    expect(
+      await screen.findByText("Remote changes conflict with local commits. Pull was aborted."),
+    ).toBeInTheDocument();
+    expect(branchInput.value).toBe("feature");
+    expect(createWorktreeMock).not.toHaveBeenCalled();
   });
 });

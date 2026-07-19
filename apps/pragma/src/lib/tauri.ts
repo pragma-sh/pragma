@@ -903,6 +903,16 @@ export function githubFetchAndSync(worktreeId: string): Promise<BranchSyncStatus
   return invoke<BranchSyncStatus>("github_fetch_and_sync", { worktreeId });
 }
 
+/** Pulls a clean branch, automatically aborting a conflicted merge. */
+export function githubPullBranch(worktreeId: string): Promise<void> {
+  return invoke("github_pull_branch", { worktreeId });
+}
+
+/** Pulls a clean branch, then pushes it to `origin`. */
+export function githubSyncBranch(worktreeId: string): Promise<void> {
+  return invoke("github_sync_branch", { worktreeId });
+}
+
 /** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */
 export function githubPushBranch(worktreeId: string): Promise<void> {
   return invoke("github_push_branch", { worktreeId });
