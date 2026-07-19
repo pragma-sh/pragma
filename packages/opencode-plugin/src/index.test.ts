@@ -4,6 +4,7 @@ const sdkMocks = vi.hoisted(() => ({
   reportAttention: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportCleared: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportMessage: vi.fn((..._args: unknown[]) => Promise.resolve({})),
+  reportSessionName: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStarted: vi.fn((..._args: unknown[]) => Promise.resolve({})),
   reportStopped: vi.fn((..._args: unknown[]) => Promise.resolve({})),
 }));
@@ -21,6 +22,7 @@ vi.mock("@pragma/sdk", () => {
     reportAttention: forwardReportMock(sdkMocks.reportAttention),
     reportCleared: forwardReportMock(sdkMocks.reportCleared),
     reportMessage: forwardReportMock(sdkMocks.reportMessage),
+    reportSessionName: forwardReportMock(sdkMocks.reportSessionName),
     reportStarted: forwardReportMock(sdkMocks.reportStarted),
     reportStopped: forwardReportMock(sdkMocks.reportStopped),
   };
@@ -41,6 +43,7 @@ const pragmaEnv = {
 
 function testHooks() {
   const reports: Report[] = [];
+  const sessionNames: string[] = [];
   const commands: string[] = [];
   const questions: Array<{
     question: string;
@@ -89,8 +92,11 @@ function testHooks() {
       reports.push("attention:question");
       questions.push({ question, options });
     },
+    async sessionName(name) {
+      sessionNames.push(name);
+    },
   });
-  return { hooks, reports, commands, questions, messages };
+  return { hooks, reports, commands, questions, messages, sessionNames };
 }
 
 function runtimeEvent(type: string, properties: Record<string, unknown>) {
@@ -215,6 +221,7 @@ describe("Pragma opencode plugin", () => {
       async cleared() {
         reports.push("cleared");
       },
+      async sessionName() {},
     });
 
     const started = hooks.event?.(sessionStatus("busy"));
@@ -289,6 +296,34 @@ describe("Pragma opencode plugin", () => {
     await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-1" }));
 
     expect(reports).toEqual(["started"]);
+  });
+
+  it("reports the session title from session events, deduplicating repeats", async () => {
+    const { hooks, sessionNames } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("session.updated", { info: { id: "s1", title: "Fix flaky tests" } }),
+    );
+    await hooks.event?.(
+      runtimeEvent("session.updated", { info: { id: "s1", title: "Fix flaky tests" } }),
+    );
+    // A rename (or a switch to another session) reports the new name.
+    await hooks.event?.(
+      runtimeEvent("session.updated", { info: { id: "s2", title: "Port CI to Linux" } }),
+    );
+    expect(sessionNames).toEqual(["Fix flaky tests", "Port CI to Linux"]);
+  });
+
+  it("never renames the tab for child (subagent) session titles", async () => {
+    const { hooks, sessionNames } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
+    );
+    await hooks.event?.(
+      runtimeEvent("session.updated", {
+        info: { id: "child-1", parentID: "s1", title: "Subtask" },
+      }),
+    );
+    expect(sessionNames).toEqual([]);
   });
 
   it("reports started on retry session status", async () => {

@@ -399,6 +399,50 @@ describe("report.sh", () => {
     );
   });
 
+  it("names the session from the first prompt, once per session", () => {
+    const first = run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "session-a",
+        prompt: "Fix flaky tests\nwith more detail",
+      }),
+    });
+    expect(first).toContainEqual(expect.stringContaining("session-name --name Fix flaky tests"));
+
+    // A second prompt in the same session must not rename again.
+    const second = run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "session-a",
+        prompt: "Now run the suite",
+      }),
+    });
+    expect(second.filter((call) => call.includes("session-name"))).toHaveLength(1);
+  });
+
+  it("renames the tab when the session switches", () => {
+    run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "session-a",
+        prompt: "First session",
+      }),
+    });
+    run("cleared", {
+      stdin: JSON.stringify({ hook_event_name: "SessionEnd", session_id: "session-a" }),
+    });
+    const afterSwitch = run("started", {
+      stdin: JSON.stringify({
+        hook_event_name: "UserPromptSubmit",
+        session_id: "session-b",
+        prompt: "Second session",
+      }),
+    });
+    expect(afterSwitch).toContainEqual(
+      expect.stringContaining("session-name --name Second session"),
+    );
+  });
+
   it("surfaces the transcript's assistant reply as a chat message on stopped", () => {
     run("started");
     run("stopped", { stdin: transcript([ASSISTANT_DONE]) });

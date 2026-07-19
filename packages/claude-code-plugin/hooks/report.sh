@@ -39,6 +39,9 @@ state_dir="${TMPDIR:-/tmp}"
 marker="${state_dir}/pragma-cli-${agent}-${tab}.active"
 pidfile="${state_dir}/pragma-cli-${agent}-${tab}.watcher"
 session_file="${state_dir}/pragma-cli-${agent}-${tab}.session"
+# Holds the session_id whose name was already reported, so each session (incl.
+# a /resume switch to another session) names the tab exactly once.
+named_file="${state_dir}/pragma-cli-${agent}-${tab}.sessionname"
 children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 # The session id that owns the in-flight marker. `/clear` fires SessionEnd (old
 # session) + SessionStart (new session) while the user's next prompt may already
@@ -113,6 +116,31 @@ transcript_path() {
     return 0
   fi
   printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Prints a tab-title-sized session name derived from the prompt's first line.
+# Silent no-op without python3 (the session simply stays unnamed).
+session_name_from_prompt() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import sys
+lines = sys.stdin.read().strip().splitlines()
+line = lines[0].strip() if lines else ""
+print(line if len(line) <= 48 else line[:47].rstrip() + "\u2026")
+' 2>/dev/null
+}
+
+# Claude Code exposes no conversation title to hooks, so the session is named
+# after its first real user prompt; switching sessions renames on that
+# session's first prompt. Pragma preserves manual tab renames regardless.
+report_session_name() {
+  prompt_text="$1"
+  [ -n "$hook_session_id" ] || return 0
+  [ "$(cat "$named_file" 2>/dev/null)" = "$hook_session_id" ] && return 0
+  session_name="$(session_name_from_prompt "$prompt_text")"
+  [ -n "$session_name" ] || return 0
+  report session-name --name "$session_name"
+  printf '%s' "$hook_session_id" >"$named_file"
 }
 
 # Reports a rich message whose text is JSON-escaped (safe for arbitrary
@@ -540,6 +568,7 @@ case "${1:-}" in
       ;;
     *)
       content_message user "$prompt"
+      report_session_name "$prompt"
       ;;
     esac
     stop_watcher
@@ -615,6 +644,7 @@ case "${1:-}" in
     clear_subagents
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
+      rm -f "$named_file"
     fi
     report cleared
     ;;

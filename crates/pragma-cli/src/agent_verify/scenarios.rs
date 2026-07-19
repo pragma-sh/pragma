@@ -36,6 +36,13 @@ pub fn definitions() -> &'static [ScenarioDef] {
             run: basic_reply,
         },
         ScenarioDef {
+            id: "session-name",
+            name: "session name",
+            slow: false,
+            features: &[AgentFeature::SessionName],
+            run: session_name,
+        },
+        ScenarioDef {
             id: "command-no-permission",
             name: "command without permission",
             slow: false,
@@ -162,7 +169,7 @@ fn command_no_permission(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Out
         matches!(
             event,
             VerifyEvent::Agent {
-                status: AgentStatus::Attention,
+                status: Some(AgentStatus::Attention),
                 attention_kind: Some(AgentAttentionKind::Command),
                 ..
             }
@@ -184,6 +191,17 @@ fn basic_reply(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, Stri
     let mut session = ctx.launch(prompts.get("basic-reply")?)?;
     session.await_running()?;
     session.await_assistant_message()?;
+    require_done(session.await_settled()?)?;
+    Ok(Outcome::Passed)
+}
+
+/// The agent must name its session (create/first prompt) so Pragma can rename
+/// the hosting tab; renames and session switches re-report through the same
+/// channel, so one observed report verifies the pipeline.
+fn session_name(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, String> {
+    let mut session = ctx.launch(prompts.get("session-name")?)?;
+    session.await_running()?;
+    session.await_session_name()?;
     require_done(session.await_settled()?)?;
     Ok(Outcome::Passed)
 }
@@ -221,7 +239,7 @@ fn question_dismiss(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome,
     )?;
     thread::sleep(Duration::from_secs(2));
     if session.scoped_events_since_cursor().iter().any(|event| {
-        matches!(event, VerifyEvent::Agent { status, .. } if *status != AgentStatus::Attention)
+        matches!(event, VerifyEvent::Agent { status, .. } if *status != Some(AgentStatus::Attention))
     }) {
         return Err("wrong requestId cleared question attention".to_string());
     }
@@ -311,7 +329,7 @@ fn command_deny(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, Str
     )?;
     thread::sleep(Duration::from_millis(500));
     if session.scoped_events_since_cursor().iter().any(|event| {
-        matches!(event, VerifyEvent::Agent { status, .. } if *status != AgentStatus::Attention)
+        matches!(event, VerifyEvent::Agent { status, .. } if *status != Some(AgentStatus::Attention))
     }) {
         return Err("wrong requestId cleared command attention".to_string());
     }
@@ -398,7 +416,7 @@ fn abort_mid_question(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcom
         matches!(
             event,
             VerifyEvent::Agent {
-                status: AgentStatus::Attention,
+                status: Some(AgentStatus::Attention),
                 ..
             }
         )
@@ -474,7 +492,7 @@ fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome
             }
             VerifyEvent::Agent {
                 ref agent,
-                status: AgentStatus::Attention,
+                status: Some(AgentStatus::Attention),
                 attention_kind: Some(AgentAttentionKind::Question),
                 question,
                 request_id,
@@ -486,7 +504,7 @@ fn stream_integrity(ctx: &ScenarioCtx<'_>, _prompts: &Prompts) -> Result<Outcome
             }
             VerifyEvent::Agent {
                 ref agent,
-                status: AgentStatus::Attention,
+                status: Some(AgentStatus::Attention),
                 attention_kind: Some(AgentAttentionKind::Command),
                 command,
                 request_id,

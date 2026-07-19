@@ -55,6 +55,7 @@ function makeTab(overrides: Partial<Tab>): Tab {
     pluginViewId: null,
     pluginPayload: null,
     pluginDedupeKey: null,
+    agentId: null,
     userRenamed: false,
     orderIndex: 0,
     createdAt: "now",

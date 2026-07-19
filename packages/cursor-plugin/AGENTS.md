@@ -60,7 +60,7 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 | ---------------------- | ------------------- | --------------------------------------------------------------------------------- |
 | `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)                                      |
 | `sessionEnd`           | `cleared`           | `cleared`                                                                         |
-| `beforeSubmitPrompt`   | `started`           | `started` + user prompt message (sets the turn marker)                            |
+| `beforeSubmitPrompt`   | `started`           | `started` + user prompt message; first prompt also derives `session-name`         |
 | `afterAgentResponse`   | `response`          | Assistant response message                                                        |
 | `stop`                 | `stopped`           | `stopped`; `cleared` when Cursor reports `aborted` or `error`                     |
 | `beforeShellExecution` | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
@@ -123,6 +123,10 @@ that is the whole fix at that point.
 Agent CLI; see `packages/claude-code-plugin/AGENTS.md` if transcript polling for cancels
 is wanted later (it relies on Cursor writing an interrupt marker to the transcript,
 which has not been confirmed).
+
+Cursor exposes no reliable native session title in hook payloads. `report.sh` derives one
+from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it once per
+session, and resets that state on `sessionStart` / `sessionEnd`.
 
 The built-in `--force` launcher cannot exercise approval prompts, so the agent declares
 `questions`, `commandApproval`, and `abort` in `excludeFeatures`. `agent verify` skips those

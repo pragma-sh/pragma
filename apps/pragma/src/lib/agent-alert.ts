@@ -50,7 +50,9 @@ export function shouldAlertForStatus(payload: AgentReportPayload): boolean {
 
 /** Records that `payload.status` has been surfaced (alerted or seen on screen). */
 export function latchAlertedStatus(payload: AgentReportPayload): void {
-  alertedStatusByKey.set(statusLatchKey(payload), payload.status);
+  if (payload.status) {
+    alertedStatusByKey.set(statusLatchKey(payload), payload.status);
+  }
 }
 
 /**

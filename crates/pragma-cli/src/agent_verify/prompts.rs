@@ -80,6 +80,7 @@ fn hex(value: u8) -> Result<u8, String> {
 fn defaults() -> HashMap<String, String> {
     [
         ("basic-reply", "Reply with exactly two short sentences. Do not use tools and do not ask questions."),
+        ("session-name", "Reply with one short sentence about naming things. Do not use tools and do not ask questions."),
         ("command-no-permission", "Run this safe shell command exactly, then report its numeric output: date +%s. Do not ask for permission and do not substitute another command."),
         ("question-answer", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
         ("question-dismiss", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),

@@ -13,7 +13,7 @@
 //! `Db`, and sends `PublishWorkspace`. The work never runs on the main thread;
 //! a fast burst of mutations yields a single publish.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
@@ -25,7 +25,6 @@ use crate::db::Db;
 use crate::error::AppResult;
 use crate::git::host_rpc;
 use crate::hosts::Hosts;
-use crate::pty::PtyClient;
 
 /// Coalesce window: while mutations keep arriving, the publisher waits this
 /// long after the latest one before sending a snapshot. Keeps a burst of
@@ -51,11 +50,11 @@ pub struct WorkspacePublisher {
 
 impl WorkspacePublisher {
     /// Spawns the worker thread and returns the trigger handle. The worker
-    /// owns its own `PragmaClient` clone + `AppHandle` so it reads `Db` off the
-    /// macOS main thread.
-    pub fn start(app: AppHandle, pty: PtyClient) -> Self {
+    /// owns an `AppHandle` so it reads `Db` and routes snapshots to each owning
+    /// host off the macOS main thread.
+    pub fn start(app: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel::<()>();
-        thread::spawn(move || worker(rx, app, pty));
+        thread::spawn(move || worker(rx, app));
         Self { tx }
     }
 
@@ -70,7 +69,7 @@ impl WorkspacePublisher {
 /// triggers keep arriving within `DEBOUNCE_IDLE`. Once idle, snapshot and send,
 /// retrying transient failures so a publish triggered right after a server
 /// restart is not silently lost.
-fn worker(rx: Receiver<()>, app: AppHandle, pty: PtyClient) {
+fn worker(rx: Receiver<()>, app: AppHandle) {
     while rx.recv().is_ok() {
         // Drain bursts: keep waiting for more triggers until the channel is
         // quiet for `DEBOUNCE_IDLE`.
@@ -78,7 +77,7 @@ fn worker(rx: Receiver<()>, app: AppHandle, pty: PtyClient) {
             // Keep draining: another mutation landed; reset the idle window.
         }
         for attempt in 0..=PUBLISH_RETRIES {
-            match publish_once(&app, &pty) {
+            match publish_once(&app) {
                 Ok(()) => break,
                 Err(error) if attempt < PUBLISH_RETRIES => {
                     eprintln!("workspace publish failed (attempt {attempt}): {error}");
@@ -92,20 +91,62 @@ fn worker(rx: Receiver<()>, app: AppHandle, pty: PtyClient) {
     }
 }
 
-/// Reads all projects/worktrees/tabs from `Db` and publishes a snapshot.
-fn publish_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
+/// Reads all projects/worktrees/tabs from `Db` and publishes one snapshot to
+/// every owning host. Remote hosts need their own snapshot: daemon-owned tab
+/// metadata must stay with the PTY host rather than the desktop shell.
+fn publish_once(app: &AppHandle) -> AppResult<()> {
     let db = app.state::<Db>();
-    adopt_headless_worktrees(&db, &app.state::<Hosts>());
+    let hosts = app.state::<Hosts>();
+    adopt_headless_worktrees(&db, &hosts);
     let projects = db.list_projects()?;
     let worktrees = db.list_all_worktrees()?;
     let tabs = db.list_all_tabs()?;
-    let snapshot = pragma_protocol::WorkspaceSnapshot {
-        projects,
-        worktrees,
-        tabs,
-    };
-    pty.publish_workspace(&snapshot)?;
+    let mut snapshots = HashMap::new();
+    let mut project_hosts = HashMap::new();
+    for project in projects {
+        let host_id = hosts.host_id_for_project_path(&project.path);
+        project_hosts.insert(project.id.clone(), host_id.clone());
+        snapshots
+            .entry(host_id)
+            .or_insert_with(empty_snapshot)
+            .projects
+            .push(project);
+    }
+    for worktree in worktrees {
+        if let Some(host_id) = project_hosts.get(&worktree.project_id) {
+            snapshots
+                .entry(host_id.clone())
+                .or_insert_with(empty_snapshot)
+                .worktrees
+                .push(worktree);
+        }
+    }
+    for tab in tabs {
+        if let Some(host_id) = project_hosts.get(&tab.project_id) {
+            snapshots
+                .entry(host_id.clone())
+                .or_insert_with(empty_snapshot)
+                .tabs
+                .push(tab);
+        }
+    }
+    for (host_id, snapshot) in snapshots {
+        // A disconnected remote will receive its full snapshot on its next
+        // successful publish after reconnect; local projects keep publishing.
+        let Ok(client) = hosts.client_for_host(&host_id) else {
+            continue;
+        };
+        client.publish_workspace(&snapshot)?;
+    }
     Ok(())
+}
+
+fn empty_snapshot() -> pragma_protocol::WorkspaceSnapshot {
+    pragma_protocol::WorkspaceSnapshot {
+        projects: Vec::new(),
+        worktrees: Vec::new(),
+        tabs: Vec::new(),
+    }
 }
 
 /// Adopts git worktrees `pragma-server` created headlessly (a phone launching

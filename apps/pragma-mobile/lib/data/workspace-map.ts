@@ -27,6 +27,10 @@ export function agentTabsBySnapshot(
   const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
   const result: Record<string, AgentTab[]> = {};
   for (const status of newestStatusesFirst(statuses, tabsById)) {
+    if (!status.status) {
+      // A stored session-name-only report (no status yet) has no dot to show.
+      continue;
+    }
     const tab = tabsById.get(status.tabId);
     const agentTab: AgentTab = {
       id: status.tabId,

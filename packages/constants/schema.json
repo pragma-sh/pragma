@@ -679,7 +679,8 @@
         "subagents",
         "abort",
         "interrupt",
-        "usageLimits"
+        "usageLimits",
+        "sessionName"
       ]
     },
     "CatalogAgent": {
@@ -1298,9 +1299,9 @@
     },
     "AgentReportKind": {
       "title": "AgentReportKind",
-      "description": "CLI report command names; each maps to an AgentStatus.",
+      "description": "CLI report command names; each maps to an AgentStatus, except `session-name`, which renames the session without changing status.",
       "type": "string",
-      "enum": ["started", "stopped", "attention", "cleared"]
+      "enum": ["started", "stopped", "attention", "cleared", "session-name"]
     },
     "AgentAttentionKind": {
       "title": "AgentAttentionKind",
@@ -1434,7 +1435,19 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/AgentStatus"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "New agent status, or null for a status-less report (e.g. a `session-name` rename) that must leave the stored status untouched."
+        },
+        "sessionName": {
+          "type": "string",
+          "description": "Human-readable name of the agent's active session. Reported on session create/rename/switch; the client renames the hosting tab unless the user renamed it manually."
         },
         "attentionKind": {
           "anyOf": [
@@ -1692,6 +1705,7 @@
         "pluginViewId",
         "pluginPayload",
         "pluginDedupeKey",
+        "agentId",
         "userRenamed",
         "orderIndex",
         "createdAt"
@@ -1751,9 +1765,13 @@
           "type": ["string", "null"],
           "description": "Optional dedupe key used to focus an existing plugin-webview tab instead of opening another."
         },
+        "agentId": {
+          "type": ["string", "null"],
+          "description": "Catalog id of the agent launched into this terminal tab, set at launch time. Drives the tab's agent icon and default title; null for tabs without an agent."
+        },
         "userRenamed": {
           "type": "boolean",
-          "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) are ignored while this is true. Always false for non-terminal tabs."
+          "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) and agent session-name renames are ignored while this is true. Always false for non-terminal tabs."
         },
         "orderIndex": {
           "type": "integer"

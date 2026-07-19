@@ -9,6 +9,7 @@ use pragma_constants::{
     AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, Tab, TabKind, Worktree,
 };
 use pragma_core::git::GitRequest;
+use pragma_core::tabs::TabAgentMetadata;
 use pragma_core::watcher::WorktreeWatcher;
 use pragma_protocol::{
     AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
@@ -302,12 +303,20 @@ impl Registry {
     /// replacement snapshot to all live subscribers. v1 keeps deltas trivial
     /// (the delta is the whole snapshot); row-level deltas are a later
     /// optimization. Mirrors `broadcast_agent`: dead subscribers are pruned.
-    pub fn publish_workspace(&self, snapshot: WorkspaceSnapshot) {
-        let payload = serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null);
-        persist_workspace_snapshot(&self.server_dir, &snapshot);
-        if let Ok(mut guard) = self.workspace.lock() {
+    pub fn publish_workspace(&self, mut snapshot: WorkspaceSnapshot) {
+        let payload = if let Ok(mut guard) = self.workspace.lock() {
+            if let Some(current) = guard.as_ref() {
+                preserve_daemon_tab_metadata(current, &mut snapshot);
+            }
+            persist_workspace_snapshot(&self.server_dir, &snapshot);
             *guard = Some(snapshot);
-        }
+            guard
+                .as_ref()
+                .and_then(|workspace| serde_json::to_value(workspace).ok())
+                .unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        };
         self.broadcast_workspace(&EventFrame::Delta {
             subscription: ProtocolEventKind::Workspace,
             payload,
@@ -320,8 +329,11 @@ impl Registry {
     /// new rows immediately even though the desktop app is closed. The desktop
     /// remains the source of truth: its next publish replaces this snapshot
     /// (it adopts headless worktrees from disk before publishing).
-    fn mutate_workspace(&self, mutate: impl FnOnce(&mut WorkspaceSnapshot)) -> Result<(), String> {
-        let payload = {
+    fn mutate_workspace<T>(
+        &self,
+        mutate: impl FnOnce(&mut WorkspaceSnapshot) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let (result, payload) = {
             let mut guard = self
                 .workspace
                 .lock()
@@ -329,15 +341,88 @@ impl Registry {
             let snapshot = guard
                 .as_mut()
                 .ok_or_else(|| "desktop has not published a workspace snapshot".to_string())?;
-            mutate(snapshot);
+            let result = mutate(snapshot)?;
             persist_workspace_snapshot(&self.server_dir, snapshot);
-            serde_json::to_value(&*snapshot).unwrap_or(serde_json::Value::Null)
+            (
+                result,
+                serde_json::to_value(&*snapshot).unwrap_or(serde_json::Value::Null),
+            )
         };
         self.broadcast_workspace(&EventFrame::Delta {
             subscription: ProtocolEventKind::Workspace,
             payload,
         });
-        Ok(())
+        Ok(result)
+    }
+
+    /// Persists a launched agent's identity and default title on its owning host.
+    pub fn set_tab_agent(&self, tab: Tab, agent_id: &str, title: &str) -> Result<(), String> {
+        if self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?
+            .is_none()
+        {
+            self.publish_workspace(WorkspaceSnapshot {
+                projects: Vec::new(),
+                worktrees: Vec::new(),
+                tabs: vec![tab.clone()],
+            });
+        }
+        self.mutate_workspace(|snapshot| {
+            let index = snapshot
+                .tabs
+                .iter()
+                .position(|existing| existing.id == tab.id);
+            let index = index.unwrap_or_else(|| {
+                snapshot.tabs.push(tab);
+                snapshot.tabs.len() - 1
+            });
+            let tab = &mut snapshot.tabs[index];
+            tab.agent_id = Some(agent_id.to_string());
+            if !tab.user_renamed {
+                tab.title = Some(title.to_string());
+            }
+            Ok(())
+        })
+    }
+
+    /// Updates a session-reported title only when the tab is daemon-owned by an agent.
+    pub fn set_agent_tab_title(&self, tab_id: &str, title: &str) -> Result<(), String> {
+        self.mutate_workspace(|snapshot| {
+            let tab = snapshot
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.id == tab_id)
+                .ok_or_else(|| format!("tab not found: {tab_id}"))?;
+            if tab.agent_id.is_some() && !tab.user_renamed {
+                tab.title = Some(title.to_string());
+            }
+            Ok(())
+        })
+    }
+
+    /// Returns daemon-owned agent identity/title metadata for locally persisted tabs.
+    pub fn tab_agent_metadata(&self, tab_ids: &[String]) -> Result<Vec<TabAgentMetadata>, String> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?;
+        let snapshot = workspace
+            .as_ref()
+            .ok_or_else(|| "desktop has not published a workspace snapshot".to_string())?;
+        Ok(snapshot
+            .tabs
+            .iter()
+            .filter(|tab| tab_ids.contains(&tab.id))
+            .filter_map(|tab| {
+                tab.agent_id.as_ref().map(|agent_id| TabAgentMetadata {
+                    tab_id: tab.id.clone(),
+                    agent_id: agent_id.clone(),
+                    title: tab.title.clone(),
+                })
+            })
+            .collect())
     }
 
     /// Launches an agent when no desktop controller is connected: resolves an
@@ -510,7 +595,10 @@ impl Registry {
             hidden: false,
             created_at: now_timestamp(),
         };
-        self.mutate_workspace(|snapshot| snapshot.worktrees.push(worktree))?;
+        self.mutate_workspace(|snapshot| {
+            snapshot.worktrees.push(worktree);
+            Ok(())
+        })?;
         Ok((worktree_id, path))
     }
 
@@ -532,6 +620,7 @@ impl Registry {
             plugin_view_id: None,
             plugin_payload: None,
             plugin_dedupe_key: None,
+            agent_id: None,
             user_renamed: false,
             order_index: 0,
             created_at: now_timestamp(),
@@ -548,6 +637,7 @@ impl Registry {
                 order_index: next_index,
                 ..tab
             });
+            Ok(())
         }) {
             eprintln!("headless launch: failed to mirror tab {tab_id}: {error}");
         }
@@ -798,7 +888,6 @@ impl Registry {
     }
 
     pub fn report_agent(&self, payload: AgentReportPayload) -> Result<(), RegistryError> {
-        let event = agent_event(&payload);
         let key = (
             payload.worktree_id.clone(),
             payload.tab_id.clone(),
@@ -808,6 +897,19 @@ impl Registry {
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
+        // Merge with the stored entry: a status-less report (`session-name`)
+        // must not disturb the last status, and a status report without a
+        // session name must not drop the last reported name.
+        let mut payload = payload;
+        if let Some(prev) = statuses.get(&key) {
+            if payload.status.is_none() {
+                payload.status = prev.status;
+            }
+            if payload.session_name.is_none() {
+                payload.session_name.clone_from(&prev.session_name);
+            }
+        }
+        let event = agent_event(&payload);
         // `cleared` is stored like every other status: it marks an idle-but-live
         // agent session (a fresh TUI before its first turn, or a finished one),
         // so a late subscriber — e.g. a paired phone's worktree list — still
@@ -1125,8 +1227,8 @@ impl Registry {
     pub fn mark_agents_seen_for_tab(&self, tab_id: &str) {
         if let Ok(mut statuses) = self.agent_statuses.lock() {
             for ((_, status_tab_id, _), payload) in statuses.iter_mut() {
-                if status_tab_id == tab_id && matches!(payload.status, AgentStatus::Done) {
-                    payload.status = AgentStatus::Cleared;
+                if status_tab_id == tab_id && matches!(payload.status, Some(AgentStatus::Done)) {
+                    payload.status = Some(AgentStatus::Cleared);
                 }
             }
         }
@@ -1249,12 +1351,29 @@ impl Registry {
     }
 }
 
+/// Keeps agent identity and default titles authoritative on the host when the
+/// desktop republishes its legacy local tab rows.
+fn preserve_daemon_tab_metadata(current: &WorkspaceSnapshot, incoming: &mut WorkspaceSnapshot) {
+    for tab in &mut incoming.tabs {
+        let Some(existing) = current.tabs.iter().find(|existing| existing.id == tab.id) else {
+            continue;
+        };
+        if existing.agent_id.is_some() {
+            tab.agent_id = existing.agent_id.clone();
+            if !tab.user_renamed {
+                tab.title = existing.title.clone();
+            }
+        }
+    }
+}
+
 fn agent_event(payload: &AgentReportPayload) -> EventFrame {
     EventFrame::Agent {
         worktree_id: payload.worktree_id.clone(),
         tab_id: payload.tab_id.clone(),
         agent: payload.agent.clone(),
         status: payload.status,
+        session_name: payload.session_name.clone(),
         attention_kind: payload.attention_kind,
         command: payload.command.clone(),
         question: payload.question.clone(),
@@ -1283,7 +1402,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
-    use pragma_constants::{NewWorktreeSpec, Project, Worktree};
+    use pragma_constants::{NewWorktreeSpec, Project, Tab, TabKind, Worktree};
     use pragma_protocol::{
         AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
         AgentStatus, ControlResult, EventFrame, WorkspaceSnapshot,
@@ -1326,6 +1445,30 @@ mod tests {
         }
     }
 
+    fn snapshot_with_agent_tab(project_path: &str) -> WorkspaceSnapshot {
+        let mut snapshot = snapshot_with_project(project_path);
+        snapshot.tabs.push(Tab {
+            id: "tab-1".to_string(),
+            project_id: "project-1".to_string(),
+            worktree_id: "worktree-main".to_string(),
+            kind: TabKind::Terminal,
+            title: Some("Shell".to_string()),
+            url: None,
+            file_path: None,
+            diff_side: None,
+            pr_number: None,
+            plugin_id: None,
+            plugin_view_id: None,
+            plugin_payload: None,
+            plugin_dedupe_key: None,
+            agent_id: None,
+            user_renamed: false,
+            order_index: 0,
+            created_at: "2026-01-01 00:00:00".to_string(),
+        });
+        snapshot
+    }
+
     #[test]
     fn published_workspace_snapshot_survives_a_server_restart() {
         let dir = tempdir().expect("tempdir");
@@ -1341,6 +1484,52 @@ mod tests {
         };
         assert_eq!(payload["projects"][0]["id"], "project-1");
         assert_eq!(payload["worktrees"][0]["id"], "worktree-main");
+    }
+
+    #[test]
+    fn tab_agent_metadata_survives_desktop_republish_and_server_restart() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let snapshot = snapshot_with_agent_tab("/tmp/sandbox");
+        let tab = snapshot.tabs[0].clone();
+        registry.publish_workspace(snapshot);
+        registry
+            .set_tab_agent(tab, "pragma.codex", "Codex")
+            .expect("agent metadata should persist");
+
+        // The desktop's legacy SQLite row still has no agent id. Its next full
+        // publish must not clobber daemon-owned metadata.
+        registry.publish_workspace(snapshot_with_agent_tab("/tmp/sandbox"));
+        let metadata = registry
+            .tab_agent_metadata(&["tab-1".to_string()])
+            .expect("metadata should load");
+        assert_eq!(metadata[0].agent_id, "pragma.codex");
+        assert_eq!(metadata[0].title.as_deref(), Some("Codex"));
+
+        drop(registry);
+        let reloaded = registry_in(dir.path());
+        let metadata = reloaded
+            .tab_agent_metadata(&["tab-1".to_string()])
+            .expect("metadata should survive restart");
+        assert_eq!(metadata[0].agent_id, "pragma.codex");
+    }
+
+    #[test]
+    fn tab_agent_metadata_upserts_before_the_first_workspace_publish() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let mut snapshot = snapshot_with_agent_tab("/tmp/sandbox");
+        let tab = snapshot.tabs.remove(0);
+
+        registry
+            .set_tab_agent(tab, "pragma.codex", "Codex")
+            .expect("agent metadata should create an initial snapshot");
+
+        let metadata = registry
+            .tab_agent_metadata(&["tab-1".to_string()])
+            .expect("metadata should load");
+        assert_eq!(metadata[0].agent_id, "pragma.codex");
+        assert_eq!(metadata[0].title.as_deref(), Some("Codex"));
     }
 
     #[test]
@@ -1429,7 +1618,8 @@ mod tests {
             agent: "opencode".to_string(),
             worktree_id: "worktree-1".to_string(),
             tab_id: "tab-1".to_string(),
-            status,
+            status: Some(status),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -1500,11 +1690,54 @@ mod tests {
             matches!(
                 after.as_slice(),
                 [EventFrame::Agent {
-                    status: AgentStatus::Cleared,
+                    status: Some(AgentStatus::Cleared),
                     ..
                 }]
             ),
             "cleared keeps the session listed as idle so late subscribers see it exists"
+        );
+    }
+
+    #[test]
+    fn session_name_report_preserves_status_and_carries_forward() {
+        let registry = Registry::default();
+        registry
+            .report_agent(agent_payload(AgentStatus::Running))
+            .expect("running report should store");
+
+        // A status-less session-name rename must not disturb the stored status.
+        let mut rename = agent_payload(AgentStatus::Running);
+        rename.status = None;
+        rename.session_name = Some("Fix flaky tests".to_string());
+        registry.report_agent(rename).expect("rename should store");
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            matches!(
+                snapshot.as_slice(),
+                [EventFrame::Agent {
+                    status: Some(AgentStatus::Running),
+                    session_name: Some(name),
+                    ..
+                }] if name == "Fix flaky tests"
+            ),
+            "rename keeps the running status and stores the name"
+        );
+
+        // A later status report without a name keeps the last reported name.
+        registry
+            .report_agent(agent_payload(AgentStatus::Done))
+            .expect("done report should store");
+        let (after, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            matches!(
+                after.as_slice(),
+                [EventFrame::Agent {
+                    status: Some(AgentStatus::Done),
+                    session_name: Some(name),
+                    ..
+                }] if name == "Fix flaky tests"
+            ),
+            "status change carries the session name forward"
         );
     }
 
@@ -1748,7 +1981,8 @@ mod tests {
             agent: agent.to_string(),
             worktree_id: "worktree-1".to_string(),
             tab_id: tab.to_string(),
-            status,
+            status: Some(status),
+            session_name: None,
             attention_kind: None,
             command: None,
             question: None,
@@ -1771,7 +2005,9 @@ mod tests {
         let mut remaining: Vec<(String, AgentStatus)> = snapshot
             .into_iter()
             .filter_map(|event| match event {
-                pragma_protocol::EventFrame::Agent { tab_id, status, .. } => Some((tab_id, status)),
+                pragma_protocol::EventFrame::Agent { tab_id, status, .. } => {
+                    status.map(|status| (tab_id, status))
+                }
                 _ => None,
             })
             .collect();
@@ -1978,7 +2214,8 @@ mod tests {
                 agent: "opencode".to_string(),
                 worktree_id: "worktree-1".to_string(),
                 tab_id: id.clone(),
-                status: AgentStatus::Running,
+                status: Some(AgentStatus::Running),
+                session_name: None,
                 attention_kind: None,
                 command: None,
                 question: None,

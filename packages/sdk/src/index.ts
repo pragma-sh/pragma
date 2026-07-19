@@ -10,6 +10,7 @@ export {
   reportAttention,
   reportCleared,
   reportMessage,
+  reportSessionName,
   reportStarted,
   reportStopped,
 } from "./agents-client";
@@ -43,6 +44,7 @@ export type {
   ConnectOptions,
   ReportMessageOptions,
   ReportOptions,
+  ReportSessionNameOptions,
   WorkspaceSnapshot,
 } from "./types/agents";
 export type { CommandResult, ExecRunRequest } from "./types/exec";

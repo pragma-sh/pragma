@@ -254,6 +254,20 @@ impl Db {
         if version < 11 {
             conn.execute_batch("PRAGMA user_version = 11;")?;
         }
+        // v12 adds `agent_id` to `tabs`: the catalog id of the agent launched
+        // into a terminal tab, set at launch time. It drives the tab's agent
+        // icon and default title. NULL (the default) means no agent.
+        if version < 12 {
+            let has_agent_id: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'agent_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_agent_id == 0 {
+                conn.execute_batch("ALTER TABLE tabs ADD COLUMN agent_id TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 12;")?;
+        }
         Ok(())
     }
 
@@ -467,7 +481,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -480,7 +494,7 @@ impl Db {
     pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs ORDER BY project_id, order_index, created_at",
         )?;
         let rows = stmt.query_map([], tab_from_row)?;
@@ -793,7 +807,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -804,7 +818,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -968,9 +982,10 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         plugin_view_id: row.get(10)?,
         plugin_payload: row.get(11)?,
         plugin_dedupe_key: row.get(12)?,
-        user_renamed: row.get::<_, i64>(13)? == 1,
-        order_index: row.get::<_, i64>(14)?,
-        created_at: row.get(15)?,
+        agent_id: row.get(13)?,
+        user_renamed: row.get::<_, i64>(14)? == 1,
+        order_index: row.get::<_, i64>(15)?,
+        created_at: row.get(16)?,
     })
 }
 
