@@ -11,8 +11,8 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use pragma_protocol::{
-    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, RequestFrame, RequestKind,
-    ResponseFrame, ServerFrame,
+    read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolError, RequestFrame,
+    RequestKind, ResponseFrame, ServerFrame,
 };
 use uuid::Uuid;
 
@@ -151,6 +151,12 @@ pub struct AgentStatusRow {
     pub attention_kind: Option<String>,
 }
 
+/// How long `agent status` waits for additional snapshot rows after the
+/// subscribe ack before deciding the server's stored-status burst is done.
+/// Separate from `tab read`'s [`READ_TIMEOUT`] so the two drains can be tuned
+/// independently (a snapshot with many registered agents may need longer).
+const AGENT_SNAPSHOT_TIMEOUT: Duration = READ_TIMEOUT;
+
 /// Subscribes to agent status, prints the snapshot (one row per agent), and
 /// with `--watch` keeps streaming deltas until the subscription ends.
 pub fn agent_status(
@@ -184,7 +190,7 @@ pub fn agent_status(
             Err(error) => return Err(CliError::from(error)),
         }
     }
-    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    let _ = stream.set_read_timeout(Some(AGENT_SNAPSHOT_TIMEOUT));
     loop {
         match read_json_frame::<ServerFrame>(&mut stream) {
             Ok(ServerFrame::Event(event)) => {
@@ -193,8 +199,18 @@ pub fn agent_status(
                 }
             }
             Ok(_) => {}
-            // Idle gap (or disconnect): the snapshot is fully delivered.
-            Err(_) => break,
+            Err(ProtocolError::Io(ref e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                // Idle gap: the snapshot is fully delivered.
+                break;
+            }
+            // A real I/O or protocol error mid-drain (e.g. the server hung up):
+            // surface it instead of silently rendering a truncated table.
+            Err(error) => return Err(CliError::from(error)),
         }
     }
     render_status(&rows, out);
