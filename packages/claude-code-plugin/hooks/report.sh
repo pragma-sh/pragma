@@ -608,10 +608,6 @@ case "${1:-}" in
     if [ "$hook_event_name" = "SessionStart" ] && [ -f "$marker" ] &&
       [ -n "$hook_session_id" ] &&
       [ "$(cat "$turn_session_file" 2>/dev/null)" = "$hook_session_id" ]; then
-      # Re-assert `started` in case the tab had already moved to `attention`
-      # (e.g. a permission request fired before this SessionStart landed) --
-      # otherwise this exit path would leave it stuck there.
-      report started
       exit 0
     fi
     stop_watcher
