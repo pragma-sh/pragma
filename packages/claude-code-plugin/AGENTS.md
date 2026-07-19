@@ -252,7 +252,7 @@ Three per-tab files in `$TMPDIR` coordinate it, keyed on `PRAGMA_TAB_ID`:
   fires `SessionEnd` (old session) + `SessionStart` (new session) as **concurrent hook
   processes** while the user's next prompt may already have started a turn in the new
   session. Session pinning discards the old session's late `SessionEnd`, but
-  `SessionStart` re-pins to its own id first — so a `SessionStart` landing *after* that
+  `SessionStart` re-pins to its own id first — so a `SessionStart` landing _after_ that
   session's first `started` would wipe the live marker and **mute every marker-guarded
   report for the rest of the turn** ("reports stop coming through after `/clear`"). The
   `cleared` case therefore skips clearing when the in-flight turn already belongs to the
