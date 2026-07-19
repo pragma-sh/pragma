@@ -385,6 +385,56 @@ function useChangesSync(
   return { syncing, syncError, onSync };
 }
 
+/** Combines staging, commit, discard, and sync interactions for the Changes subtab. */
+function useChangesActions(
+  worktreeId: string | null,
+  refresh: () => Promise<void>,
+  refreshSyncStatus: () => Promise<void>,
+  stagedCount: number,
+): {
+  pending: PendingDiscard | null;
+  setPending: (pending: PendingDiscard | null) => void;
+  onConfirmDiscard: () => void;
+  closeDiscard: () => void;
+  stagedActions: { fileActions: ChangeFileAction[]; headerActions: ChangeGroupAction[] };
+  unstagedActions: { fileActions: ChangeFileAction[]; headerActions: ChangeGroupAction[] };
+  commitMessage: string;
+  setCommitMessage: (value: string) => void;
+  committing: boolean;
+  generating: boolean;
+  onSubmit: () => void;
+  onGenerate: () => void;
+  syncing: boolean;
+  syncError: string | null;
+  onSync: () => void;
+} {
+  const { pending, setPending, onConfirmDiscard, closeDiscard } = useChangesDiscard(
+    worktreeId,
+    refresh,
+  );
+  const { stagedActions, unstagedActions } = useChangesStaging(worktreeId, refresh, setPending);
+  const { commitMessage, setCommitMessage, committing, generating, onSubmit, onGenerate } =
+    useChangesCommit(worktreeId, refresh, stagedCount);
+  const { syncing, syncError, onSync } = useChangesSync(worktreeId, refresh, refreshSyncStatus);
+  return {
+    pending,
+    setPending,
+    onConfirmDiscard,
+    closeDiscard,
+    stagedActions,
+    unstagedActions,
+    commitMessage,
+    setCommitMessage,
+    committing,
+    generating,
+    onSubmit,
+    onGenerate,
+    syncing,
+    syncError,
+    onSync,
+  };
+}
+
 /**
  * The Changes subtab: top lifecycle controls, then staged (HEAD → index),
  * unstaged (index → working tree), and committed (base branch → HEAD) change
@@ -410,15 +460,23 @@ export function ChangesTab() {
   const { status: syncStatus, refresh: refreshSyncStatus } = useBranchSyncStatus(
     shouldLoadSyncStatus ? worktreeId : null,
   );
-  const { pending, setPending, onConfirmDiscard, closeDiscard } = useChangesDiscard(
-    worktreeId,
-    refresh,
-  );
-  const { stagedActions, unstagedActions } = useChangesStaging(worktreeId, refresh, setPending);
   const stagedCount = state.kind === "ready" ? state.changes.staged.length : 0;
-  const { commitMessage, setCommitMessage, committing, generating, onSubmit, onGenerate } =
-    useChangesCommit(worktreeId, refresh, stagedCount);
-  const { syncing, syncError, onSync } = useChangesSync(worktreeId, refresh, refreshSyncStatus);
+  const {
+    pending,
+    onConfirmDiscard,
+    closeDiscard,
+    stagedActions,
+    unstagedActions,
+    commitMessage,
+    setCommitMessage,
+    committing,
+    generating,
+    onSubmit,
+    onGenerate,
+    syncing,
+    syncError,
+    onSync,
+  } = useChangesActions(worktreeId, refresh, refreshSyncStatus, stagedCount);
 
   const openDiff = useCallback(
     (file: ChangedFile) => void workspace.openDiffTab(file.path, "worktree"),
@@ -630,6 +688,8 @@ interface SyncActionProps {
 
 /** Sync action, styled like the commit button: full-width with pull/push counts. */
 function SyncAction({ disabled, error, onSync, status }: SyncActionProps) {
+  const behind = status?.behind ?? 0;
+  const ahead = status?.ahead ?? 0;
   return (
     <div className="flex flex-col gap-1 border-b border-border/60 px-2 py-2">
       <Button
@@ -641,17 +701,11 @@ function SyncAction({ disabled, error, onSync, status }: SyncActionProps) {
         title="Sync with remote (pull, then push)"
         variant="default"
       >
-        <span
-          className="inline-flex items-center gap-px"
-          title={`${status?.behind ?? 0} commit(s) to pull`}
-        >
-          <ArrowDown className="size-3.5" /> {status?.behind ?? 0}
+        <span className="inline-flex items-center gap-px" title={`${behind} commit(s) to pull`}>
+          <ArrowDown className="size-3.5" /> {behind}
         </span>
-        <span
-          className="inline-flex items-center gap-px"
-          title={`${status?.ahead ?? 0} commit(s) to push`}
-        >
-          <ArrowUp className="size-3.5" /> {status?.ahead ?? 0}
+        <span className="inline-flex items-center gap-px" title={`${ahead} commit(s) to push`}>
+          <ArrowUp className="size-3.5" /> {ahead}
         </span>
         Sync
       </Button>

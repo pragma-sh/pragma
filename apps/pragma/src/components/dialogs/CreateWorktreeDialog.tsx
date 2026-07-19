@@ -34,6 +34,39 @@ type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shift
   preventDefault: () => void;
 };
 
+/** Text fields for the new worktree: branch name, display title, agent prompt. */
+function useWorktreeFormFields(): {
+  branch: string;
+  setBranch: (value: string) => void;
+  title: string;
+  setTitle: (value: string) => void;
+  message: string;
+  setMessage: (value: string) => void;
+} {
+  const [branch, setBranch] = useState("");
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  return { branch, setBranch, title, setTitle, message, setMessage };
+}
+
+/** Submission state: in-flight flag, last error, and the main-behind confirmation gate. */
+function useWorktreeSubmission(): {
+  error: string | null;
+  setError: (value: string | null) => void;
+  busy: boolean;
+  setBusy: (value: boolean) => void;
+  behind: number;
+  setBehind: (value: number) => void;
+  mainWorktreeId: string | null;
+  setMainWorktreeId: (value: string | null) => void;
+} {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [behind, setBehind] = useState(0);
+  const [mainWorktreeId, setMainWorktreeId] = useState<string | null>(null);
+  return { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId };
+}
+
 /**
  * Creates a nested worktree and, when a prompt is given, immediately starts an
  * agent session in it: the user names the branch (and an optional display
@@ -52,13 +85,9 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
     loadModels,
     handleAgentChange,
   } = useAgentSelection(isOpen);
-  const [branch, setBranch] = useState("");
-  const [title, setTitle] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [behind, setBehind] = useState(0);
-  const [mainWorktreeId, setMainWorktreeId] = useState<string | null>(null);
+  const { branch, setBranch, title, setTitle, message, setMessage } = useWorktreeFormFields();
+  const { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId } =
+    useWorktreeSubmission();
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
