@@ -12,7 +12,10 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   Requests/RPCs check a connection out of a small idle pool
   (`REQUEST_POOL_MAX_IDLE`) so concurrent calls run in parallel on their own
   connections — never funnel them back through one shared stream, or file
-  reads and diffs will queue behind slow git polls again.
+  reads and diffs will queue behind slow git polls again. RPC response reads
+  have no deadline while host work is active because operations such as a
+  user-defined `git push` hook may run long; the normal timeout is restored before the
+  connection returns to the pool.
 - Local managed-server bootstrap for development and packaged native clients.
 - Remote SSH bridge using `russh` and `channel_open_direct_streamlocal`, with
   agent (default), key-file, and password auth (`RemoteAuth`). `ssh_exec` runs

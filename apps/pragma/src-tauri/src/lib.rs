@@ -1013,6 +1013,8 @@ pub fn run() {
             github::github_repo_ref,
             github::github_default_pr_title,
             github::github_fetch_and_sync,
+            github::github_pull_branch,
+            github::github_sync_branch,
             github::github_push_branch,
             github::github_pr_file_diff,
             github::github_delete_remote_branch,
