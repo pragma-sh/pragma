@@ -115,6 +115,25 @@ describe("cursor report.sh", () => {
     );
   });
 
+  it("derives the session name from only the first prompt", () => {
+    run("started", { stdin: JSON.stringify({ prompt: "Fix auth\nwith regression tests" }) });
+    run("stopped");
+    run("started", { stdin: JSON.stringify({ prompt: "Second turn" }) });
+    expect(reportCalls().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent cursor session-name --name Fix auth",
+    ]);
+  });
+
+  it("derives a new session name after session clear", () => {
+    run("started", { stdin: JSON.stringify({ prompt: "First session" }) });
+    run("cleared");
+    run("started", { stdin: JSON.stringify({ prompt: "Next session" }) });
+    expect(reportCalls().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent cursor session-name --name First session",
+      "agent report --agent cursor session-name --name Next session",
+    ]);
+  });
+
   it("uses PRAGMA_CLI when it is set", () => {
     run("started", {
       env: { PATH: process.env.PATH ?? "", PRAGMA_CLI: join(binDir, "pragma-cli") },

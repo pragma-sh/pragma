@@ -170,6 +170,7 @@ describe("report.sh", () => {
     });
     expect(reports()).toEqual([
       "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
       "agent report --agent codex stopped",
     ]);
     expect(messages()).toEqual([
@@ -184,6 +185,27 @@ describe("report.sh", () => {
     const replyIndex = calls().findIndex((call) => call.includes("codex-turn-1-assistant"));
     expect(replyIndex).toBeLessThan(stopIndex);
     expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("derives the session name from only the first prompt", () => {
+    run("started", {
+      stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth\nwith regression tests" }),
+    });
+    run("stopped", { stdin: JSON.stringify({ turn_id: "turn-1" }) });
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Second turn" }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
+  });
+
+  it("derives a new session name after session clear", () => {
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "First session" }) });
+    run("cleared");
+    run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Next session" }) });
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent codex session-name --name First session",
+      "agent report --agent codex session-name --name Next session",
+    ]);
   });
 
   it("streams transcript assistant markdown during the turn and never duplicates it on stop", async () => {
@@ -204,7 +226,10 @@ describe("report.sh", () => {
         text: "Interim: reading **files**.",
       }),
     );
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
 
     // The final reply lands in the transcript just before Stop fires; the stop
     // handler must sync it (watcher may not have polled yet) exactly once and
@@ -328,7 +353,7 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await waitFor(() => reports().length > 1);
+    await waitFor(() => reports().at(-1)?.includes(" attention ") ?? false);
     expect(reports().at(-1)).toBe(
       'agent report --agent codex attention --kind question --question Choose Red or Blue? --options [{"label":"Red","description":"Warm"},{"label":"Blue","description":"Cool"}] --request-id call-question-1',
     );
@@ -369,7 +394,10 @@ describe("report.sh", () => {
       })}\n`,
     );
     await sleep(500);
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
   });
 
   it("abort watcher clears current turn", async () => {
@@ -382,6 +410,7 @@ describe("report.sh", () => {
     await waitFor(() => reports().length > 1);
     expect(reports()).toEqual([
       "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
       "agent report --agent codex cleared",
     ]);
     expect(existsSync(markerPath())).toBe(false);
@@ -391,7 +420,10 @@ describe("report.sh", () => {
     const current = transcript([{ type: "event_msg", payload: { type: "turn_aborted" } }]);
     run("started", { stdin: current.input });
     await sleep(350);
-    expect(reports()).toEqual(["agent report --agent codex started"]);
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
     expect(existsSync(markerPath())).toBe(true);
   });
 });

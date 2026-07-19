@@ -3,6 +3,7 @@ import {
   hasPragmaEnvironment,
   reportCleared,
   reportMessage,
+  reportSessionName,
   reportStarted,
   reportStopped,
   type AgentMessage,
@@ -18,15 +19,16 @@ export default function pragmaPiExtension(pi: ExtensionAPI): void {
   const reporter = new PiLifecycleReporter(createSdkReporter(env));
   void reporter.clear();
 
-  pi.on("before_agent_start", (event) =>
-    reporter.sendMessage({
+  pi.on("before_agent_start", (event) => {
+    void reporter.nameSessionFromPrompt(event.prompt);
+    return reporter.sendMessage({
       id: `user:${event.prompt.slice(0, 48)}:${Date.now()}`,
       role: "user",
       text: event.prompt,
       subAgentsActive: 0,
       ts: Date.now(),
-    }),
-  );
+    });
+  });
   pi.on("agent_start", () => reporter.start());
   pi.on("message_update", (event) => {
     if (event.message.role !== "assistant") return;
@@ -54,6 +56,8 @@ function createSdkReporter(env: NodeJS.ProcessEnv): PiReporter {
     cleared: () => bestEffort(() => reportCleared({ agent: AGENT_ID, env }), env),
     message: (message: Omit<AgentMessage, "agent" | "worktreeId" | "tabId">) =>
       bestEffort(() => reportMessage({ agent: AGENT_ID, env, message }), env),
+    sessionName: (name: string) =>
+      bestEffort(() => reportSessionName({ agent: AGENT_ID, env, name }), env),
   };
 }
 
