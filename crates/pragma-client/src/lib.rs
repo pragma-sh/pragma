@@ -457,7 +457,12 @@ impl PragmaClient {
     /// executes on the remote `pragma-server` — the caller is endpoint-agnostic.
     pub fn rpc(&self, method: ProtocolRpcMethod, payload: Value) -> ClientResult<Value> {
         let request = request_rpc(method, payload);
-        self.with_request_conn("server rpc failed", |stream| Self::rpc_on(stream, &request))
+        self.with_request_conn("server rpc failed", |stream| {
+            configure_rpc_stream(stream)?;
+            let result = Self::rpc_on(stream, &request);
+            configure_stream(stream)?;
+            result
+        })
     }
 
     /// Sends a brokered control request to the controller app and awaits its
@@ -1069,6 +1074,13 @@ fn configure_stream(stream: &UnixStream) -> ClientResult<()> {
     Ok(())
 }
 
+fn configure_rpc_stream(stream: &UnixStream) -> ClientResult<()> {
+    // Host RPCs can legitimately outlive the normal request timeout, notably
+    // when `git push` runs user-defined pre-push hooks.
+    stream.set_read_timeout(None)?;
+    Ok(())
+}
+
 fn send_input_frame(client: &PragmaClient, conn: &mut Option<UnixStream>, msg: &InputMsg) {
     for _ in 0..2 {
         if conn.is_none() {
@@ -1097,9 +1109,27 @@ fn rpc_error(error: RpcError) -> ClientError {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::net::UnixStream;
     use std::path::Path;
 
-    use super::{instance_data_dir, PragmaClient};
+    use super::{configure_rpc_stream, configure_stream, instance_data_dir, PragmaClient};
+
+    #[test]
+    fn rpc_wait_disables_and_then_restores_read_timeout() {
+        let (stream, _peer) = UnixStream::pair().expect("socket pair");
+
+        configure_stream(&stream).expect("configure request stream");
+        assert!(stream.read_timeout().expect("read timeout").is_some());
+
+        configure_rpc_stream(&stream).expect("configure rpc stream");
+        assert_eq!(stream.read_timeout().expect("rpc read timeout"), None);
+
+        configure_stream(&stream).expect("restore request stream");
+        assert!(stream
+            .read_timeout()
+            .expect("restored read timeout")
+            .is_some());
+    }
 
     #[test]
     fn log_path_sits_beside_socket() {
