@@ -383,6 +383,7 @@ function useKanbanCardLifecycle(
       // Load the new worktree + tab into workspace state so opening the card
       // later attaches to the (now persisted) background session.
       await ws.refreshProject(target);
+      await ws.markTabAgent(tab.id, agent);
       await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
         modelId: card.modelId ?? null,
         reasoningId: null,

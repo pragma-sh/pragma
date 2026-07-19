@@ -602,6 +602,15 @@ export function setTabTitle(tabId: string, title: string): Promise<Tab> {
   return invoke<Tab>("set_tab_title", { tabId, title });
 }
 
+/**
+ * Records which agent was launched into a terminal tab and seeds the tab's
+ * title with the agent's display name (user renames win). The tab shows the
+ * agent's icon and ignores shell OSC titles from then on.
+ */
+export function setTabAgent(tabId: string, agentId: string, title: string): Promise<Tab> {
+  return invoke<Tab>("set_tab_agent", { tabId, agentId, title });
+}
+
 /** Persists the current page URL for a browser tab (session restore). */
 export function setTabUrl(tabId: string, url: string): Promise<Tab> {
   return invoke<Tab>("set_tab_url", { tabId, url });

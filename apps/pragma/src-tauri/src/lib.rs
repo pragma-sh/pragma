@@ -750,6 +750,22 @@ fn set_tab_title(
     Ok(tab)
 }
 
+/// Records which agent was launched into a terminal tab and seeds the tab's
+/// title with the agent's display name (user renames win). The tab shows the
+/// agent's icon and ignores shell OSC titles from then on.
+#[tauri::command]
+fn set_tab_agent(
+    db: tauri::State<'_, Db>,
+    publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
+    tab_id: String,
+    agent_id: String,
+    title: String,
+) -> AppResult<Tab> {
+    let tab = db.set_tab_agent(&tab_id, &agent_id, &title)?;
+    publisher.trigger();
+    Ok(tab)
+}
+
 /// Persists the current page URL for a browser tab (session restore).
 #[tauri::command]
 fn set_tab_url(
@@ -968,6 +984,7 @@ pub fn run() {
             close_tab,
             rename_tab,
             set_tab_title,
+            set_tab_agent,
             set_tab_url,
             list_splits,
             set_split_layout,

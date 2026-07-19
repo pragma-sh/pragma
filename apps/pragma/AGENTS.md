@@ -401,6 +401,13 @@ out via `onTitle(tabId, listener)`; workspace context dispatches `set-auto-title
 Tauri command, which sets `user_renamed = 1` server-side), the title is permanently
 locked against future shell pushes.
 
+**Agent tabs:** launching an agent tags the tab (`Tab.agentId`, `set_tab_agent`
+command, `set-tab-agent` action) — the tab shows the agent's icon, its title seeds
+with the agent's display name, and shell OSC titles are ignored entirely. Agent
+`session-name` reports arrive on the agent event bridge and dispatch
+`set-session-title`, renaming the tab on session create/rename/switch;
+`userRenamed` still wins over all of it.
+
 **CLI-driven tab/worktree mutations:** brokered `pragma-cli` commands are executed by
 `src-tauri/src/control.rs`, then emit `worktreeChanged` / `tabsChanged` Tauri events.
 `workspace-context.tsx` listens for those events and refreshes the selected project's

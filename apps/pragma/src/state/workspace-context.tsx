@@ -91,6 +91,7 @@ import {
   renameWorktree as renameWorktreeCommand,
   setActiveSelection,
   setSplitLayout as setSplitLayoutCommand,
+  setTabAgent as setTabAgentCommand,
   setTabTitle as setTabTitleCommand,
   setTabUrl as setTabUrlCommand,
   setWorktreeHidden as setWorktreeHiddenCommand,
@@ -240,6 +241,8 @@ export type WorkspaceAction =
   | { type: "remove-tab"; tabId: string }
   | { type: "rename-tab"; tabId: string; title: string }
   | { type: "set-auto-title"; tabId: string; title: string }
+  | { type: "set-session-title"; tabId: string; title: string }
+  | { type: "set-tab-agent"; tabId: string; agentId: string; title: string }
   | { type: "set-tab-url"; tabId: string; url: string }
   | { type: "set-icon"; projectId: string; icon: ProjectIcon | null }
   | { type: "set-worktree-remote"; worktreeId: string; isRemote: boolean }
@@ -289,6 +292,7 @@ interface WorkspaceContextValue extends WorkspaceState {
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
+  markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
   openSelectedWorktree: (editorId?: string | null) => Promise<void>;
   openWorktreeInEditor: (worktreeId: string, editorId?: string | null) => Promise<void>;
   cycleTab: (direction: 1 | -1) => void;
@@ -1504,8 +1508,39 @@ function reduceSetAutoTitle(
   return {
     ...state,
     tabs: state.tabs.map((tab) =>
-      tab.id === action.tabId && !tab.userRenamed
+      tab.id === action.tabId && !tab.userRenamed && !tab.agentId
         ? { ...tab, title: action.title.trim() || defaultTabTitle(tab.kind) }
+        : tab,
+    ),
+  };
+}
+
+function reduceSetSessionTitle(
+  state: WorkspaceState,
+  action: ActionOf<"set-session-title">,
+): WorkspaceState {
+  // Agent-reported session name. Respects `userRenamed` so a manual rename is
+  // never clobbered; unlike auto-titles it applies to agent tabs (which ignore
+  // shell OSC titles entirely).
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === action.tabId && !tab.userRenamed ? { ...tab, title: action.title } : tab,
+    ),
+  };
+}
+
+function reduceSetTabAgent(
+  state: WorkspaceState,
+  action: ActionOf<"set-tab-agent">,
+): WorkspaceState {
+  // Marks the tab as agent-owned at launch: the agent's icon takes over and
+  // the title seeds with the agent's display name (user renames win).
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === action.tabId
+        ? { ...tab, agentId: action.agentId, title: tab.userRenamed ? tab.title : action.title }
         : tab,
     ),
   };
@@ -1563,6 +1598,8 @@ const REDUCERS: ReducerMap = {
   "remove-tab": reduceRemoveTab,
   "rename-tab": reduceRenameTab,
   "set-auto-title": reduceSetAutoTitle,
+  "set-session-title": reduceSetSessionTitle,
+  "set-tab-agent": reduceSetTabAgent,
   "set-tab-url": reduceSetTabUrl,
   "set-icon": reduceSetIcon,
   "set-worktree-remote": reduceSetWorktreeRemote,
@@ -1960,6 +1997,7 @@ function dispatchNewTab(
 /** Handlers needed to react to a single agent status report. */
 interface AgentReportContext {
   visibleTabIdsRef: RefObject<Set<string>>;
+  applySessionName: (payload: AgentReportPayload) => void;
   clearDoneStatusForTab: (tabId: string) => void;
   markAgentsSeen: (tabId: string) => Promise<void>;
   latchAlertedStatus: (payload: AgentReportPayload) => void;
@@ -2155,7 +2193,12 @@ function useTabMetaListeners(
             return;
           }
           const currentTab = tabsRef.current.find((item) => item.id === tabId);
-          if (!currentTab || currentTab.kind !== "terminal" || currentTab.userRenamed) {
+          if (
+            !currentTab ||
+            currentTab.kind !== "terminal" ||
+            currentTab.userRenamed ||
+            currentTab.agentId
+          ) {
             return;
           }
           const currentTitle = currentTab.title?.trim() || defaultTabTitle("terminal");
@@ -2385,6 +2428,11 @@ function useAgentStatusListeners(
       return undefined;
     });
     void onAgentReport((payload) => {
+      reportCtx.applySessionName(payload);
+      if (!payload.status) {
+        // A status-less report (session-name only) carries no indicator change.
+        return;
+      }
       applyAgentReport(payload);
       releaseLatchOnAgentMove(payload, reportCtx.releaseAlertLatch);
       latchSeenAgentCompletion(payload, reportCtx);
@@ -2659,6 +2707,7 @@ function useTabCreation(
 function useSessionLaunch(
   selectWorktree: (worktreeId: string | null) => void,
   createTerminalTab: (worktreeId?: string) => Promise<Tab | null>,
+  markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>,
 ): (
   worktreeId: string,
   agent: AgentConfig,
@@ -2677,6 +2726,7 @@ function useSessionLaunch(
       if (!tab) {
         return null;
       }
+      void markTabAgent(tab.id, agent);
       startAgentInTab(tab.id, agent, message, modelSelection);
       void startWatcherForAgentSession({
         agentId: agent.id,
@@ -2688,7 +2738,7 @@ function useSessionLaunch(
       });
       return tab;
     },
-    [createTerminalTab, selectWorktree],
+    [createTerminalTab, markTabAgent, selectWorktree],
   );
 }
 
@@ -2977,6 +3027,7 @@ function useTabLifecycle(
 ): {
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
+  markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
   setActiveTab: (tabId: string | null) => void;
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
 } {
@@ -3031,6 +3082,20 @@ function useTabLifecycle(
     [dispatch],
   );
 
+  // Marks a freshly created terminal tab as hosting a launched agent: the tab
+  // takes the agent's icon and its title seeds with the agent's display name.
+  const markTabAgent = useCallback(
+    async (tabId: string, agent: AgentConfig) => {
+      dispatch({ type: "set-tab-agent", tabId, agentId: agent.id, title: agent.name });
+      try {
+        await setTabAgentCommand(tabId, agent.id, agent.name);
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch],
+  );
+
   const setActiveTab = useCallback(
     (tabId: string | null) => {
       const worktreeId = tabId ? state.tabs.find((tab) => tab.id === tabId)?.worktreeId : undefined;
@@ -3044,7 +3109,7 @@ function useTabLifecycle(
   );
   const setActiveTabRef = useRef(setActiveTab);
   setActiveTabRef.current = setActiveTab;
-  return { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef };
+  return { closeTab, renameTerminalTab, markTabAgent, setActiveTab, setActiveTabRef };
 }
 
 /** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
@@ -3134,6 +3199,13 @@ function useProjectLoading(
         toast.error(`Couldn't launch ${request.agentId}: agent is unavailable.`);
         return;
       }
+      dispatch({
+        type: "set-tab-agent",
+        tabId: request.tabId,
+        agentId: agent.id,
+        title: agent.name,
+      });
+      void setTabAgentCommand(request.tabId, agent.id, agent.name).catch(() => undefined);
       void startBackgroundAgentSession(
         request.tabId,
         request.worktreeId,
@@ -3166,7 +3238,7 @@ function useProjectLoading(
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     if (!state.selectedProjectId) {
@@ -3919,8 +3991,26 @@ function useAgentManagement({
     worktreeProjectIdRef,
     dispatch,
   );
+  // Renames the hosting tab to the agent-reported session name. User renames
+  // win; the persisted title update leaves `userRenamed` untouched.
+  const applySessionName = useCallback(
+    (payload: AgentReportPayload) => {
+      const name = payload.sessionName?.trim();
+      if (!name) {
+        return;
+      }
+      const tab = stateRef.current.tabs.find((candidate) => candidate.id === payload.tabId);
+      if (!tab || tab.userRenamed || tab.title === name) {
+        return;
+      }
+      dispatch({ type: "set-session-title", tabId: payload.tabId, title: name });
+      void setTabTitleCommand(payload.tabId, name).catch(() => undefined);
+    },
+    [dispatch, stateRef],
+  );
   useAgentStatusListeners({
     visibleTabIdsRef,
+    applySessionName,
     clearDoneStatusForTab,
     markAgentsSeen,
     latchAlertedStatus,
@@ -3970,7 +4060,9 @@ function useTabManagement({
     dispatch,
     worktreeProjectIdRef,
   );
-  const startSession = useSessionLaunch(selectWorktree, createTerminalTab);
+  const { closeTab, renameTerminalTab, markTabAgent, setActiveTab, setActiveTabRef } =
+    useTabLifecycle(state, dispatch, setManagedScriptsState);
+  const startSession = useSessionLaunch(selectWorktree, createTerminalTab, markTabAgent);
   useDeepLinkHandler(
     stateRef,
     resolveProjectForWorktree,
@@ -3987,11 +4079,6 @@ function useTabManagement({
   useTerminalLinkHandler(openFromTerminalLink);
   const { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView } =
     useTabOpeners(state, dispatch);
-  const { closeTab, renameTerminalTab, setActiveTab, setActiveTabRef } = useTabLifecycle(
-    state,
-    dispatch,
-    setManagedScriptsState,
-  );
   const terminalTabIdsKey = useMemo(
     () =>
       state.tabs
@@ -4012,6 +4099,7 @@ function useTabManagement({
     openPluginWebView,
     closeTab,
     renameTerminalTab,
+    markTabAgent,
     setActiveTab,
     setActiveTabRef,
     terminalTabIdsKey,
@@ -4300,6 +4388,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     openPluginWebView,
     closeTab,
     renameTerminalTab,
+    markTabAgent,
     setActiveTab,
     setActiveTabRef,
     terminalTabIdsKey,
@@ -4368,6 +4457,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openPluginWebView,
       closeTab,
       renameTerminalTab,
+      markTabAgent,
       setActiveTab,
       activateTabLocation,
       openFileLocation,
@@ -4397,6 +4487,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openPluginWebView,
       closeTab,
       renameTerminalTab,
+      markTabAgent,
       setActiveTab,
       activateTabLocation,
       openFileLocation,
