@@ -283,7 +283,11 @@ interface WorkspaceContextValue extends WorkspaceState {
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
-  openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  openDiffTab: (
+    path: string,
+    side: DiffSide,
+    opts?: { paneId?: string; commit?: string | null },
+  ) => Promise<void>;
   /** Opens (or focuses) the PR review tab for a pull request number. */
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   /** Opens (or focuses) the read-only daemon-log tab (Troubleshooting menu). */
@@ -2866,7 +2870,11 @@ function useTabOpeners(
   dispatch: WorkspaceDispatch,
 ): {
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
-  openDiffTab: (path: string, side: DiffSide, opts?: { paneId?: string }) => Promise<void>;
+  openDiffTab: (
+    path: string,
+    side: DiffSide,
+    opts?: { paneId?: string; commit?: string | null },
+  ) => Promise<void>;
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   openDaemonLogTab: () => Promise<void>;
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
@@ -2877,6 +2885,7 @@ function useTabOpeners(
       path: string,
       side: DiffSide | null,
       paneId: string | undefined,
+      commit?: string | null,
     ) => {
       const projectId = state.selectedProjectId;
       const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
@@ -2888,7 +2897,8 @@ function useTabOpeners(
           tab.kind === kind &&
           tab.worktreeId === worktreeId &&
           tab.filePath === path &&
-          tab.diffSide === side,
+          tab.diffSide === side &&
+          (tab.diffCommit ?? null) === (commit ?? null),
       );
       if (existing) {
         dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
@@ -2903,6 +2913,7 @@ function useTabOpeners(
           undefined,
           path,
           side,
+          commit ?? null,
         );
         dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
       } catch (cause) {
@@ -2918,8 +2929,8 @@ function useTabOpeners(
     [openLocatorTab],
   );
   const openDiffTab = useCallback(
-    (path: string, side: DiffSide, opts?: { paneId?: string }) =>
-      openLocatorTab("diff", path, side, opts?.paneId),
+    (path: string, side: DiffSide, opts?: { paneId?: string; commit?: string | null }) =>
+      openLocatorTab("diff", path, side, opts?.paneId, opts?.commit),
     [openLocatorTab],
   );
 
@@ -2985,6 +2996,7 @@ function useTabOpeners(
           "pr-review",
           title,
           undefined,
+          null,
           null,
           null,
           prNumber,

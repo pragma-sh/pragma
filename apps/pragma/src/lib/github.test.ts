@@ -30,6 +30,7 @@ import {
   findPullRequestForBranch,
   getChecksStatus,
   listBaseRepoOptions,
+  listPullRequestCommits,
   listReviewThreads,
   resetGitHubClient,
 } from "./github";
@@ -328,6 +329,60 @@ describe("listReviewThreads", () => {
       body: "nit",
       createdAt: "2026-01-01",
       user: { login: "octo", avatarUrl: "https://avatars/octo" },
+    });
+  });
+});
+
+describe("listPullRequestCommits", () => {
+  it("maps commit co-authors, checks, and the GitHub commit diff URL", async () => {
+    octokit.graphql.mockResolvedValue({
+      repository: {
+        pullRequest: {
+          commits: {
+            pageInfo: { endCursor: null, hasNextPage: false },
+            nodes: [
+              {
+                commit: {
+                  authors: {
+                    nodes: [
+                      {
+                        name: "Octo Cat",
+                        user: { login: "octo", avatarUrl: "https://avatars/octo" },
+                      },
+                      { name: "Hub Bot", user: null },
+                    ],
+                  },
+                  committedDate: "2026-06-24T12:00:00Z",
+                  messageHeadline: "feat: show commit events",
+                  oid: "a1b2c3d4e5f6",
+                  statusCheckRollup: { state: "SUCCESS" },
+                  url: "https://github.com/acme/widget/commit/a1b2c3d4e5f6",
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(listPullRequestCommits(repo, 42)).resolves.toEqual([
+      {
+        authors: [
+          { name: "Octo Cat", user: { login: "octo", avatarUrl: "https://avatars/octo" } },
+          { name: "Hub Bot", user: null },
+        ],
+        committedAt: "2026-06-24T12:00:00Z",
+        message: "feat: show commit events",
+        sha: "a1b2c3d4e5f6",
+        status: "success",
+        url: "https://github.com/acme/widget/commit/a1b2c3d4e5f6",
+      },
+    ]);
+    expect(octokit.graphql).toHaveBeenCalledWith(expect.stringContaining("statusCheckRollup"), {
+      owner: "acme",
+      repo: "widget",
+      number: 42,
+      after: null,
     });
   });
 });

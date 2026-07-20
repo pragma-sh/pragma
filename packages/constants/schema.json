@@ -1700,6 +1700,7 @@
         "url",
         "filePath",
         "diffSide",
+        "diffCommit",
         "prNumber",
         "pluginId",
         "pluginViewId",
@@ -1744,6 +1745,10 @@
               "type": "null"
             }
           ]
+        },
+        "diffCommit": {
+          "type": ["string", "null"],
+          "description": "Commit hash a commit-scoped diff tab shows (first parent → commit); null for range diffs and non-diff tabs."
         },
         "prNumber": {
           "type": ["integer", "null"],
@@ -1868,6 +1873,61 @@
           "items": {
             "$ref": "#/definitions/ChangedFile"
           }
+        }
+      }
+    },
+    "WorktreeCommit": {
+      "title": "WorktreeCommit",
+      "description": "One commit on a worktree's branch since its fork point with the parent branch, with the files it changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "shortHash", "subject", "authors", "files"],
+      "properties": {
+        "hash": {
+          "type": "string",
+          "description": "The full commit hash."
+        },
+        "shortHash": {
+          "type": "string",
+          "description": "The abbreviated commit hash."
+        },
+        "subject": {
+          "type": "string",
+          "description": "The commit subject (first message line)."
+        },
+        "authors": {
+          "type": "array",
+          "description": "The author name followed by any Co-authored-by trailer names, deduplicated.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "Files this commit changed relative to its first parent.",
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
+        }
+      }
+    },
+    "WorktreeCommitList": {
+      "title": "WorktreeCommitList",
+      "description": "A page of a worktree's commits since its fork point, newest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commits", "totalCount"],
+      "properties": {
+        "commits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorktreeCommit"
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total commits in the fork-point range, independent of the requested page size."
         }
       }
     },

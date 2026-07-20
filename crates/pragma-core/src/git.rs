@@ -12,6 +12,7 @@ use std::path::Path;
 
 use pragma_constants::{
     BranchSyncStatus, ChangeStatus, ChangedFile, DiffSide, FileDiff, WorktreeChanges,
+    WorktreeCommit, WorktreeCommitList,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,6 +77,20 @@ pub enum GitRequest {
     },
     /// Batch "is this worktree merged & clean" check.
     MergedStatus { items: Vec<MergedStatusItem> },
+    /// Lists commits since the fork point with the parent branch, newest first.
+    WorktreeCommits {
+        root: String,
+        parent_branch: Option<String>,
+        limit: u32,
+    },
+    /// Loads old/new text for one file as changed by a single commit
+    /// (first parent → commit).
+    CommitFileDiff {
+        root: String,
+        commit: String,
+        path: String,
+        old_path: Option<String>,
+    },
     /// Loads old/new text for one changed file on a diff side.
     FileDiff {
         root: String,
@@ -178,6 +193,26 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             parent_branch.as_deref(),
         )?),
         GitRequest::MergedStatus { items } => to_value(merged_status(&items)),
+        GitRequest::WorktreeCommits {
+            root,
+            parent_branch,
+            limit,
+        } => to_value(worktree_commits(
+            Path::new(&root),
+            parent_branch.as_deref(),
+            limit,
+        )?),
+        GitRequest::CommitFileDiff {
+            root,
+            commit,
+            path,
+            old_path,
+        } => to_value(commit_file_diff(
+            Path::new(&root),
+            &commit,
+            path,
+            old_path.as_deref(),
+        )?),
         GitRequest::FileDiff {
             root,
             path,
@@ -380,6 +415,152 @@ fn committed_changes(root: &Path, parent_branch: Option<&str>) -> CoreResult<Vec
     let numstat = run_git(root, &numstat_args(&args))?;
     attach_numstat(&mut changes, &parse_numstat(&numstat));
     Ok(changes)
+}
+
+/// Record/field separators for the commit-log format string: fields are split
+/// by `%x1f` (unit separator) and records end with `%x1e` (record separator) so
+/// multi-line trailer values can't be confused with record boundaries.
+const LOG_FIELD_SEP: char = '\u{1f}';
+const LOG_RECORD_SEP: char = '\u{1e}';
+
+/// Lists commits in the fork-point range (newest first) with their authors,
+/// co-authors, and per-commit changed files. At most `limit` commits are
+/// returned; `total_count` reports the whole range so the client can page.
+fn worktree_commits(
+    root: &Path,
+    parent_branch: Option<&str>,
+    limit: u32,
+) -> CoreResult<WorktreeCommitList> {
+    let Some(merge_base) = base_merge_base(root, parent_branch)? else {
+        return Ok(WorktreeCommitList {
+            commits: Vec::new(),
+            total_count: 0,
+        });
+    };
+    let range = format!("{merge_base}..HEAD");
+    let total_count = git_stdout(root, &["rev-list", "--count", &range])?
+        .parse::<u64>()
+        .unwrap_or(0);
+    let limit_arg = limit.to_string();
+    let format = format!(
+        "%H{LOG_FIELD_SEP}%h{LOG_FIELD_SEP}%an{LOG_FIELD_SEP}%s{LOG_FIELD_SEP}%(trailers:key=Co-authored-by,valueonly=true){LOG_RECORD_SEP}"
+    );
+    let format_arg = format!("--format={format}");
+    let log = run_git(root, &["log", "-n", &limit_arg, &format_arg, &range])?;
+    let mut commits = parse_commit_log(&String::from_utf8_lossy(&log));
+    // Each commit's file list is an independent pair of read-only git queries;
+    // load them concurrently so a 10-commit page costs one commit's latency.
+    let files: Vec<CoreResult<Vec<ChangedFile>>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = commits
+            .iter()
+            .map(|commit| {
+                let hash = commit.hash.clone();
+                scope.spawn(move || commit_files(root, &hash))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| CoreError::Operation("git query task panicked".to_string()))?
+            })
+            .collect()
+    });
+    for (commit, result) in commits.iter_mut().zip(files) {
+        commit.files = result?;
+    }
+    Ok(WorktreeCommitList {
+        commits,
+        total_count,
+    })
+}
+
+/// Parses `git log` output in the `LOG_FIELD_SEP`/`LOG_RECORD_SEP` format into
+/// commits (without files). Malformed records are skipped.
+fn parse_commit_log(log: &str) -> Vec<WorktreeCommit> {
+    log.split(LOG_RECORD_SEP)
+        .filter_map(|record| {
+            let record = record.trim_matches(['\n', ' ']);
+            let mut fields = record.split(LOG_FIELD_SEP);
+            let hash = fields.next()?.trim();
+            if hash.is_empty() {
+                return None;
+            }
+            let short_hash = fields.next()?.trim().to_string();
+            let author = fields.next()?.trim().to_string();
+            let subject = fields.next()?.trim().to_string();
+            let trailers = fields.next().unwrap_or_default();
+            let mut authors = vec![author];
+            for name in trailers.lines().filter_map(trailer_author_name) {
+                if !authors.iter().any(|existing| existing == &name) {
+                    authors.push(name);
+                }
+            }
+            Some(WorktreeCommit {
+                hash: hash.to_string(),
+                short_hash,
+                subject,
+                authors,
+                files: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+/// Extracts the display name from a `Co-authored-by` trailer value
+/// (`Name <email>` → `Name`). Empty values yield `None`.
+fn trailer_author_name(value: &str) -> Option<String> {
+    let name = value.split('<').next().unwrap_or(value).trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Lists the files one commit changed relative to its first parent.
+fn commit_files(root: &Path, hash: &str) -> CoreResult<Vec<ChangedFile>> {
+    let parent = format!("{hash}^");
+    let args = [
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames",
+        &parent,
+        hash,
+    ];
+    let name_status = run_git(root, &args)?;
+    let mut changes = parse_name_status(&name_status, DiffSide::Committed);
+    let numstat = run_git(root, &numstat_args(&args))?;
+    attach_numstat(&mut changes, &parse_numstat(&numstat));
+    Ok(changes)
+}
+
+/// Loads old/new text for one file as changed by a single commit
+/// (first parent → commit).
+fn commit_file_diff(
+    root: &Path,
+    commit: &str,
+    path: String,
+    old_path: Option<&str>,
+) -> CoreResult<FileDiff> {
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(CoreError::InvalidPayload(format!(
+            "invalid commit hash: {commit}"
+        )));
+    }
+    let parent = format!("{commit}^");
+    if diff_is_binary(root, &[&parent, commit], &path) {
+        return Ok(binary_diff(path));
+    }
+    let old_ref_path = old_path.unwrap_or(&path);
+    let (old_text, new_text) = load_diff_sides(
+        || git_show(root, &format!("{parent}:{old_ref_path}")).unwrap_or_default(),
+        || git_show(root, &format!("{commit}:{path}")).unwrap_or_default(),
+    );
+    Ok(FileDiff {
+        path,
+        old_text,
+        new_text,
+        binary: false,
+    })
 }
 
 /// Lists HEAD → index (staged) changes.
@@ -1343,10 +1524,10 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
+        commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
         github_fetch_and_sync, github_pull_branch, github_sync_branch, list_headless_worktrees,
         merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
-        worktree_is_dirty, MergedStatusItem,
+        worktree_commits, worktree_is_dirty, MergedStatusItem,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1501,6 +1682,65 @@ mod tests {
             .any(|c| c.path == "feature.txt" && c.status == ChangeStatus::Added));
         assert!(!changes.committed.iter().any(|c| c.path == "base.txt"));
         assert!(!changes.committed.iter().any(|c| c.path == "main-only.txt"));
+    }
+
+    #[test]
+    fn worktree_commits_lists_commits_with_files_and_coauthors() {
+        let (child_path, _main_path) = project_with_child();
+        std::fs::write(child_path.join("one.txt"), "one\n").expect("write one");
+        run(&child_path, &["add", "-A"]);
+        run(
+            &child_path,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "-m",
+                "first commit\n\nCo-authored-by: Pair <pair@example.com>",
+            ],
+        );
+        std::fs::write(child_path.join("two.txt"), "two\n").expect("write two");
+        commit_all(&child_path, "second commit");
+
+        let list = worktree_commits(&child_path, Some("main"), 10).expect("commits");
+        assert_eq!(list.total_count, 2);
+        assert_eq!(list.commits.len(), 2);
+        let newest = &list.commits[0];
+        assert_eq!(newest.subject, "second commit");
+        assert_eq!(newest.short_hash.len(), 7);
+        assert!(newest
+            .files
+            .iter()
+            .any(|f| f.path == "two.txt" && f.status == ChangeStatus::Added));
+        assert!(!newest.files.iter().any(|f| f.path == "one.txt"));
+        let oldest = &list.commits[1];
+        assert_eq!(oldest.authors, vec!["Test".to_string(), "Pair".to_string()]);
+        assert!(oldest.files.iter().any(|f| f.path == "one.txt"));
+
+        let paged = worktree_commits(&child_path, Some("main"), 1).expect("commits");
+        assert_eq!(paged.total_count, 2);
+        assert_eq!(paged.commits.len(), 1);
+        assert_eq!(paged.commits[0].subject, "second commit");
+    }
+
+    #[test]
+    fn commit_file_diff_scopes_to_single_commit() {
+        let (child_path, _main_path) = project_with_child();
+        std::fs::write(child_path.join("file.txt"), "v1\n").expect("write v1");
+        commit_all(&child_path, "add file");
+        std::fs::write(child_path.join("file.txt"), "v2\n").expect("write v2");
+        commit_all(&child_path, "change file");
+
+        let list = worktree_commits(&child_path, Some("main"), 10).expect("commits");
+        let newest = &list.commits[0];
+        let diff = commit_file_diff(&child_path, &newest.hash, "file.txt".to_string(), None)
+            .expect("diff");
+        assert_eq!(diff.old_text, "v1\n");
+        assert_eq!(diff.new_text, "v2\n");
+
+        assert!(commit_file_diff(&child_path, "not-a-hash", "file.txt".to_string(), None).is_err());
     }
 
     #[test]

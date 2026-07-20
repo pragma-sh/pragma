@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const worktreeChangesMock = vi.fn();
+const worktreeCommitsMock = vi.fn();
 const discardUnstagedFileMock = vi.fn();
 const discardAllUnstagedMock = vi.fn();
 const stageFileMock = vi.fn();
@@ -67,6 +68,7 @@ let workspaceMock: {
 
 vi.mock("@/lib/tauri", () => ({
   worktreeChanges: (...args: unknown[]) => worktreeChangesMock(...args),
+  worktreeCommits: (...args: unknown[]) => worktreeCommitsMock(...args),
   discardUnstagedFile: (...args: unknown[]) => discardUnstagedFileMock(...args),
   discardAllUnstaged: (...args: unknown[]) => discardAllUnstagedMock(...args),
   stageFile: (...args: unknown[]) => stageFileMock(...args),
@@ -102,6 +104,7 @@ function change(path: string, status: ChangeStatus, side: DiffSide): ChangedFile
 }
 
 beforeEach(() => {
+  worktreeCommitsMock.mockResolvedValue({ commits: [], totalCount: 0 });
   githubFetchAndSyncMock.mockResolvedValue({
     branch: "feature",
     ahead: 0,
@@ -116,6 +119,7 @@ afterEach(() => {
   aiAvailableMock = false;
   aiGenerateCommitMessageMock.mockReset();
   worktreeChangesMock.mockReset();
+  worktreeCommitsMock.mockReset();
   discardUnstagedFileMock.mockReset();
   discardAllUnstagedMock.mockReset();
   stageFileMock.mockReset();
@@ -215,6 +219,64 @@ describe("ChangesTab", () => {
     expect(openDiffTabMock).toHaveBeenCalledWith("src/committed.ts", "worktree");
     expect(openDiffTabMock).toHaveBeenCalledWith("src/staged.ts", "worktree");
     expect(openDiffTabMock).toHaveBeenCalledWith("src/unstaged.ts", "worktree");
+  });
+
+  it("lists commits under an 'All changes' dropdown and opens commit-scoped diffs", async () => {
+    worktreeChangesMock.mockResolvedValue(
+      changes({ committed: [change("src/a.ts", "modified", "committed")] }),
+    );
+    worktreeCommitsMock.mockResolvedValue({
+      commits: [
+        {
+          hash: "abc123def456",
+          shortHash: "abc123d",
+          subject: "feat: add thing",
+          authors: ["Test", "Pair"],
+          files: [change("src/a.ts", "modified", "committed")],
+        },
+      ],
+      totalCount: 1,
+    });
+    render(<ChangesTab />);
+
+    // The aggregate list is preserved under the "All changes" sub-collapsible.
+    expect(await screen.findByText("All changes")).toBeTruthy();
+    // The commit row shows the subject and short hash.
+    expect(await screen.findByText("feat: add thing")).toBeTruthy();
+    expect(screen.getByText("abc123d")).toBeTruthy();
+    expect(screen.queryByTitle("Test")).toBeNull();
+    expect(screen.queryByTitle("Pair")).toBeNull();
+
+    // Expanding the commit lists its files; clicking one opens a diff scoped
+    // to that commit only.
+    fireEvent.click(screen.getByText("feat: add thing"));
+    const rows = await screen.findAllByText("a.ts");
+    fireEvent.click(rows[rows.length - 1]!);
+    expect(openDiffTabMock).toHaveBeenCalledWith("src/a.ts", "committed", {
+      commit: "abc123def456",
+    });
+    // Only one commit in range: no pagination control.
+    expect(screen.queryByText("Load more")).toBeNull();
+  });
+
+  it("offers 'Load more' when more commits exist and grows the page", async () => {
+    worktreeChangesMock.mockResolvedValue(
+      changes({ committed: [change("src/a.ts", "modified", "committed")] }),
+    );
+    worktreeCommitsMock.mockResolvedValue({
+      commits: Array.from({ length: 10 }, (_, index) => ({
+        hash: `hash-${index}`,
+        shortHash: `short-${index}`,
+        subject: `commit ${index}`,
+        authors: ["Test"],
+        files: [],
+      })),
+      totalCount: 12,
+    });
+    render(<ChangesTab />);
+
+    fireEvent.click(await screen.findByText("Load more"));
+    await vi.waitFor(() => expect(worktreeCommitsMock).toHaveBeenCalledWith("wt", 20));
   });
 
   it("stages a single unstaged file without confirmation", async () => {

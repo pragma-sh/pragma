@@ -3,12 +3,14 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fileDiffMock = vi.fn();
+const commitFileDiffMock = vi.fn();
 const mergeViewMock = vi.fn();
 const loadLanguageExtensionMock = vi.fn();
 const dispatchMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   fileDiff: (...args: unknown[]) => fileDiffMock(...args),
+  commitFileDiff: (...args: unknown[]) => commitFileDiffMock(...args),
 }));
 
 // Capture the live-reload listener so tests can simulate watcher events without
@@ -46,6 +48,7 @@ function diffTab(): Tab {
     url: null,
     filePath: "src/app.ts",
     diffSide: "committed",
+    diffCommit: null,
     prNumber: null,
     pluginId: null,
     pluginViewId: null,
@@ -72,6 +75,7 @@ afterEach(cleanup);
 beforeEach(() => {
   fileChangeListener = null;
   fileDiffMock.mockReset();
+  commitFileDiffMock.mockReset();
   mergeViewMock.mockReset();
   loadLanguageExtensionMock.mockReset();
   dispatchMock.mockReset();
@@ -83,6 +87,21 @@ describe("DiffView", () => {
     mockAppFileDiff();
     render(<DiffView tab={diffTab()} />);
     await waitFor(() => expect(fileDiffMock).toHaveBeenCalledWith("wt", "src/app.ts", "committed"));
+    await waitFor(() => expect(mergeViewMock).toHaveBeenCalled());
+  });
+
+  it("loads a commit-scoped diff through commit_file_diff when diffCommit is set", async () => {
+    commitFileDiffMock.mockResolvedValue({
+      path: "src/app.ts",
+      oldText: "a",
+      newText: "b",
+      binary: false,
+    });
+    render(<DiffView tab={{ ...diffTab(), diffCommit: "abc123" }} />);
+    await waitFor(() =>
+      expect(commitFileDiffMock).toHaveBeenCalledWith("wt", "abc123", "src/app.ts"),
+    );
+    expect(fileDiffMock).not.toHaveBeenCalled();
     await waitFor(() => expect(mergeViewMock).toHaveBeenCalled());
   });
 

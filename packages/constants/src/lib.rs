@@ -32,7 +32,7 @@ pub use generated::{
     RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
     ScriptRunStatus, Scripts, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical,
     Tab, TabKind, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
-    WorktreeStatus,
+    WorktreeCommit, WorktreeCommitList, WorktreeStatus,
 };
 
 /// The parsed, shared constants.

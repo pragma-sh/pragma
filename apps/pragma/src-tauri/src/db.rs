@@ -85,6 +85,7 @@ impl Db {
                title        TEXT,
                file_path    TEXT,
                diff_side    TEXT,
+               diff_commit  TEXT,
                pr_number    INTEGER,
                user_renamed INTEGER NOT NULL DEFAULT 0,
                order_index  INTEGER NOT NULL,
@@ -267,6 +268,19 @@ impl Db {
                 conn.execute_batch("ALTER TABLE tabs ADD COLUMN agent_id TEXT;")?;
             }
             conn.execute_batch("PRAGMA user_version = 12;")?;
+        }
+        // v13 adds `diff_commit` to `tabs`: the commit hash a commit-scoped
+        // diff tab shows (first parent → commit). NULL means a range diff.
+        if version < 13 {
+            let has_diff_commit: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'diff_commit'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_diff_commit == 0 {
+                conn.execute_batch("ALTER TABLE tabs ADD COLUMN diff_commit TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 13;")?;
         }
         Ok(())
     }
@@ -481,7 +495,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -494,7 +508,7 @@ impl Db {
     pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs ORDER BY project_id, order_index, created_at",
         )?;
         let rows = stmt.query_map([], tab_from_row)?;
@@ -513,6 +527,7 @@ impl Db {
         url: Option<String>,
         file_path: Option<String>,
         diff_side: Option<DiffSide>,
+        diff_commit: Option<String>,
         pr_number: Option<i64>,
     ) -> AppResult<Tab> {
         self.create_tab_record(
@@ -523,6 +538,7 @@ impl Db {
             url,
             file_path,
             diff_side,
+            diff_commit,
             pr_number,
             None,
             None,
@@ -553,6 +569,7 @@ impl Db {
             None,
             None,
             None,
+            None,
             plugin_id,
             plugin_view_id,
             plugin_payload,
@@ -572,6 +589,7 @@ impl Db {
         url: Option<String>,
         file_path: Option<String>,
         diff_side: Option<DiffSide>,
+        diff_commit: Option<String>,
         pr_number: Option<i64>,
         plugin_id: Option<String>,
         plugin_view_id: Option<String>,
@@ -587,8 +605,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     id,
                     project_id,
@@ -598,6 +616,7 @@ impl Db {
                     url,
                     file_path,
                     diff_side.map(diff_side_as_str),
+                    diff_commit,
                     pr_number,
                     plugin_id,
                     plugin_view_id,
@@ -807,7 +826,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -818,7 +837,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -977,15 +996,16 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         url: row.get(5)?,
         file_path: row.get(6)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
-        pr_number: row.get::<_, Option<i64>>(8)?,
-        plugin_id: row.get(9)?,
-        plugin_view_id: row.get(10)?,
-        plugin_payload: row.get(11)?,
-        plugin_dedupe_key: row.get(12)?,
-        agent_id: row.get(13)?,
-        user_renamed: row.get::<_, i64>(14)? == 1,
-        order_index: row.get::<_, i64>(15)?,
-        created_at: row.get(16)?,
+        diff_commit: row.get(8)?,
+        pr_number: row.get::<_, Option<i64>>(9)?,
+        plugin_id: row.get(10)?,
+        plugin_view_id: row.get(11)?,
+        plugin_payload: row.get(12)?,
+        plugin_dedupe_key: row.get(13)?,
+        agent_id: row.get(14)?,
+        user_renamed: row.get::<_, i64>(15)? == 1,
+        order_index: row.get::<_, i64>(16)?,
+        created_at: row.get(17)?,
     })
 }
 
@@ -1014,6 +1034,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Terminal,
                 Some("main".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -1085,6 +1106,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("browser tab should insert");
         assert_eq!(tab.kind, TabKind::Browser);
@@ -1124,6 +1146,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("browser tab should insert");
         let short_id = &tab.id[..8];
@@ -1154,6 +1177,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Log,
                 Some("Server Logs".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -1346,6 +1370,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("tab should insert");
         db.delete_worktree(&parent.id)
@@ -1483,6 +1508,7 @@ mod tests {
                 &project.id,
                 &main.id,
                 TabKind::Terminal,
+                None,
                 None,
                 None,
                 None,

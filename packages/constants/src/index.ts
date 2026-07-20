@@ -64,6 +64,8 @@ export type {
   ChangeStatus,
   ChangedFile,
   WorktreeChanges,
+  WorktreeCommit,
+  WorktreeCommitList,
   FileDiff,
   FileChange,
   FileChangeKind,

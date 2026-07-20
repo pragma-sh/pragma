@@ -42,6 +42,7 @@ function tab(over: Partial<Tab> = {}): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    diffCommit: null,
     prNumber: null,
     pluginId: null,
     pluginViewId: null,
