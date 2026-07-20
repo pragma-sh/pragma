@@ -46,6 +46,29 @@ vi.mock("@tiptap/react", () => ({
   useEditor: () => mockEditor,
   useEditorState: () => ({}),
   EditorContent: () => <div aria-label="wysiwyg editor" />,
+  Extension: { create: (config: unknown) => config },
+}));
+
+// The fuzzy-find ProseMirror plugin isn't exercised by these re-seed tests.
+vi.mock("@/components/editor/use-markdown-find", () => ({
+  markdownFindExtension: {},
+  useMarkdownFind: () => ({
+    open: false,
+    query: "",
+    replaceValue: "",
+    ignoreCase: false,
+    matchCount: 0,
+    currentMatch: 0,
+    openBar: vi.fn(),
+    closeBar: vi.fn(),
+    setQuery: vi.fn(),
+    setReplaceValue: vi.fn(),
+    setIgnoreCase: vi.fn(),
+    findNext: vi.fn(),
+    findPrevious: vi.fn(),
+    replaceOne: vi.fn(),
+    replaceAll: vi.fn(),
+  }),
 }));
 
 /** A fake TipTap editor exposing just the surface the re-seed effect touches. */

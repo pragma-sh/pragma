@@ -52,6 +52,12 @@ export const pragmaEditorTheme = EditorView.theme(
     // clipped by — the sticky gutter. Reset `white-space`/`overflow-wrap` since the
     // widget inherits the code's `white-space: pre` from `.cm-content`, which would
     // stop long comment text from wrapping and clip it instead.
+    ".cm-fuzzy-match": {
+      backgroundColor: "rgba(51, 65, 85, 0.6)",
+    },
+    ".cm-fuzzy-match-active": {
+      backgroundColor: "rgba(180, 83, 9, 0.7)",
+    },
     ".cm-review-comment": {
       position: "sticky",
       left: "var(--cm-gutter-width, 0px)",
