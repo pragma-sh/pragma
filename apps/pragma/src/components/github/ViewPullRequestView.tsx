@@ -182,9 +182,7 @@ function Conversation({
   let body: React.ReactNode;
   if (error) {
     body = <p className="text-xs text-destructive">{error}</p>;
-  } else if (!comments) {
-    body = <p className="text-xs text-muted-foreground">Loading…</p>;
-  } else if (!commits) {
+  } else if (!comments || !commits) {
     body = <p className="text-xs text-muted-foreground">Loading…</p>;
   } else if (comments.length === 0 && commits.length === 0) {
     body = <p className="text-xs text-muted-foreground">No activity yet.</p>;
@@ -363,9 +361,7 @@ function HeaderCard({ pr }: { pr: PullRequestSummary }) {
         <span>←</span>
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{pr.headRef}</span>
       </div>
-      <div className="rounded-md border border-border bg-canvas p-2">
-        <GitHubMarkdown>{pr.body}</GitHubMarkdown>
-      </div>
+      <GitHubMarkdown>{pr.body}</GitHubMarkdown>
     </div>
   );
 }
