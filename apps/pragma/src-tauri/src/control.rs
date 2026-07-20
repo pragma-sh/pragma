@@ -506,6 +506,7 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
         args.file.clone(),
         args.diff_side.as_deref().map(diff_side).transpose()?,
         None,
+        None,
     )?;
     if matches!(kind, TabKind::Terminal) {
         let pty = app.state::<PtyClient>();
@@ -717,6 +718,7 @@ fn materialize_split_tab(
         spec.url.clone(),
         spec.file.clone(),
         diff_side,
+        None,
         None,
     )?;
     if matches!(kind, TabKind::Terminal) {
@@ -1077,6 +1079,7 @@ fn agent_session_launch(
         &worktree.project_id,
         &worktree.id,
         TabKind::Terminal,
+        None,
         None,
         None,
         None,

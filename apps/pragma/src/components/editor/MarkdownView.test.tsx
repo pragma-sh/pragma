@@ -76,6 +76,7 @@ function markdownTab(): Tab {
     url: null,
     filePath: "README.md",
     diffSide: null,
+    diffCommit: null,
     prNumber: null,
     pluginId: null,
     pluginViewId: null,

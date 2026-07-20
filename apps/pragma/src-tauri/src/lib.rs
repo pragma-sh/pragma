@@ -694,6 +694,7 @@ fn create_tab(
     url: Option<String>,
     file_path: Option<String>,
     diff_side: Option<DiffSide>,
+    diff_commit: Option<String>,
     pr_number: Option<i64>,
 ) -> AppResult<Tab> {
     let tab = db.create_tab(
@@ -704,6 +705,7 @@ fn create_tab(
         url,
         file_path,
         diff_side,
+        diff_commit,
         pr_number,
     )?;
     publisher.trigger();
@@ -1049,8 +1051,10 @@ pub fn run() {
             fs::cancel_palette_search,
             ports::list_open_ports,
             git::worktree_changes,
+            git::worktree_commits,
             git::worktrees_merged_status,
             git::file_diff,
+            git::commit_file_diff,
             git::discard_unstaged_file,
             git::discard_all_unstaged,
             git::stage_file,

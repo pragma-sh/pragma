@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use pragma_constants::{
     ChangeStatus, DiffSide, FileDiff, ProtocolRpcMethod, Worktree, WorktreeChanges,
+    WorktreeCommitList,
 };
 use pragma_core::git::{GitRequest, MergedStatusItem};
 use serde::de::DeserializeOwned;
@@ -80,6 +81,51 @@ pub fn worktree_changes(
         &GitRequest::WorktreeChanges {
             root: worktree.path,
             parent_branch,
+        },
+    )
+}
+
+/// Lists a worktree's commits since its fork point (newest first), with
+/// authors, co-authors, and per-commit changed files.
+#[tauri::command(async)]
+pub fn worktree_commits(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    limit: u32,
+) -> AppResult<WorktreeCommitList> {
+    let worktree = db.worktree(&worktree_id)?;
+    let parent_branch = parent_branch(&db, &worktree)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    host_rpc(
+        &pty,
+        &GitRequest::WorktreeCommits {
+            root: worktree.path,
+            parent_branch,
+            limit,
+        },
+    )
+}
+
+/// Loads the old/new text for one file as changed by a single commit.
+#[tauri::command(async)]
+pub fn commit_file_diff(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    commit: String,
+    path: String,
+    old_path: Option<String>,
+) -> AppResult<FileDiff> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    host_rpc(
+        &pty,
+        &GitRequest::CommitFileDiff {
+            root: worktree.path,
+            commit,
+            path,
+            old_path,
         },
     )
 }

@@ -1,7 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { BranchSyncStatus, ChangedFile, WorktreeChanges } from "@pragma/constants";
+import type {
+  BranchSyncStatus,
+  ChangedFile,
+  WorktreeChanges,
+  WorktreeCommit,
+} from "@pragma/constants";
 import { ArrowDown, ArrowUp, Minus, Plus, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,6 +16,7 @@ import {
   type ChangeFileAction,
   type ChangeGroupAction,
 } from "@/components/right-sidebar/ChangeGroup";
+import { CommittedChangesGroup } from "@/components/right-sidebar/CommittedChangesGroup";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import {
   AlertDialog,
@@ -482,6 +488,11 @@ export function ChangesTab() {
     (file: ChangedFile) => void workspace.openDiffTab(file.path, "worktree"),
     [workspace],
   );
+  const openCommitDiff = useCallback(
+    (commit: WorktreeCommit, file: ChangedFile) =>
+      void workspace.openDiffTab(file.path, "committed", { commit: commit.hash }),
+    [workspace],
+  );
 
   if (!worktreeId) {
     return (
@@ -546,11 +557,11 @@ export function ChangesTab() {
         onOpen={openDiff}
         title="Unstaged changes"
       />
-      <ChangeGroup
-        emptyLabel="No committed changes"
+      <CommittedChangesGroup
         files={changes.committed}
-        onOpen={openDiff}
-        title="Committed changes"
+        onOpenCommitFile={openCommitDiff}
+        onOpenFile={openDiff}
+        worktreeId={worktreeId}
       />
       <DiscardConfirmDialog onConfirm={onConfirmDiscard} onClose={closeDiscard} pending={pending} />
     </div>

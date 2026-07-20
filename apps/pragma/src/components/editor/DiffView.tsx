@@ -5,7 +5,7 @@ import type { Tab } from "@pragma/constants";
 
 import { MergeDiff } from "@/components/editor/MergeDiff";
 import { useWorktreeFileChange } from "@/lib/file-watch";
-import { fileDiff } from "@/lib/tauri";
+import { commitFileDiff, fileDiff } from "@/lib/tauri";
 
 type LoadState =
   | { kind: "loading" }
@@ -20,7 +20,7 @@ type LoadState =
  * language grammar is resolved lazily so both panes get syntax highlighting.
  */
 export function DiffView({ tab }: { tab: Tab }) {
-  const { id: tabId, worktreeId, filePath, diffSide } = tab;
+  const { id: tabId, worktreeId, filePath, diffSide, diffCommit } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -42,7 +42,9 @@ export function DiffView({ tab }: { tab: Tab }) {
     // fall back to diffing against the current path — a benign degradation.
     void (async () => {
       try {
-        const diff = await fileDiff(worktreeId, filePath, diffSide);
+        const diff = diffCommit
+          ? await commitFileDiff(worktreeId, diffCommit, filePath)
+          : await fileDiff(worktreeId, filePath, diffSide);
         if (cancelled) {
           return;
         }
@@ -60,7 +62,7 @@ export function DiffView({ tab }: { tab: Tab }) {
     return () => {
       cancelled = true;
     };
-  }, [tabId, worktreeId, filePath, diffSide, reloadNonce]);
+  }, [tabId, worktreeId, filePath, diffSide, diffCommit, reloadNonce]);
 
   if (state.kind === "binary") {
     return <Placeholder>This file is binary and can't be diffed.</Placeholder>;

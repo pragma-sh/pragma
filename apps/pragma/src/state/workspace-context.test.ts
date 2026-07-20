@@ -34,6 +34,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    diffCommit: null,
     prNumber: null,
     pluginId: null,
     pluginViewId: null,

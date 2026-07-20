@@ -50,6 +50,7 @@ function makeTab(overrides: Partial<Tab>): Tab {
     url: null,
     filePath: null,
     diffSide: null,
+    diffCommit: null,
     prNumber: null,
     pluginId: null,
     pluginViewId: null,
@@ -88,6 +89,7 @@ function mockBackend(seedTabs: Tab[]) {
             title: args.title as string | null,
             filePath: args.filePath as string | null,
             diffSide: args.diffSide as Tab["diffSide"],
+            diffCommit: null,
           }),
         );
       }
@@ -142,6 +144,7 @@ describe("openFileTab / openDiffTab", () => {
       kind: "diff",
       filePath: "src/app.ts",
       diffSide: "committed",
+      diffCommit: null,
     });
     const { result } = await renderWorkspace([existing]);
 

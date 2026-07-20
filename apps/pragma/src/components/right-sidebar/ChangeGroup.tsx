@@ -88,7 +88,6 @@ export function ChangeGroup({
   fileBadge,
 }: ChangeGroupProps) {
   const [open, setOpen] = useState(true);
-  const groups = useMemo(() => groupByDirectory(files), [files]);
 
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
@@ -119,80 +118,108 @@ export function ChangeGroup({
         </span>
       </div>
       <CollapsibleContent>
-        {files.length === 0 ? (
-          <p className="px-4 py-1 text-[11px] text-muted-foreground">{emptyLabel}</p>
-        ) : (
-          groups.map(([dir, items]) => (
-            <div key={dir}>
-              {dir && (
-                <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {dir}
-                </div>
-              )}
-              {items.map((file) => {
-                const meta = STATUS_META[file.status];
-                return (
-                  <div
-                    className="group/row flex w-full items-center gap-2 px-4 py-0.5 text-xs hover:bg-muted"
-                    key={`${file.path}:${file.status}`}
-                  >
-                    <button
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                      onClick={() => onOpen(file)}
-                      type="button"
-                    >
-                      <Icon className="size-4 shrink-0" icon={fileIconId(basename(file.path))} />
-                      <span className="min-w-0 flex-1 truncate text-foreground">
-                        {basename(file.path)}
-                      </span>
-                    </button>
-                    {fileActions.map((action) => (
-                      <button
-                        aria-label={action.label(file)}
-                        className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
-                        key={action.title}
-                        onClick={() => action.onClick(file)}
-                        title={action.title}
-                        type="button"
-                      >
-                        <action.icon className="size-3.5" />
-                      </button>
-                    ))}
-                    {fileBadge?.(file)}
-                    <span
-                      aria-label={
-                        file.additions === null
-                          ? "Line count unavailable"
-                          : `${file.additions} lines added`
-                      }
-                      className={cn(
-                        "shrink-0 font-mono tabular-nums",
-                        file.additions === null ? "text-muted-foreground" : "text-success",
-                      )}
-                    >
-                      {file.additions === null ? "—" : `+${file.additions}`}
-                    </span>
-                    <span
-                      aria-label={
-                        file.deletions === null
-                          ? "Line count unavailable"
-                          : `${file.deletions} lines deleted`
-                      }
-                      className={cn(
-                        "shrink-0 font-mono tabular-nums",
-                        file.deletions === null ? "text-muted-foreground" : "text-destructive",
-                      )}
-                    >
-                      {file.deletions === null ? "—" : `-${file.deletions}`}
-                    </span>
-                    <span className={cn("shrink-0 font-mono", meta.className)}>{meta.letter}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ))
-        )}
+        <ChangeFileList
+          emptyLabel={emptyLabel}
+          fileActions={fileActions}
+          fileBadge={fileBadge}
+          files={files}
+          onOpen={onOpen}
+        />
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+/** Props for the flat, directory-grouped changed-file list. */
+interface ChangeFileListProps {
+  files: ChangedFile[];
+  /** Shown when `files` is empty. */
+  emptyLabel: string;
+  onOpen: (file: ChangedFile) => void;
+  fileActions?: ChangeFileAction[];
+  /** Optional trailing badge per row (e.g. a PR's unresolved-comment count). */
+  fileBadge?: (file: ChangedFile) => ReactNode;
+}
+
+/**
+ * The directory-grouped changed-file rows a `ChangeGroup` renders, exported so
+ * other collapsible containers (e.g. a per-commit file list) reuse the exact
+ * same row style.
+ */
+export function ChangeFileList({
+  files,
+  emptyLabel,
+  onOpen,
+  fileActions = NO_FILE_ACTIONS,
+  fileBadge,
+}: ChangeFileListProps) {
+  const groups = useMemo(() => groupByDirectory(files), [files]);
+  if (files.length === 0) {
+    return <p className="px-4 py-1 text-[11px] text-muted-foreground">{emptyLabel}</p>;
+  }
+  return groups.map(([dir, items]) => (
+    <div key={dir}>
+      {dir && (
+        <div className="px-3 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          {dir}
+        </div>
+      )}
+      {items.map((file) => {
+        const meta = STATUS_META[file.status];
+        return (
+          <div
+            className="group/row flex w-full items-center gap-2 px-4 py-0.5 text-xs hover:bg-muted"
+            key={`${file.path}:${file.status}`}
+          >
+            <button
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              onClick={() => onOpen(file)}
+              type="button"
+            >
+              <Icon className="size-4 shrink-0" icon={fileIconId(basename(file.path))} />
+              <span className="min-w-0 flex-1 truncate text-foreground">{basename(file.path)}</span>
+            </button>
+            {fileActions.map((action) => (
+              <button
+                aria-label={action.label(file)}
+                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+                key={action.title}
+                onClick={() => action.onClick(file)}
+                title={action.title}
+                type="button"
+              >
+                <action.icon className="size-3.5" />
+              </button>
+            ))}
+            {fileBadge?.(file)}
+            <span
+              aria-label={
+                file.additions === null ? "Line count unavailable" : `${file.additions} lines added`
+              }
+              className={cn(
+                "shrink-0 font-mono tabular-nums",
+                file.additions === null ? "text-muted-foreground" : "text-success",
+              )}
+            >
+              {file.additions === null ? "—" : `+${file.additions}`}
+            </span>
+            <span
+              aria-label={
+                file.deletions === null
+                  ? "Line count unavailable"
+                  : `${file.deletions} lines deleted`
+              }
+              className={cn(
+                "shrink-0 font-mono tabular-nums",
+                file.deletions === null ? "text-muted-foreground" : "text-destructive",
+              )}
+            >
+              {file.deletions === null ? "—" : `-${file.deletions}`}
+            </span>
+            <span className={cn("shrink-0 font-mono", meta.className)}>{meta.letter}</span>
+          </div>
+        );
+      })}
+    </div>
+  ));
 }

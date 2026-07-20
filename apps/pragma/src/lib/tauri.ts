@@ -20,6 +20,7 @@ import type {
   Tab,
   TabKind,
   WorktreeChanges,
+  WorktreeCommitList,
   Worktree,
   WorktreeStatus,
   AgentMessage,
@@ -554,6 +555,7 @@ export function createTab(
   url?: string,
   filePath?: string | null,
   diffSide?: DiffSide | null,
+  diffCommit?: string | null,
   prNumber?: number | null,
 ): Promise<Tab> {
   return invoke<Tab>("create_tab", {
@@ -564,6 +566,7 @@ export function createTab(
     url,
     filePath,
     diffSide,
+    diffCommit,
     // Only send `prNumber` for PR tabs; omitting it keeps the IPC arg shape
     // stable for the common non-PR case (an explicit null is still forwarded).
     ...(prNumber !== undefined && { prNumber }),
@@ -778,6 +781,25 @@ export function worktreeChanges(worktreeId: string): Promise<WorktreeChanges> {
  */
 export function worktreesMergedStatus(worktreeIds: string[]): Promise<Record<string, boolean>> {
   return invoke<Record<string, boolean>>("worktrees_merged_status", { worktreeIds });
+}
+
+/**
+ * Lists a worktree's commits since its fork point (newest first), with
+ * authors, co-authors, and per-commit changed files. `limit` caps the page;
+ * `totalCount` reports the whole range so callers can offer "load more".
+ */
+export function worktreeCommits(worktreeId: string, limit: number): Promise<WorktreeCommitList> {
+  return invoke<WorktreeCommitList>("worktree_commits", { worktreeId, limit });
+}
+
+/** Loads the old/new text for one file as changed by a single commit. */
+export function commitFileDiff(
+  worktreeId: string,
+  commit: string,
+  path: string,
+  oldPath?: string | null,
+): Promise<FileDiff> {
+  return invoke<FileDiff>("commit_file_diff", { worktreeId, commit, path, oldPath });
 }
 
 /** Loads the old/new text for one changed file on the given diff side. */
