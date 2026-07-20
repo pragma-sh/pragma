@@ -42,6 +42,13 @@ export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 2;
 export type TitleListener = (title: string) => void;
 export type ExitListener = (code: number | null) => void;
 
+/** A fuzzy find match in the terminal buffer: `row` is an absolute buffer row (scrollback included). */
+export interface TerminalFuzzyMatch {
+  row: number;
+  from: number;
+  to: number;
+}
+
 type TerminalPlatform = "mac" | "linux";
 
 function currentTerminalPlatform(): TerminalPlatform {
@@ -55,6 +62,11 @@ function handleTerminalKeyEvent(tabId: string, event: KeyboardEvent): boolean {
     return false;
   }
   const platform = currentTerminalPlatform();
+  if (isFindShortcut(event, platform)) {
+    event.preventDefault();
+    terminalManager.requestFind(tabId);
+    return false;
+  }
   if (handleSoftNewline(tabId, event)) {
     return false;
   }
@@ -67,6 +79,37 @@ function handleTerminalKeyEvent(tabId: string, event: KeyboardEvent): boolean {
     actionForEvent(event, getKeybindingsConfig(), platform) === null &&
     !hasPluginCommandForEvent(event)
   );
+}
+
+/** Cmd+F (mac) / Ctrl+F (linux), with no other modifiers, opens the find bar. */
+function isFindShortcut(event: KeyboardEvent, platform: TerminalPlatform): boolean {
+  if (event.key.toLowerCase() !== "f" || event.shiftKey || event.altKey) {
+    return false;
+  }
+  return platform === "mac" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+/**
+ * Best-effort model of the not-yet-submitted shell input line, rebuilt from
+ * raw keystrokes before they're sent to the PTY. The PTY's own echo (the text
+ * that actually appears on screen) comes from the remote shell, so we cannot
+ * read it back locally — this local mirror is what Replace edits instead.
+ * Printable inserts, backspace, and line-clearing chords are tracked;
+ * anything else (arrow keys, tab-completion, other escape sequences) is left
+ * as a no-op since we can't infer cursor position without shell integration.
+ */
+function applyLocalEcho(current: string, data: string): string {
+  if (data === "\r" || data === "\n") {
+    return "";
+  }
+  if (data === "\x7f" || data === "\b") {
+    return current.slice(0, -1);
+  }
+  if (data === "\x15" || data === "\x03") {
+    return "";
+  }
+  const isPlainInsert = [...data].every((char) => char.charCodeAt(0) >= 0x20 && char !== "\x7f");
+  return isPlainInsert ? current + data : current;
 }
 
 function handleSoftNewline(tabId: string, event: KeyboardEvent): boolean {
@@ -158,6 +201,11 @@ export class TerminalManager {
   // same keyed-Set shape as titleListeners for consistency; cleaned up in
   // dispose() rather than lingering like title subscriptions do.
   private exitListeners = new Map<string, Set<ExitListener>>();
+  private findRequestListeners = new Map<string, Set<() => void>>();
+  /** Local mirror of each tab's not-yet-submitted shell input line; see {@link applyLocalEcho}. */
+  private inputLineBuffers = new Map<string, string>();
+  /** Live marker/decoration disposables for the current find highlight, per tab. */
+  private fuzzyHighlightDisposables = new Map<string, IDisposable[]>();
 
   mount(tab: Tab, cwd: string, element: HTMLElement): void {
     const existing = this.terminals.get(tab.id);
@@ -188,6 +236,11 @@ export class TerminalManager {
       fontSize: TERMINAL_FONT_SIZE,
       lineHeight: TERMINAL_LINE_HEIGHT,
       scrollback: TERMINAL_SCROLLBACK_LINES,
+      // SearchAddon's match/active-match decorations call the proposed
+      // `registerDecoration` API; without this it throws the moment a find
+      // has a real match, so highlighting (and the resultCount event it
+      // gates) silently breaks.
+      allowProposedApi: true,
       theme: {
         background: "#0b0d10",
         foreground: "#e5e7eb",
@@ -273,7 +326,13 @@ export class TerminalManager {
       createFileLinkProvider(terminal, tab.id, tab.worktreeId, cwd),
     );
     this.terminals.set(tab.id, managed);
-    terminal.onData((data) => void ptyWrite(tab.id, data));
+    terminal.onData((data) => {
+      this.inputLineBuffers.set(
+        tab.id,
+        applyLocalEcho(this.inputLineBuffers.get(tab.id) ?? "", data),
+      );
+      void ptyWrite(tab.id, data);
+    });
     this.connect(tab, cwd, managed);
     this.fit(tab.id);
   }
@@ -349,7 +408,124 @@ export class TerminalManager {
     this.terminals.delete(tabId);
     this.pendingInput.delete(tabId);
     this.exitListeners.delete(tabId);
+    this.findRequestListeners.delete(tabId);
+    this.inputLineBuffers.delete(tabId);
+    this.clearFuzzyHighlights(tabId);
     void ptyKill(tabId);
+  }
+
+  /** Every buffer row (scrollback + viewport) as plain text, for fuzzy-scanning. */
+  getBufferLines(tabId: string): string[] {
+    const managed = this.terminals.get(tabId);
+    if (!managed) {
+      return [];
+    }
+    const buffer = managed.terminal.buffer.active;
+    const lines: string[] = [];
+    for (let row = 0; row < buffer.length; row += 1) {
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
+    }
+    return lines;
+  }
+
+  /**
+   * Replaces the current find highlight with `matches`, painting `activeIndex`
+   * distinctly. Uses xterm's marker/decoration API directly (proposed, hence
+   * `allowProposedApi` above) since there's no built-in fuzzy search to lean
+   * on. `registerMarker`'s offset is relative to the cursor's current absolute
+   * row, so each match's absolute row is converted relative to that.
+   */
+  setFuzzyHighlights(tabId: string, matches: TerminalFuzzyMatch[], activeIndex: number): void {
+    const managed = this.terminals.get(tabId);
+    if (!managed) {
+      return;
+    }
+    this.clearFuzzyHighlights(tabId);
+    const buffer = managed.terminal.buffer.active;
+    const cursorAbsoluteRow = buffer.baseY + buffer.cursorY;
+    const disposables: IDisposable[] = [];
+    matches.forEach((match, index) => {
+      const marker = managed.terminal.registerMarker(match.row - cursorAbsoluteRow);
+      if (!marker) {
+        return;
+      }
+      disposables.push(marker);
+      const decoration = managed.terminal.registerDecoration({
+        marker,
+        x: match.from,
+        width: Math.max(1, match.to - match.from),
+        backgroundColor: index === activeIndex ? "#b45309" : "#334155",
+      });
+      if (decoration) {
+        disposables.push(decoration);
+      }
+    });
+    this.fuzzyHighlightDisposables.set(tabId, disposables);
+  }
+
+  /** Clears the current find highlight, if any. */
+  clearFuzzyHighlights(tabId: string): void {
+    const existing = this.fuzzyHighlightDisposables.get(tabId);
+    if (existing) {
+      for (const disposable of existing) {
+        disposable.dispose();
+      }
+      this.fuzzyHighlightDisposables.delete(tabId);
+    }
+  }
+
+  /** Scrolls the viewport to an absolute buffer row (e.g. to reveal the active match). */
+  scrollToBufferRow(tabId: string, row: number): void {
+    this.terminals.get(tabId)?.terminal.scrollToLine(row);
+  }
+
+  /** Subscribes to Cmd/Ctrl+F pressed while this tab's terminal has focus. */
+  onRequestFind(tabId: string, listener: () => void): () => void {
+    let listeners = this.findRequestListeners.get(tabId);
+    if (!listeners) {
+      listeners = new Set();
+      this.findRequestListeners.set(tabId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const set = this.findRequestListeners.get(tabId);
+      if (!set) {
+        return;
+      }
+      set.delete(listener);
+      if (set.size === 0) {
+        this.findRequestListeners.delete(tabId);
+      }
+    };
+  }
+
+  /** Called from the terminal's custom key handler on Cmd/Ctrl+F. */
+  requestFind(tabId: string): void {
+    const listeners = this.findRequestListeners.get(tabId);
+    if (listeners) {
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  }
+
+  /** The not-yet-submitted shell input line, per {@link applyLocalEcho}'s best-effort model. */
+  getPendingInputLine(tabId: string): string {
+    return this.inputLineBuffers.get(tabId) ?? "";
+  }
+
+  /**
+   * Rewrites the tab's pending input line to `next` by sending backspaces for
+   * the tracked length followed by the new text — Replace only ever touches
+   * this unsent line, never the PTY's scrollback/output.
+   */
+  replaceInPendingInput(tabId: string, next: string): void {
+    const current = this.inputLineBuffers.get(tabId) ?? "";
+    if (current === next) {
+      return;
+    }
+    void ptyWrite(tabId, "\x7f".repeat(current.length) + next);
+    this.inputLineBuffers.set(tabId, next);
   }
 
   private fit(tabId: string): void {
