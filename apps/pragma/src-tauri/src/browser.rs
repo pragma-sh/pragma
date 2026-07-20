@@ -34,6 +34,12 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const META_EVENT: &str = "browser-meta";
 /// Event name emitted by a browser webview when the user interacts with its content.
 const FOCUS_REQUEST_EVENT: &str = "browser-focus-request";
+/// Event name emitted by a browser webview when the page-side handler sees
+/// Cmd/Ctrl+F while it (not the React chrome) holds keyboard focus.
+const FIND_REQUEST_EVENT: &str = "browser-find-request";
+/// URL scheme the injected [`focus_script`] navigates to on Cmd/Ctrl+F, mirroring
+/// [`FOCUS_SENTINEL_SCHEME`]'s ping-via-cancelled-navigation trick.
+const FIND_SENTINEL_SCHEME: &str = "pragma-find";
 /// URL scheme the injected [`focus_script`] navigates to when its page gains
 /// focus. It is a one-way "this page was focused" ping back to Rust: the
 /// navigation handler recognizes the scheme, reports focus to the frontend, and
@@ -71,6 +77,14 @@ static BROWSER_EVAL_PENDING: OnceLock<BrowserEvalPending> = OnceLock::new();
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserFocusRequest {
+    tab_id: String,
+}
+
+/// Cmd/Ctrl+F ping reported to the frontend so the find bar opens even when
+/// keyboard focus is inside the page rather than the React chrome.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserFindRequest {
     tab_id: String,
 }
 
@@ -121,6 +135,17 @@ fn focus_script() -> String {
   window.addEventListener('focus', signal, true);
   window.addEventListener('pointerdown', signal, true);
   window.addEventListener('blur', function() {{ signalled = false; }}, true);
+
+  // Forward Cmd/Ctrl+F to the React find bar instead of letting it fall
+  // through to the page (or nothing); see FIND_SENTINEL_SCHEME (Rust).
+  window.addEventListener('keydown', function(event) {{
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const modifierHeld = isMac ? event.metaKey : event.ctrlKey;
+    if (event.key.toLowerCase() === 'f' && modifierHeld && !event.shiftKey && !event.altKey) {{
+      event.preventDefault();
+      window.location.href = '{FIND_SENTINEL_SCHEME}:request';
+    }}
+  }}, true);
 }})();
 "
     )
@@ -395,6 +420,16 @@ pub fn browser_create(
                 );
                 return false;
             }
+            // A Cmd/Ctrl+F ping, not a real navigation: report it and cancel the load.
+            if url.scheme() == FIND_SENTINEL_SCHEME {
+                let _ = nav_app.emit(
+                    FIND_REQUEST_EVENT,
+                    BrowserFindRequest {
+                        tab_id: nav_tab.clone(),
+                    },
+                );
+                return false;
+            }
             emit_meta(
                 &nav_app,
                 &BrowserMeta {
@@ -581,6 +616,172 @@ fn selector_eval(selector: &str, body: &str) -> AppResult<String> {
     Ok(format!(
         "(() => {{ const el = document.querySelector({selector}); if (!el) throw new Error('selector not found'); {body}; }})();"
     ))
+}
+
+/// Total matches and the 0-based index of the currently active one (`-1` when
+/// there are no matches) for an in-page find.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserFindResult {
+    count: usize,
+    index: i64,
+}
+
+fn parse_find_result(value: serde_json::Value) -> AppResult<BrowserFindResult> {
+    serde_json::from_value(value)
+        .map_err(|error| AppError::Browser(format!("invalid find result: {error}")))
+}
+
+/// Highlights every occurrence of `query` in the page and jumps to the first
+/// match, replacing any highlighting from a previous search. Uses injected
+/// `<mark>` wrapping rather than `window.find()` because the latter cannot
+/// report a match count or index, which the find bar's "3/12" indicator needs.
+fn build_find_set_script(query: &str, case_sensitive: bool) -> AppResult<String> {
+    let query = serde_json::to_string(query)?;
+    let case_sensitive = if case_sensitive { "true" } else { "false" };
+    Ok(format!(
+        r"
+(function() {{
+  const state = window.__pragmaFind || (window.__pragmaFind = {{ marks: [], index: -1 }});
+  for (const mark of state.marks) {{
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parent.replaceChild(document.createTextNode(mark.textContent), mark);
+    parent.normalize();
+  }}
+  state.marks = [];
+  state.index = -1;
+  const query = {query};
+  const caseSensitive = {case_sensitive};
+  if (!query) return {{ count: 0, index: -1 }};
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {{
+    acceptNode(node) {{
+      const tag = node.parentElement && node.parentElement.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK') return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }},
+  }});
+  const textNodes = [];
+  let current;
+  while ((current = walker.nextNode())) textNodes.push(current);
+  for (const node of textNodes) {{
+    const text = node.textContent || '';
+    const haystack = caseSensitive ? text : text.toLowerCase();
+    const fragments = [];
+    let lastEnd = 0;
+    let searchFrom = 0;
+    let found = false;
+    let index;
+    while ((index = haystack.indexOf(needle, searchFrom)) !== -1) {{
+      found = true;
+      fragments.push(document.createTextNode(text.slice(lastEnd, index)));
+      const mark = document.createElement('mark');
+      mark.setAttribute('data-pragma-find', '1');
+      mark.style.backgroundColor = '#f59e0b';
+      mark.style.color = '#111827';
+      mark.textContent = text.slice(index, index + needle.length);
+      fragments.push(mark);
+      state.marks.push(mark);
+      lastEnd = index + needle.length;
+      searchFrom = lastEnd;
+    }}
+    if (found) {{
+      fragments.push(document.createTextNode(text.slice(lastEnd)));
+      const parent = node.parentNode;
+      for (const fragment of fragments) parent.insertBefore(fragment, node);
+      parent.removeChild(node);
+    }}
+  }}
+  if (state.marks.length > 0) {{
+    state.index = 0;
+    state.marks[0].style.backgroundColor = '#fb923c';
+    state.marks[0].scrollIntoView({{ block: 'center' }});
+  }}
+  return {{ count: state.marks.length, index: state.marks.length ? 0 : -1 }};
+}})();
+"
+    ))
+}
+
+/// Moves to the next/previous match highlighted by a prior `browser_find_set`.
+fn build_find_seek_script(forward: bool) -> &'static str {
+    if forward {
+        r"
+(function() {
+  const state = window.__pragmaFind;
+  if (!state || state.marks.length === 0) return { count: 0, index: -1 };
+  if (state.index >= 0) state.marks[state.index].style.backgroundColor = '#f59e0b';
+  state.index = (state.index + 1) % state.marks.length;
+  state.marks[state.index].style.backgroundColor = '#fb923c';
+  state.marks[state.index].scrollIntoView({ block: 'center' });
+  return { count: state.marks.length, index: state.index };
+})();
+"
+    } else {
+        r"
+(function() {
+  const state = window.__pragmaFind;
+  if (!state || state.marks.length === 0) return { count: 0, index: -1 };
+  if (state.index >= 0) state.marks[state.index].style.backgroundColor = '#f59e0b';
+  state.index = (state.index - 1 + state.marks.length) % state.marks.length;
+  state.marks[state.index].style.backgroundColor = '#fb923c';
+  state.marks[state.index].scrollIntoView({ block: 'center' });
+  return { count: state.marks.length, index: state.index };
+})();
+"
+    }
+}
+
+const FIND_CLEAR_SCRIPT: &str = r"
+(function() {
+  const state = window.__pragmaFind;
+  if (!state) return null;
+  for (const mark of state.marks) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parent.replaceChild(document.createTextNode(mark.textContent), mark);
+    parent.normalize();
+  }
+  state.marks = [];
+  state.index = -1;
+  return null;
+})();
+";
+
+/// Highlights every occurrence of `query` in the page and jumps to the first
+/// match. See [`build_find_set_script`].
+#[tauri::command]
+pub fn browser_find_set(
+    app: tauri::AppHandle,
+    tab_id: String,
+    query: String,
+    case_sensitive: bool,
+) -> AppResult<BrowserFindResult> {
+    let script = build_find_set_script(&query, case_sensitive)?;
+    parse_find_result(browser_eval(app, tab_id, script)?)
+}
+
+/// Moves to the next (`forward: true`) or previous match from the last
+/// `browser_find_set` call.
+#[tauri::command]
+pub fn browser_find_seek(
+    app: tauri::AppHandle,
+    tab_id: String,
+    forward: bool,
+) -> AppResult<BrowserFindResult> {
+    parse_find_result(browser_eval(
+        app,
+        tab_id,
+        build_find_seek_script(forward).to_string(),
+    )?)
+}
+
+/// Removes find highlighting from the page.
+#[tauri::command]
+pub fn browser_find_clear(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
+    browser_eval(app, tab_id, FIND_CLEAR_SCRIPT.to_string())?;
+    Ok(())
 }
 
 /// CLI-oriented tab screenshot. Unlike [`browser_screenshot`], which needs the
