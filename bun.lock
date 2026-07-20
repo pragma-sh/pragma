@@ -316,7 +316,7 @@
     },
     "packages/plugin": {
       "name": "@pragma/plugin",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@pragma/constants": "workspace:*",
         "@pragma/sdk": "workspace:*",
