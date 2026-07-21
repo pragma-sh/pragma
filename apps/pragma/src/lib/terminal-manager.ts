@@ -112,6 +112,16 @@ function applyLocalEcho(current: string, data: string): string {
   return isPlainInsert ? current + data : current;
 }
 
+function preservesLocalEchoConfidence(data: string): boolean {
+  if (data === "\r" || data === "\n" || data === "\x7f" || data === "\b") {
+    return true;
+  }
+  if (data === "\x15" || data === "\x03") {
+    return true;
+  }
+  return [...data].every((char) => char.charCodeAt(0) >= 0x20 && char !== "\x7f");
+}
+
 function handleSoftNewline(tabId: string, event: KeyboardEvent): boolean {
   // Shift+Enter is a soft newline: xterm maps Enter to CR, so rewrite it to
   // ESC+CR for TUI REPLs that treat that as multiline continuation.
@@ -204,6 +214,8 @@ export class TerminalManager {
   private findRequestListeners = new Map<string, Set<() => void>>();
   /** Local mirror of each tab's not-yet-submitted shell input line; see {@link applyLocalEcho}. */
   private inputLineBuffers = new Map<string, string>();
+  /** Whether the local input mirror still knows the shell cursor position. */
+  private inputLineConfidence = new Map<string, boolean>();
   /** Live marker/decoration disposables for the current find highlight, per tab. */
   private fuzzyHighlightDisposables = new Map<string, IDisposable[]>();
 
@@ -327,6 +339,9 @@ export class TerminalManager {
     );
     this.terminals.set(tab.id, managed);
     terminal.onData((data) => {
+      if (!preservesLocalEchoConfidence(data)) {
+        this.inputLineConfidence.set(tab.id, false);
+      }
       this.inputLineBuffers.set(
         tab.id,
         applyLocalEcho(this.inputLineBuffers.get(tab.id) ?? "", data),
@@ -410,6 +425,7 @@ export class TerminalManager {
     this.exitListeners.delete(tabId);
     this.findRequestListeners.delete(tabId);
     this.inputLineBuffers.delete(tabId);
+    this.inputLineConfidence.delete(tabId);
     this.clearFuzzyHighlights(tabId);
     void ptyKill(tabId);
   }
@@ -514,12 +530,20 @@ export class TerminalManager {
     return this.inputLineBuffers.get(tabId) ?? "";
   }
 
+  /** Whether replacing can safely rewrite the shell's current input line. */
+  canReplacePendingInput(tabId: string): boolean {
+    return this.inputLineConfidence.get(tabId) ?? true;
+  }
+
   /**
    * Rewrites the tab's pending input line to `next` by sending backspaces for
    * the tracked length followed by the new text — Replace only ever touches
    * this unsent line, never the PTY's scrollback/output.
    */
   replaceInPendingInput(tabId: string, next: string): void {
+    if (!this.canReplacePendingInput(tabId)) {
+      return;
+    }
     const current = this.inputLineBuffers.get(tabId) ?? "";
     if (current === next) {
       return;

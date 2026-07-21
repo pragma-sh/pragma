@@ -28,15 +28,26 @@ export function useBrowserFind(tabId: string): BrowserFindApi {
     matchCount: 0,
     currentMatch: 0,
   });
-  useEffect(
-    () =>
-      void onBrowserFindRequest((request) => {
-        if (request.tabId === tabId) {
-          setState((p) => ({ ...p, open: true }));
-        }
-      }).then((unlisten) => unlisten),
-    [tabId],
-  );
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onBrowserFindRequest((request) => {
+      if (request.tabId === tabId) {
+        setState((p) => ({ ...p, open: true }));
+      }
+    }).then((cleanup) => {
+      if (disposed) {
+        return cleanup();
+      } else {
+        unlisten = cleanup;
+        return undefined;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [tabId]);
 
   const applyMatchResult = useCallback(({ count, index }: { count: number; index: number }) => {
     setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));

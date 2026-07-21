@@ -510,6 +510,37 @@ describe("TerminalManager output", () => {
   });
 });
 
+describe("TerminalManager pending input replacement", () => {
+  it("does not replace after cursor movement makes the local mirror uncertain", async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{ onData: Mock<(data: string) => void> }>;
+      }
+    ).instances.at(-1);
+    const onData = terminal!.onData.mock.calls[0]![0] as unknown as (data: string) => void;
+    onData("hello");
+    onData("\x1b[D");
+
+    expect(manager.canReplacePendingInput(tab.id)).toBe(false);
+    manager.replaceInPendingInput(tab.id, "goodbye");
+
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "pty_write",
+      expect.objectContaining({ data: "\x7f".repeat(5) + "goodbye" }),
+    );
+  });
+});
+
 describe("TerminalManager key passthrough", () => {
   beforeEach(() => {
     invokeMock.mockReset();

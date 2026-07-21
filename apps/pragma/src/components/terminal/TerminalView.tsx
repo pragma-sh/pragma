@@ -50,7 +50,7 @@ function TerminalViewComponent({ tab, cwd }: TerminalViewProps) {
           onValueChange: find.setReplaceValue,
           onReplace: find.replaceOne,
           onReplaceAll: find.replaceAll,
-          replaceDisabled: find.query.length === 0,
+          replaceDisabled: find.matchCount === 0 || !terminalManager.canReplacePendingInput(tab.id),
         }}
       />
     </div>

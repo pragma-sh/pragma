@@ -655,6 +655,27 @@ fn build_find_set_script(query: &str, case_sensitive: bool) -> AppResult<String>
   const caseSensitive = {case_sensitive};
   if (!query) return {{ count: 0, index: -1 }};
   const needle = caseSensitive ? query : query.toLowerCase();
+  function findFuzzyRanges(text, search) {{
+    const haystack = caseSensitive ? text : text.toLowerCase();
+    const ranges = [];
+    let searchFrom = 0;
+    while (searchFrom < haystack.length) {{
+      let needleIndex = 0;
+      let start = -1;
+      let end = -1;
+      for (let i = searchFrom; i < haystack.length && needleIndex < search.length; i += 1) {{
+        if (haystack[i] === search[needleIndex]) {{
+          if (start === -1) start = i;
+          end = i;
+          needleIndex += 1;
+        }}
+      }}
+      if (needleIndex < search.length) break;
+      ranges.push({{ from: start, to: end + 1 }});
+      searchFrom = end + 1;
+    }}
+    return ranges;
+  }}
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {{
     acceptNode(node) {{
       const tag = node.parentElement && node.parentElement.tagName;
@@ -667,26 +688,21 @@ fn build_find_set_script(query: &str, case_sensitive: bool) -> AppResult<String>
   while ((current = walker.nextNode())) textNodes.push(current);
   for (const node of textNodes) {{
     const text = node.textContent || '';
-    const haystack = caseSensitive ? text : text.toLowerCase();
     const fragments = [];
     let lastEnd = 0;
-    let searchFrom = 0;
-    let found = false;
-    let index;
-    while ((index = haystack.indexOf(needle, searchFrom)) !== -1) {{
-      found = true;
-      fragments.push(document.createTextNode(text.slice(lastEnd, index)));
+    const ranges = findFuzzyRanges(text, needle);
+    for (const range of ranges) {{
+      fragments.push(document.createTextNode(text.slice(lastEnd, range.from)));
       const mark = document.createElement('mark');
       mark.setAttribute('data-pragma-find', '1');
       mark.style.backgroundColor = '#f59e0b';
       mark.style.color = '#111827';
-      mark.textContent = text.slice(index, index + needle.length);
+      mark.textContent = text.slice(range.from, range.to);
       fragments.push(mark);
       state.marks.push(mark);
-      lastEnd = index + needle.length;
-      searchFrom = lastEnd;
+      lastEnd = range.to;
     }}
-    if (found) {{
+    if (ranges.length > 0) {{
       fragments.push(document.createTextNode(text.slice(lastEnd)));
       const parent = node.parentNode;
       for (const fragment of fragments) parent.insertBefore(fragment, node);
