@@ -29,6 +29,7 @@ apps/pragma/
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
+│   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
 │   │   ├── editor-dirty-store.ts   # Ephemeral editor dirty state (never in reducer)
 │   │   ├── review-done-store.ts    # Ephemeral per-file PR review done-toggle
@@ -206,6 +207,11 @@ absolute filesystem path, or a plugin-dir-relative icon path; relative paths res
 against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
+
+Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
+(worktree id → pin timestamp). The sidebar promotes pinned worktrees to roots
+at the top (newest pin first); each row exposes a hover pin button, a
+context-menu Pin/Unpin item, and a filled pin glyph that unpins when clicked.
 
 Plugin watchers are normally started when Pragma launches an agent session, but command
 approval reports also lazy-start the matching watcher for their tab. This keeps approval
