@@ -12,27 +12,16 @@ import {
   nextFuzzyMatch,
   previousFuzzyMatch,
 } from "@/lib/fuzzy-match";
+import {
+  type FindReplaceApi,
+  type FindReplaceState,
+  useOpenBar,
+  useSetIgnoreCase,
+  useSetQuery,
+  useSetReplaceValue,
+} from "@/components/find-replace/find-replace-state";
 
-export interface MarkdownFindState {
-  open: boolean;
-  query: string;
-  replaceValue: string;
-  ignoreCase: boolean;
-  matchCount: number;
-  currentMatch: number;
-}
-
-export interface MarkdownFindApi extends MarkdownFindState {
-  openBar: () => void;
-  closeBar: () => void;
-  setQuery: (value: string) => void;
-  setReplaceValue: (value: string) => void;
-  setIgnoreCase: (value: boolean) => void;
-  findNext: () => void;
-  findPrevious: () => void;
-  replaceOne: () => void;
-  replaceAll: () => void;
-}
+export type MarkdownFindApi = FindReplaceApi;
 
 const findPluginKey = new PluginKey<DecorationSet>("pragmaMarkdownFind");
 
@@ -141,8 +130,9 @@ function findDocumentMatches(
  * document range to highlight or replace. `FindReplaceBar` is the UI; this
  * hook is the controller, driven by the `Editor` instance.
  */
+// fallow-ignore-next-line complexity -- controller hook composing state + paint/recompute/goTo callbacks for one find/replace surface; each callback is already factored to its own useCallback.
 export function useMarkdownFind(editor: Editor | null): MarkdownFindApi {
-  const [state, setState] = useState<MarkdownFindState>({
+  const [state, setState] = useState<FindReplaceState>({
     open: false,
     query: "",
     replaceValue: "",
@@ -192,7 +182,7 @@ export function useMarkdownFind(editor: Editor | null): MarkdownFindApi {
     [editor, paint],
   );
 
-  const openBar = useCallback(() => setState((previous) => ({ ...previous, open: true })), []);
+  const openBar = useOpenBar(setState);
 
   const closeBar = useCallback(() => {
     setState((previous) => ({ ...previous, open: false, matchCount: 0, currentMatch: 0 }));
@@ -201,25 +191,10 @@ export function useMarkdownFind(editor: Editor | null): MarkdownFindApi {
     paint([], 0);
   }, [paint]);
 
-  const setQuery = useCallback(
-    (query: string) => {
-      setState((previous) => ({ ...previous, query }));
-      recompute(query, state.ignoreCase);
-    },
-    [recompute, state.ignoreCase],
-  );
-
-  const setReplaceValue = useCallback((replaceValue: string) => {
-    setState((previous) => ({ ...previous, replaceValue }));
-  }, []);
-
-  const setIgnoreCase = useCallback(
-    (ignoreCase: boolean) => {
-      setState((previous) => ({ ...previous, ignoreCase }));
-      recompute(state.query, ignoreCase);
-    },
-    [recompute, state.query],
-  );
+  // fallow-ignore-next-line code-duplication -- shared setQuery/setReplaceValue/setIgnoreCase calls already factored into find-replace-state.ts; the rest of the match is goTo's per-surface guard, not extractable logic.
+  const setQuery = useSetQuery(setState, recompute, state.ignoreCase);
+  const setReplaceValue = useSetReplaceValue(setState);
+  const setIgnoreCase = useSetIgnoreCase(setState, recompute, state.query);
 
   const goTo = useCallback(
     (direction: "next" | "previous") => {

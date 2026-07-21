@@ -2,27 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 
 import { findFuzzyMatches } from "@/lib/fuzzy-match";
 import { terminalManager, type TerminalFuzzyMatch } from "@/lib/terminal-manager";
+import {
+  type FindReplaceApi,
+  type FindReplaceState,
+  useOpenBar,
+  useSetIgnoreCase,
+  useSetQuery,
+  useSetReplaceValue,
+} from "@/components/find-replace/find-replace-state";
 
-export interface TerminalFindState {
-  open: boolean;
-  query: string;
-  replaceValue: string;
-  ignoreCase: boolean;
-  matchCount: number;
-  currentMatch: number;
-}
-
-export interface TerminalFindApi extends TerminalFindState {
-  openBar: () => void;
-  closeBar: () => void;
-  setQuery: (value: string) => void;
-  setReplaceValue: (value: string) => void;
-  setIgnoreCase: (value: boolean) => void;
-  findNext: () => void;
-  findPrevious: () => void;
-  replaceOne: () => void;
-  replaceAll: () => void;
-}
+export type TerminalFindApi = FindReplaceApi;
 
 /** Replaces the first fuzzy match of `query` in `line`. */
 function replaceFirstFuzzy(
@@ -65,7 +54,7 @@ function replaceAllFuzzy(
  * not-yet-submitted input line via `TerminalManager`'s local-echo mirror.
  */
 export function useTerminalFind(tabId: string): TerminalFindApi {
-  const [state, setState] = useState<TerminalFindState>({
+  const [state, setState] = useState<FindReplaceState>({
     open: false,
     query: "",
     replaceValue: "",
@@ -108,7 +97,7 @@ export function useTerminalFind(tabId: string): TerminalFindApi {
     [tabId],
   );
 
-  const openBar = useCallback(() => setState((p) => ({ ...p, open: true })), []);
+  const openBar = useOpenBar(setState);
 
   const closeBar = useCallback(() => {
     terminalManager.clearFuzzyHighlights(tabId);
@@ -117,25 +106,10 @@ export function useTerminalFind(tabId: string): TerminalFindApi {
     setState((p) => ({ ...p, open: false, matchCount: 0, currentMatch: 0 }));
   }, [tabId]);
 
-  const setQuery = useCallback(
-    (query: string) => {
-      setState((p) => ({ ...p, query }));
-      recompute(query, state.ignoreCase);
-    },
-    [recompute, state.ignoreCase],
-  );
-
-  const setReplaceValue = useCallback((replaceValue: string) => {
-    setState((p) => ({ ...p, replaceValue }));
-  }, []);
-
-  const setIgnoreCase = useCallback(
-    (ignoreCase: boolean) => {
-      setState((p) => ({ ...p, ignoreCase }));
-      recompute(state.query, ignoreCase);
-    },
-    [recompute, state.query],
-  );
+  // fallow-ignore-next-line code-duplication -- shared setQuery/setReplaceValue/setIgnoreCase calls already factored into find-replace-state.ts; the rest of the match is goTo's per-surface guard, not extractable logic.
+  const setQuery = useSetQuery(setState, recompute, state.ignoreCase);
+  const setReplaceValue = useSetReplaceValue(setState);
+  const setIgnoreCase = useSetIgnoreCase(setState, recompute, state.query);
 
   const goTo = useCallback(
     (direction: "next" | "previous") => {

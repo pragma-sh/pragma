@@ -28,7 +28,7 @@ import {
 } from "@/components/editor/use-editor-file";
 import { useEditorFind } from "@/components/editor/use-editor-find";
 import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-markdown-find";
-import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";
+import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { basename } from "@/lib/path";
 
@@ -153,26 +153,7 @@ function MarkdownWysiwyg({
       </MarkdownViewBar>
       <div className="relative min-h-0 flex-1 overflow-y-auto">
         <EditorContent className="h-full" editor={editor} />
-        <FindReplaceBar
-          currentMatch={find.currentMatch}
-          findPlaceholder="Find in file"
-          ignoreCase={find.ignoreCase}
-          matchCount={find.matchCount}
-          onClose={find.closeBar}
-          onIgnoreCaseChange={find.setIgnoreCase}
-          onNext={find.findNext}
-          onPrevious={find.findPrevious}
-          onQueryChange={find.setQuery}
-          open={find.open}
-          query={find.query}
-          replace={{
-            value: find.replaceValue,
-            onValueChange: find.setReplaceValue,
-            onReplace: find.replaceOne,
-            onReplaceAll: find.replaceAll,
-            replaceDisabled: find.matchCount === 0,
-          }}
-        />
+        <EditorFindReplaceBar find={find} />
       </div>
     </div>
   );
@@ -230,26 +211,7 @@ function MarkdownRaw({
         theme="none"
         value={doc}
       />
-      <FindReplaceBar
-        currentMatch={find.currentMatch}
-        findPlaceholder="Find in file"
-        ignoreCase={find.ignoreCase}
-        matchCount={find.matchCount}
-        onClose={find.closeBar}
-        onIgnoreCaseChange={find.setIgnoreCase}
-        onNext={find.findNext}
-        onPrevious={find.findPrevious}
-        onQueryChange={find.setQuery}
-        open={find.open}
-        query={find.query}
-        replace={{
-          value: find.replaceValue,
-          onValueChange: find.setReplaceValue,
-          onReplace: find.replaceOne,
-          onReplaceAll: find.replaceAll,
-          replaceDisabled: find.matchCount === 0,
-        }}
-      />
+      <EditorFindReplaceBar find={find} />
     </div>
   );
 }

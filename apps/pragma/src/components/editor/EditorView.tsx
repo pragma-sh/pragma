@@ -15,7 +15,7 @@ import {
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
 import { useEditorFind } from "@/components/editor/use-editor-find";
-import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";
+import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { clearEditorLocation, useEditorLocation } from "@/state/editor-location-store";
 
 /** Resolve a language grammar lazily by filename; plain text on no match. */
@@ -100,6 +100,7 @@ export function useEditorExtensions(
  * tab id), tracks dirty state, and saves on ⌘/Ctrl-S only — there is no
  * autosave. Binary/oversized files render a placeholder instead of garbage.
  */
+// fallow-ignore-next-line complexity -- wires together file load/save/language/keymap/find hooks for one CodeMirror instance; each hook already owns its own logic, this just composes them.
 export function EditorView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
   const savedDocRef = useRef("");
@@ -156,26 +157,7 @@ export function EditorView({ tab }: { tab: Tab }) {
         theme="none"
         value={state.kind === "ready" ? state.doc : ""}
       />
-      <FindReplaceBar
-        currentMatch={find.currentMatch}
-        findPlaceholder="Find in file"
-        ignoreCase={find.ignoreCase}
-        matchCount={find.matchCount}
-        onClose={find.closeBar}
-        onIgnoreCaseChange={find.setIgnoreCase}
-        onNext={find.findNext}
-        onPrevious={find.findPrevious}
-        onQueryChange={find.setQuery}
-        open={find.open}
-        query={find.query}
-        replace={{
-          value: find.replaceValue,
-          onValueChange: find.setReplaceValue,
-          onReplace: find.replaceOne,
-          onReplaceAll: find.replaceAll,
-          replaceDisabled: find.matchCount === 0,
-        }}
-      />
+      <EditorFindReplaceBar find={find} />
     </div>
   );
 }

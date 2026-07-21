@@ -43,6 +43,7 @@ export interface FindReplaceBarProps {
  * HTML, so this always registers a suppression while open — a harmless no-op
  * for the editor/terminal panes.
  */
+// fallow-ignore-next-line complexity -- single floating bar rendering find controls plus an optional collapsible replace section; the branching is the UI, not accidental complexity.
 export function FindReplaceBar({
   open,
   onClose,
@@ -98,6 +99,18 @@ export function FindReplaceBar({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       onNext();
+    }
+  };
+
+  const handleReplaceKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === "Enter" && replace) {
+      event.preventDefault();
+      replace.onReplace();
     }
   };
 
@@ -168,17 +181,7 @@ export function FindReplaceBar({
               <Input
                 className="h-7"
                 onChange={(event) => replace.onValueChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    onClose();
-                    return;
-                  }
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    replace.onReplace();
-                  }
-                }}
+                onKeyDown={handleReplaceKeyDown}
                 placeholder="Replace"
                 value={replace.value}
               />

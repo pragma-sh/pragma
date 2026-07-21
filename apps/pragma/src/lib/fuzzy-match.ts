@@ -12,6 +12,7 @@ export interface FuzzyMatch {
  * span — since replace has to act on a single contiguous range and that range
  * includes whatever text sits between the matched characters.
  */
+// fallow-ignore-next-line complexity -- single greedy-leftmost subsequence scan; splitting the inner loop would only hide the state it shares (start/end/needleIndex) across calls.
 export function findFuzzyMatches(text: string, query: string, ignoreCase: boolean): FuzzyMatch[] {
   if (!query) {
     return [];

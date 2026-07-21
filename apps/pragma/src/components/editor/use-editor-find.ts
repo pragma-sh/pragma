@@ -9,27 +9,17 @@ import {
   nextFuzzyMatch,
   previousFuzzyMatch,
 } from "@/lib/fuzzy-match";
+import {
+  type FindReplaceApi,
+  type FindReplaceState,
+  useOpenBar,
+  useSetIgnoreCase,
+  useSetQuery,
+  useSetReplaceValue,
+} from "@/components/find-replace/find-replace-state";
 
-export interface EditorFindState {
-  open: boolean;
-  query: string;
-  replaceValue: string;
-  ignoreCase: boolean;
-  matchCount: number;
-  currentMatch: number;
-}
-
-export interface EditorFindApi extends EditorFindState {
+export interface EditorFindApi extends FindReplaceApi {
   extension: Extension;
-  openBar: () => void;
-  closeBar: () => void;
-  setQuery: (value: string) => void;
-  setReplaceValue: (value: string) => void;
-  setIgnoreCase: (value: boolean) => void;
-  findNext: () => void;
-  findPrevious: () => void;
-  replaceOne: () => void;
-  replaceAll: () => void;
   /** Recomputes match highlighting; call after the document changes elsewhere. */
   refreshMatches: () => void;
 }
@@ -76,8 +66,9 @@ const fuzzyMatchField = StateField.define<DecorationSet>({
  * matching mode and the replace semantics here are custom. `FindReplaceBar`
  * is the UI; this hook is the controller wired to a `viewRef`.
  */
+// fallow-ignore-next-line complexity -- controller hook composing state + paint/recompute/goTo callbacks for one find/replace surface; each callback is already factored to its own useCallback.
 export function useEditorFind(viewRef: { current: EditorView | null }): EditorFindApi {
-  const [state, setState] = useState<EditorFindState>({
+  const [state, setState] = useState<FindReplaceState>({
     open: false,
     query: "",
     replaceValue: "",
@@ -123,7 +114,7 @@ export function useEditorFind(viewRef: { current: EditorView | null }): EditorFi
     [paint, viewRef],
   );
 
-  const openBar = useCallback(() => setState((previous) => ({ ...previous, open: true })), []);
+  const openBar = useOpenBar(setState);
 
   const closeBar = useCallback(() => {
     const view = viewRef.current;
@@ -134,25 +125,10 @@ export function useEditorFind(viewRef: { current: EditorView | null }): EditorFi
     view?.focus();
   }, [paint, viewRef]);
 
-  const setQuery = useCallback(
-    (query: string) => {
-      setState((previous) => ({ ...previous, query }));
-      recompute(query, state.ignoreCase);
-    },
-    [recompute, state.ignoreCase],
-  );
-
-  const setReplaceValue = useCallback((replaceValue: string) => {
-    setState((previous) => ({ ...previous, replaceValue }));
-  }, []);
-
-  const setIgnoreCase = useCallback(
-    (ignoreCase: boolean) => {
-      setState((previous) => ({ ...previous, ignoreCase }));
-      recompute(state.query, ignoreCase);
-    },
-    [recompute, state.query],
-  );
+  // fallow-ignore-next-line code-duplication -- shared setQuery/setReplaceValue/setIgnoreCase calls already factored into find-replace-state.ts; the rest of the match is goTo's per-surface guard, not extractable logic.
+  const setQuery = useSetQuery(setState, recompute, state.ignoreCase);
+  const setReplaceValue = useSetReplaceValue(setState);
+  const setIgnoreCase = useSetIgnoreCase(setState, recompute, state.query);
 
   const refreshMatches = useCallback(() => {
     recompute(state.query, state.ignoreCase);

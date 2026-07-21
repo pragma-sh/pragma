@@ -54,6 +54,7 @@ interface BrowserViewProps {
  * native child webview that floats over the placeholder `<div>`; this component
  * keeps that webview created, positioned, and shown/hidden in sync with React.
  */
+// fallow-ignore-next-line complexity -- orchestrates the native webview lifecycle (create/position/show/hide) plus toolbar chrome; find-in-page wiring only adds one keydown effect on top of pre-existing branching.
 export function BrowserView({ tab, active }: BrowserViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const { isDragging } = useTabDrag();

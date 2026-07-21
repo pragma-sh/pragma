@@ -6,14 +6,9 @@ import {
   browserFindSet,
   onBrowserFindRequest,
 } from "@/lib/tauri";
+import { type FindBarState, useOpenBar } from "@/components/find-replace/find-replace-state";
 
-export interface BrowserFindState {
-  open: boolean;
-  query: string;
-  ignoreCase: boolean;
-  matchCount: number;
-  currentMatch: number;
-}
+export type BrowserFindState = FindBarState;
 
 export interface BrowserFindApi extends BrowserFindState {
   openBar: () => void;
@@ -43,6 +38,10 @@ export function useBrowserFind(tabId: string): BrowserFindApi {
     [tabId],
   );
 
+  const applyMatchResult = useCallback(({ count, index }: { count: number; index: number }) => {
+    setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));
+  }, []);
+
   const setQuery = useCallback(
     (query: string) => {
       setState((p) => ({ ...p, query }));
@@ -51,12 +50,9 @@ export function useBrowserFind(tabId: string): BrowserFindApi {
         setState((p) => ({ ...p, matchCount: 0, currentMatch: 0 }));
         return;
       }
-      void browserFindSet(tabId, query, !state.ignoreCase).then(({ count, index }) => {
-        setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));
-        return undefined;
-      });
+      void browserFindSet(tabId, query, !state.ignoreCase).then(applyMatchResult);
     },
-    [tabId, state.ignoreCase],
+    [tabId, state.ignoreCase, applyMatchResult],
   );
 
   const setIgnoreCase = useCallback(
@@ -65,15 +61,12 @@ export function useBrowserFind(tabId: string): BrowserFindApi {
       if (!state.query) {
         return;
       }
-      void browserFindSet(tabId, state.query, !ignoreCase).then(({ count, index }) => {
-        setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));
-        return undefined;
-      });
+      void browserFindSet(tabId, state.query, !ignoreCase).then(applyMatchResult);
     },
-    [tabId, state.query],
+    [tabId, state.query, applyMatchResult],
   );
 
-  const openBar = useCallback(() => setState((p) => ({ ...p, open: true })), []);
+  const openBar = useOpenBar(setState);
 
   const closeBar = useCallback(() => {
     void browserFindClear(tabId);
@@ -84,21 +77,15 @@ export function useBrowserFind(tabId: string): BrowserFindApi {
     if (!state.query) {
       return;
     }
-    void browserFindSeek(tabId, true).then(({ count, index }) => {
-      setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));
-      return undefined;
-    });
-  }, [tabId, state.query]);
+    void browserFindSeek(tabId, true).then(applyMatchResult);
+  }, [tabId, state.query, applyMatchResult]);
 
   const findPrevious = useCallback(() => {
     if (!state.query) {
       return;
     }
-    void browserFindSeek(tabId, false).then(({ count, index }) => {
-      setState((p) => ({ ...p, matchCount: count, currentMatch: index + 1 }));
-      return undefined;
-    });
-  }, [tabId, state.query]);
+    void browserFindSeek(tabId, false).then(applyMatchResult);
+  }, [tabId, state.query, applyMatchResult]);
 
   return { ...state, openBar, closeBar, setQuery, setIgnoreCase, findNext, findPrevious };
 }
