@@ -19,6 +19,8 @@ import {
   GitBranchPlus,
   GitMerge,
   Pencil,
+  Pin,
+  PinOff,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,6 +46,7 @@ import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
+import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
@@ -66,12 +69,16 @@ interface WorktreeTreeProps {
 
 export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const workspace = useWorkspace();
+  const pinTimes = useWorktreePins();
   const worktrees = useMemo(
     () =>
       workspace.selectedProjectId ? (workspace.worktrees[workspace.selectedProjectId] ?? []) : [],
     [workspace.selectedProjectId, workspace.worktrees],
   );
-  const tree = buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden });
+  const tree = useMemo(
+    () => buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden, pinTimes }),
+    [worktrees, pinTimes],
+  );
   const hidden = worktrees.filter((w) => w.hidden);
   const [showHidden, setShowHidden] = useState(false);
   const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
@@ -241,6 +248,7 @@ interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
   isMain: boolean;
   label: string;
   merged: boolean;
+  pinned: boolean;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
   rename: RenameApi;
@@ -248,6 +256,7 @@ interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
   toggleExpanded: () => void;
   handleSelect: () => void;
   handleCreateChild: () => void;
+  handleTogglePin: () => void;
   openDelete: () => void;
   selected: boolean;
 }
@@ -334,35 +343,63 @@ function WorktreeRowPrimaryButton({
   );
 }
 
-/** Row actions: an always-visible new-worktree button on main, hover-revealed
- *  create-child and delete buttons on nested worktrees. */
+/** Always-visible pin glyph on pinned rows; click unpins. */
+function WorktreePinnedIndicator({ label, onUnpin }: { label: string; onUnpin: () => void }) {
+  return (
+    <Button aria-label={`Unpin ${label}`} size="icon-xs" variant="ghost" onClick={onUnpin}>
+      <Pin className="fill-current" />
+    </Button>
+  );
+}
+
+/** Row actions: pin toggle, plus an always-visible new-worktree button on
+ *  main / hover-revealed create-child and delete on nested worktrees. */
 function WorktreeRowActions({
   isMain,
   label,
+  pinned,
   handleCreateChild,
+  handleTogglePin,
   openDelete,
 }: {
   isMain: boolean;
   label: string;
+  pinned: boolean;
   handleCreateChild: () => void;
+  handleTogglePin: () => void;
   openDelete: () => void;
 }) {
+  const pinButton = pinned ? null : (
+    <Button
+      aria-label={`Pin ${label}`}
+      className="opacity-0 group-hover:opacity-100"
+      size="icon-xs"
+      variant="ghost"
+      onClick={handleTogglePin}
+    >
+      <Pin />
+    </Button>
+  );
   if (isMain) {
     return (
-      <Button
-        aria-label={`New worktree from ${label}`}
-        className="ml-1 h-6 px-1.5 text-xs"
-        size="xs"
-        variant="secondary"
-        onClick={handleCreateChild}
-      >
-        <GitBranchPlus />
-        New
-      </Button>
+      <>
+        {pinButton}
+        <Button
+          aria-label={`New worktree from ${label}`}
+          className="ml-1 h-6 px-1.5 text-xs"
+          size="xs"
+          variant="secondary"
+          onClick={handleCreateChild}
+        >
+          <GitBranchPlus />
+          New
+        </Button>
+      </>
     );
   }
   return (
     <>
+      {pinButton}
       <Button
         aria-label={`Create child worktree from ${label}`}
         className="opacity-0 group-hover:opacity-100"
@@ -395,6 +432,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       isMain,
       label,
       merged,
+      pinned,
       WorktreeIcon,
       agentStatus,
       rename,
@@ -402,6 +440,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       toggleExpanded,
       handleSelect,
       handleCreateChild,
+      handleTogglePin,
       openDelete,
       selected,
       className,
@@ -437,27 +476,34 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
           startRename={startRename}
           WorktreeIcon={WorktreeIcon}
         />
+        {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
         <WorktreeRowActions
           handleCreateChild={handleCreateChild}
+          handleTogglePin={handleTogglePin}
           isMain={isMain}
           label={label}
           openDelete={openDelete}
-        />
+          pinned={pinned}
+        />{" "}
       </div>
     );
   },
 );
 
-/** The row's right-click menu: rename, copy path/branch, open in editor, hide, delete. */
+/** The row's right-click menu: rename, pin, copy path/branch, open in editor, hide, delete. */
 function WorktreeContextMenu({
   isMain,
+  pinned,
   worktree,
   startRename,
+  handleTogglePin,
   openDelete,
 }: {
   isMain: boolean;
+  pinned: boolean;
   worktree: Worktree;
   startRename: () => void;
+  handleTogglePin: () => void;
   openDelete: () => void;
 }) {
   const workspace = useWorkspace();
@@ -483,6 +529,10 @@ function WorktreeContextMenu({
       <ContextMenuItem disabled={isMain} onSelect={isMain ? undefined : startRename}>
         <Pencil />
         Rename
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={handleTogglePin}>
+        {pinned ? <PinOff /> : <Pin />}
+        {pinned ? "Unpin" : "Pin"}
       </ContextMenuItem>
       <ContextMenuItem onSelect={copyPath}>
         <Copy />
@@ -559,6 +609,7 @@ function WorktreeRow({
   const label = worktreeLabel(node.worktree);
   const hasChildren = node.children.length > 0;
   const isMain = node.worktree.isMain;
+  const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const WorktreeIcon = merged ? GitMerge : GitBranch;
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
@@ -573,6 +624,9 @@ function WorktreeRow({
     workspace.selectWorktree(node.worktree.id);
     onCreateChild();
   }, [workspace, node.worktree.id, onCreateChild]);
+  const handleTogglePin = useCallback(() => {
+    toggleWorktreePin(node.worktree.id);
+  }, [node.worktree.id]);
   const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
   const openDelete = useCallback(() => setDeleteOpen(true), []);
 
@@ -586,11 +640,13 @@ function WorktreeRow({
             expanded={expanded}
             handleCreateChild={handleCreateChild}
             handleSelect={handleSelect}
+            handleTogglePin={handleTogglePin}
             hasChildren={hasChildren}
             isMain={isMain}
             label={label}
             merged={merged}
             openDelete={openDelete}
+            pinned={pinned}
             rename={rename}
             selected={selected}
             startRename={rename.startRename}
@@ -599,8 +655,10 @@ function WorktreeRow({
           />
         </ContextMenuTrigger>
         <WorktreeContextMenu
+          handleTogglePin={handleTogglePin}
           isMain={isMain}
           openDelete={openDelete}
+          pinned={pinned}
           startRename={rename.startRename}
           worktree={node.worktree}
         />
