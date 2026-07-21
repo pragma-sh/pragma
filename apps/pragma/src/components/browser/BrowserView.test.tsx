@@ -30,6 +30,10 @@ vi.mock("@/lib/tauri", () => ({
   browserSetBounds: tauriMocks.browserSetBounds,
   browserSetVisible: tauriMocks.browserSetVisible,
   browserSnapshot: tauriMocks.browserSnapshot,
+  browserFindSet: vi.fn(() => Promise.resolve({ count: 0, index: -1 })),
+  browserFindSeek: vi.fn(() => Promise.resolve({ count: 0, index: -1 })),
+  browserFindClear: vi.fn(() => Promise.resolve()),
+  onBrowserFindRequest: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 function browserTab(): Tab {

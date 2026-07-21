@@ -8,6 +8,7 @@ import {
   Code,
   MoreHorizontal,
   RotateCw,
+  Search,
 } from "lucide-react";
 
 import type { Tab } from "@pragma/constants";
@@ -21,6 +22,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useBrowserFind } from "@/components/browser/use-browser-find";
+import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { BROWSER_START_URL, rectToBounds, screenshotBounds } from "@/lib/browser-manager";
 import { useNativeOverlaySuppressed } from "@/lib/native-overlay";
@@ -51,6 +54,7 @@ interface BrowserViewProps {
  * native child webview that floats over the placeholder `<div>`; this component
  * keeps that webview created, positioned, and shown/hidden in sync with React.
  */
+// fallow-ignore-next-line complexity -- orchestrates the native webview lifecycle (create/position/show/hide) plus toolbar chrome; find-in-page wiring only adds one keydown effect on top of pre-existing branching.
 export function BrowserView({ tab, active }: BrowserViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const { isDragging } = useTabDrag();
@@ -61,6 +65,28 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   // webview is shown (or genuinely hidden, e.g. inactive/dragging).
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [address, setAddress] = useState(tab.url ?? "");
+  const find = useBrowserFind(tab.id);
+
+  // Cmd/Ctrl+F while the React chrome (not the native page) holds focus; the
+  // page-content case is forwarded via `onBrowserFindRequest` (see
+  // `focus_script`/`FIND_SENTINEL_SCHEME` in browser.rs).
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      const modifierHeld = navigator.platform.toUpperCase().includes("MAC")
+        ? event.metaKey
+        : event.ctrlKey;
+      if (event.key.toLowerCase() === "f" && modifierHeld && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        find.openBar();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- find.openBar is stable per tabId; tabId doesn't change for a mounted BrowserView.
+  }, [active, find.openBar]);
 
   // Latest `active`, readable from the async create callback without re-creating it.
   const activeRef = useRef(active);
@@ -319,6 +345,15 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
           >
             <Camera />
           </Button>
+          <Button
+            aria-label="Find in page"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
+            size="icon-sm"
+            variant="ghost"
+            onClick={find.openBar}
+          >
+            <Search />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -346,6 +381,19 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
               src={snapshot}
             />
           ) : null}
+          <FindReplaceBar
+            currentMatch={find.currentMatch}
+            findPlaceholder="Find on page"
+            ignoreCase={find.ignoreCase}
+            matchCount={find.matchCount}
+            onClose={find.closeBar}
+            onIgnoreCaseChange={find.setIgnoreCase}
+            onNext={find.findNext}
+            onPrevious={find.findPrevious}
+            onQueryChange={find.setQuery}
+            open={find.open}
+            query={find.query}
+          />
         </div>
       </div>
     </TooltipProvider>

@@ -14,6 +14,8 @@ import {
   useEditorSave,
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
+import { useEditorFind } from "@/components/editor/use-editor-find";
+import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { clearEditorLocation, useEditorLocation } from "@/state/editor-location-store";
 
 /** Resolve a language grammar lazily by filename; plain text on no match. */
@@ -54,15 +56,43 @@ export function useEditorKeymap(save: (contents: string) => Promise<void>): Exte
   );
 }
 
-/** The full CodeMirror extension set (theme + save keymap + resolved language). */
+/** The ⌘/Ctrl-F keymap extension that opens the find/replace bar. */
+export function useEditorFindKeymap(openFindBar: () => void): Extension {
+  return useMemo(
+    () =>
+      Prec.high(
+        keymap.of([
+          {
+            key: "Mod-f",
+            preventDefault: true,
+            run: () => {
+              openFindBar();
+              return true;
+            },
+          },
+        ]),
+      ),
+    [openFindBar],
+  );
+}
+
+/** The full CodeMirror extension set (theme + save/find keymaps + search state + resolved language). */
 export function useEditorExtensions(
   languageExtension: Extension | null,
   saveKeymap: Extension,
+  findKeymap: Extension,
+  findExtension: Extension,
 ): Extension[] {
   return useMemo(() => {
-    const base = [pragmaEditorTheme, pragmaSyntaxHighlighting, saveKeymap];
+    const base = [
+      pragmaEditorTheme,
+      pragmaSyntaxHighlighting,
+      saveKeymap,
+      findKeymap,
+      findExtension,
+    ];
     return languageExtension ? [...base, languageExtension] : base;
-  }, [saveKeymap, languageExtension]);
+  }, [saveKeymap, findKeymap, findExtension, languageExtension]);
 }
 
 /**
@@ -70,6 +100,7 @@ export function useEditorExtensions(
  * tab id), tracks dirty state, and saves on ⌘/Ctrl-S only — there is no
  * autosave. Binary/oversized files render a placeholder instead of garbage.
  */
+// fallow-ignore-next-line complexity -- wires together file load/save/language/keymap/find hooks for one CodeMirror instance; each hook already owns its own logic, this just composes them.
 export function EditorView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
   const savedDocRef = useRef("");
@@ -79,10 +110,18 @@ export function EditorView({ tab }: { tab: Tab }) {
   const { state, load } = useEditorFileLoader(tab, savedDocRef, currentDocRef);
   const languageExtension = useEditorLanguage(filePath);
   const save = useEditorSave(tabId, worktreeId, filePath, savedDocRef);
-  const onChange = useEditorOnChange(tabId, savedDocRef, currentDocRef);
+  const baseOnChange = useEditorOnChange(tabId, savedDocRef, currentDocRef);
   const saveKeymap = useEditorKeymap(save);
-  const extensions = useEditorExtensions(languageExtension, saveKeymap);
+  const find = useEditorFind(viewRef);
+  const findKeymap = useEditorFindKeymap(find.openBar);
+  const extensions = useEditorExtensions(languageExtension, saveKeymap, findKeymap, find.extension);
   const handleSaveShortcut = useSaveShortcut(save, currentDocRef);
+  const onChange = (value: string) => {
+    baseOnChange(value);
+    if (find.open) {
+      find.refreshMatches();
+    }
+  };
 
   useEffect(() => {
     const view = viewRef.current;
@@ -103,7 +142,10 @@ export function EditorView({ tab }: { tab: Tab }) {
 
   return (
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- keydown relay only
-    <div className="h-full min-h-0 overflow-hidden bg-canvas" onKeyDown={handleSaveShortcut}>
+    <div
+      className="relative h-full min-h-0 overflow-hidden bg-canvas"
+      onKeyDown={handleSaveShortcut}
+    >
       <CodeMirror
         className="h-full"
         extensions={extensions}
@@ -115,6 +157,7 @@ export function EditorView({ tab }: { tab: Tab }) {
         theme="none"
         value={state.kind === "ready" ? state.doc : ""}
       />
+      <EditorFindReplaceBar find={find} />
     </div>
   );
 }

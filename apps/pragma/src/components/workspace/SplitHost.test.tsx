@@ -139,6 +139,13 @@ vi.mock("@/lib/terminal-manager", () => ({
     activate: vi.fn(),
     resize: vi.fn(),
     dispose: vi.fn(),
+    onRequestFind: vi.fn(() => () => {}),
+    getBufferLines: vi.fn(() => []),
+    setFuzzyHighlights: vi.fn(),
+    clearFuzzyHighlights: vi.fn(),
+    scrollToBufferRow: vi.fn(),
+    getPendingInputLine: vi.fn(() => ""),
+    replaceInPendingInput: vi.fn(),
   },
 }));
 

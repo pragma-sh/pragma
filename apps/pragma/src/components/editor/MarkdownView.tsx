@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
+import type { EditorView as CodeMirrorView } from "@codemirror/view";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
@@ -12,6 +13,7 @@ import { Markdown } from "tiptap-markdown";
 
 import {
   useEditorExtensions,
+  useEditorFindKeymap,
   useEditorKeymap,
   useEditorLanguage,
 } from "@/components/editor/EditorView";
@@ -24,6 +26,9 @@ import {
   useEditorSave,
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
+import { useEditorFind } from "@/components/editor/use-editor-find";
+import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-markdown-find";
+import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { basename } from "@/lib/path";
 
@@ -67,6 +72,24 @@ function MarkdownWysiwyg({
     onSaveRef.current = onSave;
   }, [onChange, onSave]);
 
+  const findRef = useRef<ReturnType<typeof useMarkdownFind>>({
+    open: false,
+    query: "",
+    replaceValue: "",
+    ignoreCase: false,
+    matchCount: 0,
+    currentMatch: 0,
+    openBar: () => {},
+    closeBar: () => {},
+    setQuery: () => {},
+    setReplaceValue: () => {},
+    setIgnoreCase: () => {},
+    findNext: () => {},
+    findPrevious: () => {},
+    replaceOne: () => {},
+    replaceAll: () => {},
+  });
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, link: { openOnClick: false } }),
@@ -75,6 +98,7 @@ function MarkdownWysiwyg({
       TaskList,
       TaskItem.configure({ nested: true }),
       Markdown.configure({ html: true, linkify: true }),
+      markdownFindExtension,
     ],
     content: doc,
     editorProps: {
@@ -88,13 +112,24 @@ function MarkdownWysiwyg({
           onSaveRef.current();
           return true;
         }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+          event.preventDefault();
+          findRef.current.openBar();
+          return true;
+        }
         return false;
       },
     },
     onUpdate: ({ editor: instance }) => {
       onChangeRef.current(getMarkdown(instance));
+      if (findRef.current.open) {
+        findRef.current.setQuery(findRef.current.query);
+      }
     },
   });
+
+  const find = useMarkdownFind(editor ?? null);
+  findRef.current = find;
 
   // Re-seed only when the file reloads from disk underneath a blurred editor
   // (live preview of agent edits); comparing serialized markdown avoids
@@ -116,8 +151,9 @@ function MarkdownWysiwyg({
       <MarkdownViewBar modeToggle={modeToggle}>
         <MarkdownToolbar editor={editor} />
       </MarkdownViewBar>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <EditorContent className="h-full" editor={editor} />
+        <EditorFindReplaceBar find={find} />
       </div>
     </div>
   );
@@ -151,18 +187,32 @@ function MarkdownRaw({
   onChange: (value: string) => void;
   save: (contents: string) => Promise<void>;
 }) {
+  const viewRef = useRef<CodeMirrorView | null>(null);
   const languageExtension = useEditorLanguage(filePath);
   const saveKeymap = useEditorKeymap(save);
-  const extensions = useEditorExtensions(languageExtension, saveKeymap);
+  const find = useEditorFind(viewRef);
+  const findKeymap = useEditorFindKeymap(find.openBar);
+  const extensions = useEditorExtensions(languageExtension, saveKeymap, findKeymap, find.extension);
   return (
-    <CodeMirror
-      className="h-full"
-      extensions={extensions}
-      height="100%"
-      onChange={onChange}
-      theme="none"
-      value={doc}
-    />
+    <div className="relative h-full">
+      <CodeMirror
+        className="h-full"
+        extensions={extensions}
+        height="100%"
+        onChange={(value) => {
+          onChange(value);
+          if (find.open) {
+            find.refreshMatches();
+          }
+        }}
+        onCreateEditor={(view) => {
+          viewRef.current = view;
+        }}
+        theme="none"
+        value={doc}
+      />
+      <EditorFindReplaceBar find={find} />
+    </div>
   );
 }
 

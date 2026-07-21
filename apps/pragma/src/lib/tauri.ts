@@ -1064,6 +1064,31 @@ export function browserSnapshot(bounds: BrowserBounds): Promise<string> {
   return invoke<string>("browser_snapshot", { ...bounds });
 }
 
+/** Match count and 0-based active index (-1 if none) for an in-page find. */
+export interface BrowserFindResult {
+  count: number;
+  index: number;
+}
+
+/** Highlights every occurrence of `query` in the page and jumps to the first match. */
+export function browserFindSet(
+  tabId: string,
+  query: string,
+  caseSensitive: boolean,
+): Promise<BrowserFindResult> {
+  return invoke<BrowserFindResult>("browser_find_set", { tabId, query, caseSensitive });
+}
+
+/** Moves to the next (or previous) match from the last {@link browserFindSet} call. */
+export function browserFindSeek(tabId: string, forward: boolean): Promise<BrowserFindResult> {
+  return invoke<BrowserFindResult>("browser_find_seek", { tabId, forward });
+}
+
+/** Removes find highlighting from the page. */
+export function browserFindClear(tabId: string): Promise<void> {
+  return invoke("browser_find_clear", { tabId });
+}
+
 /** Subscribes to per-tab page metadata (title/url) from browser webviews. */
 export function onBrowserMeta(handler: (meta: BrowserMeta) => void): Promise<UnlistenFn> {
   return listen<BrowserMeta>("browser-meta", (event) => handler(event.payload));
@@ -1079,6 +1104,18 @@ export function onBrowserFocusRequest(
   handler: (request: BrowserFocusRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<BrowserFocusRequest>("browser-focus-request", (event) => handler(event.payload));
+}
+
+/** Payload sent by a browser webview when Cmd/Ctrl+F is pressed inside the page. */
+export interface BrowserFindRequest {
+  tabId: string;
+}
+
+/** Subscribes to Cmd/Ctrl+F pressed inside a browser webview's page content. */
+export function onBrowserFindRequest(
+  handler: (request: BrowserFindRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<BrowserFindRequest>("browser-find-request", (event) => handler(event.payload));
 }
 
 /** A native menubar action forwarded to the workspace shell. */
