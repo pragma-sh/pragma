@@ -248,4 +248,4 @@ if [ -n "$GIT_ROOT" ]; then
   echo "  Project:     $GIT_ROOT/.cursor/{cli.json,permissions.json}"
 fi
 echo ""
-echo "Restart Cursor / Pragma if they were open. Launch: agent --force --approve-mcps"
+echo "Restart Cursor / Pragma if they were open. Launch: cursor-agent --force --approve-mcps"

@@ -61,6 +61,18 @@ describe("resolveModels", () => {
   });
 });
 
+/** An agent definition whose model provider varies per test (flaky-provider fixtures). */
+function flakyAgent(models: unknown, iconPath?: string): Record<string, unknown> {
+  return {
+    id: "flaky",
+    name: "Flaky",
+    ...(iconPath ? { iconPath } : {}),
+    launch: { command: ["flaky"] },
+    models,
+    args: { model: (id: string) => ["--model", id] },
+  };
+}
+
 function plugin(pluginId: string, definition: unknown, dir = "/plugins/one"): ResolvedPlugin {
   return {
     pluginId,
@@ -142,6 +154,83 @@ describe("assembleCatalog", () => {
     const hash = catalog.agents[0]?.icon?.hash;
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     expect(assets[hash!]?.path).toBe(join(dir, "rel.svg"));
+  });
+
+  it("falls back to the last-good entry when a model provider throws", async () => {
+    const iconPath = tempIcon("flaky.svg", "<svg>flaky</svg>");
+    const dir = join(iconPath, "..");
+    const good = await assembleCatalog(
+      [plugin("p.one", { agents: [flakyAgent([{ id: "m", name: "M" }], "flaky.svg")] }, dir)],
+      ctx,
+    );
+    expect(good.catalog.agents).toHaveLength(1);
+
+    const errors: string[] = [];
+    const flaky = await assembleCatalog(
+      [
+        plugin(
+          "p.one",
+          {
+            agents: [
+              flakyAgent(async () => {
+                throw new Error("exec failed");
+              }, "flaky.svg"),
+            ],
+          },
+          dir,
+        ),
+      ],
+      ctx,
+      (_p, agentId) => errors.push(agentId),
+      good,
+    );
+
+    expect(errors).toEqual(["flaky"]);
+    expect(flaky.catalog.agents).toEqual(good.catalog.agents);
+    // The reused entry's icon asset rides along so the gateway keeps serving it.
+    const hash = good.catalog.agents[0]?.icon?.hash;
+    expect(flaky.assets[hash!]?.path).toBe(join(dir, "flaky.svg"));
+  });
+
+  it("falls back to the last-good entry when a model provider returns no models", async () => {
+    const good = await assembleCatalog(
+      [plugin("p.one", { agents: [flakyAgent([{ id: "m", name: "M" }])] })],
+      ctx,
+    );
+
+    const errors: string[] = [];
+    const empty = await assembleCatalog(
+      [plugin("p.one", { agents: [flakyAgent(async () => [])] })],
+      ctx,
+      (_p, agentId) => errors.push(agentId),
+      good,
+    );
+
+    expect(errors).toEqual(["flaky"]);
+    expect(empty.catalog.agents).toEqual(good.catalog.agents);
+  });
+
+  it("still skips a failing agent when no last-good entry exists", async () => {
+    const plugins: ResolvedPlugin[] = [
+      plugin("p.one", {
+        agents: [
+          {
+            id: "broken",
+            name: "Broken",
+            launch: { command: ["broken"] },
+            models: async () => {
+              throw new Error("exec failed");
+            },
+            args: { model: () => [] },
+          },
+        ],
+      }),
+    ];
+    const { catalog } = await assembleCatalog(plugins, ctx, () => {}, {
+      catalog: { agents: [] },
+      assets: {},
+    });
+    expect(catalog.agents).toEqual([]);
   });
 
   it("resolves model providers concurrently while preserving agent order", async () => {

@@ -173,6 +173,7 @@ bun install                # Install all workspace deps
 
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
+bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
 
 # Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md

@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bun run --filter pragma tauri:dev",
+    "dev:command": "bun scripts/dev-command.ts",
     "dev:mobile": "bun run --filter pragma-mobile start",
     "dev:mobile:ios": "bun run --filter pragma-mobile ios",
     "dev:mobile:android": "bun run --filter pragma-mobile android",

@@ -50,12 +50,16 @@ Each server process also generates a boot id passed with the server state direct
 `pragma-plugins`. The sidecar persists plugin lifecycle markers there: `onInstall` once per
 plugin id and `onPragmaLoad` once per server boot, including across catalog reloads or a
 sidecar respawn. Server startup proactively loads plugins after briefly waiting for gateway
-discovery, so `onPragmaLoad` does not depend on a later catalog request.
+discovery, so `onPragmaLoad` does not depend on a later catalog request. Catalog load waits
+up to 30s because dynamic model providers may invoke cold host CLIs; a shorter timeout leaves
+load state unresolved and turns later catalog reads into a reload storm.
 
 Watcher metadata stays server-internal because plugin config may contain secrets. Internal
 action `watcher` accepts an agent id and returns matching plugin id, bundle path, config,
-and local watcher agent. Headless launch registers its mirrored project root through
-`registerRoots` before catalog/watcher lookup, then starts `pragma-watch` from that metadata.
+and local watcher agent. Headless launch ensures its mirrored project root is registered
+before catalog/watcher lookup, then starts `pragma-watch` from that metadata. Registration
+is idempotent and serialized with catalog reloads: parallel launches for one project trigger
+at most one reload instead of flooding sidecar and gateway with duplicate model-provider work.
 Catalog ids select the watcher; its plugin-local `watcherAgent` is the runtime stream id
 passed as `--agentId`, matching status reports and mobile interjections.
 
@@ -75,8 +79,16 @@ registering as the controller. The gateway exposes this as
 `GET /v1/subscriptions/workspace`.
 
 The mirror also enables controller-free (headless) agent launch. `agentSessionLaunch`
-still brokers to desktop when connected; otherwise the server resolves agent launch
-metadata from the plugin catalog, spawns the PTY, and schedules startup/prefill input.
+still brokers to desktop when connected — unless the payload sets `headless: true`,
+which forces the server-side path even with a controller attached (used by
+`pragma-cli agent verify` so scenario sessions never open desktop tabs). Otherwise the
+server resolves agent launch metadata from the plugin catalog, spawns the PTY, and
+schedules startup/prefill input. Bracketed (TUI) prefills do not trust `prefillDelayMs`
+alone: after the configured delay the launcher also waits (bounded, +15s) for the
+session output to show an alternate-screen enter sequence before typing, because a
+prompt typed before the TUI takes the screen is silently swallowed — concurrent cold
+starts (parallel `agent verify` sessions) routinely push TUI startup past the fixed
+delay. Plain-mode prefills keep the fixed-delay behavior.
 A `newWorktree` spec is honored headlessly too: the server creates the git checkout at
 `<project>/.pragma/worktrees/<uuid>` through the same `pragma-core` git operations the
 desktop uses, then merges the new worktree + terminal tab into the mirrored snapshot
@@ -152,9 +164,9 @@ session/connection code:
 The server keeps runtime-only agent status keyed by `(worktreeId, tabId, agent)`.
 Shell sessions export both `PRAGMA_SERVER_SOCKET` and the legacy
 `PRAGMA_DAEMON_SOCKET` so existing plugins keep working while clients migrate to
-`pragma-cli`. They also export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
-directory to `PATH` so plugins can find the helper even when the user's login shell omits
-`~/.local/bin`.
+`pragma-cli`. Production exports `PRAGMA_CLI=$HOME/.local/bin/pragma-cli`; dev channels
+use isolated `<PRAGMA_APP_DATA_DIR>/bin/pragma-cli` so concurrent worktrees never share
+stale helper binaries. The matching directory is prepended to `PATH`.
 
 Command-approval decisions are broadcast on the same agent stream and kept only in a
 short bounded replay window, so a watcher that starts/subscribes just after the toast

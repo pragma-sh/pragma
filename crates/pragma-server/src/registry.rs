@@ -152,6 +152,40 @@ fn shell_quote(value: &str) -> String {
     }
 }
 
+/// Alternate-screen enter sequences a TUI emits once it takes the terminal.
+const ALT_SCREEN_SEQUENCES: [&[u8]; 3] = [b"\x1b[?1049h", b"\x1b[?1047h", b"\x1b[?47h"];
+/// Extra time past `prefillDelayMs` a bracketed prefill waits for the TUI's
+/// alternate screen. Concurrent cold starts (parallel `agent verify` launches)
+/// routinely push TUI startup past the fixed delay, and a prompt typed before
+/// the TUI takes the screen is silently swallowed by the shell.
+const ALT_SCREEN_EXTRA_WAIT: Duration = Duration::from_secs(15);
+const ALT_SCREEN_POLL: Duration = Duration::from_millis(200);
+/// Settle after a late alternate-screen entry so the input widget is mounted.
+const ALT_SCREEN_SETTLE: Duration = Duration::from_millis(500);
+
+/// Waits (bounded by [`ALT_SCREEN_EXTRA_WAIT`]) for the session's TUI to enter
+/// the alternate screen. Returns immediately when the screen is already taken;
+/// falls through after the cap so a TUI that never announces the alternate
+/// screen still receives its prefill.
+fn wait_for_alt_screen(session: &Session) {
+    let entered = || {
+        ALT_SCREEN_SEQUENCES
+            .iter()
+            .any(|sequence| session.output_contains(sequence))
+    };
+    if entered() {
+        return;
+    }
+    let deadline = Instant::now() + ALT_SCREEN_EXTRA_WAIT;
+    while Instant::now() < deadline {
+        thread::sleep(ALT_SCREEN_POLL);
+        if entered() {
+            thread::sleep(ALT_SCREEN_SETTLE);
+            return;
+        }
+    }
+}
+
 fn schedule_agent_launch(session: &Session, launch: &Value, command: &str, prompt: Option<&str>) {
     thread::sleep(Duration::from_millis(
         pragma_constants::CONSTANTS.agents.start_delay_ms,
@@ -173,6 +207,11 @@ fn schedule_agent_launch(session: &Session, launch: &Value, command: &str, promp
     thread::sleep(Duration::from_millis(
         prefill_delay_ms.saturating_sub(elapsed_ms),
     ));
+    // Plain-mode CLIs have no alternate-screen signal and keep the fixed-delay
+    // behavior; TUI (bracketed) prefills wait for the screen takeover.
+    if launch["prefillMode"] != "plain" {
+        wait_for_alt_screen(session);
+    }
     let body = if launch["prefillMode"] == "plain" {
         prompt.to_string()
     } else {
@@ -436,7 +475,7 @@ impl Registry {
             serde_json::from_value(payload).map_err(|error| error.to_string())?;
         let project_root = self.mirrored_project_path(&args.project_id)?;
         self.plugins
-            .handle_rpc(&json!({ "action": "registerRoots", "roots": [project_root] }))
+            .ensure_root(&project_root)
             .map_err(|error| error.to_string())?;
         let (worktree_id, cwd) = match (args.worktree_id, args.new_worktree) {
             (Some(_), Some(_)) => {

@@ -477,7 +477,14 @@ impl PragmaClient {
     ) -> ClientResult<Value> {
         let request = request_control(method, payload);
         self.with_request_conn("server control failed", |stream| {
-            Self::control_on(stream, &request)
+            // Agent launches may legitimately exceed the normal 5s request
+            // timeout while the host resolves plugins or creates a worktree.
+            // A timeout here is especially unsafe: transport retry duplicates
+            // a control request whose first launch may still have succeeded.
+            configure_rpc_stream(stream)?;
+            let result = Self::control_on(stream, &request);
+            configure_stream(stream)?;
+            result
         })
     }
 

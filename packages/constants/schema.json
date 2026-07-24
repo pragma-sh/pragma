@@ -5,7 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "maxParallelAgents",
     "app",
     "window",
     "links",
@@ -20,11 +19,6 @@
     "tunnel"
   ],
   "properties": {
-    "maxParallelAgents": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Maximum number of agents Pragma runs in parallel. A single shared scalar constant used by both the TypeScript frontend and the Rust backend."
-    },
     "app": {
       "$ref": "#/definitions/AppInfo"
     },
@@ -1666,6 +1660,10 @@
         },
         "prompt": {
           "type": ["string", "null"]
+        },
+        "headless": {
+          "type": ["boolean", "null"],
+          "description": "When true, the host server launches the session itself (PTY + watcher, no desktop tab) even while a desktop controller is connected. Used by `pragma-cli agent verify` so scenario sessions do not open a desktop tab per step."
         }
       }
     },

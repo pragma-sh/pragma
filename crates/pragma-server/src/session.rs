@@ -221,6 +221,14 @@ impl Session {
         self.write_bytes(data.as_bytes())
     }
 
+    /// True when the PTY output observed so far contains `needle` (for example
+    /// the alternate-screen escape a TUI emits once it takes the terminal).
+    pub fn output_contains(&self, needle: &[u8]) -> bool {
+        self.scrollback
+            .lock()
+            .is_ok_and(|scrollback| scrollback.output_contains(needle))
+    }
+
     pub fn write_bytes(&self, data: &[u8]) -> Result<(), SessionError> {
         let _ = self.output_tx.send(OutputMsg::Flush);
         let mut writer = self.writer.lock().map_err(|_| SessionError::LockPoisoned)?;
@@ -698,6 +706,48 @@ impl Scrollback {
     pub fn frames(&self) -> Vec<EventFrame> {
         self.frames.iter().cloned().collect()
     }
+
+    /// True when the buffered `Output` frame data contains `needle`, including
+    /// occurrences split across adjacent frames.
+    pub fn output_contains(&self, needle: &[u8]) -> bool {
+        if needle.is_empty() {
+            return true;
+        }
+        let overlap = needle.len() - 1;
+        // Tail of the previously scanned output, kept so a needle split across
+        // a frame boundary is still found.
+        let mut tail: Vec<u8> = Vec::new();
+        for frame in &self.frames {
+            let EventFrame::Output { data, .. } = frame else {
+                continue;
+            };
+            if !tail.is_empty() {
+                let mut boundary = tail.clone();
+                boundary.extend_from_slice(&data[..data.len().min(overlap)]);
+                if contains(&boundary, needle) {
+                    return true;
+                }
+            }
+            if contains(data, needle) {
+                return true;
+            }
+            if data.len() >= overlap {
+                tail = data[data.len() - overlap..].to_vec();
+            } else {
+                tail.extend_from_slice(data);
+                let excess = tail.len().saturating_sub(overlap);
+                tail.drain(..excess);
+            }
+        }
+        false
+    }
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.len() >= needle.len()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 /// Bytes of terminal output a frame pins in memory. Non-output frames (title,
@@ -749,10 +799,29 @@ fn shell_path() -> String {
 }
 
 fn pragma_cli_path() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
+    let channel = std::env::var_os("PRAGMA_SERVER_CHANNEL");
+    pragma_cli_path_from(
+        channel.as_deref(),
+        std::env::var_os("PRAGMA_APP_DATA_DIR"),
+        std::env::var_os("HOME"),
+    )
+}
+
+fn pragma_cli_path_from(
+    channel: Option<&std::ffi::OsStr>,
+    app_data_dir: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if let Some(channel) = channel.filter(|channel| *channel != "pragma") {
+        return app_data_dir
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+            .map(|dir| dir.join(channel))
+            .map(|dir| dir.join("bin/pragma-cli"));
+    }
+    home.filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
-        .map(|home| home.join(".local/bin/pragma-cli"))
+        .map(|dir| dir.join(".local/bin/pragma-cli"))
 }
 
 fn path_with_cli_dir(cli_path: &Path) -> String {
@@ -781,7 +850,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        gateway_env, path_with_cli_dir_from, OscChunk, OscParser, OutputCoalescer, Scrollback,
+        gateway_env, path_with_cli_dir_from, pragma_cli_path_from, OscChunk, OscParser,
+        OutputCoalescer, Scrollback,
     };
     use pragma_constants::CONSTANTS;
     use pragma_protocol::EventFrame;
@@ -864,6 +934,28 @@ mod tests {
             &frames[0],
             EventFrame::Output { data, .. } if data == b"bbbb"
         ));
+    }
+
+    /// The alternate-screen readiness scan must find a sequence even when the
+    /// PTY reader split it across two output frames.
+    #[test]
+    fn scrollback_output_contains_spans_frame_boundaries() {
+        let mut scrollback = Scrollback::new(10);
+        for data in [b"boot \x1b[?10".to_vec(), b"49h draw".to_vec()] {
+            scrollback.push(EventFrame::Output {
+                session_id: "s".to_string(),
+                data,
+            });
+        }
+        scrollback.push(EventFrame::Title {
+            session_id: "s".to_string(),
+            title: "\x1b[?1047h".to_string(),
+        });
+        assert!(scrollback.output_contains(b"\x1b[?1049h"));
+        assert!(scrollback.output_contains(b"boot"));
+        // Non-output frames never satisfy the scan.
+        assert!(!scrollback.output_contains(b"\x1b[?1047h"));
+        assert!(!scrollback.output_contains(b"missing"));
     }
 
     /// Non-output frames must not be starved out by the byte budget, and a
@@ -1015,5 +1107,25 @@ mod tests {
         );
 
         assert_eq!(path, "/Users/test/.local/bin:/usr/bin:/bin");
+    }
+
+    #[test]
+    fn cli_path_is_global_for_prod_and_instance_scoped_for_dev() {
+        assert_eq!(
+            pragma_cli_path_from(
+                Some(std::ffi::OsStr::new("pragma")),
+                Some("/data/prod".into()),
+                Some("/home/test".into()),
+            ),
+            Some(Path::new("/home/test/.local/bin/pragma-cli").to_path_buf())
+        );
+        assert_eq!(
+            pragma_cli_path_from(
+                Some(std::ffi::OsStr::new("pragma-dev-abc")),
+                Some("/data".into()),
+                Some("/home/test".into()),
+            ),
+            Some(Path::new("/data/pragma-dev-abc/bin/pragma-cli").to_path_buf())
+        );
     }
 }

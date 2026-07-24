@@ -415,6 +415,7 @@ case "${1:-}" in
     if [ -n "$child" ] && [ -f "$marker" ]; then
       mkdir -p "$subagent_dir"
       : >"$subagent_dir/$(safe_id "$child")"
+      content_message system "Codex started a subagent" "codex-${token:-session}-subagent-$(safe_id "$child")"
       report started
     fi
     ;;

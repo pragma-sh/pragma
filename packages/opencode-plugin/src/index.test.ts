@@ -48,12 +48,14 @@ function testHooks() {
   const questions: Array<{
     question: string;
     options: Array<{ label: string; description?: string }>;
+    requestId: string;
   }> = [];
   const messages: Array<{
     id: string;
     role: string;
     text?: string;
     toolCalls?: Array<{ name: string; summary?: string }>;
+    subAgentsActive?: number;
   }> = [];
   const hooks = createPragmaOpencodeHooks({
     env: pragmaEnv,
@@ -79,6 +81,7 @@ function testHooks() {
               })),
             }
           : {}),
+        ...(message.subAgentsActive > 0 ? { subAgentsActive: message.subAgentsActive } : {}),
       });
     },
     async cleared() {
@@ -88,9 +91,9 @@ function testHooks() {
       reports.push("attention:command");
       commands.push(command);
     },
-    async attentionQuestion(question, options) {
+    async attentionQuestion(question, options, requestId) {
       reports.push("attention:question");
-      questions.push({ question, options });
+      questions.push({ question, options, requestId });
     },
     async sessionName(name) {
       sessionNames.push(name);
@@ -118,7 +121,17 @@ function questionPart(status: string) {
       type: "tool",
       callID: "c1",
       tool: "question",
-      state: { status },
+      state: {
+        status,
+        input: {
+          questions: [
+            {
+              question: "Choose Red or Blue?",
+              options: [{ label: "Red" }, { label: "Blue" }],
+            },
+          ],
+        },
+      },
     },
   });
 }
@@ -132,6 +145,10 @@ function abortErrorEvent() {
     sessionID: "s1",
     error: { name: "MessageAbortedError", data: { message: "aborted" } },
   });
+}
+
+async function flushLegacyQuestion(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 75));
 }
 
 function permissionEvent(type: "permission.asked" | "permission.updated") {
@@ -266,7 +283,7 @@ describe("Pragma opencode plugin", () => {
   });
 
   it("keeps the parent running until all subagents finish and the parent idles", async () => {
-    const { hooks, reports } = testHooks();
+    const { hooks, reports, messages } = testHooks();
     await hooks.event?.(sessionStatus("busy"));
     await hooks.event?.(
       runtimeEvent("session.created", { info: { id: "child-1", parentID: "s1" } }),
@@ -274,6 +291,8 @@ describe("Pragma opencode plugin", () => {
     await hooks.event?.(
       runtimeEvent("session.created", { info: { id: "child-2", parentID: "s1" } }),
     );
+
+    expect(messages.some((message) => message.subAgentsActive === 2)).toBe(true);
 
     await hooks.event?.(sessionIdleEvent());
     await hooks.event?.(runtimeEvent("session.idle", { sessionID: "child-1" }));
@@ -649,6 +668,7 @@ describe("Pragma opencode plugin", () => {
     const { hooks, reports } = testHooks();
 
     await hooks.event?.(questionPart("pending"));
+    await flushLegacyQuestion();
     // opencode reports the session idle while it waits for the answer; red must hold.
     await hooks.event?.(sessionIdleEvent());
 
@@ -659,6 +679,7 @@ describe("Pragma opencode plugin", () => {
     const { hooks, reports } = testHooks();
 
     await hooks.event?.(questionPart("pending"));
+    await flushLegacyQuestion();
     await hooks.event?.(questionPart("completed"));
 
     expect(reports).toEqual(["attention:question", "started"]);
@@ -800,6 +821,7 @@ describe("Pragma opencode plugin", () => {
         },
       },
     );
+    await flushLegacyQuestion();
 
     expect(reports).toEqual(["attention:question"]);
     expect(questions).toEqual([
@@ -809,12 +831,111 @@ describe("Pragma opencode plugin", () => {
           { label: "Postgres", description: "Relational" },
           { label: "SQLite", description: "Embedded" },
         ],
+        requestId: "opencode-question-c1",
       },
     ]);
     expect(messages[0]?.toolCalls?.[0]).toMatchObject({
       name: "question",
       summary: "Which database?",
     });
+  });
+
+  it("uses canonical question events from OpenCode 1.18", async () => {
+    const { hooks, reports, questions } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("question.asked", {
+        id: "que-1",
+        sessionID: "s1",
+        questions: [
+          {
+            question: "Choose Red or Blue?",
+            header: "Color",
+            options: [
+              { label: "Red", description: "Warm" },
+              { label: "Blue", description: "Cool" },
+            ],
+          },
+        ],
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("question.replied", {
+        sessionID: "s1",
+        requestID: "que-1",
+        answers: [["Red"]],
+      }),
+    );
+
+    expect(reports).toEqual(["attention:question", "started"]);
+    expect(questions).toEqual([
+      {
+        question: "Choose Red or Blue?",
+        options: [
+          { label: "Red", description: "Warm" },
+          { label: "Blue", description: "Cool" },
+        ],
+        requestId: "que-1",
+      },
+    ]);
+  });
+
+  it("lets the canonical question event supersede the legacy tool hook", async () => {
+    const { hooks, reports, questions } = testHooks();
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "question", sessionID: "s1", callID: "c1" },
+      {
+        args: {
+          questions: [
+            {
+              question: "Choose Red or Blue?",
+              options: [{ label: "Red" }, { label: "Blue" }],
+            },
+          ],
+        },
+      },
+    );
+    await hooks.event?.(
+      runtimeEvent("question.asked", {
+        id: "que-1",
+        sessionID: "s1",
+        questions: [
+          {
+            question: "Choose Red or Blue?",
+            options: [{ label: "Red" }, { label: "Blue" }],
+          },
+        ],
+      }),
+    );
+    await flushLegacyQuestion();
+
+    expect(reports).toEqual(["attention:question"]);
+    expect(questions).toEqual([
+      {
+        question: "Choose Red or Blue?",
+        options: [{ label: "Red" }, { label: "Blue" }],
+        requestId: "que-1",
+      },
+    ]);
+  });
+
+  it("does not emit generic attention for an incomplete question tool part", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          id: "p1",
+          sessionID: "s1",
+          messageID: "m1",
+          type: "tool",
+          callID: "c1",
+          tool: "question",
+          state: { status: "pending" },
+        },
+      }),
+    );
+    expect(reports).toEqual([]);
   });
 
   it("reports started for a non-question tool via tool.execute.before", async () => {

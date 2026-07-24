@@ -147,6 +147,18 @@ function questionAttention(
   };
 }
 
+function commandAttention(requestId = "req-1"): AttentionEvent {
+  return {
+    type: "agent",
+    agent: "opencode",
+    worktreeId: "wt-1",
+    tabId: "tab-1",
+    status: "attention",
+    attentionKind: "command",
+    requestId,
+  };
+}
+
 function answer(reply: string | null, overrides: Partial<AnswerEvent["answer"]> = {}): AnswerEvent {
   return {
     type: "agentAnswer",
@@ -188,20 +200,23 @@ describe("createTuiWatcher with handleDecisions", () => {
   });
 
   it("sends the approve keystroke on an approve verdict for its session", async () => {
-    const { ctx, sendKeys } = context([decision(true)]);
+    const { ctx, sendKeys } = context([commandAttention(), decision(true)]);
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledTimes(1);
     expect(sendKeys).toHaveBeenCalledWith("\r");
   });
 
   it("sends the deny keystrokes (right, right, enter) on a deny verdict", async () => {
-    const { ctx, sendKeys } = context([decision(false)]);
+    const { ctx, sendKeys } = context([commandAttention(), decision(false)]);
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
   });
 
   it("honors configured keystrokes", async () => {
-    const { ctx, sendKeys } = context([decision(true)], { approveKeys: "y\r", denyKeys: "n\r" });
+    const { ctx, sendKeys } = context([commandAttention(), decision(true)], {
+      approveKeys: "y\r",
+      denyKeys: "n\r",
+    });
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("y\r");
   });
@@ -234,6 +249,7 @@ describe("createTuiWatcher with handleDecisions", () => {
                   // First stream drops with no verdict (gateway hiccup).
                   return;
                 }
+                yield commandAttention();
                 yield decision(true);
                 controller.abort();
               },
@@ -256,7 +272,9 @@ describe("createTuiWatcher with handleDecisions", () => {
 
   it("survives a sendKeys failure and keeps answering", async () => {
     const { ctx, sendKeys } = context([
+      commandAttention("req-1"),
       decision(true, { requestId: "req-1" }),
+      commandAttention("req-2"),
       decision(true, { requestId: "req-2" }),
     ]);
     sendKeys.mockRejectedValueOnce(new Error("write failed"));
@@ -276,6 +294,7 @@ describe("createTuiWatcher with handleDecisions", () => {
             const count = connectCount;
             return {
               async *[Symbol.asyncIterator]() {
+                yield commandAttention("req-1");
                 yield decision(true, { requestId: "req-1" });
                 if (count > 1) {
                   controller.abort();
@@ -300,10 +319,36 @@ describe("createTuiWatcher with handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledTimes(1);
   });
 
+  it("answers a verdict whose command attention it never saw (mid-stream connect)", async () => {
+    // The watcher connected after the command attention was raised (or its
+    // attention snapshot was already superseded), so no matching attention is
+    // remembered. The verdict must still be applied; dropping it would leave
+    // the agent stuck at the approval dialog forever.
+    const { ctx, sendKeys } = context([decision(false, { requestId: "missed-attention" })]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
+  });
+
   it("answers a question with the digit for the matching option", async () => {
     const { ctx, sendKeys } = context([questionAttention("req-q", ["3", "4", "5"]), answer("4")]);
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledWith("2");
+  });
+
+  it("waits for the question prompt to mount before sending answer keys", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx, sendKeys } = context([questionAttention("req-q", ["3", "4", "5"]), answer("4")]);
+      const watching = approvalWatcher.watch(ctx as never);
+
+      await vi.advanceTimersByTimeAsync(149);
+      expect(sendKeys).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await watching;
+      expect(sendKeys).toHaveBeenCalledWith("2");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("types a free-text answer via the Other row", async () => {

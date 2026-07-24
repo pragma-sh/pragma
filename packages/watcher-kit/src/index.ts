@@ -83,6 +83,8 @@ const DEFAULT_ABORT_KEYS = "\x1b";
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
 const QUESTION_DIGIT_MAX = 9;
+/** Lets a newly reported question prompt mount before sending any answer keys. */
+const QUESTION_PROMPT_MOUNT_DELAY_MS = 150;
 /** Lets the TUI mount its custom-answer editor before typing into it. */
 const QUESTION_OTHER_INPUT_DELAY_MS = 150;
 /**
@@ -206,8 +208,10 @@ async function handleControlEvent(
 ): Promise<void> {
   // Remember question text/choices from attention reports so an AgentAnswer
   // can be turned into the matching TUI digit / free-text keystroke sequence.
-  if (event.type === "agent" && runtime.handleQuestionAnswers) {
-    rememberQuestion(runtime.questionsByRequestId, event);
+  // Command attentions carry no data the verdict handler needs, so they are not
+  // cached (see `handleDecision`).
+  if (event.type === "agent") {
+    if (runtime.handleQuestionAnswers) rememberQuestion(runtime.questionsByRequestId, event);
     return;
   }
   if (runtime.handleDecisions && (await handleDecision(ctx, runtime, event))) {
@@ -226,6 +230,20 @@ async function handleControlEvent(
   }
 }
 
+/**
+ * Applies a command-approval verdict by writing the approve/deny keystrokes.
+ *
+ * A verdict is self-contained (the approve/deny keys are static), so it does
+ * not depend on this watcher having first seen the paired `command` attention.
+ * That matters because attention delivery is not guaranteed to precede the
+ * verdict for this subscriber: a watcher can connect mid-stream after the
+ * attention was raised, or reconnect once the attention snapshot has already
+ * been superseded, while the verdict still arrives live or via the replay
+ * buffer. Gating on a remembered attention would silently drop those verdicts
+ * and leave the agent stuck at the approval dialog. `seenRequestIds` dedupes
+ * verdicts replayed across reconnects, and the connection is already scoped to
+ * this agent + tab, so every `agentDecision` here is a verdict for this session.
+ */
 async function handleDecision(
   ctx: WatcherContext<TuiWatcherConfig>,
   runtime: WatcherRuntime,
@@ -251,6 +269,8 @@ async function handleAnswer(
   if (runtime.seenRequestIds.has(answer.requestId)) return true;
   runtime.seenRequestIds.add(answer.requestId);
   runtime.questionsByRequestId.delete(answer.requestId);
+  await delay(QUESTION_PROMPT_MOUNT_DELAY_MS, ctx.signal);
+  if (ctx.signal.aborted) return true;
   const reply = answer.answer?.trim() ?? null;
   if (!answer.dismissed && reply && !cached.options.includes(reply)) {
     if (runtime.questionFreeTextMode === "interject") {

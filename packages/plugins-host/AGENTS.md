@@ -24,7 +24,10 @@ resolution moves into `pragma-core`). It imports the built-in agent plugins
 (`@pragma/{claude-code,opencode,cursor}-plugin/pragma-agent`) and any local-path plugins
 via Bun `import()` (the `pragma-watch` precedent), resolves async model providers through a
 `PragmaClient` pointed at the local gateway, hashes icon files (`sha256`, 256 KB cap), and
-assembles the `AgentCatalog`.
+assembles the `AgentCatalog`. A flaky model provider (exec throwing, or returning no
+models) must not drop the agent from the catalog: `assembleCatalog` takes the previous
+successful `CatalogResult` and reuses the agent's last-good entry (icon asset included),
+logging the failure; an agent is skipped only when it has never resolved successfully.
 
 Plugin lifecycle hooks run asynchronously after catalog publication, so slow setup cannot block
 agent discovery. `onInstall` is persisted once per plugin id in `plugin-lifecycle.json` under the

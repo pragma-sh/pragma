@@ -304,6 +304,12 @@ describe("report.sh", () => {
     run("subagent-start", {
       stdin: JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "child-2" }),
     });
+    expect(messagePayloads()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "system", subAgentsActive: 1 }),
+        expect.objectContaining({ role: "system", subAgentsActive: 2 }),
+      ]),
+    );
 
     run("subagent-stop", {
       stdin: JSON.stringify({ hook_event_name: "SubagentStop", agent_id: "child-1" }),

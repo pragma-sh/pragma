@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { parsePiModels, piAgentPlugin } from "./pragma-plugin";
 
 describe("pi watcher", () => {
-  it("submits interjections without reporting cleared on session exit", async () => {
+  it("submits interjections and clears status on session exit", async () => {
     const watcher = piAgentPlugin.watchers?.[0];
     expect(watcher).toBeDefined();
 
@@ -44,15 +44,38 @@ describe("pi watcher", () => {
 
     await watcher?.watch(context as never);
 
-    // Interjection is typed and submitted, but the watcher never emits its own
-    // `cleared` on exit — that is owned by the Pi extension (session_shutdown /
-    // on-load), avoiding a delayed `cleared` racing a relaunched session.
     expect(sendKeys).toHaveBeenCalledWith("continue\r");
-    expect(report).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith({
+      agent: "pi",
+      tabId: "tab-1",
+      worktreeId: "worktree-1",
+      status: "cleared",
+      attentionKind: null,
+    });
   });
 });
 
 describe("parsePiModels", () => {
+  it("checks Node managers when the plugin host PATH omits Pi", async () => {
+    const run = vi.fn(async () => [{ stdout: "", stderr: "", status: 0 }]);
+    const models = piAgentPlugin.agents?.[0]?.models;
+
+    expect(typeof models).toBe("function");
+    if (typeof models === "function") {
+      await models({ sdk: { exec: { run } } } as never);
+    }
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commands: [
+          expect.stringMatching(
+            /fnm exec --using default -- pi --list-models.*"\$HOME\/\.bun\/bin\/pi" --list-models/,
+          ),
+        ],
+      }),
+    );
+  });
+
   it("parses model rows and thinking support", () => {
     expect(
       parsePiModels(`provider        model             context  max-out  thinking  images

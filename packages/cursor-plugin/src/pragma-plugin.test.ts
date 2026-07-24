@@ -1,6 +1,32 @@
 import { expect, it, vi } from "vitest";
 
-import { cursorAgentPlugin, loadCursorUsageLimits, parseCursorUsageSummary } from "./pragma-plugin";
+import {
+  cursorAgentPlugin,
+  loadCursorUsageLimits,
+  parseCursorModels,
+  parseCursorUsageSummary,
+} from "./pragma-plugin";
+
+it("launches Cursor's unambiguous binary", () => {
+  expect(cursorAgentPlugin.agents?.[0]?.launch.command).toEqual([
+    "cursor-agent",
+    "--force",
+    "--approve-mcps",
+  ]);
+  expect(cursorAgentPlugin.agents?.[0]?.excludeFeatures).toEqual([
+    "questions",
+    "commandApproval",
+    "subagents",
+    "abort",
+    "interrupt",
+  ]);
+});
+
+it("includes Cursor's auto model", () => {
+  expect(parseCursorModels("Available models\n\nauto - Auto (current, default)\n")).toEqual([
+    { id: "auto", name: "Auto (current, default)" },
+  ]);
+});
 
 it("links to Cursor's usage dashboard", () => {
   expect(cursorAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
@@ -14,6 +40,7 @@ it("submits interjections in a separate PTY write", async () => {
 
   const controller = new AbortController();
   const sendKeys = vi.fn(async () => {});
+  const report = vi.fn(async () => {});
   const context = {
     sdk: {
       agents: {
@@ -34,6 +61,7 @@ it("submits interjections in a separate PTY write", async () => {
             }
           },
         }),
+        report,
       },
     },
     agentId: "cursor",
@@ -49,6 +77,13 @@ it("submits interjections in a separate PTY write", async () => {
 
   expect(sendKeys).toHaveBeenNthCalledWith(1, "continue");
   expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
+  expect(report).toHaveBeenCalledWith({
+    agent: "cursor",
+    tabId: "tab-1",
+    worktreeId: "worktree-1",
+    status: "cleared",
+    attentionKind: null,
+  });
 });
 
 it("reports API and first-party usage with an averaged summary", () => {

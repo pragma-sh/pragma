@@ -10,19 +10,34 @@ import { createTuiWatcher } from "@pragma/watcher-kit";
 const PI_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(
   (id) => ({ id, name: id === "xhigh" ? "Extra High" : `${id[0]?.toUpperCase()}${id.slice(1)}` }),
 );
+const baseWatcher = createTuiWatcher({ agent: "pi", handleDecisions: false });
 
 /** Pragma launcher and interjection watcher for Pi CLI. */
 export const piAgentPlugin: PluginDefinition = definePlugin({
   name: "Pi",
   description: "Launch Pi CLI from Pragma.",
-  // Interjection-only watcher (no decision/question keystrokes). Session-exit
-  // clearing is owned entirely by the Pi extension: it reports `cleared` on
-  // `session_shutdown` and again up front on the next session load, so a hard
-  // process exit that skips `session_shutdown` is reconciled when Pi next opens
-  // in the tab. A watcher-level `finally` `cleared` would fire a second,
-  // delayed `cleared` on soft exits that can land after a quickly-relaunched
-  // session's `started` and stomp it, so we mirror opencode and omit it.
-  watchers: [createTuiWatcher({ agent: "pi", handleDecisions: false })],
+  watchers: [
+    {
+      agent: "pi",
+      async watch(ctx) {
+        try {
+          await baseWatcher.watch(ctx);
+        } finally {
+          try {
+            await ctx.sdk.agents.report({
+              agent: ctx.agentId,
+              tabId: ctx.session.tabId,
+              worktreeId: ctx.session.worktreeId,
+              status: "cleared",
+              attentionKind: null,
+            });
+          } catch {
+            // Session-exit cleanup must never disrupt watcher shutdown.
+          }
+        }
+      },
+    },
+  ],
   agents: [
     defineAgent({
       id: "pi",
@@ -38,7 +53,7 @@ export const piAgentPlugin: PluginDefinition = definePlugin({
         parsePiModels(
           await execFirst(
             ctx,
-            "pi --list-models 2>/dev/null || \"${SHELL:-/bin/sh}\" -lc 'pi --list-models' 2>/dev/null",
+            'pi --list-models 2>/dev/null || fnm exec --using default -- pi --list-models 2>/dev/null || "$HOME/.bun/bin/pi" --list-models 2>/dev/null || "${SHELL:-/bin/sh}" -lc \'pi --list-models\' 2>/dev/null',
           ),
         ),
       permissionModes: [],

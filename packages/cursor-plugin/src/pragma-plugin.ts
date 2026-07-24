@@ -12,6 +12,11 @@ import { createTuiWatcher } from "@pragma/watcher-kit";
 
 /** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
+const baseWatcher = createTuiWatcher({
+  agent: "cursor",
+  handleDecisions: false,
+  interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
+});
 const INSTALLED_CURSOR_USAGE_HELPER = "$HOME/.pragma/plugins/cursor/scripts/usage-limits";
 
 /**
@@ -35,11 +40,26 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
     }),
   ],
   watchers: [
-    createTuiWatcher({
+    {
       agent: "cursor",
-      handleDecisions: false,
-      interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
-    }),
+      async watch(ctx) {
+        try {
+          await baseWatcher.watch(ctx);
+        } finally {
+          try {
+            await ctx.sdk.agents.report({
+              agent: ctx.agentId,
+              tabId: ctx.session.tabId,
+              worktreeId: ctx.session.worktreeId,
+              status: "cleared",
+              attentionKind: null,
+            });
+          } catch {
+            // Session-exit cleanup must never disrupt watcher shutdown.
+          }
+        }
+      },
+    },
   ],
   agents: [
     defineAgent({
@@ -47,8 +67,8 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       name: "Cursor Agent",
       icon: () => null,
       iconPath: "assets/cursor.svg",
-      launch: { command: ["agent", "--force", "--approve-mcps"] },
-      excludeFeatures: ["questions", "commandApproval", "abort"],
+      launch: { command: ["cursor-agent", "--force", "--approve-mcps"] },
+      excludeFeatures: ["questions", "commandApproval", "subagents", "abort", "interrupt"],
       startupInput: [{ delayMs: 5000, data: "a" }],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -223,7 +243,7 @@ function parseCursorModelLine(
   const [rawId, rawName] = line.split(" - ", 2);
   const id = rawId?.trim();
   const name = rawName?.trim();
-  if (!id || id === "auto" || !name || /\s/.test(id)) {
+  if (!id || !name || /\s/.test(id)) {
     return null;
   }
   return { ...splitCursorEffort(id), name };

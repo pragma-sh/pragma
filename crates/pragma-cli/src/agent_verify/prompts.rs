@@ -83,16 +83,16 @@ fn defaults() -> HashMap<String, String> {
         ("session-name", "Reply with one short sentence about naming things. Do not use tools and do not ask questions."),
         ("command-no-permission", "Run this safe shell command exactly, then report its numeric output: date +%s. Do not ask for permission and do not substitute another command."),
         ("question-answer", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
-        ("question-dismiss", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
+        ("question-dismiss", "Use your interactive question tool now. Ask exactly: Choose Circle or Square? Offer exactly Circle and Square, then wait for the answer."),
         ("question-free-text", "Use your interactive question tool now. Ask exactly: What verification marker should I use? Offer exactly Alpha and Beta, then stop and wait. The verifier will answer with custom free text. The answer may arrive directly or as a follow-up message starting with: Answer to question. Either way, once you have it, reply with the exact marker text you received."),
-        ("command-allow", "Run this shell command and then report its output: echo pragma-verify-approval. Do not substitute another command."),
-        ("command-deny", "Run this shell command and then stop if permission is denied: echo pragma-verify-denied. Do not substitute another command."),
-        ("decision-timeout", "Run this shell command and wait for permission: echo pragma-verify-timeout. Do not substitute another command."),
-        ("subagent", "Spawn two parallel sub-agents. One writes about memoization and one writes about tail recursion, about 200 words each. Wait for both and summarize both."),
-        ("abort-mid-run", "Count slowly from 1 to 1000, explaining each number in a sentence. Do not stop early."),
-        ("interrupt-event", "Count slowly from 1 to 1000, explaining each number in a sentence. Do not stop early."),
-        ("abort-mid-question", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer Red and Blue, then wait."),
-        ("abort-mid-approval", "Run this shell command and wait for permission: echo pragma-verify-abort-approval."),
+        ("command-allow", "Use the shell tool exactly once with command `ls /pragma-verify-approval` and workdir `/etc`, then report its output. Do not substitute another command or workdir."),
+        ("command-deny", "Use the shell tool exactly once with command `ls /pragma-verify-denied` and workdir `/etc`, then stop if permission is denied. Do not substitute another command or workdir."),
+        ("decision-timeout", "Use the shell tool exactly once with command `ls /pragma-verify-timeout` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
+        ("subagent", "Spawn two parallel sub-agents. Ask one for a memoization tip and one for a tail-recursion tip. Wait for both and summarize their answers."),
+        ("abort-mid-run", "Write a detailed comparison of merge sort, quicksort, heapsort, and insertion sort, including tradeoffs and examples."),
+        ("interrupt-event", "Draft an in-depth guide to diagnosing latency in a distributed service, with examples and a checklist."),
+        ("abort-mid-question", "Use your interactive question tool now. Ask exactly: Choose Tea or Coffee? Offer Tea and Coffee, then wait."),
+        ("abort-mid-approval", "Use the shell tool exactly once with command `ls /pragma-verify-abort-approval` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
         ("crash-exit", "Reply with a detailed explanation of sorting algorithms long enough to remain busy for several seconds."),
     ]
     .into_iter()
@@ -102,7 +102,7 @@ fn defaults() -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_escapes;
+    use super::{defaults, parse_escapes};
 
     #[test]
     fn parses_abort_escapes() {
@@ -116,5 +116,35 @@ mod tests {
     fn rejects_bad_hex() {
         assert!(parse_escapes(r"\xzz").is_err());
         assert!(parse_escapes(r"\x1").is_err());
+    }
+
+    #[test]
+    fn approval_prompts_require_an_external_workdir() {
+        let prompts = defaults();
+        for id in [
+            "command-allow",
+            "command-deny",
+            "decision-timeout",
+            "abort-mid-approval",
+        ] {
+            let prompt = prompts.get(id).expect("approval prompt");
+            assert!(prompt.contains("workdir `/etc`"));
+            assert!(!prompt.contains("$HOME"));
+        }
+    }
+
+    #[test]
+    fn behaviorally_similar_scenarios_use_distinct_prompts() {
+        let prompts = defaults();
+        for ids in [
+            ["question-answer", "question-dismiss", "abort-mid-question"],
+            ["abort-mid-run", "interrupt-event", "crash-exit"],
+        ] {
+            let unique = ids
+                .map(|id| prompts.get(id).expect("scenario prompt"))
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(unique.len(), ids.len());
+        }
     }
 }

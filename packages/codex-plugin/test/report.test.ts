@@ -98,7 +98,7 @@ function reports(): string[] {
   return calls().filter((call) => call.startsWith("agent report "));
 }
 
-function messages(): Array<{ id: string; role: string; text: string }> {
+function messages(): Array<{ id: string; role: string; text: string; subAgentsActive: number }> {
   return calls()
     .filter((call) => call.startsWith("agent message "))
     .map((call) => JSON.parse(call.slice(call.indexOf("--payload ") + "--payload ".length)));
@@ -278,6 +278,13 @@ describe("report.sh", () => {
   it("tracks subagents so parent stop cannot finish early", () => {
     run("started");
     run("subagent-start", { stdin: JSON.stringify({ agent_id: "child-1" }) });
+    expect(messages()).toContainEqual(
+      expect.objectContaining({
+        role: "system",
+        text: "Codex started a subagent",
+        subAgentsActive: 1,
+      }),
+    );
     run("stopped");
     expect(reports()).not.toContain("agent report --agent codex stopped");
     expect(existsSync(markerPath())).toBe(true);

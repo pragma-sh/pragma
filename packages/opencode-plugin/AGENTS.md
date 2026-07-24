@@ -89,8 +89,9 @@ even when the `dispose` plugin hook doesn't run (abrupt shutdown).
 
 - The `permission.asked` event → a **`command` attention carrying the command text + a
   requestId** (see _Command approval_), and the `question` tool (via `tool.execute.before`
-  or a pending `message.part.updated` part) → a **`question` attention carrying the
-  prompt + option labels/descriptions + a requestId**. Question args live on the hook's second
+  or, on OpenCode 1.18+, the canonical `question.asked` event) → a **`question` attention carrying the
+  prompt + option labels/descriptions + a requestId**. Question args live on
+  `question.asked.properties.questions[]` in OpenCode 1.18 and on the legacy hook's second
   parameter (`output.args.questions[]`); the plugin parses `question`/`header` and
   each option's `label`/optional `description` so mobile/desktop can render a real answer UI instead of raw
   JSON. Non-question tool summaries prefer the primary arg (command, path, pattern)
@@ -109,6 +110,14 @@ fallbacks (both routed to the same command-approval report). Only real opencode 
 handled — **do not re-add the speculative `session.next.*` events** (opencode does emit
 `session.next.agent.switched` / `session.next.model.switched`, but they carry no status
 meaning; mapping them was the source of the stuck-yellow bug).
+
+OpenCode 1.18 adds `question.asked` / `question.replied` / `question.rejected`. Prefer
+`question.asked`: it carries complete prompt/options plus stable request id, while the
+earlier `message.part.updated` event can contain an incomplete tool state. Never emit a
+generic question attention for that incomplete state; it can race ahead of canonical data.
+Legacy question-hook reports are deferred briefly so this canonical event can supersede
+their synthetic call id. Otherwise a fast remote answer targets the legacy id immediately
+before OpenCode raises its real `que_*` prompt, leaving the session stuck on attention.
 
 ## Command approval + question answers (the watcher route)
 
@@ -156,8 +165,9 @@ split across two pieces:
    the agent keeps running, so the watcher **re-connects** (short backoff) until its session
    aborts — a single dropped stream must not silently disable approval or interjection — and a
    failed `sendKeys` write is swallowed rather than tearing the watcher down. The server
-   replays very recent decisions/answers to cover watcher startup races; the watcher dedupes
-   verdicts by `requestId` so reconnect replay does not send Enter twice. opencode's permission
+   replays recent attention and decision events to cover watcher startup races; the watcher
+   caches command-attention request ids, ignores unmatched verdicts, and dedupes matched verdicts
+   so a wrong id or reconnect replay cannot operate the live prompt. opencode's permission
    prompt has **three** options with "Allow" selected first: **approve** = Enter (`\r`);
    **reject** = two Right-arrow presses then Enter (`\x1b[C\x1b[C\r`) to move to the third
    ("Reject") option and confirm. Override via the watcher's `approveKeys` / `denyKeys` /
@@ -167,7 +177,10 @@ split across two pieces:
    `requestId`), then on `AgentAnswer` write OpenCode's question-TUI keystrokes: digits
    `1`–`9` select+submit a listed option; an unmatched reply opens the virtual "Type your
    own answer" row (`options.length + 1`), types the text, and Enter-submits; dismiss /
-   empty reply sends Escape. Helper: `questionAnswerKeys`.
+   empty reply sends Escape. The shared watcher waits briefly after the attention report
+   before writing any answer keys because OpenCode can emit `question.asked` just before
+   its TUI prompt mounts, especially during parallel verification. Helper:
+   `questionAnswerKeys`.
 
 Each built-in plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
 reports matching bundle metadata to server, which starts `pragma-watch` for a headless

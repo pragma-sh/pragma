@@ -60,14 +60,6 @@ mod tests {
     }
 
     #[test]
-    fn max_parallel_agents_is_positive() {
-        // Same value the frontend reads as `constants.maxParallelAgents`.
-        // `minimum: 1` in the schema makes typify generate a `NonZeroU64`, so the
-        // Rust side is statically guaranteed non-zero; `.get()` reads the value.
-        assert!(CONSTANTS.max_parallel_agents.get() >= 1);
-    }
-
-    #[test]
     fn max_concurrent_script_commands_is_positive() {
         assert!(CONSTANTS.scripts.max_concurrent_commands.get() >= 1);
     }

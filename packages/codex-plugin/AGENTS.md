@@ -57,6 +57,10 @@ Official references:
 | Transcript `request_user_input` | abort watcher    | Reports single-question attention; watcher returns remote answers as TUI keys |
 | Transcript `agent_message`      | abort watcher    | Streams each completed assistant message (raw Markdown) mid-turn              |
 
+`SubagentStart` also emits a system message with marker-derived
+`subAgentsActive`. Status reports do not carry that count; without this message,
+chat consumers and `agent verify` cannot observe real parallel activity.
+
 ## Assistant message streaming
 
 Codex records one unescaped `event_msg`/`agent_message` rollout line per completed

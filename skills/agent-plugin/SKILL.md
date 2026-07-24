@@ -236,16 +236,34 @@ Run real integration harness from target worktree:
 pragma-cli agent verify --agent <catalog-id> --abort-input '\x1b'
 ```
 
-Reload or restart Pragma after rebuilding a plugin bundle so pragma-server's headless launch
-catalog reflects the new command and watcher. Prefer running `agent verify` with the desktop
-app QUIT: a running app brokers launches through its own plugin copy and can silently drop
-new launch flags even when the gateway catalog is fresh; with no app connected the server's
-headless path builds the command from the live sidecar catalog. Host hook trust is separate:
-script-body edits do not require re-trust unless the trusted hook definition itself changed.
+Verify launches sessions headlessly by default (payload `headless: true`), so the server
+builds commands from the live sidecar catalog and no desktop tab opens per scenario even
+while the app is running. Still reload or restart Pragma after rebuilding a plugin bundle
+so pragma-server's catalog reflects the new command and watcher. Pass `--headed` only when
+you specifically need to exercise the desktop launch broker (a running app brokers headed
+launches through its own plugin copy and can silently drop new launch flags even when the
+gateway catalog is fresh). Host hook trust is separate: script-body edits do not require
+re-trust unless the trusted hook definition itself changed.
 
-Use `--scenario <id>` while iterating, `--prompts <file.json>` for host-specific prompt
-tuning, and `--include-slow` before final handoff. Re-run until every applicable scenario
-passes. Skips need explicit capability reasons; failures are not handoff-ready.
+Scenarios run concurrently on a worker pool (`--jobs`, default 6; `stream-integrity`
+always runs alone afterwards). Use `--jobs 1` to serialize when debugging cross-talk or a
+host that cannot run parallel sessions in one worktree. Parallel cold starts slow TUI
+boot; two guards cover the resulting lost-prefill window: the headless launcher waits
+for the TUI's alternate screen before typing the prompt, and `await_running` retypes
+the prompt once after a short first window (half `--step-timeout`, capped at 20s) before
+failing an attempt. A headless launch also probes the terminal immediately, so a server
+or session error fails the attempt before any event timeout. `--step-timeout` is one total
+budget shared by every wait within a fresh-session attempt. Retries receive a fresh budget
+instead of inheriting an expired deadline.
+Event waits fail fast on settle: an agent that finishes its turn
+without the awaited attention/message/sub-agent report fails ~10s after done/cleared
+(`agent settled without ...`) instead of waiting out the full step timeout. Use `--scenario <id>` while
+iterating, `--prompts <file.json>` for host-specific prompt tuning, and `--include-slow`
+before final handoff. Re-run until every applicable scenario passes. Skips need explicit
+capability reasons; failures are not handoff-ready.
+
+The verifier explicitly clears status for every session it launched before exiting,
+including failed attempts, so a timeout must not leave stale running/attention dots.
 
 Verification burns real LLM tokens. Pick the **cheapest available model that can still
 spawn sub-agents** (the `subagent` scenario requires sub-agent capability) instead of the
@@ -264,6 +282,10 @@ cheapest subagent-capable id before running the full suite.
 delivery paths: the marker arriving in the same turn (custom-answer editor), or the
 `questionFreeTextMode: "interject"` secondary path — fallback row selected, response
 aborted, marker delivered by the `Answer to question ...` follow-up turn.
+
+Question attention can reach the event stream immediately before a host mounts its TUI
+prompt. Keep a short prompt-mount delay before watcher answer keys and verifier abort
+input; otherwise parallel cold starts make both paths intermittently lose input.
 
 Also run package tests and `bun run check`. For hook packages, refresh installed copy and
 restart host before live run.

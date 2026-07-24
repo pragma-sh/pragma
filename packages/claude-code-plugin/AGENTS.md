@@ -70,7 +70,9 @@ The bridge tracks every **`SubagentStart` / `SubagentStop`** by `agent_id` in pe
 marker files, so overlapping children cannot collapse into one boolean. A parent `Stop`
 stays `started` while any marker remains; each child stop removes only its own marker,
 and the parent's final `Stop` owns the finished report. Session start/end clear stale
-markers. The `Stop` payload's **`background_tasks`** array remains a compatibility
+markers. Rich messages derive `subAgentsActive` from those markers; never hardcode zero,
+or chat consumers and `agent verify` cannot observe real parallel activity. The `Stop`
+payload's **`background_tasks`** array remains a compatibility
 fallback: entries like
 `{"type": "subagent", "status": "running", ...}` mean the session is still busy, so
 `report.sh` re-asserts `started`, keeps the marker + abort watcher alive (a cancel during

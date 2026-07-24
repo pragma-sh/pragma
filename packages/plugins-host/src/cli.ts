@@ -6,7 +6,12 @@ import type { PluginContext, PluginDefinition } from "@pragma/plugin";
 import { PragmaClient } from "@pragma/sdk";
 import { readStdinLines } from "@pragma/sidecar-kit";
 
-import { assembleCatalog, assembleWatchers, type ResolvedPlugin } from "./catalog";
+import {
+  assembleCatalog,
+  assembleWatchers,
+  type CatalogResult,
+  type ResolvedPlugin,
+} from "./catalog";
 import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
 import { loadUsageLimits } from "./usage-limits";
@@ -105,7 +110,10 @@ async function resolvePlugins(roots: string[], bundledDir?: string): Promise<Res
   return plugins.filter((plugin): plugin is ResolvedPlugin => plugin !== undefined);
 }
 
-async function load(command: LoadCommand): Promise<{
+async function load(
+  command: LoadCommand,
+  previous?: CatalogResult,
+): Promise<{
   state: LoadedState;
   catalog: Awaited<ReturnType<typeof assembleCatalog>>;
   watchers: ReturnType<typeof assembleWatchers>;
@@ -119,13 +127,17 @@ async function load(command: LoadCommand): Promise<{
   // A single shared context (first root as project) resolves async model
   // providers, which shell out through the SDK to the local gateway.
   const ctx = contextFor(sdk, "pragma.catalog", roots[0]);
-  const catalog = await assembleCatalog(plugins, ctx, (pluginId, agentId, error) =>
-    emit({
-      type: "log",
-      pluginId,
-      level: "error",
-      message: `agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`,
-    }),
+  const catalog = await assembleCatalog(
+    plugins,
+    ctx,
+    (pluginId, agentId, error) =>
+      emit({
+        type: "log",
+        pluginId,
+        level: "error",
+        message: `agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+    previous,
   );
   return {
     state: { plugins, sdk, root: roots[0] },
@@ -136,6 +148,8 @@ async function load(command: LoadCommand): Promise<{
 
 class StdinLines {
   private loaded: LoadedState | undefined;
+  /** Last successfully assembled catalog, the fallback for flaky providers. */
+  private lastCatalog: CatalogResult | undefined;
   private queue = Promise.resolve();
   private lifecycleQueue = Promise.resolve();
 
@@ -149,8 +163,9 @@ class StdinLines {
     try {
       const command = JSON.parse(line) as Command;
       if (command.type === "load") {
-        const loaded = await load(command);
+        const loaded = await load(command, this.lastCatalog);
         this.loaded = loaded.state;
+        this.lastCatalog = loaded.catalog;
         emit({
           type: "catalog",
           catalog: loaded.catalog.catalog,
