@@ -904,6 +904,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let channel = pty::instance_channel(app.config().product_name.as_deref());
     let data_dir = pty::instance_data_dir(&app_data_dir, &channel);
     std::fs::create_dir_all(&data_dir)?;
+    if let Err(error) = agent_cli::ensure_installed(app.handle(), &data_dir, &channel) {
+        log::warn!("failed to install pragma-cli: {error}");
+    }
     let router = RouterDb::open(data_dir.join("router.db"))?;
     app.manage(Db::open(data_dir.join("pragma.db"))?);
     app.manage(github::TokenStore::new(&data_dir));
@@ -931,9 +934,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     install_menu(app.handle())?;
     install_deep_links(app);
-    if let Err(error) = agent_cli::ensure_installed(app.handle()) {
-        log::warn!("failed to install pragma-cli: {error}");
-    }
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
     automations::start(app.handle().clone(), pty.clone());
@@ -947,10 +947,6 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             log::warn!("failed to start tauri-agent-tools dev bridge: {error}");
         }
     }
-    log::info!(
-        "Pragma supports up to {} parallel agents",
-        CONSTANTS.max_parallel_agents
-    );
     Ok(())
 }
 

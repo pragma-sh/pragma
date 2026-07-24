@@ -1,5 +1,4 @@
 {
-  "maxParallelAgents": 8,
   "daemon": {
     "protocolVersion": 20
   },

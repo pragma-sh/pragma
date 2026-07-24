@@ -60,6 +60,37 @@ pub enum VerifyEvent {
     },
 }
 
+impl VerifyEvent {
+    /// `(worktreeId, tabId, agent)` scope triple, or `None` for stream-control
+    /// lines (`ready`, subscription snapshots/deltas) that carry no session.
+    pub fn scope(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            VerifyEvent::Agent {
+                worktree_id,
+                tab_id,
+                agent,
+                ..
+            } => Some((worktree_id, tab_id, agent)),
+            VerifyEvent::AgentMessage { message } => {
+                Some((&message.worktree_id, &message.tab_id, &message.agent))
+            }
+            VerifyEvent::AgentDecision { decision } => {
+                Some((&decision.worktree_id, &decision.tab_id, &decision.agent))
+            }
+            VerifyEvent::AgentAnswer { answer } => {
+                Some((&answer.worktree_id, &answer.tab_id, &answer.agent))
+            }
+            VerifyEvent::AgentInput { input } => {
+                Some((&input.worktree_id, &input.tab_id, &input.agent))
+            }
+            VerifyEvent::AgentInterrupt { interrupt } => {
+                Some((&interrupt.worktree_id, &interrupt.tab_id, &interrupt.agent))
+            }
+            VerifyEvent::Ready | VerifyEvent::Snapshot { .. } | VerifyEvent::Delta { .. } => None,
+        }
+    }
+}
+
 #[derive(Default)]
 struct LedgerState {
     events: Vec<(VerifyEvent, Value)>,
@@ -143,11 +174,37 @@ impl Ledger {
 
     /// Returns capped raw event evidence from a cursor onward.
     pub fn evidence_since(&self, cursor: usize, limit: usize) -> Vec<Value> {
+        self.evidence_filtered(cursor, limit, |_| true)
+    }
+
+    /// Returns capped raw event evidence from a cursor onward, restricted to
+    /// events attributed to one of `tab_ids`. Keeps concurrent scenarios from
+    /// leaking each other's sessions into failure evidence.
+    pub fn evidence_since_for_tabs(
+        &self,
+        cursor: usize,
+        limit: usize,
+        tab_ids: &[String],
+    ) -> Vec<Value> {
+        self.evidence_filtered(cursor, limit, |event| {
+            event
+                .scope()
+                .is_some_and(|(_, tab, _)| tab_ids.iter().any(|id| id == tab))
+        })
+    }
+
+    fn evidence_filtered(
+        &self,
+        cursor: usize,
+        limit: usize,
+        keep: impl Fn(&VerifyEvent) -> bool,
+    ) -> Vec<Value> {
         self.inner.0.lock().map_or_else(
             |_| Vec::new(),
             |state| {
                 state.events[cursor..]
                     .iter()
+                    .filter(|(event, _)| keep(event))
                     .rev()
                     .take(limit)
                     .map(|(_, value)| value.clone())

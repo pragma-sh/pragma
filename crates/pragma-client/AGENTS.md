@@ -15,7 +15,9 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   reads and diffs will queue behind slow git polls again. RPC response reads
   have no deadline while host work is active because operations such as a
   user-defined `git push` hook may run long; the normal timeout is restored before the
-  connection returns to the pool.
+  connection returns to the pool. Brokered control requests use the same unbounded wait:
+  retrying an `agentSessionLaunch` after a 5s socket timeout can duplicate a launch that
+  already succeeded server-side.
 - Local managed-server bootstrap for development and packaged native clients.
 - Remote SSH bridge using `russh` and `channel_open_direct_streamlocal`, with
   agent (default), key-file, and password auth (`RemoteAuth`). `ssh_exec` runs

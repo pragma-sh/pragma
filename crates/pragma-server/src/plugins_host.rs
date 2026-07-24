@@ -35,7 +35,10 @@ const PLUGIN_ROOTS_FILE: &str = "plugin-roots.json";
 
 /// Icons are capped at 256 KB so base64-in-JSON asset delivery stays cheap.
 const ASSET_MAX_BYTES: u64 = 256 * 1024;
-const LOAD_TIMEOUT: Duration = Duration::from_secs(5);
+// Dynamic model providers execute host CLIs and routinely exceed the normal
+// request timeout on a cold start. Timing out too early leaves load state at
+// `NotStarted`, causing every catalog caller to enqueue another full reload.
+const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
 #[cfg(not(test))]
 const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
@@ -137,6 +140,7 @@ pub struct PluginsRegistry {
     pending_usage_limits: PendingUsageLimits,
     roots: Mutex<Vec<String>>,
     load_state: Mutex<LoadState>,
+    reload_lock: Mutex<()>,
     server_boot_id: String,
 }
 
@@ -159,6 +163,7 @@ impl PluginsRegistry {
             pending_usage_limits: Arc::clone(&pending_usage_limits),
             roots: Mutex::new(roots),
             load_state: Mutex::new(LoadState::NotStarted),
+            reload_lock: Mutex::new(()),
             server_boot_id: uuid::Uuid::new_v4().to_string(),
         });
         thread::spawn(move || {
@@ -309,15 +314,50 @@ impl PluginsRegistry {
             .get("roots")
             .and_then(|value| serde_json::from_value(value.clone()).ok())
             .unwrap_or_default();
+        let _reload = self
+            .reload_lock
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        if *self.roots.lock().map_err(|_| PluginsError::LockPoisoned)? == roots {
+            return Ok(());
+        }
         persist_roots(&self.server_dir, &roots);
         (*self.roots.lock().map_err(|_| PluginsError::LockPoisoned)?).clone_from(&roots);
-        self.reload()
+        self.reload_locked()
+    }
+
+    /// Adds one project root when absent. Headless session launches call this
+    /// concurrently, so root update and catalog reload share one critical
+    /// section: one launch reloads while followers wait for that catalog.
+    pub fn ensure_root(&self, root: &str) -> Result<(), PluginsError> {
+        let _reload = self
+            .reload_lock
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        let roots = {
+            let mut roots = self.roots.lock().map_err(|_| PluginsError::LockPoisoned)?;
+            if roots.iter().any(|existing| existing == root) {
+                return Ok(());
+            }
+            roots.push(root.to_string());
+            roots.clone()
+        };
+        persist_roots(&self.server_dir, &roots);
+        self.reload_locked()
     }
 
     /// Re-sends `load` with the current roots and freshly read gateway
     /// credentials (e.g. after the gateway starts and writes its discovery
     /// file, so dynamic model providers can finally resolve).
     fn reload(&self) -> Result<(), PluginsError> {
+        let _reload = self
+            .reload_lock
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        self.reload_locked()
+    }
+
+    fn reload_locked(&self) -> Result<(), PluginsError> {
         let roots = self
             .roots
             .lock()
@@ -349,6 +389,10 @@ impl PluginsRegistry {
     /// credentials appear when the first load ran without them (a credential-less
     /// load drops every agent whose model provider needs the gateway).
     fn ensure_catalog_fresh(&self) -> Result<(), PluginsError> {
+        let _reload = self
+            .reload_lock
+            .lock()
+            .map_err(|_| PluginsError::LockPoisoned)?;
         let state = *self
             .load_state
             .lock()
@@ -356,7 +400,7 @@ impl PluginsRegistry {
         match state {
             LoadState::StartedWithGateway => Ok(()),
             LoadState::StartedWithoutGateway if self.gateway_credentials().is_none() => Ok(()),
-            LoadState::NotStarted | LoadState::StartedWithoutGateway => self.reload(),
+            LoadState::NotStarted | LoadState::StartedWithoutGateway => self.reload_locked(),
         }
     }
 
@@ -667,7 +711,7 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_lowercase_hex_sha256, PluginsRegistry, SidecarEvent};
+    use super::{is_lowercase_hex_sha256, PluginsRegistry, SidecarEvent, PLUGIN_ROOTS_FILE};
 
     #[test]
     fn validates_lowercase_hex_sha256() {
@@ -732,6 +776,25 @@ mod tests {
         let registry = PluginsRegistry::new(dir);
         let catalog = registry.cached_catalog().expect("cached catalog");
         assert_eq!(catalog, serde_json::json!({ "agents": [] }));
+    }
+
+    #[test]
+    fn ensuring_persisted_root_does_not_start_catalog_reload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(PLUGIN_ROOTS_FILE),
+            serde_json::to_vec(&vec!["/project"]).expect("serialize roots"),
+        )
+        .expect("write roots");
+        let registry = PluginsRegistry::new(dir.path().to_path_buf());
+
+        registry.ensure_root("/project").expect("existing root");
+
+        assert_eq!(
+            *registry.load_state.lock().expect("load state"),
+            super::LoadState::NotStarted,
+            "idempotent registration must not reload the plugin sidecar"
+        );
     }
 
     #[test]

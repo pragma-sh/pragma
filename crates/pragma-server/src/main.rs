@@ -638,23 +638,24 @@ fn handle_control_request(
         ));
     };
     let request_id = request.request_id;
+    // An explicit `headless: true` launch bypasses the desktop broker even while
+    // a controller is connected, so callers (`pragma-cli agent verify`) can spawn
+    // sessions without opening a desktop tab per launch.
+    if control.method == pragma_constants::ControlMethod::AgentSessionLaunch
+        && control
+            .payload
+            .get("headless")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(headless_launch_control_result(registry, control.payload));
+    }
     let Some(writer) = registry
         .controller_writer()
         .map_err(|err| HandledRequestError::Request(err.to_string()))?
     else {
         if control.method == pragma_constants::ControlMethod::AgentSessionLaunch {
-            return match registry.launch_agent_headless(control.payload) {
-                Ok(payload) => Err(HandledRequestError::Control(ControlResult {
-                    ok: true,
-                    payload: Some(payload),
-                    error: None,
-                })),
-                Err(error) => Err(HandledRequestError::Control(ControlResult {
-                    ok: false,
-                    payload: None,
-                    error: Some(error),
-                })),
-            };
+            return Err(headless_launch_control_result(registry, control.payload));
         }
         return Err(HandledRequestError::Control(app_not_running_result()));
     };
@@ -680,6 +681,26 @@ fn handle_control_request(
         event_stream: None,
         control_rx: Some(rx),
     })
+}
+
+/// Runs a server-side (headless) agent session launch and wraps the outcome as
+/// the control reply for the caller.
+fn headless_launch_control_result(
+    registry: &Registry,
+    payload: serde_json::Value,
+) -> HandledRequestError {
+    match registry.launch_agent_headless(payload) {
+        Ok(payload) => HandledRequestError::Control(ControlResult {
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        }),
+        Err(error) => HandledRequestError::Control(ControlResult {
+            ok: false,
+            payload: None,
+            error: Some(error),
+        }),
+    }
 }
 
 fn app_not_running_result() -> ControlResult {

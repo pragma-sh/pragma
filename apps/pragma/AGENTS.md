@@ -183,11 +183,11 @@ so a paste-aware TUI commits the text before the submit keypress lands — this 
 Kanban background launches and foreground launches both submit reliably across agents.
 Use these only for generic pre-TUI gates / input semantics owned by that agent
 definition; core must not hard-code per-agent keystrokes. `pragma-cli` is
-installed/updated to `~/.local/bin` on startup; daemon
-terminal sessions export `PRAGMA_CLI=$HOME/.local/bin/pragma-cli` and prepend that
-directory to `PATH` so bundled plugins can report status even when the user's shell
-doesn't include it. The app still emits a UI warning if that directory is not on the
-app's startup `$PATH`.
+installed/updated to `~/.local/bin` on production startup. Dev builds install it under
+their isolated instance data directory (`<data-dir>/bin`) so concurrent worktrees cannot
+overwrite each other's helper with an older binary. Daemon terminal sessions export the
+matching `PRAGMA_CLI` and prepend its directory to `PATH`; production still warns when
+`~/.local/bin` is absent from app startup `$PATH`.
 
 Agent definitions may also declare typed `excludeFeatures`; this metadata crosses the
 shared catalog so `agent verify` skips unsupported optional capability groups.

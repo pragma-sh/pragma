@@ -468,6 +468,14 @@ pub struct AgentVerifyArgs {
     /// JSON file mapping scenario ids to prompt overrides.
     #[arg(long, value_name = "FILE")]
     pub prompts: Option<String>,
+    /// Concurrent scenario sessions. `stream-integrity` always runs alone after
+    /// parallel scenarios settle.
+    #[arg(long, default_value_t = 6, value_parser = clap::value_parser!(u16).range(1..=16))]
+    pub jobs: u16,
+    /// Launch scenario sessions through the connected desktop app (opens a
+    /// visible tab per launch). Default launches headlessly on the host server.
+    #[arg(long)]
+    pub headed: bool,
 }
 
 #[derive(Debug, Args)]
@@ -733,6 +741,8 @@ mod tests {
             "basic-reply",
             "--attempts",
             "3",
+            "--jobs",
+            "16",
             "--pick-model-cmd",
             "--model moonshot/kimi-k3",
         ])
@@ -746,6 +756,7 @@ mod tests {
         assert_eq!(args.agent, "opencode");
         assert_eq!(args.scenarios, ["basic-reply"]);
         assert_eq!(args.attempts, 3);
+        assert_eq!(args.jobs, 16);
         assert_eq!(args.abort_input, "\\x1b");
         assert_eq!(
             args.pick_model_cmd.as_deref(),

@@ -8,6 +8,9 @@ mod report;
 mod scenarios;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{CatalogAgent, WorkspaceSnapshot};
@@ -54,9 +57,21 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
         Some(resolve_model(catalog_agent, args.model.as_deref()).map_err(CliError::config)?)
     };
     let runtime_agent_id = runtime_agent_id(&catalog_agent.id);
+    // Prefill-retry inputs mirroring the host's launch behavior (see
+    // `ScenarioSession::await_running`).
+    let prefill_plain = serde_json::to_value(&catalog_agent.launch)
+        .ok()
+        .is_some_and(|launch| launch["prefillMode"] == "plain");
+    let prefill_submit = catalog_agent
+        .launch
+        .prefill_submit
+        .clone()
+        .unwrap_or_else(|| "\r".to_string());
     let ledger = Ledger::collect(api.event_reader().map_err(CliError::config)?);
-    let selected: HashSet<&str> = args.scenarios.iter().map(String::as_str).collect();
-    let context = ScenarioCtx {
+    let all_launched_tabs = Mutex::new(Vec::new());
+    // Each scenario gets its own context so launched-tab tracking (evidence
+    // scoping) stays per-scenario when scenarios run concurrently.
+    let make_context = || ScenarioCtx {
         api: &api,
         ledger: &ledger,
         project_id: &project_id,
@@ -66,34 +81,137 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
         runtime_agent_id: &runtime_agent_id,
         model_id,
         model_cmd,
-        timeout: Duration::from_secs(args.step_timeout),
+        attempt_timeout: Duration::from_secs(args.step_timeout),
         abort_input: &abort_input,
+        headless: !args.headed,
+        prefill_plain,
+        prefill_submit: &prefill_submit,
+        launched_tabs: Mutex::new(Vec::new()),
+        all_launched_tabs: &all_launched_tabs,
     };
+    results.extend(run_scenarios(args, catalog_agent, &prompts, &make_context));
+    if let Err(error) = clear_launched_statuses(
+        &runtime_agent_id,
+        &all_launched_tabs,
+        |agent, worktree_id, tab_id| api.clear_status(agent, worktree_id, tab_id),
+    ) {
+        results.push(cleanup_failed_result(error));
+    }
+    finish(out, args.agent.clone(), results, ledger.schema_errors())
+}
 
-    for scenario in definitions() {
+fn clear_launched_statuses(
+    agent: &str,
+    launched: &Mutex<Vec<gateway::LaunchResult>>,
+    mut clear_status: impl FnMut(&str, &str, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    let tabs = launched
+        .lock()
+        .map_err(|_| "launched-session lock poisoned".to_string())?
+        .clone();
+    let mut errors = Vec::new();
+    for tab in tabs {
+        if let Err(error) = clear_status(agent, &tab.worktree_id, &tab.tab_id) {
+            errors.push(format!("{}: {error}", tab.tab_id));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to clear agent statuses: {}",
+            errors.join(" | ")
+        ))
+    }
+}
+
+fn cleanup_failed_result(error: String) -> ScenarioResult {
+    ScenarioResult {
+        id: "cleanup".to_string(),
+        name: "status cleanup".to_string(),
+        status: ScenarioStatus::Failed,
+        attempts: 1,
+        duration_ms: 0,
+        failure: Some(error),
+        evidence: Vec::new(),
+    }
+}
+
+/// Runs the selected scenarios on a bounded worker pool (`--jobs`), keeping
+/// `stream-integrity` serial and last because it asserts invariants over the
+/// whole event ledger. Results come back in scenario-table order.
+fn run_scenarios<'a>(
+    args: &AgentVerifyArgs,
+    catalog_agent: &CatalogAgent,
+    prompts: &Prompts,
+    make_context: &(impl Fn() -> ScenarioCtx<'a> + Sync),
+) -> Vec<ScenarioResult> {
+    let selected: HashSet<&str> = args.scenarios.iter().map(String::as_str).collect();
+    let mut queued: Vec<(usize, &scenarios::ScenarioDef)> = Vec::new();
+    let mut serial: Vec<(usize, &scenarios::ScenarioDef)> = Vec::new();
+    let outcomes: Mutex<Vec<(usize, ScenarioResult)>> = Mutex::new(Vec::new());
+    for (index, scenario) in definitions().iter().enumerate() {
         if !selected.is_empty() && !selected.contains(scenario.id) {
             continue;
         }
-        if scenario.slow && !args.include_slow {
-            results.push(skipped_result(scenario, "requires --include-slow"));
-            continue;
-        }
-        if excludes_scenario(scenario, catalog_agent.exclude_features.as_deref()) {
-            results.push(skipped_result(
-                scenario,
-                "agent declares this feature unsupported",
-            ));
-            continue;
-        }
-        let result = execute_scenario(scenario, &context, &prompts, args.attempts);
-        let failed = matches!(result.status, ScenarioStatus::Failed);
-        results.push(result);
-        if args.fail_fast && failed {
-            break;
+        let skip_reason = if scenario.slow && !args.include_slow {
+            Some("requires --include-slow")
+        } else if excludes_scenario(scenario, catalog_agent.exclude_features.as_deref()) {
+            Some("agent declares this feature unsupported")
+        } else {
+            None
+        };
+        if let Some(reason) = skip_reason {
+            if let Ok(mut outcomes) = outcomes.lock() {
+                outcomes.push((index, skipped_result(scenario, reason)));
+            }
+        } else if scenario.id == "stream-integrity" {
+            serial.push((index, scenario));
+        } else {
+            queued.push((index, scenario));
         }
     }
 
-    finish(out, args.agent.clone(), results, ledger.schema_errors())
+    let next = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let workers = usize::from(args.jobs).min(queued.len());
+    if workers > 0 {
+        thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    if args.fail_fast && failed.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let slot = next.fetch_add(1, Ordering::SeqCst);
+                    let Some((index, scenario)) = queued.get(slot) else {
+                        break;
+                    };
+                    let context = make_context();
+                    let result = execute_scenario(scenario, &context, prompts, args.attempts);
+                    if matches!(result.status, ScenarioStatus::Failed) {
+                        failed.store(true, Ordering::SeqCst);
+                    }
+                    if let Ok(mut outcomes) = outcomes.lock() {
+                        outcomes.push((*index, result));
+                    }
+                });
+            }
+        });
+    }
+
+    if !(args.fail_fast && failed.load(Ordering::SeqCst)) {
+        for (index, scenario) in serial {
+            let context = make_context();
+            let result = execute_scenario(scenario, &context, prompts, args.attempts);
+            if let Ok(mut outcomes) = outcomes.lock() {
+                outcomes.push((index, result));
+            }
+        }
+    }
+
+    let mut outcomes = outcomes.into_inner().unwrap_or_default();
+    outcomes.sort_by_key(|(index, _)| *index);
+    outcomes.into_iter().map(|(_, result)| result).collect()
 }
 
 fn excludes_scenario(
@@ -140,7 +258,20 @@ fn execute_scenario(
             Err(error) => failure = Some(error),
         }
     }
-    let evidence = context.ledger.evidence_since(first_cursor, 8);
+    // Scope evidence to this scenario's own sessions; ledger-wide scenarios
+    // (stream-integrity) launch no tabs and keep the unscoped view.
+    let launched_tabs = context
+        .launched_tabs
+        .lock()
+        .map(|tabs| tabs.clone())
+        .unwrap_or_default();
+    let evidence = if launched_tabs.is_empty() {
+        context.ledger.evidence_since(first_cursor, 8)
+    } else {
+        context
+            .ledger
+            .evidence_since_for_tabs(first_cursor, 8, &launched_tabs)
+    };
     ScenarioResult {
         id: scenario.id.to_string(),
         name: scenario.name.to_string(),
@@ -393,5 +524,34 @@ mod tests {
             abort_question,
             Some(&[AgentFeature::Commands])
         ));
+    }
+
+    #[test]
+    fn clears_every_launched_status_before_exit() {
+        let launched = Mutex::new(vec![
+            gateway::LaunchResult {
+                worktree_id: "w1".to_string(),
+                tab_id: "t1".to_string(),
+            },
+            gateway::LaunchResult {
+                worktree_id: "w2".to_string(),
+                tab_id: "t2".to_string(),
+            },
+        ]);
+        let mut cleared = Vec::new();
+
+        clear_launched_statuses("opencode", &launched, |agent, worktree, tab| {
+            cleared.push((agent.to_string(), worktree.to_string(), tab.to_string()));
+            Ok(())
+        })
+        .expect("status cleanup");
+
+        assert_eq!(
+            cleared,
+            [
+                ("opencode".to_string(), "w1".to_string(), "t1".to_string()),
+                ("opencode".to_string(), "w2".to_string(), "t2".to_string()),
+            ]
+        );
     }
 }

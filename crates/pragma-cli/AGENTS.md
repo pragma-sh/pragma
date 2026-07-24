@@ -24,7 +24,7 @@ pragma-cli agent answer --agent <id> --request-id <id> --text "<reply>"|--dismis
 pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
 # End-to-end integration verification through the gateway/mobile API surface.
 pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b'] \
-  [--model <id> | --pick-model-cmd "<raw model args>"]
+  [--model <id> | --pick-model-cmd "<raw model args>"] [--jobs <n>] [--headed]
 ```
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
@@ -50,14 +50,46 @@ the same NDJSON event stream mobile consumes. Events are scoped by the RUNTIME a
 (final segment of the catalog id), exactly like mobile's stream filter — a plugin
 reporting under the qualified catalog id fails verification because those consumers
 would never see it. It runs all scenarios by default, retries
-LLM-dependent behavior with fresh sessions, and exits non-zero on any failure. Question
+LLM-dependent behavior with fresh sessions, and exits non-zero on any failure.
+Scenario sessions launch **headlessly by default** (launch payload `headless: true`), so
+the server spawns them without opening a desktop tab even while the app is connected;
+`--headed` restores brokering through the desktop launch path. Scenarios run
+**concurrently** on a worker pool (`--jobs`, default 6, max 16). Failure evidence is
+scoped to each scenario's own launched tabs, and `stream-integrity` always runs alone
+after the pool drains because it asserts invariants over the whole event ledger.
+`--fail-fast` stops scheduling new scenarios after a failure but lets in-flight ones
+finish. `--step-timeout` is one total budget per fresh-session attempt, shared by every
+wait within that attempt. A retry gets a fresh budget instead of inheriting the first
+attempt's expired deadline. Each headless launch
+immediately probes its terminal with an empty write, surfacing server/session failures
+before any event timeout. `await_running` waits at most 20s: if no running report lands, the
+prompt prefill likely raced the TUI boot and was swallowed, so the session retypes the
+prompt once (mirroring the catalog's prefill mode/submit) and waits out the remaining
+budget. It never sends more than one retry because delayed status reporting must not
+create duplicate turns. Waits for
+attention, assistant messages, session names, and sub-agent activity **fail fast on
+settle**: after a done/cleared status only a 10s grace window remains for the awaited
+event to ride in (stop-hook reporters emit late events; a new running status re-opens
+the window for follow-up turns), so an agent that finishes its turn without the expected
+event fails with `agent settled without ...` instead of burning the whole step timeout.
+Question
 scenarios validate exact prompt/options, listed and custom answers, dismissal, and wrong
 request-id isolation rather than accepting any generic question attention.
+Behaviorally similar scenarios use distinct prompts; repeated identical questions and
+artificial busywork can make models refuse later cases instead of exercising the host.
+Abort-mid-question waits one short render window after attention before injecting Escape;
+host reporters can publish the question immediately before their TUI prompt mounts, and
+an earlier abort byte is nondeterministically swallowed under parallel startup load.
 Stream-integrity message and attention invariants are scoped to that runtime agent so
 unrelated agents reporting concurrently cannot fail the selected integration.
+Before exiting, verification explicitly reports `cleared` for every session it launched,
+including failed attempts, so timeout and attention scenarios leave no stale status dots.
 Agent catalog `excludeFeatures` entries skip matching optional scenario groups with an
 explicit reason. `command-no-permission` verifies a safe shell command completes and
 raises no command-attention event; command approval remains a separate capability group.
+Approval scenarios request an explicit external `workdir` rather than putting `$HOME` in
+the command: OpenCode 1.18 treats command-argument external paths as advisory and cannot
+resolve shell environment expansion when deciding whether approval is required.
 `question-free-text` requires an assistant message echoing the exact marker and accepts
 two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
 `questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's

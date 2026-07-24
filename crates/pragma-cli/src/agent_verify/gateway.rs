@@ -19,20 +19,26 @@ pub struct LaunchResult {
     pub tab_id: String,
 }
 
+/// Inputs for one `agentSessionLaunch` request.
+pub struct LaunchSpec<'a> {
+    pub project_id: &'a str,
+    pub worktree_id: &'a str,
+    pub agent_id: &'a str,
+    pub model_id: Option<&'a str>,
+    /// Raw model command overriding `model_id` at launch.
+    pub model_cmd: Option<&'a str>,
+    /// Launch server-side without opening a desktop tab.
+    pub headless: bool,
+    pub prompt: &'a str,
+}
+
 /// Gateway operations used by verification scenarios.
 pub trait VerifyApi: Send + Sync {
     fn catalog(&self) -> Result<AgentCatalog, String>;
     fn asset_exists(&self, hash: &str) -> Result<(), String>;
     fn workspace_snapshot(&self) -> Result<WorkspaceSnapshot, String>;
-    fn launch(
-        &self,
-        project_id: &str,
-        worktree_id: &str,
-        agent_id: &str,
-        model_id: Option<&str>,
-        model_cmd: Option<&str>,
-        prompt: &str,
-    ) -> Result<LaunchResult, String>;
+    fn launch(&self, spec: &LaunchSpec<'_>) -> Result<LaunchResult, String>;
+    fn clear_status(&self, agent: &str, worktree_id: &str, tab_id: &str) -> Result<(), String>;
     fn answer(
         &self,
         agent: &str,
@@ -150,26 +156,33 @@ impl VerifyApi for HttpVerifyApi {
         Err("workspace stream ended before snapshot".to_string())
     }
 
-    fn launch(
-        &self,
-        project_id: &str,
-        worktree_id: &str,
-        agent_id: &str,
-        model_id: Option<&str>,
-        model_cmd: Option<&str>,
-        prompt: &str,
-    ) -> Result<LaunchResult, String> {
-        self.post_json(
-            "/v1/control/agentSessionLaunch",
+    fn launch(&self, spec: &LaunchSpec<'_>) -> Result<LaunchResult, String> {
+        let mut body = json!({
+            "projectId": spec.project_id,
+            "worktreeId": spec.worktree_id,
+            "newWorktree": null,
+            "agentId": spec.agent_id,
+            "modelId": spec.model_id,
+            "reasoningId": null,
+            "modelCmd": spec.model_cmd,
+            "prompt": spec.prompt,
+        });
+        // Only sent when requested so headed launches keep the exact payload the
+        // desktop broker has always received.
+        if spec.headless {
+            body["headless"] = json!(true);
+        }
+        self.post_json("/v1/control/agentSessionLaunch", &body)
+    }
+
+    fn clear_status(&self, agent: &str, worktree_id: &str, tab_id: &str) -> Result<(), String> {
+        self.post_empty(
+            "/v1/agents/reports",
             &json!({
-                "projectId": project_id,
+                "agent": agent,
                 "worktreeId": worktree_id,
-                "newWorktree": null,
-                "agentId": agent_id,
-                "modelId": model_id,
-                "reasoningId": null,
-                "modelCmd": model_cmd,
-                "prompt": prompt,
+                "tabId": tab_id,
+                "status": "cleared",
             }),
         )
     }

@@ -154,17 +154,17 @@ fn command_no_permission(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Out
     let earliest = unix_seconds()?.saturating_sub(5);
     let mut session = ctx.launch(prompts.get("command-no-permission")?)?;
     session.await_running()?;
-    let message = session.await_assistant_message()?;
+    let message = session.await_assistant_message_matching(|text| {
+        contains_unix_timestamp(text, earliest, u64::MAX)
+    })?;
     let latest = unix_seconds()?.saturating_add(5);
-    let reported_current_time = message.text.as_deref().is_some_and(|text| {
-        text.split(|character: char| !character.is_ascii_digit())
-            .filter_map(|value| value.parse::<u64>().ok())
-            .any(|value| (earliest..=latest).contains(&value))
-    });
+    let reported_current_time = message
+        .text
+        .as_deref()
+        .is_some_and(|text| contains_unix_timestamp(text, earliest, latest));
     if !reported_current_time {
         return Err("safe command output omitted a current Unix timestamp".to_string());
     }
-    require_done(session.await_settled()?)?;
     if session.scoped_events_since_start().iter().any(|event| {
         matches!(
             event,
@@ -177,7 +177,14 @@ fn command_no_permission(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Out
     }) {
         return Err("safe command unexpectedly requested permission".to_string());
     }
+    require_done(session.await_settled()?)?;
     Ok(Outcome::Passed)
+}
+
+fn contains_unix_timestamp(text: &str, earliest: u64, latest: u64) -> bool {
+    text.split(|character: char| !character.is_ascii_digit())
+        .filter_map(|value| value.parse::<u64>().ok())
+        .any(|value| (earliest..=latest).contains(&value))
 }
 
 fn unix_seconds() -> Result<u64, String> {
@@ -228,7 +235,11 @@ fn question_dismiss(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome,
     let mut session = ctx.launch(prompts.get("question-dismiss")?)?;
     session.await_running()?;
     let attention = session.await_attention(AgentAttentionKind::Question)?;
-    validate_question(&attention, "Choose Red or Blue?", &["Red", "Blue"])?;
+    validate_question(
+        &attention,
+        "Choose Circle or Square?",
+        &["Circle", "Square"],
+    )?;
     let wrong_id = format!("{}-wrong", attention.request_id);
     ctx.api.answer(
         &attention.agent,
@@ -379,10 +390,14 @@ fn interrupt_event(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, 
     let mut session = ctx.launch(prompts.get("interrupt-event")?)?;
     session.await_running()?;
     session.interrupt(ctx.runtime_agent_id)?;
-    let interrupt = ctx.ledger.wait_for(session.cursor(), ctx.timeout, |event| {
-        matches!(event, VerifyEvent::AgentInterrupt { interrupt }
-            if interrupt.tab_id == session.tab_id() && interrupt.worktree_id == session.worktree_id())
-    })?;
+    let interrupt = ctx.ledger.wait_for(
+        session.cursor(),
+        session.remaining_timeout()?,
+        |event| {
+            matches!(event, VerifyEvent::AgentInterrupt { interrupt }
+                if interrupt.tab_id == session.tab_id() && interrupt.worktree_id == session.worktree_id())
+        },
+    )?;
     if !matches!(interrupt.event, VerifyEvent::AgentInterrupt { .. }) {
         return Err("interrupt fan-out missing".to_string());
     }
@@ -402,6 +417,9 @@ fn abort_mid_question(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcom
     let mut session = ctx.launch(prompts.get("abort-mid-question")?)?;
     session.await_running()?;
     let attention = session.await_attention(AgentAttentionKind::Question)?;
+    // The report can arrive while the host is still mounting its question TUI.
+    // Give that prompt one render window before injecting the abort key.
+    thread::sleep(Duration::from_millis(300));
     session.write_abort(ctx.abort_input)?;
     session.await_settled()?;
     ctx.api.answer(
