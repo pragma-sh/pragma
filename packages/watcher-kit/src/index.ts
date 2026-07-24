@@ -121,7 +121,6 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
         interjectSubmitDelayMs,
         questionFreeTextMode,
         seenRequestIds: new Set<string>(),
-        commandRequestIds: new Set<string>(),
         questionsByRequestId: new Map<string, CachedQuestion>(),
       };
 
@@ -163,7 +162,6 @@ interface WatcherRuntime {
   interjectSubmitDelayMs: number;
   questionFreeTextMode: "editor" | "interject";
   seenRequestIds: Set<string>;
-  commandRequestIds: Set<string>;
   questionsByRequestId: Map<string, CachedQuestion>;
 }
 
@@ -210,8 +208,9 @@ async function handleControlEvent(
 ): Promise<void> {
   // Remember question text/choices from attention reports so an AgentAnswer
   // can be turned into the matching TUI digit / free-text keystroke sequence.
+  // Command attentions carry no data the verdict handler needs, so they are not
+  // cached (see `handleDecision`).
   if (event.type === "agent") {
-    if (runtime.handleDecisions) rememberCommand(runtime.commandRequestIds, event);
     if (runtime.handleQuestionAnswers) rememberQuestion(runtime.questionsByRequestId, event);
     return;
   }
@@ -231,16 +230,28 @@ async function handleControlEvent(
   }
 }
 
+/**
+ * Applies a command-approval verdict by writing the approve/deny keystrokes.
+ *
+ * A verdict is self-contained (the approve/deny keys are static), so it does
+ * not depend on this watcher having first seen the paired `command` attention.
+ * That matters because attention delivery is not guaranteed to precede the
+ * verdict for this subscriber: a watcher can connect mid-stream after the
+ * attention was raised, or reconnect once the attention snapshot has already
+ * been superseded, while the verdict still arrives live or via the replay
+ * buffer. Gating on a remembered attention would silently drop those verdicts
+ * and leave the agent stuck at the approval dialog. `seenRequestIds` dedupes
+ * verdicts replayed across reconnects, and the connection is already scoped to
+ * this agent + tab, so every `agentDecision` here is a verdict for this session.
+ */
 async function handleDecision(
   ctx: WatcherContext<TuiWatcherConfig>,
   runtime: WatcherRuntime,
   event: AgentStreamEvent,
 ): Promise<boolean> {
   if (event.type !== "agentDecision") return false;
-  if (!runtime.commandRequestIds.has(event.decision.requestId)) return true;
   if (runtime.seenRequestIds.has(event.decision.requestId)) return true;
   runtime.seenRequestIds.add(event.decision.requestId);
-  runtime.commandRequestIds.delete(event.decision.requestId);
   await writeKeys(ctx, event.decision.approved ? runtime.keys.approveKeys : runtime.keys.denyKeys);
   return true;
 }
@@ -367,18 +378,6 @@ function rememberQuestion(
   // Orphaned entries (cleared/aborted without an AgentAnswer) are tiny and are
   // overwritten the next time the same requestId is reused; the answer handler
   // deletes the entry on a successful reply.
-}
-
-function rememberCommand(cache: Set<string>, event: AgentStreamEvent): void {
-  if (
-    event.type === "agent" &&
-    event.status === "attention" &&
-    event.attentionKind === "command" &&
-    typeof event.requestId === "string" &&
-    event.requestId.length > 0
-  ) {
-    cache.add(event.requestId);
-  }
 }
 
 /**

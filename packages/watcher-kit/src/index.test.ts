@@ -319,13 +319,14 @@ describe("createTuiWatcher with handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledTimes(1);
   });
 
-  it("ignores a decision whose request id has no matching command attention", async () => {
-    const { ctx, sendKeys } = context([
-      commandAttention("req-1"),
-      decision(false, { requestId: "wrong-id" }),
-    ]);
+  it("answers a verdict whose command attention it never saw (mid-stream connect)", async () => {
+    // The watcher connected after the command attention was raised (or its
+    // attention snapshot was already superseded), so no matching attention is
+    // remembered. The verdict must still be applied; dropping it would leave
+    // the agent stuck at the approval dialog forever.
+    const { ctx, sendKeys } = context([decision(false, { requestId: "missed-attention" })]);
     await approvalWatcher.watch(ctx as never);
-    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
   });
 
   it("answers a question with the digit for the matching option", async () => {
