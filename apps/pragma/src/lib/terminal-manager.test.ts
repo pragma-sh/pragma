@@ -141,7 +141,15 @@ describe("TerminalManager font configuration", () => {
     expect(TerminalManager.lineHeight).toBe(TERMINAL_LINE_HEIGHT);
   });
 
-  it("leaves xterm wheel sensitivity at defaults so mouse-tracking TUIs receive raw wheel input", async () => {
+  // This previously asserted the opposite — that both options stay at xterm's
+  // defaults so a mouse-tracking TUI receives raw wheel input. That protected the
+  // wrong thing: `scrollSensitivity` only gates how often xterm's accumulator
+  // crosses a whole line, and the report rate reaching a TUI is bounded by
+  // MOUSE_WHEEL_REPORT_INTERVAL_MS regardless. Meanwhile leaving it at 1 left
+  // xterm's own scrollback scrolling at ~30% of finger distance on a trackpad
+  // (xterm damps sub-50px pixel deltas by 0.3), which is the scroll that actually
+  // felt slow next to other terminals.
+  it("scales wheel sensitivity so trackpad scrolling is not damped to a third", async () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
     const manager = new TerminalManager();
@@ -160,7 +168,9 @@ describe("TerminalManager font configuration", () => {
       }
     ).instances.at(-1);
 
-    expect(terminal!.options.scrollSensitivity).toBeUndefined();
+    expect(terminal!.options.scrollSensitivity).toBe(3);
+    // Left at xterm's default: it is multiplied by `scrollSensitivity`, so
+    // alt-scroll already scales with the value above.
     expect(terminal!.options.fastScrollSensitivity).toBeUndefined();
   });
 
@@ -501,9 +511,11 @@ describe("TerminalManager output", () => {
     expect(terminal!.write).toHaveBeenCalledTimes(1);
     expect(decodeOutput(terminal!.write.mock.calls[0]![0])).toBe("first");
 
-    // ...and flush coalesced into a single write when the first one completes.
+    // ...and flush coalesced into a single write the moment the first completes.
+    // Synchronously: the drain used to wait an animation frame per chunk, which
+    // capped it at ~60 chunks/s while the server coalesces every 8ms, so a
+    // repainting TUI fell steadily behind.
     releaseWrite!();
-    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
 
     expect(terminal!.write).toHaveBeenCalledTimes(2);
     expect(decodeOutput(terminal!.write.mock.calls[1]![0])).toBe("secondthird");
@@ -924,8 +936,46 @@ describe("TerminalManager mouse input", () => {
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
-      // Once the interval elapses, the next event is forwarded again.
+      // A TUI that answers with silence must not wedge scrolling forever, so the
+      // interval is an escape hatch: once it elapses, a report goes through even
+      // with no output.
       clock += MOUSE_WHEEL_REPORT_INTERVAL_MS;
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("releases the next wheel report as soon as the TUI paints, without waiting out the interval", () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+
+    const channel = channelInstances.at(-1);
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+          modes: { mouseTrackingMode: string };
+        }>;
+      }
+    ).instances.at(-1);
+    terminal!.modes.mouseTrackingMode = "any";
+    const handler = terminal!.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+      event: WheelEvent,
+    ) => boolean;
+
+    // Clock frozen, so nothing here can be explained by the interval elapsing.
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => 1000);
+    try {
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
+
+      // The TUI redraws in response — evidence it kept up, so the gate opens.
+      channel!.onmessage(encodeOutput("redraw"));
+
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
     } finally {
       nowSpy.mockRestore();

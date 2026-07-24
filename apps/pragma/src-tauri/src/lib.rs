@@ -961,6 +961,16 @@ fn ensure_gateway_in_background(pty: PtyClient) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)] // The Tauri builder is one long registration chain.
 pub fn run() {
+    // First thing in the process: macOS launchd hands a GUI app an
+    // `RLIMIT_NOFILE` soft limit of 256, and every child we spawn from here on
+    // (the server, the gateway, sidecars, and every shell in a terminal tab)
+    // inherits whatever is in force at spawn time. Raising it here is what stops
+    // a busy session from exhausting fds. Best-effort: a refused raise still
+    // runs, just with the inherited ceiling.
+    match pragma_protocol::limits::raise_open_file_limit() {
+        Ok(limit) => log::info!("open-file soft limit: {limit}"),
+        Err(error) => log::warn!("could not raise the open-file limit: {error}"),
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_deep_link::init())

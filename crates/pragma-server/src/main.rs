@@ -26,6 +26,7 @@ use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 
+use pragma_protocol::limits::raise_open_file_limit;
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, write_output_frame, ControlEnvelope,
     ControlResult, EventFrame, Frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
@@ -107,16 +108,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = server_paths();
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
-    remove_stale_files(&paths.socket, &paths.lock);
+    // Before anything opens an fd, and before any session shell is spawned:
+    // children inherit the limit in force at spawn time, so raising it here is
+    // what keeps a tab full of tests from hitting the launchd default of 256.
+    match raise_open_file_limit() {
+        Ok(limit) => eprintln!("open-file soft limit: {limit}"),
+        Err(err) => eprintln!("could not raise the open-file limit: {err}"),
+    }
+    // Holding the advisory lock is what makes this process *the* server for this
+    // channel; everything below (unlinking and rebinding the socket) is only safe
+    // once no other server can be doing the same thing concurrently.
     let mut lock = acquire_lock(&paths.lock)?;
     // Record our PID so the app can replace *this* server precisely if it ever
     // turns out to speak an incompatible protocol version (see the hello frame).
+    lock.set_len(0)?;
     writeln!(lock, "{}", std::process::id())?;
     lock.flush()?;
     let _lock = lock;
-    if paths.socket.exists() {
-        fs::remove_file(&paths.socket)?;
-    }
+    take_socket_path(&paths.socket)?;
     let listener = UnixListener::bind(&paths.socket)?;
     set_socket_permissions(&paths.socket)?;
 
@@ -953,18 +962,66 @@ fn default_app_data_dir() -> PathBuf {
     }
 }
 
+/// Takes the single-server-per-channel lock, or fails if another server already
+/// holds it.
+///
+/// This is a kernel advisory lock (`flock`) on the lock *file description*, not
+/// the mere existence of the file. Existence-based locking was racy in a way
+/// that let several servers run at once: a starting server that found a lock
+/// file with no socket beside it yet would delete the winner's lock — a window
+/// the winner is inside for its whole startup — and then take the lock itself.
+/// Both then unlinked and rebound the socket, leaving orphaned servers holding
+/// PTYs, watchers, and sidecars for the rest of the login session, each burning
+/// its own share of the process fd budget.
+///
+/// An `flock` has neither problem: it is released automatically when the holder
+/// exits (so a crash never leaves a stale lock needing cleanup), and it cannot
+/// be stolen by unlinking the path. `daemonize` forks *before* this is called;
+/// were that ever reordered, note that a lock taken pre-fork is shared with —
+/// not re-acquired by — the child.
 fn acquire_lock(lock_path: &Path) -> Result<File, Box<dyn std::error::Error>> {
-    OpenOptions::new()
+    let file = OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
-        .open(lock_path)
-        .map_err(|err| {
-            format!(
-                "pragma-server is already running or lock is stale at {}: {err}",
-                lock_path.display()
-            )
-            .into()
-        })
+        .create(true)
+        .truncate(false)
+        .open(lock_path)?;
+    file.try_lock().map_err(|err| {
+        format!(
+            "pragma-server is already running (lock held at {}): {err}",
+            lock_path.display()
+        )
+    })?;
+    Ok(file)
+}
+
+/// Clears the socket path for binding, refusing to start if a server is still
+/// serving on it.
+///
+/// The lock and this check cover each other's blind spot. An advisory lock
+/// guards a *file*, so anything that unlinks the lock path lets the next process
+/// create a fresh file and lock that instead — no longer excluded by the holder.
+/// A live socket is the evidence that survives: a server that is actually
+/// serving still answers on it whatever happened to its lock file. Conversely a
+/// socket file alone proves nothing (a killed server leaves one behind), which
+/// is why a refused connection means "stale, unlink it" rather than "in use".
+///
+/// A deliberate replacement still works, because the app kills the old server
+/// before spawning a new one (`kill_stale_server` in `pragma-client`) — by the
+/// time we probe, nothing answers.
+fn take_socket_path(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if !socket.exists() {
+        return Ok(());
+    }
+    if UnixStream::connect(socket).is_ok() {
+        return Err(format!(
+            "another pragma-server is already serving on {}",
+            socket.display()
+        )
+        .into());
+    }
+    fs::remove_file(socket)?;
+    Ok(())
 }
 
 fn set_socket_permissions(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -974,11 +1031,99 @@ fn set_socket_permissions(socket: &Path) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn remove_stale_files(socket: &Path, lock: &Path) {
-    if socket.exists() && UnixStream::connect(socket).is_err() {
-        let _ = fs::remove_file(socket);
-        let _ = fs::remove_file(lock);
-    } else if lock.exists() && !socket.exists() {
-        let _ = fs::remove_file(lock);
+// `remove_stale_files` used to probe the socket and delete a "stale" lock here.
+// Both jobs are now handled by `acquire_lock`'s advisory lock, which the kernel
+// releases on exit — see the race it removes, documented there.
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::{acquire_lock, take_socket_path, UnixListener};
+
+    #[test]
+    fn a_second_server_cannot_take_a_held_lock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock_path = dir.path().join("server.lock");
+
+        let held = acquire_lock(&lock_path).expect("the first server takes the lock");
+        assert!(
+            acquire_lock(&lock_path).is_err(),
+            "a second server must not run alongside the lock holder",
+        );
+
+        // Releasing hands the channel to the next server, exactly as process exit
+        // does — no stale lock file to clean up first.
+        //
+        // Retried rather than asserted outright, because `cargo test` runs the
+        // whole suite in one process and sibling tests spawn shells: a `fork` any
+        // one of them makes while this lock is open briefly duplicates the fd, and
+        // the lock outlives our `drop` until that child reaches `execve` and
+        // O_CLOEXEC closes the copy. That is a test-harness artifact, not a
+        // server one — in production the only process that forks while holding
+        // this fd is the running server, which is exactly who should be blocking
+        // us. (Verified separately: a PTY child does *not* keep the lock alive
+        // past its exec, so session shells cannot pin a dead server's lock.)
+        drop(held);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let next = loop {
+            match acquire_lock(&lock_path) {
+                Ok(lock) => break lock,
+                Err(error) => assert!(
+                    Instant::now() < deadline,
+                    "the lock should be free once the holder exits: {error}",
+                ),
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        drop(next);
+    }
+
+    /// A server that is still serving must keep its socket even if its lock file
+    /// was unlinked — the case an advisory lock alone cannot see, and the shape
+    /// of the original bug: the deleted `remove_stale_files` removed a "stale"
+    /// lock whose owner was mid-startup, after which both processes bound the
+    /// socket and the loser kept running with PTYs, watchers, and sidecars.
+    #[test]
+    fn a_live_socket_blocks_a_second_server_even_with_no_lock_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("daemon.sock");
+        let _serving = UnixListener::bind(&socket_path).expect("the first server binds");
+
+        assert!(
+            take_socket_path(&socket_path).is_err(),
+            "a socket that still answers must not be unlinked and rebound",
+        );
+        assert!(
+            socket_path.exists(),
+            "the running server's socket must be left in place",
+        );
+    }
+
+    /// The other half: a socket file with nobody behind it is debris from a
+    /// killed server, and must not wedge startup forever.
+    #[test]
+    fn a_dead_socket_file_is_cleared_for_rebinding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("daemon.sock");
+        std::fs::write(&socket_path, b"").expect("leave socket debris behind");
+
+        take_socket_path(&socket_path).expect("a socket nobody answers on is stale");
+        assert!(!socket_path.exists(), "the stale socket should be unlinked");
+    }
+
+    /// A leftover lock file must not block startup. The previous
+    /// `create_new(true)` lock treated *any* existing file as a running server,
+    /// so a crashed or `SIGKILL`ed server left a file that made every subsequent
+    /// start fail until something deleted it — which is what motivated the
+    /// stale-file cleanup that in turn caused the multi-server race.
+    #[test]
+    fn a_leftover_lock_file_from_a_dead_server_does_not_block_startup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock_path = dir.path().join("server.lock");
+        std::fs::write(&lock_path, "4242\n").expect("leave a lock file behind");
+
+        let _lock = acquire_lock(&lock_path).expect("an unlocked leftover file is not a holder");
     }
 }

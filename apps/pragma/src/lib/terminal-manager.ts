@@ -25,7 +25,15 @@ const MAX_RESIZE_RETRIES = 5;
 const RESIZE_RETRY_MS = 200;
 export const MAX_TERMINAL_COLS = 240;
 export const MAX_TERMINAL_ROWS = 90;
-export const TERMINAL_SCROLLBACK_LINES = 500;
+/**
+ * Lines xterm keeps above the viewport. Deliberately *not* the server's
+ * `SCROLLBACK_LIMIT`: that one bounds retained PTY *output frames* (plus a byte
+ * cap) for replay to a reattaching client, which is a different unit and a
+ * different job. This is what you can actually scroll back through in a tab, so
+ * it is sized against other terminals (VS Code ships 1000) rather than against
+ * the replay budget.
+ */
+export const TERMINAL_SCROLLBACK_LINES = 5000;
 
 // Minimum gap between wheel-driven mouse reports while a TUI has mouse tracking
 // enabled. xterm emits exactly one mouse report per OS wheel event, and macOS
@@ -33,11 +41,22 @@ export const TERMINAL_SCROLLBACK_LINES = 500;
 // Code, opencode) redraws its whole grid per report, and consumes reports no
 // faster than it can redraw, so an unthrottled flood backs the PTY input up and
 // scrolling keeps going after your finger stops (a laggy, floaty tail). Dropping
-// (never rewriting) excess reports keeps scroll matched to the TUI. This is the
-// knob to tune for scroll feel: lower = faster/farther scroll but more redraw
-// load; higher = calmer but a flick scrolls less. When mouse tracking is off,
-// xterm scrolls its own viewport locally and is left untouched.
-export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 2;
+// (never rewriting) excess reports keeps scroll matched to the TUI.
+//
+// Rather than a fixed rate, the gate is the TUI's own redraw: a report is
+// forwarded once the PTY has produced output since the previous one, i.e. once
+// the TUI has actually responded to it. That self-tunes — a fast TUI gets every
+// report the OS delivers, a slow one gets exactly as many as it can paint, and
+// neither builds the input backlog that makes scrolling continue after your
+// finger stops. A fixed interval cannot do this: it is either above the TUI's
+// redraw rate (backlog, floaty tail) or below it (needlessly sluggish), and the
+// right value differs per TUI.
+//
+// This constant is only the escape hatch for the case the gate cannot see: a TUI
+// that answers a wheel report with *no* output (already at the end of its scroll
+// region, or ignoring the wheel entirely) would otherwise wedge scrolling
+// forever. After this long with no output, the next report goes through anyway.
+export const MOUSE_WHEEL_REPORT_INTERVAL_MS = 50;
 
 export type TitleListener = (title: string) => void;
 export type ExitListener = (code: number | null) => void;
@@ -168,6 +187,12 @@ interface ManagedTerminal {
   /** Raw output byte-chunks awaiting an xterm write; coalesced on flush. */
   pendingOutput: Uint8Array[];
   writeInFlight: boolean;
+  /**
+   * True while a wheel-driven mouse report has been sent to a mouse-tracking TUI
+   * that has not produced any output in response yet. Gates the next report so
+   * scrolling is paced by the TUI's redraw instead of by the trackpad.
+   */
+  awaitingWheelRedraw: boolean;
   /** Live PTY event channel, retained so dispose() can detach its handler. */
   channel: Channel<PtyMessage> | null;
   /** File-path link provider registration, disposed with the terminal. */
@@ -248,6 +273,18 @@ export class TerminalManager {
       fontSize: TERMINAL_FONT_SIZE,
       lineHeight: TERMINAL_LINE_HEIGHT,
       scrollback: TERMINAL_SCROLLBACK_LINES,
+      // Lines scrolled per wheel delta. This is the fix for scrolling that feels
+      // slow next to Terminal.app/iTerm, and it matters most on a trackpad:
+      // xterm multiplies the delta by this option *before* it branches on
+      // deltaMode, then — for pixel deltas — divides by the cell height and
+      // additionally damps anything under 50px by 0.3. Trackpad deltas are
+      // almost all under 50px, so stock xterm moves a Mac trackpad at ~30% of
+      // the distance your finger travelled. 3 cancels that damping (3 × 0.3 ≈ 1)
+      // and simultaneously brings a discrete mouse wheel up from xterm's 1 line
+      // per notch to the ~3 other terminals use. `fastScrollSensitivity` is left
+      // at its default because xterm multiplies the two together, so alt-scroll
+      // scales with this automatically.
+      scrollSensitivity: 3,
       // SearchAddon's match/active-match decorations call the proposed
       // `registerDecoration` API; without this it throws the moment a find
       // has a real match, so highlighting (and the resultCount event it
@@ -282,12 +319,17 @@ export class TerminalManager {
       }),
     );
     terminal.attachCustomKeyEventHandler((event) => handleTerminalKeyEvent(tab.id, event));
-    // Throttle wheel-driven mouse reports while a TUI is consuming them so a fast
-    // trackpad flick can't flood the PTY input with reports it can't keep up with.
-    // See MOUSE_WHEEL_REPORT_INTERVAL_MS. Returning false drops the event before
-    // xterm turns it into a report; returning true forwards it verbatim.
-    // Initialize to -Infinity so the first event after startup is always
-    // forwarded when mouse tracking is on (performance.now() can still be < the
+    // Pace wheel-driven mouse reports against the TUI's own redraw while it is
+    // consuming them, so a fast trackpad flick cannot queue up reports it has no
+    // hope of painting. Returning false drops the event before xterm turns it
+    // into a report; returning true forwards it verbatim.
+    //
+    // The gate is `awaitingWheelRedraw`: set when a report is forwarded, cleared
+    // by `enqueueOutput` as soon as the PTY produces anything. So the next report
+    // waits for the TUI to answer the previous one. See
+    // MOUSE_WHEEL_REPORT_INTERVAL_MS for the escape hatch when it answers with
+    // silence. `lastWheelReport` starts at -Infinity so the first event after
+    // startup always goes through (performance.now() can still be below the
     // interval early in page life).
     let lastWheelReport = -Infinity;
     terminal.attachCustomWheelEventHandler(() => {
@@ -295,10 +337,11 @@ export class TerminalManager {
         return true;
       }
       const now = performance.now();
-      if (now - lastWheelReport < MOUSE_WHEEL_REPORT_INTERVAL_MS) {
+      if (managed.awaitingWheelRedraw && now - lastWheelReport < MOUSE_WHEEL_REPORT_INTERVAL_MS) {
         return false;
       }
       lastWheelReport = now;
+      managed.awaitingWheelRedraw = true;
       return true;
     });
     terminal.open(container);
@@ -313,8 +356,13 @@ export class TerminalManager {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => webgl.dispose());
       terminal.loadAddon(webgl);
-    } catch {
-      // WebGL unavailable (e.g. headless CI); keep the DOM renderer.
+    } catch (error) {
+      // WebGL unavailable (e.g. headless CI); keep the DOM renderer. Warn rather
+      // than swallowing: the DOM renderer is the slow path this addon exists to
+      // avoid, and a silent fallback is indistinguishable from "scrolling and
+      // typing just feel bad in this app" — exactly the symptom you would then
+      // go looking for in the wrong place.
+      console.warn("WebGL renderer unavailable; falling back to the DOM renderer", error);
     }
 
     const managed: ManagedTerminal = {
@@ -328,6 +376,7 @@ export class TerminalManager {
       resizeRetries: 0,
       pendingOutput: [],
       writeInFlight: false,
+      awaitingWheelRedraw: false,
       channel: null,
       fileLinkProvider: null,
     };
@@ -409,6 +458,7 @@ export class TerminalManager {
     }
     managed.pendingOutput = [];
     managed.writeInFlight = false;
+    managed.awaitingWheelRedraw = false;
     managed.fileLinkProvider?.dispose();
     managed.fileLinkProvider = null;
     // Detach the channel handler so Tauri stops delivering events to a disposed
@@ -617,6 +667,10 @@ export class TerminalManager {
   }
 
   private enqueueOutput(managed: ManagedTerminal, data: Uint8Array): void {
+    // The TUI answered the last wheel report, so the next one may go through.
+    // Cleared on any output, not just a redraw: telling the two apart would mean
+    // parsing the stream, and anything the TUI emits is evidence it is keeping up.
+    managed.awaitingWheelRedraw = false;
     managed.pendingOutput.push(data);
     if (!managed.writeInFlight) {
       this.flushOutput(managed);
@@ -637,8 +691,16 @@ export class TerminalManager {
     managed.writeInFlight = true;
     managed.terminal.write(data, () => {
       managed.writeInFlight = false;
+      // Drain straight into the next write rather than waiting for an animation
+      // frame. xterm's own WriteBuffer already time-slices parsing and defers
+      // painting to a frame, so this callback means "the parser consumed it" —
+      // it is the backpressure signal, and an extra rAF on top only adds a frame
+      // of latency per chunk. That capped the drain rate at ~60 chunks/s while
+      // the server coalesces every 8ms (~125/s), so a repainting TUI fell
+      // steadily further behind: paints arrived late and wheel-driven redraws
+      // kept arriving after the scroll had stopped.
       if (managed.pendingOutput.length > 0) {
-        window.requestAnimationFrame(() => this.flushOutput(managed));
+        this.flushOutput(managed);
       }
     });
   }

@@ -42,6 +42,13 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The gateway holds a socket per in-flight HTTP request plus one to the
+    // server; like every Pragma host process it inherits launchd's 256-fd soft
+    // limit and raises it before opening anything. Best-effort — see
+    // `pragma_protocol::limits`.
+    if let Err(error) = pragma_protocol::limits::raise_open_file_limit() {
+        eprintln!("could not raise the open-file limit: {error}");
+    }
     let args = Args::parse();
     run(args).map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
 }
