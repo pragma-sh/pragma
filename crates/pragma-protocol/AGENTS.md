@@ -27,6 +27,26 @@ channel for dev builds.
 Both live here so the app and daemon always compute identical channels without circular
 dependencies.
 
+## Process limits
+
+`pragma_protocol::limits::raise_open_file_limit()` — raises this process's
+`RLIMIT_NOFILE` soft limit toward 65 536, capped at the hard limit. Only ever raises,
+so it is safe to call from a process that already has a higher limit.
+
+**Every host process must call this before it opens anything or spawns a child.**
+macOS `launchd` gives a GUI app a soft limit of **256**, and Rust — unlike Node/Bun —
+never raises it on its own. That ceiling is inherited by `pragma-server`, the gateway,
+every sidecar, and every shell in a terminal tab, so a session with many tabs (or a
+test suite running inside one) exhausts it: the server logs
+`accept failed: Too many open files (os error 24)` and then cannot accept another
+connection until an existing one closes, which reads as a total, permanent freeze.
+Children inherit the limit in force when they are spawned, so the call has to come
+first.
+
+Current callers: `pragma-server`, `pragma-gateway`, and the app's `run()`. It lives
+here rather than in `pragma-core` because this is the one crate every host process
+already depends on.
+
 ## Rules
 
 - Any change to the frame layout, tag values, or the binary input/output format **must** bump

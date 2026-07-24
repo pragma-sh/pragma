@@ -5,6 +5,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod limits;
+
 pub use pragma_constants::{
     AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
     AgentReportPayload, AgentSessionLaunchPayload, AgentStatus, ControlMethod, NewWorktreeSpec,
