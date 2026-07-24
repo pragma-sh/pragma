@@ -30,11 +30,11 @@ You cannot fix what you cannot observe. The first step is always
 
 ### Percentiles matter more than averages
 
-| Signal | What it usually means |
-|---|---|
-| p50 rising | Capacity problem (under-provisioned, slow common path) |
+| Signal                      | What it usually means                                        |
+| --------------------------- | ------------------------------------------------------------ |
+| p50 rising                  | Capacity problem (under-provisioned, slow common path)       |
 | p99 / p999 rising, p50 flat | Tail problem: GC, locks, retries, pool waits, noisy neighbor |
-| Mean ≫ median | Heavy tail or a minority of catastrophic outliers |
+| Mean ≫ median               | Heavy tail or a minority of catastrophic outliers            |
 
 **Unwritten rule:** Optimize the tail first. It is almost always a
 synchronization choke (lock contention, GC pause, head-of-line blocking,
@@ -45,10 +45,10 @@ retry storm).
 
 These three move together but mean different things:
 
-| Metric | Question it answers |
-|---|---|
-| Latency | How long did *one* request wait? |
-| Throughput | How many requests completed per second? |
+| Metric      | Question it answers                            |
+| ----------- | ---------------------------------------------- |
+| Latency     | How long did _one_ request wait?               |
+| Throughput  | How many requests completed per second?        |
 | Utilization | How close is a resource to its capacity limit? |
 
 Little's Law links them for a stable system:
@@ -82,11 +82,11 @@ could be parallel** — or hidden gaps between spans (queuing).
 
 ### Client, server, and "user" latency are different clocks
 
-| Measurement point | What it includes |
-|---|---|
-| Browser / mobile TTFB | DNS + TCP + TLS + edge + origin queue + first byte |
-| Edge / LB latency | Origin queue + service time (no client RTT) |
-| Server handler timer | Often *excludes* accept-queue wait (common blind spot) |
+| Measurement point      | What it includes                                                     |
+| ---------------------- | -------------------------------------------------------------------- |
+| Browser / mobile TTFB  | DNS + TCP + TLS + edge + origin queue + first byte                   |
+| Edge / LB latency      | Origin queue + service time (no client RTT)                          |
+| Server handler timer   | Often _excludes_ accept-queue wait (common blind spot)               |
 | Distributed trace wall | Sum of spans + gaps; misses client-side JS / CDN if not instrumented |
 
 A "fast" server histogram with unhappy users usually means the pain is
@@ -113,7 +113,7 @@ arrivals, so the measured p99 looks better than production.
 
 **Fix:** Use a closed-loop vs open-loop consciously. Prefer arrival-rate
 driven tests (open loop / constant arrival) with scheduled start times,
-and record *intended* issue time vs completion time.
+and record _intended_ issue time vs completion time.
 
 ### Sampling bias
 
@@ -170,15 +170,15 @@ time_total:       %{time_total}\n
 In the tracing UI, sort traces by total duration descending. Open the
 slowest. The waterfall should show which span dominates.
 
-| Pattern | Likely cause |
-|---|---|
-| One span ≈ 90 % of wall time | That service is the bottleneck |
-| All spans slow; idle gaps between them | Network, TLS redo, or proxy buffering |
-| Thin spans, thick dark gap between them | Queuing (pool wait, thread starvation, backlog) |
-| Periodic spikes across unrelated traces | GC, cron/admin lock, noisy-neighbor VM |
-| Fan-out: many sibling spans, wall ≈ slowest child | Parallel path OK; slowest sibling is the issue |
-| Fan-out: wall ≈ sum of children | Accidental sequential calls that should be parallel |
-| Span starts late relative to parent | Accept queue / scheduler delay before handler |
+| Pattern                                           | Likely cause                                        |
+| ------------------------------------------------- | --------------------------------------------------- |
+| One span ≈ 90 % of wall time                      | That service is the bottleneck                      |
+| All spans slow; idle gaps between them            | Network, TLS redo, or proxy buffering               |
+| Thin spans, thick dark gap between them           | Queuing (pool wait, thread starvation, backlog)     |
+| Periodic spikes across unrelated traces           | GC, cron/admin lock, noisy-neighbor VM              |
+| Fan-out: many sibling spans, wall ≈ slowest child | Parallel path OK; slowest sibling is the issue      |
+| Fan-out: wall ≈ sum of children                   | Accidental sequential calls that should be parallel |
+| Span starts late relative to parent               | Accept queue / scheduler delay before handler       |
 
 **Fix reflex:** Fat hop → drill into that service (Step 3). Gap between
 services → connection pools (keep-alive, max connections, idle timeout)
@@ -207,15 +207,15 @@ CPU profile (`pprof`, `perf`, `py-spy`, `async-profiler`).
 
 Perfect code still slows when the machine is overcommitted:
 
-| Metric | Saturation signal |
-|---|---|
-| CPU | > 80 % sustained; run-queue > 2× vCPU → scheduling delay |
-| Memory | Major page faults → allocator / GC stalls |
-| Disk I/O | `await` > 10 ms or `%util` ≈ 100 % → swap or log storm |
-| Network | rx/tx drops; TCP retransmits > 0.1 % |
-| Connections | `ss -s` TIME_WAIT storm → ephemeral port exhaustion |
-| Steal time (VMs) | Non-trivial `st` in `top` → noisy neighbor |
-| File descriptors | Near `ulimit` → accept/connect failures and stalls |
+| Metric           | Saturation signal                                        |
+| ---------------- | -------------------------------------------------------- |
+| CPU              | > 80 % sustained; run-queue > 2× vCPU → scheduling delay |
+| Memory           | Major page faults → allocator / GC stalls                |
+| Disk I/O         | `await` > 10 ms or `%util` ≈ 100 % → swap or log storm   |
+| Network          | rx/tx drops; TCP retransmits > 0.1 %                     |
+| Connections      | `ss -s` TIME_WAIT storm → ephemeral port exhaustion      |
+| Steal time (VMs) | Non-trivial `st` in `top` → noisy neighbor               |
+| File descriptors | Near `ulimit` → accept/connect failures and stalls       |
 
 **Fix reflex:** Add headroom (scale up/out) before micro-optimizing.
 CPU-only autoscaling misses memory-pressure latency; prefer custom metrics
@@ -265,19 +265,19 @@ and breakers behave under induced dependency latency.
 
 ## 4. Recurring Villains (Cheat Sheet)
 
-| Symptom | Most likely | Next likely |
-|---|---|---|
-| p99 high, p50 normal | GC / compaction / lock | Retry-on-timeout |
-| All latencies high, all hops | Connection pool exhaustion | Network congestion |
-| Spikes every 5–15 min | Config reload, log rotate, K8s leader election | TLS cert rotation |
-| Latency ∝ payload size | Serialization (JSON → protobuf) | Full table / large scans |
-| Latency after deploy, then heals | Cache cold start | JIT warm-up |
-| Only first request slow | TLS / pool init | Lazy singleton |
-| All services slow at once | Shared DNS / LB / Kafka / DB | AZ or cloud provider issue |
-| Latency only under concurrency | Lock contention / pool wait | Thread pool saturation |
-| Good traces, bad user experience | Client-side / CDN / last mile | Browser main-thread blocking |
-| Latency rises with fan-out width | Head-of-line / sequential calls | Shared downstream saturation |
-| Cross-AZ calls suddenly slow | AZ networking / MTU / peering | Mis-routed traffic |
+| Symptom                          | Most likely                                    | Next likely                  |
+| -------------------------------- | ---------------------------------------------- | ---------------------------- |
+| p99 high, p50 normal             | GC / compaction / lock                         | Retry-on-timeout             |
+| All latencies high, all hops     | Connection pool exhaustion                     | Network congestion           |
+| Spikes every 5–15 min            | Config reload, log rotate, K8s leader election | TLS cert rotation            |
+| Latency ∝ payload size           | Serialization (JSON → protobuf)                | Full table / large scans     |
+| Latency after deploy, then heals | Cache cold start                               | JIT warm-up                  |
+| Only first request slow          | TLS / pool init                                | Lazy singleton               |
+| All services slow at once        | Shared DNS / LB / Kafka / DB                   | AZ or cloud provider issue   |
+| Latency only under concurrency   | Lock contention / pool wait                    | Thread pool saturation       |
+| Good traces, bad user experience | Client-side / CDN / last mile                  | Browser main-thread blocking |
+| Latency rises with fan-out width | Head-of-line / sequential calls                | Shared downstream saturation |
+| Cross-AZ calls suddenly slow     | AZ networking / MTU / peering                  | Mis-routed traffic           |
 
 ---
 
@@ -289,19 +289,19 @@ and breakers behave under induced dependency latency.
 
 **Trace waterfall:**
 
-| Span | Duration |
-|---|---|
-| checkout-service | 50 ms |
-| payment-service | **3.8 s** (fat hop) |
-| inventory-service | 120 ms |
-| notification-service | 230 ms |
+| Span                 | Duration            |
+| -------------------- | ------------------- |
+| checkout-service     | 50 ms               |
+| payment-service      | **3.8 s** (fat hop) |
+| inventory-service    | 120 ms              |
+| notification-service | 230 ms              |
 
 **payment-service children:**
 
-| Span | Duration | Notes |
-|---|---|---|
-| `authorize()` | 200 ms | Fine |
-| `charge()` | 3.6 s | **3.5 s dark gap before first DB byte** |
+| Span          | Duration | Notes                                   |
+| ------------- | -------- | --------------------------------------- |
+| `authorize()` | 200 ms   | Fine                                    |
+| `charge()`    | 3.6 s    | **3.5 s dark gap before first DB byte** |
 
 **Host saturation:**
 
@@ -316,7 +316,7 @@ every `charge()` queues.
 **Fix:** Export to read replica; raise IOPS; split read/write pools.
 p99 → ~520 ms.
 
-**Lesson:** A fat DB span is often *waiting for a connection*, not a slow
+**Lesson:** A fat DB span is often _waiting for a connection_, not a slow
 query. Instrument pool wait separately from query execution.
 
 ---
@@ -510,11 +510,11 @@ Attribute mesh time separately from app time in dashboards.
 
 User wait = queue delay + service time. Diagnose with:
 
-| Signal | Meaning |
-|---|---|
-| Rising lag, stable processing time | Under-consuming (scale / speed workers) |
-| Stable lag, rising processing time | Per-job work got slower |
-| Lag spikes at cron / campaign boundaries | Burst producers; need buffering or smoothing |
+| Signal                                   | Meaning                                       |
+| ---------------------------------------- | --------------------------------------------- |
+| Rising lag, stable processing time       | Under-consuming (scale / speed workers)       |
+| Stable lag, rising processing time       | Per-job work got slower                       |
+| Lag spikes at cron / campaign boundaries | Burst producers; need buffering or smoothing  |
 | Duplicate processing / redelivery storms | Visibility timeout too short vs work duration |
 
 Propagate the original `traceparent` into message headers so a single
@@ -524,11 +524,11 @@ waterfall covers HTTP → queue → worker → downstream.
 
 Synthetic probes from one region miss last-mile and device variance.
 
-| Source | Blind spots |
-|---|---|
+| Source               | Blind spots                                                      |
+| -------------------- | ---------------------------------------------------------------- |
 | Datacenter synthetic | CDN cache misses elsewhere; mobile networks; browser main thread |
-| Edge logs only | Origin-healthy but POP-congested; TLS on client |
-| RUM only | Harder to bisect server hops; need correlation to trace IDs |
+| Edge logs only       | Origin-healthy but POP-congested; TLS on client                  |
+| RUM only             | Harder to bisect server hops; need correlation to trace IDs      |
 
 **Practice:** Pair RUM (p75/p95 TTFB + LCP where relevant) with origin
 histograms and occasional synthetic multi-region checks. Join on
@@ -544,7 +544,7 @@ everyone. Look for:
 - Fairness controls: per-tenant concurrency limits, separate pools, or
   admission tokens
 
-If overall p99 is bad but p99 *excluding top tenant* is fine, you have a
+If overall p99 is bad but p99 _excluding top tenant_ is fine, you have a
 fairness problem, not a global capacity problem.
 
 ---
@@ -629,17 +629,17 @@ Work top-down. Check a box only when you have evidence, not a guess.
 
 ## 8. Tools Reference
 
-| Layer | Tool | What it tells you |
-|---|---|---|
-| Distributed traces | Jaeger, Zipkin, OpenTelemetry | Per-span latency, dependency graph, waterfall |
-| Metrics | Prometheus + Grafana | Aggregate percentiles, errors, saturation |
-| Continuous profiling | Parca, Pyroscope, Google Profiler | Always-on CPU/memory correlated with latency |
-| CPU / memory (ad-hoc) | `pprof`, `async-profiler`, `py-spy`, `perf` | Hot functions, locks, GC |
-| Network | `tcpdump`, Wireshark, `mtr`, `ss`, `sar` | Retransmits, RTT, drops, TIME_WAIT |
-| DB | `EXPLAIN ANALYZE`, `pg_stat_statements`, processlist | Plans, indexes, lock waits |
-| Linux | `top`/`htop`, `iostat`, `vmstat`, `dmesg` | Steal, I/O await, OOM, kernel errors |
-| Chaos | Toxiproxy, Chaos Mesh, Gremlin | Inject latency; validate timeouts/breakers |
-| Load | k6, vegeta, ghz | Reproduce tail under controlled concurrency |
+| Layer                 | Tool                                                 | What it tells you                             |
+| --------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| Distributed traces    | Jaeger, Zipkin, OpenTelemetry                        | Per-span latency, dependency graph, waterfall |
+| Metrics               | Prometheus + Grafana                                 | Aggregate percentiles, errors, saturation     |
+| Continuous profiling  | Parca, Pyroscope, Google Profiler                    | Always-on CPU/memory correlated with latency  |
+| CPU / memory (ad-hoc) | `pprof`, `async-profiler`, `py-spy`, `perf`          | Hot functions, locks, GC                      |
+| Network               | `tcpdump`, Wireshark, `mtr`, `ss`, `sar`             | Retransmits, RTT, drops, TIME_WAIT            |
+| DB                    | `EXPLAIN ANALYZE`, `pg_stat_statements`, processlist | Plans, indexes, lock waits                    |
+| Linux                 | `top`/`htop`, `iostat`, `vmstat`, `dmesg`            | Steal, I/O await, OOM, kernel errors          |
+| Chaos                 | Toxiproxy, Chaos Mesh, Gremlin                       | Inject latency; validate timeouts/breakers    |
+| Load                  | k6, vegeta, ghz                                      | Reproduce tail under controlled concurrency   |
 
 ---
 

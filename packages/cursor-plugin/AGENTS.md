@@ -60,14 +60,14 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 
 ## Hook → status mapping
 
-| Cursor hook            | `report.sh` arg     | Reports                                                                           |
-| ---------------------- | ------------------- | --------------------------------------------------------------------------------- |
-| `sessionStart`         | `cleared`           | `cleared` (fresh session; clears stale dots)                                      |
-| `sessionEnd`           | `cleared`           | `cleared`                                                                         |
-| `beforeSubmitPrompt`   | `started`           | `started` + user prompt message; first prompt also derives `session-name`         |
-| `afterAgentResponse`   | `response`          | Assistant response message                                                        |
-| `stop`                 | `stopped`           | `stopped`; `cleared` when Cursor reports `aborted` or `error`                     |
-| `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red)                           |
+| Cursor hook          | `report.sh` arg | Reports                                                                   |
+| -------------------- | --------------- | ------------------------------------------------------------------------- |
+| `sessionStart`       | `cleared`       | `cleared` (fresh session; clears stale dots)                              |
+| `sessionEnd`         | `cleared`       | `cleared`                                                                 |
+| `beforeSubmitPrompt` | `started`       | `started` + user prompt message; first prompt also derives `session-name` |
+| `afterAgentResponse` | `response`      | Assistant response message                                                |
+| `stop`               | `stopped`       | `stopped`; `cleared` when Cursor reports `aborted` or `error`             |
+| `postToolUse`        | `running`       | `started` **iff** turn marker exists (clears stale red)                   |
 
 ## Command approval is unsupported
 
