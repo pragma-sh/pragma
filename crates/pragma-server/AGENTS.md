@@ -114,6 +114,33 @@ not add tab persistence back to the Tauri SQLite shell.
   Server invariants stay unchanged.
 - SSH is client-side only. The server must not know SSH exists.
 
+## One Server Per Channel
+
+Startup enforces this with two checks that cover each other's blind spot. Do not
+weaken either, and in particular **do not add code that deletes the lock file** —
+that is precisely what caused the bug this replaced.
+
+1. **`flock` on `server.lock`** (`acquire_lock`). An advisory lock, not the mere
+   existence of the file: the kernel releases it when the holder exits, so a crashed
+   server never leaves a lock needing cleanup, and a second server starting
+   concurrently is refused.
+2. **A liveness probe of `daemon.sock`** (`take_socket_path`). An `flock` guards a
+   file, not a path, so anything that unlinks the lock lets the next process create
+   and lock a fresh one. A server that is genuinely serving still answers on its
+   socket regardless — that is the evidence that survives. A socket file nobody
+   answers on is debris from a killed server and is unlinked.
+
+The previous existence-based lock (`create_new`) had to treat a leftover file as a
+running server, which meant it needed stale-file cleanup, which deleted the lock of a
+winner that had not yet bound its socket. Both processes then bound, and the loser
+kept running forever with PTYs, watchers, and sidecars attached — burning its own
+`RLIMIT_NOFILE` budget and re-running every automation. Three such servers were found
+alive at once.
+
+Deliberate replacement still works because the app kills the old server before
+spawning a new one (`kill_stale_server` in `pragma-client`), so nothing answers the
+probe by then.
+
 ## Wire Protocol
 
 Terminal output is raw bytes end-to-end. Every frame is:
