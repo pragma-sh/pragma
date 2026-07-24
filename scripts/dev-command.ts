@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -56,9 +56,25 @@ function targetPaths(devId: string): DevTarget {
   };
 }
 
+/**
+ * Resolves `path` to its canonical, symlink-free absolute form. `resolve` only
+ * collapses `.`/`..` segments and leaves symlinks intact, so a directory
+ * entered through a symlink (e.g. `~/projects/app` → `/actual/worktree`) would
+ * not match the real worktree path. Falls back to a plain `resolve` when the
+ * path does not exist on disk (e.g. a stale snapshot worktree), so a missing
+ * candidate is treated as non-matching instead of throwing.
+ */
+function canonicalize(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
 /** True when `cwd` is `worktreePath` itself or nested inside it. */
 function containsPath(worktreePath: string, cwd: string): boolean {
-  const fromWorktree = relative(resolve(worktreePath), cwd);
+  const fromWorktree = relative(canonicalize(worktreePath), cwd);
   return fromWorktree === "" || (!fromWorktree.startsWith("..") && !isAbsolute(fromWorktree));
 }
 
@@ -79,7 +95,7 @@ function worktreeForCwd(serverDir: string): string {
   }
 
   const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as WorkspaceSnapshot;
-  const cwd = resolve(process.cwd());
+  const cwd = canonicalize(process.cwd());
   const worktree = deepestWorktreeContaining(snapshot.worktrees, cwd);
   if (!worktree) {
     throw new Error(`current directory is not a worktree in target dev build: ${cwd}`);
