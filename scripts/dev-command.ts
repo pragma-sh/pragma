@@ -21,22 +21,55 @@ function appDataDir(): string {
   return join(dataHome, constants.app.identifier);
 }
 
-function targetPaths(devId: string): { cli: string; serverDir: string; socket: string } {
+/** Resolved on-disk locations of a running dev build. */
+interface DevTarget {
+  cli: string;
+  serverDir: string;
+  socket: string;
+}
+
+/** Normalizes a bare or prefixed dev id into its `pragma-dev-<hex16>` channel id. */
+function devChannelId(devId: string): string {
   const channel = devId.startsWith("pragma-dev-") ? devId : `pragma-dev-${devId}`;
   if (!/^pragma-dev-[0-9a-f]{16}$/i.test(channel)) {
     throw new Error("dev id must be a 16-character hexadecimal channel id");
   }
+  return channel;
+}
 
+/** Linux puts the server socket under `XDG_RUNTIME_DIR`; macOS keeps it in the instance dir. */
+function serverDirFor(channel: string, instanceDir: string): string {
+  if (process.platform === "linux" && process.env.XDG_RUNTIME_DIR) {
+    return join(process.env.XDG_RUNTIME_DIR, channel);
+  }
+  return instanceDir;
+}
+
+function targetPaths(devId: string): DevTarget {
+  const channel = devChannelId(devId);
   const instanceDir = join(appDataDir(), channel);
-  const serverDir =
-    process.platform === "linux" && process.env.XDG_RUNTIME_DIR
-      ? join(process.env.XDG_RUNTIME_DIR, channel)
-      : instanceDir;
+  const serverDir = serverDirFor(channel, instanceDir);
   return {
     cli: join(instanceDir, "bin", "pragma-cli"),
     serverDir,
     socket: join(serverDir, "daemon.sock"),
   };
+}
+
+/** True when `cwd` is `worktreePath` itself or nested inside it. */
+function containsPath(worktreePath: string, cwd: string): boolean {
+  const fromWorktree = relative(resolve(worktreePath), cwd);
+  return fromWorktree === "" || (!fromWorktree.startsWith("..") && !isAbsolute(fromWorktree));
+}
+
+/** Deepest (longest-path) snapshot worktree containing `cwd`, if any. */
+function deepestWorktreeContaining(
+  worktrees: WorkspaceSnapshot["worktrees"],
+  cwd: string,
+): WorkspaceSnapshot["worktrees"][number] | undefined {
+  return worktrees
+    .filter((candidate) => containsPath(candidate.path, cwd))
+    .toSorted((a, b) => b.path.length - a.path.length)[0];
 }
 
 function worktreeForCwd(serverDir: string): string {
@@ -47,36 +80,25 @@ function worktreeForCwd(serverDir: string): string {
 
   const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as WorkspaceSnapshot;
   const cwd = resolve(process.cwd());
-  let worktree: WorkspaceSnapshot["worktrees"][number] | undefined;
-  for (const candidate of snapshot.worktrees) {
-    const fromWorktree = relative(resolve(candidate.path), cwd);
-    const containsCwd =
-      fromWorktree === "" || (!fromWorktree.startsWith("..") && !isAbsolute(fromWorktree));
-    if (containsCwd && (!worktree || candidate.path.length > worktree.path.length)) {
-      worktree = candidate;
-    }
-  }
-
+  const worktree = deepestWorktreeContaining(snapshot.worktrees, cwd);
   if (!worktree) {
     throw new Error(`current directory is not a worktree in target dev build: ${cwd}`);
   }
   return worktree.id;
 }
 
-function main(): void {
-  const [devId, ...commandParts] = process.argv.slice(2);
-  if (!devId || commandParts.length === 0) usage();
-
-  const command = commandParts.join(" ");
-  const target = targetPaths(devId);
+/** Fails fast when the target dev build is not running or has no installed CLI. */
+function assertTargetReady(target: DevTarget): void {
   if (!existsSync(target.socket)) {
     throw new Error(`target dev build is not running: ${target.socket}`);
   }
   if (!existsSync(target.cli)) {
     throw new Error(`target dev build CLI is not installed: ${target.cli}`);
   }
+}
 
-  const worktree = worktreeForCwd(target.serverDir);
+/** Opens `command` in a new terminal tab of the target dev build's worktree. */
+function openTerminalTab(target: DevTarget, worktree: string, command: string): void {
   const child = spawnSync(
     target.cli,
     ["tab", "open", "--worktree", worktree, "--kind", "terminal", "--command", command],
@@ -91,6 +113,15 @@ function main(): void {
   );
   if (child.error) throw child.error;
   if (child.status !== 0) process.exit(child.status ?? 1);
+}
+
+function main(): void {
+  const [devId, ...commandParts] = process.argv.slice(2);
+  if (!devId || commandParts.length === 0) usage();
+
+  const target = targetPaths(devId);
+  assertTargetReady(target);
+  openTerminalTab(target, worktreeForCwd(target.serverDir), commandParts.join(" "));
 }
 
 try {

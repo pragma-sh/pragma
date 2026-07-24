@@ -127,46 +127,80 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   let lastSessionName: string | null = null;
 
+  /** Mirrors a child session's lifecycle onto its parent. Returns true if handled. */
+  async function handleChildSessionEvent(event: RuntimeEvent): Promise<boolean> {
+    if (!isChildSessionEvent(event)) {
+      return false;
+    }
+    const parentId = childSessions.get(sessionIdFromEvent(event) ?? "");
+    if (applyChildSessionEvent(event)) {
+      await reportSubagentActivity(parentId);
+      await sync();
+    }
+    return true;
+  }
+
+  /**
+   * A permission request: report the command + a requestId so a Pragma approval
+   * toast appears, and pin the red dot. opencode exposes no decision-returning
+   * plugin hook on the current binary, so the paired watcher answers the verdict
+   * with `sendKeys` (see pragma-plugin.ts). Returns true if handled.
+   */
+  async function handlePermissionEvent(event: RuntimeEvent): Promise<boolean> {
+    if (event.type !== "permission.asked" && event.type !== "permission.updated") {
+      return false;
+    }
+    await raiseCommandApproval(event);
+    return true;
+  }
+
+  /** Raises a question attention for `question.asked`. Returns true if handled. */
+  async function handleQuestionAskedEvent(event: RuntimeEvent): Promise<boolean> {
+    if (event.type !== "question.asked") {
+      return false;
+    }
+    cancelPendingLegacyQuestion();
+    await raiseQuestionAttention(
+      isRecord(event.properties) ? event.properties : {},
+      questionRequestId(event),
+    );
+    return true;
+  }
+
+  /** Runs the handlers that fully consume an event, short-circuiting the status sync. */
+  async function handleConsumingEvent(event: RuntimeEvent): Promise<boolean> {
+    return (
+      (await handleChildSessionEvent(event)) ||
+      (await handlePermissionEvent(event)) ||
+      (await handleQuestionAskedEvent(event))
+    );
+  }
+
+  /**
+   * Assistant (and other) chat content rides on message.* events; report it
+   * before the status sync so a trailing idle still carries the reply.
+   */
+  async function reportChatAndApplyStatus(event: RuntimeEvent): Promise<void> {
+    if (CHAT_EVENT_TYPES.has(event.type)) {
+      await reportChatContent(event);
+    }
+    const action = applyEvent(event);
+    if (action === "clear") {
+      await clear();
+    } else if (action === "sync") {
+      await sync();
+    }
+  }
+
   return {
     event: async ({ event }) => {
       const runtimeEvent = event as RuntimeEvent;
       rememberSessionKind(runtimeEvent);
       await maybeReportSessionName(runtimeEvent);
-      if (isChildSessionEvent(runtimeEvent)) {
-        const parentId = childSessions.get(sessionIdFromEvent(runtimeEvent) ?? "");
-        if (applyChildSessionEvent(runtimeEvent)) {
-          await reportSubagentActivity(parentId);
-          await sync();
-        }
+      if (await handleConsumingEvent(runtimeEvent)) {
         return;
       }
-      // A permission request: report the command + a requestId so a Pragma
-      // approval toast appears, and pin the red dot. opencode exposes no
-      // decision-returning plugin hook on the current binary, so the paired
-      // watcher answers the verdict with `sendKeys` (see pragma-plugin.ts).
-      if (runtimeEvent.type === "permission.asked" || runtimeEvent.type === "permission.updated") {
-        await raiseCommandApproval(runtimeEvent);
-        return;
-      }
-      if (runtimeEvent.type === "question.asked") {
-        cancelPendingLegacyQuestion();
-        await raiseQuestionAttention(
-          isRecord(runtimeEvent.properties) ? runtimeEvent.properties : {},
-          questionRequestId(runtimeEvent),
-        );
-        return;
-      }
-      // Assistant (and other) chat content rides on message.* events; report it
-      // before the status sync so a trailing idle still carries the reply.
-      if (CHAT_EVENT_TYPES.has(runtimeEvent.type)) {
-        await reportChatContent(runtimeEvent);
-      }
-      const action = applyEvent(runtimeEvent);
-      if (action === "clear") {
-        await clear();
-      } else if (action === "sync") {
-        await sync();
-      }
+      await reportChatAndApplyStatus(runtimeEvent);
     },
     "chat.message": async (_input, output) => {
       if (isChildSessionId(_input.sessionID)) {
