@@ -24,16 +24,6 @@
       "command": "__REPORT_SH__ response"
     }
   ],
-  "beforeShellExecution": [
-    {
-      "command": "__REPORT_SH__ attention-command"
-    }
-  ],
-  "beforeMCPExecution": [
-    {
-      "command": "__REPORT_SH__ attention-command"
-    }
-  ],
   "postToolUse": [
     {
       "command": "__REPORT_SH__ running"

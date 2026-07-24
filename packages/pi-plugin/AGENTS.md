@@ -23,12 +23,10 @@ catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pra
 Pi 0.80.10 emits `agent_end` after Escape abort and records the final assistant message
 with `stopReason: "aborted"`; do not report that event as stopped. The integration does
 not add tools, permission prompts, or sub-agent support that stock Pi does not provide.
-Session-exit clearing is owned entirely by the extension: `session_shutdown` reports
-`cleared` on a graceful quit, and the up-front `cleared` on the next session load
-reconciles a hard process exit that skipped `session_shutdown`. The watcher is
-interjection-only and deliberately does **not** report `cleared` in a `finally` — that
-delayed, watcher-level `cleared` could land after a quickly-relaunched session's
-`started` and stomp it. This mirrors opencode.
+Session-exit clearing uses both layers: extension `session_shutdown` reports `cleared`
+on a graceful quit. The exact launched-session watcher also reports `cleared`
+when its session exits, covering crashes and kills that skip `session_shutdown`; reporting
+failures are swallowed so cleanup cannot disrupt watcher shutdown.
 
 ## Build and install
 
@@ -39,6 +37,11 @@ pi install /absolute/path/to/packages/pi-plugin
 
 Local package installation records the package in Pi's user settings. Rebuild this
 package and run `/reload` in Pi after changing the extension bundle.
+
+Model discovery checks `pi` on the plugin-host PATH, FNM's default Node environment,
+`$HOME/.bun/bin/pi`, then a login shell. GUI-launched plugin hosts often omit active
+Node-manager bins from PATH even when Pi launches normally from an interactive terminal;
+keep these explicit fallbacks.
 
 ## Verification
 

@@ -103,6 +103,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   /** Child session id → parent session id. Child lifecycle keeps its parent busy. */
   const childSessions = new Map<string, string>();
   const activeChildSessions = new Set<string>();
+  let pendingLegacyQuestion: ReturnType<typeof setTimeout> | null = null;
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
     "session.status": applySessionStatusEvent,
@@ -111,6 +112,8 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     "session.deleted": applySessionDeletedEvent,
     "server.instance.disposed": () => "clear",
     "permission.replied": applyPermissionRepliedEvent,
+    "question.replied": applyQuestionRepliedEvent,
+    "question.rejected": applyQuestionRepliedEvent,
     "message.updated": applyMessageUpdatedEvent,
     "message.part.updated": applyMessagePartEvent,
   };
@@ -130,7 +133,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       rememberSessionKind(runtimeEvent);
       await maybeReportSessionName(runtimeEvent);
       if (isChildSessionEvent(runtimeEvent)) {
+        const parentId = childSessions.get(sessionIdFromEvent(runtimeEvent) ?? "");
         if (applyChildSessionEvent(runtimeEvent)) {
+          await reportSubagentActivity(parentId);
           await sync();
         }
         return;
@@ -141,6 +146,14 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       // watcher answers the verdict with `sendKeys` (see pragma-plugin.ts).
       if (runtimeEvent.type === "permission.asked" || runtimeEvent.type === "permission.updated") {
         await raiseCommandApproval(runtimeEvent);
+        return;
+      }
+      if (runtimeEvent.type === "question.asked") {
+        cancelPendingLegacyQuestion();
+        await raiseQuestionAttention(
+          isRecord(runtimeEvent.properties) ? runtimeEvent.properties : {},
+          questionRequestId(runtimeEvent),
+        );
         return;
       }
       // Assistant (and other) chat content rides on message.* events; report it
@@ -163,13 +176,15 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       const text =
         textFromParts(output.parts) ??
         textFromRecord(output.message as unknown as Record<string, unknown>);
-      await reporter.message({
-        id: messageId("chat"),
-        role: "user",
-        ...(text ? { text } : {}),
-        subAgentsActive: 0,
-        ts: Date.now(),
-      });
+      await queueReport(() =>
+        reporter.message({
+          id: messageId("chat"),
+          role: "user",
+          ...(text ? { text } : {}),
+          subAgentsActive: 0,
+          ts: Date.now(),
+        }),
+      );
       await sync();
     },
     "command.execute.before": async (input) => {
@@ -177,8 +192,10 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
         return;
       }
       busy = true;
-      await reporter.message(
-        toolMessage("command", summaryFromRecord(input as Record<string, unknown>)),
+      await queueReport(() =>
+        reporter.message(
+          toolMessage("command", summaryFromRecord(input as Record<string, unknown>)),
+        ),
       );
       await sync();
     },
@@ -188,17 +205,21 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       }
       const args = isRecord(output?.args) ? output.args : {};
       if (input.tool === "question") {
-        await raiseQuestionAttention(
+        scheduleLegacyQuestionAttention(
           args,
-          typeof input.callID === "string" ? input.callID : undefined,
+          typeof input.callID === "string" ? `opencode-question-${input.callID}` : undefined,
         );
         // Surface a short human line in the transcript — never the raw args JSON.
         const parsed = parseQuestionArgs(args);
-        await reporter.message(toolMessage("question", parsed?.prompt ?? "Waiting for an answer"));
+        await queueReport(() =>
+          reporter.message(toolMessage("question", parsed?.prompt ?? "Waiting for an answer")),
+        );
         return;
       }
       busy = true;
-      await reporter.message(toolMessage(input.tool, toolSummary(input.tool, args)));
+      await queueReport(() =>
+        reporter.message(toolMessage(input.tool, toolSummary(input.tool, args))),
+      );
       await sync();
     },
     "permission.ask": async (input) => {
@@ -223,11 +244,6 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       await clear();
     },
   };
-
-  function raiseAttention(kind: AgentAttentionKind): void {
-    attention = true;
-    attentionKind = kind;
-  }
 
   function rememberSessionKind(event: RuntimeEvent): void {
     const info = sessionEventInfo(event);
@@ -281,6 +297,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       if (event.type === "session.deleted") {
         childSessions.delete(sessionId);
       }
+      return true;
     }
     return false;
   }
@@ -312,6 +329,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
    * `stopped`/`done`, which leaves a green dot.
    */
   async function clear(): Promise<void> {
+    cancelPendingLegacyQuestion();
     busy = false;
     attention = false;
     childSessions.clear();
@@ -441,22 +459,28 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
    */
   async function raiseQuestionAttention(
     args: Record<string, unknown>,
-    callId: string | undefined,
+    requestId: string | undefined,
   ): Promise<void> {
     const parsed = parseQuestionArgs(args);
+    if (!parsed) {
+      return;
+    }
     attention = true;
     attentionKind = "question";
     lastReported = "attention:question";
     await queueReport(() =>
-      reporter.attentionQuestion(
-        parsed?.prompt ?? "The agent is asking a question",
-        parsed?.options ?? [],
-        callId ? `opencode-question-${callId}` : permissionRequestId(),
-      ),
+      reporter.attentionQuestion(parsed.prompt, parsed.options, requestId ?? permissionRequestId()),
     );
   }
 
   function applyPermissionRepliedEvent(): EventAction {
+    attention = false;
+    busy = true;
+    return "sync";
+  }
+
+  function applyQuestionRepliedEvent(): EventAction {
+    cancelPendingLegacyQuestion();
     attention = false;
     busy = true;
     return "sync";
@@ -469,6 +493,22 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   function applyMessagePartEvent(event: RuntimeEvent): EventAction {
     return applyQuestionPart(event) ? "sync" : "none";
+  }
+
+  async function reportSubagentActivity(parentId: string | undefined): Promise<void> {
+    if (!parentId) return;
+    let active = 0;
+    for (const childId of activeChildSessions) {
+      if (childSessions.get(childId) === parentId) active += 1;
+    }
+    await queueReport(() =>
+      reporter.message({
+        id: `subagents:${parentId}`,
+        role: "system",
+        subAgentsActive: active,
+        ts: Date.now(),
+      }),
+    );
   }
 
   /**
@@ -529,13 +569,15 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     partID?: string,
   ): Promise<void> {
     const isReasoning = partType === "reasoning";
-    await reporter.message({
-      id: isReasoning ? `reasoning:${messageID}:${partID ?? "part"}` : `assistant:${messageID}`,
-      role: isReasoning ? "system" : "assistant",
-      text,
-      subAgentsActive: 0,
-      ts: Date.now(),
-    });
+    await queueReport(() =>
+      reporter.message({
+        id: isReasoning ? `reasoning:${messageID}:${partID ?? "part"}` : `assistant:${messageID}`,
+        role: isReasoning ? "system" : "assistant",
+        text,
+        subAgentsActive: 0,
+        ts: Date.now(),
+      }),
+    );
   }
 
   /** Records `message.updated` role so later text parts can be attributed. */
@@ -582,18 +624,41 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   function applyQuestionPartState(part: Record<string, unknown>): void {
     const state = isRecord(part.state) ? part.state : undefined;
     if (questionPartFinished(state)) {
+      cancelPendingLegacyQuestion();
       attention = false;
       busy = true;
       return;
     }
-    // Prefer the structured report (prompt + options) when the part carries
-    // tool input; fall back to a bare attention flag when it doesn't.
+    // Use legacy structured input when present. OpenCode 1.18 emits the
+    // canonical `question.asked` event after incomplete tool-state updates.
     const input = questionPartInput(state, part);
     if (input) {
-      void raiseQuestionAttention(input, typeof part.callID === "string" ? part.callID : undefined);
-      return;
+      scheduleLegacyQuestionAttention(
+        input,
+        typeof part.callID === "string" ? `opencode-question-${part.callID}` : undefined,
+      );
     }
-    raiseAttention("question");
+  }
+
+  function scheduleLegacyQuestionAttention(
+    args: Record<string, unknown>,
+    requestId: string | undefined,
+  ): void {
+    cancelPendingLegacyQuestion();
+    // OpenCode 1.18 invokes legacy question hooks immediately before emitting
+    // `question.asked`, whose `que_*` id is the only id its live prompt owns.
+    // Defer fallback reporting until that canonical event has a chance to win.
+    pendingLegacyQuestion = setTimeout(() => {
+      pendingLegacyQuestion = null;
+      void raiseQuestionAttention(args, requestId).catch(() => undefined);
+    }, 50);
+  }
+
+  function cancelPendingLegacyQuestion(): void {
+    if (pendingLegacyQuestion !== null) {
+      clearTimeout(pendingLegacyQuestion);
+      pendingLegacyQuestion = null;
+    }
   }
 }
 
@@ -677,6 +742,11 @@ function questionPartInput(
   part: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   return isRecord(state?.input) ? state.input : isRecord(part.input) ? part.input : undefined;
+}
+
+function questionRequestId(event: RuntimeEvent): string | undefined {
+  const properties: unknown = event.properties;
+  return isRecord(properties) && typeof properties.id === "string" ? properties.id : undefined;
 }
 
 /** A unique correlation id for one command-approval round-trip. Opaque. */

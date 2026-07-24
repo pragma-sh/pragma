@@ -83,6 +83,8 @@ const DEFAULT_ABORT_KEYS = "\x1b";
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
 const QUESTION_DIGIT_MAX = 9;
+/** Lets a newly reported question prompt mount before sending any answer keys. */
+const QUESTION_PROMPT_MOUNT_DELAY_MS = 150;
 /** Lets the TUI mount its custom-answer editor before typing into it. */
 const QUESTION_OTHER_INPUT_DELAY_MS = 150;
 /**
@@ -119,6 +121,7 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
         interjectSubmitDelayMs,
         questionFreeTextMode,
         seenRequestIds: new Set<string>(),
+        commandRequestIds: new Set<string>(),
         questionsByRequestId: new Map<string, CachedQuestion>(),
       };
 
@@ -160,6 +163,7 @@ interface WatcherRuntime {
   interjectSubmitDelayMs: number;
   questionFreeTextMode: "editor" | "interject";
   seenRequestIds: Set<string>;
+  commandRequestIds: Set<string>;
   questionsByRequestId: Map<string, CachedQuestion>;
 }
 
@@ -206,8 +210,9 @@ async function handleControlEvent(
 ): Promise<void> {
   // Remember question text/choices from attention reports so an AgentAnswer
   // can be turned into the matching TUI digit / free-text keystroke sequence.
-  if (event.type === "agent" && runtime.handleQuestionAnswers) {
-    rememberQuestion(runtime.questionsByRequestId, event);
+  if (event.type === "agent") {
+    if (runtime.handleDecisions) rememberCommand(runtime.commandRequestIds, event);
+    if (runtime.handleQuestionAnswers) rememberQuestion(runtime.questionsByRequestId, event);
     return;
   }
   if (runtime.handleDecisions && (await handleDecision(ctx, runtime, event))) {
@@ -232,8 +237,10 @@ async function handleDecision(
   event: AgentStreamEvent,
 ): Promise<boolean> {
   if (event.type !== "agentDecision") return false;
+  if (!runtime.commandRequestIds.has(event.decision.requestId)) return true;
   if (runtime.seenRequestIds.has(event.decision.requestId)) return true;
   runtime.seenRequestIds.add(event.decision.requestId);
+  runtime.commandRequestIds.delete(event.decision.requestId);
   await writeKeys(ctx, event.decision.approved ? runtime.keys.approveKeys : runtime.keys.denyKeys);
   return true;
 }
@@ -251,6 +258,8 @@ async function handleAnswer(
   if (runtime.seenRequestIds.has(answer.requestId)) return true;
   runtime.seenRequestIds.add(answer.requestId);
   runtime.questionsByRequestId.delete(answer.requestId);
+  await delay(QUESTION_PROMPT_MOUNT_DELAY_MS, ctx.signal);
+  if (ctx.signal.aborted) return true;
   const reply = answer.answer?.trim() ?? null;
   if (!answer.dismissed && reply && !cached.options.includes(reply)) {
     if (runtime.questionFreeTextMode === "interject") {
@@ -358,6 +367,18 @@ function rememberQuestion(
   // Orphaned entries (cleared/aborted without an AgentAnswer) are tiny and are
   // overwritten the next time the same requestId is reused; the answer handler
   // deletes the entry on a successful reply.
+}
+
+function rememberCommand(cache: Set<string>, event: AgentStreamEvent): void {
+  if (
+    event.type === "agent" &&
+    event.status === "attention" &&
+    event.attentionKind === "command" &&
+    typeof event.requestId === "string" &&
+    event.requestId.length > 0
+  ) {
+    cache.add(event.requestId);
+  }
 }
 
 /**

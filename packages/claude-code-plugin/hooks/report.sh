@@ -81,7 +81,8 @@ message() {
   text="$2"
   id="${agent}-${tab}-$(date +%s)-$$-$role"
   ts="$(message_ts_ms)"
-  payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":0,"ts":'"$ts"'}'
+  active="$(tracked_subagent_count)"
+  payload='{"id":"'"$id"'","role":"'"$role"'","text":"'"$text"'","subAgentsActive":'"$active"',"ts":'"$ts"'}'
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
 
@@ -151,15 +152,16 @@ content_message() {
   [ -n "$py3" ] && [ -n "$text" ] || return 0
   id="${agent}-${tab}-$(date +%s)-$$-$role"
   ts="$(message_ts_ms)"
+  active="$(tracked_subagent_count)"
   payload=$("$py3" -c '
 import json, sys
 print(json.dumps({
     "id": sys.argv[1],
     "role": sys.argv[2],
     "text": sys.argv[3],
-    "subAgentsActive": 0,
+    "subAgentsActive": int(sys.argv[5]),
     "ts": int(sys.argv[4]),
-}))' "$id" "$role" "$text" "$ts" 2>/dev/null)
+}))' "$id" "$role" "$text" "$ts" "$active" 2>/dev/null)
   [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
@@ -235,6 +237,16 @@ has_tracked_subagents() {
     [ -f "$child" ] && return 0
   done
   return 1
+}
+
+tracked_subagent_count() {
+  count=0
+  if [ -d "$children_dir" ]; then
+    for child in "$children_dir"/*; do
+      [ -f "$child" ] && count=$((count + 1))
+    done
+  fi
+  printf '%s' "$count"
 }
 
 clear_subagents() {
@@ -518,6 +530,7 @@ agent_transcript_path="$(json_field agent_transcript_path "$input")"
 if [ "${1:-}" = "subagent-start" ]; then
   track_subagent "$hook_agent_id"
   [ -f "$marker" ] || printf '%s' "$$-$(date +%s)" >"$marker"
+  message system "Claude Code started a subagent"
   report started
   exit 0
 fi

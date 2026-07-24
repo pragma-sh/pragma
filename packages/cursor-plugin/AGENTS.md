@@ -20,7 +20,7 @@ packages/cursor-plugin/
 └── test/report.test.ts
 ```
 
-## Why plain `agent` (no wrapper CLI)
+## Why `cursor-agent` (no wrapper CLI)
 
 The first version used a separate `pragma-cursor-agent` launcher with `expect` to send
 **`a`** / **`n`** through the interactive **Command Execution** intro. That intro is
@@ -40,15 +40,19 @@ not a permission gate Cursor exposes only via keystrokes — it is skipped when
 - `<git-root>/.cursor/permissions.json` — project IDE/CLI allowlists
 - `<git-root>/.cursor/cli.json` — project CLI permission allow/deny only (no `approvalMode` / `sandbox`; those stay global)
 
-The Pragma launcher then starts plain:
+The Pragma launcher starts Cursor's unambiguous binary name:
 
 ```json
-"start": ["agent", "--force", "--approve-mcps"]
+"start": ["cursor-agent", "--force", "--approve-mcps"]
 ```
 
 - **`--force`** (`--yolo`) — Run Everything: auto-approve commands unless explicitly
   denied (matches intro option **`u`** / `approvalMode: "unrestricted"`).
 - **`--approve-mcps`** — skips the MCP approval prompt at session start.
+
+Do not shorten this to `agent`: unrelated tools install that generic binary name. Model
+discovery and launch must both target `cursor-agent`, or Pragma can catalog Cursor models
+while launching a different agent.
 
 Per-command allowlist prompts should not appear with `--force`. To use Auto sandbox +
 allowlist instead, drop `--force` and use `--sandbox enabled` with
@@ -63,26 +67,15 @@ allowlist instead, drop `--force` and use `--sandbox enabled` with
 | `beforeSubmitPrompt`   | `started`           | `started` + user prompt message; first prompt also derives `session-name`         |
 | `afterAgentResponse`   | `response`          | Assistant response message                                                        |
 | `stop`                 | `stopped`           | `stopped`; `cleared` when Cursor reports `aborted` or `error`                     |
-| `beforeShellExecution` | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
-| `beforeMCPExecution`   | `attention-command` | `attention --kind command` (+ command + requestId) **and blocks for the verdict** |
 | `postToolUse`          | `running`           | `started` **iff** turn marker exists (clears stale red)                           |
 
-## Approving from a Pragma toast (`beforeShellExecution` / `beforeMCPExecution` block)
+## Command approval is unsupported
 
-Cursor's command/MCP gates are **blocking** hooks whose stdout is a
-`{"permission":"allow"|"deny"|"ask"}` decision. The `attention-command` case uses that to
-approve remotely (mirrors Claude Code's `permission` case):
-
-1. Extract the command from stdin (`.command` / `.tool_name`, via `jq` with a sed
-   fallback), mint a `requestId`, and report
-   `attention --kind command --command <cmd> --request-id <id>` so the Pragma approval
-   toast shows the command with **Approve**/**Deny**.
-2. Block on `pragma-cli agent await-decision --request-id <id>
---timeout ${PRAGMA_APPROVAL_TIMEOUT:-300}` for the verdict the app publishes.
-3. Emit `{"permission":"allow"}` / `{"permission":"deny"}` so approve runs the command and
-   deny rejects it — no terminal interaction.
-4. On **timeout** emit nothing (exit 0) so Cursor keeps its own approval UI (fail-open).
-   Never hangs a session.
+Cursor fires `beforeShellExecution` / `beforeMCPExecution` for every tool execution,
+including safe auto-approved commands under `--force`; payloads do not distinguish a real
+permission prompt. Wiring them as attention hooks makes `date +%s` falsely block for remote
+approval. Keep those events out of `hooks.fragment.json` and declare `commandApproval`
+unsupported until Cursor exposes a prompt-only signal.
 
 ## Interjection (free-form input)
 
@@ -124,13 +117,18 @@ Agent CLI; see `packages/claude-code-plugin/AGENTS.md` if transcript polling for
 is wanted later (it relies on Cursor writing an interrupt marker to the transcript,
 which has not been confirmed).
 
+Process exit is observable through the exact launched-session watcher. Its `finally`
+reports `cleared`, covering crashes and kills that skip Cursor's `sessionEnd` hook;
+reporting failures are swallowed so cleanup cannot disrupt watcher shutdown.
+
 Cursor exposes no reliable native session title in hook payloads. `report.sh` derives one
 from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it once per
 session, and resets that state on `sessionStart` / `sessionEnd`.
 
-The built-in `--force` launcher cannot exercise approval prompts, so the agent declares
-`questions`, `commandApproval`, and `abort` in `excludeFeatures`. `agent verify` skips those
-unsupported scenario groups instead of treating known host limitations as failures.
+The built-in launcher cannot expose questions, prompt-only command approval, subagent
+lifecycle, abort detection, or interrupt handling, so all five are declared in
+`excludeFeatures`. `agent verify` skips those unsupported scenario groups instead of
+treating known host limitations as failures.
 
 ## Installation
 
@@ -148,7 +146,7 @@ If install fails with "cannot write" inside a sandboxed agent, run the same comm
 in a normal terminal (writes go to `~/.pragma` and `~/.cursor`).
 
 Launch from Pragma's agent menu via the built-in Cursor agent, or run
-`agent --force --approve-mcps` in a Pragma terminal.
+`cursor-agent --force --approve-mcps` in a Pragma terminal.
 
 ## Guard + non-Pragma sessions
 
