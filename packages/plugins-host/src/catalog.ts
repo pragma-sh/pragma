@@ -95,13 +95,17 @@ export async function resolveModels(
  * Assembles the catalog from resolved plugins: resolves each agent's models,
  * hashes its icon (registering it in the asset map), and produces
  * {@link CatalogAgent} entries. A single agent's failure (bad icon, model
- * provider throwing) is reported via `onError` and skips that agent, never
- * failing the whole catalog.
+ * provider throwing or returning no models) is reported via `onError` and
+ * falls back to the agent's entry in `previous` (the last successful catalog)
+ * when one exists — a transient model-provider hiccup must not drop the agent
+ * from the catalog — and only skips the agent when there is no last-good
+ * entry, never failing the whole catalog.
  */
 export async function assembleCatalog(
   plugins: ResolvedPlugin[],
   ctx: PluginContext,
   onError: (pluginId: string, agentId: string, error: unknown) => void = () => {},
+  previous?: CatalogResult,
 ): Promise<CatalogResult> {
   const assets: Record<string, IconAsset> = {};
   const entries = plugins.flatMap((plugin) =>
@@ -109,16 +113,45 @@ export async function assembleCatalog(
   );
   const resolvedAgents = await Promise.all(
     entries.map(async ({ agent, plugin }) => {
+      const fallback = lastGoodAgent(previous, qualifiedAgentId(plugin.pluginId, agent.id));
       try {
-        return await catalogAgent(agent, plugin, ctx, assets);
+        const resolved = await catalogAgent(agent, plugin, ctx, assets);
+        if (resolved.models.length === 0 && fallback && fallback.models.length > 0) {
+          onError(
+            plugin.pluginId,
+            agent.id,
+            new Error("model provider returned no models; reusing last-good catalog entry"),
+          );
+          return adoptFallback(fallback, previous, assets);
+        }
+        return resolved;
       } catch (error) {
         onError(plugin.pluginId, agent.id, error);
-        return null;
+        return fallback ? adoptFallback(fallback, previous, assets) : null;
       }
     }),
   );
   const agents = resolvedAgents.filter((agent): agent is CatalogAgent => agent !== null);
   return { catalog: { agents }, assets };
+}
+
+/** The agent's entry in the last successfully assembled catalog, if any. */
+function lastGoodAgent(previous: CatalogResult | undefined, id: string): CatalogAgent | undefined {
+  return previous?.catalog.agents.find((agent) => agent.id === id);
+}
+
+/** Reuses a last-good agent entry, carrying its icon asset into the new map. */
+function adoptFallback(
+  agent: CatalogAgent,
+  previous: CatalogResult | undefined,
+  assets: Record<string, IconAsset>,
+): CatalogAgent {
+  const hash = agent.icon?.hash;
+  const asset = hash ? previous?.assets[hash] : undefined;
+  if (hash && asset) {
+    assets[hash] = asset;
+  }
+  return agent;
 }
 
 /**
