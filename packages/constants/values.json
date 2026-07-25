@@ -23,6 +23,16 @@
     "storageScopes": ["global", "project"],
     "bundledDirName": "plugins"
   },
+  "keybindings": {
+    "configFileName": ".pragma/keybindings.json"
+  },
+  "agentStatus": {
+    "soundsDirName": ".pragma/assets/sounds",
+    "maxSoundSeconds": 5,
+    "maxSoundBytes": 5242880,
+    "soundExtensions": ["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "webm"],
+    "notificationsEnabled": true
+  },
   "protocol": {
     "rpcMethods": [
       "git",
