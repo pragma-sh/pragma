@@ -17,7 +17,7 @@
     "./pragma-plugin": "./src/pragma-plugin.ts"
   },
   "scripts": {
-    "build": "bunup src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "build": "bun build src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
     "install:local": "sh scripts/install-local.sh",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
