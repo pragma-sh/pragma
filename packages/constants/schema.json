@@ -13,6 +13,7 @@
     "agents",
     "daemon",
     "gateway",
+    "platform",
     "protocol",
     "github",
     "plugins",
@@ -36,6 +37,9 @@
     },
     "agents": {
       "$ref": "#/definitions/Agents"
+    },
+    "platform": {
+      "$ref": "#/definitions/Platform"
     },
     "daemon": {
       "$ref": "#/definitions/Daemon"
@@ -515,17 +519,98 @@
         }
       }
     },
+    "TerminalBackend": {
+      "title": "TerminalBackend",
+      "type": "string",
+      "enum": ["native", "wsl"],
+      "description": "Which world a terminal session's shell lives in. `native` runs the host's own shell through the host's PTY (a pseudo-terminal on macOS and Linux, ConPTY on Windows). `wsl` runs a Linux shell inside a WSL distribution, served by a Linux `pragma-server` running in that distribution. Only Windows offers a real choice; macOS and Linux always resolve to `native`."
+    },
+    "Platform": {
+      "title": "Platform",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shells", "wsl", "defaultBackend"],
+      "description": "Per-operating-system launch defaults shared by the Rust session layer and the TypeScript settings UI. Values here are defaults only: a project may override them in its `.pragma/config.json`.",
+      "properties": {
+        "shells": {
+          "$ref": "#/definitions/DefaultShells"
+        },
+        "wsl": {
+          "$ref": "#/definitions/Wsl"
+        },
+        "defaultBackend": {
+          "$ref": "#/definitions/TerminalBackend"
+        }
+      }
+    },
+    "DefaultShells": {
+      "title": "DefaultShells",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["macos", "linux", "windows"],
+      "description": "Fallback shell used when the environment names none. On macOS and Linux the `SHELL` environment variable wins when it is set; Windows has no such convention, so the candidate list is probed in order instead.",
+      "properties": {
+        "macos": {
+          "type": "string",
+          "description": "Shell launched on macOS when `SHELL` is unset."
+        },
+        "linux": {
+          "type": "string",
+          "description": "Shell launched on Linux when `SHELL` is unset."
+        },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Windows shell candidates, probed in order and resolved against `PATH`. PowerShell 7+ (`pwsh.exe`) is preferred over the in-box Windows PowerShell (`powershell.exe`) because it ships the modern ConPTY behaviour; the last entry must be a shell that is present on every Windows install so resolution cannot fail."
+        }
+      }
+    },
+    "Wsl": {
+      "title": "Wsl",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launcher", "listArgs", "serverBinary"],
+      "description": "How the Windows client reaches a Linux `pragma-server` running inside a WSL distribution. The Windows side never translates `\\\\wsl$\\` paths: the Linux server owns its own filesystem world and is addressed exactly like a remote host.",
+      "properties": {
+        "launcher": {
+          "type": "string",
+          "description": "Executable used to run a command inside a WSL distribution."
+        },
+        "listArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments that list installed distributions with their state and WSL version. The output is UTF-16LE encoded, which the parser has to decode before splitting."
+        },
+        "serverBinary": {
+          "type": "string",
+          "description": "Name of the Linux `pragma-server` executable expected on the distribution's PATH, or installed by Pragma into the distribution when it is missing."
+        }
+      }
+    },
     "Daemon": {
       "title": "Daemon",
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocolVersion"],
+      "required": ["protocolVersion", "socketFile", "lockFile", "logFile"],
       "description": "Contract between the Pragma app and the detached PTY daemon.",
       "properties": {
         "protocolVersion": {
           "type": "integer",
           "minimum": 1,
           "description": "Wire-protocol version negotiated between the app and the detached PTY daemon. The daemon greets every connection with this version; the app replaces a daemon whose version does not match (or that sends no greeting). Bump it whenever the daemon protocol or its PTY-stream handling changes so a stale long-lived daemon is restarted instead of silently serving old behavior."
+        },
+        "socketFile": {
+          "type": "string",
+          "description": "File name of the server's local IPC endpoint inside the server directory. A Unix-domain socket on every supported platform: macOS and Linux use the kernel's AF_UNIX, Windows uses the AF_UNIX support present since Windows 10 build 17063. The server binds it and every native client connects to it, so the name must never be spelled out by hand on either side of the language boundary."
+        },
+        "lockFile": {
+          "type": "string",
+          "description": "File name of the startup lock the server holds inside the server directory, used to keep a second server from binding over a live one."
+        },
+        "logFile": {
+          "type": "string",
+          "description": "File name the detached server writes its stdout and stderr to inside the server directory."
         }
       }
     },

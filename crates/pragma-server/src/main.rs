@@ -10,10 +10,6 @@ use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::net::Shutdown;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -21,10 +17,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use daemonize::Daemonize;
 use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
+use pragma_platform::ipc::{self, LocalStream};
 
 use pragma_protocol::limits::raise_open_file_limit;
 use pragma_protocol::{
@@ -62,6 +58,10 @@ const EVENT_STREAM_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DETACH_FLAG: &str = "--detach";
+
+/// Runs this process as a stdio relay to an already-running server instead of
+/// starting one. See [`relay_stdio`].
+const RELAY_FLAG: &str = "--relay";
 
 /// The channel that isolates this server from a differently-built sibling.
 ///
@@ -106,6 +106,9 @@ fn workspace_root() -> PathBuf {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = server_paths();
+    if should_relay() {
+        return relay_stdio(&paths.socket);
+    }
     fs::create_dir_all(&paths.dir)?;
     detach_if_requested(&paths, should_detach())?;
     // Before anything opens an fd, and before any session shell is spawned:
@@ -126,8 +129,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     lock.flush()?;
     let _lock = lock;
     take_socket_path(&paths.socket)?;
-    let listener = UnixListener::bind(&paths.socket)?;
-    set_socket_permissions(&paths.socket)?;
+    // `ipc::bind` restricts the socket to its owner, on every platform.
+    let listener = ipc::bind(&paths.socket)?;
 
     let registry = Arc::new(Registry::new(
         paths.socket.clone(),
@@ -161,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Core>) {
+fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<Core>) {
     // Bound every write to this client so a peer that stops reading cannot
     // pin a writer thread (and the mutex it holds) forever — see
     // `CLIENT_WRITE_TIMEOUT`. Reads stay blocking: an idle connection is fine.
@@ -216,7 +219,7 @@ fn handle_client(mut stream: UnixStream, registry: &Arc<Registry>, core: &Arc<Co
 /// or response involved. `Output` frames are never sent by a client and are
 /// discarded. Returns `None` once the connection errors, closes, or sends a
 /// malformed JSON frame.
-fn next_request(stream: &mut UnixStream, registry: &Registry) -> Option<RequestFrame> {
+fn next_request(stream: &mut LocalStream, registry: &Registry) -> Option<RequestFrame> {
     loop {
         let bytes = match read_frame(stream).ok()? {
             Frame::Json(bytes) => bytes,
@@ -233,7 +236,7 @@ fn next_request(stream: &mut UnixStream, registry: &Registry) -> Option<RequestF
 /// Drains `ControlResult` replies from the controller connection and routes each
 /// to its waiting `request_id` in `Registry.pending`. Runs on the connection's
 /// own thread until the controller disconnects.
-fn controller_reply_loop(stream: &mut UnixStream, registry: &Arc<Registry>) {
+fn controller_reply_loop(stream: &mut LocalStream, registry: &Arc<Registry>) {
     while let Ok(request) = read_json_frame::<RequestFrame>(stream) {
         if let RequestKind::ControlResult = request.kind {
             if let Some(result) = request.control_result {
@@ -247,7 +250,7 @@ fn controller_reply_loop(stream: &mut UnixStream, registry: &Arc<Registry>) {
 /// Handles one request frame on a normal (non-controller) connection.
 fn handle_client_request(
     request: RequestFrame,
-    writer: &Arc<Mutex<UnixStream>>,
+    writer: &Arc<Mutex<LocalStream>>,
     registry: &Arc<Registry>,
     core: &Arc<Core>,
     closed: &Arc<AtomicBool>,
@@ -815,7 +818,7 @@ struct EventStream {
 fn forward_events(
     scrollback: Vec<EventFrame>,
     rx: Receiver<EventFrame>,
-    writer: Arc<Mutex<UnixStream>>,
+    writer: Arc<Mutex<LocalStream>>,
     registry: Arc<Registry>,
     closed: Arc<AtomicBool>,
 ) {
@@ -864,7 +867,7 @@ fn forward_events(
 /// on the wire, so the stream's framing can no longer be trusted — no other
 /// thread may keep writing responses onto it. Returns whether the write
 /// succeeded.
-fn write_or_hang_up(writer: &Arc<Mutex<UnixStream>>, event: EventFrame) -> bool {
+fn write_or_hang_up(writer: &Arc<Mutex<LocalStream>>, event: EventFrame) -> bool {
     let Ok(mut writer) = writer.lock() else {
         return false;
     };
@@ -879,7 +882,7 @@ fn write_or_hang_up(writer: &Arc<Mutex<UnixStream>>, event: EventFrame) -> bool 
 /// down for the same reason as [`write_or_hang_up`]: after a timed-out partial
 /// write the stream's framing cannot be trusted. Returns whether the write
 /// succeeded.
-fn write_frame_or_hang_up(writer: &mut UnixStream, frame: &ServerFrame) -> bool {
+fn write_frame_or_hang_up(writer: &mut LocalStream, frame: &ServerFrame) -> bool {
     if write_json_frame(writer, frame).is_err() {
         let _ = writer.shutdown(Shutdown::Both);
         return false;
@@ -889,7 +892,7 @@ fn write_frame_or_hang_up(writer: &mut UnixStream, frame: &ServerFrame) -> bool 
 
 /// Writes one event to the client: output goes out as a binary frame (raw bytes,
 /// no JSON escaping), while title/exit stay JSON control frames.
-fn write_event(writer: &mut UnixStream, event: EventFrame) -> Result<(), ProtocolError> {
+fn write_event(writer: &mut LocalStream, event: EventFrame) -> Result<(), ProtocolError> {
     match event {
         EventFrame::Output { session_id, data } => write_output_frame(writer, &session_id, &data),
         other => write_json_frame(writer, &ServerFrame::Event(other)),
@@ -904,6 +907,10 @@ struct ServerPaths {
     dir: PathBuf,
     socket: PathBuf,
     lock: PathBuf,
+    /// Only read on Unix, where `daemonize` redirects the standard streams into
+    /// it. On Windows the spawning client opens this same path itself and hands
+    /// it to the new process — see `detach_spawned` in `pragma-client`.
+    #[cfg_attr(not(unix), allow(dead_code))]
     log: PathBuf,
 }
 
@@ -921,9 +928,9 @@ fn server_paths() -> ServerPaths {
             .join(&channel)
     };
     ServerPaths {
-        socket: dir.join("daemon.sock"),
-        lock: dir.join("server.lock"),
-        log: dir.join("server.log"),
+        socket: ipc::socket_path_in(&dir),
+        lock: ipc::lock_path_in(&dir),
+        log: ipc::log_path_in(&dir),
         dir,
     }
 }
@@ -932,6 +939,81 @@ fn should_detach() -> bool {
     std::env::args_os().any(|arg| arg == OsStr::new(DETACH_FLAG))
 }
 
+fn should_relay() -> bool {
+    std::env::args_os().any(|arg| arg == OsStr::new(RELAY_FLAG))
+}
+
+/// Copies this process's stdin and stdout to and from the server's socket,
+/// then exits when either side closes.
+///
+/// This is how a Windows client reaches a server running inside WSL. WSL2 is a
+/// virtual machine: it cannot connect to a Windows named pipe, and Windows
+/// cannot connect to the Linux `AF_UNIX` socket inside it. What does cross the
+/// boundary is a process launched through `wsl.exe`, whose standard streams are
+/// ordinary pipes on the Windows side. So the Windows client runs this binary
+/// inside the distribution with `--relay`, and gets a byte pipe to the socket.
+///
+/// Nothing is interpreted here — this is a pipe, and all framing stays in
+/// `pragma-protocol`. Notably the socket keeps its owner-only permissions and
+/// stays the only entry point, so agent plugins running inside the distribution
+/// (`pragma-cli`, the opencode and Claude hooks) connect to it exactly as they
+/// do on a native Linux host.
+fn relay_stdio(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{Read, Write};
+
+    let to_server = ipc::connect(socket).map_err(|error| {
+        format!(
+            "relay could not reach the server at {}: {error}",
+            socket.display()
+        )
+    })?;
+    let mut from_server = to_server.try_clone()?;
+
+    // stdin -> socket on this thread, socket -> stdout on another: a relay is
+    // full duplex, and a terminal is routinely writing and reading at once.
+    let downstream = thread::spawn(move || {
+        let mut stdout = std::io::stdout();
+        let mut buffer = vec![0_u8; 32 * 1024];
+        loop {
+            match from_server.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    if stdout.write_all(&buffer[..read]).is_err() || stdout.flush().is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let mut to_server = to_server;
+    let mut stdin = std::io::stdin();
+    let mut buffer = vec![0_u8; 32 * 1024];
+    loop {
+        match stdin.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                if to_server.write_all(&buffer[..read]).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = to_server.shutdown(Shutdown::Both);
+    let _ = downstream.join();
+    Ok(())
+}
+
+/// Detaches from the launching terminal so the server outlives it.
+///
+/// On Unix this forks, sets a new session, and redirects the standard streams
+/// into the log file. Windows has no `fork`, and the equivalent is applied by
+/// whoever spawns us instead: `pragma-client` creates the process with
+/// `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW` and hands
+/// it the log file as its stdout and stderr, so by the time this runs the
+/// process is already detached and its output already redirected. See
+/// `spawn_server` in `crates/pragma-client/src/lib.rs`.
+#[cfg(unix)]
 fn detach_if_requested(
     paths: &ServerPaths,
     should_detach: bool,
@@ -945,7 +1027,7 @@ fn detach_if_requested(
         .append(true)
         .open(&paths.log)?;
     let stderr = stdout.try_clone()?;
-    Daemonize::new()
+    daemonize::Daemonize::new()
         .working_directory(&paths.dir)
         .stdout(stdout)
         .stderr(stderr)
@@ -953,12 +1035,40 @@ fn detach_if_requested(
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn detach_if_requested(
+    paths: &ServerPaths,
+    should_detach: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !should_detach {
+        return Ok(());
+    }
+    // The spawning side already detached us and redirected our output; all that
+    // is left is the working directory `Daemonize` would have set.
+    std::env::set_current_dir(&paths.dir)?;
+    Ok(())
+}
+
 fn default_app_data_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
-    if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/com.pragma.app")
-    } else {
-        home.join(".local/share/com.pragma.app")
+    #[cfg(windows)]
+    {
+        // Roaming application data is the Windows equivalent of the per-user
+        // data directories used below, and is where Tauri puts the app's data.
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            return PathBuf::from(app_data).join("com.pragma.app");
+        }
+        std::env::var_os("USERPROFILE").map_or_else(std::env::temp_dir, |home| {
+            PathBuf::from(home).join("AppData/Roaming/com.pragma.app")
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
+        if cfg!(target_os = "macos") {
+            home.join("Library/Application Support/com.pragma.app")
+        } else {
+            home.join(".local/share/com.pragma.app")
+        }
     }
 }
 
@@ -1013,7 +1123,7 @@ fn take_socket_path(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
     if !socket.exists() {
         return Ok(());
     }
-    if UnixStream::connect(socket).is_ok() {
+    if LocalStream::connect(socket).is_ok() {
         return Err(format!(
             "another pragma-server is already serving on {}",
             socket.display()
@@ -1021,13 +1131,6 @@ fn take_socket_path(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     fs::remove_file(socket)?;
-    Ok(())
-}
-
-fn set_socket_permissions(socket: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut permissions = fs::metadata(socket)?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(socket, permissions)?;
     Ok(())
 }
 
@@ -1040,7 +1143,8 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use super::{acquire_lock, take_socket_path, UnixListener};
+    use super::{acquire_lock, take_socket_path};
+    use pragma_platform::ipc::LocalListener;
 
     #[test]
     fn a_second_server_cannot_take_a_held_lock() {
@@ -1089,7 +1193,7 @@ mod tests {
     fn a_live_socket_blocks_a_second_server_even_with_no_lock_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket_path = dir.path().join("daemon.sock");
-        let _serving = UnixListener::bind(&socket_path).expect("the first server binds");
+        let _serving = LocalListener::bind(&socket_path).expect("the first server binds");
 
         assert!(
             take_socket_path(&socket_path).is_err(),

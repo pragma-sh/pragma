@@ -6,6 +6,7 @@ members = [
   "crates/pragma-client",
   "crates/pragma-core",
   "crates/pragma-gateway",
+  "crates/pragma-platform",
   "crates/pragma-protocol",
   "crates/pragma-server",
   "packages/constants",

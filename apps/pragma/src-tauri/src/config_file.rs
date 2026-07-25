@@ -3,9 +3,6 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-
 use pragma_constants::CONSTANTS;
 use pragma_core::fs::FsRequest;
 use serde::{Deserialize, Serialize};
@@ -195,15 +192,8 @@ async fn read_local(path: PathBuf) -> AppResult<ConfigDocument> {
 
 async fn write_local(path: PathBuf, contents: String) -> AppResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let temp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-        let mut options = std::fs::OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut file = options.open(&temp_path)?;
+        let mut file = pragma_platform::perms::create_private_file(&temp_path)?;
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
         std::fs::rename(temp_path, path)?;

@@ -1,4 +1,4 @@
-use std::os::unix::net::UnixStream;
+use pragma_platform::ipc::LocalStream;
 use std::thread;
 use std::time::Duration;
 
@@ -139,7 +139,7 @@ pub fn kill_for_cwd(
     Ok(empty_response(204))
 }
 
-fn hold_spawn_stream(state: &AppState, session_id: String, stream: UnixStream) {
+fn hold_spawn_stream(state: &AppState, session_id: String, stream: LocalStream) {
     if let Ok(mut streams) = state.pending_spawn_streams.lock() {
         streams.insert(session_id.clone(), stream);
     }

@@ -1,23 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::path::Path;
 
 use netstat2::{
     iterate_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
 };
 use pragma_constants::OpenPort;
+use pragma_platform::process::ProcessEntry as ProcessInfo;
 
 #[derive(Clone, Debug)]
 pub struct SessionOwner {
     pub tab_id: String,
     pub worktree_id: String,
     pub root_pid: u32,
-}
-
-#[derive(Clone, Debug)]
-struct ProcessInfo {
-    parent_pid: u32,
-    name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -38,69 +32,7 @@ pub fn list_open_ports(owners: &[SessionOwner]) -> Result<Vec<OpenPort>, String>
 }
 
 fn list_processes() -> Result<HashMap<u32, ProcessInfo>, String> {
-    let output = pragma_core::process_env::command("ps")
-        .args(["-axo", "pid=,ppid=,comm="])
-        .output()
-        .map_err(|error| format!("failed to inspect processes: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("process inspection exited with {}", output.status));
-    }
-    let mut processes = parse_processes(&String::from_utf8_lossy(&output.stdout));
-    enrich_truncated_names(&mut processes);
-    Ok(processes)
-}
-
-/// `ps comm=` is sourced from the kernel's `TASK_COMM_LEN` field, which Linux
-/// caps at 15 characters — longer names (`vite-dev-server`, `python3-watchdog`)
-/// arrive already truncated. `/proc/<pid>/cmdline` carries the untruncated
-/// argv[0], so on Linux we prefer it when available, falling back to the
-/// `ps`-derived name for processes that exit before we can read it (or when
-/// `/proc` is unavailable, e.g. inside some sandboxes). macOS's `ps comm=` is
-/// not subject to this cap, so no enrichment is needed there.
-#[cfg(target_os = "linux")]
-fn enrich_truncated_names(processes: &mut HashMap<u32, ProcessInfo>) {
-    for (pid, info) in processes.iter_mut() {
-        if let Some(name) = linux_cmdline_name(*pid) {
-            info.name = name;
-        }
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn enrich_truncated_names(_processes: &mut HashMap<u32, ProcessInfo>) {}
-
-#[cfg(target_os = "linux")]
-fn linux_cmdline_name(pid: u32) -> Option<String> {
-    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let arg0 = bytes
-        .split(|&byte| byte == 0)
-        .find(|segment| !segment.is_empty())?;
-    let arg0 = std::str::from_utf8(arg0).ok()?;
-    Some(
-        Path::new(arg0)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(arg0)
-            .to_string(),
-    )
-}
-
-fn parse_processes(output: &str) -> HashMap<u32, ProcessInfo> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse().ok()?;
-            let parent_pid = fields.next()?.parse().ok()?;
-            let command = fields.next()?;
-            let name = Path::new(command)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(command)
-                .to_string();
-            Some((pid, ProcessInfo { parent_pid, name }))
-        })
-        .collect()
+    pragma_platform::process::list_processes()
 }
 
 fn list_listening_sockets() -> Result<Vec<ListeningSocket>, String> {

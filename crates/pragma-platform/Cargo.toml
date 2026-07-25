@@ -1,0 +1,18 @@
+[package]
+name = "pragma-platform"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Operating-system primitives shared by every Pragma crate: local IPC transport, owner-only file permissions, process termination, and shell resolution."
+
+[lints]
+workspace = true
+
+[dependencies]
+pragma-constants = { path = "../../packages/constants" }
+
+[target.'cfg(windows)'.dependencies]
+uds_windows = "1.2"
+
+[dev-dependencies]
+tempfile = "3"

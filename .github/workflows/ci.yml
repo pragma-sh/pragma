@@ -100,15 +100,50 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Unit tests (cargo test)
+        # PRAGMA_TEST_PTY opts in to the test that spawns a real shell on a real
+        # pseudo-terminal (ConPTY on Windows). It is off by default because a
+        # sandboxed local executor may not be allowed to allocate one.
         run: cargo test --workspace --all-features
+        env:
+          PRAGMA_TEST_PTY: "1"
+
+  rust-windows:
+    name: Rust on Windows (clippy, test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No apt step and no GTK/WebKit: the Windows webview is WebView2, which
+      # ships with the OS on Windows 11 and with the Edge runtime on Windows 10.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: Swatinem/rust-cache@v2
+      - run: bun install --frozen-lockfile
+      - name: Stage daemon sidecar
+        # `shell: bash` selects the Git Bash that ships with the Windows runner,
+        # which is what the staging script is written against.
+        shell: bash
+        run: bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
+      - name: Lint (clippy)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Unit tests (cargo test)
+        # PRAGMA_TEST_PTY opts in to the test that spawns a real shell on a real
+        # pseudo-terminal (ConPTY on Windows). It is off by default because a
+        # sandboxed local executor may not be allowed to allocate one.
+        run: cargo test --workspace --all-features
+        env:
+          PRAGMA_TEST_PTY: "1"
 
   build:
     name: Build app (${{ matrix.os }})
-    needs: [frontend, rust]
+    needs: [frontend, rust, rust-windows]
     strategy:
       fail-fast: false
       matrix:
-        os: [blacksmith-4vcpu-ubuntu-2404, blacksmith-6vcpu-macos-latest]
+        os: [blacksmith-4vcpu-ubuntu-2404, blacksmith-6vcpu-macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -28,11 +28,19 @@ const DESIRED_NOFILE: u64 = 65_536;
 /// Best-effort by design: a platform that refuses the raise still runs, just
 /// with the inherited ceiling, so callers log rather than abort. Must be called
 /// before spawning children — they inherit the limit in force at `fork` time.
+///
+/// Windows has no `RLIMIT_NOFILE`. Its equivalent ceiling is the C runtime's
+/// stdio descriptor table, which `rlimit` raises with `_setmaxstdio`, and it is
+/// per-process rather than inherited — so children raise their own. Sockets do
+/// not draw on it at all, which is why Windows does not see the `EMFILE`
+/// failure this exists to prevent.
 pub fn raise_open_file_limit() -> std::io::Result<u64> {
     rlimit::increase_nofile_limit(DESIRED_NOFILE)
 }
 
-#[cfg(test)]
+// The test below reads the limit pair directly, which only exists on Unix;
+// `raise_open_file_limit` itself is available on every platform.
+#[cfg(all(test, unix))]
 mod tests {
     use super::{raise_open_file_limit, DESIRED_NOFILE};
 

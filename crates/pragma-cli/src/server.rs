@@ -5,7 +5,7 @@
 //! frame, and verifies the protocol version. `--worktree` defaults to
 //! `$PRAGMA_WORKTREE_ID` everywhere it is optional.
 
-use std::os::unix::net::UnixStream;
+use pragma_platform::ipc::{self, LocalStream};
 
 use pragma_constants::CONSTANTS;
 use pragma_protocol::{read_json_frame, HelloFrame, ProtocolError, ServerFrame};
@@ -36,14 +36,14 @@ pub fn optional_worktree_id(override_id: Option<String>) -> Option<String> {
 
 /// A connected, hello-verified server stream.
 pub struct Server {
-    pub stream: UnixStream,
+    pub stream: LocalStream,
 }
 
 /// Connects to the server, reads the hello frame, and verifies the protocol
 /// version. Returns a stream ready to send requests.
 pub fn connect() -> Result<Server, CliError> {
     let path = socket_path().map_err(CliError::config)?;
-    let mut stream = UnixStream::connect(&path)
+    let mut stream = ipc::connect(std::path::Path::new(&path))
         .map_err(|e| CliError::config(format!("connect to {path}: {e}")))?;
     let expected = CONSTANTS.daemon.protocol_version.get();
     match read_json_frame::<ServerFrame>(&mut stream) {

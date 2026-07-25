@@ -44,7 +44,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "deb", "rpm", "appimage"],
+    "targets": ["app", "dmg", "deb", "rpm", "appimage", "msi", "nsis"],
     "externalBin": [
       "binaries/pragma-server",
       "binaries/pragma-gateway",

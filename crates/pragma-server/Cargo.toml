@@ -12,11 +12,11 @@ workspace = true
 anyhow = "1"
 base64 = { workspace = true }
 chrono = { workspace = true }
-daemonize = "0.5"
 netstat2 = { workspace = true }
 portable-pty = "0.8"
 pragma-constants = { path = "../../packages/constants" }
 pragma-core = { path = "../pragma-core" }
+pragma-platform = { path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,5 +25,9 @@ thiserror = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+daemonize = "0.5"
+
 [dev-dependencies]
+pragma-platform = { path = "../pragma-platform" }
 tempfile = "3"

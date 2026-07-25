@@ -1,6 +1,6 @@
 # crates/pragma-server - Persistent Host Server
 
-`pragma-server` owns host-side runtime state and listens on a `0600` Unix socket
+`pragma-server` owns host-side runtime state and listens on an owner-only Unix socket
 only. It replaces the old `pragma-daemon` name while preserving the existing PTY,
 scrollback, raw output, and agent-status strengths.
 
@@ -104,15 +104,24 @@ not add tab persistence back to the Tauri SQLite shell.
 
 ## Socket And Access Control
 
-- The socket filename remains `daemon.sock` so SSH `direct-streamlocal` forwards
+- The socket filename comes from `@pragma/constants` (`daemon.socketFile`, still
+  `daemon.sock`) so SSH `direct-streamlocal` forwards
   the same path.
-- The socket mode is explicitly set to `0600`; Unix filesystem permissions are
-  the access control boundary.
+- The socket is restricted to its owner by `pragma_platform::ipc::bind` — `0600` on
+  Unix, an owner-only ACL on Windows. Filesystem permissions are the access control
+  boundary on every platform; there is no in-band auth.
 - Do not add TCP, TLS, pairing, tokens, or a custom auth layer.
 - The HTTP gateway is deliberately separate (`crates/pragma-gateway`): SDKs talk HTTP
   to the gateway, and the gateway talks to this server over the existing Unix socket.
   Server invariants stay unchanged.
 - SSH is client-side only. The server must not know SSH exists.
+- `--relay` is the one exception to "the server only listens": it makes the process a
+  stdio pipe to an already-running server's socket instead of starting one. A Windows
+  client runs it _inside_ a WSL distribution through `wsl.exe` to reach the Linux server
+  there, because WSL2 and Windows cannot share a socket or a pipe. It interprets nothing
+  — framing stays in `pragma-protocol` — and the socket keeps its owner-only permissions
+  and remains the only entry point, so agent plugins inside the distribution connect to
+  it exactly as they do on a native Linux host. Covered by `tests/relay.rs`.
 
 ## One Server Per Channel
 

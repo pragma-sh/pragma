@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -11,6 +10,8 @@ use std::time::{Duration, Instant};
 use pragma_client::request_spawn;
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
 use pragma_constants::CONSTANTS;
+use pragma_platform::ipc::LocalStream;
+use pragma_platform::process;
 use pragma_protocol::{
     read_frame, read_json_frame, write_json_frame, EventFrame, Frame, ProtocolEventKind,
     ServerFrame,
@@ -24,7 +25,7 @@ const GATEWAY_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const GATEWAY_READY_POLL: Duration = Duration::from_millis(100);
 
 /// Live per-session event-stream connections, tracked so a disposed or
-/// re-attached terminal can have its Rust-side `UnixStream` shut down
+/// re-attached terminal can have its Rust-side `LocalStream` shut down
 /// explicitly rather than relying on the server to notice.
 ///
 /// Without this, a connection abandoned without an explicit kill (a dev HMR
@@ -32,7 +33,7 @@ const GATEWAY_READY_POLL: Duration = Duration::from_millis(100);
 /// its `forward_stream` reader thread — and the matching server-side thread +
 /// fd — blocked forever: the server only releases a connection when the
 /// client closes its end, and nothing here ever did.
-type SessionStreams = Arc<Mutex<HashMap<String, UnixStream>>>;
+type SessionStreams = Arc<Mutex<HashMap<String, LocalStream>>>;
 
 /// Connection details for the local HTTP gateway, returned to the frontend so
 /// in-webview clients (e.g. the plugin SDK bridge) can call the HTTP API.
@@ -107,7 +108,7 @@ impl PtyClient {
     /// for it. A prior connection here means the client re-attached (or
     /// re-spawned) without ever disposing the old one — the exact leak this
     /// tracking exists to close.
-    fn track_stream(&self, session_id: &str, stream: &UnixStream) {
+    fn track_stream(&self, session_id: &str, stream: &LocalStream) {
         let Ok(cloned) = stream.try_clone() else {
             return;
         };
@@ -363,7 +364,7 @@ impl PtyClient {
         Ok(self.inner.read_log()?)
     }
 
-    pub(crate) fn connect_with_spawn(&self) -> AppResult<UnixStream> {
+    pub(crate) fn connect_with_spawn(&self) -> AppResult<LocalStream> {
         Ok(self.inner.connect_with_spawn()?)
     }
 
@@ -452,15 +453,14 @@ fn kill_running_gateway(discovery_path: &Path) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
         return;
     };
-    let Some(pid) = value.get("pid").and_then(serde_json::Value::as_u64) else {
+    let Some(pid) = value
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok())
+    else {
         return;
     };
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
-    }
+    let _ = process::kill(pid);
 }
 
 fn gateway_log_path(socket_path: &Path) -> PathBuf {
@@ -530,7 +530,7 @@ pub(crate) fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>) {
+fn forward_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>) {
     thread::spawn(move || {
         while let Ok(frame) = read_frame(&mut stream) {
             match frame {
@@ -581,7 +581,7 @@ fn forward_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>)
 /// `fileChanged` delta carries `{ worktreeId, change }`; only the inner
 /// `change` ([`FileChange`](pragma_constants::FileChange)) is relayed as a JSON
 /// channel message. The initial empty snapshot and any other frame are ignored.
-fn forward_file_stream(mut stream: UnixStream, on_event: Channel<InvokeResponseBody>) {
+fn forward_file_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>) {
     thread::spawn(move || {
         while let Ok(frame) = read_frame(&mut stream) {
             let Frame::Json(bytes) = frame else {

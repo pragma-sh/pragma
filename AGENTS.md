@@ -6,10 +6,11 @@
 
 ## What is Pragma?
 
-Pragma is a **macOS + Linux desktop app** (Tauri v2) moving toward a host-server + thin
-native-client architecture. The host runs persistent, worktree-scoped terminal sessions
-through `pragma-server`; native clients connect over a local Unix socket or an SSH
-streamlocal bridge. Plugins for opencode, Claude Code, and Cursor report status through
+Pragma is a **macOS + Linux + Windows desktop app** (Tauri v2) moving toward a
+host-server + thin native-client architecture. The host runs persistent, worktree-scoped
+terminal sessions through `pragma-server`; native clients connect over a local Unix
+socket (on all three platforms), or over a bridge that presents a remote SSH host or a
+WSL distribution as one. Plugins for opencode, Claude Code, and Cursor report status through
 the `pragma-cli` helper.
 
 ## North star: clean, reusable, consistent
@@ -70,7 +71,7 @@ than no guide.
 | Concern           | Choice                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Monorepo / tasks  | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
-| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
+| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS, Linux, Windows**)                                                                                           |
 | Frontend          | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
 | Styling / UI      | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
 | Backend           | Rust (Tauri commands)                                                                                                                                           |
@@ -101,8 +102,9 @@ than no guide.
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
 │   ├── pragma-core/             # Host business logic boundary → see crates/pragma-core/AGENTS.md
 │   ├── pragma-gateway/          # Localhost HTTP gateway → see crates/pragma-gateway/AGENTS.md
+│   ├── pragma-platform/         # OS seams: IPC, permissions, processes, shells → see crates/pragma-platform/AGENTS.md
 │   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
-│   └── pragma-server/           # Persistent Unix-socket host server → see crates/pragma-server/AGENTS.md
+│   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
@@ -158,10 +160,12 @@ than no guide.
   `invoke()` directly from components).
 - GitHub REST/GraphQL → `apps/pragma/src/lib/github.ts` only (never instantiate Octokit
   in components). See `apps/pragma/AGENTS.md`.
-- PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH bridge →
-  `crates/pragma-client`; localhost HTTP/JSON translation → `crates/pragma-gateway`;
-  host business logic → `crates/pragma-core`; wire framing → `crates/pragma-protocol`;
-  CLI/status reporting → `crates/pragma-cli`.
+- PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH and WSL
+  bridges → `crates/pragma-client`; localhost HTTP/JSON translation →
+  `crates/pragma-gateway`; host business logic → `crates/pragma-core`; wire framing →
+  `crates/pragma-protocol`; CLI/status reporting → `crates/pragma-cli`.
+- Anything that differs between operating systems → `crates/pragma-platform`. Never a
+  bare `#[cfg(unix)]` at the call site (see _Platform targets_).
 
 ## Common commands
 
@@ -174,7 +178,7 @@ bun install                # Install all workspace deps
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
-bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 
 # Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
 bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
@@ -255,19 +259,55 @@ Shared rules:
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
-compile-only Tauri build on macOS **and** Linux. A separate **Fallow** workflow
+compile-only Tauri build on macOS, Linux, **and** Windows. A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
 `fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
 inline annotations, and fails the check on issues the PR introduces.
 
 ## Platform targets
 
-We target **macOS and Linux only** right now. `tauri.conf.json` bundles `app`/`dmg`
-(macOS) and `deb`/`rpm`/`appimage` (Linux). Don't add Windows/Android specifics without
-updating this guide and CI. Linux builds need the GTK/WebKit system libraries — see the
-`rust`/`build` jobs in CI for the exact `apt` list. `xcap` pulls in `libspa-sys`
-(`libpipewire-0.3-dev`), `libgbm-dev`, and `libclang-dev` — all required at link time
-on Linux and must stay in the CI apt list.
+We target **macOS, Linux, and Windows**. `tauri.conf.json` bundles `app`/`dmg` (macOS),
+`deb`/`rpm`/`appimage` (Linux), and `msi`/`nsis` (Windows). Don't add Android specifics
+without updating this guide and CI.
+
+- **Linux** builds need the GTK/WebKit system libraries — see the `rust`/`build` jobs in
+  CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
+  `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
+- **Windows** needs no system packages: the webview is WebView2, which ships with the OS
+  on Windows 11 and with the Edge runtime on Windows 10. CI covers it with the
+  `rust-windows` job plus a `windows-latest` entry in the `build` matrix.
+
+**Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
+pattern is how a security guarantee quietly disappears — it is exactly what let the
+GitHub token be written world-readable on Windows. Platform differences belong in
+`crates/pragma-platform`, which owns four seams and has a real implementation for each
+on every target:
+
+| Seam      | What it owns                                                             |
+| --------- | ------------------------------------------------------------------------ |
+| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows         |
+| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows |
+| `process` | Kill, kill-tree, liveness, and the process table                         |
+| `shell`   | Which shell a PTY launches, and its interactive arguments                |
+
+### Windows session modes
+
+Windows runs terminals in one of two worlds, and they are served differently:
+
+- **PowerShell** — a Windows-native `pragma-server.exe` drives ConPTY through
+  `portable-pty`. `pwsh.exe` is preferred over `powershell.exe`; note PowerShell takes
+  `-NoLogo`, **not** the POSIX `-l`.
+- **WSL** — the ordinary Linux `pragma-server` runs _unchanged inside the distribution_
+  and is reached like a remote host. This is not an implementation detail to optimise
+  away: the agent plugins (`pragma-cli`, the opencode and Claude hooks) run inside WSL
+  and connect to that Linux Unix socket, so a Windows-native server could never serve
+  them. WSL2 cannot reach a Windows named pipe and Windows cannot open the Linux socket,
+  so the bridge relays over the standard streams of a `wsl.exe` process
+  (`pragma-server --relay`). See `crates/pragma-client/src/wsl.rs` for why that beat
+  forwarding a port over localhost.
+
+A project selects its shell in `.pragma/config.json` under `terminal.shell`; defaults
+live in `@pragma/constants` under `platform`.
 
 ## Testing
 

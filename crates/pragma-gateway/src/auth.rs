@@ -1,12 +1,10 @@
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
+use pragma_platform::{perms, process};
 use rand::distributions::{Alphanumeric, DistString};
 use serde::{Deserialize, Serialize};
 
@@ -49,14 +47,7 @@ pub fn read_or_create_token(path: &Path) -> GatewayResult<String> {
 
 /// Writes the persistent bearer token with owner-only permissions.
 pub fn write_token(path: &Path, token: &str) -> GatewayResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut options = OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path)?;
+    let mut file = perms::create_private_file(path)?;
     file.write_all(token.as_bytes())?;
     file.flush()?;
     Ok(())
@@ -82,15 +73,8 @@ pub fn read_discovery(path: &Path) -> GatewayResult<GatewayDiscovery> {
 
 /// Writes a discovery file with owner-only permissions.
 pub fn write_discovery(path: &Path, discovery: &GatewayDiscovery) -> GatewayResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_vec_pretty(discovery)?;
-    let mut options = OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path)?;
+    let mut file = perms::create_private_file(path)?;
     file.write_all(&json)?;
     file.flush()?;
     Ok(())
@@ -127,13 +111,8 @@ pub fn remove_stale_or_refuse(path: &Path, protocol_version: u64) -> GatewayResu
 /// Kills a superseded gateway process, but only after confirming the pid still
 /// belongs to a `pragma-gateway` binary (pids get recycled).
 fn kill_stale_gateway(pid: u32) {
-    let pid = pid.to_string();
-    let is_gateway = Command::new("ps")
-        .args(["-p", &pid, "-o", "comm="])
-        .output()
-        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("pragma-gateway"));
-    if is_gateway {
-        let _ = Command::new("kill").args(["-KILL", &pid]).status();
+    if process::is_running(pid, "pragma-gateway") {
+        let _ = process::kill(pid);
     }
 }
 
@@ -297,11 +276,13 @@ mod tests {
         };
         write_discovery(&path, &discovery).expect("write discovery");
         assert_eq!(read_discovery(&path).expect("read discovery"), discovery);
-        let mode = fs::metadata(path).expect("metadata").permissions();
         #[cfg(unix)]
-        assert_eq!(
-            std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
-            0o600
-        );
+        {
+            let mode = fs::metadata(path).expect("metadata").permissions();
+            assert_eq!(
+                std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+                0o600
+            );
+        }
     }
 }

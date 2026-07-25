@@ -1,0 +1,76 @@
+# `pragma-platform` — operating-system seams
+
+Every place Pragma behaves differently on macOS, Linux, or Windows lives here. Nothing
+else in the workspace should carry a `#[cfg(unix)]` for a platform _capability_.
+
+## Why this crate exists
+
+Before it, platform differences were `#[cfg(unix)]` blocks at the call sites, each with a
+`#[cfg(not(unix))]` twin. Several of those twins silently did nothing — the GitHub OAuth
+token was created `0600` on Unix and with `fs::write` and default inheritance on Windows.
+Nothing failed; the guarantee just evaporated.
+
+**The rule that follows: a platform difference is a missing implementation in one crate,
+never a quietly-empty branch at a call site.** If you cannot implement a seam on a
+target, return an `Err` that says so. Do not no-op.
+
+## The four seams
+
+| Module    | Unix                                 | Windows                                                 |
+| --------- | ------------------------------------ | ------------------------------------------------------- |
+| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 build 17063+)      |
+| `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)`             |
+| `process` | `kill`, `pkill`, `ps`                | `taskkill`, `tasklist`, `Get-CimInstance Win32_Process` |
+| `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`                  |
+
+### `ipc` — why `AF_UNIX` and not named pipes
+
+Windows named pipes have **no read timeout and no socket-style `shutdown`**. This codebase
+depends on both: the server wakes a reader blocked on a socket by shutting that socket
+down from another thread (`pragma-server/src/main.rs`, `gateway/http/response.rs`,
+`src-tauri/src/pty.rs`). Emulating that over pipes means overlapped I/O plus `CancelIoEx`,
+which needs `unsafe` — forbidden workspace-wide — for no behavioural gain on a
+local-only transport. `AF_UNIX` keeps `set_read_timeout`, `try_clone`, `shutdown`, and
+`pair` working identically, so call sites are the same on every platform.
+
+Consequences worth knowing:
+
+- A Unix-domain address has a **108-byte limit**, on Windows too. `check_socket_path`
+  turns an overrun into a readable error instead of an opaque `InvalidInput` from `bind`.
+- There is no peer-credential API (no `SO_PEERCRED`). Nothing uses one today; gateway auth
+  is token-based. If you ever need to authenticate the _connecting process_, this choice
+  has to be revisited.
+- Socket files must be spelled from `@pragma/constants` (`ipc::socket_file_name()` and
+  friends), never inline.
+
+### `perms` — `icacls`, not the Win32 API
+
+`unsafe_code = "forbid"` is set workspace-wide and every Rust binding to the Windows
+security APIs needs `unsafe`. `icacls` is the in-box tool for the job, and the call is
+**checked** — a failure returns `Err` rather than leaving a secret readable.
+`create_private_file` applies the restriction to the _empty_ file before returning the
+handle, so contents are never briefly on disk under looser permissions.
+
+`set_executable` is the one honest no-op: Windows decides executability by extension, so
+there is no bit to set and nothing is lost.
+
+### `shell` — PowerShell does not take `-l`
+
+`-l` abbreviates `-Login` in PowerShell, which is an error on Windows. Passing it would
+fail every terminal Pragma opens. Use `shell::resolve_launch`, which returns the program
+_and_ its interactive arguments together — never hardcode `-l` at a call site.
+
+Note `stem()` splits on both `/` and `\` rather than deferring to `Path::file_stem`,
+which only recognises the host's separator. A test caught this: a Windows PowerShell path
+examined on a Unix CI runner came back whole and fell through to the POSIX branch.
+
+## Adding a seam
+
+1. Add the module here with a real implementation for every target.
+2. Put any tunable default in `@pragma/constants` under `platform`, not in Rust.
+3. Test the platform-independent core on every platform. Parsers for foreign-OS output
+   (`parse_tasklist_image_name`, `parse_win32_process_csv`, `parse_distros`) are plain
+   string handling — write them so they compile and run everywhere, or CI on Linux and
+   macOS will never exercise them.
+4. Verify with `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`.
+   The GNU target needs no Windows machine and is `cfg`-identical to MSVC.

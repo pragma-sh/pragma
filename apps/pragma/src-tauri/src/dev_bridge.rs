@@ -196,21 +196,11 @@ impl Default for SidecarRegistry {
     }
 }
 
-/// Best-effort liveness probe for a sidecar PID. Returns `Some(true)` if the
-/// process is running, `Some(false)` if it has exited, and `None` when we
-/// can't determine (e.g., on Windows where we don't ship a probe in v1).
-#[cfg(unix)]
+/// Liveness probe for a sidecar PID. `Some(true)` if the process is running,
+/// `Some(false)` if it has exited, `None` when the process table could not be
+/// inspected at all.
 fn pid_alive(pid: u32) -> Option<bool> {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .ok()
-        .map(|status| status.success())
-}
-
-#[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> Option<bool> {
-    None
+    Some(pragma_platform::process::process_name(pid).is_some())
 }
 
 /// Register a sidecar process with the bridge so it shows up in `/process`

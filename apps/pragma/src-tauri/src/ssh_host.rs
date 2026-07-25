@@ -521,7 +521,10 @@ fn bootstrap_command() -> String {
 
 /// The remote `daemon.sock` path the bridge forwards.
 fn remote_socket_path(home: &str) -> String {
-    format!("{home}/.pragma/{REMOTE_CHANNEL}/daemon.sock")
+    format!(
+        "{home}/.pragma/{REMOTE_CHANNEL}/{}",
+        pragma_platform::ipc::socket_file_name()
+    )
 }
 
 #[cfg(test)]

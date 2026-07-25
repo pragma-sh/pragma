@@ -51,18 +51,8 @@ fn copy_if_changed(source: &Path, destination: &Path) -> AppResult<()> {
     let needs_copy = std::fs::read(destination).map_or(true, |existing| existing != source_bytes);
     if needs_copy {
         std::fs::write(destination, source_bytes)?;
-        set_executable(destination)?;
+        pragma_platform::perms::set_executable(destination)?;
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_executable(path: &Path) -> AppResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(path, permissions)?;
     Ok(())
 }
 

@@ -1,6 +1,9 @@
 {
   "daemon": {
-    "protocolVersion": 20
+    "protocolVersion": 20,
+    "socketFile": "daemon.sock",
+    "lockFile": "server.lock",
+    "logFile": "server.log"
   },
   "gateway": {
     "discoveryFile": "gateway.json",
@@ -12,6 +15,19 @@
       "name": "x-pragma-device-name",
       "platform": "x-pragma-device-platform",
       "appVersion": "x-pragma-app-version"
+    }
+  },
+  "platform": {
+    "defaultBackend": "native",
+    "shells": {
+      "macos": "/bin/zsh",
+      "linux": "/bin/sh",
+      "windows": ["pwsh.exe", "powershell.exe"]
+    },
+    "wsl": {
+      "launcher": "wsl.exe",
+      "listArgs": ["--list", "--verbose"],
+      "serverBinary": "pragma-server"
     }
   },
   "tunnel": {

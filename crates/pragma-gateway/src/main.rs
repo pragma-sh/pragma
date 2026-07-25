@@ -19,8 +19,6 @@ use http::{serve, AppState};
 use pragma_constants::CONSTANTS;
 use tiny_http::Server;
 
-const SOCKET_FILE: &str = "daemon.sock";
-
 #[derive(Debug, Parser)]
 #[command(about = "Localhost HTTP gateway for pragma-server")]
 struct Args {
@@ -121,7 +119,7 @@ fn resolve_socket_path(args: &Args) -> GatewayResult<PathBuf> {
         .channel
         .as_deref()
         .unwrap_or(pragma_protocol::PROD_CHANNEL);
-    Ok(server_dir(app_data_dir, channel).join(SOCKET_FILE))
+    Ok(server_dir(app_data_dir, channel).join(pragma_platform::ipc::socket_file_name()))
 }
 
 fn server_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
