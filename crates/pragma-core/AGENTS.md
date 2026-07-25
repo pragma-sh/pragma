@@ -39,6 +39,11 @@ Tauri or client presentation code.
   two-search concurrency, and cancellation; responses contain only worktree-relative paths.
 - All `git` subprocess calls go through `process_env::command` so a GUI-launched
   host still finds `git` on `PATH`.
+- **Asset files use their own ops.** `FsRequest::ListDir` hides gitignored entries and
+  `ReadFile` refuses binary content, which is wrong for asset directories users expect
+  to see (e.g. a gitignored `.pragma/assets/sounds`). `ListFileNames` lists files
+  unfiltered (optionally by extension) and `ReadBytes` / `WriteBytes` move bytes as
+  base64 under the same `MAX_READ_BYTES` cap.
 
 ## Rules
 
