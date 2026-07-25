@@ -4,6 +4,8 @@ import type { KeybindingPlatform, KeybindingAction } from "@/lib/keybindings";
 import {
   actionForEvent,
   defaultKeybindingsConfig,
+  isRecordingKeybinding,
+  KEYBINDINGS_CHANGED_EVENT,
   setLoadedKeybindingsConfig,
   workspaceIndexForAction,
 } from "@/lib/keybindings";
@@ -13,6 +15,8 @@ import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 import { getPlatform, loadKeybindings } from "@/lib/tauri";
 
 interface UseShortcutsOptions {
+  /** Selected project, whose `.pragma/keybindings.json` overrides the global one. */
+  projectId: string | null;
   projectCount: number;
   onProject: (index: number) => void;
   onNextTab: () => void;
@@ -72,10 +76,16 @@ const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
   "openCommandMode",
 ]);
 
-/** Registers window-level keyboard shortcuts driven by `~/.pragma/keybindings.json`. */
+/**
+ * Registers window-level keyboard shortcuts driven by the effective keybindings:
+ * built-in defaults, then `~/.pragma/keybindings.json`, then the selected
+ * project's `.pragma/keybindings.json`. Reloads when the project changes or
+ * Settings saves a binding.
+ */
 export function useShortcuts(options: UseShortcutsOptions): void {
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const { projectId } = options;
 
   const [shortcutState, setShortcutState] = useState<ShortcutState>(() => {
     const platform = isMacPlatform() ? "mac" : "linux";
@@ -89,7 +99,7 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     let cancelled = false;
     async function load() {
       try {
-        const [platform, config] = await Promise.all([getPlatform(), loadKeybindings()]);
+        const [platform, config] = await Promise.all([getPlatform(), loadKeybindings(projectId)]);
         if (cancelled) {
           return;
         }
@@ -103,15 +113,21 @@ export function useShortcuts(options: UseShortcutsOptions): void {
       }
     }
     void load();
+    window.addEventListener(KEYBINDINGS_CHANGED_EVENT, load);
     return () => {
       cancelled = true;
+      window.removeEventListener(KEYBINDINGS_CHANGED_EVENT, load);
     };
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     const state = shortcutState;
 
     function onKeyDown(event: KeyboardEvent) {
+      // While Settings records a chord, every key belongs to the recorder.
+      if (isRecordingKeybinding()) {
+        return;
+      }
       const action = state.actionForEvent(event);
       if (!action) {
         return;

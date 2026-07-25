@@ -1,15 +1,29 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@iconify/react";
-import { ArrowLeft, Blocks, LogOut, RefreshCw, Smartphone, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  BellRing,
+  Blocks,
+  Keyboard,
+  LogOut,
+  RefreshCw,
+  Smartphone,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
-import { constants, type GitHubAuthMethod } from "@pragma/constants";
+import { constants, type AgentStatusSettings, type GitHubAuthMethod } from "@pragma/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
+import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
+import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
+import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import {
   aiAuthMethods,
@@ -28,7 +42,14 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section = "plugins" | "github" | "ai" | "mobile";
+type Section = "plugins" | "keybindings" | "agentStatus" | "github" | "ai" | "mobile";
+
+/** Sections that read and write per-project settings as well as global ones. */
+const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
+  "plugins",
+  "keybindings",
+  "agentStatus",
+]);
 
 interface PluginConfig {
   path: string;
@@ -43,6 +64,7 @@ interface PragmaConfig {
     urlPattern?: string;
     [key: string]: unknown;
   };
+  agentStatus?: AgentStatusSettings;
   [key: string]: unknown;
 }
 
@@ -60,6 +82,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   const config = value as PragmaConfig;
   validatePlugins(config.plugins);
   validateTunnel(config.tunnel);
+  validateAgentStatusSettings(config.agentStatus);
   return config;
 }
 
@@ -137,8 +160,9 @@ export function SettingsWorkspace() {
   useEffect(() => void load(), [load]);
   useEffect(() => {
     if (scope === "project" && !workspace.selectedProjectId) setScope("global");
-    // GitHub, AI, and mobile settings are app-global; project scope only offers plugins.
-    if (scope === "project" && section !== "plugins") setSection("plugins");
+    // GitHub, AI, and mobile settings are app-global, so project scope falls back
+    // to the first section that has a project layer.
+    if (scope === "project" && !PROJECT_SECTIONS.has(section)) setSection("plugins");
   }, [scope, section, workspace.selectedProjectId]);
 
   const persist = useCallback(
@@ -211,6 +235,7 @@ export function SettingsWorkspace() {
           loaded={loaded}
           loading={loading}
           persist={persist}
+          projectId={workspace.selectedProjectId}
           projectPath={workspace.activeProject?.path ?? null}
           reload={load}
           scope={scope}
@@ -238,6 +263,20 @@ function SettingsNavigation({
         onClick={() => setSection("plugins")}
       >
         Plugins
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "keybindings"}
+        icon={<Keyboard />}
+        onClick={() => setSection("keybindings")}
+      >
+        Keybindings
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "agentStatus"}
+        icon={<BellRing />}
+        onClick={() => setSection("agentStatus")}
+      >
+        Agent Status
       </SettingsNavItem>
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
@@ -283,6 +322,7 @@ function SettingsContent({
   loaded,
   loading,
   persist,
+  projectId,
   projectPath,
   reload,
   scope,
@@ -292,6 +332,7 @@ function SettingsContent({
   loaded: LoadedConfig | null;
   loading: boolean;
   persist: PersistConfig;
+  projectId: string | null;
   projectPath: string | null;
   reload: () => Promise<void>;
   scope: ConfigScope;
@@ -308,6 +349,22 @@ function SettingsContent({
             persist={persist}
             projectPath={projectPath}
             scope={scope}
+          />
+        ) : null}
+        {section === "keybindings" ? (
+          <KeybindingsSection projectId={projectId} scope={scope} />
+        ) : null}
+        {loaded && section === "agentStatus" ? (
+          <AgentStatusSection
+            persist={(patch) =>
+              persist((current) => ({
+                ...current,
+                agentStatus: { ...current.agentStatus, ...patch },
+              }))
+            }
+            projectId={projectId}
+            scope={scope}
+            settings={loaded.value.agentStatus ?? {}}
           />
         ) : null}
         {section === "github" && scope === "global" ? <GitHubSection /> : null}
@@ -387,24 +444,6 @@ function SettingsNavItem({
       {icon}
       {children}
     </button>
-  );
-}
-
-function SettingsCard({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border bg-card p-5 shadow-sm">
-      <h2 className="font-semibold">{title}</h2>
-      {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
-      <div className="mt-5">{children}</div>
-    </section>
   );
 }
 

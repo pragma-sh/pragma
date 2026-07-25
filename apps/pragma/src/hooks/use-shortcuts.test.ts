@@ -131,6 +131,7 @@ function dispatchKeydown(eventInit: KeyboardEventInit): KeyboardEvent {
 /** Full set of shortcut handlers, with `overrides` for the ones under test. */
 function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
   return {
+    projectId: null,
     projectCount: 1,
     onProject: vi.fn(),
     onNextTab: vi.fn(),
