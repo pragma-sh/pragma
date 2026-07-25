@@ -241,7 +241,7 @@ function worktreeLabel(worktree: Worktree): string {
   return worktree.isMain ? "main" : (worktree.title ?? worktree.branch);
 }
 
-interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
+interface WorktreeRowLabelState {
   depth: number;
   expanded: boolean;
   hasChildren: boolean;
@@ -249,16 +249,24 @@ interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
   label: string;
   merged: boolean;
   pinned: boolean;
+  selected: boolean;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
-  rename: RenameApi;
+}
+
+interface WorktreeRowLabelActions {
   startRename: () => void;
   toggleExpanded: () => void;
   handleSelect: () => void;
   handleCreateChild: () => void;
   handleTogglePin: () => void;
   openDelete: () => void;
-  selected: boolean;
+}
+
+interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
+  row: WorktreeRowLabelState;
+  actions: WorktreeRowLabelActions;
+  rename: RenameApi;
 }
 
 /** Class for a worktree row's container, highlighting the selected one. */
@@ -354,6 +362,7 @@ function WorktreePinnedIndicator({ label, onUnpin }: { label: string; onUnpin: (
 
 /** Row actions: pin toggle, plus an always-visible new-worktree button on
  *  main / hover-revealed create-child and delete on nested worktrees. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated components (ReviewThreadActions, WorktreeContextMenu); not extractable logic.
 function WorktreeRowActions({
   isMain,
   label,
@@ -424,8 +433,8 @@ function WorktreeRowActions({
 
 /** The row's visible label: expand caret, branch icon, name/rename input, actions. */
 const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
-  function WorktreeRowLabel(
-    {
+  function WorktreeRowLabel({ row, actions, rename, className, style, ...props }, ref) {
+    const {
       depth,
       expanded,
       hasChildren,
@@ -433,22 +442,18 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       label,
       merged,
       pinned,
+      selected,
       WorktreeIcon,
       agentStatus,
-      rename,
+    } = row;
+    const {
       startRename,
       toggleExpanded,
       handleSelect,
       handleCreateChild,
       handleTogglePin,
       openDelete,
-      selected,
-      className,
-      style,
-      ...props
-    },
-    ref,
-  ) {
+    } = actions;
     return (
       <div
         ref={ref}
@@ -491,6 +496,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
 );
 
 /** The row's right-click menu: rename, pin, copy path/branch, open in editor, hide, delete. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated components (ReviewThreadActions, WorktreeRowActions); not extractable logic.
 function WorktreeContextMenu({
   isMain,
   pinned,
@@ -635,23 +641,27 @@ function WorktreeRow({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <WorktreeRowLabel
-            agentStatus={agentStatus}
-            depth={depth}
-            expanded={expanded}
-            handleCreateChild={handleCreateChild}
-            handleSelect={handleSelect}
-            handleTogglePin={handleTogglePin}
-            hasChildren={hasChildren}
-            isMain={isMain}
-            label={label}
-            merged={merged}
-            openDelete={openDelete}
-            pinned={pinned}
+            actions={{
+              handleCreateChild,
+              handleSelect,
+              handleTogglePin,
+              openDelete,
+              startRename: rename.startRename,
+              toggleExpanded,
+            }}
             rename={rename}
-            selected={selected}
-            startRename={rename.startRename}
-            toggleExpanded={toggleExpanded}
-            WorktreeIcon={WorktreeIcon}
+            row={{
+              agentStatus,
+              depth,
+              expanded,
+              hasChildren,
+              isMain,
+              label,
+              merged,
+              pinned,
+              selected,
+              WorktreeIcon,
+            }}
           />
         </ContextMenuTrigger>
         <WorktreeContextMenu
