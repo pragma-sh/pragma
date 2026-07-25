@@ -141,4 +141,20 @@ describe("WorktreeTree", () => {
     expect(selectWorktreeMock).toHaveBeenCalledWith("main");
     expect(onCreateChild).toHaveBeenCalledOnce();
   });
+
+  it("exposes pin in the context menu and unpins via the pin glyph", async () => {
+    localStorage.clear();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    const rowLabel = await screen.findByText("feature");
+
+    fireEvent.contextMenu(rowLabel);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+
+    const unpin = await screen.findByRole("button", { name: "Unpin feature" });
+    fireEvent.click(unpin);
+
+    expect(screen.queryByRole("button", { name: "Unpin feature" })).toBeNull();
+  });
 });
