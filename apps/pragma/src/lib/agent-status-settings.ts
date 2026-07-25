@@ -52,7 +52,10 @@ export function mergeAgentStatusSettings(
   global: AgentStatusSettings,
   project: AgentStatusSettings,
 ): EffectiveAgentStatusSettings {
-  const soundName = project.soundName ?? global.soundName ?? null;
+  // `null` is an explicit "built-in chime" choice and must not fall through to
+  // the global custom clip; only a missing (`undefined`) field inherits.
+  const soundName =
+    project.soundName !== undefined ? project.soundName : (global.soundName ?? null);
   return {
     notificationsEnabled:
       project.notificationsEnabled ??

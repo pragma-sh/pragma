@@ -25,6 +25,14 @@ describe("agent status settings", () => {
     ).toEqual({ notificationsEnabled: false, soundName: "global.wav", soundScope: "global" });
   });
 
+  it("keeps an explicit project built-in chime over a global custom sound", () => {
+    expect(mergeAgentStatusSettings({ soundName: "global.wav" }, { soundName: null })).toEqual({
+      notificationsEnabled: constants.agentStatus.notificationsEnabled,
+      soundName: null,
+      soundScope: "global",
+    });
+  });
+
   it("accepts an absent block and a null sound", () => {
     expect(validateAgentStatusSettings(undefined)).toEqual({});
     expect(validateAgentStatusSettings({ soundName: null })).toEqual({ soundName: null });
