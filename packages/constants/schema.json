@@ -16,6 +16,7 @@
     "protocol",
     "github",
     "plugins",
+    "theme",
     "tunnel"
   ],
   "properties": {
@@ -51,6 +52,9 @@
     },
     "plugins": {
       "$ref": "#/definitions/Plugins"
+    },
+    "theme": {
+      "$ref": "#/definitions/Theme"
     },
     "tunnel": {
       "$ref": "#/definitions/Tunnel"
@@ -552,6 +556,28 @@
         "bundledDirName": {
           "type": "string",
           "description": "Directory name (under the app resource dir) holding the plugin bundles shipped with Pragma. Each subdirectory is a normal plugin package (package.json + bundle + assets), resolved by the same manifest readers as user-configured plugins."
+        }
+      }
+    },
+    "Theme": {
+      "title": "Theme",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileName", "modes"],
+      "description": "Optional color-theme override file read by the desktop app. Shared so the Rust reader/writer and the TypeScript theme runtime agree on the file location and the color-scheme blocks it may declare.",
+      "properties": {
+        "fileName": {
+          "type": "string",
+          "description": "Relative path of the optional theme file. Resolved against the home directory for the global theme and against the project root for a project theme — the same layout rule as `plugins.configFileName`. Both files are optional; the app merges built-in defaults <- global <- project per token."
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["light", "dark"]
+          },
+          "uniqueItems": true,
+          "description": "Color-scheme blocks a theme file may declare under `colors`. Each maps to the matching CSS variable block in the app stylesheet (`:root` for light, `.dark` for dark)."
         }
       }
     },

@@ -23,6 +23,10 @@
     "storageScopes": ["global", "project"],
     "bundledDirName": "plugins"
   },
+  "theme": {
+    "fileName": ".pragma/theme.json",
+    "modes": ["light", "dark"]
+  },
   "protocol": {
     "rpcMethods": [
       "git",
