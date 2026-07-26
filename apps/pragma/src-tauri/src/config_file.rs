@@ -1,10 +1,10 @@
-//! Global/project `.pragma/*.json` access for Settings controls.
+//! Global/project `.pragma` file access for Settings controls.
 //!
-//! Two documents share this plumbing: `.pragma/config.json` (plugins, tunnel) and
-//! the optional `.pragma/theme.json` (color overrides). Both resolve against the
-//! home directory in [`ConfigScope::Global`] and against the project's main
-//! worktree in [`ConfigScope::Project`], so remote/SSH projects go over the same
-//! `fs_rpc` path as local ones.
+//! `config.json`, `keybindings.json`, and the optional `theme.json` are edited
+//! the same way — a global file under the home directory and a per-project file
+//! under the project's main worktree — so all three go through one scoped
+//! reader/writer. Project files are reached over the owning host's filesystem
+//! RPC, which keeps SSH-bridged projects working without a second code path.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -47,16 +47,6 @@ fn starter_document(path: String) -> ConfigDocument {
     }
 }
 
-/// The host handles a scoped read/write needs, bundled so the helpers below
-/// stay within clippy's argument budget.
-struct ScopeHandles<'a> {
-    app: tauri::AppHandle,
-    db: &'a Db,
-    hosts: &'a Hosts,
-    /// The local host client, used when the scope is global.
-    pty: &'a PtyClient,
-}
-
 fn project_main_worktree(db: &Db, project_id: &str) -> AppResult<pragma_constants::Worktree> {
     db.list_worktrees(project_id)?
         .into_iter()
@@ -64,133 +54,26 @@ fn project_main_worktree(db: &Db, project_id: &str) -> AppResult<pragma_constant
         .ok_or_else(|| AppError::InvalidInput("project has no main worktree".to_string()))
 }
 
-#[tauri::command]
-pub async fn read_config(
+/// Reads one scoped `.pragma` file, returning a starter document when it is missing.
+pub(crate) async fn read_scoped(
     app: tauri::AppHandle,
-    db: State<'_, Db>,
-    hosts: State<'_, Hosts>,
-    pty: State<'_, PtyClient>,
+    db: &Db,
+    hosts: &Hosts,
     scope: ConfigScope,
     project_id: Option<String>,
+    relative: &str,
 ) -> AppResult<ConfigDocument> {
-    let handles = ScopeHandles {
-        app,
-        db: &db,
-        hosts: &hosts,
-        pty: &pty,
-    };
-    read_scoped(
-        handles,
-        scope,
-        project_id,
-        CONSTANTS.plugins.config_file_name.clone(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn write_config(
-    app: tauri::AppHandle,
-    db: State<'_, Db>,
-    hosts: State<'_, Hosts>,
-    pty: State<'_, PtyClient>,
-    scope: ConfigScope,
-    project_id: Option<String>,
-    contents: String,
-) -> AppResult<()> {
-    let handles = ScopeHandles {
-        app,
-        db: &db,
-        hosts: &hosts,
-        pty: &pty,
-    };
-    let client = write_scoped(
-        handles,
-        scope,
-        project_id,
-        CONSTANTS.plugins.config_file_name.clone(),
-        contents,
-    )
-    .await?;
-    if let Err(error) = reload_plugins(&client) {
-        log::warn!("config saved but plugin reload failed: {error}");
-    }
-    Ok(())
-}
-
-/// Reads the optional `.pragma/theme.json` color overrides for a scope. A
-/// missing file is not an error — the frontend treats it as "no overrides".
-#[tauri::command]
-pub async fn read_theme(
-    app: tauri::AppHandle,
-    db: State<'_, Db>,
-    hosts: State<'_, Hosts>,
-    pty: State<'_, PtyClient>,
-    scope: ConfigScope,
-    project_id: Option<String>,
-) -> AppResult<ConfigDocument> {
-    let handles = ScopeHandles {
-        app,
-        db: &db,
-        hosts: &hosts,
-        pty: &pty,
-    };
-    read_scoped(
-        handles,
-        scope,
-        project_id,
-        CONSTANTS.theme.file_name.clone(),
-    )
-    .await
-}
-
-/// Writes `.pragma/theme.json` for a scope. Unlike `config.json` this needs no
-/// plugin reload — the frontend re-applies the CSS variables itself.
-#[tauri::command]
-pub async fn write_theme(
-    app: tauri::AppHandle,
-    db: State<'_, Db>,
-    hosts: State<'_, Hosts>,
-    pty: State<'_, PtyClient>,
-    scope: ConfigScope,
-    project_id: Option<String>,
-    contents: String,
-) -> AppResult<()> {
-    let handles = ScopeHandles {
-        app,
-        db: &db,
-        hosts: &hosts,
-        pty: &pty,
-    };
-    write_scoped(
-        handles,
-        scope,
-        project_id,
-        CONSTANTS.theme.file_name.clone(),
-        contents,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn read_scoped(
-    handles: ScopeHandles<'_>,
-    scope: ConfigScope,
-    project_id: Option<String>,
-    relative: String,
-) -> AppResult<ConfigDocument> {
-    let ScopeHandles { app, db, hosts, .. } = handles;
     match scope {
-        ConfigScope::Global => read_local(app.path().home_dir()?.join(relative.as_str())).await,
+        ConfigScope::Global => read_local(app.path().home_dir()?.join(relative)).await,
         ConfigScope::Project => {
-            let worktree = project_main_worktree(db, &require_project_id(project_id)?)?;
+            let worktree = scoped_project_worktree(db, project_id)?;
             let client = ssh_host::client_for_worktree(app, db, hosts, &worktree.id).await?;
-            let display_path = format!("{}/{}", worktree.path, relative);
+            let display_path = format!("{}/{relative}", worktree.path);
             let exists: bool = fs_rpc(
                 &client,
                 &FsRequest::PathExists {
                     root: worktree.path.clone(),
-                    path: relative.clone(),
+                    path: relative.to_string(),
                 },
             )?;
             if !exists {
@@ -200,7 +83,7 @@ async fn read_scoped(
                 &client,
                 &FsRequest::ReadFile {
                     root: worktree.path,
-                    path: relative.clone(),
+                    path: relative.to_string(),
                 },
             )?;
             if file.binary || file.truncated {
@@ -217,65 +100,218 @@ async fn read_scoped(
     }
 }
 
-/// Writes a scoped `.pragma` document and returns the client that owns it, so
-/// callers can follow up with an RPC on the same host.
-async fn write_scoped(
-    handles: ScopeHandles<'_>,
+/// Writes one scoped `.pragma` file, creating its parent directory when needed.
+pub(crate) async fn write_scoped(
+    app: tauri::AppHandle,
+    db: &Db,
+    hosts: &Hosts,
     scope: ConfigScope,
     project_id: Option<String>,
-    relative: String,
+    relative: &str,
     contents: String,
-) -> AppResult<PtyClient> {
-    let ScopeHandles {
-        app,
-        db,
-        hosts,
-        pty,
-    } = handles;
+) -> AppResult<Option<PtyClient>> {
     match scope {
         ConfigScope::Global => {
-            write_local(app.path().home_dir()?.join(relative.as_str()), contents).await?;
-            Ok(pty.clone())
+            write_local(app.path().home_dir()?.join(relative), contents).await?;
+            Ok(None)
         }
         ConfigScope::Project => {
-            let worktree = project_main_worktree(db, &require_project_id(project_id)?)?;
+            let worktree = scoped_project_worktree(db, project_id)?;
             let client = ssh_host::client_for_worktree(app, db, hosts, &worktree.id).await?;
-            let parent_dir = std::path::Path::new(relative.as_str())
+            if let Some(parent) = std::path::Path::new(relative)
                 .parent()
                 .and_then(std::path::Path::to_str)
-                .unwrap_or(".pragma")
-                .to_string();
-            let exists: bool = fs_rpc(
-                &client,
-                &FsRequest::PathExists {
-                    root: worktree.path.clone(),
-                    path: parent_dir.clone(),
-                },
-            )?;
-            if !exists {
-                fs_rpc::<()>(
-                    &client,
-                    &FsRequest::CreateFolder {
-                        root: worktree.path.clone(),
-                        path: parent_dir,
-                    },
-                )?;
+                .filter(|parent| !parent.is_empty())
+            {
+                ensure_host_dir(&client, &worktree.path, parent)?;
             }
             fs_rpc::<()>(
                 &client,
                 &FsRequest::WriteFile {
                     root: worktree.path,
-                    path: relative,
+                    path: relative.to_string(),
                     contents,
                 },
             )?;
-            Ok(client)
+            Ok(Some(client))
         }
     }
 }
 
-fn require_project_id(project_id: Option<String>) -> AppResult<String> {
-    project_id.ok_or_else(|| AppError::InvalidInput("project scope requires projectId".to_string()))
+/// Resolves the main worktree a project-scoped `.pragma` path hangs off, which is
+/// also the root every project-scoped filesystem RPC is relative to.
+pub(crate) fn scoped_project_worktree(
+    db: &Db,
+    project_id: Option<String>,
+) -> AppResult<pragma_constants::Worktree> {
+    let project_id = project_id
+        .ok_or_else(|| AppError::InvalidInput("project scope requires projectId".to_string()))?;
+    project_main_worktree(db, &project_id)
+}
+
+/// Creates each missing ancestor of `relative` under `root` on the owning host.
+pub(crate) fn ensure_host_dir(client: &PtyClient, root: &str, relative: &str) -> AppResult<()> {
+    let mut current = String::new();
+    for segment in relative.split('/').filter(|segment| !segment.is_empty()) {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(segment);
+        let exists: bool = fs_rpc(
+            client,
+            &FsRequest::PathExists {
+                root: root.to_string(),
+                path: current.clone(),
+            },
+        )?;
+        if !exists {
+            fs_rpc::<()>(
+                client,
+                &FsRequest::CreateFolder {
+                    root: root.to_string(),
+                    path: current.clone(),
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn read_config(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+) -> AppResult<ConfigDocument> {
+    read_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.plugins.config_file_name.as_str(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn write_config(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    pty: State<'_, PtyClient>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    contents: String,
+) -> AppResult<()> {
+    let host = write_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.plugins.config_file_name.as_str(),
+        contents,
+    )
+    .await?;
+    let client = host.as_ref().unwrap_or(&pty);
+    if let Err(error) = reload_plugins(client) {
+        log::warn!("config saved but plugin reload failed: {error}");
+    }
+    Ok(())
+}
+
+/// Reads the global or project `keybindings.json` verbatim so Settings can patch
+/// exactly the actions the user recorded and leave hand-edits alone.
+#[tauri::command]
+pub async fn read_keybindings_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+) -> AppResult<ConfigDocument> {
+    read_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.keybindings.config_file_name.as_str(),
+    )
+    .await
+}
+
+/// Writes the global or project `keybindings.json` after checking that it still
+/// merges into a valid config, so a bad write can never break every shortcut.
+#[tauri::command]
+pub async fn write_keybindings_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    contents: String,
+) -> AppResult<()> {
+    crate::keybindings::validate_overrides(&contents)?;
+    write_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.keybindings.config_file_name.as_str(),
+        contents,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Reads the optional `.pragma/theme.json` color overrides for a scope. A
+/// missing file is not an error — the frontend treats it as "no overrides".
+#[tauri::command]
+pub async fn read_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+) -> AppResult<ConfigDocument> {
+    read_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.as_str(),
+    )
+    .await
+}
+
+/// Writes `.pragma/theme.json` for a scope. Unlike `config.json` this needs no
+/// plugin reload — the frontend re-applies the CSS variables itself.
+#[tauri::command]
+pub async fn write_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    contents: String,
+) -> AppResult<()> {
+    write_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.as_str(),
+        contents,
+    )
+    .await?;
+    Ok(())
 }
 
 fn reload_plugins(client: &PtyClient) -> AppResult<()> {

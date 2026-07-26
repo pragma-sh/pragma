@@ -17,7 +17,9 @@
     "github",
     "plugins",
     "theme",
-    "tunnel"
+    "tunnel",
+    "keybindings",
+    "agentStatus"
   ],
   "properties": {
     "app": {
@@ -58,6 +60,12 @@
     },
     "tunnel": {
       "$ref": "#/definitions/Tunnel"
+    },
+    "keybindings": {
+      "$ref": "#/definitions/KeybindingsFiles"
+    },
+    "agentStatus": {
+      "$ref": "#/definitions/AgentStatusDefaults"
     }
   },
   "definitions": {
@@ -632,6 +640,118 @@
         "defaultUrlPattern": {
           "type": "string",
           "description": "Default regular expression whose first capture group is the public tunnel URL, matched against both stdout and stderr lines. Covers ngrok's JSON `\"url\":\"https://\u2026\"` log and plain `https://\u2026` URLs (e.g. cloudflared)."
+        }
+      }
+    },
+    "KeybindingsFiles": {
+      "title": "KeybindingsFiles",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configFileName"],
+      "description": "Location of the editable keybindings file. Resolved against the home directory for global bindings and against the project root for project bindings, so Rust and the Settings UI agree on one path.",
+      "properties": {
+        "configFileName": {
+          "type": "string",
+          "description": "Relative path of the keybindings file (e.g. `.pragma/keybindings.json`). A project file only needs the actions it overrides; missing actions fall back to the global file, then to the built-in defaults."
+        }
+      }
+    },
+    "AgentStatusDefaults": {
+      "title": "AgentStatusDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "soundsDirName",
+        "maxSoundSeconds",
+        "maxSoundBytes",
+        "soundExtensions",
+        "notificationsEnabled"
+      ],
+      "description": "Shipped defaults and limits for agent alert notifications and sounds. A user overrides these per install/project via the `agentStatus` key of `.pragma/config.json`.",
+      "properties": {
+        "soundsDirName": {
+          "type": "string",
+          "description": "Relative directory scanned for alert sounds. Resolved against the home directory for global sounds and against the project root for project sounds."
+        },
+        "maxSoundSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Longest allowed alert clip. Longer uploads are rejected rather than truncated."
+        },
+        "maxSoundBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest allowed alert clip in bytes, bounding what crosses IPC when a clip is imported or played."
+        },
+        "soundExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Lower-case file extensions (no dot) treated as alert sounds when listing the sounds directory."
+        },
+        "notificationsEnabled": {
+          "type": "boolean",
+          "description": "Whether platform notifications fire for agent alerts when the user has not configured `agentStatus.notificationsEnabled`."
+        }
+      }
+    },
+    "AgentStatusSettings": {
+      "title": "AgentStatusSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `agentStatus` block of a global or project `.pragma/config.json`. Every field is optional: a project value overrides the global one, which overrides AgentStatusDefaults.",
+      "properties": {
+        "notificationsEnabled": {
+          "type": "boolean",
+          "description": "Whether an agent alert raises a platform notification."
+        },
+        "soundName": {
+          "type": ["string", "null"],
+          "description": "File name (not a path) of the clip in the sounds directory played on every agent alert. Null plays the built-in chime instead."
+        }
+      }
+    },
+    "SettingsScope": {
+      "title": "SettingsScope",
+      "description": "Which `.pragma` layer a setting or asset belongs to: the user's home directory or the selected project.",
+      "type": "string",
+      "enum": ["global", "project"]
+    },
+    "AgentSound": {
+      "title": "AgentSound",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scope"],
+      "description": "One alert clip discovered in a scope's sounds directory.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "File name including extension, unique within its directory."
+        },
+        "scope": {
+          "$ref": "#/definitions/SettingsScope",
+          "description": "Which sounds directory the clip was found in."
+        }
+      }
+    },
+    "AgentSoundList": {
+      "title": "AgentSoundList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dir", "sounds"],
+      "description": "Contents of one scope's sounds directory, plus the directory path to show in Settings.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Host-resolved absolute path of the scanned sounds directory (it may not exist yet)."
+        },
+        "sounds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentSound"
+          }
         }
       }
     },

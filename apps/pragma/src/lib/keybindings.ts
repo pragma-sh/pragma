@@ -88,10 +88,40 @@ export function chordForPlatform(
   return platformChord[platform];
 }
 
+/**
+ * Canonical form of a chord key, so a recorded chord and a hand-written config
+ * entry compare equal. `KeyboardEvent.key` reports the space bar as `" "`, which
+ * is unreadable in JSON, so it is stored and matched as `"space"`.
+ */
+export function normalizeChordKey(key: string): string {
+  const lower = key.toLowerCase();
+  return lower === " " ? "space" : lower;
+}
+
+/**
+ * Window event fired after Settings writes a keybinding, so live shortcut
+ * handlers reload without the user reopening the workspace.
+ */
+export const KEYBINDINGS_CHANGED_EVENT = "pragma:keybindings-changed";
+
+// True while Settings is capturing a chord. Every shortcut handler bails out so
+// the keys the user presses are recorded rather than acted on.
+let recordingKeybinding = false;
+
+/** Marks the start or end of a Settings keybinding recording session. */
+export function setRecordingKeybinding(active: boolean): void {
+  recordingKeybinding = active;
+}
+
+/** Whether Settings is currently capturing a chord instead of running actions. */
+export function isRecordingKeybinding(): boolean {
+  return recordingKeybinding;
+}
+
 /** Checks whether a keyboard event exactly matches a configured chord. */
 export function chordMatches(event: KeyboardEvent, chord: KeybindingChord): boolean {
-  const eventKey = event.key.toLowerCase();
-  const chordKey = chord.key.toLowerCase();
+  const eventKey = normalizeChordKey(event.key);
+  const chordKey = normalizeChordKey(chord.key);
   const required = new Set<Modifier>(chord.modifiers as Modifier[]);
   if (eventKey !== chordKey) {
     // On US layouts Shift+/ produces "?", so accept it for configured "/" chords
