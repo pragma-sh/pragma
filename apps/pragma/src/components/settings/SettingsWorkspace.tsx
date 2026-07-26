@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@iconify/react";
-import { ArrowLeft, Blocks, LogOut, RefreshCw, Smartphone, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Blocks,
+  LogOut,
+  Palette,
+  RefreshCw,
+  Smartphone,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { constants, type GitHubAuthMethod } from "@pragma/constants";
@@ -8,6 +17,7 @@ import { constants, type GitHubAuthMethod } from "@pragma/constants";
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
+import { ThemeSection } from "@/components/settings/ThemeSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@/lib/errors";
@@ -28,7 +38,10 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section = "plugins" | "github" | "ai" | "mobile";
+type Section = "plugins" | "theme" | "github" | "ai" | "mobile";
+
+/** Sections that exist at both scopes; everything else is app-global. */
+const SCOPED_SECTIONS = new Set<Section>(["plugins", "theme"]);
 
 interface PluginConfig {
   path: string;
@@ -137,8 +150,9 @@ export function SettingsWorkspace() {
   useEffect(() => void load(), [load]);
   useEffect(() => {
     if (scope === "project" && !workspace.selectedProjectId) setScope("global");
-    // GitHub, AI, and mobile settings are app-global; project scope only offers plugins.
-    if (scope === "project" && section !== "plugins") setSection("plugins");
+    // GitHub, AI, and mobile settings are app-global; project scope only offers
+    // the sections backed by a per-project file.
+    if (scope === "project" && !SCOPED_SECTIONS.has(section)) setSection("plugins");
   }, [scope, section, workspace.selectedProjectId]);
 
   const persist = useCallback(
@@ -211,6 +225,7 @@ export function SettingsWorkspace() {
           loaded={loaded}
           loading={loading}
           persist={persist}
+          projectId={workspace.selectedProjectId}
           projectPath={workspace.activeProject?.path ?? null}
           reload={load}
           scope={scope}
@@ -238,6 +253,13 @@ function SettingsNavigation({
         onClick={() => setSection("plugins")}
       >
         Plugins
+      </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "theme"}
+        icon={<Palette />}
+        onClick={() => setSection("theme")}
+      >
+        Theme
       </SettingsNavItem>
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
@@ -283,6 +305,7 @@ function SettingsContent({
   loaded,
   loading,
   persist,
+  projectId,
   projectPath,
   reload,
   scope,
@@ -292,11 +315,23 @@ function SettingsContent({
   loaded: LoadedConfig | null;
   loading: boolean;
   persist: PersistConfig;
+  projectId: string | null;
   projectPath: string | null;
   reload: () => Promise<void>;
   scope: ConfigScope;
   section: Section;
 }) {
+  // The Theme page reads `.pragma/theme.json`, not the `config.json` document
+  // the rest of Settings loads, so it renders past that load state.
+  if (section === "theme") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="min-w-0 flex-1 overflow-auto p-8">
       <div className="mx-auto max-w-3xl">

@@ -1152,6 +1152,20 @@ export function writeConfig(
   return invoke("write_config", { scope, projectId: projectId ?? null, contents });
 }
 
+/** Reads global or project `.pragma/theme.json`; a missing file reports `exists: false`. */
+export function readTheme(scope: ConfigScope, projectId?: string | null): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_theme", { scope, projectId: projectId ?? null });
+}
+
+/** Writes global or project `.pragma/theme.json`. */
+export function writeTheme(
+  scope: ConfigScope,
+  contents: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke("write_theme", { scope, projectId: projectId ?? null, contents });
+}
+
 /** Subscribes to native menubar actions. */
 export function onMenuAction(handler: (action: MenuAction) => void): Promise<UnlistenFn> {
   return listen<MenuAction>("pragma:menu", (event) => handler(event.payload));

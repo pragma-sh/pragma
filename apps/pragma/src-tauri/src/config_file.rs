@@ -1,4 +1,10 @@
-//! Global/project `.pragma/config.json` access for Settings controls.
+//! Global/project `.pragma/*.json` access for Settings controls.
+//!
+//! Two documents share this plumbing: `.pragma/config.json` (plugins, tunnel) and
+//! the optional `.pragma/theme.json` (color overrides). Both resolve against the
+//! home directory in [`ConfigScope::Global`] and against the project's main
+//! worktree in [`ConfigScope::Project`], so remote/SSH projects go over the same
+//! `fs_rpc` path as local ones.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -41,6 +47,16 @@ fn starter_document(path: String) -> ConfigDocument {
     }
 }
 
+/// The host handles a scoped read/write needs, bundled so the helpers below
+/// stay within clippy's argument budget.
+struct ScopeHandles<'a> {
+    app: tauri::AppHandle,
+    db: &'a Db,
+    hosts: &'a Hosts,
+    /// The local host client, used when the scope is global.
+    pty: &'a PtyClient,
+}
+
 fn project_main_worktree(db: &Db, project_id: &str) -> AppResult<pragma_constants::Worktree> {
     db.list_worktrees(project_id)?
         .into_iter()
@@ -53,54 +69,23 @@ pub async fn read_config(
     app: tauri::AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
+    pty: State<'_, PtyClient>,
     scope: ConfigScope,
     project_id: Option<String>,
 ) -> AppResult<ConfigDocument> {
-    match scope {
-        ConfigScope::Global => {
-            let path = app
-                .path()
-                .home_dir()?
-                .join(CONSTANTS.plugins.config_file_name.as_str());
-            read_local(path).await
-        }
-        ConfigScope::Project => {
-            let project_id = project_id.ok_or_else(|| {
-                AppError::InvalidInput("project scope requires projectId".to_string())
-            })?;
-            let worktree = project_main_worktree(&db, &project_id)?;
-            let client = ssh_host::client_for_worktree(app, &db, &hosts, &worktree.id).await?;
-            let relative = CONSTANTS.plugins.config_file_name.clone();
-            let exists: bool = fs_rpc(
-                &client,
-                &FsRequest::PathExists {
-                    root: worktree.path.clone(),
-                    path: relative.clone(),
-                },
-            )?;
-            let display_path = format!("{}/{}", worktree.path, relative);
-            if !exists {
-                return Ok(starter_document(display_path));
-            }
-            let file: pragma_constants::FileContents = fs_rpc(
-                &client,
-                &FsRequest::ReadFile {
-                    root: worktree.path,
-                    path: relative,
-                },
-            )?;
-            if file.binary || file.truncated {
-                return Err(AppError::InvalidInput(
-                    "config.json must be a small UTF-8 text file".to_string(),
-                ));
-            }
-            Ok(ConfigDocument {
-                exists: true,
-                contents: file.text,
-                path: display_path,
-            })
-        }
-    }
+    let handles = ScopeHandles {
+        app,
+        db: &db,
+        hosts: &hosts,
+        pty: &pty,
+    };
+    read_scoped(
+        handles,
+        scope,
+        project_id,
+        CONSTANTS.plugins.config_file_name.clone(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -113,25 +98,149 @@ pub async fn write_config(
     project_id: Option<String>,
     contents: String,
 ) -> AppResult<()> {
+    let handles = ScopeHandles {
+        app,
+        db: &db,
+        hosts: &hosts,
+        pty: &pty,
+    };
+    let client = write_scoped(
+        handles,
+        scope,
+        project_id,
+        CONSTANTS.plugins.config_file_name.clone(),
+        contents,
+    )
+    .await?;
+    if let Err(error) = reload_plugins(&client) {
+        log::warn!("config saved but plugin reload failed: {error}");
+    }
+    Ok(())
+}
+
+/// Reads the optional `.pragma/theme.json` color overrides for a scope. A
+/// missing file is not an error — the frontend treats it as "no overrides".
+#[tauri::command]
+pub async fn read_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    pty: State<'_, PtyClient>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+) -> AppResult<ConfigDocument> {
+    let handles = ScopeHandles {
+        app,
+        db: &db,
+        hosts: &hosts,
+        pty: &pty,
+    };
+    read_scoped(
+        handles,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.clone(),
+    )
+    .await
+}
+
+/// Writes `.pragma/theme.json` for a scope. Unlike `config.json` this needs no
+/// plugin reload — the frontend re-applies the CSS variables itself.
+#[tauri::command]
+pub async fn write_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    pty: State<'_, PtyClient>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    contents: String,
+) -> AppResult<()> {
+    let handles = ScopeHandles {
+        app,
+        db: &db,
+        hosts: &hosts,
+        pty: &pty,
+    };
+    write_scoped(
+        handles,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.clone(),
+        contents,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn read_scoped(
+    handles: ScopeHandles<'_>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    relative: String,
+) -> AppResult<ConfigDocument> {
+    let ScopeHandles { app, db, hosts, .. } = handles;
+    match scope {
+        ConfigScope::Global => read_local(app.path().home_dir()?.join(relative.as_str())).await,
+        ConfigScope::Project => {
+            let worktree = project_main_worktree(db, &require_project_id(project_id)?)?;
+            let client = ssh_host::client_for_worktree(app, db, hosts, &worktree.id).await?;
+            let display_path = format!("{}/{}", worktree.path, relative);
+            let exists: bool = fs_rpc(
+                &client,
+                &FsRequest::PathExists {
+                    root: worktree.path.clone(),
+                    path: relative.clone(),
+                },
+            )?;
+            if !exists {
+                return Ok(starter_document(display_path));
+            }
+            let file: pragma_constants::FileContents = fs_rpc(
+                &client,
+                &FsRequest::ReadFile {
+                    root: worktree.path,
+                    path: relative.clone(),
+                },
+            )?;
+            if file.binary || file.truncated {
+                return Err(AppError::InvalidInput(format!(
+                    "{relative} must be a small UTF-8 text file"
+                )));
+            }
+            Ok(ConfigDocument {
+                exists: true,
+                contents: file.text,
+                path: display_path,
+            })
+        }
+    }
+}
+
+/// Writes a scoped `.pragma` document and returns the client that owns it, so
+/// callers can follow up with an RPC on the same host.
+async fn write_scoped(
+    handles: ScopeHandles<'_>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    relative: String,
+    contents: String,
+) -> AppResult<PtyClient> {
+    let ScopeHandles {
+        app,
+        db,
+        hosts,
+        pty,
+    } = handles;
     match scope {
         ConfigScope::Global => {
-            let path = app
-                .path()
-                .home_dir()?
-                .join(CONSTANTS.plugins.config_file_name.as_str());
-            write_local(path, contents).await?;
-            if let Err(error) = reload_plugins(&pty) {
-                log::warn!("config saved but plugin reload failed: {error}");
-            }
-            Ok(())
+            write_local(app.path().home_dir()?.join(relative.as_str()), contents).await?;
+            Ok(pty.clone())
         }
         ConfigScope::Project => {
-            let project_id = project_id.ok_or_else(|| {
-                AppError::InvalidInput("project scope requires projectId".to_string())
-            })?;
-            let worktree = project_main_worktree(&db, &project_id)?;
-            let client = ssh_host::client_for_worktree(app, &db, &hosts, &worktree.id).await?;
-            let config_dir = std::path::Path::new(CONSTANTS.plugins.config_file_name.as_str())
+            let worktree = project_main_worktree(db, &require_project_id(project_id)?)?;
+            let client = ssh_host::client_for_worktree(app, db, hosts, &worktree.id).await?;
+            let parent_dir = std::path::Path::new(relative.as_str())
                 .parent()
                 .and_then(std::path::Path::to_str)
                 .unwrap_or(".pragma")
@@ -140,7 +249,7 @@ pub async fn write_config(
                 &client,
                 &FsRequest::PathExists {
                     root: worktree.path.clone(),
-                    path: config_dir.clone(),
+                    path: parent_dir.clone(),
                 },
             )?;
             if !exists {
@@ -148,7 +257,7 @@ pub async fn write_config(
                     &client,
                     &FsRequest::CreateFolder {
                         root: worktree.path.clone(),
-                        path: config_dir,
+                        path: parent_dir,
                     },
                 )?;
             }
@@ -156,16 +265,17 @@ pub async fn write_config(
                 &client,
                 &FsRequest::WriteFile {
                     root: worktree.path,
-                    path: CONSTANTS.plugins.config_file_name.clone(),
+                    path: relative,
                     contents,
                 },
             )?;
-            if let Err(error) = reload_plugins(&client) {
-                log::warn!("project config saved but plugin reload failed: {error}");
-            }
-            Ok(())
+            Ok(client)
         }
     }
+}
+
+fn require_project_id(project_id: Option<String>) -> AppResult<String> {
+    project_id.ok_or_else(|| AppError::InvalidInput("project scope requires projectId".to_string()))
 }
 
 fn reload_plugins(client: &PtyClient) -> AppResult<()> {

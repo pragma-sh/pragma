@@ -990,6 +990,8 @@ pub fn run() {
             gateway_devices,
             config_file::read_config,
             config_file::write_config,
+            config_file::read_theme,
+            config_file::write_theme,
             tunnel_start,
             tunnel_stop,
             tunnel_status,
