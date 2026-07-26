@@ -286,6 +286,16 @@ claude plugin install pragma-claude-code@pragma
 This registers it at **user scope** so it runs in every Claude session, including
 outside Pragma.
 
+**Add the marketplace from the main checkout, never from a `.pragma/worktrees/<id>` copy.**
+A `directory` marketplace source stores an absolute path in `~/.claude/settings.json`
+(`extraKnownMarketplaces.pragma`) and `~/.claude/plugins/known_marketplaces.json`. Deleting
+that worktree leaves both pointing at a missing directory, and Claude Code drops the plugin
+with `Marketplace pragma failed to load: cache-miss` — no hooks, so agent status silently
+stops reporting while `claude plugin list` still shows it enabled. Diagnose with
+`claude plugin list --json` and read the `errors` field; fix by repointing both files at
+`packages/claude-code-plugin` in the main checkout and running
+`claude plugin marketplace update pragma`.
+
 ## Usage limits
 
 The Pragma plugin sends Claude Code's structured `get_usage` control request through a
