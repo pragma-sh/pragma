@@ -381,6 +381,7 @@ impl PtyClient {
             command
         };
         command.stdin(Stdio::null());
+        pragma_platform::process::hide_console(&mut command);
         if let Ok(log_file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

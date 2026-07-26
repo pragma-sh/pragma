@@ -52,8 +52,12 @@ pub fn create_worktree(
         },
     )?;
     let worktree_id = uuid::Uuid::new_v4().to_string();
+    // Joined a segment at a time so the stored path uses the host's own
+    // separator throughout instead of the mixed `C:\project\.pragma/worktrees`
+    // a literal `".pragma/worktrees"` would produce on Windows.
     let path = PathBuf::from(&project.path)
-        .join(".pragma/worktrees")
+        .join(".pragma")
+        .join("worktrees")
         .join(&worktree_id);
     let path = path.to_string_lossy().into_owned();
     git::host_rpc::<()>(

@@ -3,7 +3,9 @@
 //! Pragma speaks one transport on every supported platform — a Unix-domain
 //! stream socket addressed by a filesystem path. macOS and Linux get it from
 //! `std`; Windows gets it from `uds_windows`, which wraps the `AF_UNIX` support
-//! Windows has shipped since build 17063 (Windows 10 1803). Both expose the
+//! Windows has shipped since build 17063 (Windows 10 1803). Note this is *not*
+//! the app's minimum Windows version — `ConPTY` sets a higher floor; see the
+//! table in this crate's `AGENTS.md`. Both expose the
 //! same surface — `connect`, `try_clone`, `shutdown`, `pair`, and read/write
 //! timeouts — so the framing and blocking behaviour in `pragma-protocol` and
 //! the server's client loop are identical everywhere and the wire format is

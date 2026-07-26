@@ -12,7 +12,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use pragma_constants::{
@@ -351,7 +350,7 @@ pub fn merge_worktree_to_parent(
 // ---------------------------------------------------------------------------
 
 pub fn ensure_repo(path: &Path) -> AppResult<()> {
-    let output = Command::new("git")
+    let output = crate::process_env::git()
         .args([
             "-C",
             path_string(path).as_str(),
@@ -367,7 +366,7 @@ pub fn ensure_repo(path: &Path) -> AppResult<()> {
 }
 
 pub fn current_branch(path: &Path) -> AppResult<String> {
-    let output = Command::new("git")
+    let output = crate::process_env::git()
         .args(["-C", path_string(path).as_str(), "branch", "--show-current"])
         .output()?;
     if output.status.success() {
@@ -391,7 +390,7 @@ pub fn clone(remote_url: &str, into_directory: &Path) -> AppResult<PathBuf> {
         .unwrap_or("project")
         .trim_end_matches(".git");
     let target = into_directory.join(repo_name);
-    let output = Command::new("git")
+    let output = crate::process_env::git()
         .args(["clone", remote_url, path_string(&target).as_str()])
         .output()?;
     if output.status.success() {
@@ -441,14 +440,13 @@ fn stderr(bytes: Vec<u8>) -> String {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::process::Command;
 
     use tempfile::tempdir;
 
     use super::{current_branch, ensure_pragma_excluded, ensure_repo, PRAGMA_WORKTREES_EXCLUDE};
 
     fn run(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        let output = crate::process_env::git()
             .arg("-C")
             .arg(dir)
             .args(args)

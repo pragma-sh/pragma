@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -336,7 +336,7 @@ pub fn spawn_sidecar_monitored(
     log_buffer: &Arc<LogBuffer>,
     registry: Option<&Arc<SidecarRegistry>>,
 ) -> Result<std::process::Child, String> {
-    let mut child = Command::new(command)
+    let mut child = pragma_platform::process::command(command)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

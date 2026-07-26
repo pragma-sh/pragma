@@ -39,8 +39,7 @@ impl WorktreeWatcher {
     where
         F: Fn(Vec<FileChange>) + Send + 'static,
     {
-        let canonical_root = root
-            .canonicalize()
+        let canonical_root = pragma_platform::path::canonicalize(root)
             .map_err(|err| CoreError::Operation(format!("watch root {}: {err}", root.display())))?;
         let watch_root = canonical_root.clone();
         let mut debouncer = new_debouncer(DEBOUNCE, None, move |result: DebounceEventResult| {

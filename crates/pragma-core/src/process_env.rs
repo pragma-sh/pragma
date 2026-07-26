@@ -13,10 +13,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Creates a child-process command with a PATH suitable for GUI-launched hosts.
+///
+/// The console window is suppressed on Windows (see
+/// [`pragma_platform::process::hide_console`]) — everything routed through here
+/// is a console program run on the user's behalf, and the host is a GUI
+/// process, so each one would otherwise pop a window.
 #[must_use]
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
     command.env("PATH", user_path());
+    pragma_platform::process::hide_console(&mut command);
     command
 }
 

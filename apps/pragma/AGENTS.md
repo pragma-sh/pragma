@@ -46,7 +46,8 @@ apps/pragma/
     ├── src/fs.rs                # Worktree-scoped, path-safe filesystem commands
     ├── src/main.rs              # Thin entrypoint
     ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
-    ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
+    ├── tauri.macos.conf.json    # macOS-only window flags (transparency + overlay titlebar)
+    ├── tauri.dev.conf.json      # Dev overrides (icons-dev/; "Pragma Dev" titles the window)
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
     ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
@@ -413,6 +414,26 @@ with the agent's display name, and shell OSC titles are ignored entirely. Agent
 `workspace-context.tsx` listens for those events and refreshes the selected project's
 SQLite snapshot; `tabOpened` also selects the target worktree/tab so CLI-opened tabs are
 visible immediately.
+
+## Window chrome — transparency is macOS-only
+
+`transparent`, `titleBarStyle: "Overlay"`, `hiddenTitle`, and `macOSPrivateApi` live in
+`tauri.macos.conf.json`, **not** `tauri.conf.json`. A transparent window only makes sense
+where there is something behind it: on macOS that is the `NSVisualEffectView` vibrancy
+layer `src-tauri/src/window_chrome.rs` installs. On Windows and Linux there is nothing,
+and the compositor's own chrome (the DWM title bar, a GTK client-side header bar) renders
+see-through instead of solid — the bug that put these flags in a separate file.
+
+Two rules follow:
+
+- **Tauri's config merge replaces arrays, it does not merge them** (`json_patch::merge`).
+  `app.windows` is an array, so `tauri.macos.conf.json` carries the _whole_ window object,
+  not just the macOS keys. Change one, change both.
+- **Don't put an `app.windows` array in `tauri.dev.conf.json`.** It is applied via
+  `--config` _after_ the platform file, so it would replace the array again and put
+  transparency back on every platform. The dev build differs only by product name, and
+  `window_chrome::apply` titles the window from `package_info().name` for exactly that
+  reason.
 
 ## Drag-and-drop
 

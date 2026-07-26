@@ -664,13 +664,13 @@ impl PluginsSidecar {
 
 fn sidecar_command() -> Command {
     if cfg!(debug_assertions) {
-        let mut command = Command::new("bun");
+        let mut command = pragma_platform::process::command("bun");
         command
             .arg("packages/plugins-host/src/cli.ts")
             .current_dir(workspace_root());
         command
     } else {
-        Command::new(sidecar_executable(SIDECAR_NAME))
+        pragma_platform::process::command(sidecar_executable(SIDECAR_NAME))
     }
 }
 
