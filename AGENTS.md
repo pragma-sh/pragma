@@ -276,6 +276,13 @@ without updating this guide and CI.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it with the
   `rust-windows` job plus a `windows-latest` entry in the `build` matrix.
+- **Line endings are pinned by `.gitattributes`.** The build shells out to
+  `src-tauri/scripts/*.sh` through Git Bash, and Git for Windows checks files out as CRLF
+  by default. A `\r` on the `set -euo pipefail` line fails the build with
+  `set: pipefail: invalid option name` (the `\r` hides itself by wrapping the cursor).
+  `*.sh` and the Husky hooks are therefore forced to `eol=lf`. After pulling a change to
+  `.gitattributes`, an existing Windows checkout still holds the old CRLF files — refresh
+  it with `git rm --cached -r . && git reset --hard`.
 
 **Minimum Windows version: 10 version 1809 (build 17763), October 2018.** ConPTY sets
 that floor, and it is a hard one — `portable-pty` resolves `CreatePseudoConsole` from
