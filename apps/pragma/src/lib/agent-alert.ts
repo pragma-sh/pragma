@@ -8,6 +8,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createElement } from "react";
 import { toast } from "sonner";
 
+import {
+  agentStatusSettings,
+  playAgentAlertSound,
+  type EffectiveAgentStatusSettings,
+} from "@/lib/agent-status-settings";
 import { resolveAgentApproval, showAgentNotification } from "@/lib/tauri";
 import { listPluginAgents } from "@/plugins/agents";
 import { startWatcherForAgentSession } from "@/plugins/watchers";
@@ -88,7 +93,8 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
     return;
   }
   recentAlertAtByKey.set(key, now);
-  playChime();
+  const settings = await agentStatusSettings(options.projectId);
+  await playAlertSound(settings, options.projectId);
   const agentName = await displayNameForAgent(payload.agent);
   const title = titleFor(payload, agentName);
   const description = descriptionFor(payload);
@@ -119,6 +125,9 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
     if (focused) {
       return;
     }
+  }
+  if (!settings.notificationsEnabled) {
+    return;
   }
   try {
     if (await ensureNotificationPermission()) {
@@ -366,12 +375,27 @@ function alertKey(payload: AgentReportPayload): string {
   ].join("\u0000");
 }
 
-function playChime(): void {
+/**
+ * Plays the user's configured alert clip, falling back to the built-in chime
+ * when none is set or it cannot be decoded. Shares the chime debounce so a burst
+ * of alerts stays a single sound either way.
+ */
+async function playAlertSound(
+  settings: EffectiveAgentStatusSettings,
+  projectId?: string | null,
+): Promise<void> {
   const now = Date.now();
   if (now - lastChime < CHIME_DEBOUNCE_MS) {
     return;
   }
   lastChime = now;
+  if (await playAgentAlertSound(settings, projectId)) {
+    return;
+  }
+  playChime();
+}
+
+function playChime(): void {
   const AudioContextCtor =
     window.AudioContext ??
     (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;

@@ -10,6 +10,8 @@ import type {
   GitHubAuthStatus,
   GitHubRepoRef,
   GitHubUser,
+  AgentSound,
+  AgentSoundList,
   KanbanPromptCard,
   KanbanPromptStatus,
   KeybindingsConfig,
@@ -1182,14 +1184,71 @@ export function getPlatform(): Promise<"mac" | "linux"> {
   return invoke<"mac" | "linux">("platform_name");
 }
 
-/** Loads the user keybindings config, writing the default file first if it is missing. */
-export function loadKeybindings(): Promise<KeybindingsConfig> {
-  return invoke<KeybindingsConfig>("load_keybindings");
+/**
+ * Loads the keybindings that apply right now: built-in defaults overlaid with
+ * `~/.pragma/keybindings.json` and, when a project is given, that project's
+ * `.pragma/keybindings.json`.
+ */
+export function loadKeybindings(projectId?: string | null): Promise<KeybindingsConfig> {
+  return invoke<KeybindingsConfig>("load_keybindings", { projectId: projectId ?? null });
 }
 
-/** Saves a keybindings config back to `~/.pragma/keybindings.json`. */
-export function saveKeybindings(config: KeybindingsConfig): Promise<void> {
-  return invoke("save_keybindings", { config });
+/** Reads one scope's `keybindings.json` verbatim, for patching single actions. */
+export function readKeybindingsFile(
+  scope: ConfigScope,
+  projectId?: string | null,
+): Promise<ConfigDocument> {
+  return invoke<ConfigDocument>("read_keybindings_file", { scope, projectId: projectId ?? null });
+}
+
+/** Writes one scope's `keybindings.json`; rejects contents that would not load. */
+export function writeKeybindingsFile(
+  scope: ConfigScope,
+  contents: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke("write_keybindings_file", { scope, projectId: projectId ?? null, contents });
+}
+
+/**
+ * Suspends the native menu accelerators while Settings records a shortcut, so
+ * chords such as Cmd+W are captured instead of closing a tab. Always restore
+ * them when recording stops.
+ */
+export function setMenuAcceleratorsEnabled(enabled: boolean): Promise<void> {
+  return invoke("set_menu_accelerators_enabled", { enabled });
+}
+
+/** Lists the alert clips in one scope's `.pragma/assets/sounds` directory. */
+export function listAgentSounds(
+  scope: ConfigScope,
+  projectId?: string | null,
+): Promise<AgentSoundList> {
+  return invoke<AgentSoundList>("list_agent_sounds", { scope, projectId: projectId ?? null });
+}
+
+/** Reads one alert clip as base64 so it can be played in the webview. */
+export function readAgentSound(
+  scope: ConfigScope,
+  name: string,
+  projectId?: string | null,
+): Promise<string> {
+  return invoke<string>("read_agent_sound", { scope, projectId: projectId ?? null, name });
+}
+
+/** Stores an uploaded clip in one scope's sounds directory. */
+export function importAgentSound(
+  scope: ConfigScope,
+  name: string,
+  contentsBase64: string,
+  projectId?: string | null,
+): Promise<AgentSound> {
+  return invoke<AgentSound>("import_agent_sound", {
+    scope,
+    projectId: projectId ?? null,
+    name,
+    contentsBase64,
+  });
 }
 
 // ---------------------------------------------------------------------------

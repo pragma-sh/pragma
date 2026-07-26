@@ -48,6 +48,7 @@ function useWorkspaceShortcuts(
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
   useShortcuts({
+    projectId: workspace.activeProject?.id ?? null,
     projectCount: workspace.projects.length,
     onProject: (index) => void workspace.selectProject(workspace.projects[index]?.id ?? null),
     onNextTab: () => workspace.cycleTab(1),

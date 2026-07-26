@@ -87,6 +87,26 @@ pub enum FsRequest {
         path: String,
         contents: String,
     },
+    /// Lists file names (not directories) directly inside a worktree-relative
+    /// directory, optionally restricted to the given lower-case extensions.
+    /// Unlike [`FsRequest::ListDir`] this does not hide gitignored entries: it
+    /// serves asset directories such as `.pragma/assets/sounds`, which projects
+    /// routinely gitignore but users still expect to see listed.
+    ListFileNames {
+        root: String,
+        path: String,
+        extensions: Vec<String>,
+    },
+    /// Reads a worktree-relative file as base64, for the binary assets that
+    /// [`FsRequest::ReadFile`] deliberately refuses to return as text.
+    ReadBytes { root: String, path: String },
+    /// Overwrites a worktree-relative file with base64-encoded bytes. Does not
+    /// create missing parent directories.
+    WriteBytes {
+        root: String,
+        path: String,
+        contents: String,
+    },
     /// Renames (or moves) an entry within the worktree.
     Rename {
         root: String,
@@ -124,6 +144,17 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             path,
             contents,
         } => to_value(write_file(&root, &path, &contents)?),
+        FsRequest::ListFileNames {
+            root,
+            path,
+            extensions,
+        } => to_value(list_file_names(&root, &path, &extensions)?),
+        FsRequest::ReadBytes { root, path } => to_value(read_bytes(&root, &path)?),
+        FsRequest::WriteBytes {
+            root,
+            path,
+            contents,
+        } => to_value(write_bytes(&root, &path, &contents)?),
         FsRequest::Rename { root, from, to } => to_value(rename(&root, &from, &to)?),
         FsRequest::Delete { root, path } => to_value(delete(&root, &path)?),
         FsRequest::PaletteSearch {
@@ -642,6 +673,67 @@ fn write_file(root: &str, path: &str, contents: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// Lists file names directly inside a worktree-relative directory, keeping only
+/// the given extensions when any are supplied. A missing directory lists empty
+/// so callers can offer an asset folder before the user has created it.
+pub fn list_file_names(root: &str, path: &str, extensions: &[String]) -> CoreResult<Vec<String>> {
+    let dir = resolve_in_worktree(Path::new(root), path)?;
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut names: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if extensions.is_empty() || has_extension(&name, extensions) {
+            names.push(name);
+        }
+    }
+    names.sort_by_key(|name| name.to_lowercase());
+    Ok(names)
+}
+
+fn has_extension(name: &str, extensions: &[String]) -> bool {
+    Path::new(name)
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .is_some_and(|extension| extensions.contains(&extension))
+}
+
+/// Reads a worktree-relative file as base64. Oversized files are rejected rather
+/// than truncated, because a partial binary asset is useless to the caller.
+pub fn read_bytes(root: &str, path: &str) -> CoreResult<String> {
+    let target = resolve_in_worktree(Path::new(root), path)?;
+    let byte_size = std::fs::metadata(&target)?.len();
+    if byte_size > MAX_READ_BYTES {
+        return Err(CoreError::InvalidPayload(format!(
+            "{path} is larger than the {MAX_READ_BYTES} byte read limit"
+        )));
+    }
+    Ok(base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        std::fs::read(&target)?,
+    ))
+}
+
+/// Overwrites a worktree-relative file with base64-encoded bytes. Does not create
+/// missing parent directories.
+fn write_bytes(root: &str, path: &str, contents: &str) -> CoreResult<()> {
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, contents)
+        .map_err(|error| CoreError::InvalidPayload(format!("invalid base64 contents: {error}")))?;
+    if bytes.len() as u64 > MAX_READ_BYTES {
+        return Err(CoreError::InvalidPayload(format!(
+            "contents exceed the {MAX_READ_BYTES} byte write limit"
+        )));
+    }
+    let target = resolve_in_worktree(Path::new(root), path)?;
+    std::fs::write(&target, bytes)?;
+    Ok(())
+}
+
 /// Renames (or moves) a worktree-relative entry. Both paths are resolved through
 /// the worktree so symlink escapes and `..` are rejected. Errors if the source
 /// is missing or the destination already exists.
@@ -764,6 +856,50 @@ mod tests {
     #[test]
     fn max_read_cap_is_two_mib() {
         assert_eq!(MAX_READ_BYTES, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn lists_asset_file_names_by_extension_including_gitignored_ones() {
+        let dir = tempdir().expect("tempdir");
+        git_init(dir.path());
+        std::fs::write(dir.path().join(".gitignore"), ".pragma/\n").expect("write gitignore");
+        let sounds = dir.path().join(".pragma/assets/sounds");
+        std::fs::create_dir_all(&sounds).expect("mkdir sounds");
+        std::fs::write(sounds.join("Chime.WAV"), "riff").expect("write wav");
+        std::fs::write(sounds.join("alert.mp3"), "id3").expect("write mp3");
+        std::fs::write(sounds.join("notes.txt"), "text").expect("write txt");
+        std::fs::create_dir(sounds.join("nested")).expect("mkdir nested");
+
+        let root = dir.path().to_string_lossy().into_owned();
+        let names = super::list_file_names(
+            &root,
+            ".pragma/assets/sounds",
+            &["wav".to_string(), "mp3".to_string()],
+        )
+        .expect("list");
+
+        assert_eq!(
+            names,
+            vec!["alert.mp3".to_string(), "Chime.WAV".to_string()]
+        );
+        // A directory that does not exist yet lists empty rather than failing.
+        assert!(super::list_file_names(&root, ".pragma/assets/missing", &[])
+            .expect("list missing")
+            .is_empty());
+    }
+
+    #[test]
+    fn round_trips_binary_assets_as_base64() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().to_string_lossy().into_owned();
+        let bytes = [0_u8, 159, 146, 150];
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+
+        super::write_bytes(&root, "clip.wav", &encoded).expect("write bytes");
+
+        assert_eq!(super::read_bytes(&root, "clip.wav").expect("read"), encoded);
+        assert_eq!(std::fs::read(dir.path().join("clip.wav")).unwrap(), bytes);
+        assert!(super::write_bytes(&root, "clip.wav", "not base64!").is_err());
     }
 
     #[test]

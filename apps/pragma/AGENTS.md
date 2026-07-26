@@ -243,6 +243,33 @@ live in `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 `gateway-devices.json`, which the gateway updates from authenticated mobile identity
 headers, and exposes supported global/project `.pragma/config.json` values through forms.
 
+## Settings sections
+
+`components/settings/SettingsWorkspace.tsx` is the shell: a scope toggle (Global /
+Project), a nav list, and one section component per panel (`SettingsCard` is shared).
+Sections listed in `PROJECT_SECTIONS` support both scopes; everything else is
+app-global and falls back to Plugins when the user switches to Project scope.
+
+**Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
+that actually applies after the `default → global → project` merge, whether it differs
+from the built-in default, and Record / Stop / Reset. While recording,
+`setRecordingKeybinding(true)` mutes `useShortcuts` and `set_menu_accelerators_enabled(false)`
+clears the native accelerators, so chords the app already owns (⌘T, ⌘W) can be
+captured instead of firing. Writes patch only the recorded action+platform in the
+selected scope's file through `read/writeKeybindingsFile`, then dispatch
+`pragma:keybindings-changed` so live shortcuts reload. Rust validates every write with
+`keybindings::validate_overrides`, so a bad patch can never break all shortcuts.
+
+**Agent Status** (`AgentStatusSection.tsx`) edits the `agentStatus` block of the
+scope's `config.json` (`{ notificationsEnabled, soundName }`). Clips live in
+`CONSTANTS.agentStatus.soundsDirName` (`.pragma/assets/sounds`) under the home
+directory or the project's main worktree, listed/read/imported through
+`list_agent_sounds` / `read_agent_sound` / `import_agent_sound`. Uploads are duration-checked
+in the webview (only it can decode audio) and byte-capped on the host. `lib/agent-status-settings.ts`
+resolves the effective settings (project over global over `CONSTANTS.agentStatus`),
+caches them until `pragma:config-changed`, and `agent-alert.ts` plays the chosen clip —
+falling back to the built-in chime — before deciding whether to raise a notification.
+
 ## Workspace mirror publisher
 
 `src-tauri/src/workspace_mirror.rs` mirrors the desktop's entire workspace state
@@ -336,7 +363,9 @@ are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them
 **Open Server Logs** opens the `log` tab; logs load through `read_daemon_log`
 (`PtyClient::read_log`, reading `log_path()` — beside the socket, not app data). Add a
 menu action: id const + item in `install_menu`, `MenuAction` variant +
-branch in `handleMenuAction`.
+branch in `handleMenuAction`. Accelerators live in one `MENU_ACCELERATORS` table (they
+mirror the default keybindings); the items are kept in `WorkspaceAccelerators` managed
+state so `set_menu_accelerators_enabled` can suspend them while Settings records a chord.
 
 ## Deep links (`pragma://open`)
 
