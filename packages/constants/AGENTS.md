@@ -36,6 +36,9 @@ The Rust side parses `values.json` against the schema-generated types at startup
 - `gateway.discoveryFile` / `gateway.tokenHeader` — local HTTP gateway discovery file
   name and bearer auth header. The gateway port is intentionally runtime-assigned and
   must not be added as a constant.
+- `theme.fileName` / `theme.modes` — location and color-scheme blocks of the optional
+  `.pragma/theme.json` color overrides (see `apps/pragma/AGENTS.md`). Only the file
+  contract is shared; the token catalog is derived from `apps/pragma/src/index.css`.
 - `protocol.*` — RPC method, event, and error names shared by Rust and TypeScript.
 - `github.*` — OAuth client id, scopes, endpoint URLs.
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and

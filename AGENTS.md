@@ -145,6 +145,11 @@ than no guide.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`;
   native `Cmd+,` opens it on macOS. Host-only mobile pairing and gateway device history
   live under its global scope.
+- Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
+  merged `index.css` defaults <- global <- project. Never restate a shipped default color in
+  TS or Rust: `apps/pragma/src/index.css` is the source of truth and the token catalog is
+  parsed from it. Sourced built-in palettes live in `apps/pragma/src/lib/theme-presets.ts`.
+  See _User themes_ in `apps/pragma/AGENTS.md`.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.

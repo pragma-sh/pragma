@@ -60,6 +60,9 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | opencode runtime integration plugin              | `packages/opencode-plugin`                               |
 | Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                           |
 | A reusable UI primitive                          | `bunx shadcn@latest add <c>` → `components/ui`           |
+| A shipped default color/design token             | `apps/pragma/src/index.css` ONLY (parsed by `theme-tokens.ts`) |
+| A sourced built-in theme palette                 | `apps/pragma/src/lib/theme-presets.ts`                        |
+| User color overrides (global/project)            | `.pragma/theme.json` via `apps/pragma/src/lib/theme.ts`  |
 | A feature component (composition of primitives)  | elsewhere under `src/`                                   |
 | PTY/session ownership                            | `crates/pragma-server`                                   |
 | Daemon wire frame types/framing                  | `crates/pragma-protocol`                                 |
