@@ -25,6 +25,14 @@ approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 watch_interval="${PRAGMA_WATCH_INTERVAL:-1}"
 watch_max="${PRAGMA_WATCH_MAX:-86400}"
 py3="$(command -v python3 2>/dev/null || true)"
+# Being on PATH is not proof of being usable: Windows ships an App Execution
+# Alias at ~/AppData/Local/Microsoft/WindowsApps/python3 that only prints
+# "Python was not found" and exits nonzero. That satisfies `command -v`, so the
+# emptiness checks would wrongly take the has-python branch. Run it once and
+# drop it unless it actually executes.
+if [ -n "$py3" ] && ! "$py3" -c '' >/dev/null 2>&1; then
+  py3=""
+fi
 interrupt_pattern='"type":"turn_aborted"'
 
 report() {

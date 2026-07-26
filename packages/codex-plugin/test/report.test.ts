@@ -149,6 +149,27 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
   }
 }
 
+/**
+ * Whether a *working* `python3` is on PATH.
+ *
+ * `report.sh` parses content-bearing hook fields (prompt, transcript text,
+ * questions) with Python 3 and treats it as optional, degrading to status-only
+ * reporting without it. Assertions that depend on that parsing are therefore
+ * conditional, or they fail on any host lacking it. Presence alone is not enough
+ * to check: Windows ships an App Execution Alias named `python3` that only
+ * prints "Python was not found", so this runs the interpreter.
+ */
+const hasPython3 = (() => {
+  try {
+    execFileSync("python3", ["-c", ""], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const itWithPython3 = hasPython3 ? it : it.skip;
+
 describe("report.sh", () => {
   it("no-ops outside Pragma", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -161,7 +182,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("reports normal turn start and stop with the fallback reply", () => {
+  itWithPython3("reports normal turn start and stop with the fallback reply", () => {
     // No transcript_path: the assistant reply must come from the Stop
     // payload's last_assistant_message, delivered before the stopped report.
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth" }) });
@@ -187,7 +208,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("derives the session name from only the first prompt", () => {
+  itWithPython3("derives the session name from only the first prompt", () => {
     run("started", {
       stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth\nwith regression tests" }),
     });
@@ -198,7 +219,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("marks a truncated session name with an ellipsis", () => {
+  itWithPython3("marks a truncated session name with an ellipsis", () => {
     const prompt = "x".repeat(49);
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt }) });
     expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
@@ -206,7 +227,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("derives a new session name after session clear", () => {
+  itWithPython3("derives a new session name after session clear", () => {
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "First session" }) });
     run("cleared");
     run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Next session" }) });
@@ -216,51 +237,54 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("streams transcript assistant markdown during the turn and never duplicates it on stop", async () => {
-    const current = transcript();
-    run("started", { stdin: current.input });
-    appendFileSync(
-      current.path,
-      `${JSON.stringify({
-        type: "event_msg",
-        payload: { type: "agent_message", message: "Interim: reading **files**." },
-      })}\n`,
-    );
-    await waitFor(() => messages().length > 1);
-    expect(messages().at(-1)).toEqual(
-      expect.objectContaining({
-        id: "codex-turn-1-assistant-000",
-        role: "assistant",
-        text: "Interim: reading **files**.",
-      }),
-    );
-    expect(reports()).toEqual([
-      "agent report --agent codex started",
-      "agent report --agent codex session-name --name Fix auth",
-    ]);
+  itWithPython3(
+    "streams transcript assistant markdown during the turn and never duplicates it on stop",
+    async () => {
+      const current = transcript();
+      run("started", { stdin: current.input });
+      appendFileSync(
+        current.path,
+        `${JSON.stringify({
+          type: "event_msg",
+          payload: { type: "agent_message", message: "Interim: reading **files**." },
+        })}\n`,
+      );
+      await waitFor(() => messages().length > 1);
+      expect(messages().at(-1)).toEqual(
+        expect.objectContaining({
+          id: "codex-turn-1-assistant-000",
+          role: "assistant",
+          text: "Interim: reading **files**.",
+        }),
+      );
+      expect(reports()).toEqual([
+        "agent report --agent codex started",
+        "agent report --agent codex session-name --name Fix auth",
+      ]);
 
-    // The final reply lands in the transcript just before Stop fires; the stop
-    // handler must sync it (watcher may not have polled yet) exactly once and
-    // must not re-send last_assistant_message through the fallback path.
-    const reply = "# Result\n\n- one\n- two\n\n```bash\necho hi\n```";
-    appendFileSync(
-      current.path,
-      `${JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: reply } })}\n`,
-    );
-    run("stopped", {
-      stdin: JSON.stringify({
-        turn_id: "turn-1",
-        transcript_path: current.path,
-        last_assistant_message: reply,
-      }),
-    });
-    const assistant = messages().filter((message) => message.role === "assistant");
-    expect(assistant).toEqual([
-      expect.objectContaining({ id: "codex-turn-1-assistant-000" }),
-      expect.objectContaining({ id: "codex-turn-1-assistant-001", text: reply }),
-    ]);
-    expect(reports().at(-1)).toBe("agent report --agent codex stopped");
-  });
+      // The final reply lands in the transcript just before Stop fires; the stop
+      // handler must sync it (watcher may not have polled yet) exactly once and
+      // must not re-send last_assistant_message through the fallback path.
+      const reply = "# Result\n\n- one\n- two\n\n```bash\necho hi\n```";
+      appendFileSync(
+        current.path,
+        `${JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: reply } })}\n`,
+      );
+      run("stopped", {
+        stdin: JSON.stringify({
+          turn_id: "turn-1",
+          transcript_path: current.path,
+          last_assistant_message: reply,
+        }),
+      });
+      const assistant = messages().filter((message) => message.role === "assistant");
+      expect(assistant).toEqual([
+        expect.objectContaining({ id: "codex-turn-1-assistant-000" }),
+        expect.objectContaining({ id: "codex-turn-1-assistant-001", text: reply }),
+      ]);
+      expect(reports().at(-1)).toBe("agent report --agent codex stopped");
+    },
+  );
 
   it("does not emit stopped without a prior start", () => {
     expect(run("stopped")).toEqual([]);
@@ -275,7 +299,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("tracks subagents so parent stop cannot finish early", () => {
+  itWithPython3("tracks subagents so parent stop cannot finish early", () => {
     run("started");
     run("subagent-start", { stdin: JSON.stringify({ agent_id: "child-1" }) });
     expect(messages()).toContainEqual(
@@ -294,7 +318,7 @@ describe("report.sh", () => {
     expect(reports().at(-1)).toBe("agent report --agent codex stopped");
   });
 
-  it("reports command attention and returns allow", () => {
+  itWithPython3("reports command attention and returns allow", () => {
     run("started");
     const output = runRaw(
       "permission",
@@ -341,7 +365,7 @@ describe("report.sh", () => {
     expect(output).toBe("");
   });
 
-  it("reports a transcript question and resumes after its answer", async () => {
+  itWithPython3("reports a transcript question and resumes after its answer", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -388,7 +412,7 @@ describe("report.sh", () => {
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
-  it("does not flatten unsupported multi-question requests", async () => {
+  itWithPython3("does not flatten unsupported multi-question requests", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -415,7 +439,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("abort watcher clears current turn", async () => {
+  itWithPython3("abort watcher clears current turn", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -431,7 +455,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("abort watcher ignores a prior turn marker", async () => {
+  itWithPython3("abort watcher ignores a prior turn marker", async () => {
     const current = transcript([{ type: "event_msg", payload: { type: "turn_aborted" } }]);
     run("started", { stdin: current.input });
     await sleep(350);
