@@ -292,15 +292,25 @@ by the same script. Shipped plugin packages are staged under `resources/plugins/
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
 frontend mtime poll then hot-reloads the staged bundle.
 
-**Anything the staging scripts write under `src-tauri/` must be ignored in
-`src-tauri/.gitignore`, not just the repo-root `.gitignore`.** The `tauri dev` file
-watcher is rooted at `src-tauri` and only reads that file (plus `.taurignore`), so a
-root-level entry is invisible to it. Because `tauri:dev` stages sidecars and bundled
-plugins immediately before starting `tauri dev`, a missing entry means the watcher sees
-its own staging writes, kills the app, and forces a full rebuild on every `bun run dev`
-— and on Windows a relink can then collide with the still-running `pragma.exe`, which
-holds a lock on its own binary. `binaries/` and `resources/plugins/` are both ignored
-there for exactly this reason.
+**Anything the build writes into a watched directory will restart `tauri dev`.** The
+watcher covers `src-tauri` _and_ every Cargo path dependency (`packages/constants`,
+`crates/*`), and it reacts to the write itself, not to a content change. Because
+`tauri:dev` stages sidecars, restages bundled plugins, and regenerates constants
+immediately before starting `tauri dev`, each of those can kill the app and force a full
+rebuild — on Windows the relink then collides with the still-running `pragma.exe`, which
+holds a lock on its own binary.
+
+The two halves are fixed differently, and the boundary was measured rather than assumed:
+
+- **Inside `src-tauri`** — ignore it in `.taurignore` or `src-tauri/.gitignore`. The
+  repo-root `.gitignore` does **not** work; the watcher never reads it. `binaries/` and
+  `resources/plugins/` are ignored for exactly this reason.
+- **Outside `src-tauri`** — ignoring is not available: a `**/src/generated/` pattern in
+  `.taurignore` did not stop `packages/constants/src/generated/constants.ts`, and neither
+  did a `.gitignore` placed inside that package. Such a generator must instead **not
+  write when nothing changed** — see `packages/constants/scripts/generate-types.ts`, which
+  compares before writing. This matters because `generate` runs from `pretest` and
+  `pretypecheck`, so any `bun run test` alongside `bun run dev` used to restart the app.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build

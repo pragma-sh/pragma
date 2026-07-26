@@ -26,9 +26,10 @@ use crate::pty::workspace_root;
 /// One `plugins[]` entry in a `.pragma/config.json` file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginConfigEntry {
-    /// Plugin specifier. Local paths (`./`, `../`, `/`, `~/`) are resolved
-    /// relative to the config file's directory; anything else is treated as an
-    /// npm specifier (unsupported for now).
+    /// Plugin specifier. Relative local paths (`./`, `../`, and the `.\` / `..\`
+    /// spellings) resolve against the config file's directory; absolute paths
+    /// (`/…`, `~/…`, and Windows forms like `C:\…`) resolve as given. Anything
+    /// else is treated as an npm specifier (unsupported for now).
     pub path: String,
     /// Optional plugin configuration object, validated by the plugin's own
     /// zod schema on the frontend.
@@ -319,16 +320,38 @@ fn resolve_entry(
 /// Maps a local-path specifier to an absolute plugin directory, or `None` for
 /// non-path (npm) specifiers.
 fn resolve_local_dir(config_dir: &Path, home: &Path, specifier: &str) -> Option<PathBuf> {
-    if specifier.starts_with('/') {
-        return Some(normalize(Path::new(specifier)));
-    }
-    if let Some(rest) = specifier.strip_prefix("~/") {
+    if let Some(rest) = specifier
+        .strip_prefix("~/")
+        .or_else(|| specifier.strip_prefix(r"~\"))
+    {
         return Some(normalize(&home.join(rest)));
     }
-    if specifier.starts_with("./") || specifier.starts_with("../") {
-        return Some(normalize(&config_dir.join(specifier)));
+    let path = Path::new(specifier);
+    // `is_absolute` is the platform-correct test. A bare `starts_with('/')` check
+    // misses every Windows absolute form — `C:\…` and the `\\?\C:\…` verbatim
+    // paths `std::fs::canonicalize` produces — so those fell through and were
+    // misreported as unsupported npm specifiers. The leading-slash case is kept
+    // so a POSIX-style path in a shared config still resolves on Windows, where
+    // `is_absolute` rejects it for lacking a drive letter.
+    if path.is_absolute() || specifier.starts_with('/') {
+        return Some(normalize(path));
+    }
+    if is_explicit_relative(path) {
+        return Some(normalize(&config_dir.join(path)));
     }
     None
+}
+
+/// True when a specifier explicitly opts into relative resolution.
+///
+/// Component-based so it covers `./` and `../` as well as the `.\` and `..\`
+/// spellings Windows users write. A leading `.` survives `Path::components`,
+/// which is what makes this reliable.
+fn is_explicit_relative(path: &Path) -> bool {
+    matches!(
+        path.components().next(),
+        Some(std::path::Component::CurDir | std::path::Component::ParentDir)
+    )
 }
 
 /// Lexically normalizes `.` / `..` segments without touching the filesystem.
@@ -395,6 +418,51 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
 mod tests {
     use super::*;
 
+    /// Guards the specifier forms `resolve_local_dir` must accept. Windows
+    /// absolute paths (`C:\…`) used to fall through every branch and surface as
+    /// "npm plugin specifiers are not supported yet", making an absolute
+    /// `plugins[].path` unusable on that platform.
+    #[test]
+    fn local_dir_accepts_each_platform_path_form() {
+        let (config_dir, home, absolute) = if cfg!(windows) {
+            (
+                Path::new(r"C:\cfg\.pragma"),
+                Path::new(r"C:\home\me"),
+                r"C:\abs\p",
+            )
+        } else {
+            (Path::new("/cfg/.pragma"), Path::new("/home/me"), "/abs/p")
+        };
+
+        // Bare and scoped names remain npm specifiers.
+        assert!(resolve_local_dir(config_dir, home, "my-plugin").is_none());
+        assert!(resolve_local_dir(config_dir, home, "@pragma/thing").is_none());
+
+        assert_eq!(
+            resolve_local_dir(config_dir, home, absolute).as_deref(),
+            Some(Path::new(absolute))
+        );
+        assert_eq!(
+            resolve_local_dir(config_dir, home, "~/p").as_deref(),
+            Some(home.join("p").as_path())
+        );
+        assert_eq!(
+            resolve_local_dir(config_dir, home, "../p").as_deref(),
+            Some(normalize(&config_dir.join("../p")).as_path())
+        );
+        // A POSIX-style absolute path stays resolvable on Windows, where
+        // `Path::is_absolute` rejects it for lacking a drive letter.
+        assert!(resolve_local_dir(config_dir, home, "/abs/p").is_some());
+        // Windows users write these spellings; they must resolve relatively.
+        if cfg!(windows) {
+            assert_eq!(
+                resolve_local_dir(config_dir, home, r"..\p").as_deref(),
+                Some(normalize(&config_dir.join("../p")).as_path())
+            );
+            assert!(resolve_local_dir(config_dir, home, r".\p").is_some());
+        }
+    }
+
     fn write_config(root: &Path, json: &serde_json::Value) {
         let path = config_path(root);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -456,7 +524,9 @@ mod tests {
         let manifest = results[0].manifest.as_ref().expect("manifest resolved");
         assert_eq!(manifest.name, "my-plugin");
         assert_eq!(manifest.version, "1.2.3");
-        assert!(manifest.main_path.ends_with("dist/index.js"));
+        // Component-wise: the resolved path uses the platform separator, so a
+        // literal "dist/index.js" suffix never matches on Windows.
+        assert!(Path::new(&manifest.main_path).ends_with(Path::new("dist").join("index.js")));
         assert_eq!(results[0].scope, PluginScope::Global);
         assert!(results[0].error.is_none());
     }
@@ -604,7 +674,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_config(
             temp.path(),
-            &serde_json::json!({ "plugins": [{ "path": fixture.canonicalize().unwrap().display().to_string() }] }),
+            // `pragma_platform::path::canonicalize`, never `std::fs`'s: the latter
+            // returns a `\\?\C:\…` verbatim path on Windows (see AGENTS.md).
+            &serde_json::json!({ "plugins": [{ "path": pragma_platform::path::canonicalize(&fixture).unwrap().display().to_string() }] }),
         );
         let results = read_manifests(temp.path(), None, None);
         let manifest = results[0].manifest.as_ref().expect("fixture resolves");

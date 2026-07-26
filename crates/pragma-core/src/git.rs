@@ -1540,6 +1540,19 @@ mod tests {
         assert!(output.status.success(), "git {args:?} failed");
     }
 
+    /// Initializes a test repo with line-ending handling pinned in its own config.
+    ///
+    /// Repo-local config is required rather than `git -c` on the test's own
+    /// commands: the functions under test shell out to `git checkout`/`pull`
+    /// themselves, and those inherit only what the repository config says. Git
+    /// for Windows defaults `core.autocrlf=true` system-wide, which rewrites
+    /// checked-out fixtures to CRLF and fails every `"…\n"` assertion here.
+    fn init_repo(dir: &Path, args: &[&str]) {
+        run(dir, args);
+        run(dir, &["config", "core.autocrlf", "false"]);
+        run(dir, &["config", "core.eol", "lf"]);
+    }
+
     fn commit_all(dir: &Path, message: &str) {
         run(dir, &["add", "-A"]);
         run(
@@ -1569,10 +1582,10 @@ mod tests {
 
     fn project_with_remote() -> (TempDir, TempDir, TempDir) {
         let remote = tempdir().expect("remote tempdir");
-        run(remote.path(), &["init", "--bare"]);
+        init_repo(remote.path(), &["init", "--bare"]);
 
         let local = tempdir().expect("local tempdir");
-        run(local.path(), &["init", "-b", "main"]);
+        init_repo(local.path(), &["init", "-b", "main"]);
         run(local.path(), &["config", "user.email", "test@example.com"]);
         run(local.path(), &["config", "user.name", "Test"]);
         run(
@@ -1604,7 +1617,7 @@ mod tests {
     fn project_with_child() -> (std::path::PathBuf, std::path::PathBuf) {
         let main = tempdir().expect("tempdir");
         let main_path = main.path().to_path_buf();
-        run(&main_path, &["init", "-b", "main"]);
+        init_repo(&main_path, &["init", "-b", "main"]);
         run(&main_path, &["config", "user.email", "test@example.com"]);
         run(&main_path, &["config", "user.name", "Test"]);
         std::fs::write(main_path.join("base.txt"), "base\n").expect("write base");
@@ -1631,7 +1644,7 @@ mod tests {
     fn lists_headless_worktrees_under_pragma_dir() {
         let project = tempdir().expect("tempdir");
         let project_path = project.path().to_path_buf();
-        run(&project_path, &["init", "-b", "main"]);
+        init_repo(&project_path, &["init", "-b", "main"]);
         run(&project_path, &["config", "user.email", "test@example.com"]);
         run(&project_path, &["config", "user.name", "Test"]);
         std::fs::write(project_path.join("base.txt"), "base\n").expect("write base");
@@ -1658,7 +1671,12 @@ mod tests {
         let entry = listed.first().expect("one entry");
         assert_eq!(entry.id, "wt-1");
         assert_eq!(entry.branch, "feature");
-        assert_eq!(entry.path, checkout.to_string_lossy());
+        // Compare as paths, not strings. `PRAGMA_WORKTREES_EXCLUDE` carries a
+        // trailing slash (it doubles as a git exclude pattern), which Windows
+        // counts as a separator, so `read_dir` yields `…\.pragma/worktrees/wt-1`
+        // while this test's join yields `…\.pragma/worktrees\wt-1`. Both name the
+        // same file, and `Path` equality treats `/` and `\` as equivalent there.
+        assert_eq!(Path::new(&entry.path), checkout.as_path());
     }
 
     #[test]

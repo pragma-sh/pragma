@@ -284,6 +284,13 @@ without updating this guide and CI.
   `.gitattributes`, an existing Windows checkout still holds the old CRLF files — refresh
   it with `git rm --cached -r . && git reset --hard` (commit or stash first: that command
   discards uncommitted work).
+- **A Windows checkout has no real symlinks — `core.symlinks=false`.** Git writes each
+  one as a small text file holding its target path, so `CLAUDE.md` is literally the nine
+  bytes `AGENTS.md`. Any formatter that matches it will "fix" it (oxfmt appends a trailing
+  newline) and the symlink is then broken for everyone on macOS/Linux. `CLAUDE.md` is in
+  `.oxfmtrc.json`'s `ignorePatterns` for exactly this reason; the other tracked symlinks
+  (`.claude/skills`, `.agents/skills/*`) are extension-less and no formatter claims them.
+  If you add a symlink whose name a formatter or linter would match, ignore it there too.
 - **The whole tree is `eol=lf`, not just `*.sh`.** Every blob here is already LF; the
   hazard is `text=auto` **alone**, which lets `core.autocrlf=true` write CRLF into a
   Windows working tree. oxfmt enforces LF, so `bun run format:check` (and thus
@@ -317,13 +324,34 @@ on every target:
 | `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning  |
 | `shell`   | Which shell a PTY launches, and its interactive arguments                    |
 
-Two of those are easy to bypass by reflex, and both bypasses are visible bugs on Windows:
+Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:
 
 - **Canonicalize with `pragma_platform::path::canonicalize`, never `std::fs`'s.** `std`
   returns `\\?\C:\…`, which git reads as a UNC path and refuses.
 - **Spawn with `pragma_platform::process::command` (or `process_env::command`, which
   wraps it), never a bare `Command::new`.** A console program started from a GUI process
   pops a console window on Windows unless `CREATE_NO_WINDOW` is set.
+- **Name executables with `pragma_client::executable_name`, never a bare string.** It
+  appends `EXE_SUFFIX`, so `pragma-cli` becomes `pragma-cli.exe` on Windows. This applies
+  to a path you _write_ as much as one you read: `agent_cli` copied the helper to a
+  suffix-less name, so the copy was both unreadable on the next launch and not executable
+  by agents resolving it from `PATH` — startup logged only
+  `failed to install pragma-cli: os error 2`.
+
+Two more rules that are not seams but bite the same way:
+
+- **A path is not a string.** Compare with `Path`, not `String`: `Path` treats `/` and `\`
+  as equivalent separators on Windows, so `Path::new(a) == Path::new(b)` holds where
+  `a == b` fails. Never assert on a `"dir/file"` suffix — build it with `join`. And test
+  absolute paths with `Path::is_absolute`, never `starts_with('/')`, which misses every
+  Windows form (`C:\…`, `\\?\C:\…`) — that check silently rejected absolute
+  `plugins[].path` entries as unsupported npm specifiers.
+- **Clear the read timeout on a long-lived stream.** `configure_stream` sets a 5s read
+  timeout so a wedged server cannot hang startup, but a subscription is mostly idle:
+  leave it on and every quiet 5s looks like a dropped connection, so the bridge warns and
+  reconnects forever (`os error 10060` on Windows, `WouldBlock` on Unix). Call
+  `set_read_timeout(None)` once the subscribe response arrives, as
+  `pragma_client::open_event_stream` and the `agent_events` bridge do.
 
 ### Windows session modes
 
@@ -350,3 +378,23 @@ live in `@pragma/constants` under `platform`.
   jsdom (`src/test/setup.ts`); mock the Tauri API rather than the native shell.
 - **Rust:** `#[cfg(test)] mod tests` next to the code; `cargo test --workspace`.
 - Add a test with every behavior change. Keep tests fast and deterministic.
+- **A test must pass on all three platforms, and CI only proves that for the ones it
+  runs.** The `rust-windows` job runs the full suite, so a POSIX-only assumption is a red
+  build, not a local curiosity. The recurring offenders:
+  - **`git init` in a fixture inherits the host's config.** Git for Windows ships
+    `core.autocrlf=true` system-wide, so checked-out fixtures come back CRLF and every
+    `"…\n"` assertion fails. Pin `core.autocrlf=false` + `core.eol=lf` **in the repo**
+    (see `init_repo` in `pragma-core/src/git.rs`) — `git -c` on the test's own commands is
+    not enough, because the code under test runs its own `git checkout`/`pull`, which read
+    only the repository config.
+  - **`PATH` is `;`-separated on Windows.** Build fixtures with `std::env::join_paths`,
+    never a literal `"/a:/b"`, or the whole list arrives as one opaque entry and the
+    assertion fails for the wrong reason.
+  - **Shell output is not portable.** `pwd` under Git Bash prints an MSYS path
+    (`/c/Users/…`) that never equals the Win32 path `canonicalize` returns. Assert on
+    something the shell cannot reformat — e.g. `cat` a marker file that only resolves from
+    the intended cwd.
+  - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
+    created its symlink only on Unix, so on Windows it asserted against a link that was
+    never there. Windows symlinks also need Developer Mode or admin — skip explicitly when
+    creation fails rather than passing for the wrong reason.

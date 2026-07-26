@@ -148,18 +148,20 @@ mod tests {
     #[test]
     fn runs_commands_in_cwd_with_env() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // Prove the working directory by reading a file that only resolves from
+        // inside it. Comparing `pwd` output is not portable: under Git Bash on
+        // Windows it prints an MSYS path (`/c/Users/…`) which never equals the
+        // Win32 path `canonicalize` returns, so the assertion could not hold on
+        // both platforms at once.
+        std::fs::write(dir.path().join("marker.txt"), "in-cwd").expect("marker");
         let results = run(&ExecRequest {
             cwd: dir.path().to_string_lossy().into_owned(),
-            commands: vec!["printf \"$GREETING:$(pwd -P)\"".to_string()],
+            commands: vec!["printf \"$GREETING:$(cat marker.txt)\"".to_string()],
             env: vec![("GREETING".to_string(), "hi".to_string())],
             max_concurrent: 1,
         });
         assert_eq!(results.len(), 1);
-        let canonical = dir.path().canonicalize().expect("canon");
-        assert_eq!(
-            results[0].stdout,
-            format!("hi:{}", canonical.to_string_lossy())
-        );
+        assert_eq!(results[0].stdout, "hi:in-cwd");
         assert_eq!(results[0].status, Some(0));
     }
 

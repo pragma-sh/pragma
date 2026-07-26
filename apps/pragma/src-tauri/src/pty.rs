@@ -437,6 +437,11 @@ pub(crate) fn sidecar_executable(name: &str) -> PathBuf {
     pragma_client::sidecar_executable(name)
 }
 
+/// Appends this platform's executable suffix (`.exe` on Windows) to a bare name.
+pub(crate) fn executable_name(name: &str) -> String {
+    pragma_client::executable_name(name)
+}
+
 pub(crate) fn cargo_executable() -> PathBuf {
     pragma_client::cargo_executable()
 }

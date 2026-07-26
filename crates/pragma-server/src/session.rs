@@ -1198,12 +1198,20 @@ mod tests {
 
     #[test]
     fn cli_dir_is_prepended_to_path_once() {
-        let path = path_with_cli_dir_from(
-            Path::new("/Users/test/.local/bin/pragma-cli"),
-            Some("/usr/bin:/Users/test/.local/bin:/bin".into()),
-        );
+        // Build both the fixture and the expectation with `join_paths` rather than
+        // a literal `:`-joined string. PATH is `;`-separated on Windows, so a
+        // hardcoded POSIX list arrives as one opaque entry there: the dedup below
+        // silently finds nothing to drop and the assertion fails for the wrong
+        // reason. `path_with_cli_dir_from` itself uses split_paths/join_paths.
+        let cli_dir = Path::new("/Users/test/.local/bin");
+        let existing = std::env::join_paths([Path::new("/usr/bin"), cli_dir, Path::new("/bin")])
+            .expect("join existing");
+        let expected = std::env::join_paths([cli_dir, Path::new("/usr/bin"), Path::new("/bin")])
+            .expect("join expected");
 
-        assert_eq!(path, "/Users/test/.local/bin:/usr/bin:/bin");
+        let path = path_with_cli_dir_from(&cli_dir.join("pragma-cli"), Some(existing));
+
+        assert_eq!(path, expected.to_string_lossy());
     }
 
     #[test]

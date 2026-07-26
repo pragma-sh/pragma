@@ -344,7 +344,7 @@ impl PragmaClient {
             self.kill_stale_server();
             self.spawn_server()?;
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = self.spawn_deadline();
         loop {
             match self.connect_compatible() {
                 Ok(Some(_)) => return Ok(()),
@@ -368,6 +368,15 @@ impl PragmaClient {
         }
     }
 
+    /// How long a freshly spawned server gets to start accepting connections.
+    fn spawn_deadline(&self) -> Instant {
+        let compiles = matches!(
+            &self.endpoint,
+            ClientEndpoint::ManagedLocal(config) if config.debug
+        );
+        Instant::now() + spawn_wait(compiles)
+    }
+
     /// Connects to a compatible server, spawning a managed local server if needed.
     pub fn connect_with_spawn(&self) -> ClientResult<LocalStream> {
         if let Some(stream) = self.connect_compatible()? {
@@ -378,7 +387,7 @@ impl PragmaClient {
             return Ok(stream);
         }
         self.spawn_server()?;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = self.spawn_deadline();
         loop {
             match self.connect_compatible() {
                 Ok(Some(stream)) => return Ok(stream),
@@ -711,22 +720,31 @@ impl PragmaClient {
 /// nothing to do here. Windows has no `fork`, so detaching has to happen at
 /// creation time instead:
 ///
-/// - `DETACHED_PROCESS` keeps the server off this process's console, so closing
-///   the app's console does not deliver a close event to the server.
+/// - `CREATE_NO_WINDOW` gives the child its own console that is never displayed.
+///   That keeps it off *this* process's console — so closing the app's console
+///   delivers no close event — while still leaving it *a* console to inherit
+///   down the chain.
 /// - `CREATE_NEW_PROCESS_GROUP` stops a Ctrl+C in the launching console from
 ///   being broadcast to the server.
-/// - `CREATE_NO_WINDOW` prevents a console window from flashing up, which is
-///   what the user would otherwise see every time a server starts.
+///
+/// **`DETACHED_PROCESS` must not be added back.** Win32 documents
+/// `CREATE_NO_WINDOW` as *ignored* when combined with `DETACHED_PROCESS` (or
+/// `CREATE_NEW_CONSOLE`), so the pair left the child with **no** console at all
+/// — and a console grandchild spawned from a consoleless parent gets a brand-new
+/// *visible* one. In a debug build the server and gateway are started via
+/// `cargo run`, so every `cargo`, `rustc`, and `pragma-server.exe` in that chain
+/// popped a console window: the "command prompts launching at random" during
+/// `bun run dev`. The flags below are what the old doc comment already claimed
+/// this function did.
 fn detach_spawned(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
 
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        command
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | pragma_platform::process::CREATE_NO_WINDOW);
     }
     #[cfg(not(windows))]
     {
@@ -1137,6 +1155,27 @@ fn server_dir(config: &LocalServerConfig) -> PathBuf {
     }
 }
 
+/// How long to wait for a just-spawned server to accept connections.
+///
+/// `compiles` is true for a debug spawn, which runs `cargo run -p pragma-server`
+/// and may **build** the server first — and during `bun run dev` it also contends
+/// with the app's own build for the cargo build-directory lock ("Blocking waiting
+/// for file lock on build directory"). A release spawn just execs the staged
+/// sidecar, where five seconds is already generous.
+///
+/// Five seconds in debug expires routinely on a cold or contended build: each
+/// bridge then reports "server did not become reachable", and their retries race
+/// each other into "pragma-server is already running (lock held)". Waiting longer
+/// costs nothing in the common case — the caller polls every 100ms and returns the
+/// moment it connects, so this is a ceiling, not a delay.
+fn spawn_wait(compiles: bool) -> Duration {
+    if compiles {
+        Duration::from_mins(2)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
 fn configure_stream(stream: &LocalStream) -> ClientResult<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -1181,7 +1220,27 @@ mod tests {
     use pragma_platform::ipc::LocalStream;
     use std::path::Path;
 
-    use super::{configure_rpc_stream, configure_stream, instance_data_dir, PragmaClient};
+    use super::{
+        configure_rpc_stream, configure_stream, instance_data_dir, spawn_wait, PragmaClient,
+    };
+
+    /// A debug spawn compiles the server through `cargo run`, so it must get more
+    /// than the release path's exec-only budget. Too short a debug wait is what
+    /// made every dev start log "server did not become reachable" and then race
+    /// its own retry into "pragma-server is already running".
+    #[test]
+    fn debug_spawn_waits_longer_than_a_release_exec() {
+        let release = spawn_wait(false);
+        let debug = spawn_wait(true);
+        assert!(
+            debug > release,
+            "debug wait {debug:?} must exceed release wait {release:?}"
+        );
+        // Long enough to cover a contended cargo build, not so long that a truly
+        // dead server hangs the caller indefinitely.
+        assert!(debug >= std::time::Duration::from_mins(1));
+        assert!(debug <= std::time::Duration::from_mins(5));
+    }
 
     #[test]
     fn rpc_wait_disables_and_then_restores_read_timeout() {

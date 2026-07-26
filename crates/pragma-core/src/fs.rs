@@ -724,7 +724,12 @@ mod tests {
         let resolved = resolve_in_worktree(dir.path(), "src/app.ts").expect("resolve");
         assert!(resolved.ends_with("src/app.ts"));
         let root = resolve_in_worktree(dir.path(), "").expect("resolve root");
-        assert_eq!(root, dir.path().canonicalize().expect("canon"));
+        // Same canonicalizer as the code under test: `std::fs`'s keeps the `\\?\`
+        // verbatim prefix on Windows, which `resolve_in_worktree` strips.
+        assert_eq!(
+            root,
+            pragma_platform::path::canonicalize(dir.path()).expect("canon")
+        );
     }
 
     #[test]
@@ -732,8 +737,18 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let outside = tempdir().expect("outside tempdir");
         std::fs::write(outside.path().join("secret.txt"), "secret").expect("write secret");
+        let link = dir.path().join("link");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).expect("symlink");
+        std::os::unix::fs::symlink(outside.path(), &link).expect("symlink");
+        #[cfg(windows)]
+        {
+            // Symlink creation needs Developer Mode or admin. Without that
+            // privilege no link exists, so the escape this test guards is
+            // unreachable — skip rather than assert a vacuous pass.
+            if std::os::windows::fs::symlink_dir(outside.path(), &link).is_err() {
+                return;
+            }
+        }
         assert!(resolve_in_worktree(dir.path(), "link/secret.txt").is_err());
     }
 
