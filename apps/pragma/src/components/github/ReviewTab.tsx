@@ -766,6 +766,7 @@ function ReviewThreadComments({ thread }: { thread: ReviewThread }) {
 }
 
 /** Resolve / Fix / Add-to-fix-it-list buttons for a thread. */
+// fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated components (WorktreeRowActions, WorktreeContextMenu); not extractable logic.
 function ReviewThreadActions({
   thread,
   busy,
