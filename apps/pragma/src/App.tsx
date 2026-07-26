@@ -8,6 +8,7 @@ import { AutomationsProvider } from "@/state/automations-context";
 import { GitHubProvider } from "@/state/github-context";
 import { KanbanProvider } from "@/state/kanban-context";
 import { OpenPortsProvider } from "@/state/open-ports-context";
+import { ThemeProvider } from "@/state/theme-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
 
 function App() {
@@ -15,19 +16,21 @@ function App() {
     <AiProvider>
       <GitHubProvider>
         <WorkspaceProvider>
-          <PluginProvider>
-            <OpenPortsProvider>
-              <KanbanProvider>
-                <AutomationsProvider>
-                  <ConfirmCloseProvider>
-                    <WorkspaceShell />
-                    <GitHubSetupModal />
-                    <AiSetupModal />
-                  </ConfirmCloseProvider>
-                </AutomationsProvider>
-              </KanbanProvider>
-            </OpenPortsProvider>
-          </PluginProvider>
+          <ThemeProvider>
+            <PluginProvider>
+              <OpenPortsProvider>
+                <KanbanProvider>
+                  <AutomationsProvider>
+                    <ConfirmCloseProvider>
+                      <WorkspaceShell />
+                      <GitHubSetupModal />
+                      <AiSetupModal />
+                    </ConfirmCloseProvider>
+                  </AutomationsProvider>
+                </KanbanProvider>
+              </OpenPortsProvider>
+            </PluginProvider>
+          </ThemeProvider>
         </WorkspaceProvider>
       </GitHubProvider>
     </AiProvider>

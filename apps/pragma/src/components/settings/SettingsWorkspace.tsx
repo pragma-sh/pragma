@@ -6,6 +6,7 @@ import {
   Blocks,
   Keyboard,
   LogOut,
+  Palette,
   RefreshCw,
   Smartphone,
   Sparkles,
@@ -21,6 +22,7 @@ import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { ThemeSection } from "@/components/settings/ThemeSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
@@ -42,12 +44,13 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section = "plugins" | "keybindings" | "agentStatus" | "github" | "ai" | "mobile";
+type Section = "plugins" | "keybindings" | "theme" | "agentStatus" | "github" | "ai" | "mobile";
 
 /** Sections that read and write per-project settings as well as global ones. */
 const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
   "plugins",
   "keybindings",
+  "theme",
   "agentStatus",
 ]);
 
@@ -272,6 +275,13 @@ function SettingsNavigation({
         Keybindings
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "theme"}
+        icon={<Palette />}
+        onClick={() => setSection("theme")}
+      >
+        Theme
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "agentStatus"}
         icon={<BellRing />}
         onClick={() => setSection("agentStatus")}
@@ -338,6 +348,17 @@ function SettingsContent({
   scope: ConfigScope;
   section: Section;
 }) {
+  // The Theme page reads `.pragma/theme.json`, not the `config.json` document
+  // the rest of Settings loads, so it renders past that load state.
+  if (section === "theme") {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <ThemeSection projectId={projectId} scope={scope} />
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="min-w-0 flex-1 overflow-auto p-8">
       <div className="mx-auto max-w-3xl">

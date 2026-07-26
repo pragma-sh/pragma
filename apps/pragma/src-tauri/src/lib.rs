@@ -1060,6 +1060,8 @@ pub fn run() {
             gateway_devices,
             config_file::read_config,
             config_file::write_config,
+            config_file::read_theme,
+            config_file::write_theme,
             config_file::read_keybindings_file,
             config_file::write_keybindings_file,
             agent_sounds::list_agent_sounds,

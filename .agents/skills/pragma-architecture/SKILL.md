@@ -47,26 +47,29 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 
 ## Where does it go?
 
-| What you're adding                               | Where                                                    |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| Value used by BOTH frontend and backend          | `packages/constants` (`values.json`)                     |
-| Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                                   |
-| Reusable logic/types a future app could use      | a NEW `packages/*` package                               |
-| Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                           |
-| Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                     |
-| Automation authoring API / host sidecar          | `packages/automations` (`@pragma/automations`)           |
-| Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                          |
-| Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)              |
-| opencode runtime integration plugin              | `packages/opencode-plugin`                               |
-| Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                           |
-| A reusable UI primitive                          | `bunx shadcn@latest add <c>` → `components/ui`           |
-| A feature component (composition of primitives)  | elsewhere under `src/`                                   |
-| PTY/session ownership                            | `crates/pragma-server`                                   |
-| Daemon wire frame types/framing                  | `crates/pragma-protocol`                                 |
-| External agent report CLI                        | `crates/pragma-cli`                                      |
-| Terminal rendering/output flow                   | `apps/pragma/src/lib/terminal-manager.ts`                |
-| Project script config/headless lifecycle         | `apps/pragma/src-tauri/src/scripts.rs` + host `exec` RPC |
-| Interactive run-script planning                  | `apps/pragma/src/lib/scripts.ts`                         |
+| What you're adding                               | Where                                                          |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| Value used by BOTH frontend and backend          | `packages/constants` (`values.json`)                           |
+| Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                                         |
+| Reusable logic/types a future app could use      | a NEW `packages/*` package                                     |
+| Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                                 |
+| Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                           |
+| Automation authoring API / host sidecar          | `packages/automations` (`@pragma/automations`)                 |
+| Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                                |
+| Built-in AI prompt/helper logic                  | `packages/ai-helpers` (`pragma-ai` sidecar)                    |
+| opencode runtime integration plugin              | `packages/opencode-plugin`                                     |
+| Code that calls the Rust backend                 | `apps/pragma/src/lib/tauri.ts`                                 |
+| A reusable UI primitive                          | `bunx shadcn@latest add <c>` → `components/ui`                 |
+| A shipped default color/design token             | `apps/pragma/src/index.css` ONLY (parsed by `theme-tokens.ts`) |
+| A sourced built-in theme palette                 | `apps/pragma/src/lib/theme-presets.ts`                         |
+| User color overrides (global/project)            | `.pragma/theme.json` via `apps/pragma/src/lib/theme.ts`        |
+| A feature component (composition of primitives)  | elsewhere under `src/`                                         |
+| PTY/session ownership                            | `crates/pragma-server`                                         |
+| Daemon wire frame types/framing                  | `crates/pragma-protocol`                                       |
+| External agent report CLI                        | `crates/pragma-cli`                                            |
+| Terminal rendering/output flow                   | `apps/pragma/src/lib/terminal-manager.ts`                      |
+| Project script config/headless lifecycle         | `apps/pragma/src-tauri/src/scripts.rs` + host `exec` RPC       |
+| Interactive run-script planning                  | `apps/pragma/src/lib/scripts.ts`                               |
 
 ## Decision rules
 

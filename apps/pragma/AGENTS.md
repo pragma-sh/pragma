@@ -18,6 +18,10 @@ apps/pragma/
 │   │   ├── native-editing.ts    # OS text-editing chords → readline sequences
 │   │   ├── agent-alert.ts       # Alert latch (chime + notification, fires at most once)
 │   │   ├── native-overlay.ts    # Ref-counted suppression store for native webview overlays
+│   │   ├── theme.ts             # `.pragma/theme.json` parse/merge/apply (CSS var overrides)
+│   │   ├── theme-tokens.ts      # Themeable color catalog + defaults parsed from index.css
+│   │   ├── theme-presets.ts     # Sourced built-in palettes adapted to light/dark theme files
+│   │   ├── theme-color.ts       # The only oklch ⇄ sRGB boundary (culori)
 │   │   ├── brand-icons.ts/json  # Curated offline icon subset (lucide + simple-icons)
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
@@ -27,6 +31,7 @@ apps/pragma/
 │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
 │   │   ├── kanban-context.tsx      # Project prompt board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
+│   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
@@ -81,6 +86,32 @@ apps/pragma/
 - Use the `cn()` helper (`src/lib/utils.ts`) for conditional classes. Theme tokens live
   in `src/index.css` (`@theme`/CSS variables) — use semantic tokens (`bg-background`,
   `text-muted-foreground`), not raw colors.
+
+### User themes (`.pragma/theme.json`)
+
+`src/index.css` stays the **single source of truth for the shipped defaults**. The
+themeable catalog is not mirrored in TypeScript: `src/lib/theme-tokens.ts` imports
+`index.css` with `?raw` and parses the `:root` (light) and `.dark` (dark) blocks, so a
+new color variable is picked up automatically — `theme-tokens.test.ts` fails until it is
+also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports to `""`,
+`vitest.config.ts` sets `css: true`; don't remove it.
+
+- Overrides live in an optional `.pragma/theme.json` at two scopes (path from
+  `constants.theme.fileName`), read/written by `read_theme`/`write_theme`. Layers merge
+  per token: `index.css` <- global <- project, so switching projects re-applies instantly.
+- `applyThemeOverrides` injects one `<style id="pragma-theme-overrides">` at the end of
+  `<head>`, under **doubled selectors** (`:root:root`, `.dark.dark`). A themed dark
+  `sidebar` also gets a higher-specificity `.dark.dark.vibrancy` rule that mixes its
+  selected tint to 40% opacity, preserving macOS desktop blur.
+- Values are persisted as `oklch(...)` to match the defaults. `src/lib/theme-color.ts` is
+  the only place that converts; the shadcn color picker speaks sRGB, so colors outside the
+  sRGB gamut clamp when edited through it.
+- Built-in palettes live in `src/lib/theme-presets.ts`, include sourced light and dark
+  ramps, and replace only the selected scope's `colors` block when applied. Selecting
+  Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
+  authoritative; merged values equal to a stylesheet default are also omitted.
+- The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
+  light ramp by temporarily removing the `dark` (and `vibrancy`) classes.
 
 ## GitHub integration
 

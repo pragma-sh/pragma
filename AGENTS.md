@@ -145,9 +145,14 @@ than no guide.
   belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`) so Rust and
   TS agree, never hard-coded in one language.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
-  and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, and
-  Agent Status have both a global and a project scope (project wins); GitHub, AI, and
+  and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
+  and Agent Status have both a global and a project scope (project wins); GitHub, AI, and
   mobile pairing/gateway history are global-only.
+- Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
+  merged `index.css` defaults <- global <- project. Never restate a shipped default color in
+  TS or Rust: `apps/pragma/src/index.css` is the source of truth and the token catalog is
+  parsed from it. Sourced built-in palettes live in `apps/pragma/src/lib/theme-presets.ts`.
+  See _User themes_ in `apps/pragma/AGENTS.md`.
 - Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
   project root for project clips) and are read through the owning host, so a remote
   project's clips work the same as a local one's.

@@ -1,10 +1,10 @@
 //! Global/project `.pragma` file access for Settings controls.
 //!
-//! `config.json` and `keybindings.json` are edited the same way — a global file
-//! under the home directory and a per-project file under the project's main
-//! worktree — so both go through one scoped reader/writer. Project files are
-//! reached over the owning host's filesystem RPC, which keeps SSH-bridged
-//! projects working without a second code path.
+//! `config.json`, `keybindings.json`, and the optional `theme.json` are edited
+//! the same way — a global file under the home directory and a per-project file
+//! under the project's main worktree — so all three go through one scoped
+//! reader/writer. Project files are reached over the owning host's filesystem
+//! RPC, which keeps SSH-bridged projects working without a second code path.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -263,6 +263,51 @@ pub async fn write_keybindings_file(
         scope,
         project_id,
         CONSTANTS.keybindings.config_file_name.as_str(),
+        contents,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Reads the optional `.pragma/theme.json` color overrides for a scope. A
+/// missing file is not an error — the frontend treats it as "no overrides".
+#[tauri::command]
+pub async fn read_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+) -> AppResult<ConfigDocument> {
+    read_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.as_str(),
+    )
+    .await
+}
+
+/// Writes `.pragma/theme.json` for a scope. Unlike `config.json` this needs no
+/// plugin reload — the frontend re-applies the CSS variables itself.
+#[tauri::command]
+pub async fn write_theme(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    scope: ConfigScope,
+    project_id: Option<String>,
+    contents: String,
+) -> AppResult<()> {
+    write_scoped(
+        app,
+        &db,
+        &hosts,
+        scope,
+        project_id,
+        CONSTANTS.theme.file_name.as_str(),
         contents,
     )
     .await?;
