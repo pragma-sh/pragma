@@ -282,7 +282,16 @@ without updating this guide and CI.
   `set: pipefail: invalid option name` (the `\r` hides itself by wrapping the cursor).
   `*.sh` and the Husky hooks are therefore forced to `eol=lf`. After pulling a change to
   `.gitattributes`, an existing Windows checkout still holds the old CRLF files — refresh
-  it with `git rm --cached -r . && git reset --hard`.
+  it with `git rm --cached -r . && git reset --hard` (commit or stash first: that command
+  discards uncommitted work).
+- **The whole tree is `eol=lf`, not just `*.sh`.** Every blob here is already LF; the
+  hazard is `text=auto` **alone**, which lets `core.autocrlf=true` write CRLF into a
+  Windows working tree. oxfmt enforces LF, so `bun run format:check` (and thus
+  `bun run check`) fails on _every_ file on Windows while CI stays green — Linux/macOS
+  check out LF regardless. Diagnose this by byte count, not `grep '\r'`: MSYS `grep -U`
+  reports CRs inconsistently under Git Bash. Compare `git cat-file -s HEAD:<file>` with
+  the on-disk size — a positive difference equal to the line count means the worktree is
+  CRLF while the blob is LF.
 
 **Minimum Windows version: 10 version 1809 (build 17763), October 2018.** ConPTY sets
 that floor, and it is a hard one — `portable-pty` resolves `CreatePseudoConsole` from

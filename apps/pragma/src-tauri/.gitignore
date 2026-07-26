@@ -6,6 +6,14 @@
 # Staged Tauri sidecar binaries (built by scripts/stage-daemon-sidecar.sh)
 /binaries/
 
+# Bundled plugin resources staged by scripts/stage-bundled-plugins.sh.
+# This must be ignored *here*, not only in the repo-root .gitignore: the
+# `tauri dev` file watcher is rooted at src-tauri and only reads this file
+# (and .taurignore), so a root-level entry does not reach it. Without this,
+# staging the plugins immediately before `tauri dev` starts trips the watcher
+# and forces a full rebuild of the app on every `bun run dev`.
+/resources/plugins/
+
 # Stale bundled plugin/agent resources from older staging layouts.
 /resources/pragma/agents/
 /resources/pragma/plugins/

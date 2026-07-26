@@ -290,8 +290,17 @@ plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using
 `CONSTANTS.plugins.bundledDirName`. While `tauri dev` is running, use
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
-frontend mtime poll then hot-reloads the staged bundle. `binaries/` is
-git-ignored.
+frontend mtime poll then hot-reloads the staged bundle.
+
+**Anything the staging scripts write under `src-tauri/` must be ignored in
+`src-tauri/.gitignore`, not just the repo-root `.gitignore`.** The `tauri dev` file
+watcher is rooted at `src-tauri` and only reads that file (plus `.taurignore`), so a
+root-level entry is invisible to it. Because `tauri:dev` stages sidecars and bundled
+plugins immediately before starting `tauri dev`, a missing entry means the watcher sees
+its own staging writes, kills the app, and forces a full rebuild on every `bun run dev`
+— and on Windows a relink can then collide with the still-running `pragma.exe`, which
+holds a lock on its own binary. `binaries/` and `resources/plugins/` are both ignored
+there for exactly this reason.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build
@@ -332,6 +341,17 @@ are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them
 (`PtyClient::read_log`, reading `log_path()` — beside the socket, not app data). Add a
 menu action: id const + item in `install_menu`, `MenuAction` variant +
 branch in `handleMenuAction`.
+
+Workspace accelerators (Settings, New Terminal Tab, Close Tab, Command Palette, Command
+Mode) **must** be real menu items — the webview otherwise swallows chords like `⌘T`/`⌃T`.
+`install_workspace_menu` builds them once, then hands them to `install_macos_workspace_menu`
+or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
+share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
+it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
+generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated
+`#[cfg(not(target_os = "macos"))]`, never `#[cfg(target_os = "linux")]`: the latter
+silently drops every accelerator on Windows _and_ trips `-D warnings` there, since all
+five bindings then go unused.
 
 ## Deep links (`pragma://open`)
 
