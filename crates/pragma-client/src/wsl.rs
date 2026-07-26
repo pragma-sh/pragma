@@ -151,7 +151,7 @@ pub fn list_distros() -> Result<Vec<WslDistro>, WslError> {
         .iter()
         .map(String::as_str)
         .collect();
-    let output = std::process::Command::new(launcher)
+    let output = pragma_platform::process::command(launcher)
         .args(&args)
         .output()
         .map_err(|error| WslError::Unavailable(error.to_string()))?;
@@ -247,7 +247,8 @@ async fn relay_connection(
     distro: &str,
     local_stream: pragma_platform::ipc::LocalStream,
 ) -> Result<(), WslError> {
-    let mut child = tokio::process::Command::new(&CONSTANTS.platform.wsl.launcher)
+    let mut command = tokio::process::Command::new(&CONSTANTS.platform.wsl.launcher);
+    command
         .args([
             "-d",
             distro,
@@ -258,8 +259,9 @@ async fn relay_connection(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()?;
+        .kill_on_drop(true);
+    hide_console(&mut command);
+    let mut child = command.spawn()?;
 
     let stdin = child.stdin.take().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::BrokenPipe, "wsl relay has no stdin")
@@ -273,10 +275,30 @@ async fn relay_connection(
     Ok(())
 }
 
+/// Keeps `wsl.exe` from flashing a console window.
+///
+/// `pragma_platform::process::hide_console` takes a `std::process::Command`;
+/// tokio's has its own `creation_flags`, so the flag is applied here from the
+/// same constant. On a non-Windows host there is no console to suppress —
+/// `wsl.exe` does not exist there and the calls report `Unavailable` — so the
+/// empty twin drops nothing.
+fn hide_console(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(pragma_platform::process::CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 /// Runs the bootstrap command inside the distribution.
 async fn bootstrap(distro: &str, command: &str) -> Result<(), WslError> {
-    let output = tokio::process::Command::new(&CONSTANTS.platform.wsl.launcher)
-        .args(["-d", distro, "--exec", "/bin/sh", "-c", command])
+    let mut launcher = tokio::process::Command::new(&CONSTANTS.platform.wsl.launcher);
+    launcher.args(["-d", distro, "--exec", "/bin/sh", "-c", command]);
+    hide_console(&mut launcher);
+    let output = launcher
         .output()
         .await
         .map_err(|error| WslError::Unavailable(error.to_string()))?;

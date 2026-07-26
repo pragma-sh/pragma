@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -32,7 +32,7 @@ fn install_bin_dir(home: &Path, data_dir: &Path, channel: &str) -> PathBuf {
 
 fn agent_source() -> AppResult<PathBuf> {
     if cfg!(debug_assertions) {
-        let status = Command::new(cargo_executable())
+        let status = pragma_platform::process::command(cargo_executable())
             .args(["build", "-p", "pragma-cli"])
             .current_dir(workspace_root())
             .stdin(Stdio::null())

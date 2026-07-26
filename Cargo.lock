@@ -5487,6 +5487,7 @@ dependencies = [
  "ignore",
  "notify-debouncer-full",
  "pragma-constants",
+ "pragma-platform",
  "serde",
  "serde_json",
  "tempfile",

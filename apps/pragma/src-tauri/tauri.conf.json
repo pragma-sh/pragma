@@ -21,10 +21,7 @@
         "resizable": true,
         "fullscreen": false,
         "theme": "Dark",
-        "dragDropEnabled": false,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "dragDropEnabled": false
       }
     ],
     "security": {

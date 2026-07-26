@@ -217,7 +217,7 @@ fn palette_search(
         let mut truncated = false;
 
         'roots: for search_root in roots {
-            let root = Path::new(&search_root.root).canonicalize()?;
+            let root = pragma_platform::path::canonicalize(&search_root.root)?;
             for relative in search_paths(&root) {
                 if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
                     truncated = true;
@@ -466,7 +466,7 @@ fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
 /// the result is still under the canonical root — defeating symlink escapes.
 pub fn resolve_in_worktree(root: &Path, relative: &str) -> CoreResult<PathBuf> {
     let rel = validate_relative(relative)?;
-    let canonical_root = root.canonicalize()?;
+    let canonical_root = pragma_platform::path::canonicalize(root)?;
     let joined = canonical_root.join(&rel);
 
     let mut ancestor = joined.clone();
@@ -481,7 +481,10 @@ pub fn resolve_in_worktree(root: &Path, relative: &str) -> CoreResult<PathBuf> {
         };
         ancestor = parent.to_path_buf();
     }
-    let mut resolved = ancestor.canonicalize()?;
+    // Must use the same canonicalizer as the root above: a verbatim-prefixed
+    // path never `starts_with` a plain one, and the containment check would
+    // reject every legitimate path on Windows.
+    let mut resolved = pragma_platform::path::canonicalize(&ancestor)?;
     for name in tail.iter().rev() {
         resolved.push(name);
     }

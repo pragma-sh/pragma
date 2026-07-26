@@ -12,6 +12,7 @@ workspace = true
 ignore = "0.4"
 notify-debouncer-full = "0.7"
 pragma-constants = { path = "../../packages/constants" }
+pragma-platform = { path = "../pragma-platform" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

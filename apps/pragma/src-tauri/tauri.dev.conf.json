@@ -1,25 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pragma Dev",
-  "app": {
-    "macOSPrivateApi": true,
-    "windows": [
-      {
-        "title": "Pragma Dev",
-        "width": 1024,
-        "height": 768,
-        "minWidth": 640,
-        "minHeight": 480,
-        "resizable": true,
-        "fullscreen": false,
-        "theme": "Dark",
-        "dragDropEnabled": false,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
-      }
-    ]
-  },
   "bundle": {
     "icon": [
       "icons-dev/32x32.png",

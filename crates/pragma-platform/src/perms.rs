@@ -69,7 +69,7 @@ fn restrict_to_owner_inner(path: &Path, is_dir: bool) -> io::Result<()> {
 
 #[cfg(windows)]
 fn restrict_to_owner_inner(path: &Path, is_dir: bool) -> io::Result<()> {
-    use std::process::Command;
+    use crate::process::command;
 
     let principal = owner_principal()?;
     // `(OI)(CI)` makes the grant inheritable by files and subdirectories, which
@@ -80,7 +80,7 @@ fn restrict_to_owner_inner(path: &Path, is_dir: bool) -> io::Result<()> {
         format!("{principal}:(F)")
     };
 
-    let output = Command::new("icacls")
+    let output = command("icacls")
         .arg(path)
         .arg("/inheritance:r")
         .arg("/grant:r")

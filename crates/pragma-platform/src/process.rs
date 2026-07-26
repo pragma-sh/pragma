@@ -9,10 +9,58 @@
 //!
 //! Unix does this with `kill`/`pkill`/`ps`; Windows with `taskkill`/`tasklist`.
 //! Both are wrapped here so no caller has to know which it is running on.
+//!
+//! Every one of those helpers is a *console* program, which is why this module
+//! also owns [`command`]/[`hide_console`]: on Windows a console program spawned
+//! from a GUI process gets its own console window unless told otherwise.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+
+/// Creates a child-process command that never flashes a console window.
+///
+/// Prefer this over `Command::new` for anything Pragma runs on the user's
+/// behalf. See [`hide_console`] for why.
+#[must_use]
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    hide_console(&mut command);
+    command
+}
+
+/// Suppresses the console window Windows gives a console program spawned from
+/// a GUI process. No-op on Unix.
+///
+/// Pragma's UI process shells out constantly — `git` on every status refresh,
+/// `powershell` on every process-table poll for port attribution, `wsl.exe`
+/// when enumerating distributions. Without `CREATE_NO_WINDOW` each of those is
+/// a console window that pops up, steals focus, and vanishes: not one stray
+/// window but a stream of them, on a timer.
+///
+/// This is deliberately separate from the detach flags in `pragma-client`'s
+/// server spawn: those additionally cut the child loose from this process's
+/// console and process group, which a short-lived query must *not* do.
+pub fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+/// Windows process-creation flag: run a console program with no console window.
+///
+/// Exported for spawners that cannot take a `std::process::Command` — notably
+/// `tokio::process::Command`, whose `creation_flags` is its own method — so the
+/// value itself still has exactly one definition.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// A process in the host's process table.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +79,7 @@ pub struct ProcessEntry {
 pub fn list_processes() -> Result<HashMap<u32, ProcessEntry>, String> {
     #[cfg(unix)]
     {
-        let output = Command::new("ps")
+        let output = command("ps")
             .args(["-axo", "pid=,ppid=,comm="])
             .output()
             .map_err(|error| format!("failed to inspect processes: {error}"))?;
@@ -47,7 +95,7 @@ pub fn list_processes() -> Result<HashMap<u32, ProcessEntry>, String> {
         // `tasklist` does not report a parent pid, and `wmic` is deprecated and
         // absent from recent Windows builds. CIM through PowerShell is the
         // supported way to read the parent/child chain.
-        let output = Command::new("powershell")
+        let output = command("powershell")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -161,14 +209,14 @@ fn linux_cmdline_name(pid: u32) -> Option<String> {
 pub fn kill(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        Command::new("kill")
+        command("kill")
             .args(["-KILL", &pid.to_string()])
             .status()
             .is_ok_and(|status| status.success())
     }
     #[cfg(windows)]
     {
-        Command::new("taskkill")
+        command("taskkill")
             .args(["/F", "/PID", &pid.to_string()])
             .output()
             .is_ok_and(|output| output.status.success())
@@ -186,14 +234,14 @@ pub fn kill(pid: u32) -> bool {
 pub fn kill_tree(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        let _ = Command::new("pkill")
+        let _ = command("pkill")
             .args(["-KILL", "-P", &pid.to_string()])
             .status();
         kill(pid)
     }
     #[cfg(windows)]
     {
-        Command::new("taskkill")
+        command("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .output()
             .is_ok_and(|output| output.status.success())
@@ -208,9 +256,7 @@ pub fn kill_tree(pid: u32) -> bool {
 pub fn kill_matching(pattern: &str) {
     #[cfg(unix)]
     {
-        let _ = Command::new("pkill")
-            .args(["-KILL", "-f", pattern])
-            .status();
+        let _ = command("pkill").args(["-KILL", "-f", pattern]).status();
     }
     #[cfg(windows)]
     {
@@ -222,9 +268,7 @@ pub fn kill_matching(pattern: &str) {
         } else {
             format!("{pattern}.exe")
         };
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", &image])
-            .output();
+        let _ = command("taskkill").args(["/F", "/IM", &image]).output();
     }
 }
 
@@ -236,7 +280,7 @@ pub fn kill_matching(pattern: &str) {
 pub fn process_name(pid: u32) -> Option<String> {
     #[cfg(unix)]
     {
-        let output = Command::new("ps")
+        let output = command("ps")
             .args(["-p", &pid.to_string(), "-o", "comm="])
             .output()
             .ok()?;
@@ -248,7 +292,7 @@ pub fn process_name(pid: u32) -> Option<String> {
     }
     #[cfg(windows)]
     {
-        let output = Command::new("tasklist")
+        let output = command("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .output()
             .ok()?;

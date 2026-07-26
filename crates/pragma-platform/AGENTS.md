@@ -14,14 +14,47 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The four seams
+## The five seams
 
 | Module    | Unix                                 | Windows                                                 |
 | --------- | ------------------------------------ | ------------------------------------------------------- |
-| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 build 17063+)      |
+| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 1803+)             |
+| `path`    | `std::fs::canonicalize`              | …then strip the `\\?\` verbatim prefix                  |
 | `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)`             |
 | `process` | `kill`, `pkill`, `ps`                | `taskkill`, `tasklist`, `Get-CimInstance Win32_Process` |
 | `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`                  |
+
+### `path` — a canonical path git can read back
+
+`std::fs::canonicalize` on Windows returns an extended-length path,
+`\\?\C:\Users\dev\project`. That prefix is a Win32 API convention, not something other
+programs parse: git reads it as the UNC path `//?/C:/…` and `git worktree add` dies with
+`could not create leading directories … Invalid argument`. Pragma stores canonical
+project roots and then hands them to git, so **every canonicalization goes through
+`path::canonicalize`**, never `std`'s directly.
+
+Two consequences that bite if you forget:
+
+- A verbatim path never `starts_with` a plain one. Both sides of a containment check
+  (`fs::resolve_in_worktree`) must use the same canonicalizer or the check rejects
+  everything on Windows.
+- Paths at or past `MAX_PATH` keep the prefix, because there it is what makes them
+  openable at all.
+
+### `process` — also the console-window seam
+
+On Windows a _console_ program spawned from a GUI process gets its own console window. All
+four helpers here are console programs, and so is nearly everything Pragma shells out to
+(`git`, `wsl.exe`, sidecars). Without `CREATE_NO_WINDOW` the user sees windows popping up
+and vanishing on a timer — the process-table poll for port attribution alone is one per
+tick. Spawn through `process::command`, or apply `process::hide_console` to a command you
+built yourself; `CREATE_NO_WINDOW` is exported for spawners that cannot take a
+`std::process::Command` (tokio's has its own `creation_flags`).
+
+This is _not_ the same as the detach flags in `pragma-client`'s server spawn
+(`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`), which additionally cut
+the child loose from this process's console and process group. A short-lived query must
+not do that.
 
 ### `ipc` — why `AF_UNIX` and not named pipes
 

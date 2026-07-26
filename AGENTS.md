@@ -277,18 +277,37 @@ without updating this guide and CI.
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it with the
   `rust-windows` job plus a `windows-latest` entry in the `build` matrix.
 
+**Minimum Windows version: 10 version 1809 (build 17763), October 2018.** ConPTY sets
+that floor, and it is a hard one — `portable-pty` resolves `CreatePseudoConsole` from
+`kernel32.dll` and `expect`s it, so on an older build the server _panics_ (and release
+builds are `panic = "abort"`) the first time a terminal opens. The `AF_UNIX` transport
+needs only 1803, so it is not the binding constraint. Opening a **WSL** session needs
+1903 (18362) or later, because that is when `wsl.exe --list --verbose` and WSL2 arrived;
+PowerShell sessions have no such requirement. Nothing checks any of this at startup, so
+a user below the floor gets a panic rather than a message naming the reason; if that
+becomes a real support burden, the place to fix it is a probe in `pragma-platform`.
+
 **Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
 pattern is how a security guarantee quietly disappears — it is exactly what let the
 GitHub token be written world-readable on Windows. Platform differences belong in
-`crates/pragma-platform`, which owns four seams and has a real implementation for each
+`crates/pragma-platform`, which owns five seams and has a real implementation for each
 on every target:
 
-| Seam      | What it owns                                                             |
-| --------- | ------------------------------------------------------------------------ |
-| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows         |
-| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows |
-| `process` | Kill, kill-tree, liveness, and the process table                         |
-| `shell`   | Which shell a PTY launches, and its interactive arguments                |
+| Seam      | What it owns                                                                 |
+| --------- | ---------------------------------------------------------------------------- |
+| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows             |
+| `path`    | Canonical paths external programs accept (no Windows `\\?\` verbatim prefix) |
+| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows     |
+| `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning  |
+| `shell`   | Which shell a PTY launches, and its interactive arguments                    |
+
+Two of those are easy to bypass by reflex, and both bypasses are visible bugs on Windows:
+
+- **Canonicalize with `pragma_platform::path::canonicalize`, never `std::fs`'s.** `std`
+  returns `\\?\C:\…`, which git reads as a UNC path and refuses.
+- **Spawn with `pragma_platform::process::command` (or `process_env::command`, which
+  wraps it), never a bare `Command::new`.** A console program started from a GUI process
+  pops a console window on Windows unless `CREATE_NO_WINDOW` is set.
 
 ### Windows session modes
 

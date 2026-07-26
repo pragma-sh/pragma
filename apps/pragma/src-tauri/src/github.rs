@@ -12,7 +12,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
@@ -230,7 +229,7 @@ pub fn set_github_setup_dismissed(db: State<'_, Db>, dismissed: bool) -> AppResu
 
 /// True when the `gh` CLI is installed and authenticated.
 fn gh_is_authenticated() -> bool {
-    Command::new("gh")
+    crate::process_env::command("gh")
         .args(["auth", "status"])
         .output()
         .is_ok_and(|output| output.status.success())
@@ -238,7 +237,7 @@ fn gh_is_authenticated() -> bool {
 
 /// Reads the `gh` CLI's current token (`gh auth token`).
 fn gh_token() -> AppResult<String> {
-    let output = Command::new("gh")
+    let output = crate::process_env::command("gh")
         .args(["auth", "token"])
         .output()
         .map_err(|error| AppError::GitHub(format!("failed to run gh: {error}")))?;
