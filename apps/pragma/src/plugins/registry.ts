@@ -115,8 +115,8 @@ export function getAllPlugins(): PluginRecord[] {
  * registry but are filtered out here.
  */
 export function getActivePlugins(activeProjectId: string | null): PluginRecord[] {
-  return snapshot.filter(
-    (record) => record.scope !== "project" || record.projectId === activeProjectId,
+  return preferHigherScope(
+    snapshot.filter((record) => record.scope !== "project" || record.projectId === activeProjectId),
   );
 }
 
@@ -133,9 +133,17 @@ function usePlugins(): PluginRecord[] {
 
 /** React hook: records visible to the active project. */
 export function useActivePlugins(activeProjectId: string | null): PluginRecord[] {
-  return usePlugins().filter(
-    (record) => record.scope !== "project" || record.projectId === activeProjectId,
+  return preferHigherScope(
+    usePlugins().filter(
+      (record) => record.scope !== "project" || record.projectId === activeProjectId,
+    ),
   );
+}
+
+function preferHigherScope(records: PluginRecord[]): PluginRecord[] {
+  const winningIndex = new Map<string, number>();
+  records.forEach((record, index) => winningIndex.set(record.pluginId, index));
+  return records.filter((record, index) => winningIndex.get(record.pluginId) === index);
 }
 
 /** Collects one kind of contribution from loaded, visible plugins, tagged with its origin. */
