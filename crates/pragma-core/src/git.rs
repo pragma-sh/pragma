@@ -146,6 +146,16 @@ pub enum GitRequest {
     GithubPullBranch { root: String },
     /// Pulls then pushes the current branch to `origin`.
     GithubSyncBranch { root: String },
+    /// Syncs the current branch, then merges the latest base repository branch into it.
+    GithubMergeBaseBranch {
+        root: String,
+        base: String,
+        base_remote: Option<String>,
+    },
+    /// Discards conflict-resolution changes and aborts the active merge.
+    GithubAbortMerge { root: String },
+    /// Returns whether the worktree has an active merge.
+    GithubMergeInProgress { root: String },
     /// Pushes the current branch to `origin`, setting the upstream.
     GithubPushBranch { root: String },
     /// Deletes the current branch from `origin`.
@@ -288,6 +298,19 @@ fn handle_github_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         }
         GitRequest::GithubPullBranch { root } => to_value(github_pull_branch(Path::new(root))?)?,
         GitRequest::GithubSyncBranch { root } => to_value(github_sync_branch(Path::new(root))?)?,
+        GitRequest::GithubMergeBaseBranch {
+            root,
+            base,
+            base_remote,
+        } => to_value(github_merge_base_branch(
+            Path::new(root),
+            base,
+            base_remote.as_deref(),
+        )?)?,
+        GitRequest::GithubAbortMerge { root } => to_value(github_abort_merge(Path::new(root))?)?,
+        GitRequest::GithubMergeInProgress { root } => {
+            to_value(github_merge_in_progress(Path::new(root))?)?
+        }
         GitRequest::GithubPushBranch { root } => to_value(github_push_branch(Path::new(root))?)?,
         GitRequest::GithubDeleteRemoteBranch { root } => {
             to_value(github_delete_remote_branch(Path::new(root))?)?
@@ -911,6 +934,66 @@ fn github_sync_branch(root: &Path) -> CoreResult<()> {
     github_push_branch(root)
 }
 
+/// Syncs the PR head, then merges the latest origin base into it. Returns true
+/// when Git leaves conflicts in the worktree for the user to resolve.
+fn github_merge_base_branch(
+    root: &Path,
+    base: &str,
+    base_remote: Option<&str>,
+) -> CoreResult<bool> {
+    git_stdout(root, &["check-ref-format", "--branch", base])?;
+    github_sync_branch(root)?;
+
+    let base_ref = if let Some(remote) = base_remote {
+        git_stdout(root, &["fetch", "--", remote, base])?;
+        "FETCH_HEAD".to_string()
+    } else {
+        git_stdout(root, &["fetch", "origin"])?;
+        let base_ref = format!("refs/remotes/origin/{base}");
+        git_stdout(root, &["rev-parse", "--verify", &base_ref])?;
+        base_ref
+    };
+    let output = process_env::git()
+        .args(["-C", &path_string(root), "merge", "--no-edit", &base_ref])
+        .output()?;
+    if output.status.success() {
+        github_push_branch(root)?;
+        return Ok(false);
+    }
+    if has_unmerged_paths(root)? {
+        return Ok(true);
+    }
+    Err(CoreError::Operation(command_output(
+        &output.stdout,
+        &output.stderr,
+    )))
+}
+
+/// Discards all merge-conflict resolution changes and restores the pre-merge tree.
+fn github_abort_merge(root: &Path) -> CoreResult<()> {
+    if !github_merge_in_progress(root)? {
+        return Err(CoreError::InvalidPayload(
+            "No merge is in progress.".to_string(),
+        ));
+    }
+    git_stdout(root, &["merge", "--abort"]).map(|_| ())
+}
+
+/// Returns whether Git has an active merge for this worktree.
+fn github_merge_in_progress(root: &Path) -> CoreResult<bool> {
+    let merge_head = process_env::git()
+        .args([
+            "-C",
+            &path_string(root),
+            "rev-parse",
+            "-q",
+            "--verify",
+            "MERGE_HEAD",
+        ])
+        .output()?;
+    Ok(merge_head.status.success())
+}
+
 /// Pushes the current branch to origin and sets its upstream.
 fn github_push_branch(root: &Path) -> CoreResult<()> {
     let branch = current_branch(root)?;
@@ -1525,9 +1608,10 @@ mod tests {
 
     use super::{
         commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
-        github_fetch_and_sync, github_pull_branch, github_sync_branch, list_headless_worktrees,
-        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
-        worktree_commits, worktree_is_dirty, MergedStatusItem,
+        github_abort_merge, github_fetch_and_sync, github_merge_base_branch,
+        github_merge_in_progress, github_pull_branch, github_sync_branch, has_unmerged_paths,
+        list_headless_worktrees, merge_worktree_to_parent, merged_status, stage_file, unstage_file,
+        worktree_changes, worktree_commits, worktree_is_dirty, MergedStatusItem,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1944,6 +2028,63 @@ mod tests {
             stdout(peer.path(), &["rev-parse", "origin/main"]),
             stdout(local.path(), &["rev-parse", "HEAD"])
         );
+    }
+
+    #[test]
+    fn merge_base_branch_preserves_conflicts_for_resolution() {
+        let (remote, local, peer) = project_with_remote();
+        run(local.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(local.path().join("base.txt"), "feature\n").expect("write feature");
+        commit_all(local.path(), "feature edit");
+        run(local.path(), &["push", "-u", "origin", "feature"]);
+
+        std::fs::write(peer.path().join("base.txt"), "main\n").expect("write main");
+        commit_all(peer.path(), "main edit");
+        run(peer.path(), &["push", "origin", "main"]);
+
+        assert!(github_merge_base_branch(
+            local.path(),
+            "main",
+            Some(remote.path().to_string_lossy().as_ref()),
+        )
+        .expect("merge base"));
+        assert!(has_unmerged_paths(local.path()).expect("unmerged paths"));
+        assert!(std::fs::read_to_string(local.path().join("base.txt"))
+            .expect("read conflict")
+            .contains("<<<<<<< HEAD"));
+    }
+
+    #[test]
+    fn abort_merge_discards_conflict_resolution_changes() {
+        let (remote, local, peer) = project_with_remote();
+        run(local.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(local.path().join("base.txt"), "feature\n").expect("write feature");
+        commit_all(local.path(), "feature edit");
+        run(local.path(), &["push", "-u", "origin", "feature"]);
+
+        std::fs::write(peer.path().join("base.txt"), "main\n").expect("write main");
+        commit_all(peer.path(), "main edit");
+        run(peer.path(), &["push", "origin", "main"]);
+
+        assert!(github_merge_base_branch(
+            local.path(),
+            "main",
+            Some(remote.path().to_string_lossy().as_ref()),
+        )
+        .expect("merge base"));
+        assert!(github_merge_in_progress(local.path()).expect("merge status"));
+        std::fs::write(local.path().join("base.txt"), "manual resolution\n")
+            .expect("write resolution");
+
+        github_abort_merge(local.path()).expect("abort merge");
+
+        assert!(!github_merge_in_progress(local.path()).expect("merge status"));
+        assert!(!has_unmerged_paths(local.path()).expect("unmerged paths"));
+        assert_eq!(
+            std::fs::read_to_string(local.path().join("base.txt")).expect("read feature"),
+            "feature\n"
+        );
+        assert!(!worktree_is_dirty(local.path()));
     }
 
     #[test]
