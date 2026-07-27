@@ -58,6 +58,26 @@ describe("plugin registry", () => {
     expect(getAllPlugins()).toHaveLength(3);
   });
 
+  it("uses higher-scope plugins instead of duplicate bundled contributions", () => {
+    setPluginsForScope("bundled", null, [
+      record({ pluginId: "shared", scope: "bundled", version: "1.0.0" }),
+    ]);
+    setPluginsForScope("global", null, [record({ pluginId: "shared", version: "2.0.0" })]);
+    setPluginsForScope("project", "/p/one", [
+      record({
+        pluginId: "shared",
+        scope: "project",
+        projectId: "one",
+        projectPath: "/p/one",
+        version: "3.0.0",
+      }),
+    ]);
+
+    expect(getActivePlugins(null).map((plugin) => plugin.version)).toEqual(["2.0.0"]);
+    expect(getActivePlugins("one").map((plugin) => plugin.version)).toEqual(["3.0.0"]);
+    expect(getAllPlugins()).toHaveLength(3);
+  });
+
   it("replaces one scope's records without touching other scopes", () => {
     setPluginsForScope("global", null, [record({ pluginId: "a" }), record({ pluginId: "b" })]);
     setPluginsForScope("project", "/p/one", [

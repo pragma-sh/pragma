@@ -116,6 +116,7 @@ than no guide.
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
 │   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
+│   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
