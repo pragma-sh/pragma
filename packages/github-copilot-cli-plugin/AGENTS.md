@@ -14,7 +14,7 @@ packages/github-copilot-cli-plugin/
 ├── plugin.json              # Copilot CLI plugin manifest
 ├── scripts/install-local.sh # Local Copilot plugin install
 ├── src/pragma-plugin.ts     # Launcher, watcher, models, and usage declaration
-├── src/usage-limits.ts      # GitHub account quota normalization
+├── src/usage-limits.ts      # Copilot runtime quota transport + normalization
 └── test/report.test.ts      # Fake-pragma-cli hook tests
 ```
 
@@ -86,14 +86,22 @@ current Copilot location is derived from that id.
 
 ## Usage limits
 
-Usage provider runs `gh api copilot_internal/user` using current GitHub CLI login. It never
-reads or prints tokens. `quota_snapshots.premium_interactions` becomes one AI-credits limit,
-including monthly reset and overage allowance. Missing `gh` returns `not-configured`; missing
-login returns `authentication-required`; valid responses without AI-credit snapshot return
-`unsupported`; transport and malformed JSON failures throw so host preserves last snapshot.
-
-This endpoint is consumed by GitHub's own clients but retains an `internal` route name and is
-not part of stable public REST API. Reverify response shape on each tested Copilot CLI bump.
+Usage provider launches short-lived `copilot --headless --stdio`, performs its JSON-RPC
+`connect` handshake, then calls `account.getQuota`. Copilot CLI owns Keychain/Linux credential
+reads, OAuth refresh, and quota transport, so Pragma never reads or prints tokens and does not
+depend on GitHub CLI authentication. `quotaSnapshots.premium_interactions` is preferred for
+legacy billing; token-billed accounts fall back to `quotaSnapshots.chat`. Either becomes one
+AI-credits limit with its reset time. Copilot 1.0.75 reports `resetDate` as the current
+30-day cycle's start; elapsed/current values advance to the next 30-day boundary, while a
+future reset date is used directly. Missing Copilot CLI returns `not-configured`; missing
+Copilot login returns `authentication-required`; valid responses without a usable allowance
+return `unsupported`; transport and malformed framing failures throw so host preserves its last
+snapshot. Reverify RPC and response shape on each tested Copilot CLI bump.
+Plugin bundles run in WebKit, not Node. Keep quota framing browser-compatible (`TextEncoder` /
+`TextDecoder`); a top-level Node global such as `Buffer` prevents the whole plugin from loading.
+Run the quota subprocess through the user's login-interactive shell. GUI-launched Pragma does not
+inherit fnm/nvm's version-specific `PATH`, while Copilot terminal sessions do; probing only the
+host process `PATH` falsely reports an installed Copilot CLI as missing.
 
 ## Branding
 
@@ -116,8 +124,9 @@ bun run --filter @pragma/github-copilot-cli-plugin install:local
 copilot plugin list
 ```
 
-Register package's absolute path in `~/.pragma/config.json` for local Pragma catalog. Rebuild
-bundle and reload Pragma plugin host after edits. Then run:
+Production builds bundle this package into Pragma's plugin resources. For local development,
+register package's absolute path in `~/.pragma/config.json`. Rebuild bundle and reload Pragma
+plugin host after edits. Then run:
 
 ```bash
 bun run --filter @pragma/github-copilot-cli-plugin test

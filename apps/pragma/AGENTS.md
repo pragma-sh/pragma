@@ -200,13 +200,15 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
-plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor agent
-definitions live in their host-tool plugin packages
-(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-plugin`) as the single source of
-truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
+plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
+Copilot CLI agent definitions live in their host-tool plugin packages as the single source
+of truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
 resource directory. Desktop and `pragma-plugins` discover them through the same manifest
 path as global/project plugins; no built-in registry seam exists. Agent definitions
-carry `id`, `name`, optional `iconPath`, `launch.command`, optional model providers, optional
+with the same plugin id obey scope precedence (`project > global > bundled`), so a local
+development plugin replaces its shipped copy instead of contributing duplicate agents.
+Agent definitions carry `id`, `name`, optional `iconPath`, `launch.command`, optional model
+providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
 before prompt prefill), and optional prefill controls (`prefillMode: "bracketed" |
 "plain"`, `prefillSubmit`, `prefillSubmitDelayMs`). The prompt body and its submit key
