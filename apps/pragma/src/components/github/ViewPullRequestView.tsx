@@ -583,6 +583,78 @@ function MergeCard({
   const [confirming, setConfirming] = useState(false);
   const [merging, setMerging] = useState(false);
   const [cleanup, setCleanup] = useState(false);
+
+  const merge = useCallback(async () => {
+    setConfirming(false);
+    setMerging(true);
+    try {
+      await mergePullRequest(repo, pr.number);
+      toast.success(`Merged pull request #${pr.number}`);
+      setCleanup(true);
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setMerging(false);
+    }
+  }, [repo, pr.number]);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
+      {pr.mergeable === false ? (
+        <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
+      ) : (
+        <>
+          <ChecksSummary checks={checks} />
+          <Button
+            className="w-full"
+            disabled={merging}
+            onClick={() => setConfirming(true)}
+            size="sm"
+          >
+            {merging ? <Loader2 className="animate-spin" /> : null}
+            Merge pull request
+          </Button>
+        </>
+      )}
+
+      <AlertDialog onOpenChange={setConfirming} open={confirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge pull request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pr.headRef} will be merged into {pr.baseRef} with a merge commit.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void merge()}>Merge</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <BranchCleanupDialog
+        onChanged={onChanged}
+        onOpenChange={setCleanup}
+        open={cleanup}
+        pr={pr}
+        worktreeId={worktreeId}
+      />
+    </div>
+  );
+}
+
+function MergeConflictControls({
+  onChanged,
+  pr,
+  repo,
+  worktreeId,
+}: {
+  onChanged: () => void;
+  pr: PullRequestSummary;
+  repo: GitHubRepoRef;
+  worktreeId: string;
+}) {
+  const [merging, setMerging] = useState(false);
   const [mergeInProgress, setMergeInProgress] = useState<boolean | null>(null);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
   const mergeStatusRequest = useRef(0);
@@ -650,77 +722,31 @@ function MergeCard({
     }
   }, [refreshMergeStatus, worktreeId]);
 
-  const merge = useCallback(async () => {
-    setConfirming(false);
-    setMerging(true);
-    try {
-      await mergePullRequest(repo, pr.number);
-      toast.success(`Merged pull request #${pr.number}`);
-      setCleanup(true);
-    } catch (cause) {
-      toast.error(errorMessage(cause));
-    } finally {
-      setMerging(false);
-    }
-  }, [repo, pr.number]);
-
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
-      {pr.mergeable === false ? (
-        <>
-          <div className="flex items-start gap-2 text-destructive">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            <div className="flex flex-col gap-1">
-              <p className="text-xs font-medium">Merge conflict</p>
-              <p className="text-xs text-muted-foreground">
-                This pull request conflicts with {pr.baseRef}. Resolve it by merging latest{" "}
-                {pr.baseRef} into {pr.headRef} locally.
-              </p>
-            </div>
-          </div>
-          {mergeInProgress ? (
-            <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
-          ) : null}
-          <Button
-            className="w-full"
-            disabled={merging || mergeInProgress === null}
-            onClick={() => (mergeInProgress ? setConfirmingAbort(true) : void resolveConflicts())}
-            size="sm"
-            variant="destructive"
-          >
-            {merging || mergeInProgress === null ? <Loader2 className="animate-spin" /> : null}
-            {mergeInProgress ? "Abort Merge" : "Sync with Base Branch"}
-          </Button>
-        </>
-      ) : (
-        <>
-          <ChecksSummary checks={checks} />
-          <Button
-            className="w-full"
-            disabled={merging}
-            onClick={() => setConfirming(true)}
-            size="sm"
-          >
-            {merging ? <Loader2 className="animate-spin" /> : null}
-            Merge pull request
-          </Button>
-        </>
-      )}
-
-      <AlertDialog onOpenChange={setConfirming} open={confirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Merge pull request?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pr.headRef} will be merged into {pr.baseRef} with a merge commit.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void merge()}>Merge</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+    <>
+      <div className="flex items-start gap-2 text-destructive">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium">Merge conflict</p>
+          <p className="text-xs text-muted-foreground">
+            This pull request conflicts with {pr.baseRef}. Resolve it by merging latest {pr.baseRef}{" "}
+            into {pr.headRef} locally.
+          </p>
+        </div>
+      </div>
+      {mergeInProgress ? (
+        <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
+      ) : null}
+      <Button
+        className="w-full"
+        disabled={merging || mergeInProgress === null}
+        onClick={() => (mergeInProgress ? setConfirmingAbort(true) : void resolveConflicts())}
+        size="sm"
+        variant="destructive"
+      >
+        {merging || mergeInProgress === null ? <Loader2 className="animate-spin" /> : null}
+        {mergeInProgress ? "Abort Merge" : "Sync with Base Branch"}
+      </Button>
 
       <AlertDialog onOpenChange={setConfirmingAbort} open={confirmingAbort}>
         <AlertDialogContent>
@@ -737,15 +763,7 @@ function MergeCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <BranchCleanupDialog
-        onChanged={onChanged}
-        onOpenChange={setCleanup}
-        open={cleanup}
-        pr={pr}
-        worktreeId={worktreeId}
-      />
-    </div>
+    </>
   );
 }
 
