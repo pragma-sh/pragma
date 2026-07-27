@@ -100,8 +100,21 @@ describe("findPullRequestForBranch", () => {
         user: null,
       },
     ]);
+    octokit.rest.pulls.get.mockResolvedValue({
+      data: {
+        number: 99,
+        title: "Mine",
+        body: "",
+        state: "open",
+        html_url: "https://github.com/acme/widget/pull/99",
+        head: { ref: "feature", sha: "abc" },
+        base: { ref: "main" },
+        mergeable: false,
+        user: null,
+      },
+    });
     const pr = await findPullRequestForBranch(repo);
-    expect(pr).toMatchObject({ number: 99, headRef: "feature" });
+    expect(pr).toMatchObject({ number: 99, headRef: "feature", mergeable: false });
   });
 
   it("returns null when neither the filter nor the scan matches", async () => {
@@ -135,8 +148,36 @@ describe("findPullRequestForBranch", () => {
       ],
     });
     octokit.paginate.mockResolvedValue([]);
+    octokit.rest.pulls.get.mockResolvedValue({
+      data: {
+        number: 5,
+        title: "Cross-fork",
+        body: "",
+        state: "open",
+        html_url: "https://github.com/upstream/widget/pull/5",
+        head: { ref: "feature", sha: "abc" },
+        base: {
+          ref: "main",
+          repo: {
+            name: "widget",
+            clone_url: "https://github.com/upstream/widget.git",
+            owner: { login: "upstream" },
+          },
+        },
+        mergeable: true,
+        user: null,
+      },
+    });
     const pr = await findPullRequestForBranch(repo);
-    expect(pr).toMatchObject({ number: 5, headRef: "feature" });
+    expect(pr).toMatchObject({
+      number: 5,
+      headRef: "feature",
+      baseRepo: {
+        owner: "upstream",
+        repo: "widget",
+        cloneUrl: "https://github.com/upstream/widget.git",
+      },
+    });
     expect(octokit.rest.pulls.list).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ owner: "upstream", repo: "widget", head: "acme:feature" }),
@@ -159,9 +200,33 @@ describe("findPullRequestForBranch", () => {
         },
       ],
     });
+    octokit.rest.pulls.get.mockResolvedValue({
+      data: {
+        number: 42,
+        title: "Add subtab",
+        body: "body",
+        state: "open",
+        html_url: "https://github.com/acme/widget/pull/42",
+        draft: false,
+        mergeable: false,
+        head: { ref: "feature", sha: "abc" },
+        base: { ref: "main" },
+        user: { login: "octo", avatar_url: "https://avatars/octo" },
+      },
+    });
     const pr = await findPullRequestForBranch(repo);
-    expect(pr).toMatchObject({ number: 42, headRef: "feature", baseRef: "main" });
+    expect(pr).toMatchObject({
+      number: 42,
+      headRef: "feature",
+      baseRef: "main",
+      mergeable: false,
+    });
     expect(pr?.user).toEqual({ login: "octo", avatarUrl: "https://avatars/octo" });
+    expect(octokit.rest.pulls.get).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widget",
+      pull_number: 42,
+    });
   });
 });
 
