@@ -5,6 +5,32 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 src_tauri_dir="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$src_tauri_dir/../../.." && pwd)"
 
+# Pre-push and Tauri dev can stage concurrently. Serialize the full build/copy
+# transaction so one process cannot remove resources/plugins during another's cp.
+lock_file="$src_tauri_dir/resources/.stage-bundled-plugins.lock"
+while true; do
+  if (set -o noclobber; printf '%s\n' "$$" > "$lock_file") 2>/dev/null; then
+    break
+  fi
+
+  lock_pid=""
+  read -r lock_pid < "$lock_file" 2>/dev/null || true
+  if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+    rm -f "$lock_file"
+    continue
+  fi
+  sleep 0.1
+done
+
+release_lock() {
+  lock_pid=""
+  read -r lock_pid < "$lock_file" 2>/dev/null || true
+  if [[ "$lock_pid" == "$$" ]]; then
+    rm -f "$lock_file"
+  fi
+}
+trap release_lock EXIT INT TERM
+
 bunx turbo run build --filter=@pragma/claude-code-plugin --filter=@pragma/opencode-plugin --filter=@pragma/cursor-plugin --filter=@pragma/github-copilot-cli-plugin
 
 plugins_dir_name="$(bun -e 'import { constants } from "@pragma/constants"; process.stdout.write(constants.plugins.bundledDirName)')"

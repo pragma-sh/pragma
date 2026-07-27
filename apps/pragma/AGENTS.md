@@ -353,7 +353,8 @@ it before `cargo check` because Tauri validates `externalBin` paths during compi
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using
-`CONSTANTS.plugins.bundledDirName`. While `tauri dev` is running, use
+`CONSTANTS.plugins.bundledDirName`; staging is serialized because pre-push and Tauri dev
+may invoke it concurrently. While `tauri dev` is running, use
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
 frontend mtime poll then hot-reloads the staged bundle. `binaries/` is
 git-ignored.
