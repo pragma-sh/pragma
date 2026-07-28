@@ -4,6 +4,7 @@
 mod agent_cli;
 mod agent_events;
 mod agent_notifications;
+mod agent_sounds;
 mod ai;
 mod automations;
 mod browser;
@@ -63,6 +64,30 @@ const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
 const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
 /// Menu item id for opening the full-frame Settings view.
 const MENU_OPEN_SETTINGS: &str = "settings.open";
+
+/// Accelerators of the workspace menu items. They mirror the default keybindings
+/// and are cleared while Settings records a shortcut (see
+/// [`set_menu_accelerators_enabled`]), so a chord like Cmd+W is captured instead
+/// of closing a tab.
+const MENU_ACCELERATORS: [(&str, &str); 5] = [
+    (MENU_OPEN_SETTINGS, "CmdOrCtrl+,"),
+    (MENU_NEW_TERMINAL_TAB, "CmdOrCtrl+T"),
+    (MENU_CLOSE_ACTIVE_TAB, "CmdOrCtrl+W"),
+    (MENU_OPEN_COMMAND_PALETTE, "CmdOrCtrl+P"),
+    (MENU_OPEN_COMMAND_MODE, "CmdOrCtrl+Shift+P"),
+];
+
+/// Returns the accelerator registered for a workspace menu item id.
+fn menu_accelerator(id: &str) -> &'static str {
+    MENU_ACCELERATORS
+        .iter()
+        .find(|(item_id, _)| *item_id == id)
+        .map_or("", |(_, accelerator)| *accelerator)
+}
+
+/// The workspace menu items whose accelerators Settings can suspend while
+/// recording a keyboard shortcut.
+struct WorkspaceAccelerators(Vec<MenuItem<tauri::Wry>>);
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
 /// consistent with their UI controls.
@@ -193,36 +218,43 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         MENU_OPEN_SETTINGS,
         "Settings…",
         true,
-        Some("CmdOrCtrl+,"),
+        Some(menu_accelerator(MENU_OPEN_SETTINGS)),
     )?;
     let new_terminal_tab = MenuItem::with_id(
         app,
         MENU_NEW_TERMINAL_TAB,
         "New Terminal Tab",
         true,
-        Some("CmdOrCtrl+T"),
+        Some(menu_accelerator(MENU_NEW_TERMINAL_TAB)),
     )?;
     let close_active_tab = MenuItem::with_id(
         app,
         MENU_CLOSE_ACTIVE_TAB,
         "Close Tab",
         true,
-        Some("CmdOrCtrl+W"),
+        Some(menu_accelerator(MENU_CLOSE_ACTIVE_TAB)),
     )?;
     let open_command_palette = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_PALETTE,
         "Open Command Palette",
         true,
-        Some("CmdOrCtrl+P"),
+        Some(menu_accelerator(MENU_OPEN_COMMAND_PALETTE)),
     )?;
     let open_command_mode = MenuItem::with_id(
         app,
         MENU_OPEN_COMMAND_MODE,
         "Open Command Mode",
         true,
-        Some("CmdOrCtrl+Shift+P"),
+        Some(menu_accelerator(MENU_OPEN_COMMAND_MODE)),
     )?;
+    app.manage(WorkspaceAccelerators(vec![
+        open_settings.clone(),
+        new_terminal_tab.clone(),
+        close_active_tab.clone(),
+        open_command_palette.clone(),
+        open_command_mode.clone(),
+    ]));
 
     #[cfg(target_os = "macos")]
     install_macos_workspace_menu(
@@ -338,16 +370,54 @@ fn platform_name() -> &'static str {
     }
 }
 
-/// Loads the user keybindings config, writing the default file if it is missing.
-#[tauri::command]
-fn load_keybindings(app_handle: tauri::AppHandle) -> AppResult<KeybindingsConfig> {
-    keybindings::load_or_ensure(app_handle.path().home_dir()?)
+/// Loads the keybindings that actually apply: built-in defaults overlaid with
+/// `~/.pragma/keybindings.json` (written on first use) and then, when a project
+/// is selected, that project's `.pragma/keybindings.json`.
+#[tauri::command(async)]
+async fn load_keybindings(
+    app_handle: tauri::AppHandle,
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
+    project_id: Option<String>,
+) -> AppResult<KeybindingsConfig> {
+    let global = keybindings::read_or_ensure_text(app_handle.path().home_dir()?)?;
+    let Some(project_id) = project_id else {
+        return keybindings::effective(&global, None);
+    };
+    // A project without readable bindings (e.g. an unreachable remote host) must
+    // still get working shortcuts, so fall back to the global layer alone.
+    let project = match config_file::read_scoped(
+        app_handle,
+        &db,
+        &hosts,
+        config_file::ConfigScope::Project,
+        Some(project_id),
+        CONSTANTS.keybindings.config_file_name.as_str(),
+    )
+    .await
+    {
+        Ok(document) => document.contents,
+        Err(error) => {
+            log::warn!("failed to read project keybindings: {error}");
+            String::new()
+        }
+    };
+    keybindings::effective(&global, Some(&project))
 }
 
-/// Saves a keybindings config back to `~/.pragma/keybindings.json`.
+/// Suspends or restores the native menu accelerators while Settings records a
+/// shortcut. Without this, recording Cmd+W would close a tab before the webview
+/// ever sees the chord.
 #[tauri::command]
-fn save_keybindings(app_handle: tauri::AppHandle, config: KeybindingsConfig) -> AppResult<()> {
-    keybindings::save(app_handle.path().home_dir()?, &config)
+fn set_menu_accelerators_enabled(
+    accelerators: tauri::State<'_, WorkspaceAccelerators>,
+    enabled: bool,
+) -> AppResult<()> {
+    for item in &accelerators.0 {
+        let accelerator = enabled.then(|| menu_accelerator(item.id().as_ref()));
+        item.set_accelerator(accelerator)?;
+    }
+    Ok(())
 }
 
 /// Reads plugin entries from `~/.pragma/config.json` plus the active project's
@@ -986,7 +1056,7 @@ pub fn run() {
             app_info,
             platform_name,
             load_keybindings,
-            save_keybindings,
+            set_menu_accelerators_enabled,
             read_plugin_manifests,
             read_plugin_bundle,
             start_plugin_watcher,
@@ -995,6 +1065,13 @@ pub fn run() {
             gateway_devices,
             config_file::read_config,
             config_file::write_config,
+            config_file::read_theme,
+            config_file::write_theme,
+            config_file::read_keybindings_file,
+            config_file::write_keybindings_file,
+            agent_sounds::list_agent_sounds,
+            agent_sounds::read_agent_sound,
+            agent_sounds::import_agent_sound,
             tunnel_start,
             tunnel_stop,
             tunnel_status,

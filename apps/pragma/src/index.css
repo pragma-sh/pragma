@@ -184,7 +184,7 @@
    macOS). Elsewhere the rail stays a solid one-step-down charcoal. */
 .vibrancy .dark,
 .dark.vibrancy {
-  --sidebar: oklch(0.15 0.006 256 / 0.6);
+  --sidebar: oklch(0.15 0.006 256 / 0.4);
 }
 
 /* macOS vibrancy: modal cards (Radix `Dialog`/`AlertDialog` content and the

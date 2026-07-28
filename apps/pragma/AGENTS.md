@@ -18,6 +18,10 @@ apps/pragma/
 │   │   ├── native-editing.ts    # OS text-editing chords → readline sequences
 │   │   ├── agent-alert.ts       # Alert latch (chime + notification, fires at most once)
 │   │   ├── native-overlay.ts    # Ref-counted suppression store for native webview overlays
+│   │   ├── theme.ts             # `.pragma/theme.json` parse/merge/apply (CSS var overrides)
+│   │   ├── theme-tokens.ts      # Themeable color catalog + defaults parsed from index.css
+│   │   ├── theme-presets.ts     # Sourced built-in palettes adapted to light/dark theme files
+│   │   ├── theme-color.ts       # The only oklch ⇄ sRGB boundary (culori)
 │   │   ├── brand-icons.ts/json  # Curated offline icon subset (lucide + simple-icons)
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
@@ -27,8 +31,10 @@ apps/pragma/
 │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
 │   │   ├── kanban-context.tsx      # Project prompt board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
+│   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
+│   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
 │   │   ├── editor-dirty-store.ts   # Ephemeral editor dirty state (never in reducer)
 │   │   ├── review-done-store.ts    # Ephemeral per-file PR review done-toggle
@@ -49,8 +55,7 @@ apps/pragma/
     ├── tauri.macos.conf.json    # macOS-only window flags (transparency + overlay titlebar)
     ├── tauri.dev.conf.json      # Dev overrides (icons-dev/; "Pragma Dev" titles the window)
     ├── installer-hooks.nsh      # NSIS hooks: stop the detached sidecars before install/uninstall
-    ├── installer-close-apps.wxs # WiX fragment: same job for the MSI (util:CloseApplication)
-    ├── installer-hooks.test.ts  # Fails if either installer's list drifts from bundle.externalBin
+    ├── installer-hooks.test.ts  # Guards NSIS sidecar coverage and safe MSI process handling
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
     ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
@@ -84,6 +89,32 @@ apps/pragma/
 - Use the `cn()` helper (`src/lib/utils.ts`) for conditional classes. Theme tokens live
   in `src/index.css` (`@theme`/CSS variables) — use semantic tokens (`bg-background`,
   `text-muted-foreground`), not raw colors.
+
+### User themes (`.pragma/theme.json`)
+
+`src/index.css` stays the **single source of truth for the shipped defaults**. The
+themeable catalog is not mirrored in TypeScript: `src/lib/theme-tokens.ts` imports
+`index.css` with `?raw` and parses the `:root` (light) and `.dark` (dark) blocks, so a
+new color variable is picked up automatically — `theme-tokens.test.ts` fails until it is
+also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports to `""`,
+`vitest.config.ts` sets `css: true`; don't remove it.
+
+- Overrides live in an optional `.pragma/theme.json` at two scopes (path from
+  `constants.theme.fileName`), read/written by `read_theme`/`write_theme`. Layers merge
+  per token: `index.css` <- global <- project, so switching projects re-applies instantly.
+- `applyThemeOverrides` injects one `<style id="pragma-theme-overrides">` at the end of
+  `<head>`, under **doubled selectors** (`:root:root`, `.dark.dark`). A themed dark
+  `sidebar` also gets a higher-specificity `.dark.dark.vibrancy` rule that mixes its
+  selected tint to 40% opacity, preserving macOS desktop blur.
+- Values are persisted as `oklch(...)` to match the defaults. `src/lib/theme-color.ts` is
+  the only place that converts; the shadcn color picker speaks sRGB, so colors outside the
+  sRGB gamut clamp when edited through it.
+- Built-in palettes live in `src/lib/theme-presets.ts`, include sourced light and dark
+  ramps, and replace only the selected scope's `colors` block when applied. Selecting
+  Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
+  authoritative; merged values equal to a stylesheet default are also omitted.
+- The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
+  light ramp by temporarily removing the `dark` (and `vibrancy`) classes.
 
 ## GitHub integration
 
@@ -172,13 +203,15 @@ Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, ta
 to the regular plugin notification.
 
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
-plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, and Cursor agent
-definitions live in their host-tool plugin packages
-(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-plugin`) as the single source of
-truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
+plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
+Copilot CLI agent definitions live in their host-tool plugin packages as the single source
+of truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
 resource directory. Desktop and `pragma-plugins` discover them through the same manifest
 path as global/project plugins; no built-in registry seam exists. Agent definitions
-carry `id`, `name`, optional `iconPath`, `launch.command`, optional model providers, optional
+with the same plugin id obey scope precedence (`project > global > bundled`), so a local
+development plugin replaces its shipped copy instead of contributing duplicate agents.
+Agent definitions carry `id`, `name`, optional `iconPath`, `launch.command`, optional model
+providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
 before prompt prefill), and optional prefill controls (`prefillMode: "bracketed" |
 "plain"`, `prefillSubmit`, `prefillSubmitDelayMs`). The prompt body and its submit key
@@ -211,6 +244,11 @@ against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
+Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
+(worktree id → pin timestamp). The sidebar promotes pinned worktrees to roots
+at the top (newest pin first); each row exposes a hover pin button, a
+context-menu Pin/Unpin item, and a filled pin glyph that unpins when clicked.
+
 Plugin watchers are normally started when Pragma launches an agent session, but command
 approval reports also lazy-start the matching watcher for their tab. This keeps approval
 working when a user manually starts a watcher-backed agent (for example typing `opencode`
@@ -240,6 +278,33 @@ live in `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
 `gateway-devices.json`, which the gateway updates from authenticated mobile identity
 headers, and exposes supported global/project `.pragma/config.json` values through forms.
+
+## Settings sections
+
+`components/settings/SettingsWorkspace.tsx` is the shell: a scope toggle (Global /
+Project), a nav list, and one section component per panel (`SettingsCard` is shared).
+Sections listed in `PROJECT_SECTIONS` support both scopes; everything else is
+app-global and falls back to Plugins when the user switches to Project scope.
+
+**Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
+that actually applies after the `default → global → project` merge, whether it differs
+from the built-in default, and Record / Stop / Reset. While recording,
+`setRecordingKeybinding(true)` mutes `useShortcuts` and `set_menu_accelerators_enabled(false)`
+clears the native accelerators, so chords the app already owns (⌘T, ⌘W) can be
+captured instead of firing. Writes patch only the recorded action+platform in the
+selected scope's file through `read/writeKeybindingsFile`, then dispatch
+`pragma:keybindings-changed` so live shortcuts reload. Rust validates every write with
+`keybindings::validate_overrides`, so a bad patch can never break all shortcuts.
+
+**Agent Status** (`AgentStatusSection.tsx`) edits the `agentStatus` block of the
+scope's `config.json` (`{ notificationsEnabled, soundName }`). Clips live in
+`CONSTANTS.agentStatus.soundsDirName` (`.pragma/assets/sounds`) under the home
+directory or the project's main worktree, listed/read/imported through
+`list_agent_sounds` / `read_agent_sound` / `import_agent_sound`. Uploads are duration-checked
+in the webview (only it can decode audio) and byte-capped on the host. `lib/agent-status-settings.ts`
+resolves the effective settings (project over global over `CONSTANTS.agentStatus`),
+caches them until `pragma:config-changed`, and `agent-alert.ts` plays the chosen clip —
+falling back to the built-in chime — before deciding whether to raise a notification.
 
 ## Workspace mirror publisher
 
@@ -291,7 +356,8 @@ it before `cargo check` because Tauri validates `externalBin` paths during compi
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using
-`CONSTANTS.plugins.bundledDirName`. While `tauri dev` is running, use
+`CONSTANTS.plugins.bundledDirName`; staging is serialized because pre-push and Tauri dev
+may invoke it concurrently. While `tauri dev` is running, use
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
 frontend mtime poll then hot-reloads the staged bundle.
 
@@ -311,41 +377,15 @@ the files — then every `externalBin` sidecar, from both `NSIS_HOOK_PREINSTALL`
 `installer-hooks.test.ts` enforces that, because the failure is invisible until someone
 installs over a running app.
 
-**The MSI needs the same treatment through a different mechanism.** It installs
-`perMachine` into Program Files rather than AppData, so the path in the error differs, but
-the lock does not. `installer-close-apps.wxs` (wired in via `bundle.windows.wix`'s
-`fragmentPaths` + `componentGroupRefs`) terminates the same processes with
-`util:CloseApplication`. Three things about it are load-bearing:
-
-- **A WiX fragment is linked only if referenced.** The empty
-  `<ComponentGroup Id="PragmaCloseApplications"/>` exists purely so
-  `componentGroupRefs` can name it; resolving that symbol is what pulls the whole
-  fragment in. Rename one side and the fragment silently vanishes from the MSI.
-- **`RebootPrompt="no"` + `TerminateProcess`.** Left to Restart Manager, a headless
-  background process ends in a reboot demand instead of an install.
-- **`pragma.exe` must be listed first.** `WixCloseApplication` has no sequence column, so
-  the deferred action works in table order and the app would otherwise respawn the very
-  sidecars being terminated. Unlike NSIS this ordering is a convention, not a guarantee.
-
-Two traps found by building it:
-
-- **`--` is illegal inside an XML comment.** Fine in an NSIS `;` comment, fatal here:
-  `error CNDL0104 : An XML comment cannot contain '--'`. Tauri reports only
-  `failed to run candle.exe` and swallows the detail, so run
-  `WixTools314\candle.exe -arch x64 -ext WixUtilExtension -out <obj> <file>.wxs` by hand
-  to see the real error.
-- **`WixCloseApplications` lands at sequence 3999, right before `InstallFiles` (4000), and
-  cannot move earlier.** It schedules a deferred action, and deferred actions must sit
-  between `InstallInitialize` (1500) and `InstallFinalize` — so it cannot be pulled ahead
-  of `InstallValidate` (1400), which is where MSI does its own files-in-use detection.
-  The files are therefore freed in time for `InstallFiles`, but a full-UI install may
-  still surface MSI's own files-in-use prompt first. `MSIRESTARTMANAGERCONTROL=Disable`
-  is the lever if that ever needs suppressing; it is deliberately not set today.
-
-Tauri passes `-ext WixUtilExtension` to candle/light, which is what makes the `util:`
-namespace available; nothing extra needs installing. The MSI does **not** get the
-background-server warning dialog — MSI deployment is typically silent (`msiexec /qn`),
-where a prompt would hang the install.
+**The per-machine MSI deliberately relies on Windows Installer Restart Manager.** Do not
+add WiX `util:CloseApplication` entries for the app or sidecars. That custom action selects
+processes only by executable basename and runs elevated, so an install, update, or
+uninstall could terminate another user's Pragma instance or an unrelated same-named
+process. Restart Manager discovers processes from locks on files owned by the MSI, which
+keeps process selection tied to this installation. A headless sidecar that Restart Manager
+cannot close may require a reboot; that is safer than force-terminating an unverified
+process. `installer-hooks.test.ts` guards against restoring the removed basename-based WiX
+fragment.
 
 The NSIS hook warns before it kills, but only where nothing else would: with the window open
 Tauri's own prompt covers it, so the extra dialog fires **only** when the app is closed
@@ -413,7 +453,9 @@ are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them
 **Open Server Logs** opens the `log` tab; logs load through `read_daemon_log`
 (`PtyClient::read_log`, reading `log_path()` — beside the socket, not app data). Add a
 menu action: id const + item in `install_menu`, `MenuAction` variant +
-branch in `handleMenuAction`.
+branch in `handleMenuAction`. Accelerators live in one `MENU_ACCELERATORS` table (they
+mirror the default keybindings); the items are kept in `WorkspaceAccelerators` managed
+state so `set_menu_accelerators_enabled` can suspend them while Settings records a chord.
 
 Workspace accelerators (Settings, New Terminal Tab, Close Tab, Command Palette, Command
 Mode) **must** be real menu items — the webview otherwise swallows chords like `⌘T`/`⌃T`.

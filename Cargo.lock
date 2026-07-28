@@ -5484,6 +5484,7 @@ dependencies = [
 name = "pragma-core"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "ignore",
  "notify-debouncer-full",
  "pragma-constants",

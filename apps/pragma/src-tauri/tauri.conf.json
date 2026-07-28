@@ -56,10 +56,6 @@
     "windows": {
       "nsis": {
         "installerHooks": "./installer-hooks.nsh"
-      },
-      "wix": {
-        "fragmentPaths": ["./installer-close-apps.wxs"],
-        "componentGroupRefs": ["PragmaCloseApplications"]
       }
     },
     "icon": [

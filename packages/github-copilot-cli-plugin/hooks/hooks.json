@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" session-start",
+        "timeoutSec": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" session-end",
+        "timeoutSec": 10
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" started",
+        "timeoutSec": 10
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" stopped",
+        "timeoutSec": 10
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" subagent-start",
+        "timeoutSec": 10
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" subagent-stop",
+        "timeoutSec": 10
+      }
+    ],
+    "permissionRequest": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" permission",
+        "timeoutSec": 20
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" running",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" running",
+        "timeoutSec": 10
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "sh \"${PLUGIN_ROOT}/hooks/report.sh\" error",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

@@ -53,7 +53,13 @@ export async function resolveManifests(
     resolveScope(homeDir, "global"),
     ...roots.map((root) => resolveScope(root, "project")),
   ]);
-  return manifests.flat();
+  return preferHigherScope(manifests.flat());
+}
+
+function preferHigherScope(manifests: ResolvedManifest[]): ResolvedManifest[] {
+  const winningIndex = new Map<string, number>();
+  manifests.forEach((manifest, index) => winningIndex.set(manifest.pluginId, index));
+  return manifests.filter((manifest, index) => winningIndex.get(manifest.pluginId) === index);
 }
 
 /**

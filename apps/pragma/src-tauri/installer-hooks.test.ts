@@ -10,12 +10,11 @@ const config = JSON.parse(readFileSync(join(here, "tauri.conf.json"), "utf8")) a
     externalBin: string[];
     windows?: {
       nsis?: { installerHooks?: string };
-      wix?: { fragmentPaths?: string[]; componentGroupRefs?: string[] };
+      wix?: { fragmentPaths?: string[] };
     };
   };
 };
 const hooks = readFileSync(join(here, "installer-hooks.nsh"), "utf8");
-const wix = readFileSync(join(here, "installer-close-apps.wxs"), "utf8");
 
 /** Bare sidecar names (`pragma-server`) from the bundled `binaries/<name>` paths. */
 const sidecarNames = config.bundle.externalBin.map((path) => path.split("/").at(-1) ?? path);
@@ -31,18 +30,7 @@ const listedNames = [
   ),
 ].map((match) => match[1] as string);
 
-/**
- * The `util:CloseApplication` elements, matched as whole tags rather than by
- * loose string search — the surrounding comments mention the same attributes.
- */
-const closeElements = [...wix.matchAll(/<util:CloseApplication[^>]*?\/>/g)].map(
-  (match) => match[0],
-);
-
-/** Every image name the WiX fragment terminates, in document order. */
-const closedNames = closeElements.map((element) => /Target="([^"]+)"/.exec(element)?.[1] as string);
-
-/** The `.exe` image name for each sidecar, which is what both installers match on. */
+/** The `.exe` image name NSIS uses for each sidecar. */
 const sidecarImages = sidecarNames.map((name) => `${name}.exe`);
 
 describe("nsis installer hooks", () => {
@@ -103,44 +91,15 @@ describe("nsis installer hooks", () => {
   });
 });
 
-describe("wix close-applications fragment", () => {
+describe("wix installer", () => {
   /**
-   * A WiX fragment is dead weight unless something references it, and the
-   * reference is what pulls the `util:CloseApplication` rows into the MSI. Both
-   * halves are needed, and a rename on either side silently disarms the whole
-   * fragment.
+   * `util:CloseApplication` matches every process with the requested executable
+   * basename. An elevated per-machine MSI must instead leave process discovery
+   * to Restart Manager, which identifies holders of installed files.
    */
-  it("is wired into the windows bundle config", () => {
-    expect(config.bundle.windows?.wix?.fragmentPaths).toContain("./installer-close-apps.wxs");
-    expect(config.bundle.windows?.wix?.componentGroupRefs).toContain("PragmaCloseApplications");
-    expect(wix).toContain('<ComponentGroup Id="PragmaCloseApplications" />');
-  });
-
-  /** The MSI locks the same files as the NSIS installer, just under Program Files. */
-  it("terminates the app and every bundled sidecar", () => {
-    expect(closedNames.toSorted()).toEqual(["pragma.exe", ...sidecarImages].toSorted());
-  });
-
-  /**
-   * `WixCloseApplication` has no sequence column, so the deferred action works
-   * in table order. The app has to come first or it respawns the server and
-   * gateway it is listed alongside, re-locking their files.
-   */
-  it("terminates the app before the sidecars it would respawn", () => {
-    expect(closedNames[0]).toBe("pragma.exe");
-  });
-
-  /**
-   * Restart Manager cannot shut down a headless background process cleanly, so
-   * without both of these the MSI ends at a reboot demand instead of an install.
-   */
-  it("terminates rather than demanding a reboot", () => {
-    const missing = closeElements
-      .filter(
-        (element) =>
-          !element.includes('TerminateProcess="0"') || !element.includes('RebootPrompt="no"'),
-      )
-      .map((element) => /Target="([^"]+)"/.exec(element)?.[1]);
-    expect(missing).toEqual([]);
+  it("does not load basename-based process termination fragments", () => {
+    expect(config.bundle.windows?.wix?.fragmentPaths ?? []).not.toContain(
+      "./installer-close-apps.wxs",
+    );
   });
 });

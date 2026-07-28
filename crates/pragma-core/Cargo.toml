@@ -9,6 +9,7 @@ description = "Pure Rust host-side business logic for Pragma."
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 ignore = "0.4"
 notify-debouncer-full = "0.7"
 pragma-constants = { path = "../../packages/constants" }

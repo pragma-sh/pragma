@@ -81,6 +81,23 @@ describe("resolveManifests", () => {
     expect(manifests[0]?.config).toBeUndefined();
   });
 
+  it("uses configured plugins instead of bundled plugins with the same id", async () => {
+    const bundled = makeRoot();
+    writePluginDir(bundled, "shared-bundled", "pragma.shared", "plugin.mjs");
+    const home = makeRoot();
+    writePluginDir(home, "shared-global", "pragma.shared", "plugin.mjs");
+    writeConfig(home, [{ path: "./shared-global", config: { source: "global" } }]);
+
+    const manifests = await resolveManifests(home, [], bundled);
+
+    expect(manifests).toHaveLength(1);
+    expect(manifests[0]).toMatchObject({
+      pluginId: "pragma.shared",
+      scope: "global",
+      config: { source: "global" },
+    });
+  });
+
   it("preserves configured plugin order while resolving manifests concurrently", async () => {
     const root = makeRoot();
     writePluginDir(root, "first", "pragma.first", "plugin.mjs");

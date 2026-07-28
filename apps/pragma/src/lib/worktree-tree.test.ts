@@ -51,4 +51,37 @@ describe("buildWorktreeTree", () => {
     expect(tree.map((node) => node.worktree.id)).toEqual(["main", "child"]);
     expect(tree[1]?.worktree.id).toBe("child");
   });
+
+  it("floats pinned worktrees to the top as roots, newest pin first", () => {
+    const tree = buildWorktreeTree(
+      [
+        worktree("main", null, "main", true),
+        worktree("alpha", "main", "alpha"),
+        worktree("beta", "main", "beta"),
+        worktree("gamma", "main", "gamma"),
+      ],
+      {
+        pinTimes: new Map([
+          ["alpha", 100],
+          ["gamma", 300],
+        ]),
+      },
+    );
+
+    expect(tree.map((node) => node.worktree.id)).toEqual(["gamma", "alpha", "main"]);
+    expect(tree[2]?.children.map((node) => node.worktree.id)).toEqual(["beta"]);
+  });
+
+  it("sorts pinned roots above unpinned when already a root", () => {
+    const tree = buildWorktreeTree(
+      [
+        worktree("main", null, "main", true),
+        worktree("pinned-root", null, "pinned"),
+        worktree("other", null, "other"),
+      ],
+      { pinTimes: new Map([["pinned-root", 50]]) },
+    );
+
+    expect(tree.map((node) => node.worktree.id)).toEqual(["pinned-root", "main", "other"]);
+  });
 });

@@ -3,16 +3,16 @@ use std::path::{Path, PathBuf};
 
 use pragma_constants::{
     KeybindingChord, KeybindingChordModifiersItem, Keybindings, KeybindingsConfig, PlatformChord,
+    CONSTANTS,
 };
 
-use crate::error::AppResult;
-
-const CONFIG_DIR: &str = ".pragma";
-const CONFIG_FILE: &str = "keybindings.json";
+use crate::error::{AppError, AppResult};
 
 /// Returns the path to the user keybindings config file (`~/.pragma/keybindings.json`).
 pub fn config_path(home_dir: impl AsRef<Path>) -> PathBuf {
-    home_dir.as_ref().join(CONFIG_DIR).join(CONFIG_FILE)
+    home_dir
+        .as_ref()
+        .join(CONSTANTS.keybindings.config_file_name.as_str())
 }
 
 /// Loads the keybindings config, writing the default file first if it is missing.
@@ -21,27 +21,50 @@ pub fn config_path(home_dir: impl AsRef<Path>) -> PathBuf {
 /// hand and survives app reinstalls. New actions added after the user created
 /// their config are merged in from the defaults so old files stay valid.
 pub fn load_or_ensure(home_dir: impl AsRef<Path>) -> AppResult<KeybindingsConfig> {
+    let overrides = read_or_ensure_text(home_dir)?;
+    effective(&overrides, None)
+}
+
+/// Reads the global keybindings file verbatim, writing the defaults first if it
+/// is missing so the user always has a complete file to hand-edit.
+pub fn read_or_ensure_text(home_dir: impl AsRef<Path>) -> AppResult<String> {
     let path = config_path(home_dir);
     if !path.exists() {
         write_defaults(&path)?;
-        let content = std::fs::read_to_string(&path)?;
-        return Ok(serde_json::from_str(&content)?);
     }
-    let content = std::fs::read_to_string(&path)?;
-    let user: serde_json::Value = serde_json::from_str(&content)?;
-    let merged = merge_with_defaults(user);
-    let config: KeybindingsConfig = serde_json::from_value(merged)?;
-    Ok(config)
+    Ok(std::fs::read_to_string(&path)?)
 }
 
-/// Saves a keybindings config back to disk.
-pub fn save(home_dir: impl AsRef<Path>, config: &KeybindingsConfig) -> AppResult<()> {
-    let path = config_path(home_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+/// Resolves the config that actually applies: built-in defaults overlaid with the
+/// global file, then with the project file (when a project is selected). Each
+/// layer only needs the actions it overrides.
+pub fn effective(global: &str, project: Option<&str>) -> AppResult<KeybindingsConfig> {
+    let mut merged = serde_json::to_value(default_config()).expect("default config serializes");
+    for layer in [Some(global), project].into_iter().flatten() {
+        merged = merge_json(merged, parse_overrides(layer)?);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(config)?)?;
-    Ok(())
+    Ok(serde_json::from_value(merged)?)
+}
+
+/// Checks that an overrides file still merges into a valid config. Rejecting a
+/// bad write here keeps a typo in Settings from breaking every shortcut.
+pub fn validate_overrides(contents: &str) -> AppResult<()> {
+    effective(contents, None).map(|_| ())
+}
+
+/// Parses one overrides layer. Blank files are treated as "no overrides" so a
+/// freshly-created project file behaves like an absent one.
+fn parse_overrides(contents: &str) -> AppResult<serde_json::Value> {
+    if contents.trim().is_empty() {
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+    let value: serde_json::Value = serde_json::from_str(contents)?;
+    if !value.is_object() {
+        return Err(AppError::InvalidInput(
+            "keybindings.json root must be an object".to_string(),
+        ));
+    }
+    Ok(value)
 }
 
 fn write_defaults(path: &Path) -> AppResult<()> {
@@ -50,13 +73,6 @@ fn write_defaults(path: &Path) -> AppResult<()> {
     }
     std::fs::write(path, serde_json::to_string_pretty(&default_config())?)?;
     Ok(())
-}
-
-/// Merges a user config value with the default config so that newly-added
-/// actions get defaults while preserving any customizations the user made.
-fn merge_with_defaults(user: serde_json::Value) -> serde_json::Value {
-    let default = serde_json::to_value(default_config()).expect("default config serializes");
-    merge_json(default, user)
 }
 
 /// Recursively overlays `overlay` onto `base`. Object keys missing in `overlay`
@@ -165,14 +181,73 @@ mod tests {
     }
 
     #[test]
-    fn save_round_trips_custom_config() {
+    fn load_or_ensure_reads_back_a_hand_edited_file() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path();
         let mut config = default_config();
         config.bindings.new_terminal_tab.mac.key = "n".to_string();
-        save(home, &config).unwrap();
+        std::fs::create_dir_all(config_path(home).parent().unwrap()).unwrap();
+        std::fs::write(
+            config_path(home),
+            serde_json::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
         let loaded = load_or_ensure(home).unwrap();
         assert_eq!(loaded.bindings.new_terminal_tab.mac.key, "n");
+    }
+
+    #[test]
+    fn project_layer_overrides_the_global_one_per_platform() {
+        let global = serde_json::json!({
+            "bindings": {
+                "clearTerminal": {
+                    "mac": { "modifiers": ["cmd", "shift"], "key": "k" }
+                }
+            }
+        })
+        .to_string();
+        let project = serde_json::json!({
+            "bindings": {
+                "newTerminalTab": {
+                    "mac": { "modifiers": ["cmd"], "key": "n" }
+                }
+            }
+        })
+        .to_string();
+
+        let config = effective(&global, Some(&project)).unwrap();
+
+        assert_eq!(config.bindings.new_terminal_tab.mac.key, "n");
+        // The global override survives, and the untouched Linux chord stays default.
+        assert_eq!(
+            config.bindings.clear_terminal.mac.modifiers,
+            [
+                KeybindingChordModifiersItem::Cmd,
+                KeybindingChordModifiersItem::Shift
+            ]
+        );
+        assert_eq!(config.bindings.new_terminal_tab.linux.key, "t");
+    }
+
+    #[test]
+    fn empty_and_absent_layers_fall_back_to_defaults() {
+        let config = effective("", None).unwrap();
+        assert_eq!(config.bindings.new_terminal_tab.mac.key, "t");
+        assert_eq!(
+            serde_json::to_value(effective("   ", Some("")).unwrap()).unwrap(),
+            serde_json::to_value(&config).unwrap()
+        );
+    }
+
+    #[test]
+    fn validate_overrides_rejects_unusable_files() {
+        assert!(validate_overrides("not json").is_err());
+        assert!(validate_overrides("[]").is_err());
+        assert!(validate_overrides(
+            &serde_json::json!({ "bindings": { "clearTerminal": 5 } }).to_string()
+        )
+        .is_err());
+        assert!(validate_overrides("{}").is_ok());
     }
 
     #[test]

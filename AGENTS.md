@@ -118,6 +118,7 @@ than no guide.
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
 │   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
+│   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
 │   ├── constants/               # Dual TS + Rust package — shared source of truth
@@ -141,12 +142,23 @@ than no guide.
 **Where things go:**
 
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
-  remote-access tunnel under `tunnel` = `{ command, urlPattern }`). Shipped defaults for
-  such settings belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`) so Rust and TS
-  agree, never hard-coded in one language.
-- Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`;
-  native `Cmd+,` opens it on macOS. Host-only mobile pairing and gateway device history
-  live under its global scope.
+  remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
+  `agentStatus` = `{ notificationsEnabled, soundName }`). Keyboard shortcuts are separate:
+  `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
+  belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`) so Rust and
+  TS agree, never hard-coded in one language.
+- Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
+  and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
+  and Agent Status have both a global and a project scope (project wins); GitHub, AI, and
+  mobile pairing/gateway history are global-only.
+- Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
+  merged `index.css` defaults <- global <- project. Never restate a shipped default color in
+  TS or Rust: `apps/pragma/src/index.css` is the source of truth and the token catalog is
+  parsed from it. Sourced built-in palettes live in `apps/pragma/src/lib/theme-presets.ts`.
+  See _User themes_ in `apps/pragma/AGENTS.md`.
+- Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
+  project root for project clips) and are read through the owning host, so a remote
+  project's clips work the same as a local one's.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
@@ -276,14 +288,15 @@ without updating this guide and CI.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it with the
   `rust-windows` job plus a `windows-latest` entry in the `build` matrix.
-- **A Windows installer has to stop the sidecars, not just the app.** Windows locks a
-  running executable's image, our sidecars outlive the window by design, and a per-user
-  NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live instance
-  dies with `Error opening file for writing: …\AppData\Local\Pragma\pragma-server.exe`.
-  Both bundles need their own fix: `installer-hooks.nsh` for NSIS and
-  `installer-close-apps.wxs` for the MSI, both under `apps/pragma/src-tauri/` and both
-  keyed to `bundle.externalBin`. Adding a sidecar means editing both; see
-  `apps/pragma/AGENTS.md`.
+- **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
+  locks a running executable's image, our sidecars outlive the window by design, and a
+  per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live
+  instance dies with `Error opening file for writing:
+…\AppData\Local\Pragma\pragma-server.exe`. `installer-hooks.nsh` handles this and stays
+  keyed to `bundle.externalBin`. The elevated per-machine MSI deliberately relies on
+  Windows Installer Restart Manager instead: WiX `util:CloseApplication` matches only by
+  executable basename and could otherwise terminate another user's or unrelated process.
+  See `apps/pragma/AGENTS.md`.
 - **Never spell a shell script's runner as bare `bash` in a package script.** On Windows
   with WSL installed, `bash` on `PATH` is `C:\Windows\system32\bash.exe` — the WSL
   launcher — whose Linux `PATH` has no `rustc`, `cargo`, or `bun`, so the sidecar staging

@@ -53,10 +53,13 @@ packages/plugins-host/
 
 ## Shipped agents live in plugin packages
 
-The three built-in agent definitions (`claude-code`, `opencode`, `cursor`) live in their
-plugin packages' `src/pragma-plugin.ts`. Staging copies each package's `package.json`,
+The four bundled agent definitions (`claude-code`, `opencode`, `cursor`,
+`github-copilot`) live in their plugin packages' `src/pragma-plugin.ts`. Staging copies each
+package's `package.json`,
 `dist/`, and `assets/`; desktop and catalog sidecar discover and import those same bundles.
-Do not statically import shipped packages or duplicate agent metadata here.
+When plugin ids collide, project overrides global and global overrides bundled; only the winner
+contributes agents, watchers, and usage providers. Do not statically import shipped packages or
+duplicate agent metadata here.
 
 ## Catalog wire types
 
