@@ -39,6 +39,8 @@ Tauri or client presentation code.
   two-search concurrency, and cancellation; responses contain only worktree-relative paths.
 - All `git` subprocess calls go through `process_env::command` so a GUI-launched
   host still finds `git` on `PATH`.
+- Headless lifecycle commands resolve their shell and command arguments through
+  `pragma_platform::shell`; never assume `/bin/sh -c` exists on the host.
 - **Asset files use their own ops.** `FsRequest::ListDir` hides gitignored entries and
   `ReadFile` refuses binary content, which is wrong for asset directories users expect
   to see (e.g. a gitignored `.pragma/assets/sounds`). `ListFileNames` lists files

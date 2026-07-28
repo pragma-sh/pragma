@@ -1,4 +1,4 @@
-//! Resolving the interactive shell a PTY should launch.
+//! Resolving shells for interactive PTYs and non-interactive commands.
 //!
 //! macOS and Linux have a convention for this — the `SHELL` environment
 //! variable, with a well-known fallback. Windows has none, so the shell is
@@ -102,6 +102,18 @@ pub fn interactive_args(program: &str) -> Vec<String> {
         Vec::new()
     } else {
         vec!["-l".to_string()]
+    }
+}
+
+/// Builds arguments that ask `program` to run one command and exit.
+#[must_use]
+pub fn command_args(program: &str, command: &str) -> Vec<String> {
+    if is_powershell(program) {
+        vec!["-Command".to_string(), command.to_string()]
+    } else if is_cmd(program) {
+        vec!["/C".to_string(), command.to_string()]
+    } else {
+        vec!["-c".to_string(), command.to_string()]
     }
 }
 
@@ -333,6 +345,22 @@ mod tests {
     #[test]
     fn the_legacy_command_interpreter_takes_no_arguments() {
         assert!(super::interactive_args("cmd.exe").is_empty());
+    }
+
+    #[test]
+    fn command_arguments_follow_each_shell_family() {
+        assert_eq!(
+            super::command_args("pwsh.exe", "Write-Output hi"),
+            vec!["-Command", "Write-Output hi"]
+        );
+        assert_eq!(
+            super::command_args("cmd.exe", "echo hi"),
+            vec!["/C", "echo hi"]
+        );
+        assert_eq!(
+            super::command_args("/bin/sh", "printf hi"),
+            vec!["-c", "printf hi"]
+        );
     }
 
     #[test]

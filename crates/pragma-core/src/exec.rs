@@ -114,10 +114,12 @@ fn run(request: &ExecRequest) -> Vec<CommandResult> {
 }
 
 fn run_one(cwd: &str, env: &[(String, String)], command: &str) -> CommandResult {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let shell = pragma_platform::shell::default_shell();
     let started = Instant::now();
     let mut child = process_env::command(&shell);
-    child.arg("-c").arg(command).current_dir(cwd);
+    child
+        .args(pragma_platform::shell::command_args(&shell, command))
+        .current_dir(cwd);
     for (key, value) in env {
         child.env(key, value);
     }
@@ -154,14 +156,20 @@ mod tests {
         // Win32 path `canonicalize` returns, so the assertion could not hold on
         // both platforms at once.
         std::fs::write(dir.path().join("marker.txt"), "in-cwd").expect("marker");
+        let shell = pragma_platform::shell::default_shell();
+        let command = match pragma_platform::shell::command_args(&shell, "")[0].as_str() {
+            "-Command" => "Write-Output \"${env:GREETING}:$(Get-Content marker.txt -Raw)\"",
+            "/C" => "echo %GREETING%: & type marker.txt",
+            _ => "printf \"$GREETING:$(cat marker.txt)\"",
+        };
         let results = run(&ExecRequest {
             cwd: dir.path().to_string_lossy().into_owned(),
-            commands: vec!["printf \"$GREETING:$(cat marker.txt)\"".to_string()],
+            commands: vec![command.to_string()],
             env: vec![("GREETING".to_string(), "hi".to_string())],
             max_concurrent: 1,
         });
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].stdout, "hi:in-cwd");
+        assert_eq!(results[0].stdout.trim(), "hi:in-cwd");
         assert_eq!(results[0].status, Some(0));
     }
 

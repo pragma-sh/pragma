@@ -91,7 +91,9 @@ there is no bit to set and nothing is lost.
 
 `-l` abbreviates `-Login` in PowerShell, which is an error on Windows. Passing it would
 fail every terminal Pragma opens. Use `shell::resolve_launch`, which returns the program
-_and_ its interactive arguments together — never hardcode `-l` at a call site.
+_and_ its interactive arguments together — never hardcode `-l` at a call site. For
+non-interactive commands, use `shell::default_shell` with `shell::command_args`; Windows
+PowerShell takes `-Command`, `cmd.exe` takes `/C`, and POSIX shells take `-c`.
 
 Note `stem()` splits on both `/` and `\` rather than deferring to `Path::file_stem`,
 which only recognises the host's separator. A test caught this: a Windows PowerShell path
