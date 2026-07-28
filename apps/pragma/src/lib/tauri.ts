@@ -946,6 +946,25 @@ export function githubSyncBranch(worktreeId: string): Promise<void> {
   return invoke("github_sync_branch", { worktreeId });
 }
 
+/** Syncs the PR head, then merges the latest base repository branch into its worktree. */
+export function githubMergeBaseBranch(
+  worktreeId: string,
+  base: string,
+  baseRemote: string | null,
+): Promise<boolean> {
+  return invoke<boolean>("github_merge_base_branch", { worktreeId, base, baseRemote });
+}
+
+/** Discards conflict-resolution changes and aborts the worktree's active merge. */
+export function githubAbortMerge(worktreeId: string): Promise<void> {
+  return invoke("github_abort_merge", { worktreeId });
+}
+
+/** Returns whether Git has an active merge in the worktree. */
+export function githubMergeInProgress(worktreeId: string): Promise<boolean> {
+  return invoke<boolean>("github_merge_in_progress", { worktreeId });
+}
+
 /** Pushes the worktree's branch to `origin` (`git push -u origin <branch>`). */
 export function githubPushBranch(worktreeId: string): Promise<void> {
   return invoke("github_push_branch", { worktreeId });

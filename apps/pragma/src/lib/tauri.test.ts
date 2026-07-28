@@ -25,6 +25,9 @@ import {
   deleteFile,
   deleteWorktree,
   fileDiff,
+  githubAbortMerge,
+  githubMergeBaseBranch,
+  githubMergeInProgress,
   githubPullBranch,
   githubSyncBranch,
   listDirEntries,
@@ -464,6 +467,19 @@ describe("git changes IPC wrappers", () => {
     invokeMock.mockReset();
     void githubSyncBranch("wt-1");
     expect(invokeMock).toHaveBeenCalledWith("github_sync_branch", { worktreeId: "wt-1" });
+    invokeMock.mockReset();
+    void githubMergeBaseBranch("wt-1", "main", null);
+    expect(invokeMock).toHaveBeenCalledWith("github_merge_base_branch", {
+      worktreeId: "wt-1",
+      base: "main",
+      baseRemote: null,
+    });
+    invokeMock.mockReset();
+    void githubAbortMerge("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("github_abort_merge", { worktreeId: "wt-1" });
+    invokeMock.mockReset();
+    void githubMergeInProgress("wt-1");
+    expect(invokeMock).toHaveBeenCalledWith("github_merge_in_progress", { worktreeId: "wt-1" });
   });
 });
 

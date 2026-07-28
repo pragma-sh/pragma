@@ -55,6 +55,7 @@ export interface PullRequestSummary {
   headRef: string;
   headSha: string;
   baseRef: string;
+  baseRepo?: { owner: string; repo: string; cloneUrl: string } | null;
   draft: boolean;
   merged: boolean;
   mergeable: boolean | null;
@@ -164,7 +165,14 @@ interface PullLike {
   merged?: boolean;
   mergeable?: boolean | null;
   head: { ref: string; sha: string };
-  base: { ref: string };
+  base: {
+    ref: string;
+    repo?: {
+      name: string;
+      clone_url: string;
+      owner: { login: string } | null;
+    } | null;
+  };
   user: { login: string; avatar_url: string } | null;
 }
 
@@ -182,6 +190,13 @@ function toSummary(pr: PullLike): PullRequestSummary {
     headRef: pr.head.ref,
     headSha: pr.head.sha,
     baseRef: pr.base.ref,
+    baseRepo: pr.base.repo?.owner
+      ? {
+          owner: pr.base.repo.owner.login,
+          repo: pr.base.repo.name,
+          cloneUrl: pr.base.repo.clone_url,
+        }
+      : null,
     draft: pr.draft ?? false,
     merged: pr.merged ?? false,
     mergeable: pr.mergeable ?? null,
@@ -213,7 +228,12 @@ async function findPullInRepo(
   });
   const filtered = data[0];
   if (filtered) {
-    return toSummary(filtered);
+    const { data: pull } = await octokit.rest.pulls.get({
+      owner: target.owner,
+      repo: target.repo,
+      pull_number: filtered.number,
+    });
+    return toSummary(pull);
   }
   const open = await octokit.paginate(octokit.rest.pulls.list, {
     owner: target.owner,
@@ -222,7 +242,15 @@ async function findPullInRepo(
     per_page: 100,
   });
   const match = open.find((pr) => pr.head.ref === repo.headBranch);
-  return match ? toSummary(match) : null;
+  if (!match) {
+    return null;
+  }
+  const { data: pull } = await octokit.rest.pulls.get({
+    owner: target.owner,
+    repo: target.repo,
+    pull_number: match.number,
+  });
+  return toSummary(pull);
 }
 
 /**

@@ -144,7 +144,13 @@ full-screen `GitHubSetupModal` and the **Pull Request** right-sidebar subtab. Th
 subtab (`right-sidebar/PullRequestTab`) resolves logged-out → create
 (`CreatePullRequestView`, TipTap markdown editor) → view (`ViewPullRequestView`). A PR
 view keeps each check-run/status name and state; its merge card shows passed/failed/pending
-counts and expands to a per-check dropdown. A PR review opens a `pr-review` `TabKind`
+counts and expands to a per-check dropdown. When GitHub reports a PR as unmergeable, the
+merge card becomes a conflict alert. Its **Sync with Base Branch** action syncs the head,
+fetches the actual base repository (including cross-fork upstreams), and merges its latest
+base branch into the current worktree; clean merges push immediately, while conflicts
+remain for local editing. While Git reports an active merge, the card prompts the user to
+resolve and commit the conflict, and offers a confirmed **Abort Merge** action that discards
+conflict-resolution changes. A PR review opens a `pr-review` `TabKind`
 (v7 `pr_number` column) rendered through
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
