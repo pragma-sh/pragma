@@ -19,7 +19,7 @@
  * `typify::import_types!("schema.json")` at compile time, so `schema.json`
  * remains the watched input and a real schema change still rebuilds.
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { compileFromFile } from "json-schema-to-typescript";
 
@@ -37,6 +37,7 @@ const existing = await readFile(OUTPUT, "utf8").catch(() => undefined);
 if (existing === generated) {
   console.log(`${OUTPUT} already up to date`);
 } else {
+  await mkdir("src/generated", { recursive: true });
   await writeFile(OUTPUT, generated);
   console.log(`${OUTPUT} ${existing === undefined ? "created" : "updated"}`);
 }
