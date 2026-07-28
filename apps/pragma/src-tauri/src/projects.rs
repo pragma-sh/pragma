@@ -48,7 +48,10 @@ pub fn get_projects_directory(app: tauri::AppHandle, db: State<'_, Db>) -> AppRe
 }
 
 fn add_project_path(db: &Db, path: PathBuf) -> AppResult<Project> {
-    let canonical = path.canonicalize()?;
+    // This string is stored and later handed to git as a worktree location, so
+    // it has to be canonical *and* plain — `std`'s canonicalize would hand
+    // Windows back a `\\?\C:\…` verbatim path that git reads as a UNC path.
+    let canonical = pragma_platform::path::canonicalize(&path)?;
     git::ensure_repo(&canonical)?;
     git::ensure_pragma_excluded(&canonical)?;
     let branch = git::current_branch(&canonical)?;

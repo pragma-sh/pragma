@@ -1,4 +1,4 @@
-use std::os::unix::net::UnixStream;
+use pragma_platform::ipc::LocalStream;
 use std::path::PathBuf;
 
 use pragma_client::PragmaClient;
@@ -99,7 +99,7 @@ impl GatewayClient {
         cwd: String,
         cols: u16,
         rows: u16,
-    ) -> GatewayResult<UnixStream> {
+    ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
             .spawn_stream(session_id, worktree_id, cwd, cols, rows)
@@ -112,7 +112,7 @@ impl GatewayClient {
         &self,
         session_id: String,
         size: Option<(u16, u16)>,
-    ) -> GatewayResult<UnixStream> {
+    ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
             .attach_stream(session_id, size)
@@ -196,7 +196,7 @@ impl GatewayClient {
     }
 
     /// Opens the agent event stream.
-    pub fn subscribe_agents_stream(&self) -> GatewayResult<UnixStream> {
+    pub fn subscribe_agents_stream(&self) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
             .subscribe_agents_stream()
@@ -217,7 +217,7 @@ impl GatewayClient {
         event: ProtocolEventKind,
         worktree_id: Option<String>,
         cwd: Option<String>,
-    ) -> GatewayResult<UnixStream> {
+    ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
             .subscribe_stream(event, worktree_id, cwd)

@@ -1,5 +1,5 @@
+use pragma_platform::ipc::LocalStream;
 use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -62,7 +62,7 @@ type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 /// survive tunnel/proxy idle timeouts; when the client is gone the failed
 /// keepalive write shuts the server stream down so the forwarder thread exits
 /// instead of leaking.
-pub fn stream_ndjson_response(request: Request, stream: UnixStream) -> GatewayResult<()> {
+pub fn stream_ndjson_response(request: Request, stream: LocalStream) -> GatewayResult<()> {
     let mut writer = request.into_writer();
     writer.write_all(b"HTTP/1.1 200 OK\r\n")?;
     writer.write_all(b"content-type: application/x-ndjson\r\n")?;
@@ -102,7 +102,7 @@ fn finish_chunked_body(writer: &SharedWriter) {
 /// Periodically writes the keepalive line until the forwarder finishes or a
 /// write fails. On write failure the client has disconnected: shut the server
 /// event stream down so the forwarder's blocking read unblocks and exits.
-fn spawn_keepalive(writer: SharedWriter, done: Arc<AtomicBool>, shutdown: Option<UnixStream>) {
+fn spawn_keepalive(writer: SharedWriter, done: Arc<AtomicBool>, shutdown: Option<LocalStream>) {
     thread::spawn(move || loop {
         thread::sleep(KEEPALIVE_INTERVAL);
         if done.load(Ordering::Relaxed) {
@@ -129,7 +129,7 @@ fn spawn_keepalive(writer: SharedWriter, done: Arc<AtomicBool>, shutdown: Option
     });
 }
 
-fn forward_stream_to_writer(mut stream: UnixStream, writer: &SharedWriter) {
+fn forward_stream_to_writer(mut stream: LocalStream, writer: &SharedWriter) {
     loop {
         let event = match read_frame(&mut stream) {
             Ok(Frame::Output { session_id, data }) => EventFrame::Output { session_id, data },

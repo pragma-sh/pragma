@@ -9,7 +9,7 @@
     "./values.json": "./values.json"
   },
   "scripts": {
-    "generate": "json2ts --input schema.json --output src/generated/constants.ts --no-additionalProperties --unreachableDefinitions --bannerComment \"/* AUTO-GENERATED from schema.json. Do not edit. Run \\`bun run generate\\`. */\"",
+    "generate": "bun scripts/generate-types.ts",
     "build": "bun run generate",
     "typecheck": "tsc --noEmit",
     "pretypecheck": "bun run generate",

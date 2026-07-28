@@ -1,0 +1,46 @@
+# Normalize line endings so a Windows checkout (Git's default
+# `core.autocrlf=true`) cannot hand CRLF files to bash. A `\r` on the shebang
+# or `set -euo pipefail` line breaks the build with
+# `set: pipefail\r: invalid option name`.
+#
+# `eol=lf` (not just `text=auto`) is required: every blob in this repo is already
+# LF, but `text=auto` alone lets `core.autocrlf=true` write CRLF into a Windows
+# working tree. oxfmt enforces LF, so `bun run format:check` — and therefore
+# `bun run check` — then fails on every file it checks on Windows while staying
+# green on Linux/macOS CI. Pinning the worktree to LF keeps all three platforms
+# byte-identical. The `*.bat`/`*.cmd`/`*.ps1` rules below are more specific and
+# still win, so Windows-native scripts keep CRLF.
+* text=auto eol=lf
+
+# Shell scripts run under Git Bash / WSL on Windows: must stay LF.
+*.sh text eol=lf
+.husky/commit-msg text eol=lf
+.husky/pre-commit text eol=lf
+.husky/pre-push text eol=lf
+
+# Windows-native scripts want CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.dylib binary
+*.dll binary
+*.so binary
+*.node binary
+*.wasm binary
+bun.lock -diff linguist-generated

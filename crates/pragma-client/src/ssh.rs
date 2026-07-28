@@ -16,8 +16,8 @@ use russh::keys::agent::AgentIdentity;
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, PublicKey};
 use russh::ChannelMsg;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixListener;
+
+use crate::bridge;
 
 /// Authentication settings for a remote SSH host.
 #[derive(Clone, Debug)]
@@ -147,17 +147,14 @@ async fn run_bridge(
     authenticate(&mut handle, &config.user, &config.auth).await?;
     bootstrap(&handle, &config.bootstrap_command).await?;
 
-    let _ = std::fs::remove_file(&config.local_socket_path);
-    if let Some(parent) = config.local_socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let listener = UnixListener::bind(&config.local_socket_path)?;
-    set_socket_permissions(&config.local_socket_path)?;
+    // `bind_local_socket` restricts the socket to its owner on every platform.
+    let mut listener = bridge::bind_local_socket(&config.local_socket_path)?;
     let _ = ready_tx.send(Ok(()));
 
     let handle = Arc::new(handle);
     loop {
-        let (mut local_stream, _) = listener.accept().await?;
+        let (local_stream, next) = bridge::accept(listener).await?;
+        listener = next;
         let handle = Arc::clone(&handle);
         let remote_socket_path = config.remote_socket_path.clone();
         tokio::spawn(async move {
@@ -165,12 +162,10 @@ async fn run_bridge(
                 .channel_open_direct_streamlocal(remote_socket_path)
                 .await
             else {
-                let _ = local_stream.shutdown().await;
+                let _ = local_stream.shutdown(std::net::Shutdown::Both);
                 return;
             };
-            let mut channel_stream = channel.into_stream();
-            let _ = tokio::io::copy_bidirectional(&mut local_stream, &mut channel_stream).await;
-            let _ = channel_stream.shutdown().await;
+            let _ = bridge::pump(local_stream, channel.into_stream()).await;
         });
     }
 }
@@ -214,9 +209,7 @@ async fn authenticate_agent(
     handle: &mut Handle<TrustServerKey>,
     user: &str,
 ) -> Result<bool, SshBridgeError> {
-    let mut agent = AgentClient::connect_env()
-        .await
-        .map_err(|error| SshBridgeError::Agent(error.to_string()))?;
+    let mut agent = connect_agent().await?;
     let identities = agent
         .request_identities()
         .await
@@ -305,12 +298,36 @@ impl Handler for TrustServerKey {
     }
 }
 
+/// Connects to the running SSH agent.
+///
+/// The protocol is identical on both platforms; only the endpoint differs.
+/// Unix advertises a Unix-domain socket through `SSH_AUTH_SOCK`. Windows
+/// OpenSSH instead exposes the agent as a fixed named pipe, and sets no
+/// `SSH_AUTH_SOCK`, so there is nothing to read from the environment.
 #[cfg(unix)]
-fn set_socket_permissions(path: &PathBuf) -> Result<(), SshBridgeError> {
-    use std::os::unix::fs::PermissionsExt;
+async fn connect_agent() -> Result<AgentClient<tokio::net::UnixStream>, SshBridgeError> {
+    AgentClient::connect_env()
+        .await
+        .map_err(|error| SshBridgeError::Agent(error.to_string()))
+}
 
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(0o600);
-    std::fs::set_permissions(path, permissions)?;
-    Ok(())
+/// Named pipe the Windows OpenSSH authentication agent listens on.
+#[cfg(windows)]
+const WINDOWS_SSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
+
+// Kept `async` to match the Unix signature, which genuinely awaits: opening a
+// named pipe is synchronous, but diverging here would fork the call site.
+#[cfg(windows)]
+#[allow(clippy::unused_async)]
+async fn connect_agent(
+) -> Result<AgentClient<tokio::net::windows::named_pipe::NamedPipeClient>, SshBridgeError> {
+    let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
+        .open(WINDOWS_SSH_AGENT_PIPE)
+        .map_err(|error| {
+            SshBridgeError::Agent(format!(
+                "could not reach the OpenSSH agent at {WINDOWS_SSH_AGENT_PIPE}: {error}. \
+                 Start it with `Start-Service ssh-agent`."
+            ))
+        })?;
+    Ok(AgentClient::connect(pipe))
 }

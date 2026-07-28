@@ -13,6 +13,7 @@ base64 = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 pragma-client = { path = "../pragma-client", default-features = false }
 pragma-constants = { path = "../../packages/constants" }
+pragma-platform = { version = "0.0.0", path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
 rand = "0.8"
 serde = { workspace = true }

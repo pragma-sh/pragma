@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::pty::{cargo_executable, sidecar_executable, workspace_root};
+use crate::pty::{cargo_executable, executable_name, sidecar_executable, workspace_root};
 
 const PATH_WARNING_EVENT: &str = "pragma:agent-cli-path-warning";
 
@@ -13,7 +13,9 @@ pub fn ensure_installed(app: &AppHandle, data_dir: &Path, channel: &str) -> AppR
     let home = app.path().home_dir()?;
     let bin_dir = install_bin_dir(&home, data_dir, channel);
     std::fs::create_dir_all(&bin_dir)?;
-    let destination = bin_dir.join("pragma-cli");
+    // Must carry `.exe` on Windows: the file is both read back by
+    // `copy_if_changed` and executed by agents from their PATH.
+    let destination = bin_dir.join(executable_name("pragma-cli"));
     let source = agent_source()?;
     copy_if_changed(&source, &destination)?;
     if channel == "pragma" && !path_contains(&bin_dir) {
@@ -32,7 +34,7 @@ fn install_bin_dir(home: &Path, data_dir: &Path, channel: &str) -> PathBuf {
 
 fn agent_source() -> AppResult<PathBuf> {
     if cfg!(debug_assertions) {
-        let status = Command::new(cargo_executable())
+        let status = pragma_platform::process::command(cargo_executable())
             .args(["build", "-p", "pragma-cli"])
             .current_dir(workspace_root())
             .stdin(Stdio::null())
@@ -40,7 +42,9 @@ fn agent_source() -> AppResult<PathBuf> {
         if !status.success() {
             return Err(AppError::Daemon("failed to build pragma-cli".to_string()));
         }
-        Ok(workspace_root().join("target/debug/pragma-cli"))
+        Ok(workspace_root()
+            .join("target/debug")
+            .join(executable_name("pragma-cli")))
     } else {
         Ok(sidecar_executable("pragma-cli"))
     }
@@ -51,18 +55,8 @@ fn copy_if_changed(source: &Path, destination: &Path) -> AppResult<()> {
     let needs_copy = std::fs::read(destination).map_or(true, |existing| existing != source_bytes);
     if needs_copy {
         std::fs::write(destination, source_bytes)?;
-        set_executable(destination)?;
+        pragma_platform::perms::set_executable(destination)?;
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_executable(path: &Path) -> AppResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(path, permissions)?;
     Ok(())
 }
 
@@ -75,7 +69,28 @@ fn path_contains(dir: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::install_bin_dir;
+    use super::{executable_name, install_bin_dir};
+
+    /// The installed helper must carry `.exe` on Windows: `copy_if_changed` reads
+    /// the destination back, and agents execute it from their PATH. Without the
+    /// suffix both the source and destination miss and startup logs
+    /// "failed to install pragma-cli: os error 2".
+    #[test]
+    fn installed_cli_carries_the_platform_exe_suffix() {
+        let name = executable_name("pragma-cli");
+        if cfg!(windows) {
+            assert_eq!(name, "pragma-cli.exe");
+        } else {
+            assert_eq!(name, "pragma-cli");
+        }
+        let destination = install_bin_dir(
+            Path::new("/home/test"),
+            Path::new("/data/pragma-dev-abc"),
+            "pragma-dev-abc",
+        )
+        .join(&name);
+        assert_eq!(destination.file_name().unwrap(), name.as_str());
+    }
 
     #[test]
     fn cli_install_is_global_for_prod_and_instance_scoped_for_dev() {

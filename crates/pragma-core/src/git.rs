@@ -8,7 +8,7 @@
 //! merge-base. The work runs on whichever host owns the socket.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pragma_constants::{
     BranchSyncStatus, ChangeStatus, ChangedFile, DiffSide, FileDiff, WorktreeChanges,
@@ -1125,13 +1125,34 @@ fn merge_worktree_to_parent(
     )))
 }
 
-/// Ensures `.pragma/worktrees/` is excluded via `.git/info/exclude`, migrating a
-/// legacy broad `.pragma/` entry to the narrower path. Idempotent.
+/// Asks git where the repository keeps its shared metadata. Relative answers
+/// resolve against `path`, which is the directory git ran in.
+fn git_common_dir(path: &Path) -> CoreResult<PathBuf> {
+    let raw = PathBuf::from(
+        String::from_utf8_lossy(&run_git(path, &["rev-parse", "--git-common-dir"])?)
+            .trim()
+            .to_string(),
+    );
+    let absolute = if raw.is_absolute() {
+        raw
+    } else {
+        path.join(raw)
+    };
+    Ok(pragma_platform::path::canonicalize(absolute)?)
+}
+
+/// Ensures `.pragma/worktrees/` is excluded via the repository's
+/// `info/exclude`, migrating a legacy broad `.pragma/` entry to the narrower
+/// path. Idempotent.
 fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
-    let exclude = project_path.join(".git/info/exclude");
-    if let Some(parent) = exclude.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    // Ask git for the git dir instead of assuming `<project>/.git`. Creating
+    // that directory ourselves would leave behind a `.git` git does *not*
+    // recognise as a repository, and discovery would then walk straight past it
+    // to an ancestor repo — every git view of this project would report the
+    // ancestor's index.
+    let info = git_common_dir(project_path)?.join("info");
+    std::fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
     let mut has_worktrees_exclude = false;
     let mut changed = false;
@@ -1607,11 +1628,12 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file, file_diff,
-        github_abort_merge, github_fetch_and_sync, github_merge_base_branch,
-        github_merge_in_progress, github_pull_branch, github_sync_branch, has_unmerged_paths,
-        list_headless_worktrees, merge_worktree_to_parent, merged_status, stage_file, unstage_file,
-        worktree_changes, worktree_commits, worktree_is_dirty, MergedStatusItem,
+        commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file,
+        ensure_pragma_excluded, file_diff, github_abort_merge, github_fetch_and_sync,
+        github_merge_base_branch, github_merge_in_progress, github_pull_branch, github_sync_branch,
+        has_unmerged_paths, list_headless_worktrees, merge_worktree_to_parent, merged_status,
+        stage_file, unstage_file, worktree_changes, worktree_commits, worktree_is_dirty,
+        MergedStatusItem, PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1622,6 +1644,42 @@ mod tests {
             .output()
             .expect("git command");
         assert!(output.status.success(), "git {args:?} failed");
+    }
+
+    /// Initializes a test repo with line-ending handling pinned in its own config.
+    ///
+    /// Repo-local config is required rather than `git -c` on the test's own
+    /// commands: the functions under test shell out to `git checkout`/`pull`
+    /// themselves, and those inherit only what the repository config says. Git
+    /// for Windows defaults `core.autocrlf=true` system-wide, which rewrites
+    /// checked-out fixtures to CRLF and fails every `"…\n"` assertion here.
+    fn init_repo(dir: &Path, args: &[&str]) {
+        run(dir, args);
+        run(dir, &["config", "core.autocrlf", "false"]);
+        run(dir, &["config", "core.eol", "lf"]);
+    }
+
+    /// Excluding must never fabricate a `.git` git would not recognise: git
+    /// discovery walks straight past such a directory to the ancestor repo, and
+    /// the project's Changes view then reports the ancestor's index as its own.
+    #[test]
+    fn excluding_a_non_repo_creates_no_git_dir() {
+        let dir = tempdir().expect("tempdir");
+        init_repo(dir.path(), &["init", "-b", "main"]);
+        let nested = dir.path().join("scratch");
+        std::fs::create_dir(&nested).expect("nested dir");
+
+        ensure_pragma_excluded(&nested).expect("exclude resolves the ancestor's git dir");
+
+        assert!(
+            !nested.join(".git").exists(),
+            "a non-repo directory must not gain a .git of its own"
+        );
+        let exclude =
+            std::fs::read_to_string(dir.path().join(".git/info/exclude")).expect("exclude file");
+        assert!(exclude
+            .lines()
+            .any(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE));
     }
 
     fn commit_all(dir: &Path, message: &str) {
@@ -1653,10 +1711,10 @@ mod tests {
 
     fn project_with_remote() -> (TempDir, TempDir, TempDir) {
         let remote = tempdir().expect("remote tempdir");
-        run(remote.path(), &["init", "--bare"]);
+        init_repo(remote.path(), &["init", "--bare"]);
 
         let local = tempdir().expect("local tempdir");
-        run(local.path(), &["init", "-b", "main"]);
+        init_repo(local.path(), &["init", "-b", "main"]);
         run(local.path(), &["config", "user.email", "test@example.com"]);
         run(local.path(), &["config", "user.name", "Test"]);
         run(
@@ -1688,7 +1746,7 @@ mod tests {
     fn project_with_child() -> (std::path::PathBuf, std::path::PathBuf) {
         let main = tempdir().expect("tempdir");
         let main_path = main.path().to_path_buf();
-        run(&main_path, &["init", "-b", "main"]);
+        init_repo(&main_path, &["init", "-b", "main"]);
         run(&main_path, &["config", "user.email", "test@example.com"]);
         run(&main_path, &["config", "user.name", "Test"]);
         std::fs::write(main_path.join("base.txt"), "base\n").expect("write base");
@@ -1715,7 +1773,7 @@ mod tests {
     fn lists_headless_worktrees_under_pragma_dir() {
         let project = tempdir().expect("tempdir");
         let project_path = project.path().to_path_buf();
-        run(&project_path, &["init", "-b", "main"]);
+        init_repo(&project_path, &["init", "-b", "main"]);
         run(&project_path, &["config", "user.email", "test@example.com"]);
         run(&project_path, &["config", "user.name", "Test"]);
         std::fs::write(project_path.join("base.txt"), "base\n").expect("write base");
@@ -1742,7 +1800,12 @@ mod tests {
         let entry = listed.first().expect("one entry");
         assert_eq!(entry.id, "wt-1");
         assert_eq!(entry.branch, "feature");
-        assert_eq!(entry.path, checkout.to_string_lossy());
+        // Compare as paths, not strings. `PRAGMA_WORKTREES_EXCLUDE` carries a
+        // trailing slash (it doubles as a git exclude pattern), which Windows
+        // counts as a separator, so `read_dir` yields `…\.pragma/worktrees/wt-1`
+        // while this test's join yields `…\.pragma/worktrees\wt-1`. Both name the
+        // same file, and `Path` equality treats `/` and `\` as equivalent there.
+        assert_eq!(Path::new(&entry.path), checkout.as_path());
     }
 
     #[test]

@@ -130,6 +130,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Waits until `predicate` holds, then returns; gives up after `timeoutMs` and
+ * lets the caller's assertion produce the failure message.
+ *
+ * Prefer this over a fixed `sleep` when waiting on the background abort watcher.
+ * The watcher is a polling shell loop, and every iteration spawns processes —
+ * cheap on Linux, far slower on Windows — so a fixed delay that is comfortable
+ * on one platform flakes on another.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) return;
+    await sleep(20);
+  }
+}
+
+/**
  * Writes a transcript file and returns its path plus the stdin JSON a hook
  * delivers for it, so a test can later append an interrupt line to that same
  * file to simulate a cancel the watcher must notice.
@@ -196,6 +213,27 @@ function messagePayloads(): Array<{ role: string; text: string }> {
     );
 }
 
+/**
+ * Whether a *working* `python3` is on PATH.
+ *
+ * `report.sh` parses content-bearing hook fields (prompts, transcript replies,
+ * permission payloads, questions) with Python 3 and treats it as optional,
+ * degrading to status-only reporting without it. Assertions that depend on that
+ * parsing are therefore conditional, or they fail on any host lacking it.
+ * Presence alone is not enough to check: Windows ships an App Execution Alias
+ * named `python3` that only prints "Python was not found", so this runs it.
+ */
+const hasPython3 = (() => {
+  try {
+    execFileSync("python3", ["-c", ""], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const itWithPython3 = hasPython3 ? it : it.skip;
+
 describe("report.sh", () => {
   it("no-ops outside a Pragma terminal (no daemon socket)", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -218,7 +256,7 @@ describe("report.sh", () => {
     },
   );
 
-  it.each([
+  itWithPython3.each([
     { hook_event_name: "SubagentStop" },
     { hook_event_name: "Stop", agent_transcript_path: "/tmp/subagents/agent-child.jsonl" },
   ])("ignores subagent stop payload variants without agent_id", (payload) => {
@@ -230,7 +268,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(true);
   });
 
-  it("ignores a plain Stop from a child session", () => {
+  itWithPython3("ignores a plain Stop from a child session", () => {
     run("cleared", {
       stdin: JSON.stringify({ hook_event_name: "SessionStart", session_id: "parent-session" }),
     });
@@ -272,7 +310,7 @@ describe("report.sh", () => {
     ).toEqual(["agent report --agent claude-code started"]);
   });
 
-  it("stays running when Stop fires while background subagents are active", () => {
+  itWithPython3("stays running when Stop fires while background subagents are active", () => {
     run("started");
     // The parent turn ended but a subagent is still working: Claude auto-resumes
     // when it finishes, so the session must NOT flip to the green done dot.
@@ -296,7 +334,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("tracks multiple subagents until the parent completes after the last child", () => {
+  itWithPython3("tracks multiple subagents until the parent completes after the last child", () => {
     run("started");
     run("subagent-start", {
       stdin: JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "child-1" }),
@@ -357,7 +395,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("does not render a subagent task-notification as a user chat bubble", () => {
+  itWithPython3("does not render a subagent task-notification as a user chat bubble", () => {
     run("started", {
       stdin: JSON.stringify({
         hook_event_name: "UserPromptSubmit",
@@ -382,7 +420,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("reports finished after each consecutive agent turn", () => {
+  itWithPython3("reports finished after each consecutive agent turn", () => {
     run("started");
     run("stopped");
     run("started");
@@ -396,7 +434,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  it("surfaces the user's prompt as a user chat message on started", () => {
+  itWithPython3("surfaces the user's prompt as a user chat message on started", () => {
     run("started", {
       stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: 'Fix the "auth" bug' }),
     });
@@ -405,7 +443,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("names the session from the first prompt, once per session", () => {
+  itWithPython3("names the session from the first prompt, once per session", () => {
     const first = run("started", {
       stdin: JSON.stringify({
         hook_event_name: "UserPromptSubmit",
@@ -426,7 +464,7 @@ describe("report.sh", () => {
     expect(second.filter((call) => call.includes("session-name"))).toHaveLength(1);
   });
 
-  it("renames the tab when the session switches", () => {
+  itWithPython3("renames the tab when the session switches", () => {
     run("started", {
       stdin: JSON.stringify({
         hook_event_name: "UserPromptSubmit",
@@ -449,7 +487,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("surfaces the transcript's assistant reply as a chat message on stopped", () => {
+  itWithPython3("surfaces the transcript's assistant reply as a chat message on stopped", () => {
     run("started");
     run("stopped", { stdin: transcript([ASSISTANT_DONE]) });
     expect(messagePayloads()).toContainEqual(
@@ -457,7 +495,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("surfaces Stop's assistant reply without requiring a transcript", () => {
+  itWithPython3("surfaces Stop's assistant reply without requiring a transcript", () => {
     run("started");
     run("stopped", {
       stdin: JSON.stringify({
@@ -565,7 +603,7 @@ describe("report.sh", () => {
     );
   });
 
-  it.each([
+  itWithPython3.each([
     ["Read", { file_path: "src/config.ts" }, "Read src/config.ts"],
     [
       "Write",
@@ -651,7 +689,7 @@ describe("report.sh", () => {
     tool_input: { questions: [QUESTION] },
   });
 
-  it("reports a question attention (not a command) for AskUserQuestion", () => {
+  itWithPython3("reports a question attention (not a command) for AskUserQuestion", () => {
     run("started");
     run("permission", { stdin: QUESTION_STDIN });
     const reports = reportCalls();
@@ -665,7 +703,7 @@ describe("report.sh", () => {
     expect(reports[1]).not.toContain("--kind command");
   });
 
-  it("feeds a remote reply back as an allow decision with pre-filled answers", () => {
+  itWithPython3("feeds a remote reply back as an allow decision with pre-filled answers", () => {
     run("started");
     const output = runRaw("permission", {
       stdin: QUESTION_STDIN,
@@ -685,7 +723,7 @@ describe("report.sh", () => {
     });
   });
 
-  it("drops back to in progress after a remote reply resumes the turn", () => {
+  itWithPython3("drops back to in progress after a remote reply resumes the turn", () => {
     run("started");
     // Answering restores the question tool's flow; nothing else is guaranteed
     // to report before the next tool finishes, so the reply itself must flip
@@ -698,7 +736,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("drops back to in progress after a remote dismissal", () => {
+  itWithPython3("drops back to in progress after a remote dismissal", () => {
     run("started");
     runRaw("permission", {
       stdin: QUESTION_STDIN,
@@ -710,7 +748,7 @@ describe("report.sh", () => {
     );
   });
 
-  it("denies a remotely dismissed question so Claude closes its native prompt", () => {
+  itWithPython3("denies a remotely dismissed question so Claude closes its native prompt", () => {
     run("started");
     const output = runRaw("permission", {
       stdin: QUESTION_STDIN,
@@ -730,7 +768,7 @@ describe("report.sh", () => {
     expect(awaitCall).toContain("--timeout 300 --dismiss-output __PRAGMA_QUESTION_DISMISSED__");
   });
 
-  it("emits nothing (defers to Claude's question UI) when no answer arrives", () => {
+  itWithPython3("emits nothing (defers to Claude's question UI) when no answer arrives", () => {
     run("started");
     const output = runRaw("permission", { stdin: QUESTION_STDIN });
     expect(output.trim()).toBe("");
@@ -738,7 +776,7 @@ describe("report.sh", () => {
     expect(reportCalls()[1]).toContain("--kind question");
   });
 
-  it("falls back to a generic attention for multi-question payloads", () => {
+  itWithPython3("falls back to a generic attention for multi-question payloads", () => {
     run("started");
     const stdin = JSON.stringify({
       hook_event_name: "PermissionRequest",
@@ -776,25 +814,28 @@ describe("report.sh", () => {
     expect(run("running")).toEqual([]);
   });
 
-  it("keeps a live turn when its own session's SessionStart lands late (/clear race)", () => {
-    // /clear fires SessionEnd + SessionStart while the user's next prompt may
-    // already have started a turn in the NEW session. A late SessionStart must
-    // not wipe that turn's marker -- doing so mutes every marker-guarded
-    // report (attention, running) for the rest of the turn.
-    run("started", {
-      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-b" }),
-    });
-    expect(
-      run("cleared", {
-        stdin: JSON.stringify({
-          hook_event_name: "SessionStart",
-          session_id: "session-b",
-          source: "clear",
+  itWithPython3(
+    "keeps a live turn when its own session's SessionStart lands late (/clear race)",
+    () => {
+      // /clear fires SessionEnd + SessionStart while the user's next prompt may
+      // already have started a turn in the NEW session. A late SessionStart must
+      // not wipe that turn's marker -- doing so mutes every marker-guarded
+      // report (attention, running) for the rest of the turn.
+      run("started", {
+        stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-b" }),
+      });
+      expect(
+        run("cleared", {
+          stdin: JSON.stringify({
+            hook_event_name: "SessionStart",
+            session_id: "session-b",
+            source: "clear",
+          }),
         }),
-      }),
-    ).toEqual(["agent report --agent claude-code started"]);
-    expect(existsSync(markerPath())).toBe(true);
-  });
+      ).toEqual(["agent report --agent claude-code started"]);
+      expect(existsSync(markerPath())).toBe(true);
+    },
+  );
 
   it("still clears on SessionStart when no turn of that session is in flight", () => {
     run("started", {
@@ -817,7 +858,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("discards the old session's late SessionEnd after a new session took over", () => {
+  itWithPython3("discards the old session's late SessionEnd after a new session took over", () => {
     // Session pinning: once the new session reported, the old session's
     // trailing SessionEnd (fired by /clear) must not clear the new turn.
     run("started", {
@@ -907,7 +948,7 @@ describe("report.sh", () => {
       run("started", { stdin: t.stdin });
       // This turn's own cancel is appended past where the watcher was pinned.
       appendFileSync(t.path, `${INTERRUPTED}\n`);
-      await sleep(400);
+      await waitFor(() => reportCalls().length >= 2);
       expect(reportCalls()).toEqual([
         "agent report --agent claude-code started",
         "agent report --agent claude-code cleared",

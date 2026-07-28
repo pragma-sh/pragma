@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -53,5 +54,7 @@ describe("create-pragma-plugin", () => {
 });
 
 async function tempDir(): Promise<string> {
-  return await import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/pragma-plugin-"));
+  // `os.tmpdir()`, never a literal "/tmp": that path does not exist on Windows and
+  // `mkdtemp` fails with ENOENT there.
+  return await mkdtemp(join(tmpdir(), "pragma-plugin-"));
 }

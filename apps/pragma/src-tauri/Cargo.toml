@@ -53,6 +53,7 @@ tauri-plugin-log = "2"
 tiny_http = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
+pragma-platform = { version = "0.0.0", path = "../../../crates/pragma-platform" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6.15"

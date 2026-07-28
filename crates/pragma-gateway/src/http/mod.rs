@@ -1,8 +1,8 @@
+use pragma_platform::ipc::LocalStream;
 pub mod response;
 pub mod router;
 
 use std::collections::HashMap;
-use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -18,7 +18,7 @@ use crate::routes;
 use self::router::gateway_router;
 
 /// Spawn event streams held until the client opens the real events endpoint.
-pub type PendingSpawnStreams = Arc<Mutex<HashMap<String, UnixStream>>>;
+pub type PendingSpawnStreams = Arc<Mutex<HashMap<String, LocalStream>>>;
 
 /// Shared HTTP application state.
 #[derive(Clone)]

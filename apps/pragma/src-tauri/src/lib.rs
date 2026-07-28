@@ -266,8 +266,8 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         &open_command_palette,
         &open_command_mode,
     )?;
-    #[cfg(target_os = "linux")]
-    install_linux_workspace_menu(
+    #[cfg(not(target_os = "macos"))]
+    install_non_macos_workspace_menu(
         menu,
         &open_settings,
         &new_terminal_tab,
@@ -324,8 +324,12 @@ fn install_macos_workspace_menu(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-fn install_linux_workspace_menu(
+/// Installs the workspace actions on Linux and Windows, which share Ctrl-based
+/// accelerators. Both append to the `window` submenu: it is the only submenu
+/// `Menu::default` gives a stable id, so it is the only one `menu.get` can
+/// resolve (Windows' File menu carries a generated id, and Linux has none).
+#[cfg(not(target_os = "macos"))]
+fn install_non_macos_workspace_menu(
     menu: &Menu<tauri::Wry>,
     open_settings: &MenuItem<tauri::Wry>,
     new_terminal_tab: &MenuItem<tauri::Wry>,
@@ -337,7 +341,8 @@ fn install_linux_workspace_menu(
         .get("window")
         .and_then(|item| item.as_submenu().cloned())
     {
-        // Linux has no default File menu, so surface Pragma tab actions here.
+        // Neither platform offers a reachable File menu, so surface Pragma tab
+        // actions here.
         window_menu.append(open_settings)?;
         window_menu.append(new_terminal_tab)?;
         window_menu.append(close_active_tab)?;

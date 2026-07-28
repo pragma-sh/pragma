@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use pragma_constants::{EditorLauncher, CONSTANTS};
 use tauri::State;
@@ -50,7 +50,7 @@ fn editor_for(editor_id: &str) -> Option<&'static EditorLauncher> {
 }
 
 fn spawn_editor(cli_command: &str, worktree_path: &Path) -> AppResult<()> {
-    Command::new(cli_command)
+    crate::process_env::command(cli_command)
         .arg(worktree_path)
         .current_dir(worktree_path)
         .stdin(Stdio::null())

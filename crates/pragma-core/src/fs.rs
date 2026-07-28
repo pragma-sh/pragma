@@ -248,7 +248,7 @@ fn palette_search(
         let mut truncated = false;
 
         'roots: for search_root in roots {
-            let root = Path::new(&search_root.root).canonicalize()?;
+            let root = pragma_platform::path::canonicalize(&search_root.root)?;
             for relative in search_paths(&root) {
                 if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
                     truncated = true;
@@ -497,7 +497,7 @@ fn validate_relative(relative: &str) -> CoreResult<PathBuf> {
 /// the result is still under the canonical root — defeating symlink escapes.
 pub fn resolve_in_worktree(root: &Path, relative: &str) -> CoreResult<PathBuf> {
     let rel = validate_relative(relative)?;
-    let canonical_root = root.canonicalize()?;
+    let canonical_root = pragma_platform::path::canonicalize(root)?;
     let joined = canonical_root.join(&rel);
 
     let mut ancestor = joined.clone();
@@ -512,7 +512,10 @@ pub fn resolve_in_worktree(root: &Path, relative: &str) -> CoreResult<PathBuf> {
         };
         ancestor = parent.to_path_buf();
     }
-    let mut resolved = ancestor.canonicalize()?;
+    // Must use the same canonicalizer as the root above: a verbatim-prefixed
+    // path never `starts_with` a plain one, and the containment check would
+    // reject every legitimate path on Windows.
+    let mut resolved = pragma_platform::path::canonicalize(&ancestor)?;
     for name in tail.iter().rev() {
         resolved.push(name);
     }
@@ -813,7 +816,12 @@ mod tests {
         let resolved = resolve_in_worktree(dir.path(), "src/app.ts").expect("resolve");
         assert!(resolved.ends_with("src/app.ts"));
         let root = resolve_in_worktree(dir.path(), "").expect("resolve root");
-        assert_eq!(root, dir.path().canonicalize().expect("canon"));
+        // Same canonicalizer as the code under test: `std::fs`'s keeps the `\\?\`
+        // verbatim prefix on Windows, which `resolve_in_worktree` strips.
+        assert_eq!(
+            root,
+            pragma_platform::path::canonicalize(dir.path()).expect("canon")
+        );
     }
 
     #[test]
@@ -821,8 +829,18 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let outside = tempdir().expect("outside tempdir");
         std::fs::write(outside.path().join("secret.txt"), "secret").expect("write secret");
+        let link = dir.path().join("link");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).expect("symlink");
+        std::os::unix::fs::symlink(outside.path(), &link).expect("symlink");
+        #[cfg(windows)]
+        {
+            // Symlink creation needs Developer Mode or admin. Without that
+            // privilege no link exists, so the escape this test guards is
+            // unreachable — skip rather than assert a vacuous pass.
+            if std::os::windows::fs::symlink_dir(outside.path(), &link).is_err() {
+                return;
+            }
+        }
         assert!(resolve_in_worktree(dir.path(), "link/secret.txt").is_err());
     }
 

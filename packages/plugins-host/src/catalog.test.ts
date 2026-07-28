@@ -286,7 +286,9 @@ describe("assembleWatchers", () => {
         pluginId: "p.one",
         agentId: "p.one.one",
         watcherAgent: "one",
-        mainPath: "/plugins/one/plugin.mjs",
+        // Built with `join`, like the `plugin()` helper: a hardcoded
+        // "/plugins/one/plugin.mjs" is `\plugins\one\plugin.mjs` on Windows.
+        mainPath: join("/plugins/one", "plugin.mjs"),
         config: { approveKeys: "y" },
       },
     ]);

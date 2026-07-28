@@ -75,6 +75,14 @@ message() {
 # available on supported macOS/Linux hosts; without it, status reporting still
 # works and coarse fallback messages preserve prior behavior.
 py3="$(command -v python3 2>/dev/null || true)"
+# Being on PATH is not proof of being usable: Windows ships an App Execution
+# Alias at ~/AppData/Local/Microsoft/WindowsApps/python3 that only prints
+# "Python was not found" and exits nonzero. That satisfies `command -v`, so the
+# emptiness checks below would wrongly take the has-python branch. Run it once
+# and drop it unless it actually executes.
+if [ -n "$py3" ] && ! "$py3" -c '' >/dev/null 2>&1; then
+  py3=""
+fi
 
 json_field() {
   [ -n "$py3" ] || return 0

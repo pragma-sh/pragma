@@ -15,6 +15,7 @@ ssh = ["dep:russh", "dep:tokio"]
 
 [dependencies]
 pragma-constants = { path = "../../packages/constants" }
+pragma-platform = { version = "0.0.0", path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 russh = { version = "0.61.2", optional = true }
@@ -23,6 +24,7 @@ thiserror = { workspace = true }
 tokio = { version = "1", features = [
   "io-util",
   "net",
+  "process",
   "rt-multi-thread",
   "sync",
   "time",

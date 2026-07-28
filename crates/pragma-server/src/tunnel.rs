@@ -2,7 +2,7 @@
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -122,7 +122,7 @@ impl TunnelRegistry {
             .next()
             .ok_or_else(|| TunnelError::Message("tunnel command is empty".to_string()))?;
         self.set_status(TunnelStatus::Starting);
-        let child = Command::new(program)
+        let child = pragma_platform::process::command(program)
             .args(parts)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

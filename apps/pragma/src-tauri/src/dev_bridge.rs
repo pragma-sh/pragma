@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -196,21 +196,11 @@ impl Default for SidecarRegistry {
     }
 }
 
-/// Best-effort liveness probe for a sidecar PID. Returns `Some(true)` if the
-/// process is running, `Some(false)` if it has exited, and `None` when we
-/// can't determine (e.g., on Windows where we don't ship a probe in v1).
-#[cfg(unix)]
+/// Liveness probe for a sidecar PID. `Some(true)` if the process is running,
+/// `Some(false)` if it has exited, `None` when the process table could not be
+/// inspected at all.
 fn pid_alive(pid: u32) -> Option<bool> {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .ok()
-        .map(|status| status.success())
-}
-
-#[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> Option<bool> {
-    None
+    Some(pragma_platform::process::process_name(pid).is_some())
 }
 
 /// Register a sidecar process with the bridge so it shows up in `/process`
@@ -346,7 +336,7 @@ pub fn spawn_sidecar_monitored(
     log_buffer: &Arc<LogBuffer>,
     registry: Option<&Arc<SidecarRegistry>>,
 ) -> Result<std::process::Child, String> {
-    let mut child = Command::new(command)
+    let mut child = pragma_platform::process::command(command)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

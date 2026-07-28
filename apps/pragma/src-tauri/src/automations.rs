@@ -242,6 +242,16 @@ fn subscribe_once(
                             .error
                             .unwrap_or_else(|| "automation subscription rejected".to_string()));
                     }
+                    // The handshake keeps `configure_stream`'s 5s read timeout so a
+                    // wedged server cannot hang startup, but this subscription is
+                    // long-lived and usually idle. Leaving the timeout on makes every
+                    // quiet 5s look like a dropped connection, so the bridge logs a
+                    // warning and reconnects forever (`os error 10060` on Windows,
+                    // `WouldBlock` on Unix). Same pattern as `agent_events` and
+                    // `pragma_client::open_event_stream`.
+                    stream
+                        .set_read_timeout(None)
+                        .map_err(|error| error.to_string())?;
                 }
                 Ok(ServerFrame::Event(
                     EventFrame::Snapshot {

@@ -5412,6 +5412,7 @@ dependencies = [
  "pragma-client",
  "pragma-constants",
  "pragma-core",
+ "pragma-platform",
  "pragma-protocol",
  "rand 0.8.6",
  "regex",
@@ -5444,6 +5445,7 @@ dependencies = [
  "clap",
  "comfy-table",
  "pragma-constants",
+ "pragma-platform",
  "pragma-protocol",
  "reqwest 0.12.28",
  "serde",
@@ -5458,6 +5460,7 @@ name = "pragma-client"
 version = "0.0.0"
 dependencies = [
  "pragma-constants",
+ "pragma-platform",
  "pragma-protocol",
  "rusqlite",
  "russh",
@@ -5485,6 +5488,7 @@ dependencies = [
  "ignore",
  "notify-debouncer-full",
  "pragma-constants",
+ "pragma-platform",
  "serde",
  "serde_json",
  "tempfile",
@@ -5499,6 +5503,7 @@ dependencies = [
  "clap",
  "pragma-client",
  "pragma-constants",
+ "pragma-platform",
  "pragma-protocol",
  "rand 0.8.6",
  "reqwest 0.12.28",
@@ -5508,6 +5513,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tiny_http",
  "uuid",
+]
+
+[[package]]
+name = "pragma-platform"
+version = "0.0.0"
+dependencies = [
+ "pragma-constants",
+ "tempfile",
+ "uds_windows",
 ]
 
 [[package]]
@@ -5533,6 +5547,7 @@ dependencies = [
  "portable-pty",
  "pragma-constants",
  "pragma-core",
+ "pragma-platform",
  "pragma-protocol",
  "regex",
  "serde",
@@ -7949,6 +7964,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

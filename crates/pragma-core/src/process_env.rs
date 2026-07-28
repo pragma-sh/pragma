@@ -13,10 +13,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Creates a child-process command with a PATH suitable for GUI-launched hosts.
+///
+/// The console window is suppressed on Windows (see
+/// [`pragma_platform::process::hide_console`]) — everything routed through here
+/// is a console program run on the user's behalf, and the host is a GUI
+/// process, so each one would otherwise pop a window.
 #[must_use]
 pub fn command(program: &str) -> Command {
     let mut command = Command::new(program);
     command.env("PATH", user_path());
+    pragma_platform::process::hide_console(&mut command);
     command
 }
 
@@ -35,8 +41,22 @@ pub fn git() -> Command {
 
 fn user_path() -> OsString {
     let current = env::var_os("PATH").unwrap_or_default();
-    let home = env::var_os("HOME").map(PathBuf::from);
-    user_path_from(&current, home.as_deref())
+    user_path_from(&current, home_dir().as_deref())
+}
+
+/// The user's home directory, however this platform spells it.
+///
+/// Windows sets `USERPROFILE`, not `HOME` — `HOME` exists there only when
+/// something like Git Bash injects it, which a GUI-launched host does not have.
+/// Reading `HOME` alone therefore skipped every home-relative entry below on
+/// Windows, including the `.local/bin` that `agent_cli` installs `pragma-cli`
+/// into, so agents could not find the helper on their `PATH`.
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .or_else(|| env::var_os("USERPROFILE"))
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
 }
 
 fn user_path_from(current: &OsStr, home: Option<&Path>) -> OsString {
@@ -99,6 +119,35 @@ mod tests {
             "/Library/Frameworks/Python.framework/Versions/Current/bin"
         )));
         assert!(entries.contains(&PathBuf::from("/opt/homebrew/bin")));
+    }
+
+    /// Windows spells the home directory `USERPROFILE`; `HOME` is absent unless
+    /// something injects it. Falling back is what keeps `.local/bin` — where
+    /// `pragma-cli` is installed — on the `PATH` handed to agents there.
+    #[test]
+    fn home_dir_falls_back_to_userprofile() {
+        // Guard the precedence and empty-value handling without mutating the
+        // process environment, which would race other tests in this binary.
+        let pick = |home: Option<&str>, profile: Option<&str>| -> Option<PathBuf> {
+            home.filter(|value| !value.is_empty())
+                .or(profile)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        };
+        assert_eq!(
+            pick(Some("/home/dev"), None),
+            Some(PathBuf::from("/home/dev"))
+        );
+        assert_eq!(
+            pick(None, Some(r"C:\Users\dev")),
+            Some(PathBuf::from(r"C:\Users\dev"))
+        );
+        // An empty HOME must not shadow a usable USERPROFILE.
+        assert_eq!(
+            pick(Some(""), Some(r"C:\Users\dev")),
+            Some(PathBuf::from(r"C:\Users\dev"))
+        );
+        assert_eq!(pick(None, None), None);
     }
 
     #[test]

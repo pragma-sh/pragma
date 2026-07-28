@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use pragma_constants::CONSTANTS;
+use pragma_platform::shell;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -157,8 +158,9 @@ impl Session {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        let mut command = CommandBuilder::new(shell_path());
-        command.arg("-l");
+        let launch = shell::resolve_launch(project_shell(&cwd).as_deref());
+        let mut command = CommandBuilder::new(&launch.program);
+        command.args(&launch.args);
         command.cwd(&cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
@@ -788,14 +790,22 @@ fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
     })
 }
 
-fn shell_path() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/bin/zsh".to_string()
-        } else {
-            "/bin/sh".to_string()
-        }
-    })
+/// Reads a project's configured shell from its `.pragma/config.json`.
+///
+/// Returns `None` when the file is absent, unreadable, or names no shell —
+/// every one of which means "use the platform default" rather than an error, so
+/// a malformed config never stops a terminal from opening.
+fn project_shell(cwd: &str) -> Option<String> {
+    let path = Path::new(cwd).join(&CONSTANTS.plugins.config_file_name);
+    let contents = std::fs::read_to_string(path).ok()?;
+    let config: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    config
+        .get("terminal")?
+        .get("shell")?
+        .as_str()
+        .map(str::trim)
+        .filter(|shell| !shell.is_empty())
+        .map(str::to_string)
 }
 
 fn pragma_cli_path() -> Option<PathBuf> {
@@ -850,8 +860,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        gateway_env, path_with_cli_dir_from, pragma_cli_path_from, OscChunk, OscParser,
-        OutputCoalescer, Scrollback,
+        gateway_env, path_with_cli_dir_from, pragma_cli_path_from, project_shell, thread, Duration,
+        Instant, OscChunk, OscParser, OutputCoalescer, Scrollback, Session,
     };
     use pragma_constants::CONSTANTS;
     use pragma_protocol::EventFrame;
@@ -868,6 +878,93 @@ mod tests {
         assert_eq!(coalescer.flush(), Some(b"foobar".to_vec()));
         // A flush drains the buffer.
         assert_eq!(coalescer.flush(), None);
+    }
+
+    /// Spawns a real shell on a real PTY and drives it until `needle` appears.
+    ///
+    /// This is the one test that proves the launch actually works end to end:
+    /// the resolved program, its interactive arguments, and the platform's
+    /// pseudo-terminal (a pty on Unix, `ConPTY` on Windows). A wrong argument —
+    /// handing PowerShell the POSIX `-l`, say — makes the shell exit instead of
+    /// echoing, and shows up here rather than as a terminal that opens blank.
+    fn spawn_and_expect(command: &str, needle: &[u8]) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = Session::spawn(
+            "test-tab".to_string(),
+            "test-worktree".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+            80,
+            24,
+            "unused-socket",
+        )
+        .expect("a shell spawns on a pseudo-terminal");
+
+        session.write(command).expect("the shell accepts input");
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if session.output_contains(needle) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!(
+            "the shell never echoed {:?} within the timeout",
+            String::from_utf8_lossy(needle)
+        );
+    }
+
+    /// Guarded by `PRAGMA_TEST_PTY` because a sandboxed or headless CI executor
+    /// may not be allowed to allocate a pseudo-terminal, and a spawn failure
+    /// there would be an environment artefact rather than a real regression.
+    #[test]
+    fn a_real_shell_echoes_through_a_real_pty() {
+        if std::env::var_os("PRAGMA_TEST_PTY").is_none() {
+            return;
+        }
+        let marker = "pragma-pty-marker";
+        // `echo` exists in every shell this resolves to, PowerShell included.
+        spawn_and_expect(&format!("echo {marker}\r"), marker.as_bytes());
+    }
+
+    /// Writes a project config declaring `shell` and returns its worktree root.
+    fn project_with_shell(dir: &std::path::Path, shell: &str) -> String {
+        let config = dir.join(&CONSTANTS.plugins.config_file_name);
+        std::fs::create_dir_all(config.parent().expect("config parent")).expect("config dir");
+        std::fs::write(&config, format!(r#"{{"terminal":{{"shell":"{shell}"}}}}"#))
+            .expect("write config");
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_project_can_choose_its_own_shell() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd = project_with_shell(dir.path(), "/usr/bin/fish");
+        assert_eq!(project_shell(&cwd).as_deref(), Some("/usr/bin/fish"));
+    }
+
+    #[test]
+    fn a_project_without_a_config_uses_the_platform_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(project_shell(&dir.path().to_string_lossy()), None);
+    }
+
+    /// A broken config must not stop a terminal from opening — falling back to
+    /// the platform default is strictly better than refusing to launch a shell.
+    #[test]
+    fn a_malformed_project_config_falls_back_rather_than_failing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = dir.path().join(&CONSTANTS.plugins.config_file_name);
+        std::fs::create_dir_all(config.parent().expect("config parent")).expect("config dir");
+        std::fs::write(&config, "{ not json").expect("write config");
+        assert_eq!(project_shell(&dir.path().to_string_lossy()), None);
+    }
+
+    #[test]
+    fn a_blank_configured_shell_is_ignored() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd = project_with_shell(dir.path(), "   ");
+        assert_eq!(project_shell(&cwd), None);
     }
 
     #[test]
@@ -1101,12 +1198,20 @@ mod tests {
 
     #[test]
     fn cli_dir_is_prepended_to_path_once() {
-        let path = path_with_cli_dir_from(
-            Path::new("/Users/test/.local/bin/pragma-cli"),
-            Some("/usr/bin:/Users/test/.local/bin:/bin".into()),
-        );
+        // Build both the fixture and the expectation with `join_paths` rather than
+        // a literal `:`-joined string. PATH is `;`-separated on Windows, so a
+        // hardcoded POSIX list arrives as one opaque entry there: the dedup below
+        // silently finds nothing to drop and the assertion fails for the wrong
+        // reason. `path_with_cli_dir_from` itself uses split_paths/join_paths.
+        let cli_dir = Path::new("/Users/test/.local/bin");
+        let existing = std::env::join_paths([Path::new("/usr/bin"), cli_dir, Path::new("/bin")])
+            .expect("join existing");
+        let expected = std::env::join_paths([cli_dir, Path::new("/usr/bin"), Path::new("/bin")])
+            .expect("join expected");
 
-        assert_eq!(path, "/Users/test/.local/bin:/usr/bin:/bin");
+        let path = path_with_cli_dir_from(&cli_dir.join("pragma-cli"), Some(existing));
+
+        assert_eq!(path, expected.to_string_lossy());
     }
 
     #[test]

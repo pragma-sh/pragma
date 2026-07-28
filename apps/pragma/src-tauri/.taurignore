@@ -1,0 +1,22 @@
+# Paths the `tauri dev` file watcher must not treat as source changes.
+#
+# This file exists because the watcher reads only `.taurignore` and
+# `src-tauri/.gitignore`. Every path below is *already* ignored by the repo-root
+# `.gitignore`, but that file is invisible to the watcher, so it saw generated and
+# staged output as real edits, killed the running app, and restarted the whole Rust
+# build — repeatedly, and mid-flight. On Windows that also risks relinking
+# `pragma.exe` while the previous dev instance still holds a lock on it.
+#
+# Uses .gitignore syntax, and only reaches paths **inside this directory**.
+# Patterns here do NOT apply to the Cargo path dependencies the watcher also
+# follows (`packages/constants`, `crates/*`) — that was measured, not assumed:
+# a `**/src/generated/` entry here did not stop
+# `packages/constants/src/generated/constants.ts` from triggering a rebuild, and
+# neither did a `.gitignore` inside that package. Generated output living outside
+# `src-tauri` therefore has to avoid *writing* when nothing changed; see
+# `packages/constants/scripts/generate-types.ts`.
+
+# Sidecar binaries and bundled plugin resources, staged by
+# scripts/stage-daemon-sidecar.sh immediately before `tauri dev` starts.
+binaries/
+resources/plugins/

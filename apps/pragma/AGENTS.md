@@ -52,7 +52,10 @@ apps/pragma/
     ├── src/fs.rs                # Worktree-scoped, path-safe filesystem commands
     ├── src/main.rs              # Thin entrypoint
     ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
-    ├── tauri.dev.conf.json      # Dev overrides ("Pragma Dev" + icons-dev/)
+    ├── tauri.macos.conf.json    # macOS-only window flags (transparency + overlay titlebar)
+    ├── tauri.dev.conf.json      # Dev overrides (icons-dev/; "Pragma Dev" titles the window)
+    ├── installer-hooks.nsh      # NSIS hooks: stop the detached sidecars before install/uninstall
+    ├── installer-hooks.test.ts  # Guards NSIS sidecar coverage and safe MSI process handling
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
     ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
@@ -362,8 +365,61 @@ by the same script. Shipped plugin packages are staged under `resources/plugins/
 `CONSTANTS.plugins.bundledDirName`; staging is serialized because pre-push and Tauri dev
 may invoke it concurrently. While `tauri dev` is running, use
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
-frontend mtime poll then hot-reloads the staged bundle. `binaries/` is
-git-ignored.
+frontend mtime poll then hot-reloads the staged bundle.
+
+**The Windows installer must stop the sidecars, not just the app.** Windows locks a
+running executable's image file, and Pragma's sidecars outlive the window on purpose —
+`pragma-server` owns the terminal sessions, `pragma-gateway` serves paired phones. They
+run from the install directory, which for the default `currentUser` NSIS mode is
+`%LOCALAPPDATA%\Pragma`, so installing over a live instance aborts with
+`Error opening file for writing: …\AppData\Local\Pragma\pragma-server.exe`. Tauri's
+template only waits for `${MAINBINARYNAME}.exe`, so `installer-hooks.nsh` (wired in via
+`bundle.windows.nsis.installerHooks`) stops the main binary first — the app respawns the
+server and gateway when it sees them exit, so killing them under a live app just re-locks
+the files — then every `externalBin` sidecar, from both `NSIS_HOOK_PREINSTALL` and
+`NSIS_HOOK_PREUNINSTALL`. A locked file during uninstall is skipped _silently_ and leaves
+`$INSTDIR` behind, so the uninstall hook is not optional. **Adding a sidecar to
+`externalBin` means adding it to `PragmaForEachSidecar` in `installer-hooks.nsh`;**
+`installer-hooks.test.ts` enforces that, because the failure is invisible until someone
+installs over a running app.
+
+**The per-machine MSI deliberately relies on Windows Installer Restart Manager.** Do not
+add WiX `util:CloseApplication` entries for the app or sidecars. That custom action selects
+processes only by executable basename and runs elevated, so an install, update, or
+uninstall could terminate another user's Pragma instance or an unrelated same-named
+process. Restart Manager discovers processes from locks on files owned by the MSI, which
+keeps process selection tied to this installation. A headless sidecar that Restart Manager
+cannot close may require a reboot; that is safer than force-terminating an unverified
+process. `installer-hooks.test.ts` guards against restoring the removed basename-based WiX
+fragment.
+
+The NSIS hook warns before it kills, but only where nothing else would: with the window open
+Tauri's own prompt covers it, so the extra dialog fires **only** when the app is closed
+and a sidecar is still alive — the steady state after closing the window, where the
+server is holding detached terminal sessions that replacing its binary will end. That
+keeps the total at exactly one dialog either way. Silent (`/S`) and passive (updater)
+runs never block on it. None of this touches runtime: the macros exist only inside
+`setup.exe`/`uninstall.exe`, and `detach_spawned` still outlives the window as before.
+
+**Anything the build writes into a watched directory will restart `tauri dev`.** The
+watcher covers `src-tauri` _and_ every Cargo path dependency (`packages/constants`,
+`crates/*`), and it reacts to the write itself, not to a content change. Because
+`tauri:dev` stages sidecars, restages bundled plugins, and regenerates constants
+immediately before starting `tauri dev`, each of those can kill the app and force a full
+rebuild — on Windows the relink then collides with the still-running `pragma.exe`, which
+holds a lock on its own binary.
+
+The two halves are fixed differently, and the boundary was measured rather than assumed:
+
+- **Inside `src-tauri`** — ignore it in `.taurignore` or `src-tauri/.gitignore`. The
+  repo-root `.gitignore` does **not** work; the watcher never reads it. `binaries/` and
+  `resources/plugins/` are ignored for exactly this reason.
+- **Outside `src-tauri`** — ignoring is not available: a `**/src/generated/` pattern in
+  `.taurignore` did not stop `packages/constants/src/generated/constants.ts`, and neither
+  did a `.gitignore` placed inside that package. Such a generator must instead **not
+  write when nothing changed** — see `packages/constants/scripts/generate-types.ts`, which
+  compares before writing. This matters because `generate` runs from `pretest` and
+  `pretypecheck`, so any `bun run test` alongside `bun run dev` used to restart the app.
 
 **Dev, prod, and every dev worktree are fully isolated by an instance "channel".**
 `instance_channel` in `src-tauri/src/pty.rs` returns `pragma` for a production build
@@ -406,6 +462,17 @@ menu action: id const + item in `install_menu`, `MenuAction` variant +
 branch in `handleMenuAction`. Accelerators live in one `MENU_ACCELERATORS` table (they
 mirror the default keybindings); the items are kept in `WorkspaceAccelerators` managed
 state so `set_menu_accelerators_enabled` can suspend them while Settings records a chord.
+
+Workspace accelerators (Settings, New Terminal Tab, Close Tab, Command Palette, Command
+Mode) **must** be real menu items — the webview otherwise swallows chords like `⌘T`/`⌃T`.
+`install_workspace_menu` builds them once, then hands them to `install_macos_workspace_menu`
+or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
+share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
+it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
+generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated
+`#[cfg(not(target_os = "macos"))]`, never `#[cfg(target_os = "linux")]`: the latter
+silently drops every accelerator on Windows _and_ trips `-D warnings` there, since all
+five bindings then go unused.
 
 ## Deep links (`pragma://open`)
 
@@ -488,6 +555,26 @@ with the agent's display name, and shell OSC titles are ignored entirely. Agent
 `workspace-context.tsx` listens for those events and refreshes the selected project's
 SQLite snapshot; `tabOpened` also selects the target worktree/tab so CLI-opened tabs are
 visible immediately.
+
+## Window chrome — transparency is macOS-only
+
+`transparent`, `titleBarStyle: "Overlay"`, `hiddenTitle`, and `macOSPrivateApi` live in
+`tauri.macos.conf.json`, **not** `tauri.conf.json`. A transparent window only makes sense
+where there is something behind it: on macOS that is the `NSVisualEffectView` vibrancy
+layer `src-tauri/src/window_chrome.rs` installs. On Windows and Linux there is nothing,
+and the compositor's own chrome (the DWM title bar, a GTK client-side header bar) renders
+see-through instead of solid — the bug that put these flags in a separate file.
+
+Two rules follow:
+
+- **Tauri's config merge replaces arrays, it does not merge them** (`json_patch::merge`).
+  `app.windows` is an array, so `tauri.macos.conf.json` carries the _whole_ window object,
+  not just the macOS keys. Change one, change both.
+- **Don't put an `app.windows` array in `tauri.dev.conf.json`.** It is applied via
+  `--config` _after_ the platform file, so it would replace the array again and put
+  transparency back on every platform. The dev build differs only by product name, and
+  `window_chrome::apply` titles the window from `package_info().name` for exactly that
+  reason.
 
 ## Drag-and-drop
 

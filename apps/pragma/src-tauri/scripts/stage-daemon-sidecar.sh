@@ -12,6 +12,11 @@ set -euo pipefail
 # build keeps `tauri dev` fast: dev runs the server via `cargo run`, so the
 # staged binary merely satisfies the sidecar copy step the CLI performs for
 # every `externalBin`.
+#
+# Runs on macOS, Linux, and Windows (under Git Bash, which is what the
+# `windows-latest` CI runner provides). On Windows every produced binary carries
+# a `.exe` suffix, and Tauri expects the staged name to carry it too —
+# `pragma-server-x86_64-pc-windows-msvc.exe`.
 
 profile="debug"
 if [[ "${1:-}" == "--release" ]]; then
@@ -28,54 +33,67 @@ if [[ -z "$triple" ]]; then
   exit 1
 fi
 
-if [[ "$profile" == "release" ]]; then
-  cargo build -p pragma-server --release
-  cargo build -p pragma-gateway --release
-  cargo build -p pragma-cli --release
-else
-  cargo build -p pragma-server
-  cargo build -p pragma-gateway
-  cargo build -p pragma-cli
+# Executable suffix for this host. Everything below appends it to both the
+# source and staged names rather than assuming an extensionless binary.
+exe=""
+if [[ "$triple" == *windows* ]]; then
+  exe=".exe"
 fi
 
-# Build the `pragma-ai` sidecar (a Bun-compiled standalone that runs the
-# Node-only pi coding-agent SDK out of process for the AI features). A debug app
-# runs it from source via `bun`, but the binary must still exist so the Tauri
-# CLI's externalBin copy step succeeds.
+# Rust sidecars, built from this workspace.
+rust_sidecars=(pragma-server pragma-gateway pragma-cli)
+
+# `set -u` makes an empty array expansion an error on the bash 3.2 that ships
+# with macOS, so the profile flag is passed as a plain (possibly empty) word.
+cargo_profile_flag=""
+if [[ "$profile" == "release" ]]; then
+  cargo_profile_flag="--release"
+fi
+for crate in "${rust_sidecars[@]}"; do
+  # shellcheck disable=SC2086 # intentionally unquoted: empty means "no flag"
+  cargo build -p "$crate" $cargo_profile_flag
+done
+
+# Bun-compiled sidecars: `<workspace filter>:<package dir>:<binary name>`.
+# A debug app runs several of these from source via `bun`, but the binary must
+# still exist so the Tauri CLI's externalBin copy step succeeds.
+bun_sidecars=(
+  "@pragma/ai-helpers:ai-helpers:pragma-ai"
+  "@pragma/github-helpers:github-helpers:pragma-github"
+  "@pragma/watcher:watcher:pragma-watch"
+  "@pragma/automations:automations:pragma-automations"
+  # The plugin catalog sidecar statically bundles the built-in agent
+  # definitions from the claude-code/opencode/cursor plugin packages.
+  "@pragma/plugins-host:plugins-host:pragma-plugins"
+)
+
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
 bash "$script_dir/stage-bundled-plugins.sh"
 bun --filter @pragma/automations build:sidecar
-# Build the plugin catalog sidecar; it statically bundles the built-in agent
-# definitions from the claude-code/opencode/cursor plugin packages.
 bun --filter @pragma/plugins-host build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
-cp "$repo_root/target/$profile/pragma-server" \
-  "$src_tauri_dir/binaries/pragma-server-$triple"
-cp "$repo_root/target/$profile/pragma-gateway" \
-  "$src_tauri_dir/binaries/pragma-gateway-$triple"
-cp "$repo_root/target/$profile/pragma-cli" \
-  "$src_tauri_dir/binaries/pragma-cli-$triple"
-cp "$repo_root/packages/ai-helpers/dist/pragma-ai" \
-  "$src_tauri_dir/binaries/pragma-ai-$triple"
-cp "$repo_root/packages/github-helpers/dist/pragma-github" \
-  "$src_tauri_dir/binaries/pragma-github-$triple"
-cp "$repo_root/packages/watcher/dist/pragma-watch" \
-  "$src_tauri_dir/binaries/pragma-watch-$triple"
-cp "$repo_root/packages/automations/dist/pragma-automations" \
-  "$src_tauri_dir/binaries/pragma-automations-$triple"
-cp "$repo_root/packages/plugins-host/dist/pragma-plugins" \
-  "$src_tauri_dir/binaries/pragma-plugins-$triple"
+
+stage() {
+  local source="$1"
+  local name="$2"
+  if [[ ! -f "$source" ]]; then
+    echo "stage-daemon-sidecar: missing $source" >&2
+    exit 1
+  fi
+  cp "$source" "$src_tauri_dir/binaries/$name-$triple$exe"
+  echo "staged $name -> src-tauri/binaries/$name-$triple$exe"
+}
+
+for crate in "${rust_sidecars[@]}"; do
+  stage "$repo_root/target/$profile/$crate$exe" "$crate"
+done
+
+for entry in "${bun_sidecars[@]}"; do
+  IFS=':' read -r _filter package binary <<<"$entry"
+  stage "$repo_root/packages/$package/dist/$binary$exe" "$binary"
+done
 
 rm -rf "$src_tauri_dir/resources/pragma/agents"
-
-echo "staged pragma-server ($profile) -> src-tauri/binaries/pragma-server-$triple"
-echo "staged pragma-gateway ($profile) -> src-tauri/binaries/pragma-gateway-$triple"
-echo "staged pragma-cli ($profile) -> src-tauri/binaries/pragma-cli-$triple"
-echo "staged pragma-ai -> src-tauri/binaries/pragma-ai-$triple"
-echo "staged pragma-github -> src-tauri/binaries/pragma-github-$triple"
-echo "staged pragma-watch -> src-tauri/binaries/pragma-watch-$triple"
-echo "staged pragma-automations -> src-tauri/binaries/pragma-automations-$triple"
-echo "staged pragma-plugins -> src-tauri/binaries/pragma-plugins-$triple"

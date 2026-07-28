@@ -7,6 +7,8 @@
 
 use std::io::Write;
 
+use pragma_platform::ipc::LocalStream;
+
 use crate::server::CliError;
 
 /// Output mode: `--plain` strips ANSI/OSC escapes (default), `--raw` emits
@@ -168,7 +170,7 @@ impl Watcher {
         Self { watch }
     }
 
-    pub fn stream(self, stream: &mut std::os::unix::net::UnixStream) -> Result<(), CliError> {
+    pub fn stream(self, stream: &mut LocalStream) -> Result<(), CliError> {
         if !self.watch {
             return Ok(());
         }
@@ -195,7 +197,7 @@ impl Watcher {
     }
 }
 
-fn read_frame_for_watch(stream: &mut std::os::unix::net::UnixStream) -> Result<Frame, CliError> {
+fn read_frame_for_watch(stream: &mut LocalStream) -> Result<Frame, CliError> {
     pragma_protocol::read_frame(stream).map_err(CliError::from)
 }
 

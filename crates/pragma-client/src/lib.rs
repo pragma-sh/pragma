@@ -1,18 +1,30 @@
 //! Native Pragma client transport and frame I/O.
 //!
 //! This crate is the single local/remote connect seam for native clients. The
-//! synchronous API talks to a Unix socket path; remote hosts are reached by an
-//! SSH streamlocal bridge that exposes the forwarded remote socket as a local
-//! Unix socket. PTY output stays on the raw binary frame path defined by
-//! `pragma-protocol`.
+//! synchronous API talks to a local socket path — an `AF_UNIX` socket on macOS,
+//! Linux, and Windows alike (see `pragma-platform`'s `ipc` module for why).
+//!
+//! Everything that is not a local server is reached by presenting it as one:
+//! a bridge listens on a local socket and forwards each connection elsewhere.
+//! Remote hosts go over an SSH streamlocal channel ([`start_ssh_bridge`]);
+//! WSL distributions go over a relay process launched with `wsl.exe`
+//! ([`start_wsl_bridge`]). Nothing above the transport can tell the difference.
+//!
+//! PTY output stays on the raw binary frame path defined by `pragma-protocol`.
 
+#[cfg(feature = "ssh")]
+mod bridge;
 #[cfg(feature = "router")]
 pub mod router;
 #[cfg(feature = "ssh")]
 mod ssh;
+// Compiled on every platform, not just Windows: the distribution-table parsing
+// is plain text handling, and gating it to Windows would mean its tests never
+// run in CI. On a machine without WSL the launcher is simply absent and the
+// calls report `WslError::Unavailable`.
+#[cfg(feature = "ssh")]
+mod wsl;
 
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Sender};
@@ -21,6 +33,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
+use pragma_platform::ipc::{self, LocalStream};
+use pragma_platform::process;
 use pragma_protocol::{
     read_json_frame, write_input_frame, write_json_frame, AgentAnswer, AgentDecision, AgentInput,
     AgentInterrupt, AgentMessage, AgentReportPayload, ControlRequest, ProtocolEventKind,
@@ -36,10 +50,13 @@ pub use ssh::{
     ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
 };
 
+#[cfg(feature = "ssh")]
+pub use wsl::{
+    default_bootstrap_command, list_distros, resolve_distro, socket_path_for, start_wsl_bridge,
+    WslBridgeConfig, WslDistro, WslError, WSL_CHANNEL,
+};
+
 const SERVER_DETACH_FLAG: &str = "--detach";
-const SERVER_SOCKET_FILE: &str = "daemon.sock";
-const SERVER_LOCK_FILE: &str = "server.lock";
-const SERVER_LOG_FILE: &str = "server.log";
 
 /// Result type for Pragma client operations.
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -134,7 +151,7 @@ pub struct PragmaClient {
     /// run in parallel on their own connections instead of serializing behind
     /// one shared stream — the server handles each connection on its own
     /// thread.
-    request_pool: Arc<Mutex<Vec<UnixStream>>>,
+    request_pool: Arc<Mutex<Vec<LocalStream>>>,
     input_tx: Arc<Mutex<Option<Sender<InputMsg>>>>,
 }
 
@@ -174,7 +191,7 @@ impl PragmaClient {
         cwd: String,
         cols: u16,
         rows: u16,
-    ) -> ClientResult<UnixStream> {
+    ) -> ClientResult<LocalStream> {
         let request = request_spawn(session_id, worktree_id, cwd, cols, rows);
         self.open_event_stream(&request)
     }
@@ -187,7 +204,7 @@ impl PragmaClient {
         &self,
         session_id: String,
         size: Option<(u16, u16)>,
-    ) -> ClientResult<UnixStream> {
+    ) -> ClientResult<LocalStream> {
         let request = request_attach(session_id, size);
         self.open_event_stream(&request)
     }
@@ -201,7 +218,7 @@ impl PragmaClient {
         event: ProtocolEventKind,
         worktree_id: Option<String>,
         cwd: Option<String>,
-    ) -> ClientResult<UnixStream> {
+    ) -> ClientResult<LocalStream> {
         let request = request_subscribe(event, worktree_id, cwd);
         self.open_event_stream(&request)
     }
@@ -293,7 +310,7 @@ impl PragmaClient {
     }
 
     /// Opens a daemon-wide agent event stream positioned after the success response.
-    pub fn subscribe_agents_stream(&self) -> ClientResult<UnixStream> {
+    pub fn subscribe_agents_stream(&self) -> ClientResult<LocalStream> {
         let request = request_subscribe_agents();
         self.open_event_stream(&request)
     }
@@ -306,7 +323,7 @@ impl PragmaClient {
     /// protocol before a project is routed to it.
     pub fn server_protocol_version(&self) -> ClientResult<u64> {
         let mut stream = match &self.endpoint {
-            ClientEndpoint::Socket(path) => UnixStream::connect(path)?,
+            ClientEndpoint::Socket(path) => ipc::connect(path)?,
             ClientEndpoint::ManagedLocal(_) => self.connect_with_spawn()?,
         };
         configure_stream(&stream)?;
@@ -327,7 +344,7 @@ impl PragmaClient {
             self.kill_stale_server();
             self.spawn_server()?;
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = self.spawn_deadline();
         loop {
             match self.connect_compatible() {
                 Ok(Some(_)) => return Ok(()),
@@ -351,8 +368,17 @@ impl PragmaClient {
         }
     }
 
+    /// How long a freshly spawned server gets to start accepting connections.
+    fn spawn_deadline(&self) -> Instant {
+        let compiles = matches!(
+            &self.endpoint,
+            ClientEndpoint::ManagedLocal(config) if config.debug
+        );
+        Instant::now() + spawn_wait(compiles)
+    }
+
     /// Connects to a compatible server, spawning a managed local server if needed.
-    pub fn connect_with_spawn(&self) -> ClientResult<UnixStream> {
+    pub fn connect_with_spawn(&self) -> ClientResult<LocalStream> {
         if let Some(stream) = self.connect_compatible()? {
             return Ok(stream);
         }
@@ -361,7 +387,7 @@ impl PragmaClient {
             return Ok(stream);
         }
         self.spawn_server()?;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = self.spawn_deadline();
         loop {
             match self.connect_compatible() {
                 Ok(Some(stream)) => return Ok(stream),
@@ -376,11 +402,11 @@ impl PragmaClient {
         }
     }
 
-    /// Returns the Unix socket path used by this client.
+    /// Returns the local socket path used by this client.
     #[must_use]
     pub fn socket_path(&self) -> PathBuf {
         match &self.endpoint {
-            ClientEndpoint::ManagedLocal(config) => server_dir(config).join(SERVER_SOCKET_FILE),
+            ClientEndpoint::ManagedLocal(config) => ipc::socket_path_in(&server_dir(config)),
             ClientEndpoint::Socket(path) => path.clone(),
         }
     }
@@ -388,16 +414,16 @@ impl PragmaClient {
     /// Returns the server lock path beside the socket.
     #[must_use]
     pub fn lock_path(&self) -> PathBuf {
-        self.socket_path().with_file_name(SERVER_LOCK_FILE)
+        self.socket_path().with_file_name(ipc::lock_file_name())
     }
 
     /// Returns the server log path beside the socket.
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
-        self.socket_path().with_file_name(SERVER_LOG_FILE)
+        self.socket_path().with_file_name(ipc::log_file_name())
     }
 
-    fn open_event_stream(&self, request: &RequestFrame) -> ClientResult<UnixStream> {
+    fn open_event_stream(&self, request: &RequestFrame) -> ClientResult<LocalStream> {
         let mut stream = self.connect_with_spawn()?;
         write_json_frame(&mut stream, request)?;
         let request_id = request.request_id.clone();
@@ -428,7 +454,7 @@ impl PragmaClient {
         let (tx, rx) = mpsc::channel::<InputMsg>();
         let client = self.clone();
         thread::spawn(move || {
-            let mut conn: Option<UnixStream> = None;
+            let mut conn: Option<LocalStream> = None;
             while let Ok(mut msg) = rx.recv() {
                 while let Ok(next) = rx.try_recv() {
                     if next.session_id == msg.session_id {
@@ -490,7 +516,7 @@ impl PragmaClient {
 
     /// Reads until the `ControlResult` matching `request.request_id` arrives.
     fn control_on(
-        stream: &mut UnixStream,
+        stream: &mut LocalStream,
         request: &RequestFrame,
     ) -> Result<ClientResult<Value>, ClientError> {
         write_json_frame(stream, request)?;
@@ -522,7 +548,7 @@ impl PragmaClient {
     fn with_request_conn<T>(
         &self,
         failure: &str,
-        op: impl Fn(&mut UnixStream) -> Result<ClientResult<T>, ClientError>,
+        op: impl Fn(&mut LocalStream) -> Result<ClientResult<T>, ClientError>,
     ) -> ClientResult<T> {
         let mut last_err: Option<ClientError> = None;
         for attempt in 0..2 {
@@ -552,7 +578,7 @@ impl PragmaClient {
     }
 
     fn rpc_on(
-        stream: &mut UnixStream,
+        stream: &mut LocalStream,
         request: &RequestFrame,
     ) -> Result<ClientResult<Value>, ClientError> {
         write_json_frame(stream, request)?;
@@ -579,7 +605,7 @@ impl PragmaClient {
     }
 
     fn request_on(
-        stream: &mut UnixStream,
+        stream: &mut LocalStream,
         request: &RequestFrame,
     ) -> Result<ClientResult<()>, ClientError> {
         write_json_frame(stream, request)?;
@@ -606,8 +632,8 @@ impl PragmaClient {
         }
     }
 
-    fn connect_compatible(&self) -> ClientResult<Option<UnixStream>> {
-        let Ok(mut stream) = UnixStream::connect(self.socket_path()) else {
+    fn connect_compatible(&self) -> ClientResult<Option<LocalStream>> {
+        let Ok(mut stream) = ipc::connect(&self.socket_path()) else {
             return Ok(None);
         };
         configure_stream(&stream)?;
@@ -632,20 +658,10 @@ impl PragmaClient {
         let killed_by_pid = std::fs::read_to_string(self.lock_path())
             .ok()
             .and_then(|contents| contents.trim().parse::<u32>().ok())
-            .is_some_and(|pid| {
-                Command::new("kill")
-                    .arg("-KILL")
-                    .arg(pid.to_string())
-                    .status()
-                    .is_ok_and(|status| status.success())
-            });
+            .is_some_and(process::kill);
         if !killed_by_pid {
-            let _ = Command::new("pkill")
-                .args(["-KILL", "-f", "pragma-server"])
-                .status();
-            let _ = Command::new("pkill")
-                .args(["-KILL", "-f", "pragma-daemon"])
-                .status();
+            process::kill_matching("pragma-server");
+            process::kill_matching("pragma-daemon");
         }
         thread::sleep(Duration::from_millis(200));
         let _ = std::fs::remove_file(self.socket_path());
@@ -689,11 +705,50 @@ impl PragmaClient {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
+        detach_spawned(&mut command);
         let mut child = command.spawn()?;
         thread::spawn(move || {
             let _ = child.wait();
         });
         Ok(())
+    }
+}
+
+/// Detaches a server process from this one, where the platform needs it.
+///
+/// On Unix the server detaches itself after start-up (`daemonize`), so there is
+/// nothing to do here. Windows has no `fork`, so detaching has to happen at
+/// creation time instead:
+///
+/// - `CREATE_NO_WINDOW` gives the child its own console that is never displayed.
+///   That keeps it off *this* process's console — so closing the app's console
+///   delivers no close event — while still leaving it *a* console to inherit
+///   down the chain.
+/// - `CREATE_NEW_PROCESS_GROUP` stops a Ctrl+C in the launching console from
+///   being broadcast to the server.
+///
+/// **`DETACHED_PROCESS` must not be added back.** Win32 documents
+/// `CREATE_NO_WINDOW` as *ignored* when combined with `DETACHED_PROCESS` (or
+/// `CREATE_NEW_CONSOLE`), so the pair left the child with **no** console at all
+/// — and a console grandchild spawned from a consoleless parent gets a brand-new
+/// *visible* one. In a debug build the server and gateway are started via
+/// `cargo run`, so every `cargo`, `rustc`, and `pragma-server.exe` in that chain
+/// popped a console window: the "command prompts launching at random" during
+/// `bun run dev`. The flags below are what the old doc comment already claimed
+/// this function did.
+fn detach_spawned(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+        command
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | pragma_platform::process::CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
     }
 }
 
@@ -718,12 +773,30 @@ pub fn instance_data_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
 }
 
 /// Resolves a sidecar executable path beside the current native client binary.
+///
+/// The `.exe` suffix Windows requires is appended here rather than by every
+/// caller, so sidecar names stay spelled the same on all platforms.
 #[must_use]
 pub fn sidecar_executable(name: &str) -> PathBuf {
+    let name = executable_name(name);
     std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))
-        .map_or_else(|| PathBuf::from(name), |dir| dir.join(name))
+        .map_or_else(|| PathBuf::from(&name), |dir| dir.join(&name))
+}
+
+/// Appends the platform's executable suffix to a bare program name.
+///
+/// A name that already carries an extension is left alone, so callers may pass
+/// either form.
+#[must_use]
+pub fn executable_name(name: &str) -> String {
+    let suffix = std::env::consts::EXE_SUFFIX;
+    if suffix.is_empty() || name.ends_with(suffix) {
+        name.to_string()
+    } else {
+        format!("{name}{suffix}")
+    }
 }
 
 /// Resolves the cargo executable used by debug builds to spawn server/CLI crates.
@@ -732,12 +805,19 @@ pub fn cargo_executable() -> PathBuf {
     if let Some(cargo) = option_env!("CARGO") {
         return PathBuf::from(cargo);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo = PathBuf::from(home).join(".cargo/bin/cargo");
+    // `HOME` on Unix, `USERPROFILE` on Windows: rustup installs to
+    // `<home>/.cargo/bin` on both.
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    if let Some(home) = home {
+        let cargo = PathBuf::from(home)
+            .join(".cargo")
+            .join("bin")
+            .join(executable_name("cargo"));
         if cargo.is_file() {
             return cargo;
         }
     }
+    #[cfg(unix)]
     for candidate in [
         "/opt/homebrew/bin/cargo",
         "/usr/local/bin/cargo",
@@ -1075,20 +1155,41 @@ fn server_dir(config: &LocalServerConfig) -> PathBuf {
     }
 }
 
-fn configure_stream(stream: &UnixStream) -> ClientResult<()> {
+/// How long to wait for a just-spawned server to accept connections.
+///
+/// `compiles` is true for a debug spawn, which runs `cargo run -p pragma-server`
+/// and may **build** the server first — and during `bun run dev` it also contends
+/// with the app's own build for the cargo build-directory lock ("Blocking waiting
+/// for file lock on build directory"). A release spawn just execs the staged
+/// sidecar, where five seconds is already generous.
+///
+/// Five seconds in debug expires routinely on a cold or contended build: each
+/// bridge then reports "server did not become reachable", and their retries race
+/// each other into "pragma-server is already running (lock held)". Waiting longer
+/// costs nothing in the common case — the caller polls every 100ms and returns the
+/// moment it connects, so this is a ceiling, not a delay.
+fn spawn_wait(compiles: bool) -> Duration {
+    if compiles {
+        Duration::from_mins(2)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
+fn configure_stream(stream: &LocalStream) -> ClientResult<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     Ok(())
 }
 
-fn configure_rpc_stream(stream: &UnixStream) -> ClientResult<()> {
+fn configure_rpc_stream(stream: &LocalStream) -> ClientResult<()> {
     // Host RPCs can legitimately outlive the normal request timeout, notably
     // when `git push` runs user-defined pre-push hooks.
     stream.set_read_timeout(None)?;
     Ok(())
 }
 
-fn send_input_frame(client: &PragmaClient, conn: &mut Option<UnixStream>, msg: &InputMsg) {
+fn send_input_frame(client: &PragmaClient, conn: &mut Option<LocalStream>, msg: &InputMsg) {
     for _ in 0..2 {
         if conn.is_none() {
             let Ok(stream) = client.connect_with_spawn() else {
@@ -1116,14 +1217,34 @@ fn rpc_error(error: RpcError) -> ClientError {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::net::UnixStream;
+    use pragma_platform::ipc::LocalStream;
     use std::path::Path;
 
-    use super::{configure_rpc_stream, configure_stream, instance_data_dir, PragmaClient};
+    use super::{
+        configure_rpc_stream, configure_stream, instance_data_dir, spawn_wait, PragmaClient,
+    };
+
+    /// A debug spawn compiles the server through `cargo run`, so it must get more
+    /// than the release path's exec-only budget. Too short a debug wait is what
+    /// made every dev start log "server did not become reachable" and then race
+    /// its own retry into "pragma-server is already running".
+    #[test]
+    fn debug_spawn_waits_longer_than_a_release_exec() {
+        let release = spawn_wait(false);
+        let debug = spawn_wait(true);
+        assert!(
+            debug > release,
+            "debug wait {debug:?} must exceed release wait {release:?}"
+        );
+        // Long enough to cover a contended cargo build, not so long that a truly
+        // dead server hangs the caller indefinitely.
+        assert!(debug >= std::time::Duration::from_mins(1));
+        assert!(debug <= std::time::Duration::from_mins(5));
+    }
 
     #[test]
     fn rpc_wait_disables_and_then_restores_read_timeout() {
-        let (stream, _peer) = UnixStream::pair().expect("socket pair");
+        let (stream, _peer) = LocalStream::pair().expect("socket pair");
 
         configure_stream(&stream).expect("configure request stream");
         assert!(stream.read_timeout().expect("read timeout").is_some());

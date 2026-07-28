@@ -90,7 +90,17 @@ message() {
 # JSON parsing/escaping that POSIX sh cannot do safely; python3 ships with
 # macOS and every mainstream Linux distro. When it's missing these helpers do
 # nothing and the bridge degrades to the coarse status-only messages above.
+#
+# Windows is the exception, and being on PATH is not proof of being usable there:
+# it ships an App Execution Alias at
+# ~/AppData/Local/Microsoft/WindowsApps/python3 that only prints "Python was not
+# found" and exits nonzero. That satisfies `command -v`, so the emptiness checks
+# below would wrongly take the has-python branch. Run it once and drop it unless
+# it actually executes.
 py3="$(command -v python3 2>/dev/null || true)"
+if [ -n "$py3" ] && ! "$py3" -c '' >/dev/null 2>&1; then
+  py3=""
+fi
 
 # Prints a top-level string field from the JSON document passed as $2.
 json_field() {

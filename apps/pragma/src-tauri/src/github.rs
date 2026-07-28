@@ -12,7 +12,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
@@ -20,6 +19,7 @@ use pragma_constants::{
     CONSTANTS,
 };
 use pragma_core::git::{GitRequest, GithubRepoInfo};
+use pragma_platform::perms;
 use serde::de::DeserializeOwned;
 use tauri::State;
 
@@ -93,29 +93,18 @@ impl TokenStore {
     }
 }
 
-/// Writes `contents` to `path`, creating it with `0600` permissions so only the
-/// owner can read the token. The mode is also re-applied to a pre-existing file in
-/// case it was previously created more permissively.
-#[cfg(unix)]
+/// Writes `contents` to `path` so only the owning account can read it.
+///
+/// This holds a GitHub access token, so the restriction is not optional on any
+/// platform: `0600` on Unix, an owner-only access-control list on Windows. The
+/// restriction is re-applied to a pre-existing file in case it was previously
+/// created more permissively.
 fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut file = perms::create_private_file(path)?;
     file.write_all(contents.as_bytes())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(())
-}
-
-/// Non-Unix fallback (we only ship macOS + Linux, but keep the build portable).
-#[cfg(not(unix))]
-fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    fs::write(path, contents)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +229,7 @@ pub fn set_github_setup_dismissed(db: State<'_, Db>, dismissed: bool) -> AppResu
 
 /// True when the `gh` CLI is installed and authenticated.
 fn gh_is_authenticated() -> bool {
-    Command::new("gh")
+    crate::process_env::command("gh")
         .args(["auth", "status"])
         .output()
         .is_ok_and(|output| output.status.success())
@@ -248,7 +237,7 @@ fn gh_is_authenticated() -> bool {
 
 /// Reads the `gh` CLI's current token (`gh auth token`).
 fn gh_token() -> AppResult<String> {
-    let output = Command::new("gh")
+    let output = crate::process_env::command("gh")
         .args(["auth", "token"])
         .output()
         .map_err(|error| AppError::GitHub(format!("failed to run gh: {error}")))?;

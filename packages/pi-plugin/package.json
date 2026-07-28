@@ -14,7 +14,7 @@
     "./pragma-plugin": "./dist/pragma-plugin.mjs"
   },
   "scripts": {
-    "build": "bunup src/index.ts src/pragma-plugin.ts --format esm --target node --dts --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "build": "bun build src/index.ts src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."

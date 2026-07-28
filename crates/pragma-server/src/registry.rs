@@ -11,6 +11,7 @@ use pragma_constants::{
 use pragma_core::git::GitRequest;
 use pragma_core::tabs::TabAgentMetadata;
 use pragma_core::watcher::WorktreeWatcher;
+use pragma_platform::ipc::LocalStream;
 use pragma_protocol::{
     AgentAnswer, AgentDecision, AgentInput, AgentInterrupt, AgentMessage, AgentReportPayload,
     AgentStatus, ControlResult, EventFrame, WorkspaceSnapshot,
@@ -45,7 +46,7 @@ pub enum RegistryError {
 /// own connection thread (it reads `ControlResult` frames and calls
 /// `route_control_result`); this type is just the writer the server forwards
 /// `Control` envelopes to.
-pub type ControllerWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
+pub type ControllerWriter = Arc<Mutex<LocalStream>>;
 
 /// File beside `daemon.sock` holding the last published workspace snapshot.
 /// Persisted so controller-free (headless) agent launches keep working after
@@ -1432,7 +1433,11 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
 impl Default for Registry {
     fn default() -> Self {
         let root = std::env::temp_dir().join(format!("pragma-server-test-{}", std::process::id()));
-        Self::new(root.join("daemon.sock"), root, PathBuf::new())
+        Self::new(
+            pragma_platform::ipc::socket_path_in(&root),
+            root,
+            PathBuf::new(),
+        )
     }
 }
 
@@ -2194,7 +2199,7 @@ mod tests {
     /// simulates the controller replying by calling `route_control_result`.
     fn register_fake_controller(registry: &Registry) {
         let (a, _b) =
-            std::os::unix::net::UnixStream::pair().expect("socketpair for fake controller");
+            pragma_platform::ipc::LocalStream::pair().expect("socketpair for fake controller");
         let writer = Arc::new(Mutex::new(a));
         registry
             .register_controller(writer)

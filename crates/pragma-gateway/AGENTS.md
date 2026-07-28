@@ -11,7 +11,8 @@
 - Begin serving HTTP immediately after writing `gateway.json`. Post-discovery work such
   as plugin catalog refresh must run in background; model providers may take seconds and
   must not leave an advertised gateway unable to accept requests.
-- Persist the bearer token in a `gateway-token` file (mode `0600`) beside `daemon.sock`
+- Persist the bearer token in an owner-only `gateway-token` file beside `daemon.sock`
+  (`0600` on Unix, an owner-only ACL on Windows — always via `pragma_platform::perms`)
   when `--token` is absent: read it if present, otherwise generate and write it. This
   keeps the token stable across gateway restarts so paired remote devices are not
   disconnected on every respawn. The desktop `regenerate_gateway_token` command deletes

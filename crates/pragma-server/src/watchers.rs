@@ -101,13 +101,13 @@ pub fn gateway_credentials(server_dir: &Path) -> Option<(String, String)> {
 /// release runs the bundled sidecar beside this server binary.
 fn watcher_command() -> Command {
     if cfg!(debug_assertions) {
-        let mut command = Command::new("bun");
+        let mut command = pragma_platform::process::command("bun");
         command
             .arg(workspace_root().join("packages/watcher/src/cli.ts"))
             .current_dir(workspace_root());
         command
     } else {
-        Command::new(sidecar_executable("pragma-watch"))
+        pragma_platform::process::command(sidecar_executable("pragma-watch"))
     }
 }
 

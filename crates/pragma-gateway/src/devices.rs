@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use pragma_platform::perms;
 use serde::{Deserialize, Serialize};
 use tiny_http::Request;
 
@@ -121,11 +120,7 @@ fn read_devices(path: &Path) -> BTreeMap<String, GatewayDevice> {
 fn write_devices(path: &Path, devices: &BTreeMap<String, GatewayDevice>) -> GatewayResult<()> {
     let json = serde_json::to_vec_pretty(devices)?;
     let temp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(&temp_path)?;
+    let mut file = perms::create_private_file(&temp_path)?;
     file.write_all(&json)?;
     file.sync_all()?;
     fs::rename(temp_path, path)?;

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use pragma_constants::{
@@ -281,6 +281,33 @@ impl Db {
                 conn.execute_batch("ALTER TABLE tabs ADD COLUMN diff_commit TEXT;")?;
             }
             conn.execute_batch("PRAGMA user_version = 13;")?;
+        }
+        // v14 repairs project and worktree paths stored before canonicalization
+        // went through `pragma_platform::path`: on Windows those rows hold a
+        // verbatim `\\?\C:\…` path, which git reads as the UNC path `//?/C:/…`
+        // and rejects with `Invalid argument` when `git worktree add` creates
+        // leading directories under it. A no-op on Unix and on rows already
+        // plain, so it is safe to run against every existing database.
+        if version < 14 {
+            let tx = conn.unchecked_transaction()?;
+            for table in ["projects", "worktrees"] {
+                let rows: Vec<(String, String)> = tx
+                    .prepare(&format!("SELECT id, path FROM {table}"))?
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect::<Result<_, _>>()?;
+                for (id, path) in rows {
+                    let plain = pragma_platform::path::simplified(PathBuf::from(&path));
+                    let plain = plain.to_string_lossy();
+                    if plain != path {
+                        tx.execute(
+                            &format!("UPDATE {table} SET path = ?1 WHERE id = ?2"),
+                            params![plain.as_ref(), id],
+                        )?;
+                    }
+                }
+            }
+            tx.commit()?;
+            conn.execute_batch("PRAGMA user_version = 14;")?;
         }
         Ok(())
     }
@@ -1052,6 +1079,38 @@ mod tests {
             .list_tabs(&project.id)
             .expect("tabs should list")
             .is_empty());
+    }
+
+    /// A project added before canonicalization moved to
+    /// `pragma_platform::path` stored a verbatim `\\?\C:\…` root, which git
+    /// rejects as a UNC path. Re-migrating has to repair the row in place —
+    /// otherwise every worktree created under that project keeps failing.
+    #[cfg(windows)]
+    #[test]
+    fn migrating_strips_verbatim_prefixes_from_stored_paths() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                r"\\?\C:\Users\dev\repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        db.0.lock()
+            .expect("lock")
+            .execute_batch("PRAGMA user_version = 13;")
+            .expect("rewind version");
+
+        db.migrate().expect("migrate should repair paths");
+
+        assert_eq!(
+            db.project(&project.id).expect("project").path,
+            r"C:\Users\dev\repo"
+        );
+        assert_eq!(
+            db.list_worktrees(&project.id).expect("worktrees")[0].path,
+            r"C:\Users\dev\repo"
+        );
     }
 
     #[test]

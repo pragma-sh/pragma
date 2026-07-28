@@ -95,6 +95,27 @@ function messagePayloads(): Array<{ role: string; text: string }> {
     );
 }
 
+/**
+ * Whether a *working* `python3` is on PATH.
+ *
+ * `report.sh` treats Python 3 as optional — it parses content-bearing hook
+ * fields (prompt, response text, status) with it and degrades to status-only
+ * reporting when it is missing. The assertions that depend on that parsing are
+ * therefore conditional, or they fail on any host without it. Presence alone is
+ * not enough to check: Windows ships an App Execution Alias named `python3`
+ * that only prints "Python was not found", so this runs the interpreter.
+ */
+const hasPython3 = (() => {
+  try {
+    execFileSync("python3", ["-c", ""], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const itWithPython3 = hasPython3 ? it : it.skip;
+
 describe("cursor report.sh", () => {
   it("no-ops outside Pragma", () => {
     run("started", { socket: false });
@@ -108,14 +129,14 @@ describe("cursor report.sh", () => {
     expect(existsSync(markerPath())).toBe(true);
   });
 
-  it("surfaces the submitted prompt as a user message", () => {
+  itWithPython3("surfaces the submitted prompt as a user message", () => {
     run("started", { stdin: JSON.stringify({ prompt: 'Fix the "auth" bug' }) });
     expect(messagePayloads()).toContainEqual(
       expect.objectContaining({ role: "user", text: 'Fix the "auth" bug' }),
     );
   });
 
-  it("derives the session name from only the first prompt", () => {
+  itWithPython3("derives the session name from only the first prompt", () => {
     run("started", { stdin: JSON.stringify({ prompt: "Fix auth\nwith regression tests" }) });
     run("stopped");
     run("started", { stdin: JSON.stringify({ prompt: "Second turn" }) });
@@ -124,7 +145,7 @@ describe("cursor report.sh", () => {
     ]);
   });
 
-  it("derives a new session name after session clear", () => {
+  itWithPython3("derives a new session name after session clear", () => {
     run("started", { stdin: JSON.stringify({ prompt: "First session" }) });
     run("cleared");
     run("started", { stdin: JSON.stringify({ prompt: "Next session" }) });
@@ -134,7 +155,7 @@ describe("cursor report.sh", () => {
     ]);
   });
 
-  it("marks a truncated session name with an ellipsis", () => {
+  itWithPython3("marks a truncated session name with an ellipsis", () => {
     const prompt = "x".repeat(49);
     run("started", { stdin: JSON.stringify({ prompt }) });
     expect(reportCalls().filter((call) => call.includes(" session-name "))).toEqual([
@@ -159,7 +180,7 @@ describe("cursor report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  it("surfaces agent responses as assistant messages", () => {
+  itWithPython3("surfaces agent responses as assistant messages", () => {
     run("started");
     run("response", { stdin: JSON.stringify({ text: "Implemented the fix." }) });
     expect(messagePayloads()).toContainEqual(
@@ -167,15 +188,18 @@ describe("cursor report.sh", () => {
     );
   });
 
-  it.each(["aborted", "error"])("clears an %s turn instead of reporting completion", (status) => {
-    run("started");
-    run("stopped", { stdin: JSON.stringify({ status }) });
-    expect(reportCalls()).toEqual([
-      "agent report --agent cursor started",
-      "agent report --agent cursor cleared",
-    ]);
-    expect(existsSync(markerPath())).toBe(false);
-  });
+  itWithPython3.each(["aborted", "error"])(
+    "clears an %s turn instead of reporting completion",
+    (status) => {
+      run("started");
+      run("stopped", { stdin: JSON.stringify({ status }) });
+      expect(reportCalls()).toEqual([
+        "agent report --agent cursor started",
+        "agent report --agent cursor cleared",
+      ]);
+      expect(existsSync(markerPath())).toBe(false);
+    },
+  );
 
   it("reports cleared", () => {
     run("started");

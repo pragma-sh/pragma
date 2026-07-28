@@ -970,14 +970,14 @@ fn load_command(info: &AutomationInfo, root: &str) -> Value {
 
 fn sidecar_command() -> Command {
     if cfg!(debug_assertions) {
-        let mut command = Command::new("bun");
+        let mut command = pragma_platform::process::command("bun");
         command
             .arg("packages/automations/src/cli.ts")
             .current_dir(workspace_root())
             .env("PRAGMA_AUTOMATIONS_CACHE", automation_cache_dir());
         command
     } else {
-        let mut command = Command::new(sidecar_executable(SIDECAR_NAME));
+        let mut command = pragma_platform::process::command(sidecar_executable(SIDECAR_NAME));
         command.env("PRAGMA_AUTOMATIONS_CACHE", automation_cache_dir());
         command
     }

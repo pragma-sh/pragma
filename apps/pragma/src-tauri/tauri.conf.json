@@ -21,10 +21,7 @@
         "resizable": true,
         "fullscreen": false,
         "theme": "Dark",
-        "dragDropEnabled": false,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -44,7 +41,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "deb", "rpm", "appimage"],
+    "targets": ["app", "dmg", "deb", "rpm", "appimage", "msi", "nsis"],
     "externalBin": [
       "binaries/pragma-server",
       "binaries/pragma-gateway",
@@ -56,6 +53,11 @@
       "binaries/pragma-plugins"
     ],
     "resources": ["resources/**/*"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

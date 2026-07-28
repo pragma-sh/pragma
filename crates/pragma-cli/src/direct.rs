@@ -6,8 +6,8 @@
 //! - `agent report` — write one `AgentReport` frame and exit (unchanged
 //!   logic, only the command path moved).
 
+use pragma_platform::ipc::LocalStream;
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use pragma_protocol::{
@@ -116,7 +116,7 @@ fn attach_request(session_id: &str) -> RequestFrame {
 
 /// Waits for the `Response` to an attach/agent-report request, erroring on a
 /// negative ack.
-fn wait_response(stream: &mut UnixStream, request_id: &str) -> Result<(), CliError> {
+fn wait_response(stream: &mut LocalStream, request_id: &str) -> Result<(), CliError> {
     loop {
         let frame = read_json_frame::<ServerFrame>(stream)?;
         match frame {
@@ -245,7 +245,7 @@ fn agent_row(event: EventFrame) -> Option<AgentStatusRow> {
 }
 
 fn stream_deltas(
-    stream: &mut UnixStream,
+    stream: &mut LocalStream,
     args: &crate::cli::AgentStatusArgs,
     out: &output::Output,
 ) -> Result<(), CliError> {

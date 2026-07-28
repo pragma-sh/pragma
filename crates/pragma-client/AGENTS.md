@@ -5,7 +5,11 @@ local/remote connection decisions, and the SSH streamlocal bridge.
 
 ## Responsibilities
 
-- Synchronous frame I/O over Unix sockets for PTY, RPC, and subscriptions.
+- Synchronous frame I/O over a local `AF_UNIX` socket (macOS, Linux, **and** Windows —
+  see `crates/pragma-platform`) for PTY, RPC, and subscriptions.
+- Bridges that present something remote as a local socket: SSH streamlocal for remote
+  hosts (`ssh.rs`), and a `wsl.exe` stdio relay for WSL distributions (`wsl.rs`). Both
+  share the accept/pump machinery in `bridge.rs`.
   `PragmaClient::rpc(method, payload)` is the single entry for the host
   business-logic methods (`filesystem`, `git`); `server_protocol_version()`
   reads the `Hello` frame to verify a remote server before routing to it.

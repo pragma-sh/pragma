@@ -6,10 +6,11 @@
 
 ## What is Pragma?
 
-Pragma is a **macOS + Linux desktop app** (Tauri v2) moving toward a host-server + thin
-native-client architecture. The host runs persistent, worktree-scoped terminal sessions
-through `pragma-server`; native clients connect over a local Unix socket or an SSH
-streamlocal bridge. Plugins for opencode, Claude Code, and Cursor report status through
+Pragma is a **macOS + Linux + Windows desktop app** (Tauri v2) moving toward a
+host-server + thin native-client architecture. The host runs persistent, worktree-scoped
+terminal sessions through `pragma-server`; native clients connect over a local Unix
+socket (on all three platforms), or over a bridge that presents a remote SSH host or a
+WSL distribution as one. Plugins for opencode, Claude Code, and Cursor report status through
 the `pragma-cli` helper.
 
 ## North star: clean, reusable, consistent
@@ -70,7 +71,7 @@ than no guide.
 | Concern           | Choice                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Monorepo / tasks  | [Turborepo](https://turbo.build) + [Bun](https://bun.sh) workspaces                                                                                             |
-| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS + Linux only**)                                                                                              |
+| Desktop shell     | [Tauri v2](https://v2.tauri.app) (targets: **macOS, Linux, Windows**)                                                                                           |
 | Frontend          | [Vite](https://vite.dev) + [React 19](https://react.dev) + TypeScript                                                                                           |
 | Styling / UI      | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + `@tailwindcss/typography` (`prose`)                                           |
 | Backend           | Rust (Tauri commands)                                                                                                                                           |
@@ -101,8 +102,9 @@ than no guide.
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
 │   ├── pragma-core/             # Host business logic boundary → see crates/pragma-core/AGENTS.md
 │   ├── pragma-gateway/          # Localhost HTTP gateway → see crates/pragma-gateway/AGENTS.md
+│   ├── pragma-platform/         # OS seams: IPC, permissions, processes, shells → see crates/pragma-platform/AGENTS.md
 │   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
-│   └── pragma-server/           # Persistent Unix-socket host server → see crates/pragma-server/AGENTS.md
+│   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
@@ -170,10 +172,12 @@ than no guide.
   `invoke()` directly from components).
 - GitHub REST/GraphQL → `apps/pragma/src/lib/github.ts` only (never instantiate Octokit
   in components). See `apps/pragma/AGENTS.md`.
-- PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH bridge →
-  `crates/pragma-client`; localhost HTTP/JSON translation → `crates/pragma-gateway`;
-  host business logic → `crates/pragma-core`; wire framing → `crates/pragma-protocol`;
-  CLI/status reporting → `crates/pragma-cli`.
+- PTY/session ownership → `crates/pragma-server`; native client frame I/O / SSH and WSL
+  bridges → `crates/pragma-client`; localhost HTTP/JSON translation →
+  `crates/pragma-gateway`; host business logic → `crates/pragma-core`; wire framing →
+  `crates/pragma-protocol`; CLI/status reporting → `crates/pragma-cli`.
+- Anything that differs between operating systems → `crates/pragma-platform`. Never a
+  bare `#[cfg(unix)]` at the call site (see _Platform targets_).
 
 ## Common commands
 
@@ -186,7 +190,7 @@ bun install                # Install all workspace deps
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
-bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux bundles)
+bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 
 # Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
 bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
@@ -267,19 +271,135 @@ Shared rules:
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
-compile-only Tauri build on macOS **and** Linux. A separate **Fallow** workflow
+compile-only Tauri build on macOS, Linux, **and** Windows. A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
 `fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
 inline annotations, and fails the check on issues the PR introduces.
 
 ## Platform targets
 
-We target **macOS and Linux only** right now. `tauri.conf.json` bundles `app`/`dmg`
-(macOS) and `deb`/`rpm`/`appimage` (Linux). Don't add Windows/Android specifics without
-updating this guide and CI. Linux builds need the GTK/WebKit system libraries — see the
-`rust`/`build` jobs in CI for the exact `apt` list. `xcap` pulls in `libspa-sys`
-(`libpipewire-0.3-dev`), `libgbm-dev`, and `libclang-dev` — all required at link time
-on Linux and must stay in the CI apt list.
+We target **macOS, Linux, and Windows**. `tauri.conf.json` bundles `app`/`dmg` (macOS),
+`deb`/`rpm`/`appimage` (Linux), and `msi`/`nsis` (Windows). Don't add Android specifics
+without updating this guide and CI.
+
+- **Linux** builds need the GTK/WebKit system libraries — see the `rust`/`build` jobs in
+  CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
+  `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
+- **Windows** needs no system packages: the webview is WebView2, which ships with the OS
+  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on Blacksmith's
+  Windows Server 2025 image with the `rust-windows` job plus a
+  `blacksmith-4vcpu-windows-2025` entry in the `build` matrix.
+- **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
+  locks a running executable's image, our sidecars outlive the window by design, and a
+  per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live
+  instance dies with `Error opening file for writing:
+…\AppData\Local\Pragma\pragma-server.exe`. `installer-hooks.nsh` handles this and stays
+  keyed to `bundle.externalBin`. The elevated per-machine MSI deliberately relies on
+  Windows Installer Restart Manager instead: WiX `util:CloseApplication` matches only by
+  executable basename and could otherwise terminate another user's or unrelated process.
+  See `apps/pragma/AGENTS.md`.
+- **Never spell a shell script's runner as bare `bash` in a package script.** On Windows
+  with WSL installed, `bash` on `PATH` is `C:\Windows\system32\bash.exe` — the WSL
+  launcher — whose Linux `PATH` has no `rustc`, `cargo`, or `bun`, so the sidecar staging
+  dies with `rustc: command not found` (exit 127). CI's Blacksmith Windows image ships no
+  WSL, so this never fires there and only breaks developer machines. Go through
+  `scripts/run-shell-script.ts`, which derives Git Bash from the resolved `git.exe`
+  (override with `PRAGMA_BASH`) and is a plain `bash` everywhere else.
+- **Line endings are pinned by `.gitattributes`.** The build shells out to
+  `src-tauri/scripts/*.sh` through Git Bash, and Git for Windows checks files out as CRLF
+  by default. A `\r` on the `set -euo pipefail` line fails the build with
+  `set: pipefail: invalid option name` (the `\r` hides itself by wrapping the cursor).
+  `*.sh` and the Husky hooks are therefore forced to `eol=lf`. After pulling a change to
+  `.gitattributes`, an existing Windows checkout still holds the old CRLF files — refresh
+  it with `git rm --cached -r . && git reset --hard` (commit or stash first: that command
+  discards uncommitted work).
+- **A Windows checkout has no real symlinks — `core.symlinks=false`.** Git writes each
+  one as a small text file holding its target path, so `CLAUDE.md` is literally the nine
+  bytes `AGENTS.md`. Any formatter that matches it will "fix" it (oxfmt appends a trailing
+  newline) and the symlink is then broken for everyone on macOS/Linux. `CLAUDE.md` is in
+  `.oxfmtrc.json`'s `ignorePatterns` for exactly this reason; the other tracked symlinks
+  (`.claude/skills`, `.agents/skills/*`) are extension-less and no formatter claims them.
+  If you add a symlink whose name a formatter or linter would match, ignore it there too.
+- **The whole tree is `eol=lf`, not just `*.sh`.** Every blob here is already LF; the
+  hazard is `text=auto` **alone**, which lets `core.autocrlf=true` write CRLF into a
+  Windows working tree. oxfmt enforces LF, so `bun run format:check` (and thus
+  `bun run check`) fails on _every_ file on Windows while CI stays green — Linux/macOS
+  check out LF regardless. Diagnose this by byte count, not `grep '\r'`: MSYS `grep -U`
+  reports CRs inconsistently under Git Bash. Compare `git cat-file -s HEAD:<file>` with
+  the on-disk size — a positive difference equal to the line count means the worktree is
+  CRLF while the blob is LF.
+
+**Minimum Windows version: 10 version 1809 (build 17763), October 2018.** ConPTY sets
+that floor, and it is a hard one — `portable-pty` resolves `CreatePseudoConsole` from
+`kernel32.dll` and `expect`s it, so on an older build the server _panics_ (and release
+builds are `panic = "abort"`) the first time a terminal opens. The `AF_UNIX` transport
+needs only 1803, so it is not the binding constraint. Opening a **WSL** session needs
+1903 (18362) or later, because that is when `wsl.exe --list --verbose` and WSL2 arrived;
+PowerShell sessions have no such requirement. Nothing checks any of this at startup, so
+a user below the floor gets a panic rather than a message naming the reason; if that
+becomes a real support burden, the place to fix it is a probe in `pragma-platform`.
+
+**Never add a `#[cfg(unix)]` block with a silently-empty `#[cfg(not(unix))]` twin.** That
+pattern is how a security guarantee quietly disappears — it is exactly what let the
+GitHub token be written world-readable on Windows. Platform differences belong in
+`crates/pragma-platform`, which owns five seams and has a real implementation for each
+on every target:
+
+| Seam      | What it owns                                                                 |
+| --------- | ---------------------------------------------------------------------------- |
+| `ipc`     | The local socket: `AF_UNIX` everywhere, `uds_windows` on Windows             |
+| `path`    | Canonical paths external programs accept (no Windows `\\?\` verbatim prefix) |
+| `perms`   | Owner-only files/dirs: `0600`/`0700` on Unix, an `icacls` ACL on Windows     |
+| `process` | Kill, kill-tree, liveness, the process table, and windowless child spawning  |
+| `shell`   | Which shell a PTY launches, and its interactive arguments                    |
+
+Three of those are easy to bypass by reflex, and every bypass is a visible bug on Windows:
+
+- **Canonicalize with `pragma_platform::path::canonicalize`, never `std::fs`'s.** `std`
+  returns `\\?\C:\…`, which git reads as a UNC path and refuses.
+- **Spawn with `pragma_platform::process::command` (or `process_env::command`, which
+  wraps it), never a bare `Command::new`.** A console program started from a GUI process
+  pops a console window on Windows unless `CREATE_NO_WINDOW` is set.
+- **Name executables with `pragma_client::executable_name`, never a bare string.** It
+  appends `EXE_SUFFIX`, so `pragma-cli` becomes `pragma-cli.exe` on Windows. This applies
+  to a path you _write_ as much as one you read: `agent_cli` copied the helper to a
+  suffix-less name, so the copy was both unreadable on the next launch and not executable
+  by agents resolving it from `PATH` — startup logged only
+  `failed to install pragma-cli: os error 2`.
+
+Two more rules that are not seams but bite the same way:
+
+- **A path is not a string.** Compare with `Path`, not `String`: `Path` treats `/` and `\`
+  as equivalent separators on Windows, so `Path::new(a) == Path::new(b)` holds where
+  `a == b` fails. Never assert on a `"dir/file"` suffix — build it with `join`. And test
+  absolute paths with `Path::is_absolute`, never `starts_with('/')`, which misses every
+  Windows form (`C:\…`, `\\?\C:\…`) — that check silently rejected absolute
+  `plugins[].path` entries as unsupported npm specifiers.
+- **Clear the read timeout on a long-lived stream.** `configure_stream` sets a 5s read
+  timeout so a wedged server cannot hang startup, but a subscription is mostly idle:
+  leave it on and every quiet 5s looks like a dropped connection, so the bridge warns and
+  reconnects forever (`os error 10060` on Windows, `WouldBlock` on Unix). Call
+  `set_read_timeout(None)` once the subscribe response arrives, as
+  `pragma_client::open_event_stream` and the `agent_events` bridge do.
+
+### Windows session modes
+
+Windows runs terminals in one of two worlds, and they are served differently:
+
+- **PowerShell** — a Windows-native `pragma-server.exe` drives ConPTY through
+  `portable-pty`. `pwsh.exe` is preferred over `powershell.exe`; note PowerShell takes
+  `-NoLogo`, **not** the POSIX `-l`.
+- **WSL** — the ordinary Linux `pragma-server` runs _unchanged inside the distribution_
+  and is reached like a remote host. This is not an implementation detail to optimise
+  away: the agent plugins (`pragma-cli`, the opencode and Claude hooks) run inside WSL
+  and connect to that Linux Unix socket, so a Windows-native server could never serve
+  them. WSL2 cannot reach a Windows named pipe and Windows cannot open the Linux socket,
+  so the bridge relays over the standard streams of a `wsl.exe` process
+  (`pragma-server --relay`). See `crates/pragma-client/src/wsl.rs` for why that beat
+  forwarding a port over localhost.
+
+A project selects its shell in `.pragma/config.json` under `terminal.shell`; defaults
+live in `@pragma/constants` under `platform`.
 
 ## Testing
 
@@ -287,3 +407,23 @@ on Linux and must stay in the CI apt list.
   jsdom (`src/test/setup.ts`); mock the Tauri API rather than the native shell.
 - **Rust:** `#[cfg(test)] mod tests` next to the code; `cargo test --workspace`.
 - Add a test with every behavior change. Keep tests fast and deterministic.
+- **A test must pass on all three platforms, and CI only proves that for the ones it
+  runs.** The `rust-windows` job runs the full suite, so a POSIX-only assumption is a red
+  build, not a local curiosity. The recurring offenders:
+  - **`git init` in a fixture inherits the host's config.** Git for Windows ships
+    `core.autocrlf=true` system-wide, so checked-out fixtures come back CRLF and every
+    `"…\n"` assertion fails. Pin `core.autocrlf=false` + `core.eol=lf` **in the repo**
+    (see `init_repo` in `pragma-core/src/git.rs`) — `git -c` on the test's own commands is
+    not enough, because the code under test runs its own `git checkout`/`pull`, which read
+    only the repository config.
+  - **`PATH` is `;`-separated on Windows.** Build fixtures with `std::env::join_paths`,
+    never a literal `"/a:/b"`, or the whole list arrives as one opaque entry and the
+    assertion fails for the wrong reason.
+  - **Shell output is not portable.** `pwd` under Git Bash prints an MSYS path
+    (`/c/Users/…`) that never equals the Win32 path `canonicalize` returns. Assert on
+    something the shell cannot reformat — e.g. `cat` a marker file that only resolves from
+    the intended cwd.
+  - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
+    created its symlink only on Unix, so on Windows it asserted against a link that was
+    never there. Windows symlinks also need Developer Mode or admin — skip explicitly when
+    creation fails rather than passing for the wrong reason.

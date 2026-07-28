@@ -273,6 +273,41 @@
       "liga" 0,
       "calt" 0;
   }
+
+  /* ----- Scrollbars: no sideways bar, anywhere ---------------------------- */
+  /* One global rule instead of per-component `[&::-webkit-scrollbar]:hidden`
+     hacks. The horizontal bar is suppressed everywhere because those gutters
+     read as noise across the tab strips, kanban board, code blocks and prose
+     panes; horizontal *scrolling* is untouched — trackpad, shift+wheel and
+     keyboard still pan every region that overflows.
+
+     The vertical bar has to be styled explicitly rather than left alone:
+     authoring any `::-webkit-scrollbar` rule opts that element out of the
+     webview's default scrollbars entirely, so without the parts below every
+     scrollable pane would render an unpainted gutter. All three Tauri webviews
+     (WKWebView, WebKitGTK, WebView2) take these pseudo-elements.
+
+     Lives in `base` on purpose: the components that deliberately hide *both*
+     bars do it with Tailwind utilities, which outrank this layer and still win. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 0;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--input);
+    /* Transparent border + padding-box clip insets the thumb, so it reads as a
+       thin pill floating in the gutter rather than a full-width slab. */
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
 }
 
 @layer components {
@@ -328,4 +363,13 @@
    above. */
 .dark.vibrancy .app-content {
   background-color: transparent;
+}
+
+/* Radix `ScrollArea` draws its scrollbars as real DOM nodes, so the global
+   `::-webkit-scrollbar` block in @layer base can't reach them. Same policy: the
+   horizontal bar goes, the viewport still scrolls sideways. Unlayered on purpose
+   — the primitive sets `display: flex` on the bar via a Tailwind utility, and
+   utilities outrank every rule in `base`. */
+[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
+  display: none;
 }
