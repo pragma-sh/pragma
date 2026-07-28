@@ -525,8 +525,14 @@ shadow host. `useDesignPalette` re-pushes on light/dark and theme-override chang
 never hard-code overlay colors — add the token to `DesignPalette` instead.
 
 Staged changes come back the same way focus/find pings do — a cancelled navigation to
-`pragma-design://stage/<base64url>` that `on_navigation` decodes and re-emits as
-`browser-design-stage`. The toolbar count badge (`DesignModePopover`) lists them and
+`pragma-design://stage/<base64url>?token=<capability>` that `on_navigation` decodes and
+re-emits as `browser-design-stage`. Rust generates a fresh per-tab capability whenever
+design mode is enabled, keeps the expected value in native memory, injects it only into
+the overlay closure, and rejects staging unless the presented token matches while that
+native session remains active. Disable, full document navigation, and tab close clear the
+capability; the existing URL-change re-assertion enables the new document with a fresh
+one. Never reuse or expose the persistent gateway bearer token for this page-local flow.
+The toolbar count badge (`DesignModePopover`) lists staged changes and
 hands the lot to a **background** agent session (`createTab` + `startBackgroundAgentSession`,
 the Kanban path) so launching an agent never steals focus from the page. The toggle is
 promoted to the toolbar only for loopback URLs with an explicit port (`isLocalPortUrl` in

@@ -78,6 +78,10 @@ struct BrowserEvalCallbackPayload {
 
 static BROWSER_EVAL_PENDING: OnceLock<BrowserEvalPending> = OnceLock::new();
 
+/// Active design-mode capability per browser tab. A page must present this
+/// short-lived token while the native side still considers design mode enabled.
+static DESIGN_SESSIONS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
 /// Page-focus ping reported to the frontend so split-pane focus can follow a
 /// click into a native browser webview's content.
 #[derive(Clone, serde::Serialize)]
@@ -212,9 +216,10 @@ const DESIGN_SCHEME_TOKEN: &str = "__PRAGMA_DESIGN_SCHEME__";
 ///
 /// While enabled it highlights the element nearest the cursor, swallows page
 /// clicks so picking an element never navigates, and shows a pill input whose
-/// "+" stages the change back to Rust over [`DESIGN_SENTINEL_SCHEME`]. The
-/// enabled flag is mirrored into `sessionStorage` so design mode survives page
-/// reloads and same-origin navigation, where this script re-runs from scratch.
+/// "+" stages the change back to Rust over [`DESIGN_SENTINEL_SCHEME`], presenting
+/// a native-issued capability held only in this closure. The enabled flag is
+/// mirrored into `sessionStorage` so design mode survives page reloads and
+/// same-origin navigation, where this script re-runs from scratch.
 const DESIGN_SCRIPT: &str = r"
 (function() {
   const SCHEME = '__PRAGMA_DESIGN_SCHEME__';
@@ -227,6 +232,7 @@ const DESIGN_SCRIPT: &str = r"
 
   const state = {
     enabled: false,
+    token: null,
     host: null,
     box: null,
     label: null,
@@ -530,8 +536,11 @@ const DESIGN_SCRIPT: &str = r"
       route: window.location.pathname + window.location.search,
       url: window.location.href,
     };
+    if (!state.token) return;
     clearSelection();
-    window.location.href = SCHEME + '://stage/' + encodeUtf8Base64Url(JSON.stringify(payload));
+    window.location.href =
+      SCHEME + '://stage/' + encodeUtf8Base64Url(JSON.stringify(payload)) +
+      '?token=' + encodeURIComponent(state.token);
   }
 
   function selectElement(element) {
@@ -595,8 +604,9 @@ const DESIGN_SCRIPT: &str = r"
     placePill(state.selected);
   }
 
-  function setEnabled(enabled, palette) {
+  function setEnabled(enabled, palette, token) {
     state.enabled = Boolean(enabled);
+    state.token = state.enabled && typeof token === 'string' ? token : null;
     writeStoredFlag(state.enabled);
     if (palette) applyPalette(palette);
     if (!state.enabled) {
@@ -628,7 +638,11 @@ const DESIGN_SCRIPT: &str = r"
   window.addEventListener('scroll', onViewportChange, true);
   window.addEventListener('resize', onViewportChange, true);
 
-  window.__pragmaDesign = { setEnabled: setEnabled };
+  Object.defineProperty(window, '__pragmaDesign', {
+    value: Object.freeze({ setEnabled: setEnabled }),
+    configurable: false,
+    writable: false,
+  });
 
   state.palette = readStoredPalette();
 
@@ -657,9 +671,57 @@ fn browser_design_stage_payload(encoded: &str) -> Result<BrowserDesignStage, Str
     serde_json::from_str(&json).map_err(|error| format!("invalid design stage payload: {error}"))
 }
 
+fn design_sessions() -> &'static Mutex<HashMap<String, String>> {
+    DESIGN_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn set_design_session(tab_id: &str, token: String) {
+    if let Ok(mut sessions) = design_sessions().lock() {
+        sessions.insert(tab_id.to_string(), token);
+    }
+}
+
+fn clear_design_session(tab_id: &str) {
+    if let Ok(mut sessions) = design_sessions().lock() {
+        sessions.remove(tab_id);
+    }
+}
+
+fn design_session_authorized(tab_id: &str, presented: Option<&str>) -> bool {
+    let Some(presented) = presented else {
+        return false;
+    };
+    let Ok(sessions) = design_sessions().lock() else {
+        return false;
+    };
+    sessions
+        .get(tab_id)
+        .is_some_and(|expected| constant_time_eq(expected.as_bytes(), presented.as_bytes()))
+}
+
+fn constant_time_eq(expected: &[u8], actual: &[u8]) -> bool {
+    if expected.len() != actual.len() {
+        return false;
+    }
+    expected
+        .iter()
+        .zip(actual)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
 /// Handles a design-mode staging ping: decode the payload, tag it with the
 /// owning tab, and forward it to the frontend.
 fn receive_design_navigation(app: &AppHandle, tab_id: &str, url: &Url) {
+    let token = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "token").then(|| value.into_owned()));
+    if !design_session_authorized(tab_id, token.as_deref()) {
+        log::debug!("unauthorized browser design stage ignored for tab {tab_id}");
+        return;
+    }
     match browser_design_stage_payload(url.path().trim_start_matches('/')) {
         Ok(mut stage) => {
             stage.tab_id = tab_id.to_string();
@@ -833,7 +895,8 @@ mod tests {
 
     use super::{
         browser_design_stage_payload, browser_eval_callback_payload, build_eval_callback_script,
-        design_script, parse_url,
+        clear_design_session, design_script, design_session_authorized, parse_url,
+        set_design_session,
     };
 
     fn encoded_payload(json: &str) -> String {
@@ -892,7 +955,25 @@ mod tests {
         let script = design_script();
 
         assert!(script.contains("'pragma-design'"));
+        assert!(script.contains("'?token=' + encodeURIComponent(state.token)"));
         assert!(!script.contains("__PRAGMA_DESIGN_SCHEME__"));
+    }
+
+    #[test]
+    fn design_session_requires_current_tab_token() {
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        set_design_session(&tab_id, "first-token".to_string());
+
+        assert!(design_session_authorized(&tab_id, Some("first-token")));
+        assert!(!design_session_authorized(&tab_id, Some("wrong-token")));
+        assert!(!design_session_authorized(&tab_id, None));
+
+        set_design_session(&tab_id, "rotated-token".to_string());
+        assert!(!design_session_authorized(&tab_id, Some("first-token")));
+        assert!(design_session_authorized(&tab_id, Some("rotated-token")));
+
+        clear_design_session(&tab_id);
+        assert!(!design_session_authorized(&tab_id, Some("rotated-token")));
     }
 
     #[test]
@@ -981,6 +1062,7 @@ pub fn browser_create(
                 );
                 return false;
             }
+            clear_design_session(&nav_tab);
             emit_meta(
                 &nav_app,
                 &BrowserMeta {
@@ -1103,6 +1185,7 @@ pub fn browser_open_external(url: String) -> AppResult<()> {
 /// Destroys the native webview backing a browser tab.
 #[tauri::command]
 pub fn browser_close(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
+    clear_design_session(&tab_id);
     if let Some(webview) = app.get_webview(&webview_label(&tab_id)) {
         webview.close()?;
     }
@@ -1134,12 +1217,23 @@ pub fn browser_design_set(
     enabled: bool,
     palette: Option<DesignPalette>,
 ) -> AppResult<()> {
-    let enabled = if enabled { "true" } else { "false" };
+    let webview = require_webview(&app, &tab_id)?;
     let palette = serde_json::to_string(&palette)?;
-    require_webview(&app, &tab_id)?.eval(format!(
-        "window.__pragmaDesign && window.__pragmaDesign.setEnabled({enabled}, {palette});"
-    ))?;
-    Ok(())
+    let token = enabled.then(|| uuid::Uuid::new_v4().to_string());
+    if let Some(token) = &token {
+        set_design_session(&tab_id, token.clone());
+    } else {
+        clear_design_session(&tab_id);
+    }
+    let token_json = serde_json::to_string(&token)?;
+    let enabled_json = if enabled { "true" } else { "false" };
+    let result = webview.eval(format!(
+        "window.__pragmaDesign && window.__pragmaDesign.setEnabled({enabled_json}, {palette}, {token_json});"
+    ));
+    if result.is_err() {
+        clear_design_session(&tab_id);
+    }
+    result.map_err(Into::into)
 }
 
 /// Scrolls the page by deltas or to a top/bottom anchor.
