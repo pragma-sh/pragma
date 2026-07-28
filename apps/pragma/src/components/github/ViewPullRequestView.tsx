@@ -3,7 +3,16 @@ import { errorMessage } from "@/lib/errors";
 
 import type { ChangedFile, GitHubRepoRef } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { Check, CheckCircle2, ChevronUp, CircleDot, Loader2, X, XCircle } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  ChevronUp,
+  CircleDot,
+  Loader2,
+  TriangleAlert,
+  X,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
@@ -54,7 +63,13 @@ import {
   listReviewThreads,
   mergePullRequest,
 } from "@/lib/github";
-import { browserOpenExternal, githubDeleteRemoteBranch } from "@/lib/tauri";
+import {
+  browserOpenExternal,
+  githubAbortMerge,
+  githubDeleteRemoteBranch,
+  githubMergeBaseBranch,
+  githubMergeInProgress,
+} from "@/lib/tauri";
 import { requestReviewFocus } from "@/state/review-focus-store";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -585,16 +600,22 @@ function MergeCard({
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
-      <ChecksSummary checks={checks} />
-      <Button
-        className="w-full"
-        disabled={merging || pr.mergeable === false}
-        onClick={() => setConfirming(true)}
-        size="sm"
-      >
-        {merging ? <Loader2 className="animate-spin" /> : null}
-        {pr.mergeable === false ? "Cannot merge (conflicts)" : "Merge pull request"}
-      </Button>
+      {pr.mergeable === false ? (
+        <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
+      ) : (
+        <>
+          <ChecksSummary checks={checks} />
+          <Button
+            className="w-full"
+            disabled={merging}
+            onClick={() => setConfirming(true)}
+            size="sm"
+          >
+            {merging ? <Loader2 className="animate-spin" /> : null}
+            Merge pull request
+          </Button>
+        </>
+      )}
 
       <AlertDialog onOpenChange={setConfirming} open={confirming}>
         <AlertDialogContent>
@@ -619,6 +640,130 @@ function MergeCard({
         worktreeId={worktreeId}
       />
     </div>
+  );
+}
+
+function MergeConflictControls({
+  onChanged,
+  pr,
+  repo,
+  worktreeId,
+}: {
+  onChanged: () => void;
+  pr: PullRequestSummary;
+  repo: GitHubRepoRef;
+  worktreeId: string;
+}) {
+  const [merging, setMerging] = useState(false);
+  const [mergeInProgress, setMergeInProgress] = useState<boolean | null>(null);
+  const [confirmingAbort, setConfirmingAbort] = useState(false);
+  const mergeStatusRequest = useRef(0);
+
+  const refreshMergeStatus = useCallback(async () => {
+    const request = ++mergeStatusRequest.current;
+    try {
+      const status = await githubMergeInProgress(worktreeId);
+      if (request === mergeStatusRequest.current) {
+        setMergeInProgress(status);
+      }
+    } catch (cause) {
+      if (request === mergeStatusRequest.current) {
+        toast.error(errorMessage(cause));
+      }
+    }
+  }, [worktreeId]);
+
+  useEffect(() => {
+    void refreshMergeStatus();
+  }, [refreshMergeStatus]);
+
+  const resolveConflicts = useCallback(async () => {
+    setMerging(true);
+    try {
+      const baseRemote =
+        pr.baseRepo && (pr.baseRepo.owner !== repo.owner || pr.baseRepo.repo !== repo.repo)
+          ? pr.baseRepo.cloneUrl
+          : null;
+      const hasConflicts = await githubMergeBaseBranch(worktreeId, pr.baseRef, baseRemote);
+      await refreshMergeStatus();
+      if (hasConflicts) {
+        toast.warning(`Merged ${pr.baseRef}. Resolve conflicting files in this worktree.`);
+      } else {
+        toast.success(`Merged latest ${pr.baseRef} and pushed ${pr.headRef}`);
+        onChanged();
+      }
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setMerging(false);
+    }
+  }, [
+    onChanged,
+    pr.baseRef,
+    pr.baseRepo,
+    pr.headRef,
+    refreshMergeStatus,
+    repo.owner,
+    repo.repo,
+    worktreeId,
+  ]);
+
+  const abortMerge = useCallback(async () => {
+    setConfirmingAbort(false);
+    setMerging(true);
+    try {
+      await githubAbortMerge(worktreeId);
+      await refreshMergeStatus();
+      toast.success("Merge aborted and conflict-resolution changes discarded");
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setMerging(false);
+    }
+  }, [refreshMergeStatus, worktreeId]);
+
+  return (
+    <>
+      <div className="flex items-start gap-2 text-destructive">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium">Merge conflict</p>
+          <p className="text-xs text-muted-foreground">
+            This pull request conflicts with {pr.baseRef}. Resolve it by merging latest {pr.baseRef}{" "}
+            into {pr.headRef} locally.
+          </p>
+        </div>
+      </div>
+      {mergeInProgress ? (
+        <p className="text-center text-xs font-medium">Resolve the Merge Conflict and Commit</p>
+      ) : null}
+      <Button
+        className="w-full"
+        disabled={merging || mergeInProgress === null}
+        onClick={() => (mergeInProgress ? setConfirmingAbort(true) : void resolveConflicts())}
+        size="sm"
+        variant="destructive"
+      >
+        {merging || mergeInProgress === null ? <Loader2 className="animate-spin" /> : null}
+        {mergeInProgress ? "Abort Merge" : "Sync with Base Branch"}
+      </Button>
+
+      <AlertDialog onOpenChange={setConfirmingAbort} open={confirmingAbort}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Abort merge?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will discard all conflict-resolution changes and restore this worktree to its
+              state before merging {pr.baseRef}. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void abortMerge()}>Abort merge</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

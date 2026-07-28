@@ -581,6 +581,80 @@ pub async fn github_sync_branch(
     .map_err(|error| AppError::GitHub(format!("sync task failed: {error}")))?
 }
 
+/// Syncs the PR head branch, fetches `origin`, then merges the latest base
+/// branch into the worktree. Returns true when conflicts need local resolution.
+#[tauri::command]
+pub async fn github_merge_base_branch(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    locks: State<'_, GitLocks>,
+    worktree_id: String,
+    base: String,
+    base_remote: Option<String>,
+) -> AppResult<bool> {
+    let worktree = db.worktree(&worktree_id)?;
+    let lock = locks.lock_for(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock()?;
+        host_git(
+            &pty,
+            &GitRequest::GithubMergeBaseBranch {
+                root: worktree.path,
+                base,
+                base_remote,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("merge base task failed: {error}")))?
+}
+
+/// Discards merge-conflict resolution changes and aborts the active worktree merge.
+#[tauri::command]
+pub async fn github_abort_merge(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    locks: State<'_, GitLocks>,
+    worktree_id: String,
+) -> AppResult<()> {
+    let worktree = db.worktree(&worktree_id)?;
+    let lock = locks.lock_for(&worktree.project_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock()?;
+        host_git(
+            &pty,
+            &GitRequest::GithubAbortMerge {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("abort merge task failed: {error}")))?
+}
+
+/// Returns whether Git has an active merge in this worktree.
+#[tauri::command]
+pub async fn github_merge_in_progress(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<bool> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        host_git(
+            &pty,
+            &GitRequest::GithubMergeInProgress {
+                root: worktree.path,
+            },
+        )
+    })
+    .await
+    .map_err(|error| AppError::GitHub(format!("merge status task failed: {error}")))?
+}
+
 /// Pushes the worktree's branch to `origin`, setting upstream, before opening a
 /// PR (`git push -u origin <branch>`).
 #[tauri::command]

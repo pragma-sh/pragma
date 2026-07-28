@@ -2,7 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { GitHubRepoRef } from "@pragma/constants";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { browserOpenExternal, github, workspace } = vi.hoisted(() => ({
+const {
+  browserOpenExternal,
+  github,
+  githubAbortMerge,
+  githubMergeBaseBranch,
+  githubMergeInProgress,
+  workspace,
+} = vi.hoisted(() => ({
   browserOpenExternal: vi.fn(),
   github: {
     createIssueComment: vi.fn(),
@@ -13,6 +20,9 @@ const { browserOpenExternal, github, workspace } = vi.hoisted(() => ({
     listReviewThreads: vi.fn(),
     mergePullRequest: vi.fn(),
   },
+  githubAbortMerge: vi.fn(),
+  githubMergeBaseBranch: vi.fn(),
+  githubMergeInProgress: vi.fn(),
   workspace: { deleteWorktree: vi.fn(), openReviewTab: vi.fn() },
 }));
 
@@ -26,7 +36,13 @@ vi.mock("@/components/right-sidebar/ChangeGroup", () => ({
   ChangeGroup: () => null,
 }));
 vi.mock("@/lib/github", () => github);
-vi.mock("@/lib/tauri", () => ({ browserOpenExternal, githubDeleteRemoteBranch: vi.fn() }));
+vi.mock("@/lib/tauri", () => ({
+  browserOpenExternal,
+  githubAbortMerge,
+  githubDeleteRemoteBranch: vi.fn(),
+  githubMergeBaseBranch,
+  githubMergeInProgress,
+}));
 vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
 
 import { ChecksSummary, ViewPullRequestView } from "./ViewPullRequestView";
@@ -63,6 +79,8 @@ beforeEach(() => {
   ]);
   github.listPullFiles.mockResolvedValue([]);
   github.listReviewThreads.mockResolvedValue([]);
+  githubMergeBaseBranch.mockResolvedValue(true);
+  githubMergeInProgress.mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -106,6 +124,68 @@ describe("ViewPullRequestView", () => {
         "https://github.com/acme/widget/commit/a1b2c3d4e5f6",
       );
     });
+  });
+
+  it("replaces merge controls with conflict resolution", async () => {
+    render(
+      <ViewPullRequestView
+        onChanged={vi.fn()}
+        pr={{
+          number: 1,
+          title: "Conflicted",
+          body: "",
+          state: "open",
+          htmlUrl: "https://github.com/acme/widget/pull/1",
+          headRef: "feature",
+          headSha: "a1b2c3d4e5f6",
+          baseRef: "main",
+          baseRepo: {
+            owner: "upstream",
+            repo: "widget",
+            cloneUrl: "https://github.com/upstream/widget.git",
+          },
+          draft: false,
+          merged: false,
+          mergeable: false,
+          user: null,
+        }}
+        repo={repo}
+        worktreeId="worktree-1"
+      />,
+    );
+
+    expect(await screen.findByText("Merge conflict")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This pull request conflicts with main. Resolve it by merging latest main into feature locally.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Merge pull request" })).not.toBeInTheDocument();
+    const syncButton = screen.getByRole("button", { name: "Sync with Base Branch" });
+    await waitFor(() => {
+      expect(githubMergeInProgress).toHaveBeenCalledWith("worktree-1");
+      expect(syncButton).toBeEnabled();
+    });
+    githubMergeInProgress.mockResolvedValue(true);
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(githubMergeBaseBranch).toHaveBeenCalledWith(
+        "worktree-1",
+        "main",
+        "https://github.com/upstream/widget.git",
+      );
+    });
+    expect(screen.getByRole("button", { name: "Abort Merge" })).toBeInTheDocument();
+    expect(screen.getByText("Resolve the Merge Conflict and Commit")).toBeInTheDocument();
+    githubMergeInProgress.mockResolvedValue(false);
+    fireEvent.click(screen.getByRole("button", { name: "Abort Merge" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Abort merge?");
+    fireEvent.click(screen.getByRole("button", { name: "Abort merge" }));
+    await waitFor(() => {
+      expect(githubAbortMerge).toHaveBeenCalledWith("worktree-1");
+    });
+    expect(screen.getByRole("button", { name: "Sync with Base Branch" })).toBeInTheDocument();
   });
 });
 
