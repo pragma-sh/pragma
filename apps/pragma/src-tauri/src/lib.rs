@@ -1197,6 +1197,7 @@ pub fn run() {
             browser::browser_open_external,
             browser::browser_close,
             browser::browser_scroll,
+            browser::browser_design_set,
             browser::browser_focus_element,
             browser::browser_click,
             browser::browser_eval,

@@ -513,6 +513,38 @@ primitives gets this for free; anything else that must paint above a browser mus
 its open window in `useSuppressNativeOverlayWhile(open)`. The file-tree context menu
 also registers via `useSuppressNativeOverlayWhile(open)`.
 
+### Design mode
+
+The paintbrush toggle in the browser toolbar turns on an **in-page** element picker:
+hovering animates a highlight box onto the element nearest the cursor, clicking it opens
+a pill input, and "+" stages the typed prompt. Because the page is a native webview,
+none of that can be React — it is `DESIGN_SCRIPT` in `browser.rs`, injected alongside
+`focus_script()` into every browser page and inert until `browser_design_set` flips
+`window.__pragmaDesign.setEnabled(...)`. The flag is mirrored into the page's
+`sessionStorage` so design mode survives reloads and same-origin routing; `use-design-mode.ts`
+re-asserts it on every `tab.url` change for the cross-origin case.
+
+The overlay can't read Pragma's Tailwind variables (it lives in the user's page), so
+`readDesignPalette` resolves `--primary`/`--popover`/`--ring`/… off the app document and
+`browser_design_set` forwards them; the script re-declares them as `--pragma-*` on its
+shadow host. `useDesignPalette` re-pushes on light/dark and theme-override changes, so
+never hard-code overlay colors — add the token to `DesignPalette` instead.
+
+Staged changes come back the same way focus/find pings do — a cancelled navigation to
+`pragma-design://stage/<base64url>?token=<capability>` that `on_navigation` decodes and
+re-emits as `browser-design-stage`. Rust generates a fresh per-tab capability whenever
+design mode is enabled, keeps the expected value in native memory, injects it only into
+the overlay closure, and rejects staging unless the presented token matches while that
+native session remains active. Disable, full document navigation, and tab close clear the
+capability; the existing URL-change re-assertion enables the new document with a fresh
+one. Never reuse or expose the persistent gateway bearer token for this page-local flow.
+The toolbar count badge (`DesignModePopover`) lists staged changes and
+hands the lot to a **background** agent session (`createTab` + `startBackgroundAgentSession`,
+the Kanban path) so launching an agent never steals focus from the page. The toggle is
+promoted to the toolbar only for loopback URLs with an explicit port (`isLocalPortUrl` in
+`lib/design-mode.ts`) and lives in the overflow menu otherwise; `buildDesignPrompt` in the
+same file renders the origin/port, each element's HTML and route, and the user's own words.
+
 ## Split / tab-bar model
 
 One `splitRootByWorktree` layout per worktree. Tabs inside a real split are "split

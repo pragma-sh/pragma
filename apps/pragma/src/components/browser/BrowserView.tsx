@@ -7,6 +7,7 @@ import {
   Camera,
   Code,
   MoreHorizontal,
+  Paintbrush,
   RotateCw,
   Search,
 } from "lucide-react";
@@ -22,10 +23,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DesignModePopover } from "@/components/browser/DesignModePopover";
 import { useBrowserFind } from "@/components/browser/use-browser-find";
+import { useDesignMode } from "@/components/browser/use-design-mode";
 import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { BROWSER_START_URL, rectToBounds, screenshotBounds } from "@/lib/browser-manager";
+import { isLocalPortUrl } from "@/lib/design-mode";
 import { useNativeOverlaySuppressed } from "@/lib/native-overlay";
 import {
   browserBack,
@@ -54,7 +58,7 @@ interface BrowserViewProps {
  * native child webview that floats over the placeholder `<div>`; this component
  * keeps that webview created, positioned, and shown/hidden in sync with React.
  */
-// fallow-ignore-next-line complexity -- orchestrates the native webview lifecycle (create/position/show/hide) plus toolbar chrome; find-in-page wiring only adds one keydown effect on top of pre-existing branching.
+// fallow-ignore-next-line complexity -- orchestrates the native webview lifecycle (create/position/show/hide) plus toolbar chrome; find-in-page and design mode each add only a hook call and a toolbar control on top of pre-existing branching.
 export function BrowserView({ tab, active }: BrowserViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const { isDragging } = useTabDrag();
@@ -66,6 +70,11 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [address, setAddress] = useState(tab.url ?? "");
   const find = useBrowserFind(tab.id);
+  const design = useDesignMode(tab.id, tab.url);
+  // Design mode only helps on a local dev server (the agent needs source it can
+  // edit), so its toggle is promoted to the toolbar there and tucked into the
+  // overflow menu everywhere else.
+  const designPromoted = isLocalPortUrl(tab.url);
 
   // Cmd/Ctrl+F while the React chrome (not the native page) holds focus; the
   // page-content case is forwarded via `onBrowserFindRequest` (see
@@ -308,6 +317,35 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
               onChange={(event) => setAddress(event.target.value)}
             />
           </form>
+          {designPromoted ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Design mode"
+                  aria-pressed={design.enabled}
+                  className={
+                    design.enabled
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => design.setEnabled(!design.enabled)}
+                >
+                  <Paintbrush />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Design mode</TooltipContent>
+            </Tooltip>
+          ) : null}
+          {design.changes.length > 0 ? (
+            <DesignModePopover
+              changes={design.changes}
+              pageUrl={tab.url ?? address}
+              onApplied={design.clear}
+              onRemove={design.remove}
+            />
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -366,6 +404,12 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {designPromoted ? null : (
+                <DropdownMenuItem onSelect={() => design.setEnabled(!design.enabled)}>
+                  <Paintbrush />
+                  {design.enabled ? "Exit design mode" : "Design mode"}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => void browserClearData(tab.id)}>
                 Clear browsing data
               </DropdownMenuItem>

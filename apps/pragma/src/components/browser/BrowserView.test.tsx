@@ -14,6 +14,7 @@ const tauriMocks = vi.hoisted(() => ({
   browserSetBounds: vi.fn(() => Promise.resolve()),
   browserFrameHeight: vi.fn(() => Promise.resolve(0)),
   browserSnapshot: vi.fn(() => Promise.resolve("data:image/png;base64,STILL")),
+  browserDesignSet: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@/lib/tauri", () => ({
@@ -34,16 +35,18 @@ vi.mock("@/lib/tauri", () => ({
   browserFindSeek: vi.fn(() => Promise.resolve({ count: 0, index: -1 })),
   browserFindClear: vi.fn(() => Promise.resolve()),
   onBrowserFindRequest: vi.fn(() => Promise.resolve(() => {})),
+  browserDesignSet: tauriMocks.browserDesignSet,
+  onBrowserDesignStage: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-function browserTab(): Tab {
+function browserTab(url = "https://example.com"): Tab {
   return {
     id: "browser-1",
     projectId: "project",
     worktreeId: "worktree",
     kind: "browser",
     title: "Browser",
-    url: "https://example.com",
+    url,
     filePath: null,
     diffSide: null,
     diffCommit: null,
@@ -132,5 +135,47 @@ describe("BrowserView", () => {
       expect(tauriMocks.browserSetVisible).toHaveBeenCalledWith("browser-1", true),
     );
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("toggles design mode from the toolbar on a local dev server", async () => {
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab("http://localhost:5173/pricing")} />
+      </TabDragProvider>,
+    );
+
+    const toggle = screen.getByLabelText("Design mode");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(toggle);
+
+    expect(tauriMocks.browserDesignSet).toHaveBeenCalledWith(
+      "browser-1",
+      true,
+      expect.objectContaining({ primary: expect.any(String) }),
+    );
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
+
+    await userEvent.click(toggle);
+
+    expect(tauriMocks.browserDesignSet).toHaveBeenCalledWith(
+      "browser-1",
+      false,
+      expect.objectContaining({ primary: expect.any(String) }),
+    );
+  });
+
+  it("hides the design-mode toggle in the overflow menu for remote pages", async () => {
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab()} />
+      </TabDragProvider>,
+    );
+
+    expect(screen.queryByLabelText("Design mode")).toBeNull();
+
+    await userEvent.click(screen.getByLabelText("More options"));
+
+    expect(await screen.findByText("Design mode")).toBeInTheDocument();
   });
 });
