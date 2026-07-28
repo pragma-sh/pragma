@@ -52,6 +52,12 @@ const FOCUS_SENTINEL_SCHEME: &str = "pragma-focus";
 /// navigation hook cancels the load and delivers the payload to the waiting Rust
 /// caller. This avoids exposing Tauri IPC to arbitrary remote pages.
 const EVAL_SENTINEL_SCHEME: &str = "pragma-eval";
+/// URL scheme the injected design-mode overlay navigates to when the user stages
+/// a change, carrying the prompt plus the picked element's markup. Same
+/// cancelled-navigation trick as the focus/find/eval pings.
+const DESIGN_SENTINEL_SCHEME: &str = "pragma-design";
+/// Event name carrying a staged design-mode change to the frontend.
+const DESIGN_STAGE_EVENT: &str = "browser-design-stage";
 const BROWSER_EVAL_TIMEOUT: Duration = Duration::from_secs(5);
 
 type BrowserEvalResult = Result<serde_json::Value, String>;
@@ -86,6 +92,49 @@ struct BrowserFocusRequest {
 #[serde(rename_all = "camelCase")]
 struct BrowserFindRequest {
     tab_id: String,
+}
+
+/// One design-mode change staged from the page: the user's prompt plus enough
+/// markup context for an agent to locate the element in the project's source.
+///
+/// Deserialized from the page's payload (which has no `tabId`, hence the
+/// default) and re-serialized to the frontend with the owning tab filled in.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserDesignStage {
+    #[serde(default)]
+    tab_id: String,
+    /// What the user typed into the pill input.
+    prompt: String,
+    /// `outerHTML` of the picked element, truncated by the page script.
+    html: String,
+    /// CSS selector path to the picked element.
+    selector: String,
+    /// Tag/id/class chain of the element's ancestors, outermost first.
+    ancestors: String,
+    /// Path + query the element was picked on.
+    route: String,
+    /// Full page URL the element was picked on.
+    url: String,
+}
+
+/// The app's resolved theme colors, forwarded to the in-page design overlay.
+///
+/// The overlay lives in the page being designed, which has no access to
+/// Pragma's CSS variables, so the frontend reads them off its own document and
+/// passes them through. Empty fields fall back to the overlay's own defaults.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignPalette {
+    primary: String,
+    primary_foreground: String,
+    primary_hover: String,
+    surface: String,
+    surface_foreground: String,
+    border: String,
+    muted_foreground: String,
+    ring: String,
+    font_family: String,
 }
 
 /// Page metadata reported to the frontend as a browser webview navigates.
@@ -149,6 +198,475 @@ fn focus_script() -> String {
 }})();
 "
     )
+}
+
+/// Placeholder replaced with [`DESIGN_SENTINEL_SCHEME`] in [`DESIGN_SCRIPT`].
+///
+/// The design script is long and brace-heavy, so it is a plain constant with a
+/// token substitution rather than a `format!` template (which would need every
+/// JS brace doubled).
+const DESIGN_SCHEME_TOKEN: &str = "__PRAGMA_DESIGN_SCHEME__";
+
+/// Design-mode overlay, injected into every browser page but inert until
+/// `window.__pragmaDesign.setEnabled(true)` runs (see [`browser_design_set`]).
+///
+/// While enabled it highlights the element nearest the cursor, swallows page
+/// clicks so picking an element never navigates, and shows a pill input whose
+/// "+" stages the change back to Rust over [`DESIGN_SENTINEL_SCHEME`]. The
+/// enabled flag is mirrored into `sessionStorage` so design mode survives page
+/// reloads and same-origin navigation, where this script re-runs from scratch.
+const DESIGN_SCRIPT: &str = r"
+(function() {
+  const SCHEME = '__PRAGMA_DESIGN_SCHEME__';
+  const STORAGE_KEY = 'pragma-design-mode';
+  const PALETTE_KEY = 'pragma-design-palette';
+  // How close (px) the cursor must be to a child's box to descend into it, so
+  // hovering an element's padding still picks the visually nearest child.
+  const PROXIMITY_PX = 12;
+  const MAX_HTML = 4000;
+
+  const state = {
+    enabled: false,
+    host: null,
+    box: null,
+    label: null,
+    pill: null,
+    input: null,
+    selected: null,
+    cursorStyle: null,
+    palette: null,
+  };
+
+  function encodeUtf8Base64Url(value) {
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  function readStoredFlag() {
+    try {
+      return window.sessionStorage.getItem(STORAGE_KEY) === '1';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function writeStoredFlag(enabled) {
+    try {
+      if (enabled) {
+        window.sessionStorage.setItem(STORAGE_KEY, '1');
+      } else {
+        window.sessionStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (error) {
+      // Storage unavailable (private mode, opaque origin): design mode simply
+      // does not survive a reload.
+    }
+  }
+
+  // Colors come from the app's own theme tokens, pushed in as `--pragma-*`
+  // custom properties by applyPalette (the page has no access to Pragma's CSS
+  // variables). The literals here are only the fallback for a missing palette,
+  // and track DESIGN.md's `primary` blue and `popover` charcoal.
+  const STYLES = [
+    '.box {',
+    '  position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0;',
+    '  border: 1px solid var(--pragma-ring, #3b76ec);',
+    '  border-radius: 3px; box-sizing: border-box; will-change: transform, width, height;',
+    '  transition: transform 120ms cubic-bezier(0.2,0.8,0.2,1),',
+    '    width 120ms cubic-bezier(0.2,0.8,0.2,1),',
+    '    height 120ms cubic-bezier(0.2,0.8,0.2,1), opacity 120ms linear;',
+    '}',
+    // The tint is its own layer: opacity on .box would fade the border too, and
+    // tinting the theme color directly would need color-mix.
+    '.fill {',
+    '  position: absolute; inset: 0; border-radius: inherit;',
+    '  background: var(--pragma-ring, #3b76ec); opacity: 0.14;',
+    '}',
+    '.box.visible { opacity: 1; }',
+    '.box.selected { border-width: 2px; }',
+    '.box.selected .fill { opacity: 0.22; }',
+    '.label {',
+    '  position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0;',
+    '  padding: 2px 6px; border-radius: 4px;',
+    '  background: var(--pragma-primary, #3b76ec); color: var(--pragma-primary-fg, #fff);',
+    '  font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;',
+    '  transition: transform 120ms cubic-bezier(0.2,0.8,0.2,1), opacity 120ms linear;',
+    '}',
+    '.label.visible { opacity: 1; }',
+    '.pill {',
+    '  position: fixed; left: 0; top: 0; display: none; align-items: center; gap: 6px;',
+    '  pointer-events: auto; padding: 5px 5px 5px 14px; border-radius: 999px;',
+    '  background: var(--pragma-surface, #1c1f24); color: var(--pragma-surface-fg, #f9fafb);',
+    '  border: 1px solid var(--pragma-border, transparent);',
+    '  box-shadow: 0 10px 30px rgba(0,0,0,0.35);',
+    '  font: 400 13px/1.4 var(--pragma-font, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif);',
+    '}',
+    '.pill.open { display: flex; }',
+    '.pill input {',
+    '  all: unset; width: 260px; color: inherit; font: inherit;',
+    '}',
+    '.pill input::placeholder { color: var(--pragma-muted-fg, rgba(249,250,251,0.5)); }',
+    '.pill button {',
+    '  width: 26px; height: 26px; flex: none; border: 0; border-radius: 999px; cursor: pointer;',
+    '  background: var(--pragma-primary, #3b76ec); color: var(--pragma-primary-fg, #fff);',
+    '  font-family: inherit; font-size: 17px; font-weight: 600; line-height: 1;',
+    '  display: flex; align-items: center; justify-content: center;',
+    '}',
+    '.pill button:hover { background: var(--pragma-primary-hover, #2b5fd9); }',
+  ].join('\n');
+
+  // Theme token -> the CSS custom property the styles above read.
+  const PALETTE_VARS = {
+    primary: '--pragma-primary',
+    primaryForeground: '--pragma-primary-fg',
+    primaryHover: '--pragma-primary-hover',
+    surface: '--pragma-surface',
+    surfaceForeground: '--pragma-surface-fg',
+    border: '--pragma-border',
+    mutedForeground: '--pragma-muted-fg',
+    ring: '--pragma-ring',
+    fontFamily: '--pragma-font',
+  };
+
+  function readStoredPalette() {
+    try {
+      const stored = window.sessionStorage.getItem(PALETTE_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // Paints the overlay in the app's colors. Persisted alongside the enabled
+  // flag so a reload comes back themed rather than in fallback colors.
+  function applyPalette(palette) {
+    if (palette) {
+      state.palette = palette;
+      try {
+        window.sessionStorage.setItem(PALETTE_KEY, JSON.stringify(palette));
+      } catch (error) {
+        // Storage unavailable; the palette just does not survive a reload.
+      }
+    }
+    if (!state.palette || !state.host) return;
+    for (const token of Object.keys(PALETTE_VARS)) {
+      const value = state.palette[token];
+      if (value) state.host.style.setProperty(PALETTE_VARS[token], value);
+    }
+  }
+
+  function buildOverlay() {
+    const host = document.createElement('div');
+    host.style.cssText =
+      'position:fixed;inset:0;pointer-events:none;z-index:2147483647;border:0;margin:0;padding:0;';
+    const root = host.attachShadow({ mode: 'open' });
+    const style = document.createElement('style');
+    style.textContent = STYLES;
+    const box = document.createElement('div');
+    box.className = 'box';
+    const fill = document.createElement('div');
+    fill.className = 'fill';
+    box.append(fill);
+    const label = document.createElement('div');
+    label.className = 'label';
+    const pill = document.createElement('div');
+    pill.className = 'pill';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Describe the change';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.textContent = '+';
+    add.setAttribute('aria-label', 'Stage change');
+    add.addEventListener('click', stage);
+    input.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        stage();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        clearSelection();
+      }
+    });
+    pill.append(input, add);
+    root.append(style, box, label, pill);
+    document.documentElement.append(host);
+    state.host = host;
+    state.box = box;
+    state.label = label;
+    state.pill = pill;
+    state.input = input;
+    applyPalette(null);
+  }
+
+  function ensureOverlay() {
+    if (state.host && state.host.isConnected) return true;
+    if (!document.documentElement) return false;
+    buildOverlay();
+    return true;
+  }
+
+  function rectDistance(rect, x, y) {
+    const dx = Math.max(rect.left - x, 0, x - rect.right);
+    const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+    return Math.hypot(dx, dy);
+  }
+
+  // The deepest element under the cursor, then refined outward-in: when the
+  // cursor sits in a container's padding or gap, descend into whichever child
+  // box it is closest to.
+  function nearestElement(x, y) {
+    let element = document.elementFromPoint(x, y);
+    if (!element || element === state.host || element === document.documentElement) return null;
+    for (;;) {
+      let best = null;
+      let bestDistance = PROXIMITY_PX;
+      for (const child of element.children) {
+        if (child === state.host) continue;
+        const rect = child.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue;
+        const distance = rectDistance(rect, x, y);
+        if (distance < bestDistance) {
+          best = child;
+          bestDistance = distance;
+        }
+      }
+      if (!best) return element;
+      element = best;
+    }
+  }
+
+  function elementLabel(element) {
+    const id = element.id ? '#' + element.id : '';
+    const className =
+      typeof element.className === 'string' && element.className.trim()
+        ? '.' + element.className.trim().split(/\s+/).slice(0, 2).join('.')
+        : '';
+    return element.tagName.toLowerCase() + id + className;
+  }
+
+  function paint(element, selected) {
+    const rect = element.getBoundingClientRect();
+    state.box.classList.toggle('selected', selected);
+    state.box.classList.add('visible');
+    state.box.style.transform = 'translate(' + rect.left + 'px,' + rect.top + 'px)';
+    state.box.style.width = rect.width + 'px';
+    state.box.style.height = rect.height + 'px';
+    state.label.textContent = elementLabel(element);
+    state.label.classList.add('visible');
+    const labelTop = rect.top > 20 ? rect.top - 20 : rect.bottom + 4;
+    state.label.style.transform = 'translate(' + rect.left + 'px,' + labelTop + 'px)';
+  }
+
+  function hidePaint() {
+    state.box.classList.remove('visible', 'selected');
+    state.label.classList.remove('visible');
+  }
+
+  function placePill(element) {
+    const rect = element.getBoundingClientRect();
+    state.pill.classList.add('open');
+    const size = state.pill.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - size.width - 8);
+    const left = Math.min(Math.max(rect.left, 8), maxLeft);
+    const below = rect.bottom + 8;
+    const top =
+      below + size.height + 8 <= window.innerHeight
+        ? below
+        : Math.max(8, rect.top - size.height - 8);
+    state.pill.style.transform = 'translate(' + left + 'px,' + top + 'px)';
+  }
+
+  function cssPath(element) {
+    const parts = [];
+    let current = element;
+    while (current && current.nodeType === 1 && current !== document.documentElement) {
+      if (current.id) {
+        parts.unshift('#' + CSS.escape(current.id));
+        break;
+      }
+      const tag = current.tagName.toLowerCase();
+      const parent = current.parentElement;
+      if (!parent) {
+        parts.unshift(tag);
+        break;
+      }
+      const siblings = Array.from(parent.children).filter(function(sibling) {
+        return sibling.tagName === current.tagName;
+      });
+      parts.unshift(
+        siblings.length > 1 ? tag + ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')' : tag,
+      );
+      current = parent;
+    }
+    return parts.join(' > ');
+  }
+
+  function ancestorPath(element) {
+    const chain = [];
+    let current = element.parentElement;
+    while (current && current !== document.documentElement) {
+      chain.unshift(elementLabel(current));
+      current = current.parentElement;
+    }
+    return chain.join(' > ');
+  }
+
+  function stage() {
+    const element = state.selected;
+    if (!element) return;
+    const prompt = state.input.value.trim();
+    if (!prompt) {
+      state.input.focus();
+      return;
+    }
+    const payload = {
+      prompt: prompt,
+      html: element.outerHTML.slice(0, MAX_HTML),
+      selector: cssPath(element),
+      ancestors: ancestorPath(element),
+      route: window.location.pathname + window.location.search,
+      url: window.location.href,
+    };
+    clearSelection();
+    window.location.href = SCHEME + '://stage/' + encodeUtf8Base64Url(JSON.stringify(payload));
+  }
+
+  function selectElement(element) {
+    state.selected = element;
+    paint(element, true);
+    state.input.value = '';
+    placePill(element);
+    state.input.focus();
+  }
+
+  function clearSelection() {
+    state.selected = null;
+    state.input.value = '';
+    state.pill.classList.remove('open');
+    hidePaint();
+  }
+
+  function isOverlayEvent(event) {
+    if (!state.host) return false;
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    return path.includes(state.host) || event.target === state.host;
+  }
+
+  function onPointerMove(event) {
+    if (!state.enabled || state.selected || !ensureOverlay()) return;
+    if (isOverlayEvent(event)) return;
+    const element = nearestElement(event.clientX, event.clientY);
+    if (element) {
+      paint(element, false);
+    } else {
+      hidePaint();
+    }
+  }
+
+  // Picking an element must never activate the page, so every pointer event
+  // outside the overlay is swallowed while design mode is on.
+  function onBlockedEvent(event) {
+    if (!state.enabled || isOverlayEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onClick(event) {
+    if (!state.enabled || isOverlayEvent(event) || !ensureOverlay()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = nearestElement(event.clientX, event.clientY);
+    if (element) selectElement(element);
+  }
+
+  function onKeyDown(event) {
+    if (state.enabled && event.key === 'Escape' && state.selected) {
+      event.preventDefault();
+      clearSelection();
+    }
+  }
+
+  function onViewportChange() {
+    if (!state.enabled || !state.selected) return;
+    paint(state.selected, true);
+    placePill(state.selected);
+  }
+
+  function setEnabled(enabled, palette) {
+    state.enabled = Boolean(enabled);
+    writeStoredFlag(state.enabled);
+    if (palette) applyPalette(palette);
+    if (!state.enabled) {
+      if (state.host) clearSelection();
+      if (state.cursorStyle) {
+        state.cursorStyle.remove();
+        state.cursorStyle = null;
+      }
+      return;
+    }
+    if (!ensureOverlay()) return;
+    applyPalette(null);
+    if (!state.cursorStyle && document.head) {
+      const cursorStyle = document.createElement('style');
+      cursorStyle.textContent = '*, *::before, *::after { cursor: crosshair !important; }';
+      document.head.append(cursorStyle);
+      state.cursorStyle = cursorStyle;
+    }
+  }
+
+  window.addEventListener('pointermove', onPointerMove, true);
+  window.addEventListener('pointerdown', onBlockedEvent, true);
+  window.addEventListener('mousedown', onBlockedEvent, true);
+  window.addEventListener('mouseup', onBlockedEvent, true);
+  window.addEventListener('click', onClick, true);
+  window.addEventListener('dblclick', onBlockedEvent, true);
+  window.addEventListener('contextmenu', onBlockedEvent, true);
+  window.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('scroll', onViewportChange, true);
+  window.addEventListener('resize', onViewportChange, true);
+
+  window.__pragmaDesign = { setEnabled: setEnabled };
+
+  state.palette = readStoredPalette();
+
+  if (readStoredFlag()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { setEnabled(true); });
+    } else {
+      setEnabled(true);
+    }
+  }
+})();
+";
+
+/// The design-mode overlay script with the sentinel scheme substituted in.
+fn design_script() -> String {
+    DESIGN_SCRIPT.replace(DESIGN_SCHEME_TOKEN, DESIGN_SENTINEL_SCHEME)
+}
+
+/// Decodes a `pragma-design://stage/<base64url>` payload into a staged change.
+fn browser_design_stage_payload(encoded: &str) -> Result<BrowserDesignStage, String> {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|error| format!("invalid design stage encoding: {error}"))?;
+    let json =
+        String::from_utf8(bytes).map_err(|error| format!("invalid design stage text: {error}"))?;
+    serde_json::from_str(&json).map_err(|error| format!("invalid design stage payload: {error}"))
+}
+
+/// Handles a design-mode staging ping: decode the payload, tag it with the
+/// owning tab, and forward it to the frontend.
+fn receive_design_navigation(app: &AppHandle, tab_id: &str, url: &Url) {
+    match browser_design_stage_payload(url.path().trim_start_matches('/')) {
+        Ok(mut stage) => {
+            stage.tab_id = tab_id.to_string();
+            let _ = app.emit(DESIGN_STAGE_EVENT, stage);
+        }
+        Err(error) => log::warn!("browser design stage ignored: {error}"),
+    }
 }
 
 fn eval_pending() -> &'static BrowserEvalPending {
@@ -313,7 +831,10 @@ pub(crate) fn parse_url(input: &str) -> AppResult<Url> {
 mod tests {
     use base64::Engine;
 
-    use super::{browser_eval_callback_payload, build_eval_callback_script, parse_url};
+    use super::{
+        browser_design_stage_payload, browser_eval_callback_payload, build_eval_callback_script,
+        design_script, parse_url,
+    };
 
     fn encoded_payload(json: &str) -> String {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
@@ -347,6 +868,31 @@ mod tests {
         let error = browser_eval_callback_payload(&encoded).expect_err("payload should fail");
 
         assert_eq!(error, "boom");
+    }
+
+    #[test]
+    fn design_stage_payload_decodes_change() {
+        let encoded = encoded_payload(
+            r#"{"prompt":"make it blue","html":"<button>Go</button>","selector":"body > button","ancestors":"body","route":"/pricing","url":"http://localhost:5173/pricing"}"#,
+        );
+        let stage = browser_design_stage_payload(&encoded).expect("payload should decode");
+
+        assert_eq!(stage.tab_id, "");
+        assert_eq!(stage.prompt, "make it blue");
+        assert_eq!(stage.route, "/pricing");
+    }
+
+    #[test]
+    fn design_stage_payload_rejects_garbage() {
+        browser_design_stage_payload("not-base64!!").expect_err("payload should fail");
+    }
+
+    #[test]
+    fn design_script_substitutes_sentinel_scheme() {
+        let script = design_script();
+
+        assert!(script.contains("'pragma-design'"));
+        assert!(!script.contains("__PRAGMA_DESIGN_SCHEME__"));
     }
 
     #[test]
@@ -394,7 +940,7 @@ pub fn browser_create(
     let nav_tab = tab_id.clone();
 
     let builder = WebviewBuilder::new(label, WebviewUrl::External(start_url))
-        .initialization_script(focus_script())
+        .initialization_script(format!("{}{}", focus_script(), design_script()))
         .on_document_title_changed(move |_webview, title| {
             emit_meta(
                 &title_app,
@@ -418,6 +964,11 @@ pub fn browser_create(
                         tab_id: nav_tab.clone(),
                     },
                 );
+                return false;
+            }
+            // A design-mode staging ping, not a real navigation.
+            if url.scheme() == DESIGN_SENTINEL_SCHEME {
+                receive_design_navigation(&nav_app, &nav_tab, url);
                 return false;
             }
             // A Cmd/Ctrl+F ping, not a real navigation: report it and cancel the load.
@@ -569,6 +1120,26 @@ pub fn browser_eval(
     let callback_script = build_eval_callback_script(&script, &request_id)?;
     require_webview(&app, &tab_id)?.eval(&callback_script)?;
     wait_for_eval_result(&request_id)
+}
+
+/// Turns the injected design-mode overlay on or off for a browser tab.
+///
+/// The overlay itself is always injected (see [`DESIGN_SCRIPT`]); this only
+/// flips its enabled flag, which also persists it for the page's session so a
+/// reload or in-page navigation keeps design mode on.
+#[tauri::command]
+pub fn browser_design_set(
+    app: tauri::AppHandle,
+    tab_id: String,
+    enabled: bool,
+    palette: Option<DesignPalette>,
+) -> AppResult<()> {
+    let enabled = if enabled { "true" } else { "false" };
+    let palette = serde_json::to_string(&palette)?;
+    require_webview(&app, &tab_id)?.eval(format!(
+        "window.__pragmaDesign && window.__pragmaDesign.setEnabled({enabled}, {palette});"
+    ))?;
+    Ok(())
 }
 
 /// Scrolls the page by deltas or to a top/bottom anchor.

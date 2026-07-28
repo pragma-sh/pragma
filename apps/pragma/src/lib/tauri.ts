@@ -1120,6 +1120,76 @@ export function onBrowserFindRequest(
   return listen<BrowserFindRequest>("browser-find-request", (event) => handler(event.payload));
 }
 
+/**
+ * The app's theme colors, resolved to concrete CSS values for the in-page
+ * design overlay.
+ *
+ * The overlay renders inside whatever page the user is designing, where
+ * Pragma's Tailwind custom properties do not exist — so the values are read
+ * from the live app document (after user theme overrides) and shipped across.
+ * Both webviews are the same engine, so `oklch()` values transfer as-is.
+ * Read with `readDesignPalette` in `lib/design-mode.ts`.
+ */
+export interface DesignPalette {
+  /** `--primary`: label chip and the pill's "+" button. */
+  primary: string;
+  /** `--primary-foreground`: ink on top of {@link DesignPalette.primary}. */
+  primaryForeground: string;
+  /** `--primary-hover`: "+" button hover. */
+  primaryHover: string;
+  /** `--popover`: the pill's surface, matching menus and popovers. */
+  surface: string;
+  /** `--popover-foreground`: the pill's ink. */
+  surfaceForeground: string;
+  /** `--border`: the pill's hairline. */
+  border: string;
+  /** `--muted-foreground`: the pill input's placeholder. */
+  mutedForeground: string;
+  /** `--ring`: the hover/selection highlight box. */
+  ring: string;
+  /** The app's resolved `font-family`, so the pill reads as part of Pragma. */
+  fontFamily: string;
+}
+
+/**
+ * Turns the in-page design-mode overlay on or off for a browser tab.
+ *
+ * `palette` carries the app's resolved theme colors into the page, which has no
+ * access to Pragma's CSS variables; omitting it leaves the overlay's built-in
+ * fallback colors in place.
+ */
+export function browserDesignSet(
+  tabId: string,
+  enabled: boolean,
+  palette?: DesignPalette,
+): Promise<void> {
+  return invoke("browser_design_set", { tabId, enabled, palette: palette ?? null });
+}
+
+/** One change staged from a browser webview's design-mode overlay. */
+export interface BrowserDesignStage {
+  tabId: string;
+  /** What the user typed into the pill input. */
+  prompt: string;
+  /** `outerHTML` of the picked element, truncated by the page script. */
+  html: string;
+  /** CSS selector path to the picked element. */
+  selector: string;
+  /** Tag/id/class chain of the element's ancestors, outermost first. */
+  ancestors: string;
+  /** Path + query the element was picked on. */
+  route: string;
+  /** Full page URL the element was picked on. */
+  url: string;
+}
+
+/** Subscribes to design-mode changes staged from inside a browser webview. */
+export function onBrowserDesignStage(
+  handler: (stage: BrowserDesignStage) => void,
+): Promise<UnlistenFn> {
+  return listen<BrowserDesignStage>("browser-design-stage", (event) => handler(event.payload));
+}
+
 /** A native menubar action forwarded to the workspace shell. */
 export type MenuAction =
   | "tabs.new-terminal"
