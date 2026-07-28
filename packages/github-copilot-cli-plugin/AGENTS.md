@@ -128,6 +128,10 @@ Production builds bundle this package into Pragma's plugin resources. For local 
 register package's absolute path in `~/.pragma/config.json`. Rebuild bundle and reload Pragma
 plugin host after edits. Then run:
 
+Keep this bundle on `bun build`, matching the other agent plugins. Bunup's declaration build
+crashes on Windows when bundled workspace dependency paths contain backslashes; runtime plugin
+resources only consume `dist/pragma-plugin.mjs` and do not need emitted declarations.
+
 ```bash
 bun run --filter @pragma/github-copilot-cli-plugin test
 bun run --filter @pragma/github-copilot-cli-plugin typecheck
