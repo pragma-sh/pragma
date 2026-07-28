@@ -1,6 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "entry": ["src/index.{js,jsx,ts,tsx,mjs}", "src/main.{js,jsx,ts,tsx,mjs}"],
+  // `scripts/run-shell-script.ts` is invoked from `apps/pragma/package.json`
+  // via a parent-traversing relative path (`../../scripts/run-shell-script.ts`),
+  // which fallow's per-workspace entry-point scan intentionally skips — hence
+  // the explicit root-level entry here rather than relying on discovery.
+  "entry": [
+    "src/index.{js,jsx,ts,tsx,mjs}",
+    "src/main.{js,jsx,ts,tsx,mjs}",
+    "scripts/run-shell-script.ts",
+  ],
   // Staged sidecar bundles under `src-tauri/resources/plugins/**` are build
   // artifacts (bunup output copied from analyzed source packages by
   // `stage-daemon-sidecar.sh`), not hand-written code. Analyzing them for

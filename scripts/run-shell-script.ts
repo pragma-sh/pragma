@@ -23,40 +23,51 @@ const GIT_BASH_RELATIVE = [
 
 /** Every `git.exe` on `PATH`, in `PATH` order. */
 function gitCandidates(): string[] {
-  const found: string[] = [];
-  for (const entry of (process.env.PATH ?? "").split(delimiter)) {
-    if (!entry) continue;
-    const candidate = join(entry, "git.exe");
-    if (existsSync(candidate)) found.push(candidate);
-  }
-  return found;
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((entry) => entry.length > 0)
+    .map((entry) => join(entry, "git.exe"))
+    .filter((candidate) => existsSync(candidate));
 }
 
-function windowsBash(): string {
+function explicitBash(): string | undefined {
   const explicit = process.env.PRAGMA_BASH;
-  if (explicit) {
-    if (!existsSync(explicit)) {
-      throw new Error(`PRAGMA_BASH is set to ${explicit}, which does not exist`);
-    }
-    return explicit;
+  if (!explicit) return undefined;
+  if (!existsSync(explicit)) {
+    throw new Error(`PRAGMA_BASH is set to ${explicit}, which does not exist`);
   }
+  return explicit;
+}
 
-  const roots = gitCandidates().map(dirname);
-  for (const root of roots) {
+function bashNearGit(): string | undefined {
+  for (const root of gitCandidates().map(dirname)) {
     for (const relative of GIT_BASH_RELATIVE) {
       const candidate = join(root, relative);
       if (existsSync(candidate)) return candidate;
     }
   }
+  return undefined;
+}
 
-  for (const root of ["C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git"]) {
+/** Default install locations, checked when no `git.exe` is on `PATH` at all. */
+const GIT_INSTALL_ROOTS = ["C:\\Program Files\\Git", "C:\\Program Files (x86)\\Git"];
+
+function bashInDefaultInstall(): string | undefined {
+  for (const root of GIT_INSTALL_ROOTS) {
     const candidate = join(root, "bin", "bash.exe");
     if (existsSync(candidate)) return candidate;
   }
+  return undefined;
+}
 
-  throw new Error(
-    "could not find Git Bash. Install Git for Windows, or point PRAGMA_BASH at a bash.exe.",
-  );
+function windowsBash(): string {
+  const bash = explicitBash() ?? bashNearGit() ?? bashInDefaultInstall();
+  if (!bash) {
+    throw new Error(
+      "could not find Git Bash. Install Git for Windows, or point PRAGMA_BASH at a bash.exe.",
+    );
+  }
+  return bash;
 }
 
 const [script, ...args] = process.argv.slice(2);
