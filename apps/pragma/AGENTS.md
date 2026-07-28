@@ -48,6 +48,9 @@ apps/pragma/
     ├── tauri.conf.json          # Window/bundle config; bundles server via externalBin
     ├── tauri.macos.conf.json    # macOS-only window flags (transparency + overlay titlebar)
     ├── tauri.dev.conf.json      # Dev overrides (icons-dev/; "Pragma Dev" titles the window)
+    ├── installer-hooks.nsh      # NSIS hooks: stop the detached sidecars before install/uninstall
+    ├── installer-close-apps.wxs # WiX fragment: same job for the MSI (util:CloseApplication)
+    ├── installer-hooks.test.ts  # Fails if either installer's list drifts from bundle.externalBin
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
     ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
@@ -291,6 +294,66 @@ by the same script. Shipped plugin packages are staged under `resources/plugins/
 `CONSTANTS.plugins.bundledDirName`. While `tauri dev` is running, use
 `bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
 frontend mtime poll then hot-reloads the staged bundle.
+
+**The Windows installer must stop the sidecars, not just the app.** Windows locks a
+running executable's image file, and Pragma's sidecars outlive the window on purpose —
+`pragma-server` owns the terminal sessions, `pragma-gateway` serves paired phones. They
+run from the install directory, which for the default `currentUser` NSIS mode is
+`%LOCALAPPDATA%\Pragma`, so installing over a live instance aborts with
+`Error opening file for writing: …\AppData\Local\Pragma\pragma-server.exe`. Tauri's
+template only waits for `${MAINBINARYNAME}.exe`, so `installer-hooks.nsh` (wired in via
+`bundle.windows.nsis.installerHooks`) stops the main binary first — the app respawns the
+server and gateway when it sees them exit, so killing them under a live app just re-locks
+the files — then every `externalBin` sidecar, from both `NSIS_HOOK_PREINSTALL` and
+`NSIS_HOOK_PREUNINSTALL`. A locked file during uninstall is skipped _silently_ and leaves
+`$INSTDIR` behind, so the uninstall hook is not optional. **Adding a sidecar to
+`externalBin` means adding it to `PragmaForEachSidecar` in `installer-hooks.nsh`;**
+`installer-hooks.test.ts` enforces that, because the failure is invisible until someone
+installs over a running app.
+
+**The MSI needs the same treatment through a different mechanism.** It installs
+`perMachine` into Program Files rather than AppData, so the path in the error differs, but
+the lock does not. `installer-close-apps.wxs` (wired in via `bundle.windows.wix`'s
+`fragmentPaths` + `componentGroupRefs`) terminates the same processes with
+`util:CloseApplication`. Three things about it are load-bearing:
+
+- **A WiX fragment is linked only if referenced.** The empty
+  `<ComponentGroup Id="PragmaCloseApplications"/>` exists purely so
+  `componentGroupRefs` can name it; resolving that symbol is what pulls the whole
+  fragment in. Rename one side and the fragment silently vanishes from the MSI.
+- **`RebootPrompt="no"` + `TerminateProcess`.** Left to Restart Manager, a headless
+  background process ends in a reboot demand instead of an install.
+- **`pragma.exe` must be listed first.** `WixCloseApplication` has no sequence column, so
+  the deferred action works in table order and the app would otherwise respawn the very
+  sidecars being terminated. Unlike NSIS this ordering is a convention, not a guarantee.
+
+Two traps found by building it:
+
+- **`--` is illegal inside an XML comment.** Fine in an NSIS `;` comment, fatal here:
+  `error CNDL0104 : An XML comment cannot contain '--'`. Tauri reports only
+  `failed to run candle.exe` and swallows the detail, so run
+  `WixTools314\candle.exe -arch x64 -ext WixUtilExtension -out <obj> <file>.wxs` by hand
+  to see the real error.
+- **`WixCloseApplications` lands at sequence 3999, right before `InstallFiles` (4000), and
+  cannot move earlier.** It schedules a deferred action, and deferred actions must sit
+  between `InstallInitialize` (1500) and `InstallFinalize` — so it cannot be pulled ahead
+  of `InstallValidate` (1400), which is where MSI does its own files-in-use detection.
+  The files are therefore freed in time for `InstallFiles`, but a full-UI install may
+  still surface MSI's own files-in-use prompt first. `MSIRESTARTMANAGERCONTROL=Disable`
+  is the lever if that ever needs suppressing; it is deliberately not set today.
+
+Tauri passes `-ext WixUtilExtension` to candle/light, which is what makes the `util:`
+namespace available; nothing extra needs installing. The MSI does **not** get the
+background-server warning dialog — MSI deployment is typically silent (`msiexec /qn`),
+where a prompt would hang the install.
+
+The NSIS hook warns before it kills, but only where nothing else would: with the window open
+Tauri's own prompt covers it, so the extra dialog fires **only** when the app is closed
+and a sidecar is still alive — the steady state after closing the window, where the
+server is holding detached terminal sessions that replacing its binary will end. That
+keeps the total at exactly one dialog either way. Silent (`/S`) and passive (updater)
+runs never block on it. None of this touches runtime: the macros exist only inside
+`setup.exe`/`uninstall.exe`, and `detach_spawned` still outlives the window as before.
 
 **Anything the build writes into a watched directory will restart `tauri dev`.** The
 watcher covers `src-tauri` _and_ every Cargo path dependency (`packages/constants`,

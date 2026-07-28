@@ -276,6 +276,21 @@ without updating this guide and CI.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it with the
   `rust-windows` job plus a `windows-latest` entry in the `build` matrix.
+- **A Windows installer has to stop the sidecars, not just the app.** Windows locks a
+  running executable's image, our sidecars outlive the window by design, and a per-user
+  NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live instance
+  dies with `Error opening file for writing: …\AppData\Local\Pragma\pragma-server.exe`.
+  Both bundles need their own fix: `installer-hooks.nsh` for NSIS and
+  `installer-close-apps.wxs` for the MSI, both under `apps/pragma/src-tauri/` and both
+  keyed to `bundle.externalBin`. Adding a sidecar means editing both; see
+  `apps/pragma/AGENTS.md`.
+- **Never spell a shell script's runner as bare `bash` in a package script.** On Windows
+  with WSL installed, `bash` on `PATH` is `C:\Windows\system32\bash.exe` — the WSL
+  launcher — whose Linux `PATH` has no `rustc`, `cargo`, or `bun`, so the sidecar staging
+  dies with `rustc: command not found` (exit 127). CI's `windows-latest` image ships no
+  WSL, so this never fires there and only breaks developer machines. Go through
+  `scripts/run-shell-script.ts`, which derives Git Bash from the resolved `git.exe`
+  (override with `PRAGMA_BASH`) and is a plain `bash` everywhere else.
 - **Line endings are pinned by `.gitattributes`.** The build shells out to
   `src-tauri/scripts/*.sh` through Git Bash, and Git for Windows checks files out as CRLF
   by default. A `\r` on the `set -euo pipefail` line fails the build with

@@ -349,6 +349,13 @@ pub fn merge_worktree_to_parent(
 // Lifecycle helpers — run locally on the client to manage on-disk worktrees.
 // ---------------------------------------------------------------------------
 
+/// Validates that `path` is the **root** of a git repository.
+///
+/// `rev-parse --show-toplevel` succeeds from anywhere *inside* a repository, so
+/// a bare success check would accept a plain directory that merely happens to
+/// sit under one — say `~/Desktop/scratch` when only `~/Desktop` is a repo. The
+/// project would then be bound to the ancestor's index and its Changes view
+/// would list that ancestor's files as its own.
 pub fn ensure_repo(path: &Path) -> AppResult<()> {
     let output = crate::process_env::git()
         .args([
@@ -358,11 +365,24 @@ pub fn ensure_repo(path: &Path) -> AppResult<()> {
             "--show-toplevel",
         ])
         .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(AppError::Git(stderr(output.stderr)))
+    if !output.status.success() {
+        return Err(AppError::Git(stderr(output.stderr)));
     }
+    let toplevel = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // Git answers in its own path style (forward slashes on Windows); compare
+    // the two as canonical paths rather than as strings.
+    let toplevel = pragma_platform::path::canonicalize(&toplevel)?;
+    let path = pragma_platform::path::canonicalize(path)?;
+    if toplevel != path {
+        return Err(AppError::InvalidInput(format!(
+            "{} is not a git repository — it sits inside the one at {}. Add {} as the project, or run `git init` in {}.",
+            path.display(),
+            toplevel.display(),
+            toplevel.display(),
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 pub fn current_branch(path: &Path) -> AppResult<String> {
@@ -400,11 +420,38 @@ pub fn clone(remote_url: &str, into_directory: &Path) -> AppResult<PathBuf> {
     }
 }
 
-pub fn ensure_pragma_excluded(project_path: &Path) -> AppResult<()> {
-    let exclude = project_path.join(".git/info/exclude");
-    if let Some(parent) = exclude.parent() {
-        std::fs::create_dir_all(parent)?;
+/// Asks git where the repository keeps its shared metadata. Relative answers
+/// resolve against `path`, which is the directory git ran in.
+fn git_common_dir(path: &Path) -> AppResult<PathBuf> {
+    let output = crate::process_env::git()
+        .args([
+            "-C",
+            path_string(path).as_str(),
+            "rev-parse",
+            "--git-common-dir",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(AppError::Git(stderr(output.stderr)));
     }
+    let raw = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let absolute = if raw.is_absolute() {
+        raw
+    } else {
+        path.join(raw)
+    };
+    Ok(pragma_platform::path::canonicalize(absolute)?)
+}
+
+pub fn ensure_pragma_excluded(project_path: &Path) -> AppResult<()> {
+    // Ask git for the git dir instead of assuming `<project>/.git`. Creating
+    // that directory ourselves would leave behind a `.git` git does *not*
+    // recognise as a repository, and discovery would then walk straight past it
+    // to an ancestor repo — every git view of this project would report the
+    // ancestor's index.
+    let info = git_common_dir(project_path)?.join("info");
+    std::fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
     let mut has_worktrees_exclude = false;
     let mut changed = false;
@@ -461,6 +508,45 @@ mod tests {
         run(dir.path(), &["init", "-b", "main"]);
         ensure_repo(dir.path()).expect("repo should validate");
         assert_eq!(current_branch(dir.path()).expect("branch"), "main");
+    }
+
+    /// A directory that merely sits *inside* a repo is not a project root:
+    /// binding one would silently attach the project to the ancestor's index.
+    #[test]
+    fn rejects_a_plain_directory_inside_a_repo() {
+        let dir = tempdir().expect("tempdir");
+        run(dir.path(), &["init", "-b", "main"]);
+        let nested = dir.path().join("scratch");
+        std::fs::create_dir(&nested).expect("nested dir");
+
+        let error = ensure_repo(&nested).expect_err("nested dir must not validate");
+
+        assert!(
+            error.to_string().contains("not a git repository"),
+            "error should name the problem: {error}"
+        );
+    }
+
+    /// Excluding must never fabricate a `.git` git would not recognise — that
+    /// is what made discovery walk up to an ancestor repo.
+    #[test]
+    fn excluding_a_non_repo_fails_without_creating_a_git_dir() {
+        let dir = tempdir().expect("tempdir");
+        run(dir.path(), &["init", "-b", "main"]);
+        let nested = dir.path().join("scratch");
+        std::fs::create_dir(&nested).expect("nested dir");
+
+        ensure_pragma_excluded(&nested).expect("exclude resolves the ancestor's git dir");
+
+        assert!(
+            !nested.join(".git").exists(),
+            "a non-repo directory must not gain a .git of its own"
+        );
+        let exclude =
+            std::fs::read_to_string(dir.path().join(".git/info/exclude")).expect("exclude file");
+        assert!(exclude
+            .lines()
+            .any(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE));
     }
 
     #[test]

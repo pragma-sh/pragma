@@ -53,6 +53,15 @@
       "binaries/pragma-plugins"
     ],
     "resources": ["resources/**/*"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer-hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": ["./installer-close-apps.wxs"],
+        "componentGroupRefs": ["PragmaCloseApplications"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

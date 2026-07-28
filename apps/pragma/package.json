@@ -13,9 +13,9 @@
     "test": "bun --bun vitest run",
     "lint": "oxlint .",
     "tauri": "tauri",
-    "sidecar:server": "bash src-tauri/scripts/stage-daemon-sidecar.sh",
-    "sidecar:server:release": "bash src-tauri/scripts/stage-daemon-sidecar.sh --release",
-    "plugins:refresh": "bash src-tauri/scripts/stage-bundled-plugins.sh",
+    "sidecar:server": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-daemon-sidecar.sh",
+    "sidecar:server:release": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-daemon-sidecar.sh --release",
+    "plugins:refresh": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-bundled-plugins.sh",
     "tauri:dev": "bunx turbo run build --filter @pragma/dev-test-plugin && bun run sidecar:server && tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build"
   },
