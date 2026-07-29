@@ -48,12 +48,18 @@ function acquirePdfEngine(): Promise<PdfEngine> {
     clearTimeout(idleTimer);
     idleTimer = null;
   }
-  enginePromise ??= (async () =>
-    createPdfiumEngine(absoluteWasmUrl(), {
-      // No network: missing fonts fall back to whatever pdfium embeds rather
-      // than fetching font packs from a CDN.
-      fontFallback: null,
-    }))();
+  if (!enginePromise) {
+    const pending = (async () =>
+      createPdfiumEngine(absoluteWasmUrl(), {
+        // No network: missing fonts fall back to whatever pdfium embeds rather
+        // than fetching font packs from a CDN.
+        fontFallback: null,
+      }))();
+    enginePromise = pending;
+    void pending.catch(() => {
+      if (enginePromise === pending) enginePromise = null;
+    });
+  }
   return enginePromise;
 }
 
