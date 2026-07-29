@@ -710,6 +710,36 @@ share the same file lifecycle; unsaved edits survive the mode switch via
 `currentDocRef`. The `getMarkdown` TipTap helper is shared with the PR body editor
 in `components/editor/tiptap-markdown.ts`.
 
+**PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
+`components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
+dispatch; the `TabKind` stays `editor`). It is a **viewer**, not an editor: no dirty
+state, no save, no `use-editor-file` lifecycle. Rendering is EmbedPDF's headless React
+plugins (`@embedpdf/plugin-{viewport,scroll,render,zoom,selection,interaction-manager,
+document-manager}`) styled with Tailwind here — `PdfDocument` wires the plugin stack,
+`PdfPage` composes one page, `PdfToolbar` / `PdfZoomControls` / `PdfPageControls` are the
+chrome, `use-pdf-zoom-shortcuts` binds ⌘/Ctrl `+` `-` `0` `9`. Two things are load-bearing:
+
+- **The pdfium wasm is bundled, never fetched, and its URL must be absolute.**
+  `pdf-engine.ts` imports it as `@embedpdf/pdfium/pdfium.wasm?url` and passes
+  `fontFallback: null`; EmbedPDF's default is a jsDelivr URL plus CDN font packs, which a
+  desktop app must not depend on. Vite hands back a **root-relative** path, and the engine
+  runs in a worker created from a `blob:` URL where that path has no base — WebKit fails it
+  with `TypeError: URL is not valid or contains user credentials.` EmbedPDF swallows the
+  error, so the only symptom is a document stuck on "opening" forever. `absoluteWasmUrl()`
+  resolves it against `location.href`; `pdf-engine.test.ts` pins that. That module also
+  refcounts one shared engine across every open PDF tab — it is a worker plus a
+  multi-megabyte module, so per-tab engines are not an option.
+- **The bytes arrive in chunks.** `read_file` refuses binary content outright, so
+  `use-pdf-file.ts` walks `readFileChunk` until the host reports `eof` (see
+  `constants.files`). This is also why a remote SSH project's PDFs work unchanged.
+
+A pane renders **only its active tab**, so switching tabs unmounts the viewer outright.
+Both caches exist for that reason and neither is an optimization to "clean up": the engine
+survives zero references for `ENGINE_IDLE_MS` and `use-pdf-file.ts` keeps the last few
+files' bytes, or every switch back would re-start the wasm worker and re-read the whole
+file. The byte cache hands out `buffer.slice(0)` because the engine may transfer the buffer
+to its worker and detach it; a reload (retry, or the file changing on disk) drops the entry.
+
 **Icons:** vscode-icons render offline via `lib/file-icons.ts` (`addCollection` once —
 never let `@iconify/react` fetch over the network). Launcher brand icons come from a
 curated subset (`lib/brand-icons.json`, registered by `lib/brand-icons.ts`, imported

@@ -8,6 +8,8 @@ import { DiffView } from "@/components/editor/DiffView";
 import { EditorView } from "@/components/editor/EditorView";
 import { LogView } from "@/components/editor/LogView";
 import { isMarkdownPath, MarkdownView } from "@/components/editor/MarkdownView";
+import { isPdfPath } from "@/components/pdf/pdf-path";
+import { PdfView } from "@/components/pdf/PdfView";
 import { ReviewTab } from "@/components/github/ReviewTab";
 import { PluginWebViewTab } from "@/plugins/PluginWebViewTab";
 import { Button } from "@/components/ui/button";
@@ -105,15 +107,17 @@ function SplitNode({
   );
 }
 
+/** Pick the surface an `editor` tab opens in, keyed by the file's extension. */
+function renderEditorTab(tab: Tab): ReactNode {
+  if (isPdfPath(tab.filePath)) return <PdfView key={tab.id} tab={tab} />;
+  if (isMarkdownPath(tab.filePath)) return <MarkdownView key={tab.id} tab={tab} />;
+  return <EditorView key={tab.id} tab={tab} />;
+}
+
 /** Render the content for a pane's active tab keyed by its kind. */
 const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string) => ReactNode>> = {
   browser: (tab) => <BrowserView active key={tab.id} tab={tab} />,
-  editor: (tab) =>
-    isMarkdownPath(tab.filePath) ? (
-      <MarkdownView key={tab.id} tab={tab} />
-    ) : (
-      <EditorView key={tab.id} tab={tab} />
-    ),
+  editor: renderEditorTab,
   diff: (tab) => <DiffView key={tab.id} tab={tab} />,
   log: (tab) => <LogView key={tab.id} tab={tab} />,
   "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,

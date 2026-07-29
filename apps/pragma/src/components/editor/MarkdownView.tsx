@@ -30,7 +30,7 @@ import { useEditorFind } from "@/components/editor/use-editor-find";
 import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-markdown-find";
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { basename } from "@/lib/path";
+import { extname } from "@/lib/path";
 
 const lowlight = createLowlight(common);
 
@@ -39,10 +39,7 @@ const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown"]);
 
 /** True when the file should open in the markdown preview/editor surface. */
 export function isMarkdownPath(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const name = basename(filePath).toLowerCase();
-  const dot = name.lastIndexOf(".");
-  return dot !== -1 && MARKDOWN_EXTENSIONS.has(name.slice(dot + 1));
+  return filePath !== null && MARKDOWN_EXTENSIONS.has(extname(filePath));
 }
 
 type MarkdownMode = "editor" | "raw";

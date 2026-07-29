@@ -1132,6 +1132,7 @@ pub fn run() {
             fs::create_folder,
             fs::path_exists,
             fs::read_file,
+            fs::read_file_chunk,
             fs::write_file,
             fs::rename_file,
             fs::delete_file,

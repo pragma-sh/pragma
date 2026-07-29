@@ -9,7 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
-use pragma_constants::{DirEntry, FileContents, PaletteSearchResponse, ProtocolRpcMethod};
+use pragma_constants::{
+    DirEntry, FileChunk, FileContents, PaletteSearchResponse, ProtocolRpcMethod,
+};
 use pragma_core::fs::{FsRequest, PaletteSearchRoot};
 use serde::de::DeserializeOwned;
 use tauri::State;
@@ -108,6 +110,34 @@ pub async fn read_file(
     let root = worktree_root(&db, &worktree_id)?;
     let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
     fs_rpc(&pty, &FsRequest::ReadFile { root, path })
+}
+
+/// Reads one base64 slice of a worktree-relative file.
+///
+/// Chunked rather than whole-file so a binary a viewer needs in full — a PDF,
+/// say — is not bounded by the single-frame read cap: the caller walks `offset`
+/// forward until the returned chunk reports `eof`.
+#[tauri::command]
+pub async fn read_file_chunk(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    path: String,
+    offset: u64,
+    length: u64,
+) -> AppResult<FileChunk> {
+    let root = worktree_root(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
+    fs_rpc(
+        &pty,
+        &FsRequest::ReadBytesRange {
+            root,
+            path,
+            offset,
+            length,
+        },
+    )
 }
 
 /// Overwrites a worktree-relative file with UTF-8 text.
