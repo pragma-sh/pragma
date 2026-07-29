@@ -48,6 +48,10 @@ The Rust side parses `values.json` against the schema-generated types at startup
   clip duration/byte caps, allowed extensions, and whether notifications are on. Users
   override them through the `agentStatus` block of a `.pragma/config.json`
   (`AgentStatusSettings`).
+- `files.chunkBytes` / `files.maxBinaryBytes` — chunked binary reads. The host clamps a
+  `ReadBytesRange` request to `chunkBytes` (keep it well under the 16 MB protocol frame:
+  base64 adds a third) and the frontend refuses to assemble anything past
+  `maxBinaryBytes` in the webview's heap.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

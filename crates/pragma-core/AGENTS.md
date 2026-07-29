@@ -46,6 +46,11 @@ Tauri or client presentation code.
   to see (e.g. a gitignored `.pragma/assets/sounds`). `ListFileNames` lists files
   unfiltered (optionally by extension) and `ReadBytes` / `WriteBytes` move bytes as
   base64 under the same `MAX_READ_BYTES` cap.
+- **A binary too big for one frame is read with `ReadBytesRange`.** It returns a
+  `FileChunk` (`base64` + `offset` + total `byteSize` + `eof`) capped at
+  `constants.files.chunkBytes`, so the caller walks `offset` until `eof` instead of
+  hitting `MAX_READ_BYTES` — the PDF viewer's path. Keep the chunk cap comfortably below
+  the protocol's 16 MB frame limit: base64 inflates every chunk by 4/3.
 
 ## Rules
 

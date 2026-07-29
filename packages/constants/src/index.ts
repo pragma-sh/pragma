@@ -70,6 +70,8 @@ export type {
   FileChange,
   FileChangeKind,
   FileContents,
+  FileChunk,
+  FileReadLimits,
   PaletteSearchMatch,
   PaletteSearchResponse,
   OpenPort,

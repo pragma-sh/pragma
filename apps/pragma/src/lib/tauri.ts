@@ -5,6 +5,7 @@ import type {
   DiffSide,
   DirEntry,
   FileChange,
+  FileChunk,
   FileContents,
   FileDiff,
   GitHubAuthStatus,
@@ -706,6 +707,20 @@ export function pathExists(worktreeId: string, path: string): Promise<boolean> {
 /** Reads a worktree-relative file, flagging binary/oversized content instead of returning bytes. */
 export function readFile(worktreeId: string, path: string): Promise<FileContents> {
   return invoke<FileContents>("read_file", { worktreeId, path });
+}
+
+/**
+ * Reads one base64 slice of a worktree-relative file. `length` is clamped
+ * host-side to `constants.files.chunkBytes`; walk `offset` forward until the
+ * returned chunk reports `eof` to read a whole binary file.
+ */
+export function readFileChunk(
+  worktreeId: string,
+  path: string,
+  offset: number,
+  length: number,
+): Promise<FileChunk> {
+  return invoke<FileChunk>("read_file_chunk", { worktreeId, path, offset, length });
 }
 
 /** Overwrites a worktree-relative file with UTF-8 text (does not create parents). */

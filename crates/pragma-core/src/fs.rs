@@ -10,14 +10,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use pragma_constants::{DirEntry, FileContents};
+use pragma_constants::{DirEntry, FileChunk, FileContents, CONSTANTS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -100,6 +100,16 @@ pub enum FsRequest {
     /// Reads a worktree-relative file as base64, for the binary assets that
     /// [`FsRequest::ReadFile`] deliberately refuses to return as text.
     ReadBytes { root: String, path: String },
+    /// Reads one base64 slice of a worktree-relative file. Unlike
+    /// [`FsRequest::ReadBytes`] this has no whole-file size limit: the caller
+    /// walks `offset` forward until [`FileChunk::eof`], so a file far larger
+    /// than one protocol frame still crosses the wire.
+    ReadBytesRange {
+        root: String,
+        path: String,
+        offset: u64,
+        length: u64,
+    },
     /// Overwrites a worktree-relative file with base64-encoded bytes. Does not
     /// create missing parent directories.
     WriteBytes {
@@ -150,6 +160,12 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
             extensions,
         } => to_value(list_file_names(&root, &path, &extensions)?),
         FsRequest::ReadBytes { root, path } => to_value(read_bytes(&root, &path)?),
+        FsRequest::ReadBytesRange {
+            root,
+            path,
+            offset,
+            length,
+        } => to_value(read_bytes_range(&root, &path, offset, length)?),
         FsRequest::WriteBytes {
             root,
             path,
@@ -722,6 +738,40 @@ pub fn read_bytes(root: &str, path: &str) -> CoreResult<String> {
     ))
 }
 
+/// Reads one base64 slice of a worktree-relative file, starting at `offset` and
+/// covering at most `length` bytes. `length` is clamped to the shared chunk cap
+/// so a single response always fits inside one protocol frame even after base64
+/// expands it by 4/3; the caller loops on `offset` to read a whole file.
+pub fn read_bytes_range(root: &str, path: &str, offset: u64, length: u64) -> CoreResult<FileChunk> {
+    if length == 0 {
+        return Err(CoreError::InvalidPayload(
+            "length must be greater than zero".to_string(),
+        ));
+    }
+    let length = length.min(CONSTANTS.files.chunk_bytes.get());
+    let target = resolve_in_worktree(Path::new(root), path)?;
+    let mut file = std::fs::File::open(&target)?;
+    let byte_size = file.metadata()?.len();
+    if offset >= byte_size {
+        return Ok(FileChunk {
+            base64: String::new(),
+            offset,
+            byte_size,
+            eof: true,
+        });
+    }
+    let take = length.min(byte_size - offset);
+    file.seek(SeekFrom::Start(offset))?;
+    let mut bytes = vec![0_u8; usize::try_from(take).unwrap_or(usize::MAX)];
+    file.read_exact(&mut bytes)?;
+    Ok(FileChunk {
+        base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
+        offset,
+        byte_size,
+        eof: offset + take >= byte_size,
+    })
+}
+
 /// Overwrites a worktree-relative file with base64-encoded bytes. Does not create
 /// missing parent directories.
 fn write_bytes(root: &str, path: &str, contents: &str) -> CoreResult<()> {
@@ -918,6 +968,44 @@ mod tests {
         assert_eq!(super::read_bytes(&root, "clip.wav").expect("read"), encoded);
         assert_eq!(std::fs::read(dir.path().join("clip.wav")).unwrap(), bytes);
         assert!(super::write_bytes(&root, "clip.wav", "not base64!").is_err());
+    }
+
+    #[test]
+    fn reads_binary_files_chunk_by_chunk_past_the_whole_file_cap() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().to_string_lossy().into_owned();
+        // Deliberately larger than MAX_READ_BYTES, which `read_bytes` refuses.
+        let bytes: Vec<u8> = (0..=u8::MAX)
+            .cycle()
+            .take(usize::try_from(MAX_READ_BYTES).expect("cap fits usize") + 1_024)
+            .collect();
+        std::fs::write(dir.path().join("doc.pdf"), &bytes).expect("write pdf");
+        assert!(super::read_bytes(&root, "doc.pdf").is_err());
+
+        let mut assembled: Vec<u8> = Vec::new();
+        let mut offset = 0_u64;
+        loop {
+            let chunk =
+                super::read_bytes_range(&root, "doc.pdf", offset, u64::MAX).expect("read chunk");
+            assert_eq!(chunk.offset, offset);
+            assert_eq!(chunk.byte_size, bytes.len() as u64);
+            assembled.extend(
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &chunk.base64)
+                    .expect("decode chunk"),
+            );
+            offset = assembled.len() as u64;
+            if chunk.eof {
+                break;
+            }
+        }
+        assert_eq!(assembled, bytes);
+
+        // Reading at or past the end terminates instead of erroring, and a
+        // zero-length request is rejected so a caller cannot spin forever.
+        let past_end =
+            super::read_bytes_range(&root, "doc.pdf", bytes.len() as u64, 16).expect("read past");
+        assert!(past_end.eof && past_end.base64.is_empty());
+        assert!(super::read_bytes_range(&root, "doc.pdf", 0, 0).is_err());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { constants, type AgentStatusSettings } from "@pragma/constants";
 
+import { decodeBase64 } from "@/lib/base64";
 import { readAgentSound, readConfig, type ConfigScope } from "@/lib/tauri";
 
 /** The agent alert settings that apply after layering project over global. */
@@ -121,16 +122,6 @@ function audioContext(): AudioContext | null {
   return sharedContext;
 }
 
-/** Decodes base64 clip bytes into the buffer the Web Audio API plays. */
-function decodeBase64(contents: string): ArrayBuffer {
-  const binary = atob(contents);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes.buffer;
-}
-
 /** Reads and decodes one clip, or null when it is missing or not audio. */
 async function decodeSound(
   context: AudioContext,
@@ -140,7 +131,7 @@ async function decodeSound(
 ): Promise<AudioBuffer | null> {
   try {
     const encoded = await readAgentSound(scope, name, projectId);
-    return await context.decodeAudioData(decodeBase64(encoded));
+    return await context.decodeAudioData(decodeBase64(encoded).buffer as ArrayBuffer);
   } catch {
     return null;
   }
