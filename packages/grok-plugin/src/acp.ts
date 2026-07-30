@@ -14,12 +14,9 @@ const INITIALIZE_ID = 1;
 /** Request id of the `_x.ai/billing` call. */
 const BILLING_ID = 2;
 
-/**
- * Seconds stdin is held open after the requests are written. Grok answers in
- * ~1-2s on a warm leader and ~5s cold; closing stdin earlier kills the agent
- * before it can flush.
- */
-const DRAIN_SECONDS = 6;
+/** Poll interval and bound while Grok finishes the two requested responses. */
+const DRAIN_POLL_SECONDS = 0.1;
+const DRAIN_POLL_ATTEMPTS = 60;
 
 /**
  * ACP requires the `jsonrpc` member; grok answers `Method not found` for the
@@ -37,9 +34,32 @@ const REQUESTS = [
 ];
 
 const REQUEST_INPUT = REQUESTS.map((request) => shellQuote(JSON.stringify(request))).join(" ");
+const RESPONSE_WATCHER = `
+function is_response(line, id) {
+  return line ~ /"jsonrpc"[[:space:]]*:[[:space:]]*"2[.]0"/ &&
+    line ~ ("\\"id\\"[[:space:]]*:[[:space:]]*" id "([[:space:]]*[,}])") &&
+    (line ~ /"result"[[:space:]]*:/ || line ~ /"error"[[:space:]]*:/)
+}
+{
+  print
+  if (is_response($0, ${INITIALIZE_ID})) initialize = 1
+  if (is_response($0, ${BILLING_ID})) billing = 1
+  if (initialize && billing && !finished) {
+    print "" > done
+    close(done)
+    finished = 1
+  }
+}`.trim();
 const COMMAND =
   `command -v grok >/dev/null 2>&1 || exit ${MISSING_STATUS}; ` +
-  `{ printf '%s\\n' ${REQUEST_INPUT}; sleep ${DRAIN_SECONDS}; } | grok agent stdio`;
+  `drain_dir=$(mktemp -d) || exit 1; trap 'rm -rf "$drain_dir"' 0; ` +
+  `drain_done="$drain_dir/done"; drain_status="$drain_dir/status"; ` +
+  `{ printf '%s\\n' ${REQUEST_INPUT}; attempts=0; ` +
+  `while [ "$attempts" -lt ${DRAIN_POLL_ATTEMPTS} ] && [ ! -e "$drain_done" ]; do ` +
+  `sleep ${DRAIN_POLL_SECONDS}; attempts=$((attempts + 1)); done; } | ` +
+  `{ grok agent stdio; printf '%s\\n' "$?" > "$drain_status"; : > "$drain_done"; } | ` +
+  `awk -v done="$drain_done" ${shellQuote(RESPONSE_WATCHER)}; ` +
+  `IFS= read -r exit_code < "$drain_status" || exit 1; exit "$exit_code"`;
 
 /** One JSON-RPC response line, already narrowed to result-or-error. */
 export type AcpResponse =
