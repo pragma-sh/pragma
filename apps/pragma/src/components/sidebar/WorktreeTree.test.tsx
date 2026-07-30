@@ -1,5 +1,5 @@
 import type { Worktree } from "@pragma/constants";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const worktreesMergedStatusMock = vi.fn();
@@ -102,6 +102,27 @@ describe("WorktreeTree", () => {
     await screen.findByText("feature");
     await vi.waitFor(() => expect(worktreesMergedStatusMock).toHaveBeenCalledWith(["child"]));
     expect(container.querySelector(".lucide-git-merge")).toBeNull();
+  });
+
+  it("does not overlap merged-status interval requests", async () => {
+    vi.useFakeTimers();
+    let finishRefresh: ((value: Record<string, boolean>) => void) | undefined;
+    const pendingRefresh = new Promise<Record<string, boolean>>((resolve) => {
+      finishRefresh = resolve;
+    });
+    worktreesMergedStatusMock
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValue({ child: true });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+
+    act(() => vi.advanceTimersByTime(6000));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => finishRefresh?.({ child: false }));
+    act(() => vi.advanceTimersByTime(2000));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
   });
 
   it("opens the row context menu on right click", async () => {

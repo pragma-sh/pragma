@@ -1,26 +1,28 @@
 import { useEffect, useRef } from "react";
 
 import type { FileChange } from "@pragma/constants";
-import type { Channel } from "@tauri-apps/api/core";
 
-import { watchWorktreeFiles } from "@/lib/tauri";
+import {
+  stopWatchingWorktreeFiles,
+  watchWorktreeFiles,
+  type WorktreeFileSubscription,
+} from "@/lib/tauri";
 
 /**
  * Shared, ref-counted registry of live worktree filesystem watches.
  *
  * The server runs one recursive watcher per worktree; this mirrors that on the
- * client by opening **one** Tauri channel per worktree and fanning its
- * {@link FileChange}s out to every subscribed listener. Tauri has no
- * channel-close API, so a worktree's channel stays open for the app session once
- * created — there are only as many channels as worktrees the user actually
- * views, and the server reuses a single watcher per worktree regardless.
+ * client by opening **one** Tauri channel per actively observed worktree and fanning its
+ * {@link FileChange}s out to every subscribed listener. The last unsubscribe
+ * detaches the Tauri channel and closes the native stream, allowing
+ * the server to release its recursive OS watcher.
  */
 
 type Listener = (change: FileChange) => void;
 
 interface WorktreeWatch {
   listeners: Set<Listener>;
-  channel: Promise<Channel<FileChange>>;
+  channel: Promise<WorktreeFileSubscription>;
 }
 
 const watches = new Map<string, WorktreeWatch>();
@@ -48,12 +50,29 @@ export function subscribeToWorktreeFiles(worktreeId: string, listener: Listener)
     };
     // Keep the registry usable even if the watch fails to start (e.g. the
     // worktree was removed); listeners simply never receive events.
-    watch.channel.catch(() => undefined);
+    watch.channel.catch(() => {
+      if (watches.get(worktreeId) === watch) {
+        watches.delete(worktreeId);
+      }
+    });
     watches.set(worktreeId, watch);
   }
   watch.listeners.add(listener);
   return () => {
-    watches.get(worktreeId)?.listeners.delete(listener);
+    const current = watches.get(worktreeId);
+    if (!current) {
+      return;
+    }
+    current.listeners.delete(listener);
+    if (current.listeners.size > 0) {
+      return;
+    }
+    watches.delete(worktreeId);
+    void current.channel.then(({ channel, subscriptionId }) => {
+      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+      channel.onmessage = () => {};
+      return stopWatchingWorktreeFiles(subscriptionId);
+    });
   };
 }
 

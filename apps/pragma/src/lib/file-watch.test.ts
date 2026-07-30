@@ -4,8 +4,10 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const watchWorktreeFilesMock = vi.fn();
+const stopWatchingWorktreeFilesMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
+  stopWatchingWorktreeFiles: (...args: unknown[]) => stopWatchingWorktreeFilesMock(...args),
   watchWorktreeFiles: (...args: unknown[]) => watchWorktreeFilesMock(...args),
 }));
 
@@ -18,10 +20,14 @@ const dispatchers = new Map<string, (change: FileChange) => void>();
 beforeEach(() => {
   dispatchers.clear();
   watchWorktreeFilesMock.mockReset();
+  stopWatchingWorktreeFilesMock.mockReset().mockResolvedValue(undefined);
   watchWorktreeFilesMock.mockImplementation(
     (worktreeId: string, onChange: (change: FileChange) => void) => {
       dispatchers.set(worktreeId, onChange);
-      return Promise.resolve({} as Channel<FileChange>);
+      return Promise.resolve({
+        channel: { onmessage: onChange } as Channel<FileChange>,
+        subscriptionId: dispatchers.size,
+      });
     },
   );
 });
@@ -38,8 +44,8 @@ describe("subscribeToWorktreeFiles", () => {
   it("opens a single channel per worktree and fans out to all listeners", () => {
     const a = vi.fn();
     const b = vi.fn();
-    subscribeToWorktreeFiles("wt-fanout", a);
-    subscribeToWorktreeFiles("wt-fanout", b);
+    const unsubscribeA = subscribeToWorktreeFiles("wt-fanout", a);
+    const unsubscribeB = subscribeToWorktreeFiles("wt-fanout", b);
 
     expect(watchWorktreeFilesMock).toHaveBeenCalledTimes(1);
 
@@ -48,9 +54,11 @@ describe("subscribeToWorktreeFiles", () => {
 
     expect(a).toHaveBeenCalledWith(change);
     expect(b).toHaveBeenCalledWith(change);
+    unsubscribeA();
+    unsubscribeB();
   });
 
-  it("stops delivering to a listener after it unsubscribes", () => {
+  it("stops delivery and closes the native stream after the last unsubscribe", async () => {
     const listener = vi.fn();
     const unsubscribe = subscribeToWorktreeFiles("wt-unsub", listener);
 
@@ -60,25 +68,29 @@ describe("subscribeToWorktreeFiles", () => {
     unsubscribe();
     dispatchers.get("wt-unsub")?.({ path: "a.ts", kind: "modified" });
     expect(listener).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(stopWatchingWorktreeFilesMock).toHaveBeenCalledWith(1));
   });
 
   it("opens a distinct channel per worktree", () => {
-    subscribeToWorktreeFiles("wt-one", vi.fn());
-    subscribeToWorktreeFiles("wt-two", vi.fn());
+    const unsubscribeOne = subscribeToWorktreeFiles("wt-one", vi.fn());
+    const unsubscribeTwo = subscribeToWorktreeFiles("wt-two", vi.fn());
 
     expect(watchWorktreeFilesMock).toHaveBeenCalledTimes(2);
+    unsubscribeOne();
+    unsubscribeTwo();
   });
 });
 
 describe("useWorktreeFileChange", () => {
   it("invokes the latest handler with each change while mounted", () => {
     const handler = vi.fn();
-    renderHook(() => useWorktreeFileChange("wt-hook", handler));
+    const { unmount } = renderHook(() => useWorktreeFileChange("wt-hook", handler));
 
     const change: FileChange = { path: "src/new.ts", kind: "created" };
     dispatchers.get("wt-hook")?.(change);
 
     expect(handler).toHaveBeenCalledWith(change);
+    unmount();
   });
 
   it("is a no-op for an empty worktree id", () => {

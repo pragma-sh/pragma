@@ -6,16 +6,40 @@
  * daemon costs a git round-trip — the focus listener catches the app back up
  * the moment it becomes relevant again. Returns a stop function.
  */
-export function startRefreshLoop(refresh: () => void, intervalMs: number): () => void {
-  void refresh();
+export function startRefreshLoop(
+  refresh: () => void | Promise<unknown>,
+  intervalMs: number,
+): () => void {
+  let refreshing = false;
+  const runRefresh = () => {
+    if (refreshing) return;
+    refreshing = true;
+    const result = refresh();
+    if (result instanceof Promise) {
+      void result.then(
+        () => {
+          refreshing = false;
+          return undefined;
+        },
+        () => {
+          refreshing = false;
+          return undefined;
+        },
+      );
+    } else {
+      refreshing = false;
+    }
+  };
+
+  runRefresh();
   const interval = setInterval(() => {
     if (!document.hidden) {
-      void refresh();
+      runRefresh();
     }
   }, intervalMs);
-  window.addEventListener("focus", refresh);
+  window.addEventListener("focus", runRefresh);
   return () => {
     clearInterval(interval);
-    window.removeEventListener("focus", refresh);
+    window.removeEventListener("focus", runRefresh);
   };
 }
