@@ -733,9 +733,19 @@ chrome, `use-pdf-zoom-shortcuts` binds ⌘/Ctrl `+` `-` `0` `9`. Two things are 
   `use-pdf-file.ts` walks `readFileChunk` until the host reports `eof` (see
   `constants.files`). This is also why a remote SSH project's PDFs work unchanged.
 
+**Media tabs** — `editor` tabs whose file is a raster image, video, or audio clip
+(`isMediaPath` in `components/media/media-path.ts`) render `components/media/MediaView.tsx`
+instead of `EditorView` (same `PANE_CONTENT_RENDERERS` dispatch; the `TabKind` stays
+`editor`). **SVG stays in the code editor** so the source remains editable. The viewer is
+read-only: images and videos fit the pane (capped at native size so small media stays
+centered), with wheel / toolbar / ⌘± zoom and drag-to-pan; audio uses `AudioPlayer`
+(themed play/seek/volume over a hidden `<audio>`, plus a file-type icon well). Bytes load
+through the shared chunked reader in `lib/binary-file.ts` (`useBinaryFile` — also what PDF
+uses) and are served to `<img>` / `<video>` / `<audio>` as a revoked-on-unmount blob URL.
+
 A pane renders **only its active tab**, so switching tabs unmounts the viewer outright.
 Both caches exist for that reason and neither is an optimization to "clean up": the engine
-survives zero references for `ENGINE_IDLE_MS` and `use-pdf-file.ts` keeps the last few
+survives zero references for `ENGINE_IDLE_MS` and `lib/binary-file.ts` keeps the last few
 files' bytes, or every switch back would re-start the wasm worker and re-read the whole
 file. The byte cache hands out `buffer.slice(0)` because the engine may transfer the buffer
 to its worker and detach it; a reload (retry, or the file changing on disk) drops the entry.
