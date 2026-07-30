@@ -91,16 +91,7 @@ function VisualDocument({
 
   return (
     <MediaKeyboardSurface onKeyDown={onKeyDown}>
-      <MediaToolbar
-        name={name}
-        onActualSize={transform.setActualSize}
-        onFit={transform.resetFit}
-        onZoomIn={transform.zoomIn}
-        onZoomOut={transform.zoomOut}
-        onZoomTo={transform.zoomTo}
-        percent={transform.percent}
-        scale={transform.scale}
-      />
+      <MediaToolbar name={name} zoom={transform} />
       <div
         className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-canvas active:cursor-grabbing"
         onPointerDown={transform.onPointerDown}

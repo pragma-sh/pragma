@@ -3,7 +3,9 @@ import {
   useEffect,
   useRef,
   useState,
+  type Dispatch,
   type PointerEvent,
+  type SetStateAction,
   type WheelEvent,
 } from "react";
 
@@ -32,16 +34,37 @@ export function clampScale(scale: number): number {
 }
 
 type Size = { width: number; height: number };
+type Pan = { x: number; y: number };
+
+/** Keeps the point under `(originX, originY)` stable across a scale change. */
+function scaleAroundOrigin(
+  previous: number,
+  nextScale: number,
+  originX: number | undefined,
+  originY: number | undefined,
+  setPan: Dispatch<SetStateAction<Pan>>,
+): number {
+  const clamped = clampScale(nextScale);
+  if (originX !== undefined && originY !== undefined && previous > 0) {
+    const ratio = clamped / previous;
+    setPan((current) => ({
+      x: originX - (originX - current.x) * ratio,
+      y: originY - (originY - current.y) * ratio,
+    }));
+  }
+  return clamped;
+}
 
 /**
  * Pan/zoom transform for a media element that fits its pane by default.
  * `scale` is absolute (1 = natural pixels); pan is in CSS pixels of the viewport.
  */
+// fallow-ignore-next-line complexity -- controller hook composing viewport size, fit/zoom, and pan callbacks for one media surface; zoom math lives in scaleAroundOrigin above.
 export function useMediaTransform(natural: Size | null) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [container, setContainer] = useState<Size>({ width: 0, height: 0 });
   const [scale, setScale] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [fitted, setFitted] = useState(true);
   const dragRef = useRef<{
     pointerId: number;
@@ -78,33 +101,14 @@ export function useMediaTransform(natural: Size | null) {
 
   const zoomTo = useCallback((nextScale: number, originX?: number, originY?: number) => {
     setFitted(false);
-    setScale((previous) => {
-      const clamped = clampScale(nextScale);
-      if (originX !== undefined && originY !== undefined && previous > 0) {
-        // Keep the point under the cursor stable across the scale change.
-        const ratio = clamped / previous;
-        setPan((current) => ({
-          x: originX - (originX - current.x) * ratio,
-          y: originY - (originY - current.y) * ratio,
-        }));
-      }
-      return clamped;
-    });
+    setScale((previous) => scaleAroundOrigin(previous, nextScale, originX, originY, setPan));
   }, []);
 
   const zoomBy = useCallback((factor: number, originX?: number, originY?: number) => {
     setFitted(false);
-    setScale((previous) => {
-      const clamped = clampScale(previous * factor);
-      if (originX !== undefined && originY !== undefined && previous > 0) {
-        const ratio = clamped / previous;
-        setPan((current) => ({
-          x: originX - (originX - current.x) * ratio,
-          y: originY - (originY - current.y) * ratio,
-        }));
-      }
-      return clamped;
-    });
+    setScale((previous) =>
+      scaleAroundOrigin(previous, previous * factor, originX, originY, setPan),
+    );
   }, []);
 
   const resetFit = useCallback(() => {
@@ -167,13 +171,11 @@ export function useMediaTransform(natural: Size | null) {
     }
   }, []);
 
-  const percent = Math.round(scale * 100);
-
   return {
     viewportRef,
     scale,
     pan,
-    percent,
+    percent: Math.round(scale * 100),
     zoomIn,
     zoomOut,
     resetFit,
