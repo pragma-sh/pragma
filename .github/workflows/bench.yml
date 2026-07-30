@@ -1,0 +1,84 @@
+name: Bench
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Re-records the committed baseline. It uploads the new file as an artifact
+  # rather than committing it: a baseline bump changes what every future PR is
+  # measured against, so it should arrive as a reviewed commit, never as a side
+  # effect of a workflow run.
+  workflow_dispatch:
+    inputs:
+      record:
+        description: "Record a new baseline instead of auditing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: Terminal latency benchmark
+    # A shared 4-vCPU runner is the point, not a compromise: it is loaded and
+    # noisy in the same way a developer's machine is, and the audit is built to
+    # survive that — repetitions reduce to the best observation, wall times are
+    # normalised by a CPU calibration probe, and the tightest gates are on
+    # counters that cannot vary with machine speed at all.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force || true
+
+      # No GTK/WebKit step: the benchmark builds `pragma-server` and
+      # `pragma-bench`, neither of which links the Tauri webview.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - name: Generate shared constants
+        run: bun run generate
+
+      - name: Record baseline
+        if: inputs.record
+        run: bun run bench:record
+
+      - name: Audit against the committed baseline
+        if: ${{ !inputs.record }}
+        run: bun run bench:audit
+
+      - name: Upload raw report
+        # Always: a failed audit is exactly when the per-repetition sample
+        # vectors are worth having, and re-running to get them would produce
+        # different numbers.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: packages/bench/reports/
+          retention-days: 30
+
+      - name: Upload recorded baseline
+        if: inputs.record
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-baseline
+          path: packages/bench/baselines/*.json
+          retention-days: 30

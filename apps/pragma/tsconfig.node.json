@@ -2,8 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "types": ["node"],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["vite.config.ts", "src-tauri/*.test.ts"]
+  "include": [
+    "vite.config.ts",
+    "vitest.bench.config.ts",
+    "src-tauri/*.test.ts",
+    "src/**/*.bench.ts"
+  ]
 }

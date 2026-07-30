@@ -5439,6 +5439,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pragma-bench"
+version = "0.0.0"
+dependencies = [
+ "pragma-client",
+ "pragma-platform",
+ "pragma-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "pragma-cli"
 version = "0.0.0"
 dependencies = [

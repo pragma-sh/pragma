@@ -9,6 +9,7 @@ members = [
   "crates/pragma-platform",
   "crates/pragma-protocol",
   "crates/pragma-server",
+  "packages/bench",
   "packages/constants",
 ]
 
@@ -42,6 +43,23 @@ pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+# Optimised for iteration speed, not for shipping: used by `bun run bench --fast`.
+# The release profile runs full LTO with one codegen unit, which turns a one-line
+# change to pragma-server into a ~48s relink — fine for a bundle built once, fatal
+# for a loop that rebuilds after every edit. Dropping LTO and raising codegen units
+# gives up some absolute speed in exchange for a rebuild measured in seconds.
+#
+# Numbers from this profile are NOT comparable to release numbers, so it never
+# records a baseline (see --fast in packages/bench/src/index.ts). Structural
+# counters are unaffected by optimisation level, and those are the only gated
+# class, so an audit still means something under it.
+[profile.bench-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+opt-level = 2
+strip = false
 
 [profile.release]
 codegen-units = 1

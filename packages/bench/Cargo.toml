@@ -1,0 +1,30 @@
+[package]
+name = "pragma-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Terminal latency benchmark harness for Pragma: PTY round-trip, output throughput, TUI scroll, and multi-tab scaling."
+
+[lib]
+name = "pragma_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pragma-bench"
+path = "src/main.rs"
+
+[[bin]]
+name = "pragma-bench-load"
+path = "src/load.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+pragma-client = { path = "../../crates/pragma-client" }
+pragma-platform = { path = "../../crates/pragma-platform" }
+pragma-protocol = { path = "../../crates/pragma-protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
