@@ -8,6 +8,8 @@ import { DiffView } from "@/components/editor/DiffView";
 import { EditorView } from "@/components/editor/EditorView";
 import { LogView } from "@/components/editor/LogView";
 import { isMarkdownPath, MarkdownView } from "@/components/editor/MarkdownView";
+import { isMediaPath } from "@/components/media/media-path";
+import { MediaView } from "@/components/media/MediaView";
 import { isPdfPath } from "@/components/pdf/pdf-path";
 import { PdfView } from "@/components/pdf/PdfView";
 import { ReviewTab } from "@/components/github/ReviewTab";
@@ -110,6 +112,7 @@ function SplitNode({
 /** Pick the surface an `editor` tab opens in, keyed by the file's extension. */
 function renderEditorTab(tab: Tab): ReactNode {
   if (isPdfPath(tab.filePath)) return <PdfView key={tab.id} tab={tab} />;
+  if (isMediaPath(tab.filePath)) return <MediaView key={tab.id} tab={tab} />;
   if (isMarkdownPath(tab.filePath)) return <MarkdownView key={tab.id} tab={tab} />;
   return <EditorView key={tab.id} tab={tab} />;
 }
