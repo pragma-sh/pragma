@@ -1,5 +1,5 @@
 import type { FileChange, FileChunk, Tab } from "@pragma/constants";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const readFileChunkMock = vi.fn();
@@ -66,6 +66,46 @@ describe("MediaView", () => {
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Seek" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+  });
+
+  it("surfaces an image the browser cannot decode, with a retry that reads again", async () => {
+    readFileChunkMock.mockResolvedValue(wholeFile([137, 80]));
+
+    render(<MediaView tab={tabFor("corrupt", "png")} />);
+
+    fireEvent.error(await screen.findByRole("img", { name: "corrupt.png" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be displayed/);
+    readFileChunkMock.mockClear();
+    screen.getByRole("button", { name: "Retry" }).click();
+
+    await waitFor(() => expect(readFileChunkMock).toHaveBeenCalled());
+  });
+
+  it("names the decode failure reported by a video element", async () => {
+    readFileChunkMock.mockResolvedValue(wholeFile([0, 0, 0, 1]));
+
+    render(<MediaView tab={tabFor("broken", "mp4")} />);
+    const video = await screen.findByLabelText("broken.mp4");
+    // jsdom never populates `error`; stand in for a browser decode failure.
+    Object.defineProperty(video, "error", { value: { code: 4 }, configurable: true });
+
+    fireEvent.error(video);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/codec is not supported/);
+  });
+
+  it("surfaces a rejected play() on the audio transport", async () => {
+    readFileChunkMock.mockResolvedValue(wholeFile([1, 2, 3]));
+    const play = vi
+      .spyOn(HTMLMediaElement.prototype, "play")
+      .mockRejectedValue(new Error("decode failed"));
+
+    render(<MediaView tab={tabFor("unplayable", "mp3")} />);
+    (await screen.findByRole("button", { name: "Play" })).click();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/decode failed/);
+    play.mockRestore();
   });
 
   it("surfaces a read failure with a retry that reads again", async () => {

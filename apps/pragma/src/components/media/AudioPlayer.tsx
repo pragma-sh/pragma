@@ -3,6 +3,7 @@ import { Icon } from "@iconify/react";
 import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { Slider } from "radix-ui";
 
+import { MediaErrorNotice } from "@/components/media/MediaErrorNotice";
 import { useAudioPlayer } from "@/components/media/use-audio-player";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,8 +26,16 @@ export function formatMediaTime(seconds: number): string {
  * Themed audio surface: filename toolbar, centered artwork, and Pragma-styled
  * transport (play/pause, seek, mute/volume) driven by a hidden `<audio>`.
  */
-export function AudioPlayer({ url, name }: { url: string; name: string }) {
-  const audio = useAudioPlayer();
+export function AudioPlayer({
+  url,
+  name,
+  onReload,
+}: {
+  url: string;
+  name: string;
+  onReload: () => void;
+}) {
+  const audio = useAudioPlayer(url);
 
   return (
     <div
@@ -41,6 +50,7 @@ export function AudioPlayer({ url, name }: { url: string; name: string }) {
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <div className="flex w-full max-w-md flex-col gap-6">
           <AudioArtwork name={name} />
+          {audio.error !== null && <MediaErrorNotice message={audio.error} onRetry={onReload} />}
           <AudioTransport audio={audio} />
         </div>
       </div>

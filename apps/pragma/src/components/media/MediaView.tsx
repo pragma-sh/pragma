@@ -42,5 +42,7 @@ export function MediaView({ tab }: { tab: Tab }) {
     );
   }
 
-  return <MediaDocument mediaKind={state.mediaKind} name={name} url={state.url} />;
+  return (
+    <MediaDocument mediaKind={state.mediaKind} name={name} onReload={reload} url={state.url} />
+  );
 }

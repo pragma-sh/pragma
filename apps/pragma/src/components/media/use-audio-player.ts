@@ -7,9 +7,13 @@ import {
   type RefObject,
 } from "react";
 
+import { describeMediaError, describePlayError } from "@/components/media/media-error";
+
 /** Playback / volume state driven by a hidden `<audio>` element. */
 export type AudioPlayerControls = {
   audioRef: RefObject<HTMLAudioElement | null>;
+  /** Decode / playback failure reported by the element, if any. */
+  error: string | null;
   playing: boolean;
   duration: number;
   currentTime: number;
@@ -28,9 +32,10 @@ export type AudioPlayerControls = {
 /**
  * Owns the hidden `<audio>` element listeners and transport state for
  * {@link AudioPlayer}. Kept as a hook so the presentational surface stays thin.
+ * `src` is only used to clear a stale error when the blob is reloaded.
  */
 // fallow-ignore-next-line complexity -- controller hook for one audio element: state + listeners + transport/keyboard callbacks; each callback is already its own useCallback.
-export function useAudioPlayer(): AudioPlayerControls {
+export function useAudioPlayer(src: string): AudioPlayerControls {
   const audioRef = useRef<HTMLAudioElement>(null);
   const seekingRef = useRef(false);
   const volumeBeforeMute = useRef(1);
@@ -39,6 +44,11 @@ export function useAudioPlayer(): AudioPlayerControls {
   const [currentTime, setCurrentTime] = useState(0);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, [src]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -60,7 +70,12 @@ export function useAudioPlayer(): AudioPlayerControls {
       setMuted(audio.muted || audio.volume === 0);
       setVolume(audio.volume);
     };
+    const onError = () => {
+      setPlaying(false);
+      setError(describeMediaError(audio));
+    };
 
+    audio.addEventListener("error", onError);
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("durationchange", onMeta);
@@ -69,6 +84,7 @@ export function useAudioPlayer(): AudioPlayerControls {
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("volumechange", onVolume);
     return () => {
+      audio.removeEventListener("error", onError);
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("durationchange", onMeta);
@@ -83,8 +99,10 @@ export function useAudioPlayer(): AudioPlayerControls {
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
-      void audio.play().catch(() => {
-        /* autoplay / decode failures surface as a paused control */
+      setError(null);
+      void audio.play().catch((cause: unknown) => {
+        setPlaying(false);
+        setError(describePlayError(cause));
       });
     } else {
       audio.pause();
@@ -165,6 +183,7 @@ export function useAudioPlayer(): AudioPlayerControls {
 
   return {
     audioRef,
+    error,
     playing,
     duration,
     currentTime,
