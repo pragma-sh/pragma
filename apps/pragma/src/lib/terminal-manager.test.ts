@@ -22,7 +22,15 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const terminalDispose = vi.fn();
 const terminalClear = vi.fn();
+const terminalReset = vi.fn();
+const terminalRefresh = vi.fn();
 const terminalScrollToBottom = vi.fn();
+
+interface TerminalMockShape {
+  element: HTMLElement | null;
+  focus: Mock;
+  onData: Mock;
+}
 
 vi.mock("@xterm/xterm", () => {
   const instances: MockTerminal[] = [];
@@ -35,9 +43,11 @@ vi.mock("@xterm/xterm", () => {
     loadAddon = vi.fn();
     attachCustomKeyEventHandler = vi.fn();
     attachCustomWheelEventHandler = vi.fn();
+    focus = vi.fn();
     registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }));
     modes = { mouseTrackingMode: "none" as "none" | "x10" | "vt200" | "drag" | "any" };
     onData = vi.fn();
+    onRender = vi.fn();
     resize = vi.fn((cols: number, rows: number) => {
       this.cols = cols;
       this.rows = rows;
@@ -45,6 +55,8 @@ vi.mock("@xterm/xterm", () => {
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
     writeln = vi.fn();
     clear = terminalClear;
+    reset = terminalReset;
+    refresh = terminalRefresh;
     scrollToBottom = terminalScrollToBottom;
     dispose = terminalDispose;
     constructor(options: unknown) {
@@ -99,11 +111,21 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import {
   MAX_TERMINAL_COLS,
   MAX_TERMINAL_ROWS,
-  MOUSE_WHEEL_REPORT_INTERVAL_MS,
+  MOUSE_WHEEL_GESTURE_QUIET_MS,
+  MOUSE_WHEEL_RENDER_TIMEOUT_MS,
+  MOUSE_WHEEL_RESPONSE_TIMEOUT_MS,
   TERMINAL_FONT_FAMILY,
   TERMINAL_FONT_SIZE,
   TERMINAL_LINE_HEIGHT,
+  TERMINAL_PENDING_INPUT_MAX_BYTES,
+  TERMINAL_PENDING_OUTPUT_MAX_BYTES,
   TERMINAL_SCROLLBACK_LINES,
+  TERMINAL_WRITE_DRAIN_TIMEOUT_MS,
+  TERMINAL_WRITE_CHUNK_MAX_BYTES,
+  TUI_WHEEL_PENDING_REPORTS,
+  WEBGL_RECOVERY_DELAY_MS,
+  WEBGL_RECOVERY_MAX_ATTEMPTS,
+  WEBGL_RENDERER_CACHE_SIZE,
   TerminalManager,
 } from "./terminal-manager";
 import { defaultKeybindingsConfig, setLoadedKeybindingsConfig } from "./keybindings";
@@ -119,6 +141,13 @@ const tab = { id: "tab-1", worktreeId: "wt-1" } as Tab;
 // `instanceof ArrayBuffer` check, mirroring what Tauri delivers in the webview.
 const encodeOutput = (text: string) => Uint8Array.from(text, (char) => char.charCodeAt(0)).buffer;
 const decodeOutput = (data: unknown) => String.fromCharCode(...new Uint8Array(data as ArrayBuffer));
+
+async function settleConnection(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 describe("TerminalManager font configuration", () => {
   it("uses a Nerd Font-first font stack so box-drawing and block glyphs render in text form", () => {
@@ -145,7 +174,7 @@ describe("TerminalManager font configuration", () => {
   // defaults so a mouse-tracking TUI receives raw wheel input. That protected the
   // wrong thing: `scrollSensitivity` only gates how often xterm's accumulator
   // crosses a whole line, and the report rate reaching a TUI is bounded by
-  // MOUSE_WHEEL_REPORT_INTERVAL_MS regardless. Meanwhile leaving it at 1 left
+  // terminal-manager's response gate regardless. Meanwhile leaving it at 1 left
   // xterm's own scrollback scrolling at ~30% of finger distance on a trackpad
   // (xterm damps sub-50px pixel deltas by 0.3), which is the scroll that actually
   // felt slow next to other terminals.
@@ -201,6 +230,8 @@ describe("TerminalManager lifecycle", () => {
     invokeMock.mockResolvedValue(undefined);
     terminalDispose.mockClear();
     terminalClear.mockClear();
+    terminalReset.mockClear();
+    terminalRefresh.mockClear();
   });
 
   it("kills the daemon session and disposes the xterm widget on dispose", async () => {
@@ -217,6 +248,189 @@ describe("TerminalManager lifecycle", () => {
 
     expect(terminalDispose).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith("pty_kill", { sessionId: tab.id });
+  });
+
+  it("parks and reparents the same xterm and stream across ordinary view unmounts", async () => {
+    const manager = new TerminalManager();
+    const firstHost = document.createElement("div");
+    const secondHost = document.createElement("div");
+    document.body.append(firstHost, secondHost);
+    const hostGeneration = manager.mount(tab, "/repo", firstHost);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const terminal = (Terminal as unknown as { instances: TerminalMockShape[] }).instances.at(-1)!;
+    const attachCount = invokeMock.mock.calls.filter(
+      ([command]) => command === "pty_attach",
+    ).length;
+    invokeMock.mockClear();
+
+    manager.park(tab.id, hostGeneration);
+    manager.mount(tab, "/repo", secondHost);
+
+    expect((Terminal as unknown as { instances: TerminalMockShape[] }).instances.at(-1)).toBe(
+      terminal,
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_detach", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_kill", expect.anything());
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(0);
+    expect(attachCount).toBe(1);
+    expect(terminalReset).not.toHaveBeenCalled();
+    expect(terminalDispose).not.toHaveBeenCalled();
+    expect(secondHost.firstElementChild).toBe(terminal.element);
+  });
+
+  it("ignores stale park cleanup after the terminal has moved to a newer host", async () => {
+    const manager = new TerminalManager();
+    const firstHost = document.createElement("div");
+    const secondHost = document.createElement("div");
+    document.body.append(firstHost, secondHost);
+    const firstGeneration = manager.mount(tab, "/repo", firstHost);
+    await Promise.resolve();
+    await Promise.resolve();
+    manager.mount(tab, "/repo", secondHost);
+    manager.setVisible(tab.id, true);
+    const terminal = (
+      Terminal as unknown as { instances: Array<{ focus: Mock; element: HTMLElement | null }> }
+    ).instances.at(-1)!;
+
+    manager.park(tab.id, firstGeneration);
+    manager.focus(tab.id);
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+
+    expect(terminal.focus).toHaveBeenCalledTimes(1);
+    expect(secondHost.firstElementChild).toBe(terminal.element);
+  });
+
+  it("does not let a superseded attach flush queued input", async () => {
+    const resolveAttach: Array<() => void> = [];
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return new Promise<void>((resolve) => resolveAttach.push(resolve));
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const host = document.createElement("div");
+    document.body.append(host);
+
+    manager.mount(tab, "/repo", host);
+    manager.writeWhenReady(tab.id, "a");
+    channelInstances.at(-1)!.onmessage({ event: "disconnected" });
+    expect(resolveAttach).toHaveLength(2);
+
+    resolveAttach[0]!();
+    await settleConnection();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(0);
+
+    resolveAttach[1]!();
+    await settleConnection();
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", { sessionId: tab.id, data: "a" });
+  });
+
+  it("attaches when another creator wins the spawn race", async () => {
+    let attachCalls = 0;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        attachCalls += 1;
+        return attachCalls === 1
+          ? Promise.reject(new Error("session not found"))
+          : Promise.resolve(undefined);
+      }
+      if (command === "pty_spawn") {
+        return Promise.reject(new Error("daemon error: session already exists: tab-1"));
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(2);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_spawn")).toHaveLength(1);
+    const terminal = (Terminal as unknown as { instances: Array<{ writeln: Mock }> }).instances.at(
+      -1,
+    )!;
+    expect(terminal.writeln).not.toHaveBeenCalledWith(
+      expect.stringContaining("failed to start terminal"),
+    );
+  });
+
+  it("restarts output stream when queued renderer work exceeds its byte cap", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+    const terminal = (Terminal as unknown as { instances: Array<{ write: Mock }> }).instances.at(
+      -1,
+    )!;
+    let releaseWrite: (() => void) | undefined;
+    terminal.write.mockImplementation((_data: Uint8Array, callback?: () => void) => {
+      releaseWrite = callback;
+    });
+    const channel = channelInstances.at(-1)!;
+    const frame = new ArrayBuffer(256 * 1024);
+
+    for (
+      let index = 0;
+      index <= TERMINAL_PENDING_OUTPUT_MAX_BYTES / frame.byteLength + 1;
+      index++
+    ) {
+      channel.onmessage(frame);
+    }
+    releaseWrite!();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_detach")).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(2);
+  });
+
+  it("resumes a disconnected output stream from its accepted byte cursor without reset", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const channel = channelInstances.at(-1)!;
+    channel.onmessage({ event: "replay", cursor: 100, reset: false });
+    channel.onmessage(encodeOutput("abc"));
+    terminalReset.mockClear();
+
+    channel.onmessage({ event: "disconnected" });
+    await settleConnection();
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_detach")).toHaveLength(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(2);
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "pty_attach").at(-1)?.[1],
+    ).toEqual(expect.objectContaining({ cursor: 103 }));
+    expect(terminalReset).not.toHaveBeenCalled();
+  });
+
+  it("resets once when a reconnect cursor fell outside retained server output", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const firstChannel = channelInstances.at(-1)!;
+    firstChannel.onmessage({ event: "replay", cursor: 100, reset: false });
+    firstChannel.onmessage(encodeOutput("abc"));
+    firstChannel.onmessage({ event: "disconnected" });
+    await settleConnection();
+
+    channelInstances.at(-1)!.onmessage({ event: "replay", cursor: 200, reset: true });
+    await settleConnection();
+
+    expect(terminalReset).toHaveBeenCalledTimes(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(3);
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "pty_attach").at(-1)?.[1],
+    ).toEqual(expect.objectContaining({ cursor: null }));
   });
 
   it("does not flush queued input when the tab is disposed before attach completes", async () => {
@@ -247,6 +461,96 @@ describe("TerminalManager lifecycle", () => {
     expect(invokeMock).toHaveBeenCalledWith("pty_kill", { sessionId: tab.id });
   });
 
+  it("queues xterm input until attach succeeds and flushes it once in byte order", async () => {
+    let resolveAttach: (() => void) | undefined;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{ onData: Mock<(listener: (data: string) => void) => void> }>;
+      }
+    ).instances.at(-1)!;
+    const onData = terminal.onData.mock.calls[0]![0];
+    onData("a");
+    onData("b");
+    onData("c");
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(0);
+    resolveAttach!();
+    await settleConnection();
+
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toEqual([
+      ["pty_write", { sessionId: tab.id, data: "abc" }],
+    ]);
+  });
+
+  it("surfaces bounded pre-attach input overflow", () => {
+    invokeMock.mockImplementation((command: string) =>
+      command === "pty_attach" ? new Promise<void>(() => undefined) : Promise.resolve(undefined),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const manager = new TerminalManager();
+
+    expect(manager.writeWhenReady(tab.id, "x".repeat(TERMINAL_PENDING_INPUT_MAX_BYTES))).toBe(true);
+    expect(manager.writeWhenReady(tab.id, "y")).toBe(false);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("input queue is full"));
+    error.mockRestore();
+  });
+
+  it("focuses only the newly activated visible terminal and routes its later input there", async () => {
+    const manager = new TerminalManager();
+    const tabB = { ...tab, id: "tab-2" };
+    const hostA = document.createElement("div");
+    const hostB = document.createElement("div");
+    document.body.append(hostA, hostB);
+    manager.mount(tab, "/repo", hostA);
+    manager.mount(tabB, "/repo", hostB);
+    await Promise.resolve();
+    await Promise.resolve();
+    const terminals = (Terminal as unknown as { instances: TerminalMockShape[] }).instances;
+    const terminalA = terminals.at(-2)!;
+    const terminalB = terminals.at(-1)!;
+    manager.setVisible(tab.id, false);
+
+    manager.focus(tabB.id);
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    const onDataB = terminalB.onData.mock.calls[0]![0];
+    onDataB("z");
+
+    expect(terminalA.focus).not.toHaveBeenCalled();
+    expect(terminalB.focus).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("pty_write", { sessionId: tabB.id, data: "z" });
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_write", { sessionId: tab.id, data: "z" });
+  });
+
+  it("does not steal delayed focus from another text editor", async () => {
+    const manager = new TerminalManager();
+    const host = document.createElement("div");
+    const renameInput = document.createElement("input");
+    document.body.append(host, renameInput);
+    manager.mount(tab, "/repo", host);
+    const terminal = (Terminal as unknown as { instances: Array<{ focus: Mock }> }).instances.at(
+      -1,
+    )!;
+    renameInput.focus();
+
+    manager.focus(tab.id);
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+
+    expect(terminal.focus).not.toHaveBeenCalled();
+  });
+
   it("ignores dispose for an unknown tab without calling the backend", () => {
     const manager = new TerminalManager();
     manager.dispose("missing");
@@ -259,8 +563,7 @@ describe("TerminalManager lifecycle", () => {
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleConnection();
 
     manager.clear(tab.id);
 
@@ -280,8 +583,7 @@ describe("TerminalManager lifecycle", () => {
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleConnection();
 
     manager.scrollToBottom(tab.id);
 
@@ -295,29 +597,37 @@ describe("TerminalManager lifecycle", () => {
     expect(terminalScrollToBottom).not.toHaveBeenCalled();
   });
 
-  it("loads the WebGL renderer addon so xterm does not use the DOM renderer", async () => {
+  it("retains the WebGL renderer without a full repaint across tab switches", () => {
     const manager = new TerminalManager();
     const element = document.createElement("div");
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
-    await Promise.resolve();
-    await Promise.resolve();
-
     const terminal = (
       Terminal as unknown as {
         instances: Array<{ loadAddon: Mock<(...args: unknown[]) => unknown> }>;
       }
-    ).instances.at(-1);
-    const webgl = (
+    ).instances.at(-1)!;
+    const webglInstances = (
       WebglAddon as unknown as {
-        instances: Array<{ onContextLoss: Mock<(...args: unknown[]) => unknown> }>;
+        instances: Array<{
+          dispose: Mock<() => void>;
+          onContextLoss: Mock<(listener: () => void) => void>;
+        }>;
       }
-    ).instances.at(-1);
+    ).instances;
+    const webgl = webglInstances.at(-1)!;
 
-    expect(webgl).toBeDefined();
-    expect(webgl!.onContextLoss).toHaveBeenCalledWith(expect.any(Function));
-    expect(terminal!.loadAddon).toHaveBeenCalledWith(webgl);
+    expect(webgl.onContextLoss).toHaveBeenCalledWith(expect.any(Function));
+    expect(terminal.loadAddon).toHaveBeenCalledWith(webgl);
+
+    terminalRefresh.mockClear();
+    manager.setVisible(tab.id, false);
+    manager.setVisible(tab.id, true);
+
+    expect(webglInstances.at(-1)).toBe(webgl);
+    expect(webgl.dispose).not.toHaveBeenCalled();
+    expect(terminalRefresh).not.toHaveBeenCalled();
   });
 
   it("caps fitted dimensions before resizing xterm and the PTY", async () => {
@@ -481,6 +791,8 @@ describe("TerminalManager output", () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
     channelInstances.length = 0;
+    terminalDispose.mockClear();
+    terminalReset.mockClear();
   });
 
   it("waits for xterm write callbacks before coalescing queued output", async () => {
@@ -519,6 +831,99 @@ describe("TerminalManager output", () => {
 
     expect(terminal!.write).toHaveBeenCalledTimes(2);
     expect(decodeOutput(terminal!.write.mock.calls[1]![0])).toBe("secondthird");
+  });
+
+  it("caps every xterm parser write while preserving the exact output stream", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{ write: Mock<(data: Uint8Array, callback?: () => void) => void> }>;
+      }
+    ).instances.at(-1)!;
+    const input = Uint8Array.from(
+      { length: TERMINAL_WRITE_CHUNK_MAX_BYTES * 2 + 17 },
+      (_, index) => index % 251,
+    );
+
+    channelInstances.at(-1)!.onmessage(input.buffer);
+
+    const writes = terminal.write.mock.calls.map(([data]) => data);
+    expect(writes.every((data) => data.byteLength <= TERMINAL_WRITE_CHUNK_MAX_BYTES)).toBe(true);
+    const output = new Uint8Array(input.length);
+    let offset = 0;
+    for (const data of writes) {
+      output.set(data, offset);
+      offset += data.length;
+    }
+    expect(output).toEqual(input);
+  });
+
+  it("keeps an in-flight xterm write while rejecting stale output after cursor resume", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{ write: Mock<(data: Uint8Array, callback?: () => void) => void> }>;
+      }
+    ).instances.at(-1)!;
+    let releaseWrite: (() => void) | undefined;
+    terminal.write.mockImplementation((_data, callback) => {
+      releaseWrite = callback;
+    });
+    const oldChannel = channelInstances.at(-1)!;
+    const staleOnEvent = oldChannel.onmessage;
+    staleOnEvent(encodeOutput("old"));
+
+    staleOnEvent({ event: "disconnected" });
+    staleOnEvent(encodeOutput("stale"));
+    expect(terminalReset).not.toHaveBeenCalled();
+    expect(terminal.write).toHaveBeenCalledTimes(1);
+
+    releaseWrite!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(terminalReset).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(2);
+
+    staleOnEvent(encodeOutput("late"));
+    expect(terminal.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("recreates an xterm whose parser write never completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(tab, "/repo", element);
+      await settleConnection();
+      const terminals = (Terminal as unknown as { instances: Array<{ write: Mock }> }).instances;
+      const initialTerminal = terminals.at(-1)!;
+      initialTerminal.write.mockImplementation(() => undefined);
+
+      channelInstances.at(-1)!.onmessage({ event: "replay", cursor: 0, reset: false });
+      channelInstances.at(-1)!.onmessage(encodeOutput("stuck"));
+      await vi.advanceTimersByTimeAsync(TERMINAL_WRITE_DRAIN_TIMEOUT_MS * 2 + 1);
+
+      const activeTerminal = (
+        manager as unknown as { terminals: Map<string, { terminal: unknown }> }
+      ).terminals.get(tab.id)?.terminal;
+      expect(activeTerminal).toBeDefined();
+      expect(activeTerminal).not.toBe(initialTerminal);
+      expect(terminalDispose).toHaveBeenCalled();
+      manager.dispose(tab.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -671,8 +1076,7 @@ describe("TerminalManager native OS text editing", () => {
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleConnection();
 
     const instances = (
       Terminal as unknown as {
@@ -794,8 +1198,7 @@ describe("TerminalManager Shift+Enter", () => {
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settleConnection();
 
     const instances = (
       Terminal as unknown as {
@@ -861,12 +1264,13 @@ describe("TerminalManager mouse input", () => {
     invokeMock.mockResolvedValue(undefined);
   });
 
-  it("forwards TUI mouse wheel reports immediately so apps can intercept scrolling", () => {
+  it("forwards TUI mouse wheel reports immediately so apps can intercept scrolling", async () => {
     const manager = new TerminalManager();
     const element = document.createElement("div");
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
+    await settleConnection();
 
     const terminal = (
       Terminal as unknown as {
@@ -896,6 +1300,7 @@ describe("TerminalManager mouse input", () => {
         instances: Array<{
           attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
           modes: { mouseTrackingMode: string };
+          options: { scrollSensitivity: number };
         }>;
       }
     ).instances.at(-1);
@@ -906,9 +1311,99 @@ describe("TerminalManager mouse input", () => {
     // mouseTrackingMode === "none" → local scrollback scrolling stays untouched.
     expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
     expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+    expect(terminal!.options.scrollSensitivity).toBe(3);
   });
 
-  it("throttles a flood of wheel reports while a TUI consumes mouse input", () => {
+  it("uses stock sensitivity while a TUI captures mouse reports", () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+          modes: { mouseTrackingMode: string };
+          options: { scrollSensitivity: number };
+        }>;
+      }
+    ).instances.at(-1)!;
+    const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+      event: WheelEvent,
+    ) => boolean;
+
+    terminal.modes.mouseTrackingMode = "any";
+    expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+    expect(terminal.options.scrollSensitivity).toBe(1);
+
+    terminal.modes.mouseTrackingMode = "none";
+    expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+    expect(terminal.options.scrollSensitivity).toBe(3);
+  });
+
+  it("keeps wheel events accumulating while batching emitted TUI reports", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+          modes: { mouseTrackingMode: string };
+          onData: Mock<(...args: unknown[]) => unknown>;
+        }>;
+      }
+    ).instances.at(-1);
+    terminal!.modes.mouseTrackingMode = "any";
+    const handler = terminal!.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+      event: WheelEvent,
+    ) => boolean;
+    const onData = terminal!.onData.mock.calls[0]![0] as (data: string) => void;
+    const wheel = "\x1b[<65;10;5M";
+
+    let clock = 1000;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      // Trackpad pixel deltas can take several events to cross xterm's whole-line
+      // threshold. Until xterm emits a report, every event must reach its
+      // accumulator or scrolling wedges before the TUI receives anything.
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+
+      // First emitted report starts the redraw immediately.
+      onData(wheel);
+      // Later events still reach xterm's accumulator while their reports wait
+      // behind that redraw instead of becoming separate PTY writes.
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(wheel);
+      clock += MOUSE_WHEEL_GESTURE_QUIET_MS - 1;
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(wheel);
+      clock += MOUSE_WHEEL_GESTURE_QUIET_MS - 1;
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+
+      const writes = invokeMock.mock.calls.filter(([command]) => command === "pty_write");
+      expect(writes).toHaveLength(1);
+      expect(writes[0]![1]).toEqual({ sessionId: tab.id, data: wheel });
+
+      // A quiet gap with no response drops stale queued motion so a deliberate
+      // new gesture can go out immediately.
+      clock += MOUSE_WHEEL_GESTURE_QUIET_MS;
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(wheel);
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not mistake later keyboard input for a fractional wheel report", async () => {
     const manager = new TerminalManager();
     const element = document.createElement("div");
     document.body.append(element);
@@ -920,38 +1415,30 @@ describe("TerminalManager mouse input", () => {
         instances: Array<{
           attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
           modes: { mouseTrackingMode: string };
+          onData: Mock<(...args: unknown[]) => unknown>;
         }>;
       }
-    ).instances.at(-1);
-    terminal!.modes.mouseTrackingMode = "any";
-    const handler = terminal!.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+    ).instances.at(-1)!;
+    terminal.modes.mouseTrackingMode = "any";
+    const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
       event: WheelEvent,
     ) => boolean;
+    const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
 
-    let clock = 1000;
-    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
-    try {
-      // Leading event passes; a same-instant burst is dropped instead of
-      // flooding the PTY with full-grid redraws.
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
-      // A TUI that answers with silence must not wedge scrolling forever, so the
-      // interval is an escape hatch: once it elapses, a report goes through even
-      // with no output.
-      clock += MOUSE_WHEEL_REPORT_INTERVAL_MS;
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-    } finally {
-      nowSpy.mockRestore();
-    }
+    expect(handler(new WheelEvent("wheel", { deltaY: 1 }))).toBe(true);
+    await Promise.resolve();
+    onData("a");
+
+    expect(handler(new WheelEvent("wheel", { deltaY: 1 }))).toBe(true);
   });
 
-  it("releases the next wheel report as soon as the TUI paints, without waiting out the interval", () => {
+  it("flushes the queued wheel batch after WebGL paints TUI output", async () => {
     const manager = new TerminalManager();
     const element = document.createElement("div");
     document.body.append(element);
 
     manager.mount(tab, "/repo", element);
+    await settleConnection();
 
     const channel = channelInstances.at(-1);
     const terminal = (
@@ -959,6 +1446,8 @@ describe("TerminalManager mouse input", () => {
         instances: Array<{
           attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
           modes: { mouseTrackingMode: string };
+          onData: Mock<(...args: unknown[]) => unknown>;
+          onRender: Mock<(...args: unknown[]) => unknown>;
         }>;
       }
     ).instances.at(-1);
@@ -966,20 +1455,362 @@ describe("TerminalManager mouse input", () => {
     const handler = terminal!.attachCustomWheelEventHandler.mock.calls[0]![0] as (
       event: WheelEvent,
     ) => boolean;
-
+    const onData = terminal!.onData.mock.calls[0]![0] as (data: string) => void;
+    const onRender = terminal!.onRender.mock.calls[0]![0] as () => void;
+    let finishParsing: (() => void) | undefined;
+    (terminal as unknown as { write: Mock }).write.mockImplementation(
+      (_data: Uint8Array, callback?: () => void) => {
+        finishParsing = callback;
+      },
+    );
     // Clock frozen, so nothing here can be explained by the interval elapsing.
-    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => 1000);
+    let clock = 1000;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
     try {
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(false);
-
-      // The TUI redraws in response — evidence it kept up, so the gate opens.
-      channel!.onmessage(encodeOutput("redraw"));
-
+      const first = "\x1b[<65;10;5M";
+      const second = "\x1b[<64;10;5M";
+      onData(first);
       expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(second);
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(second);
+
+      // Receiving bytes proves the TUI consumed the report, but admitting
+      // another report before xterm parses and paints them builds a redraw queue.
+      channel!.onmessage(encodeOutput("redraw-start"));
+      channel!.onmessage(encodeOutput("redraw-end"));
+      clock += MOUSE_WHEEL_GESTURE_QUIET_MS;
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+
+      // Parsing first write starts queued second write; gate remains closed
+      // until parser catches up and WebGL paints the resulting frame.
+      finishParsing!();
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+
+      finishParsing!();
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+
+      onRender();
+      const writes = invokeMock.mock.calls.filter(([command]) => command === "pty_write");
+      expect(writes).toHaveLength(2);
+      // Both reports queued behind the redraw leave as one write, so the TUI
+      // scrolls the distance the gesture actually covered.
+      expect(writes[1]![1]).toEqual({ sessionId: tab.id, data: second + second });
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it("flushes queued wheel reports when a TUI produces no output", async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(tab, "/repo", element);
+      await settleConnection();
+
+      const terminal = (
+        Terminal as unknown as {
+          instances: Array<{
+            attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+            modes: { mouseTrackingMode: string };
+            onData: Mock<(...args: unknown[]) => unknown>;
+          }>;
+        }
+      ).instances.at(-1)!;
+      terminal.modes.mouseTrackingMode = "any";
+      const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+        event: WheelEvent,
+      ) => boolean;
+      const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
+
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData("first");
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData("second");
+
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(MOUSE_WHEEL_RESPONSE_TIMEOUT_MS);
+
+      const writes = invokeMock.mock.calls.filter(([command]) => command === "pty_write");
+      expect(writes).toHaveLength(2);
+      expect(writes[1]![1]).toEqual({ sessionId: tab.id, data: "second" });
+      manager.dispose(tab.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not admit another wheel report while response bytes still await parsing", async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(tab, "/repo", element);
+      await settleConnection();
+      const terminal = (
+        Terminal as unknown as {
+          instances: Array<{
+            attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+            modes: { mouseTrackingMode: string };
+            onData: Mock<(...args: unknown[]) => unknown>;
+            onRender: Mock<(...args: unknown[]) => unknown>;
+            write: Mock;
+          }>;
+        }
+      ).instances.at(-1)!;
+      terminal.modes.mouseTrackingMode = "any";
+      const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+        event: WheelEvent,
+      ) => boolean;
+      const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
+      const onRender = terminal.onRender.mock.calls[0]![0] as () => void;
+      let finishParsing: (() => void) | undefined;
+      terminal.write.mockImplementation((_data: Uint8Array, callback?: () => void) => {
+        finishParsing = callback;
+      });
+
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData("first");
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData("second");
+      channelInstances.at(-1)!.onmessage(encodeOutput("redraw"));
+
+      await vi.advanceTimersByTimeAsync(MOUSE_WHEEL_RESPONSE_TIMEOUT_MS);
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+
+      finishParsing!();
+      await vi.advanceTimersByTimeAsync(MOUSE_WHEEL_RENDER_TIMEOUT_MS - 1);
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+      onRender();
+      expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(2);
+      manager.dispose(tab.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds queued wheel reports and keeps latest gesture input", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+          modes: { mouseTrackingMode: string };
+          onData: Mock<(...args: unknown[]) => unknown>;
+          onRender: Mock<(...args: unknown[]) => unknown>;
+        }>;
+      }
+    ).instances.at(-1)!;
+    terminal.modes.mouseTrackingMode = "any";
+    const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+      event: WheelEvent,
+    ) => boolean;
+    const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
+    const onRender = terminal.onRender.mock.calls[0]![0] as () => void;
+    let finishParsing: (() => void) | undefined;
+    (terminal as unknown as { write: Mock }).write.mockImplementation(
+      (_data: Uint8Array, callback?: () => void) => {
+        finishParsing = callback;
+      },
+    );
+
+    for (let index = 0; index < TUI_WHEEL_PENDING_REPORTS + 3; index += 1) {
+      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      onData(String(index));
+    }
+    channelInstances.at(-1)!.onmessage(encodeOutput("redraw"));
+    finishParsing!();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
+    onRender();
+
+    // Oldest queued reports beyond the bound are dropped; the retained tail goes
+    // out as one write so the gesture keeps its distance.
+    const emitted = Array.from({ length: TUI_WHEEL_PENDING_REPORTS + 3 }, (_, index) =>
+      String(index),
+    );
+    const retained = emitted.slice(-TUI_WHEEL_PENDING_REPORTS).join("");
+    const writes = invokeMock.mock.calls.filter(([command]) => command === "pty_write");
+    expect(writes).toHaveLength(2);
+    expect(writes[0]![1]).toEqual({ sessionId: tab.id, data: "0" });
+    expect(writes[1]![1]).toEqual({ sessionId: tab.id, data: retained });
+  });
+
+  it("recreates a lost WebGL context with a bounded retry budget", () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(tab, "/repo", element);
+      const webglInstances = (
+        WebglAddon as unknown as {
+          instances: Array<{
+            onContextLoss: Mock<(listener: () => void) => void>;
+          }>;
+        }
+      ).instances;
+      const initialCount = webglInstances.length;
+
+      for (let attempt = 0; attempt < WEBGL_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+        const current = webglInstances.at(-1)!;
+        current.onContextLoss.mock.calls[0]![0]();
+        vi.advanceTimersByTime(WEBGL_RECOVERY_DELAY_MS);
+      }
+      expect(webglInstances).toHaveLength(initialCount + WEBGL_RECOVERY_MAX_ATTEMPTS);
+
+      const final = webglInstances.at(-1)!;
+      final.onContextLoss.mock.calls[0]![0]();
+      vi.advanceTimersByTime(WEBGL_RECOVERY_DELAY_MS);
+      expect(webglInstances).toHaveLength(initialCount + WEBGL_RECOVERY_MAX_ATTEMPTS);
+      manager.dispose(tab.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets WebGL recovery budget after a successful paint", () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new TerminalManager();
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(tab, "/repo", element);
+      const terminal = (
+        Terminal as unknown as {
+          instances: Array<{ onRender: Mock<(listener: () => void) => void> }>;
+        }
+      ).instances.at(-1)!;
+      const onRender = terminal.onRender.mock.calls[0]![0];
+      const webglInstances = (
+        WebglAddon as unknown as {
+          instances: Array<{ onContextLoss: Mock<(listener: () => void) => void> }>;
+        }
+      ).instances;
+      const initialCount = webglInstances.length;
+
+      for (let attempt = 0; attempt <= WEBGL_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+        webglInstances.at(-1)!.onContextLoss.mock.calls[0]![0]();
+        vi.advanceTimersByTime(WEBGL_RECOVERY_DELAY_MS);
+        onRender();
+      }
+
+      expect(webglInstances).toHaveLength(initialCount + WEBGL_RECOVERY_MAX_ATTEMPTS + 1);
+      manager.dispose(tab.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps terminal state and streams warm beyond the WebGL cache budget", () => {
+    const manager = new TerminalManager();
+    const webglInstances = (
+      WebglAddon as unknown as {
+        instances: Array<{ dispose: Mock<() => void> }>;
+      }
+    ).instances;
+    const initialCount = webglInstances.length;
+    const mountedTabs: Tab[] = [];
+
+    for (let index = 0; index < WEBGL_RENDERER_CACHE_SIZE + 5; index += 1) {
+      const currentTab = {
+        ...tab,
+        id: `webgl-cache-${index}`,
+      } as Tab;
+      mountedTabs.push(currentTab);
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(currentTab, "/repo", element);
+      manager.setVisible(currentTab.id, false);
+    }
+
+    const firstWebgl = webglInstances[initialCount]!;
+    const oldestWarmWebgl = webglInstances[initialCount + 5]!;
+    expect(firstWebgl.dispose).toHaveBeenCalledTimes(1);
+    expect(oldestWarmWebgl.dispose).not.toHaveBeenCalled();
+
+    terminalRefresh.mockClear();
+    terminalReset.mockClear();
+    invokeMock.mockClear();
+    manager.setVisible(mountedTabs[0]!.id, true);
+    expect(oldestWarmWebgl.dispose).toHaveBeenCalledTimes(1);
+    expect(webglInstances).toHaveLength(initialCount + mountedTabs.length + 1);
+    expect(terminalRefresh).toHaveBeenCalledWith(0, 23);
+    expect(terminalReset).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "pty_attach")).toHaveLength(0);
+
+    for (const currentTab of mountedTabs) {
+      manager.dispose(currentTab.id);
+    }
+  });
+
+  it("trims excess visible WebGL contexts as terminals become hidden", () => {
+    const manager = new TerminalManager();
+    const webglInstances = (
+      WebglAddon as unknown as {
+        instances: Array<{ dispose: Mock<() => void> }>;
+      }
+    ).instances;
+    const initialCount = webglInstances.length;
+    const mountedTabs: Tab[] = [];
+
+    for (let index = 0; index < WEBGL_RENDERER_CACHE_SIZE + 4; index += 1) {
+      const currentTab = { ...tab, id: `visible-webgl-${index}` } as Tab;
+      mountedTabs.push(currentTab);
+      const element = document.createElement("div");
+      document.body.append(element);
+      manager.mount(currentTab, "/repo", element);
+    }
+    expect(
+      webglInstances.slice(initialCount).filter((webgl) => !webgl.dispose.mock.calls.length),
+    ).toHaveLength(WEBGL_RENDERER_CACHE_SIZE + 4);
+
+    for (const currentTab of mountedTabs) {
+      manager.setVisible(currentTab.id, false);
+    }
+    expect(
+      webglInstances.slice(initialCount).filter((webgl) => !webgl.dispose.mock.calls.length),
+    ).toHaveLength(WEBGL_RENDERER_CACHE_SIZE);
+
+    for (const currentTab of mountedTabs) {
+      manager.dispose(currentTab.id);
+    }
+  });
+
+  it("keeps output attached while a mounted terminal is hidden", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+
+    manager.mount(tab, "/repo", element);
+    await Promise.resolve();
+    await Promise.resolve();
+    const terminal = (Terminal as unknown as { instances: Array<{ write: Mock }> }).instances.at(
+      -1,
+    )!;
+    const channel = channelInstances.at(-1)!;
+    invokeMock.mockClear();
+    terminalReset.mockClear();
+    terminalRefresh.mockClear();
+    terminal.write.mockClear();
+
+    manager.setVisible(tab.id, false);
+    channel.onmessage(encodeOutput("hidden output"));
+
+    expect(terminal.write).toHaveBeenCalledWith(expect.any(Uint8Array), expect.any(Function));
+    expect(invokeMock).not.toHaveBeenCalledWith("pty_detach", expect.anything());
+    expect(terminalReset).not.toHaveBeenCalled();
+
+    manager.setVisible(tab.id, true);
+    expect(terminalRefresh).not.toHaveBeenCalled();
   });
 });
 

@@ -426,13 +426,10 @@ fn worktree_delete(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
     let args: DeletePayload = parse(payload)?;
     let worktree = app.state::<Db>().worktree(&args.worktree_id)?;
     worktrees::delete_worktree(
+        app.clone(),
         args.worktree_id,
         args.delete_branch,
         args.force,
-        app.state::<Db>(),
-        app.state::<Hosts>(),
-        app.state::<GitLocks>(),
-        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
     )?;
     emit_worktree_changed(
         app,
@@ -530,6 +527,25 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
 fn tab_close(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
     let args: TabIdPayload = parse(payload)?;
     let tab = resolve_tab(app, &args.tab_id)?;
+    match tab.kind {
+        TabKind::Terminal => {
+            let db = app.state::<Db>();
+            let hosts = app.state::<Hosts>();
+            if let Ok(client) = hosts.for_worktree(&db, &tab.worktree_id) {
+                let _ = client.kill(tab.id.clone());
+            }
+            let _ = hosts.unbind_session(&tab.id);
+        }
+        TabKind::Browser => {
+            browser::browser_close(app.clone(), tab.id.clone())?;
+        }
+        TabKind::Editor
+        | TabKind::Diff
+        | TabKind::PrReview
+        | TabKind::Log
+        | TabKind::PluginWebview => {}
+    }
+    crate::plugins::stop_watchers_for_tab(&tab.id)?;
     app.state::<Db>().delete_tab(&tab.id)?;
     emit_tabs_changed(app, "tabClosed", &tab);
     app.state::<crate::workspace_mirror::WorkspacePublisher>()

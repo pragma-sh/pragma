@@ -15,6 +15,7 @@ function mockTerminalWithLine(text: string): Terminal {
   }));
   const line = {
     length: cells.length,
+    translateToString: () => text,
     getCell(column: number, cell: { getWidth: () => number; getChars: () => string }) {
       const data = cells[column];
       if (data) {
@@ -124,5 +125,21 @@ describe("createFileLinkProvider", () => {
 
     expect(pathExists).toHaveBeenCalledTimes(1);
     expect(pathExists).toHaveBeenCalledWith("wt-1", "src/foo.ts");
+  });
+
+  it("does not scan terminal cells when a row has no path candidates", async () => {
+    const terminal = mockTerminalWithLine("ordinary terminal output");
+    const line = terminal.buffer.active.getLine(0)!;
+    const getCell = vi.spyOn(line, "getCell");
+    setTerminalLinkHandler({
+      openUrl: vi.fn(),
+      openFile: vi.fn(),
+      pathExists: vi.fn(),
+    });
+
+    const provider = createFileLinkProvider(terminal, "tab-1", "wt-1", cwd);
+    await provideLinksForLine(provider, 1);
+
+    expect(getCell).not.toHaveBeenCalled();
   });
 });

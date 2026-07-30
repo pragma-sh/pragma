@@ -25,9 +25,11 @@ mod ssh;
 #[cfg(feature = "ssh")]
 mod wsl;
 
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -57,6 +59,12 @@ pub use wsl::{
 };
 
 const SERVER_DETACH_FLAG: &str = "--detach";
+const INPUT_QUEUE_CAPACITY: usize = 256;
+const INPUT_QUEUE_MAX_BYTES: usize = 4 * 1024 * 1024;
+// Leaves ample room below the protocol's 16 MiB body limit for framing and session IDs.
+const INPUT_FRAME_DATA_MAX: usize = 64 * 1024;
+const INPUT_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(10);
+const INPUT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Result type for Pragma client operations.
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -152,12 +160,63 @@ pub struct PragmaClient {
     /// one shared stream — the server handles each connection on its own
     /// thread.
     request_pool: Arc<Mutex<Vec<LocalStream>>>,
-    input_tx: Arc<Mutex<Option<Sender<InputMsg>>>>,
+    input_tx: Arc<Mutex<Option<InputSender>>>,
 }
 
 struct InputMsg {
     session_id: String,
     data: Vec<u8>,
+}
+
+struct InputSender {
+    tx: SyncSender<InputMsg>,
+    queued: Arc<AtomicUsize>,
+    queued_bytes: Arc<AtomicUsize>,
+    capacity: usize,
+    byte_capacity: usize,
+}
+
+#[derive(Debug)]
+enum InputEnqueueError {
+    Full,
+    Disconnected,
+}
+
+struct PendingInput {
+    data: Vec<u8>,
+    offset: usize,
+}
+
+impl InputSender {
+    fn try_send(&self, msg: InputMsg) -> Result<(), InputEnqueueError> {
+        let bytes = msg.data.len();
+        self.queued
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                (queued < self.capacity).then_some(queued + 1)
+            })
+            .map_err(|_| InputEnqueueError::Full)?;
+        if self
+            .queued_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                queued
+                    .checked_add(bytes)
+                    .filter(|next| *next <= self.byte_capacity)
+            })
+            .is_err()
+        {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+            return Err(InputEnqueueError::Full);
+        }
+
+        self.tx.try_send(msg).map_err(|error| {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+            self.queued_bytes.fetch_sub(bytes, Ordering::Relaxed);
+            match error {
+                TrySendError::Full(_) => InputEnqueueError::Full,
+                TrySendError::Disconnected(_) => InputEnqueueError::Disconnected,
+            }
+        })
+    }
 }
 
 impl PragmaClient {
@@ -204,8 +263,9 @@ impl PragmaClient {
         &self,
         session_id: String,
         size: Option<(u16, u16)>,
+        cursor: Option<u64>,
     ) -> ClientResult<LocalStream> {
-        let request = request_attach(session_id, size);
+        let request = request_attach(session_id, size, cursor);
         self.open_event_stream(&request)
     }
 
@@ -226,19 +286,26 @@ impl PragmaClient {
     /// Enqueues terminal input on a dedicated writer connection.
     pub fn write(&self, session_id: String, data: impl Into<Vec<u8>>) -> ClientResult<()> {
         let mut guard = self.input_tx.lock()?;
+        let data = data.into();
+        if data.is_empty() {
+            return Ok(());
+        }
         if guard.is_none() {
             *guard = Some(self.start_input_writer());
         }
-        let msg = InputMsg {
-            session_id,
-            data: data.into(),
-        };
-        if let Err(err) = guard.as_ref().expect("input writer present").send(msg) {
-            let tx = self.start_input_writer();
-            let _ = tx.send(err.0);
-            *guard = Some(tx);
+        let msg = InputMsg { session_id, data };
+        match guard.as_ref().expect("input writer present").try_send(msg) {
+            Ok(()) => Ok(()),
+            Err(InputEnqueueError::Full) => Err(ClientError::Server(
+                "terminal input queue is full".to_string(),
+            )),
+            Err(InputEnqueueError::Disconnected) => {
+                *guard = None;
+                Err(ClientError::Server(
+                    "terminal input queue is disconnected".to_string(),
+                ))
+            }
         }
-        Ok(())
     }
 
     /// Resizes a server-owned PTY session.
@@ -450,24 +517,30 @@ impl PragmaClient {
         }
     }
 
-    fn start_input_writer(&self) -> Sender<InputMsg> {
-        let (tx, rx) = mpsc::channel::<InputMsg>();
+    fn start_input_writer(&self) -> InputSender {
+        let (tx, rx) = mpsc::sync_channel::<InputMsg>(INPUT_QUEUE_CAPACITY);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let client = self.clone();
+        let writer_queued = Arc::clone(&queued);
+        let writer_queued_bytes = Arc::clone(&queued_bytes);
         thread::spawn(move || {
             let mut conn: Option<LocalStream> = None;
-            while let Ok(mut msg) = rx.recv() {
-                while let Ok(next) = rx.try_recv() {
-                    if next.session_id == msg.session_id {
-                        msg.data.extend_from_slice(&next.data);
-                    } else {
-                        send_input_frame(&client, &mut conn, &msg);
-                        msg = next;
-                    }
-                }
-                send_input_frame(&client, &mut conn, &msg);
-            }
+            run_input_writer(
+                &rx,
+                &writer_queued,
+                &writer_queued_bytes,
+                |session_id, data| send_input_frame(&client, &mut conn, session_id, data),
+                thread::sleep,
+            );
         });
-        tx
+        InputSender {
+            tx,
+            queued,
+            queued_bytes,
+            capacity: INPUT_QUEUE_CAPACITY,
+            byte_capacity: INPUT_QUEUE_MAX_BYTES,
+        }
     }
 
     fn request(&self, request: &RequestFrame) -> ClientResult<()> {
@@ -852,9 +925,14 @@ pub fn request_spawn(
 }
 
 /// Builds an `Attach` request frame. A `Some` size resizes the PTY to the
-/// attacher's viewport; `None` attaches as a passive observer without resizing.
+/// attacher's viewport; `cursor` resumes terminal output at an absolute byte
+/// offset. `None` size attaches as a passive observer without resizing.
 #[must_use]
-pub fn request_attach(session_id: String, size: Option<(u16, u16)>) -> RequestFrame {
+pub fn request_attach(
+    session_id: String,
+    size: Option<(u16, u16)>,
+    cursor: Option<u64>,
+) -> RequestFrame {
     request_frame(
         RequestKind::Attach,
         Some(session_id),
@@ -862,7 +940,7 @@ pub fn request_attach(session_id: String, size: Option<(u16, u16)>) -> RequestFr
         None,
         size.map(|(cols, _)| cols),
         size.map(|(_, rows)| rows),
-        None,
+        cursor.map(|value| value.to_string()),
     )
 }
 
@@ -1189,23 +1267,130 @@ fn configure_rpc_stream(stream: &LocalStream) -> ClientResult<()> {
     Ok(())
 }
 
-fn send_input_frame(client: &PragmaClient, conn: &mut Option<LocalStream>, msg: &InputMsg) {
-    for _ in 0..2 {
-        if conn.is_none() {
-            let Ok(stream) = client.connect_with_spawn() else {
-                break;
-            };
-            let _ = stream.set_read_timeout(None);
-            *conn = Some(stream);
+fn run_input_writer(
+    rx: &Receiver<InputMsg>,
+    queued: &AtomicUsize,
+    queued_bytes: &AtomicUsize,
+    mut write: impl FnMut(&str, &[u8]) -> ClientResult<()>,
+    mut wait: impl FnMut(Duration),
+) {
+    let mut pending = HashMap::<String, VecDeque<PendingInput>>::new();
+    let mut ready = VecDeque::<String>::new();
+    let mut disconnected = false;
+
+    loop {
+        if ready.is_empty() {
+            if disconnected {
+                return;
+            }
+            match rx.recv() {
+                Ok(msg) => queue_input(&mut pending, &mut ready, msg),
+                Err(_) => return,
+            }
         }
-        let Some(stream) = conn.as_mut() else {
-            break;
-        };
-        if write_input_frame(stream, &msg.session_id, &msg.data).is_ok() {
+
+        if !disconnected {
+            loop {
+                match rx.try_recv() {
+                    Ok(msg) => queue_input(&mut pending, &mut ready, msg),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let session_id = ready.pop_front().expect("ready session present");
+        let session = pending
+            .get_mut(&session_id)
+            .expect("ready session has pending input");
+        let data = build_input_frame(session);
+        let mut backoff = INPUT_RETRY_INITIAL_BACKOFF;
+        loop {
+            match write(&session_id, &data) {
+                Ok(()) => break,
+                Err(error) => {
+                    eprintln!("terminal input write failed for session {session_id}: {error}");
+                    wait(backoff);
+                    backoff = backoff.saturating_mul(2).min(INPUT_RETRY_MAX_BACKOFF);
+                }
+            }
+        }
+        let completed = consume_input_frame(session, data.len());
+        queued.fetch_sub(completed, Ordering::Relaxed);
+        queued_bytes.fetch_sub(data.len(), Ordering::Relaxed);
+        if session.is_empty() {
+            pending.remove(&session_id);
+        } else {
+            ready.push_back(session_id);
+        }
+    }
+}
+
+fn queue_input(
+    pending: &mut HashMap<String, VecDeque<PendingInput>>,
+    ready: &mut VecDeque<String>,
+    msg: InputMsg,
+) {
+    let session = pending.entry(msg.session_id.clone()).or_default();
+    if session.is_empty() {
+        ready.push_back(msg.session_id);
+    }
+    session.push_back(PendingInput {
+        data: msg.data,
+        offset: 0,
+    });
+}
+
+fn build_input_frame(session: &VecDeque<PendingInput>) -> Vec<u8> {
+    let mut data = Vec::new();
+    for input in session {
+        let take = (INPUT_FRAME_DATA_MAX - data.len()).min(input.data.len() - input.offset);
+        data.extend_from_slice(&input.data[input.offset..input.offset + take]);
+        if data.len() == INPUT_FRAME_DATA_MAX {
             break;
         }
+    }
+    data
+}
+
+fn consume_input_frame(session: &mut VecDeque<PendingInput>, mut bytes: usize) -> usize {
+    let mut completed = 0;
+    while bytes > 0 {
+        let input = session.front_mut().expect("frame bytes have pending input");
+        let consumed = bytes.min(input.data.len() - input.offset);
+        input.offset += consumed;
+        bytes -= consumed;
+        if input.offset == input.data.len() {
+            session.pop_front();
+            completed += 1;
+        }
+    }
+    completed
+}
+
+fn send_input_frame(
+    client: &PragmaClient,
+    conn: &mut Option<LocalStream>,
+    session_id: &str,
+    data: &[u8],
+) -> ClientResult<()> {
+    if conn.is_none() {
+        let stream = client.connect_with_spawn()?;
+        stream.set_read_timeout(None)?;
+        *conn = Some(stream);
+    }
+    let result = write_input_frame(
+        conn.as_mut().expect("input connection initialized"),
+        session_id,
+        data,
+    );
+    if result.is_err() {
         *conn = None;
     }
+    result.map_err(ClientError::from)
 }
 
 fn rpc_error(error: RpcError) -> ClientError {
@@ -1219,10 +1404,38 @@ fn rpc_error(error: RpcError) -> ClientError {
 mod tests {
     use pragma_platform::ipc::LocalStream;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
 
     use super::{
-        configure_rpc_stream, configure_stream, instance_data_dir, spawn_wait, PragmaClient,
+        configure_rpc_stream, configure_stream, instance_data_dir, request_attach,
+        run_input_writer, spawn_wait, ClientError, InputMsg, InputSender, PragmaClient,
+        INPUT_FRAME_DATA_MAX, INPUT_QUEUE_MAX_BYTES,
     };
+
+    fn input_channel(capacity: usize) -> (InputSender, mpsc::Receiver<InputMsg>) {
+        let (tx, rx) = mpsc::sync_channel(capacity);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        (
+            InputSender {
+                tx,
+                queued,
+                queued_bytes,
+                capacity,
+                byte_capacity: INPUT_QUEUE_MAX_BYTES,
+            },
+            rx,
+        )
+    }
+
+    #[test]
+    fn attach_request_carries_output_cursor() {
+        let request = request_attach("tab".to_string(), Some((120, 40)), Some(42));
+        assert_eq!(request.data.as_deref(), Some("42"));
+        assert_eq!(request.cols, Some(120));
+        assert_eq!(request.rows, Some(40));
+    }
 
     /// A debug spawn compiles the server through `cargo run`, so it must get more
     /// than the release path's exec-only budget. Too short a debug wait is what
@@ -1257,6 +1470,130 @@ mod tests {
             .read_timeout()
             .expect("restored read timeout")
             .is_some());
+    }
+
+    #[test]
+    fn write_surfaces_full_and_disconnected_input_queues() {
+        let client = PragmaClient::new_socket("/tmp/pragma-test/daemon.sock".into());
+        let (sender, _rx) = input_channel(1);
+        *client.input_tx.lock().expect("input sender lock") = Some(sender);
+
+        client.write("one".to_string(), b"a").expect("first input");
+        assert!(matches!(
+            client.write("two".to_string(), b"b"),
+            Err(ClientError::Server(message)) if message == "terminal input queue is full"
+        ));
+
+        let (sender, rx) = input_channel(1);
+        drop(rx);
+        *client.input_tx.lock().expect("input sender lock") = Some(sender);
+        assert!(matches!(
+            client.write("one".to_string(), b"c"),
+            Err(ClientError::Server(message))
+                if message == "terminal input queue is disconnected"
+        ));
+        assert!(client.input_tx.lock().expect("input sender lock").is_none());
+    }
+
+    #[test]
+    fn input_writer_caps_frames_and_round_robins_sessions_in_order() {
+        let (sender, rx) = input_channel(3);
+        let queued = Arc::clone(&sender.queued);
+        let queued_bytes = Arc::clone(&sender.queued_bytes);
+        let first = vec![b'a'; INPUT_FRAME_DATA_MAX + 3];
+        assert!(sender
+            .try_send(InputMsg {
+                session_id: "one".to_string(),
+                data: first.clone(),
+            })
+            .is_ok());
+        assert!(sender
+            .try_send(InputMsg {
+                session_id: "one".to_string(),
+                data: b"tail".to_vec(),
+            })
+            .is_ok());
+        assert!(sender
+            .try_send(InputMsg {
+                session_id: "two".to_string(),
+                data: b"other".to_vec(),
+            })
+            .is_ok());
+        drop(sender);
+
+        let mut frames = Vec::new();
+        run_input_writer(
+            &rx,
+            &queued,
+            &queued_bytes,
+            |session_id, data| {
+                frames.push((session_id.to_string(), data.to_vec()));
+                Ok(())
+            },
+            |_| {},
+        );
+
+        assert_eq!(
+            frames
+                .iter()
+                .map(|(session_id, _)| session_id.as_str())
+                .collect::<Vec<_>>(),
+            ["one", "two", "one"]
+        );
+        assert!(frames
+            .iter()
+            .all(|(_, data)| data.len() <= INPUT_FRAME_DATA_MAX));
+        let one = frames
+            .iter()
+            .filter(|(session_id, _)| session_id == "one")
+            .flat_map(|(_, data)| data.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(one, [first, b"tail".to_vec()].concat());
+        assert_eq!(queued.load(Ordering::Relaxed), 0);
+        assert_eq!(queued_bytes.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn input_writer_retries_the_same_frame_before_later_bytes() {
+        let (sender, rx) = input_channel(2);
+        let queued = Arc::clone(&sender.queued);
+        let queued_bytes = Arc::clone(&sender.queued_bytes);
+        let first = vec![b'a'; INPUT_FRAME_DATA_MAX];
+        sender
+            .try_send(InputMsg {
+                session_id: "one".to_string(),
+                data: first.clone(),
+            })
+            .expect("first input");
+        sender
+            .try_send(InputMsg {
+                session_id: "one".to_string(),
+                data: b"later".to_vec(),
+            })
+            .expect("later input");
+        drop(sender);
+
+        let mut attempts = Vec::new();
+        let mut fail_first = true;
+        run_input_writer(
+            &rx,
+            &queued,
+            &queued_bytes,
+            |_, data| {
+                attempts.push(data.to_vec());
+                if fail_first {
+                    fail_first = false;
+                    Err(ClientError::Server("simulated disconnect".to_string()))
+                } else {
+                    Ok(())
+                }
+            },
+            |_| {},
+        );
+
+        assert_eq!(attempts, [first.clone(), first, b"later".to_vec()]);
+        assert_eq!(queued.load(Ordering::Relaxed), 0);
+        assert_eq!(queued_bytes.load(Ordering::Relaxed), 0);
     }
 
     #[test]

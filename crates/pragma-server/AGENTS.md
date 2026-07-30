@@ -166,7 +166,8 @@ Terminal output is raw bytes end-to-end. Every frame is:
 
 `FRAME_TAG_OUTPUT`, `FRAME_TAG_INPUT`, `write_output_frame`, and `write_input_frame`
 are load-bearing. Never route PTY input/output through JSON, and never decode UTF-8 on
-the hot path.
+the hot path. Input remains fire-and-forget, but `Registry::write_bytes` failures must be
+logged with session context instead of discarded; do not add per-keystroke responses.
 
 ## Lifecycle
 
@@ -183,17 +184,27 @@ session/connection code:
 - **All per-session memory is byte-bounded.** Scrollback is capped by frame
   count _and_ total output bytes (`SCROLLBACK_MAX_BYTES`); a frame-count cap
   alone is not a bound because coalesced frames are up to 256 KiB each.
+- **Filesystem deltas are advisory and bounded.** Each file subscriber has a small bounded
+  queue; a full queue drops redundant invalidations rather than blocking the OS watcher or
+  growing memory. Last-listener teardown drops the recursive watcher.
 - **Every write to a client socket is timeout-bounded** (`CLIENT_WRITE_TIMEOUT`
   via `SO_SNDTIMEO`). A client that stops draining must never pin a thread (or
   the writer mutex it holds) forever, and must not let its unbounded subscriber
   channel grow while the session keeps producing output.
+- **Terminal reconnects are cursor-based.** Each attach begins with a `Replay` event carrying
+  the absolute output-byte cursor. A valid cursor replays only missing bytes; a cursor older than
+  retained scrollback sets `reset`, making full bounded replay exceptional rather than a loop.
+  Keep cursor snapshot and subscriber registration under the scrollback lock.
+- **Input never queues through output coalescing.** PTY input writes directly to the PTY writer;
+  do not enqueue a flush marker first. The coalescer already flushes isolated echo immediately and
+  within 8ms during a burst, while a bounded output queue must never delay keyboard or wheel input.
 - **Never keep writing after a failed write.** A timed-out write may have left
   a partial frame on the wire; the connection's framing is untrustworthy and it
   must be shut down (`write_or_hang_up` / `write_frame_or_hang_up`).
-- **Exited sessions are reaped wherever their `Exit` frame is observed** — on
-  the live event path _and_ on scrollback replay (`Registry::remove_exited`),
-  so a session that dies while no client is attached is cleaned up on the next
-  attach instead of leaking its PTY fd and scrollback.
+- **Exited sessions remove themselves through a weak registry callback** after
+  recording their final `Exit` frame, including when no client is attached.
+  Live event forwarding and scrollback replay also call
+  `Registry::remove_exited` defensively; all paths are idempotent.
 
 ## Agent Status
 

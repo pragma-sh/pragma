@@ -8,7 +8,7 @@ const writeWhenReadyMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   ptyWrite: (...args: unknown[]) => ptyWriteMock(...args),
-  ptySpawn: (...args: unknown[]) => ptySpawnMock(...args),
+  ptySpawnDetached: (...args: unknown[]) => ptySpawnMock(...args),
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
@@ -45,6 +45,7 @@ describe("startAgentInTab", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
+    ptyWriteMock.mockResolvedValue(undefined);
     writeWhenReadyMock.mockReset();
   });
 
@@ -150,9 +151,10 @@ describe("startBackgroundAgentSession", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
+    ptyWriteMock.mockResolvedValue(undefined);
     ptySpawnMock.mockReset();
     writeWhenReadyMock.mockReset();
-    ptySpawnMock.mockResolvedValue({ onmessage: vi.fn() });
+    ptySpawnMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -167,7 +169,6 @@ describe("startBackgroundAgentSession", () => {
       "/cwd",
       expect.any(Number),
       expect.any(Number),
-      expect.any(Function),
     );
     // The start command is still gated behind the launch delay.
     expect(ptyWriteMock).not.toHaveBeenCalled();

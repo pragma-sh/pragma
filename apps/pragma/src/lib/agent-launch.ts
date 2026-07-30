@@ -1,7 +1,12 @@
 import { constants } from "@pragma/constants";
 
 import { modelLaunchArgs } from "@/lib/agent-model-selection";
-import { type AgentConfig, type AgentModelSelection, ptySpawn, ptyWrite } from "@/lib/tauri";
+import {
+  type AgentConfig,
+  type AgentModelSelection,
+  ptySpawnDetached,
+  ptyWrite,
+} from "@/lib/tauri";
 import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, terminalManager } from "@/lib/terminal-manager";
 
 /**
@@ -143,10 +148,14 @@ export async function startBackgroundAgentSession(
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
   const message = prefill?.trim() ? prefill : null;
 
-  const write = (data: string) => void ptyWrite(tabId, data);
-  await ptySpawn(tabId, worktreeId, cwd, cols, rows, () => {});
+  const write = (data: string) => {
+    void ptyWrite(tabId, data).catch((error: unknown) => {
+      console.error(`background agent input queue rejected data for ${tabId}`, error);
+    });
+  };
+  await ptySpawnDetached(tabId, worktreeId, cwd, cols, rows);
   window.setTimeout(() => {
-    void ptyWrite(tabId, `${command}\r`);
+    write(`${command}\r`);
     scheduleStartupInput(agent, write);
     if (message) {
       schedulePrefill(agent, message, write);

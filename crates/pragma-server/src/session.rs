@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -55,6 +56,23 @@ const OUTPUT_COALESCE_INTERVAL: Duration = Duration::from_millis(8);
 /// keeping individual frames well under the protocol's 16 MiB frame limit.
 const OUTPUT_COALESCE_MAX_BYTES: usize = 256 * 1024;
 
+/// Maximum number of reader messages waiting for the coalescer. Each output
+/// message comes from one bounded PTY read, so this also bounds queued bytes.
+/// A full queue backpressures the PTY reader; the coalescer never waits on a
+/// subscriber, so a slow client cannot make that wait indefinite.
+const OUTPUT_CHANNEL_CAPACITY: usize = 8;
+
+/// Number of live events one attached client may lag behind. Once full, the
+/// subscriber is disconnected and can reattach from bounded scrollback.
+const SUBSCRIBER_CHANNEL_CAPACITY: usize = 32;
+
+/// Maximum raw title bytes retained while waiting for an OSC terminator.
+/// Longer or malformed candidates are replayed as ordinary terminal output.
+const OSC_TITLE_MAX_BYTES: usize = 4 * 1024;
+
+/// `ESC ] N ;` is the longest prefix retained for an OSC 0/2 candidate.
+const OSC_PENDING_MAX_BYTES: usize = 4;
+
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error("pty error: {0}")]
@@ -70,6 +88,7 @@ mod anyhow_pty {
 }
 
 type PtyChild = Box<dyn portable_pty::Child + Send>;
+type ExitHandler = Box<dyn FnOnce(&Arc<Session>) + Send>;
 
 /// Whether [`Session::live_root_pid`] has already reaped the child's exit
 /// status, and if so, what it was.
@@ -85,11 +104,11 @@ enum ReapedExitCode {
 /// ships as binary all the way to xterm); `Title` and `Exit` are control events
 /// the coalescer forwards in order (flushing any buffered output first so
 /// ordering is preserved).
+#[derive(Debug)]
 enum OutputMsg {
     Output(Vec<u8>),
     Title(String),
     Exit(Option<i32>),
-    Flush,
 }
 
 /// Accumulates consecutive PTY output so a burst can be broadcast as a single
@@ -103,8 +122,12 @@ struct OutputCoalescer {
 }
 
 impl OutputCoalescer {
-    fn push(&mut self, data: &[u8]) {
-        self.pending.extend_from_slice(data);
+    fn push(&mut self, mut data: Vec<u8>) {
+        if self.pending.is_empty() {
+            self.pending = data;
+        } else {
+            self.pending.append(&mut data);
+        }
     }
 
     fn pending_len(&self) -> usize {
@@ -139,18 +162,22 @@ pub struct Session {
     /// Stashing it here lets the reader thread recover it instead of re-waiting.
     reaped_exit_code: Mutex<ReapedExitCode>,
     scrollback: Mutex<Scrollback>,
-    subscribers: Mutex<Vec<Sender<EventFrame>>>,
-    output_tx: Sender<OutputMsg>,
+    subscribers: Mutex<Vec<SyncSender<EventFrame>>>,
+    output_tx: SyncSender<OutputMsg>,
+    exited: AtomicBool,
+    on_exit: Mutex<Option<ExitHandler>>,
 }
 
 impl Session {
-    pub fn spawn(
+    /// Spawns a session and invokes `on_exit` after its final exit event is recorded.
+    pub fn spawn_with_exit_handler(
         id: String,
         worktree_id: String,
         cwd: String,
         cols: u16,
         rows: u16,
         server_socket: &str,
+        on_exit: impl FnOnce(&Arc<Session>) + Send + 'static,
     ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
             rows,
@@ -181,7 +208,7 @@ impl Session {
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
         drop(pair.slave);
-        let (output_tx, output_rx) = mpsc::channel::<OutputMsg>();
+        let (output_tx, output_rx) = mpsc::sync_channel::<OutputMsg>(OUTPUT_CHANNEL_CAPACITY);
 
         let session = Arc::new(Self {
             id,
@@ -195,13 +222,23 @@ impl Session {
             scrollback: Mutex::new(Scrollback::new(SCROLLBACK_LIMIT)),
             subscribers: Mutex::new(Vec::new()),
             output_tx,
+            exited: AtomicBool::new(false),
+            on_exit: Mutex::new(Some(Box::new(on_exit))),
         });
         Self::start_coalescer(Arc::clone(&session), output_rx);
         Self::start_reader(Arc::clone(&session), reader);
         Ok(session)
     }
 
-    pub fn attach(&self) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), SessionError> {
+    /// Returns whether the shell's exit event has been recorded.
+    pub fn has_exited(&self) -> bool {
+        self.exited.load(Ordering::Acquire)
+    }
+
+    pub fn attach(
+        &self,
+        cursor: Option<u64>,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), SessionError> {
         // Hold the scrollback lock while registering the subscriber so the reader
         // thread cannot broadcast an event that lands in both the snapshot and the
         // channel — that would replay duplicated output to the freshly attached
@@ -210,12 +247,12 @@ impl Session {
             .scrollback
             .lock()
             .map_err(|_| SessionError::LockPoisoned)?;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(SUBSCRIBER_CHANNEL_CAPACITY);
         self.subscribers
             .lock()
             .map_err(|_| SessionError::LockPoisoned)?
             .push(tx);
-        let scrollback = scrollback_guard.frames();
+        let scrollback = scrollback_guard.frames_since(&self.id, cursor);
         Ok((scrollback, rx))
     }
 
@@ -232,7 +269,6 @@ impl Session {
     }
 
     pub fn write_bytes(&self, data: &[u8]) -> Result<(), SessionError> {
-        let _ = self.output_tx.send(OutputMsg::Flush);
         let mut writer = self.writer.lock().map_err(|_| SessionError::LockPoisoned)?;
         writer.write_all(data)?;
         writer.flush()?;
@@ -401,7 +437,7 @@ impl Session {
                 };
                 match msg {
                     OutputMsg::Output(data) => {
-                        coalescer.push(&data);
+                        coalescer.push(data);
                         if coalescer.pending_len() >= OUTPUT_COALESCE_MAX_BYTES {
                             session.broadcast_output(coalescer.flush());
                             last_flush = Instant::now();
@@ -421,11 +457,13 @@ impl Session {
                             session_id: session.id.clone(),
                             code,
                         });
+                        session.exited.store(true, Ordering::Release);
+                        if let Ok(mut handler) = session.on_exit.lock() {
+                            if let Some(handler) = handler.take() {
+                                handler(&session);
+                            }
+                        }
                         break;
-                    }
-                    OutputMsg::Flush => {
-                        session.broadcast_output(coalescer.flush());
-                        last_flush = instant_before_coalesce_window();
                     }
                 }
             }
@@ -448,9 +486,27 @@ impl Session {
             scrollback.push(event.clone());
         }
         if let Ok(mut subscribers) = self.subscribers.lock() {
-            subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+            let disconnected = fan_out(&mut subscribers, event);
+            if disconnected > 0 {
+                eprintln!(
+                    "session {} disconnected {disconnected} stalled output subscriber(s)",
+                    self.id
+                );
+            }
         }
     }
+}
+
+/// Sends without waiting. A full subscriber has already missed the live stream,
+/// so keeping it would either lose bytes silently or apply unbounded backpressure.
+/// Disconnecting makes reattach + bounded scrollback the sole recovery path.
+fn fan_out(subscribers: &mut Vec<SyncSender<EventFrame>>, event: &EventFrame) -> usize {
+    let before = subscribers.len();
+    subscribers.retain(|tx| match tx.try_send(event.clone()) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
+    });
+    before - subscribers.len()
 }
 
 fn instant_before_coalesce_window() -> Instant {
@@ -484,8 +540,8 @@ pub struct OscParser {
     /// State of the parser — see the impl for the transitions.
     state: OscState,
     /// Bytes tentatively held while we determine whether they're part of an
-    /// OSC 0/2 sequence or normal text. Flushed on transition out of
-    /// [`OscState::Esc`] / [`OscState::OscNumber`].
+    /// OSC 0/2 sequence or normal text. Never exceeds
+    /// [`OSC_PENDING_MAX_BYTES`].
     pending: Vec<u8>,
     /// The OSC number being collected (only valid in [`OscState::OscBody`]).
     osc_number: u8,
@@ -526,7 +582,7 @@ impl OscParser {
         // Coalesce consecutive text bytes into a single `Output` chunk so
         // steady-state PTY output (which is mostly plain text) doesn't
         // allocate one `Vec` per byte.
-        let mut text_buf = Vec::new();
+        let mut text_buf = Vec::with_capacity(bytes.len());
         // A `while` loop with an explicit index lets us re-process the
         // current byte after a state change (e.g. rolling an `ESC` we
         // tentatively held back into the OSC body and re-handling the
@@ -540,9 +596,6 @@ impl OscParser {
                         // Tentative — hold the `ESC` until we know whether
                         // it's the start of an OSC 0/2 we should strip or
                         // some other escape we should pass through.
-                        if !text_buf.is_empty() {
-                            out.push(OscChunk::Output(std::mem::take(&mut text_buf)));
-                        }
                         self.pending.push(byte);
                         self.state = OscState::Esc;
                     } else {
@@ -556,12 +609,11 @@ impl OscParser {
                         self.pending.push(byte);
                         self.state = OscState::Osc;
                     } else {
-                        // Not an OSC — emit the held `ESC` plus this byte
-                        // as plain output and resume.
-                        let mut flushed = std::mem::take(&mut self.pending);
-                        flushed.push(byte);
-                        out.push(OscChunk::Output(flushed));
-                        self.state = OscState::Ground;
+                        // Keep ordinary ANSI sequences in this read's output
+                        // buffer. Full-screen TUIs emit an escape every few
+                        // bytes; splitting each one into its own channel
+                        // message makes redraw throughput allocation-bound.
+                        self.replay_candidate(&mut text_buf, Some(byte));
                     }
                 }
                 OscState::Osc => {
@@ -570,13 +622,9 @@ impl OscParser {
                         self.osc_number = byte - b'0';
                         self.state = OscState::OscNumber;
                     } else {
-                        // Not OSC 0/2 — emit the held `ESC ] <byte>` as plain
-                        // output (DCS and other OSC numbers are still part
-                        // of the terminal stream for xterm to handle).
-                        let mut flushed = std::mem::take(&mut self.pending);
-                        flushed.push(byte);
-                        out.push(OscChunk::Output(flushed));
-                        self.state = OscState::Ground;
+                        // Not OSC 0/2 — preserve it in the same output chunk
+                        // for xterm to handle.
+                        self.replay_candidate(&mut text_buf, Some(byte));
                     }
                 }
                 OscState::OscNumber => {
@@ -585,17 +633,14 @@ impl OscParser {
                         self.body.clear();
                         self.state = OscState::OscBody;
                     } else if byte.is_ascii_digit() {
-                        // OSC numbers longer than one digit are not
-                        // interesting for tab titles; keep the digits as
-                        // pending until we see the `;` or give up.
-                        self.pending.push(byte);
+                        // Only exact OSC 0 and 2 are title candidates. Replay
+                        // a longer number immediately instead of retaining an
+                        // attacker-controlled run of digits.
+                        self.replay_candidate(&mut text_buf, Some(byte));
                     } else {
                         // Malformed — flush the held `ESC ] N <byte>` to the
                         // output stream and resume.
-                        let mut flushed = std::mem::take(&mut self.pending);
-                        flushed.push(byte);
-                        out.push(OscChunk::Output(flushed));
-                        self.state = OscState::Ground;
+                        self.replay_candidate(&mut text_buf, Some(byte));
                     }
                 }
                 OscState::OscBody => {
@@ -604,6 +649,9 @@ impl OscParser {
                         // other numbers were filtered out above).
                         if matches!(self.osc_number, 0 | 2) {
                             let title = String::from_utf8_lossy(&self.body).into_owned();
+                            if !text_buf.is_empty() {
+                                out.push(OscChunk::Output(std::mem::take(&mut text_buf)));
+                            }
                             out.push(OscChunk::Title(title));
                         }
                         self.reset();
@@ -611,6 +659,10 @@ impl OscParser {
                         // Possible start of the ST (`ESC \`) terminator. Hold
                         // the `ESC` and wait for its companion.
                         self.state = OscState::OscSt;
+                    } else if self.body.len() == OSC_TITLE_MAX_BYTES {
+                        // Candidate exceeded the title budget. Replay every
+                        // retained byte plus the byte that crossed the cap.
+                        self.replay_candidate(&mut text_buf, Some(byte));
                     } else {
                         self.body.push(byte);
                     }
@@ -620,6 +672,9 @@ impl OscParser {
                         // ST terminator — emit the title.
                         if matches!(self.osc_number, 0 | 2) {
                             let title = String::from_utf8_lossy(&self.body).into_owned();
+                            if !text_buf.is_empty() {
+                                out.push(OscChunk::Output(std::mem::take(&mut text_buf)));
+                            }
                             out.push(OscChunk::Title(title));
                         }
                         self.reset();
@@ -628,8 +683,12 @@ impl OscParser {
                         // allow embedded escapes inside OSC bodies). Roll
                         // it into the body, switch back to OscBody, and
                         // re-process this same byte as body content.
-                        self.body.push(0x1B);
-                        self.state = OscState::OscBody;
+                        if self.body.len() == OSC_TITLE_MAX_BYTES {
+                            self.replay_candidate(&mut text_buf, None);
+                        } else {
+                            self.body.push(0x1B);
+                            self.state = OscState::OscBody;
+                        }
                         continue;
                     }
                 }
@@ -639,22 +698,37 @@ impl OscParser {
         if !text_buf.is_empty() {
             out.push(OscChunk::Output(text_buf));
         }
+        debug_assert!(self.pending.len() <= OSC_PENDING_MAX_BYTES);
+        debug_assert!(self.body.len() <= OSC_TITLE_MAX_BYTES);
         out
     }
 
-    /// Drains any bytes still held in pending state at end of stream. Returns
-    /// them as an `Output` chunk — they were either an incomplete OSC sequence
-    /// or a trailing `ESC` whose companion never arrived.
+    /// Drains any incomplete candidate at end of stream as ordinary output.
+    /// No terminal bytes disappear merely because an OSC title was malformed.
     pub fn finish(&mut self) -> Vec<OscChunk> {
-        let mut out = Vec::new();
-        if !self.pending.is_empty() {
-            out.push(OscChunk::Output(std::mem::take(&mut self.pending)));
+        if self.state == OscState::Ground {
+            Vec::new()
+        } else {
+            let mut candidate = Vec::with_capacity(self.pending.len() + self.body.len() + 1);
+            self.replay_candidate(&mut candidate, None);
+            vec![OscChunk::Output(candidate)]
         }
-        // An in-progress body (no terminator arrived before EOF) is discarded:
-        // the title is incomplete and emitting a half-built one would be worse
-        // than the next session's clean OSC sequence.
-        self.reset();
-        out
+    }
+
+    /// Replays every retained candidate byte into the current output chunk and
+    /// returns to ground state.
+    fn replay_candidate(&mut self, output: &mut Vec<u8>, next: Option<u8>) {
+        let trailing_esc = self.state == OscState::OscSt;
+        output.append(&mut self.pending);
+        output.append(&mut self.body);
+        if trailing_esc {
+            output.push(0x1B);
+        }
+        if let Some(byte) = next {
+            output.push(byte);
+        }
+        self.state = OscState::Ground;
+        self.osc_number = 0;
     }
 
     fn reset(&mut self) {
@@ -671,6 +745,8 @@ pub struct Scrollback {
     /// Total bytes of `Output` frame data currently buffered — kept in sync
     /// with `frames` so eviction never has to rescan the deque.
     output_bytes: usize,
+    /// Absolute terminal output bytes observed over session lifetime.
+    total_output_bytes: u64,
     frames: VecDeque<EventFrame>,
 }
 
@@ -684,12 +760,17 @@ impl Scrollback {
             limit,
             max_bytes,
             output_bytes: 0,
+            total_output_bytes: 0,
             frames: VecDeque::new(),
         }
     }
 
     pub fn push(&mut self, frame: EventFrame) {
-        self.output_bytes += frame_output_bytes(&frame);
+        let output_bytes = frame_output_bytes(&frame);
+        self.output_bytes += output_bytes;
+        self.total_output_bytes = self
+            .total_output_bytes
+            .saturating_add(u64::try_from(output_bytes).unwrap_or(u64::MAX));
         self.frames.push_back(frame);
         // Evict from the front until both budgets hold, but never evict the
         // frame that was just pushed — a single oversized frame stays until
@@ -705,8 +786,49 @@ impl Scrollback {
         }
     }
 
+    #[cfg(test)]
     pub fn frames(&self) -> Vec<EventFrame> {
         self.frames.iter().cloned().collect()
+    }
+
+    /// Returns retained terminal events after `cursor`, prefixed by actual
+    /// replay start. Valid reconnect cursors produce only missing bytes; stale
+    /// cursors rebuild from oldest retained output.
+    pub fn frames_since(&self, session_id: &str, cursor: Option<u64>) -> Vec<EventFrame> {
+        let retained_bytes = u64::try_from(self.output_bytes).unwrap_or(u64::MAX);
+        let retained_start = self.total_output_bytes.saturating_sub(retained_bytes);
+        let can_resume =
+            cursor.is_some_and(|value| value >= retained_start && value <= self.total_output_bytes);
+        let replay_cursor = if can_resume {
+            cursor.unwrap_or(retained_start)
+        } else {
+            retained_start
+        };
+        let mut replay = vec![EventFrame::Replay {
+            session_id: session_id.to_string(),
+            cursor: replay_cursor,
+            reset: cursor.is_some() && !can_resume,
+        }];
+        let mut position = retained_start;
+        for frame in &self.frames {
+            if let EventFrame::Output { session_id, data } = frame {
+                let data_len = u64::try_from(data.len()).unwrap_or(u64::MAX);
+                let end = position.saturating_add(data_len);
+                if end > replay_cursor {
+                    let skip = usize::try_from(replay_cursor.saturating_sub(position))
+                        .unwrap_or(data.len())
+                        .min(data.len());
+                    replay.push(EventFrame::Output {
+                        session_id: session_id.clone(),
+                        data: data[skip..].to_vec(),
+                    });
+                }
+                position = end;
+            } else if position >= replay_cursor {
+                replay.push(frame.clone());
+            }
+        }
+        replay
     }
 
     /// True when the buffered `Output` frame data contains `needle`, including
@@ -858,10 +980,12 @@ fn path_with_cli_dir_from(cli_path: &Path, existing: Option<std::ffi::OsString>)
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::mpsc::{self, TryRecvError, TrySendError};
 
     use super::{
-        gateway_env, path_with_cli_dir_from, pragma_cli_path_from, project_shell, thread, Duration,
-        Instant, OscChunk, OscParser, OutputCoalescer, Scrollback, Session,
+        fan_out, gateway_env, path_with_cli_dir_from, pragma_cli_path_from, project_shell, thread,
+        Duration, Instant, OscChunk, OscParser, OutputCoalescer, OutputMsg, Scrollback, Session,
+        OSC_PENDING_MAX_BYTES, OSC_TITLE_MAX_BYTES, OUTPUT_CHANNEL_CAPACITY,
     };
     use pragma_constants::CONSTANTS;
     use pragma_protocol::EventFrame;
@@ -872,12 +996,78 @@ mod tests {
         // Nothing buffered yet.
         assert_eq!(coalescer.flush(), None);
         // Consecutive pushes accumulate and flush as a single concatenated frame.
-        coalescer.push(b"foo");
-        coalescer.push(b"bar");
+        coalescer.push(b"foo".to_vec());
+        coalescer.push(b"bar".to_vec());
         assert_eq!(coalescer.pending_len(), 6);
         assert_eq!(coalescer.flush(), Some(b"foobar".to_vec()));
         // A flush drains the buffer.
         assert_eq!(coalescer.flush(), None);
+    }
+
+    #[test]
+    fn reader_channel_is_bounded_and_preserves_order_after_backpressure() {
+        let (tx, rx) = mpsc::sync_channel(OUTPUT_CHANNEL_CAPACITY);
+        let capacity = u8::try_from(OUTPUT_CHANNEL_CAPACITY).expect("test capacity fits in u8");
+        for byte in 0..capacity {
+            tx.try_send(OutputMsg::Output(vec![byte]))
+                .expect("queue has capacity");
+        }
+        let overflow = match tx.try_send(OutputMsg::Output(vec![capacity])) {
+            Err(TrySendError::Full(msg)) => msg,
+            other => panic!("expected full reader queue, got {other:?}"),
+        };
+
+        assert!(matches!(
+            rx.recv().expect("first queued message"),
+            OutputMsg::Output(data) if data == [0]
+        ));
+        tx.try_send(overflow).expect("space released by consumer");
+        for byte in 1..=capacity {
+            assert!(matches!(
+                rx.recv().expect("queued message"),
+                OutputMsg::Output(data) if data == [byte]
+            ));
+        }
+    }
+
+    #[test]
+    fn full_subscriber_is_disconnected_without_losing_scrollback() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let mut subscribers = vec![tx];
+        let mut scrollback = Scrollback::new(10);
+        let first = EventFrame::Output {
+            session_id: "s".to_string(),
+            data: b"first".to_vec(),
+        };
+        let second = EventFrame::Output {
+            session_id: "s".to_string(),
+            data: b"second".to_vec(),
+        };
+
+        scrollback.push(first.clone());
+        fan_out(&mut subscribers, &first);
+        scrollback.push(second);
+        fan_out(
+            &mut subscribers,
+            scrollback.frames().last().expect("second frame"),
+        );
+
+        assert!(subscribers.is_empty(), "full subscriber must be removed");
+        assert!(matches!(
+            rx.recv().expect("already queued event remains readable"),
+            EventFrame::Output { data, .. } if data == b"first"
+        ));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Disconnected)));
+        let replayed: Vec<u8> = scrollback
+            .frames()
+            .into_iter()
+            .filter_map(|frame| match frame {
+                EventFrame::Output { data, .. } => Some(data),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(replayed, b"firstsecond");
     }
 
     /// Spawns a real shell on a real PTY and drives it until `needle` appears.
@@ -889,13 +1079,14 @@ mod tests {
     /// echoing, and shows up here rather than as a terminal that opens blank.
     fn spawn_and_expect(command: &str, needle: &[u8]) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let session = Session::spawn(
+        let session = Session::spawn_with_exit_handler(
             "test-tab".to_string(),
             "test-worktree".to_string(),
             dir.path().to_string_lossy().into_owned(),
             80,
             24,
             "unused-socket",
+            |_| {},
         )
         .expect("a shell spawns on a pseudo-terminal");
 
@@ -1033,6 +1224,63 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn scrollback_resumes_from_an_absolute_output_cursor() {
+        let mut scrollback = Scrollback::with_max_bytes(100, 100);
+        for data in [b"abcd".to_vec(), b"efgh".to_vec()] {
+            scrollback.push(EventFrame::Output {
+                session_id: "s".to_string(),
+                data,
+            });
+        }
+
+        let replay = scrollback.frames_since("s", Some(3));
+
+        assert!(matches!(
+            replay.first(),
+            Some(EventFrame::Replay {
+                cursor: 3,
+                reset: false,
+                ..
+            })
+        ));
+        let output = replay
+            .into_iter()
+            .filter_map(|frame| match frame {
+                EventFrame::Output { data, .. } => Some(data),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(output, b"defgh");
+    }
+
+    #[test]
+    fn stale_output_cursor_requests_one_bounded_reset() {
+        let mut scrollback = Scrollback::with_max_bytes(100, 4);
+        for data in [b"abcd".to_vec(), b"efgh".to_vec()] {
+            scrollback.push(EventFrame::Output {
+                session_id: "s".to_string(),
+                data,
+            });
+        }
+
+        let replay = scrollback.frames_since("s", Some(2));
+
+        assert!(matches!(
+            replay.first(),
+            Some(EventFrame::Replay {
+                cursor: 4,
+                reset: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            replay.get(1),
+            Some(EventFrame::Output { data, .. }) if data == b"efgh"
+        ));
+    }
+
     /// The alternate-screen readiness scan must find a sequence even when the
     /// PTY reader split it across two output frames.
     #[test]
@@ -1146,6 +1394,67 @@ mod tests {
     }
 
     #[test]
+    fn extracts_title_at_body_cap() {
+        let title = vec![b'x'; OSC_TITLE_MAX_BYTES];
+        let mut input = b"\x1b]0;".to_vec();
+        input.extend_from_slice(&title);
+        input.push(0x07);
+
+        let (outputs, titles) = split(feed(&input));
+
+        assert!(outputs.is_empty());
+        assert_eq!(titles, vec![String::from_utf8(title).expect("ASCII title")]);
+    }
+
+    #[test]
+    fn oversized_title_is_replayed_as_ordinary_output() {
+        let mut input = b"before\x1b]2;".to_vec();
+        input.extend(std::iter::repeat_n(b'x', OSC_TITLE_MAX_BYTES + 1));
+        input.extend_from_slice(b"\x07after");
+        let mut parser = OscParser::default();
+
+        let (outputs, titles) = split(parser.push(&input));
+        let output: Vec<u8> = outputs.into_iter().flatten().collect();
+
+        assert_eq!(output, input);
+        assert!(titles.is_empty());
+        assert!(parser.pending.len() <= OSC_PENDING_MAX_BYTES);
+        assert!(parser.body.len() <= OSC_TITLE_MAX_BYTES);
+    }
+
+    #[test]
+    fn unterminated_title_is_replayed_on_finish() {
+        let input = b"\x1b]0;unfinished\x1b";
+        let mut parser = OscParser::default();
+        let mut chunks = parser.push(input);
+        chunks.extend(parser.finish());
+        let (outputs, titles) = split(chunks);
+
+        assert_eq!(outputs.into_iter().flatten().collect::<Vec<_>>(), input);
+        assert!(titles.is_empty());
+    }
+
+    #[test]
+    fn oversized_osc_number_never_grows_pending_or_loses_bytes() {
+        let mut input = b"\x1b]".to_vec();
+        input.extend(std::iter::repeat_n(b'0', OSC_PENDING_MAX_BYTES * 1024));
+        input.extend_from_slice(b";not-a-title\x07");
+        let mut parser = OscParser::default();
+        let mut chunks = Vec::new();
+
+        for byte in &input {
+            chunks.extend(parser.push(std::slice::from_ref(byte)));
+            assert!(parser.pending.len() <= OSC_PENDING_MAX_BYTES);
+            assert!(parser.body.len() <= OSC_TITLE_MAX_BYTES);
+        }
+        chunks.extend(parser.finish());
+        let (outputs, titles) = split(chunks);
+
+        assert_eq!(outputs.into_iter().flatten().collect::<Vec<_>>(), input);
+        assert!(titles.is_empty());
+    }
+
+    #[test]
     fn leaves_osc1_icon_name_alone() {
         // OSC 1 (icon name) must reach xterm unchanged — we only care about
         // window title (OSC 0/2) for the tab strip.
@@ -1159,11 +1468,25 @@ mod tests {
     #[test]
     fn leaves_non_osc_escape_sequences_alone() {
         // CSI cursor move (`ESC [ 2 J`) and other escapes must pass through.
-        let chunks = feed(b"\x1b[2J\x1b[Hprompt$ ");
+        let input = b"\x1b[2J\x1b[31mred\x1b[0m\x1b[Hprompt$ ";
+        let chunks = feed(input);
         let (outputs, titles) = split(chunks);
-        let output_bytes: Vec<u8> = outputs.into_iter().flatten().collect();
-        assert_eq!(output_bytes, b"\x1b[2J\x1b[Hprompt$ ".to_vec());
+        assert_eq!(outputs, vec![input.to_vec()]);
         assert!(titles.is_empty());
+    }
+
+    #[test]
+    fn only_titles_split_escape_heavy_output() {
+        let chunks = feed(b"before\x1b[31mred\x1b]0;title\x07\x1b[0mafter");
+
+        assert_eq!(
+            chunks,
+            vec![
+                OscChunk::Output(b"before\x1b[31mred".to_vec()),
+                OscChunk::Title("title".to_string()),
+                OscChunk::Output(b"\x1b[0mafter".to_vec()),
+            ]
+        );
     }
 
     #[test]
