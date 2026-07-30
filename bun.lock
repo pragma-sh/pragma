@@ -308,6 +308,20 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/grok-plugin": {
+      "name": "@pragma/grok-plugin",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pragma/plugin": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/opencode-plugin": {
       "name": "@pragma/opencode-plugin",
       "version": "0.0.0",
@@ -1291,6 +1305,8 @@
     "@pragma/github-copilot-cli-plugin": ["@pragma/github-copilot-cli-plugin@workspace:packages/github-copilot-cli-plugin"],
 
     "@pragma/github-helpers": ["@pragma/github-helpers@workspace:packages/github-helpers"],
+
+    "@pragma/grok-plugin": ["@pragma/grok-plugin@workspace:packages/grok-plugin"],
 
     "@pragma/opencode-plugin": ["@pragma/opencode-plugin@workspace:packages/opencode-plugin"],
 

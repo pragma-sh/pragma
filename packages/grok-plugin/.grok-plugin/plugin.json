@@ -1,0 +1,8 @@
+{
+  "name": "pragma-grok",
+  "version": "0.0.0",
+  "description": "Reports Grok Build agent status (running / done / attention) to Pragma automatically.",
+  "author": {
+    "name": "Pragma"
+  }
+}
