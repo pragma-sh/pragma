@@ -14,7 +14,13 @@ export function startRefreshLoop(
   const runRefresh = () => {
     if (refreshing) return;
     refreshing = true;
-    const result = refresh();
+    let result: void | Promise<unknown>;
+    try {
+      result = refresh();
+    } catch {
+      refreshing = false;
+      return;
+    }
     if (result instanceof Promise) {
       void result.then(
         () => {
