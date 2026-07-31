@@ -57,9 +57,8 @@ than no guide.
 - **Mirror it in the skills.** Canonical first-party skill sources live under `skills/`
   and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes). If you
   change a workflow here, update the relevant skill (`pragma-architecture`,
-  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`,
-  `performance-benchmark`) too, and add a new
-  skill when you add a substantial new workflow.
+  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`) too, and
+  add a new skill when you add a substantial new workflow.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
   AGENTS.md) so the next person (or agent) doesn't rediscover it.
@@ -107,7 +106,6 @@ than no guide.
 │   ├── pragma-protocol/         # Shared wire frames → see crates/pragma-protocol/AGENTS.md
 │   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
-│   ├── bench/                   # Terminal latency benchmark (dual TS + Rust) → see packages/bench/AGENTS.md
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
@@ -165,11 +163,6 @@ than no guide.
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
-- A terminal latency measurement → `packages/bench`. Which tier depends on what can be
-  measured honestly: transport in Rust, xterm's parser in TypeScript, and the frontend's
-  own policy as an `apps/pragma/src/**/*.bench.ts` file (it needs jsdom and a mocked
-  `@xterm/addon-webgl`). Never benchmark GPU paint headlessly — the number would describe
-  the harness.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
@@ -215,11 +208,6 @@ bun run rust:clippy        # cargo clippy -D warnings
 bun run rust:test          # cargo test --workspace
 bun run fallow:check       # fallow audit (TS/JS): block on issues this branch introduces
 bun run check              # Lint + format/type checks + rustfmt/clippy (tests run separately)
-
-# Terminal latency benchmark (see packages/bench/AGENTS.md)
-bun run bench              # All tiers, compared against the local baseline
-bun run bench -- --scale quick --reps 2   # Fast local loop
-bun run bench:audit        # CI: audit against the committed CI baseline
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
@@ -283,10 +271,7 @@ Shared rules:
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
-compile-only Tauri build on macOS, Linux, **and** Windows. A separate **Bench** workflow (`.github/workflows/bench.yml`) runs the terminal latency
-benchmark on each PR. It fails only on `structural` counters — measured to be
-bit-identical run to run — and reports every timing metric's drift without gating it;
-see `packages/bench/AGENTS.md` for why a guessed timing threshold is worse than none.
+compile-only Tauri build on macOS, Linux, **and** Windows.
 
 A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the

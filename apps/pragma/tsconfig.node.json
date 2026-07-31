@@ -8,10 +8,5 @@
     "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": [
-    "vite.config.ts",
-    "vitest.bench.config.ts",
-    "src-tauri/*.test.ts",
-    "src/**/*.bench.ts"
-  ]
+  "include": ["vite.config.ts", "src-tauri/*.test.ts"]
 }

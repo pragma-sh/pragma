@@ -182,16 +182,6 @@
         "vitest": "^4.1.8",
       },
     },
-    "packages/bench": {
-      "name": "@pragma/bench",
-      "version": "0.0.0",
-      "devDependencies": {
-        "@types/node": "^24.12.3",
-        "@xterm/headless": "6.1.0-beta.292",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.8",
-      },
-    },
     "packages/claude-code-plugin": {
       "name": "@pragma/claude-code-plugin",
       "version": "0.0.0",
@@ -1239,8 +1229,6 @@
 
     "@pragma/automations": ["@pragma/automations@workspace:packages/automations"],
 
-    "@pragma/bench": ["@pragma/bench@workspace:packages/bench"],
-
     "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
 
     "@pragma/codex-plugin": ["@pragma/codex-plugin@workspace:packages/codex-plugin"],
@@ -1754,8 +1742,6 @@
     "@xterm/addon-web-links": ["@xterm/addon-web-links@0.12.0", "", {}, "sha512-4Smom3RPyVp7ZMYOYDoC/9eGJJJqYhnPLGGqJ6wOBfB8VxPViJNSKdgRYb8NpaM6YSelEKbA2SStD7lGyqaobw=="],
 
     "@xterm/addon-webgl": ["@xterm/addon-webgl@0.20.0-beta.291", "", { "peerDependencies": { "@xterm/xterm": "^6.1.0-beta.292" } }, "sha512-gH7r5g8f2NWMhBtaeApuwLQTJmX4uq7zT0okjeNWkFAD0nxzbUPB+kt6sogZZ5K90XYPt2OLu/bhuvF6DmKqOQ=="],
-
-    "@xterm/headless": ["@xterm/headless@6.1.0-beta.292", "", {}, "sha512-Es2xZ95wJb8n3hIfTfEh4AYzf7wXVQX1dVdA6idFFjRm26p+x6LZEgurXD6ZPwwsbXSfJXcAuzhYQruSw9Ccgg=="],
 
     "@xterm/xterm": ["@xterm/xterm@6.1.0-beta.292", "", {}, "sha512-17zqK5tM/l6qeD7McF42OrEJ6w3XqJ2vFVKdWqu0cYLzdFqMWAHp2oFNc8Fj5DmqDSl1E1FZEg6IFflDllTvLA=="],
 

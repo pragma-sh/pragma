@@ -23,12 +23,6 @@ apps/*/src-tauri/gen/
 # Test / coverage
 coverage/
 
-# Benchmark output. Raw reports are per-run artifacts; local baselines describe
-# one developer's machine and would only ever produce merge conflicts. The CI
-# baselines in packages/bench/baselines/*.json are committed on purpose.
-packages/bench/reports/
-packages/bench/baselines/local/
-
 # Editor / OS
 .DS_Store
 *.local
