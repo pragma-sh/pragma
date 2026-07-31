@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { ModelKind } from "./constants.ts";
+import type { ModelInsights } from "./model-insights.ts";
 import { pickModel } from "./pick-model.ts";
 
 /** Options for {@link createPragmaSession}. */
@@ -30,6 +31,8 @@ export interface CreatePragmaSessionOptions {
   customTools?: ToolDefinition[];
   /** Explicit model to run. Defaults to {@link pickModel}. */
   model?: Model<Api>;
+  /** modelgrep data used when this call has to pick the model itself. */
+  insights?: ModelInsights;
 }
 
 /** Result of {@link createPragmaSession}. */
@@ -102,6 +105,7 @@ export async function createPragmaSession(
     pickModel(options.modelKind, {
       authStorage: options.authStorage,
       registry: options.registry,
+      insights: options.insights,
     });
   if (!model) {
     throw new Error(

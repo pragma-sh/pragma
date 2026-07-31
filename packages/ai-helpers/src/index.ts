@@ -24,14 +24,31 @@ export {
   type GenerateCommitPlanOptions,
   NoWorktreeChangesError,
 } from "./commit-plan.ts";
-export { type ModelKind, PICK_MODEL } from "./constants.ts";
+export { MODEL_INSIGHTS, type ModelKind, PICK_MODEL, type PriceAnchor } from "./constants.ts";
 export {
   type DatedModel,
   isModelRecent,
   isOlderThanMonths,
   parseModelReleaseDate,
 } from "./model-date.ts";
-export { pickModel, selectModel, selectModelCandidates } from "./pick-model.ts";
+export {
+  indexInsights,
+  insightCachePath,
+  insightFor,
+  insightKey,
+  loadModelInsights,
+  type ModelInsight,
+  type ModelInsights,
+  NO_INSIGHTS,
+} from "./model-insights.ts";
+export {
+  pickModel,
+  priceCeiling,
+  quantile,
+  selectModel,
+  selectModelCandidates,
+  type SelectModelOptions,
+} from "./pick-model.ts";
 export {
   buildCommitMessagePrompt,
   buildCommitPlanPrompt,
