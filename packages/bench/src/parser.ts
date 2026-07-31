@@ -17,7 +17,7 @@ import { Terminal } from "@xterm/headless";
 import { pushLatency, type Measured, type Metric } from "./report.ts";
 
 /** Corpus kinds, matching `CorpusKind` in `src/corpus.rs`. */
-export const CORPUS_KINDS = ["ascii", "sgr", "cjk", "redraw"] as const;
+const CORPUS_KINDS = ["ascii", "sgr", "cjk", "redraw"] as const;
 
 export type CorpusKind = (typeof CORPUS_KINDS)[number];
 
@@ -115,6 +115,7 @@ async function parseCorpus(
  * case — where every notch is a round trip to a program that repaints — is
  * measured by the transport tier instead.
  */
+// fallow-ignore-next-line complexity -- timed scroll loop with direction reversals; the branching is the scenario under measurement.
 async function localScroll(measured: Measured, notches: number): Promise<void> {
   const terminal = new Terminal({ cols: COLS, rows: ROWS, scrollback: SCROLLBACK });
   const lines = Array.from(

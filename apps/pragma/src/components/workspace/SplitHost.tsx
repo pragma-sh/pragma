@@ -163,6 +163,7 @@ function paneBorderClass(showBar: boolean, focused: boolean): string {
   return focused ? "border-primary/35" : "border-border";
 }
 
+// fallow-ignore-next-line complexity -- pane focus, drag drop zones, and terminal retention share one React surface; extracting would reintroduce prop drilling across the split tree.
 function SplitPane({
   pane,
   showPaneBars,

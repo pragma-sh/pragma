@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file -- loaded by the bench CLI via `vitest --config`, not imported from an entry point.
 import path from "node:path";
 
 import { defineConfig } from "vitest/config";

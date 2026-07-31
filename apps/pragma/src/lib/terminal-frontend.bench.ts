@@ -254,6 +254,7 @@ function retentionCase(): number {
  * this number starts tracking the burst length, the gate stopped gating and a
  * trackpad flick is once again building a backlog the renderer has to chase.
  */
+// fallow-ignore-next-line complexity -- benchmark harness setup plus gated wheel/onData burst; branching is measurement scaffolding, not product logic.
 async function wheelCase(flip: boolean): Promise<number> {
   resetHarness();
   const manager = new TerminalManager();

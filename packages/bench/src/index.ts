@@ -69,6 +69,7 @@ interface Options {
 
 const ALL_TIERS = ["t1", "t2", "t3"] as const;
 
+// fallow-ignore-next-line complexity -- CLI flag parser: each option is an independent branch; extracting helpers would not reduce essential branching.
 function parseOptions(argv: string[]): Options {
   const valueOf = (flag: string): string | null => {
     const at = argv.indexOf(flag);
@@ -290,6 +291,7 @@ function currentCommit(): string {
 
 /** Renders the audit as a table, widest column first so it stays readable. */
 function renderTable(result: Audit): string {
+  // fallow-ignore-next-line complexity -- display formatting ternaries for NaN/null/gated columns; not extractable domain logic.
   const rows = result.findings.map((finding) => ({
     id: finding.id,
     current: Number.isNaN(finding.current) ? "—" : format(finding.current),
@@ -343,6 +345,7 @@ function explain(regressions: Finding[]): string {
     .join("\n");
 }
 
+// fallow-ignore-next-line complexity -- orchestrates tier selection, baseline load/record, and audit reporting in one CLI entrypoint.
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) {

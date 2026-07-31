@@ -314,6 +314,7 @@ export function driftOf(options: {
  * that is how a silently deleted or renamed measurement is caught rather than
  * quietly reducing coverage.
  */
+// fallow-ignore-next-line complexity -- compares every metric against baseline with new/missing/regressed/improved branches; splitting would hide the single-pass audit invariant.
 export function audit(options: {
   reports: Report[];
   baseline: Baseline;

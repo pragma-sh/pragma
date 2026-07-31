@@ -54,7 +54,7 @@ export const TERMINAL_WRITE_CHUNK_MAX_BYTES = 64 * 1024;
 export const TERMINAL_WRITE_DRAIN_TIMEOUT_MS = 1000;
 /** Input retained while attach/spawn is unresolved. */
 export const TERMINAL_PENDING_INPUT_MAX_BYTES = 256 * 1024;
-export const TERMINAL_PENDING_INPUT_MAX_MESSAGES = 1024;
+const TERMINAL_PENDING_INPUT_MAX_MESSAGES = 1024;
 
 // Renderer-response pacing for wheel-driven mouse reports while a TUI has mouse
 // tracking enabled. Sending every report immediately builds a long PTY/render
@@ -1275,6 +1275,7 @@ export class TerminalManager {
       });
   }
 
+  // fallow-ignore-next-line complexity -- dispatch over PTY message variants (bytes/replay/title/disconnected/exit); each arm is a single side effect.
   private handlePtyMessage(tabId: string, managed: ManagedTerminal, message: PtyMessage): void {
     // Raw terminal output arrives as bytes (ArrayBuffer); control events as JSON objects.
     if (message instanceof ArrayBuffer) {
