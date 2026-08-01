@@ -377,6 +377,7 @@ pub async fn ai_generate_pull_request_draft(
 /// the sidecar answers with replacements against *this* text, and the editor
 /// renders them as an accept/reject diff. Nothing is written to disk here.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri deserializes this typed IPC command's individual fields.
 pub async fn ai_inline_edit(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,

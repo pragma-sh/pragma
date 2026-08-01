@@ -67,6 +67,10 @@ vi.mock("@/state/github-context", () => ({
   useGitHub: () => ({ authenticated: false }),
 }));
 
+vi.mock("@/state/ai-context", () => ({
+  useAi: () => ({ available: false }),
+}));
+
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({ exitBoard: vi.fn() }),
 }));
