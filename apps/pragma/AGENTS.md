@@ -700,6 +700,36 @@ load/save/dirty/⌘-S lifecycle lives in `components/editor/use-editor-file.tsx`
 `instanceof`, and separate direct / transitive copies crash optimized builds. Do not alias
 the package to its physical `dist` file; that bypasses package-aware dynamic language loading.
 
+**Inline AI edit** — ⌘/Ctrl+K in any CodeMirror surface (plain editor tabs and the
+markdown Raw mode) opens a design-mode-style pill under the highlighted lines; the
+answer lands in the buffer as a red/green diff with an accept/reject bar above each
+hunk. Pieces:
+`lib/inline-edit.ts` (pure: apply the model's exact-text replacements, build the preview
+document and its hunk offsets from `@codemirror/merge`'s `Chunk`, resolve one hunk),
+`components/editor/inline-edit-extension.ts` (session `StateField`, decorations, the
+keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
+`InlineEditHunkBar.tsx`. Rules that are easy to break:
+
+- **The buffer is the source of truth, not the file.** The request carries the live
+  (often unsaved) document and the model gets **read-only** tools (`read`, `grep`,
+  `find`, `ls`) so it can search the repo but cannot write it — see
+  `INLINE_EDIT_TOOLS` in `@pragma/ai-helpers`. Nothing reaches disk until the user
+  accepts a hunk and saves.
+- **While reviewing, the document holds both sides**, so ⌘/Ctrl-S is intercepted and
+  refuses with a toast until every hunk is resolved.
+- **Hunk offsets are only valid against the document they were computed from.** Resolving
+  one hunk shifts the rest; the `StateField` maps them through `tr.changes` — never cache
+  them outside it.
+- The keyboard scheme is the primary interface (buttons mirror it): Enter submits,
+  Esc backs out (rejecting everything left in a review), Abort (while running) drops
+  the in-flight request and restores the editable pill, ⌘/Ctrl+Enter and
+  ⌘/Ctrl+Backspace accept/reject the focused hunk, adding Shift widens either to all
+  hunks, and Alt+↑/↓ walks between them. The prompt UI mirrors the browser design-mode
+  pill (rounded input + circular action button; pulse + stop while loading).
+- Block widgets are React portals over the shared `components/editor/portal-widget.ts`
+  (also used by `MergeDiff`'s review comments): identity is the widget `key`, so a
+  redraw reuses the DOM and the prompt box keeps what the user typed.
+
 **Markdown tabs** — `editor` tabs whose file is markdown (`isMarkdownPath`: `.md` /
 `.markdown` / `.mdown`, **not** `.mdx` — JSX would be mangled) render
 `components/editor/MarkdownView.tsx` instead of `EditorView` (dispatch in
@@ -826,6 +856,12 @@ Commands reuse existing workspace actions for remote access, server troubleshoot
 tab/view navigation, and editor launch. Editor commands drill into non-hidden worktrees
 sorted by `worktree_mru`; remote worktrees remain visible but disabled because editor
 launchers run on the local client.
+
+When Pragma AI is available (`useAi().available`) and the command query is non-empty,
+the top row is **Ask AI {message}**. Selecting it replaces the list with a one-shot
+streaming answer (`streamdown`) over the standard model with read-only tools
+(`read`/`grep`/`find`/`ls`) across the project; the prompt names every worktree and
+marks the currently selected one. Escape/Stop cancels the sidecar (`ai_ask_cancel`).
 
 Default tab close/new and command-palette chords are native menu accelerators because
 macOS/WebKit may consume them before webview listeners. `useShortcuts` defers those exact

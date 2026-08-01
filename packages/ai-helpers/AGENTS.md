@@ -26,16 +26,22 @@ and speaks newline-delimited JSON ("NDJSON") on stdout:
 
 - **One-shot commands** print a single terminal `result` / `error` line:
   `methods`, `status`, `set-key`, `logout`, `commit-message`, `commit-plan`,
-  `pull-request`. Input (diff / JSON context / API key) arrives on **stdin**.
+  `pull-request`, `inline-edit`. Input (diff / JSON context / API key) arrives on
+  **stdin**.
+- **`ask`** streams assistant text: `{ type: "delta", text }`, optional
+  `{ type: "reset" }` when a model attempt is abandoned, then
+  `{ type: "result", text }` or `error`. JSON context on stdin lists the question
+  and project worktrees; tools are the read-only set (`read`/`grep`/`find`/`ls`).
 - **`login`** is interactive: it streams `auth` / `device-code` / `progress` /
   `prompt` / `select` events and reads NDJSON answers from stdin to drive the
   OAuth flow.
 
 Errors are emitted as `{ type: "error", code, error }`. The `code`
 distinguishes the typed "nothing to do" cases (`no-staged`, `no-committed`,
-`no-changes`) so the Rust/UI side can message them precisely — keep these in
-sync with the error classes (`NoStagedChangesError`, `NoCommittedChangesError`,
-`NoWorktreeChangesError`).
+`no-changes`, `no-instruction`, `no-question`) so the Rust/UI side can message them precisely —
+keep these in sync with the error classes (`NoStagedChangesError`,
+`NoCommittedChangesError`, `NoWorktreeChangesError`, `NoInstructionError`,
+`NoQuestionError`).
 
 **When you change a command's shape, change `ai.rs` to match in the same
 change** — the NDJSON contract is the API and there is no schema enforcing it.
@@ -43,30 +49,45 @@ The Rust side parses the last non-empty line.
 
 ## Module map (`src/`)
 
-| File                | Responsibility                                                                 |
-| ------------------- | ------------------------------------------------------------------------------ |
-| `cli.ts`            | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch |
-| `index.ts`          | Public package surface — re-exports only; import from here, not deep paths     |
-| `auth.ts`           | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys    |
-| `pick-model.ts`     | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)         |
-| `constants.ts`      | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)   |
-| `model-date.ts`     | Parses release dates out of model ids for the recency filter                   |
-| `model-insights.ts` | modelgrep client + disk cache — throughput, latency, benchmark scores          |
-| `prompts.ts`        | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested   |
-| `session.ts`        | `createPragmaSession` / `runPromptToText` over the pi agent session            |
-| `commit-message.ts` | `git diff --cached` → one commit message (fast model)                          |
-| `commit-plan.ts`    | Whole-worktree diff → a multi-commit plan (standard model)                     |
-| `pull-request.ts`   | Committed branch diff → PR title + body (standard model, tools enabled)        |
+| File                | Responsibility                                                                    |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `cli.ts`            | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch    |
+| `index.ts`          | Public package surface — re-exports only; import from here, not deep paths        |
+| `auth.ts`           | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys       |
+| `pick-model.ts`     | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)            |
+| `constants.ts`      | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)      |
+| `model-date.ts`     | Parses release dates out of model ids for the recency filter                      |
+| `model-insights.ts` | modelgrep client + disk cache — throughput, latency, benchmark scores             |
+| `prompts.ts`        | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested      |
+| `session.ts`        | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`               |
+| `run-failure.ts`    | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`           |
+| `commit-message.ts` | `git diff --cached` → one commit message (fast model)                             |
+| `commit-plan.ts`    | Whole-worktree diff → a multi-commit plan (standard model)                        |
+| `pull-request.ts`   | Committed branch diff → PR title + body (standard model, tools enabled)           |
+| `inline-edit.ts`    | Editor buffer + instruction → exact-text replacements (standard, read-only tools) |
+| `ask-ai.ts`         | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project) |
+
+**`inline-edit` never writes.** Its tools are pinned to `INLINE_EDIT_TOOLS`
+(`read`, `grep`, `find`, `ls`) — the buffer it is editing is usually **unsaved**, so a
+model that wrote to disk would be editing a different document than the user sees.
+It answers with `{oldText, newText}` replacements that must match the buffer exactly
+once; the app applies them, shows the result as an accept/reject diff, and only then
+does anything reach the file. Do not add `write`/`edit`/`bash` to that list.
+
+**`ask` never writes either.** Same tool allowlist (`ASK_AI_TOOLS`). The prompt names
+every project worktree path and marks the currently selected one; the session `cwd` is
+the main worktree root so nested checkouts stay reachable. The UI streams deltas via
+the Tauri channel the same way login streams OAuth events.
 
 ## Model selection
 
 Three tiers, all picked automatically from the user's **authenticated** models:
 
-| Tier       | Ceiling | Ranks on                           | Used by               |
-| ---------- | ------- | ---------------------------------- | --------------------- |
-| `fast`     | Sonnet  | Throughput (prefers non-reasoning) | commit message        |
-| `standard` | Sonnet  | Capability weighed against price   | commit plan, PR draft |
-| `high`     | Opus    | Capability alone                   | _no consumer yet_     |
+| Tier       | Ceiling | Ranks on                           | Used by                            |
+| ---------- | ------- | ---------------------------------- | ---------------------------------- |
+| `fast`     | Sonnet  | Throughput (prefers non-reasoning) | commit message                     |
+| `standard` | Sonnet  | Capability weighed against price   | commit plan, PR draft, inline edit, ask AI |
+| `high`     | Opus    | Capability alone                   | _no consumer yet_                  |
 
 `fast` shares the mid-tier ceiling with `standard` because its goal is latency,
 and paying frontier rates for speed is never the trade you want.
@@ -93,6 +114,29 @@ Three rules make this hold up over time:
   `tieBand` wide, grown down from the leader (not a fixed grid, which would split
   0.999 from 1.0). Inside a band, newer wins, then cheaper, then larger context,
   then id. So a 1% better score never beats a model three months newer.
+
+### Falling back when a model fails
+
+`runPromptWithFallback` (used by `inline-edit`) walks the ranked candidates
+serially until one answers. Selection only knows what a provider _offers_, never
+what it will _serve_ — a rejected key, an exhausted subscription, or a plan that
+does not include the model all look identical until the request is made. Two
+bounds keep that from becoming a minute of silence, both in `run-failure.ts`:
+
+- **A provider-scoped failure retires the provider.** Auth, quota, and billing
+  errors (`401`/`403`/`402`/`429`, "invalid api key", "usage limit") condemn
+  every model behind that credential, so the remaining ones are skipped instead
+  of re-proving the same expired key a dozen times. Everything else — `400 model
+not available`, context overflow — blames only that model, and a sibling is
+  tried.
+- **`RUN_FALLBACK.maxAttempts` caps the walk** (3). A tier can offer twenty
+  candidates and an interactive helper cannot spend twenty round-trips on them.
+
+`NoWorkingModelError` reports **one error per provider**, not the last
+candidate's. The last candidate is the worst-ranked model of whichever provider
+sorted last, so its error is the least informative in the set — that is how a
+rejected opencode key plus an out-of-quota Copilot surfaced in the UI as a bare
+"400 model not available" after ~20s of waiting.
 
 **Bump `MODEL_INSIGHTS.cacheVersion` whenever `ModelInsight` gains a field.** An
 old cache still parses; the new field just reads `null`. When that field is one
@@ -125,6 +169,14 @@ unknown model is not a bad one.
   (`PICK_MODEL`, `MODEL_INSIGHTS`) never cross the TS/Rust boundary — they run
   entirely inside this JS sidecar — so they stay local. Anything that _is_
   shared with Rust still belongs in `@pragma/constants` per the root guide.
+- **The credential store is shared with the `pi` CLI, not Pragma's own.**
+  `createAuthStorage()` resolves to `~/.pi/agent/auth.json`, so a `pi` login
+  shows up in Pragma as a connected provider and model selection will route work
+  to it. That is deliberate (and why `needsSetup` is independent of
+  `available`), but it means "I never signed in to X in Pragma" is not evidence
+  that X is unauthenticated — read the file before concluding anything about
+  where a provider error came from. Settings → AI lists every provider in that
+  file with a sign-out button; signing out there signs out of the CLI too.
 - **Mock `./model-insights.ts` in feature tests.** `generateCommitMessage` and
   friends call `loadModelInsights()`, which will otherwise hit the real API and
   write to the developer's `~/.pragma/cache` during a test run.
