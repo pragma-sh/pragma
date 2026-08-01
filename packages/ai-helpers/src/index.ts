@@ -15,6 +15,14 @@ export {
   signedInProviders,
 } from "./auth.ts";
 export {
+  ASK_AI_TOOLS,
+  type AskAiPromptContext,
+  type AskAiWorktreeRef,
+  NoQuestionError,
+  streamAskAi,
+  type StreamAskAiOptions,
+} from "./ask-ai.ts";
+export {
   generateCommitMessage,
   type GenerateCommitMessageOptions,
   NoStagedChangesError,
@@ -24,7 +32,19 @@ export {
   type GenerateCommitPlanOptions,
   NoWorktreeChangesError,
 } from "./commit-plan.ts";
-export { MODEL_INSIGHTS, type ModelKind, PICK_MODEL, type PriceAnchor } from "./constants.ts";
+export {
+  MODEL_INSIGHTS,
+  type ModelKind,
+  PICK_MODEL,
+  type PriceAnchor,
+  RUN_FALLBACK,
+} from "./constants.ts";
+export {
+  generateInlineEdit,
+  type GenerateInlineEditOptions,
+  INLINE_EDIT_TOOLS,
+  NoInstructionError,
+} from "./inline-edit.ts";
 export {
   type DatedModel,
   isModelRecent,
@@ -50,6 +70,7 @@ export {
   type SelectModelOptions,
 } from "./pick-model.ts";
 export {
+  buildAskAiPrompt,
   buildCommitMessagePrompt,
   buildCommitPlanPrompt,
   cleanCommitMessage,
@@ -58,6 +79,15 @@ export {
   COMMIT_PLAN_DIFF_CHAR_LIMIT,
   type CommitPlanDraft,
   type CommitPlanPromptContext,
+} from "./prompts.ts";
+export {
+  buildInlineEditPrompt,
+  cleanInlineEditDraft,
+  INLINE_EDIT_FILE_CHAR_LIMIT,
+  INLINE_EDIT_WINDOW_LINES,
+  type InlineEditDraft,
+  type InlineEditPromptContext,
+  type InlineEditReplacement,
 } from "./prompts.ts";
 export {
   generatePullRequestDraft,
@@ -72,8 +102,16 @@ export {
   type PullRequestPromptContext,
 } from "./prompts.ts";
 export {
+  type AttemptFailure,
+  classifyFailure,
+  describeFailure,
+  type FailureScope,
+  NoWorkingModelError,
+} from "./run-failure.ts";
+export {
   createPragmaSession,
   type CreatePragmaSessionOptions,
   type PragmaSession,
+  runPromptStreamingWithFallback,
   runPromptToText,
 } from "./session.ts";
