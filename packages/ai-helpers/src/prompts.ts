@@ -3,6 +3,22 @@
  * versioned in one place and unit-testable, separate from the SDK plumbing.
  */
 
+/** Strip a surrounding markdown code fence from model output, if present. */
+function stripModelFence(raw: string): string {
+  let text = raw.trim();
+  const fence = /^```(?:[a-zA-Z]*)?\n([\s\S]*?)\n```$/.exec(text);
+  if (fence?.[1] !== undefined) text = fence[1].trim();
+  return text;
+}
+
+/** Keep only the outermost `{…}` object from model text (fences already stripped). */
+function extractJsonObject(raw: string): string {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start >= 0 && end > start) return raw.slice(start, end + 1);
+  return raw;
+}
+
 /** Hard cap on how much staged diff we feed the model, in characters. */
 export const COMMIT_DIFF_CHAR_LIMIT = 24_000;
 
@@ -58,10 +74,7 @@ export function buildCommitMessagePrompt(stagedDiff: string): string {
  * stray quotes, and leading/trailing whitespace.
  */
 export function cleanCommitMessage(raw: string): string {
-  let text = raw.trim();
-  const fence = /^```(?:[a-zA-Z]*)?\n([\s\S]*?)\n```$/.exec(text);
-  if (fence?.[1] !== undefined) text = fence[1].trim();
-  return text.trim();
+  return stripModelFence(raw).trim();
 }
 
 /** Input context used to group every worktree change into commits. */
@@ -141,17 +154,7 @@ export function buildCommitPlanPrompt(context: CommitPlanPromptContext): string 
 
 /** Normalize and parse a model's raw commit-plan JSON. */
 export function cleanCommitPlanDraft(raw: string): CommitPlanDraft {
-  let text = raw.trim();
-  const fence = /^```(?:json)?\n([\s\S]*?)\n```$/.exec(text);
-  if (fence?.[1] !== undefined) text = fence[1].trim();
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    text = text.slice(start, end + 1);
-  }
-
-  const parsed = JSON.parse(text) as Partial<CommitPlanDraft>;
+  const parsed = JSON.parse(extractJsonObject(stripModelFence(raw))) as Partial<CommitPlanDraft>;
   const commits = Array.isArray(parsed.commits) ? parsed.commits : [];
   const cleaned = commits
     .map((commit) => ({
@@ -227,17 +230,7 @@ export function buildPullRequestPrompt(context: PullRequestPromptContext): strin
 
 /** Normalize and parse a model's raw PR draft JSON. */
 export function cleanPullRequestDraft(raw: string): PullRequestDraft {
-  let text = raw.trim();
-  const fence = /^```(?:json)?\n([\s\S]*?)\n```$/.exec(text);
-  if (fence?.[1] !== undefined) text = fence[1].trim();
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    text = text.slice(start, end + 1);
-  }
-
-  const parsed = JSON.parse(text) as Partial<PullRequestDraft>;
+  const parsed = JSON.parse(extractJsonObject(stripModelFence(raw))) as Partial<PullRequestDraft>;
   const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
   const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
   if (!title) {
@@ -429,17 +422,7 @@ export function buildAskAiPrompt(context: AskAiPromptContext): string {
 
 /** Normalize and parse a model's raw inline-edit JSON. */
 export function cleanInlineEditDraft(raw: string): InlineEditDraft {
-  let text = raw.trim();
-  const fence = /^```(?:json)?\n([\s\S]*?)\n```$/.exec(text);
-  if (fence?.[1] !== undefined) text = fence[1].trim();
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    text = text.slice(start, end + 1);
-  }
-
-  const parsed = JSON.parse(text) as Partial<InlineEditDraft>;
+  const parsed = JSON.parse(extractJsonObject(stripModelFence(raw))) as Partial<InlineEditDraft>;
   const edits = Array.isArray(parsed.edits) ? parsed.edits : [];
   const cleaned = edits
     .map((edit) => ({
