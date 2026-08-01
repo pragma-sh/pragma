@@ -160,7 +160,12 @@ function CommandModeList({
   }
 
   const trimmedQuery = query.trim();
-  const showAskAi = aiAvailable && trimmedQuery.length > 0 && selectedWorktreeId !== null;
+  const selectedIsRemote =
+    selectedWorktreeId !== null && workspace.remoteWorktrees[selectedWorktreeId] === true;
+  // Ask AI spawns pragma-ai on the desktop client with local --cwd paths; remote
+  // SSH worktrees are refused until host-routed AI exists (see ai.rs).
+  const showAskAi =
+    aiAvailable && trimmedQuery.length > 0 && selectedWorktreeId !== null && !selectedIsRemote;
   const commandRows = commands.filter((command) => matches(query, command.label, command.keywords));
   const editorRows = constants.editorLaunchers.options.filter((option) =>
     matches(query, `Open in ${option.name}`, "editor worktree launcher"),

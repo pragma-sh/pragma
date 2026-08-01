@@ -715,6 +715,11 @@ keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
   `find`, `ls`) so it can search the repo but cannot write it — see
   `INLINE_EDIT_TOOLS` in `@pragma/ai-helpers`. Nothing reaches disk until the user
   accepts a hunk and saves.
+- **Local worktrees only (for now).** `ai_inline_edit` (and the other worktree-scoped
+  AI commands) spawn `pragma-ai` on the desktop client with a local `--cwd`. Remote
+  SSH paths must not be passed through — they would fail or inspect an unrelated local
+  checkout. The Rust command refuses remote hosts; the editor also skips opening the
+  pill when `remoteWorktrees[worktreeId]` is true. Host-routed AI is future work.
 - **While reviewing, the document holds both sides**, so ⌘/Ctrl-S is intercepted and
   refuses with a toast until every hunk is resolved.
 - **Hunk offsets are only valid against the document they were computed from.** Resolving
@@ -858,7 +863,9 @@ sorted by `worktree_mru`; remote worktrees remain visible but disabled because e
 launchers run on the local client.
 
 When Pragma AI is available (`useAi().available`) and the command query is non-empty,
-the top row is **Ask AI {message}**. Selecting it replaces the list with a one-shot
+the top row is **Ask AI {message}** — hidden for remote (SSH) worktrees, because the
+sidecar still runs on the desktop client with local `--cwd` paths (same local-only
+guard as inline edit). Selecting it replaces the list with a one-shot
 streaming answer (`streamdown`) over the standard model with read-only tools
 (`read`/`grep`/`find`/`ls`) across the project; the prompt names every worktree and
 marks the currently selected one. Escape/Stop cancels the sidecar (`ai_ask_cancel`).

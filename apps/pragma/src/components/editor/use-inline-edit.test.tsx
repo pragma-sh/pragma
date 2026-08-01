@@ -223,4 +223,51 @@ describe("useInlineEdit", () => {
     expect(await screen.findByText("rewrite a line that is not there")).toBeInTheDocument();
     expect(view!.state.doc.toString()).toBe(DOC);
   });
+
+  it("refuses to open the prompt on a remote worktree", async () => {
+    const { toast } = await import("sonner");
+    function RemoteHarness() {
+      const viewRef = useRef<EditorView | null>(null);
+      const parentRef = useRef<HTMLDivElement | null>(null);
+      const inlineEdit = useInlineEdit({
+        viewRef,
+        worktreeId: "wt",
+        filePath: "src/a.ts",
+        isRemote: true,
+      });
+      const extensionRef = useRef(inlineEdit.extension);
+      extensionRef.current = inlineEdit.extension;
+
+      useEffect(() => {
+        const created = new EditorView({
+          doc: DOC,
+          extensions: [extensionRef.current],
+          parent: parentRef.current ?? undefined,
+        });
+        viewRef.current = created;
+        view = created;
+        return () => {
+          created.destroy();
+          viewRef.current = null;
+          view = null;
+        };
+      }, []);
+
+      return (
+        <div>
+          <div ref={parentRef} />
+          {inlineEdit.portals}
+        </div>
+      );
+    }
+
+    render(<RemoteHarness />);
+    await waitFor(() => expect(view).not.toBeNull());
+    selectSecondLine();
+    pressInlineEdit();
+    expect(screen.queryByLabelText("Describe the edit")).not.toBeInTheDocument();
+    expect(toast.info).toHaveBeenCalledWith(
+      "Inline AI edit is not available for remote worktrees yet.",
+    );
+  });
 });

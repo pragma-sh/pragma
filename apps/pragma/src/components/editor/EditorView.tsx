@@ -18,6 +18,7 @@ import { useEditorFind } from "@/components/editor/use-editor-find";
 import { useInlineEdit } from "@/components/editor/use-inline-edit";
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { clearEditorLocation, useEditorLocation } from "@/state/editor-location-store";
+import { useWorkspace } from "@/state/workspace-context";
 
 /** Resolve a language grammar lazily by filename; plain text on no match. */
 export function useEditorLanguage(filePath: string | null): Extension | null {
@@ -109,6 +110,8 @@ export function useEditorExtensions(
 // fallow-ignore-next-line complexity -- wires together file load/save/language/keymap/find hooks for one CodeMirror instance; each hook already owns its own logic, this just composes them.
 export function EditorView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
+  const workspace = useWorkspace();
+  const isRemote = workspace.remoteWorktrees[worktreeId] === true;
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
   const viewRef = useRef<CodeMirrorView | null>(null);
@@ -120,7 +123,7 @@ export function EditorView({ tab }: { tab: Tab }) {
   const saveKeymap = useEditorKeymap(save);
   const find = useEditorFind(viewRef);
   const findKeymap = useEditorFindKeymap(find.openBar);
-  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath });
+  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath, isRemote });
   const extensions = useEditorExtensions(
     languageExtension,
     saveKeymap,

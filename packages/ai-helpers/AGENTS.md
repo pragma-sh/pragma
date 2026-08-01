@@ -19,6 +19,11 @@ to it over NDJSON. **Nothing here ever runs in the frontend.**
 React UI  ──invoke──▶  ai.rs (Rust)  ──spawn + NDJSON──▶  pragma-ai (this package)  ──▶  pi SDK
 ```
 
+Worktree-scoped commands (`commit-message`, `commit-plan`, `pull-request`,
+`inline-edit`, `ask`) receive a `--cwd` that the sidecar tools read on the **local**
+filesystem. `ai.rs` therefore refuses SSH-remote worktrees until AI is routed through
+the owning host; do not remove that guard to "make remote work" without a host RPC.
+
 ## The sidecar protocol (`src/cli.ts`)
 
 `src/cli.ts` is the `bin` (`pragma-ai`). Each invocation is **one operation**

@@ -32,6 +32,7 @@ import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { extname } from "@/lib/path";
+import { useWorkspace } from "@/state/workspace-context";
 
 const lowlight = createLowlight(common);
 
@@ -178,12 +179,14 @@ function MarkdownRaw({
   doc,
   filePath,
   worktreeId,
+  isRemote,
   onChange,
   save,
 }: {
   doc: string;
   filePath: string | null;
   worktreeId: string;
+  isRemote: boolean;
   onChange: (value: string) => void;
   save: (contents: string) => Promise<void>;
 }) {
@@ -192,7 +195,7 @@ function MarkdownRaw({
   const saveKeymap = useEditorKeymap(save);
   const find = useEditorFind(viewRef);
   const findKeymap = useEditorFindKeymap(find.openBar);
-  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath });
+  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath, isRemote });
   const extensions = useEditorExtensions(
     languageExtension,
     saveKeymap,
@@ -232,6 +235,8 @@ function MarkdownRaw({
  */
 export function MarkdownView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
+  const workspace = useWorkspace();
+  const isRemote = workspace.remoteWorktrees[worktreeId] === true;
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
   const [mode, setMode] = useState<MarkdownMode>("editor");
@@ -280,6 +285,7 @@ export function MarkdownView({ tab }: { tab: Tab }) {
             <MarkdownRaw
               doc={doc}
               filePath={filePath}
+              isRemote={isRemote}
               onChange={onChange}
               save={save}
               worktreeId={worktreeId}

@@ -23,7 +23,28 @@ use tauri::State;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::git::GitLocks;
+use crate::hosts::{Hosts, LOCAL_HOST};
 use crate::pty::{sidecar_executable, workspace_root};
+
+/// AI sidecars spawn on the desktop client and read `--cwd` from the local
+/// filesystem. Remote (SSH) worktree paths are not local — refusing them here
+/// prevents inspecting an unrelated checkout at the same absolute path, or
+/// failing with a confusing missing-directory error. Host-routed AI is not
+/// wired yet; keep this guard until it is.
+fn ensure_local_ai_worktree(db: &Db, hosts: &Hosts, worktree_id: &str) -> AppResult<()> {
+    refuse_remote_ai_host(&hosts.host_id_for_worktree(db, worktree_id)?)
+}
+
+/// Pure host-id check shared with unit tests.
+fn refuse_remote_ai_host(host_id: &str) -> AppResult<()> {
+    if host_id != LOCAL_HOST {
+        return Err(AppError::InvalidInput(
+            "AI features that inspect the worktree are not available for remote projects yet."
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// `settings` key for the "user dismissed AI setup" flag.
 const SETUP_DISMISSED_KEY: &str = "ai.setupDismissed";
@@ -288,8 +309,10 @@ pub fn set_ai_setup_dismissed(db: State<'_, Db>, dismissed: bool) -> AppResult<(
 #[tauri::command]
 pub async fn ai_generate_commit_message(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<String> {
+    ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let worktree = db.worktree(&worktree_id)?;
     let cwd = worktree.path;
 
@@ -317,8 +340,10 @@ pub async fn ai_generate_commit_message(
 #[tauri::command]
 pub async fn ai_generate_pull_request_draft(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
 ) -> AppResult<AiPullRequestDraft> {
+    ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let worktree = db.worktree(&worktree_id)?;
     let Some(parent_id) = worktree.parent_id.as_deref() else {
         return Err(AppError::InvalidInput(
@@ -354,6 +379,7 @@ pub async fn ai_generate_pull_request_draft(
 #[tauri::command]
 pub async fn ai_inline_edit(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     worktree_id: String,
     file_path: String,
     doc: String,
@@ -366,6 +392,7 @@ pub async fn ai_inline_edit(
             "No instruction to edit with.".to_string(),
         ));
     }
+    ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let worktree = db.worktree(&worktree_id)?;
     let cwd = worktree.path;
 
@@ -390,9 +417,11 @@ pub async fn ai_inline_edit(
 #[tauri::command]
 pub async fn ai_commit_all_and_generate_pull_request_draft(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
     worktree_id: String,
 ) -> AppResult<AiCommitAndPullRequestDraft> {
+    ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
     let worktree = db.worktree(&worktree_id)?;
     let Some(parent_id) = worktree.parent_id.as_deref() else {
         return Err(AppError::InvalidInput(
@@ -678,6 +707,7 @@ fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
 #[tauri::command(async)]
 pub fn ai_ask(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     registry: State<'_, AskRegistry>,
     id: String,
     worktree_id: String,
@@ -687,6 +717,7 @@ pub fn ai_ask(
     if question.trim().is_empty() {
         return Err(AppError::InvalidInput("No question to ask.".to_string()));
     }
+    ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
 
     let selected = db.worktree(&worktree_id)?;
     let project_worktrees = db.list_worktrees(&selected.project_id)?;
@@ -870,8 +901,17 @@ mod tests {
     use std::path::Path;
     use std::process::{Command, Stdio};
 
-    use super::{parse_status, pull_request_context};
+    use super::{parse_status, pull_request_context, refuse_remote_ai_host};
+    use crate::hosts::LOCAL_HOST;
     use serde_json::json;
+
+    #[test]
+    fn refuse_remote_ai_host_allows_local_only() {
+        assert!(refuse_remote_ai_host(LOCAL_HOST).is_ok());
+        let err =
+            refuse_remote_ai_host("user@example.com").expect_err("remote host must be refused");
+        assert!(err.to_string().contains("not available for remote"));
+    }
 
     fn run_git(cwd: &Path, args: &[&str]) {
         let status = Command::new("git")

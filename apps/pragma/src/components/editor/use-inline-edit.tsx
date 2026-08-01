@@ -48,6 +48,12 @@ interface UseInlineEditOptions {
   worktreeId: string;
   /** Worktree-relative path of the open file. */
   filePath: string | null;
+  /**
+   * True when the worktree lives on an SSH host. Inline edit runs a local
+   * sidecar against `--cwd`, so remote projects are refused until host-routed
+   * AI exists.
+   */
+  isRemote?: boolean;
 }
 
 /** The lines a hunk's decision removes, as a CodeMirror change. */
@@ -106,7 +112,12 @@ function presentInlineEditResult(
  * disk until the user accepts a hunk and saves.
  */
 // fallow-ignore-next-line complexity -- one feature's controller: it owns the session lifecycle (open/run/review/resolve) for one editor, and splitting it would only scatter the shared view/session plumbing.
-export function useInlineEdit({ viewRef, worktreeId, filePath }: UseInlineEditOptions): InlineEdit {
+export function useInlineEdit({
+  viewRef,
+  worktreeId,
+  filePath,
+  isRemote = false,
+}: UseInlineEditOptions): InlineEdit {
   const [portals, setPortals] = useState<InlineEditPortal[]>([]);
   const [session, setSession] = useState<InlineEditSession | null>(null);
   const runIdRef = useRef(0);
@@ -215,6 +226,10 @@ export function useInlineEdit({ viewRef, worktreeId, filePath }: UseInlineEditOp
       if (!filePath) {
         return false;
       }
+      if (isRemote) {
+        toast.info("Inline AI edit is not available for remote worktrees yet.");
+        return false;
+      }
       const range = view.state.selection.main;
       const firstLine = view.state.doc.lineAt(range.from);
       const lastLine = view.state.doc.lineAt(range.to);
@@ -272,7 +287,7 @@ export function useInlineEdit({ viewRef, worktreeId, filePath }: UseInlineEditOp
         }
       }),
     ];
-  }, [dismiss, filePath, host, resolve]);
+  }, [dismiss, filePath, host, isRemote, resolve]);
 
   const rendered = portals.map((portal) => {
     if (!session) {
