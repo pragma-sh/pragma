@@ -85,6 +85,33 @@ struct AiCommitPlanCommit {
     paths: Vec<String>,
 }
 
+/// One exact-text replacement an inline edit proposes for the open buffer.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInlineEditReplacement {
+    pub old_text: String,
+    pub new_text: String,
+}
+
+/// The replacements plus the one-line summary shown above the inline diff.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInlineEditDraft {
+    #[serde(default)]
+    pub summary: String,
+    pub edits: Vec<AiInlineEditReplacement>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InlineEditContext {
+    file_path: String,
+    instruction: String,
+    doc: String,
+    start_line: usize,
+    end_line: usize,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PullRequestContext {
@@ -102,6 +129,26 @@ pub struct LoginRegistry(Arc<Mutex<HashMap<String, LoginHandle>>>);
 struct LoginHandle {
     child: Child,
     stdin: ChildStdin,
+}
+
+/// In-flight palette Ask AI sidecar runs, keyed by a frontend-supplied id.
+#[derive(Default, Clone)]
+pub struct AskRegistry(Arc<Mutex<HashMap<String, Child>>>);
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AskWorktreeRef {
+    title: String,
+    branch: String,
+    path: String,
+    selected: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AskContext {
+    question: String,
+    worktrees: Vec<AskWorktreeRef>,
 }
 
 /// Build the base sidecar command (no subcommand args yet).
@@ -293,6 +340,46 @@ pub async fn ai_generate_pull_request_draft(
         let stdin = serde_json::to_string(&context)?;
         let value = run_oneshot(&["pull-request", "--cwd", &cwd], Some(&stdin))?;
         serde_json::from_value::<AiPullRequestDraft>(value).map_err(AppError::from)
+    })
+    .await
+    .map_err(|error| AppError::Ai(error.to_string()))?
+}
+
+/// Rewrite part of an open editor buffer from a natural-language instruction,
+/// using a standard model with read-only tools over the worktree.
+///
+/// The buffer text travels with the request because it is frequently unsaved —
+/// the sidecar answers with replacements against *this* text, and the editor
+/// renders them as an accept/reject diff. Nothing is written to disk here.
+#[tauri::command]
+pub async fn ai_inline_edit(
+    db: State<'_, Db>,
+    worktree_id: String,
+    file_path: String,
+    doc: String,
+    instruction: String,
+    start_line: usize,
+    end_line: usize,
+) -> AppResult<AiInlineEditDraft> {
+    if instruction.trim().is_empty() {
+        return Err(AppError::InvalidInput(
+            "No instruction to edit with.".to_string(),
+        ));
+    }
+    let worktree = db.worktree(&worktree_id)?;
+    let cwd = worktree.path;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let context = InlineEditContext {
+            file_path,
+            instruction,
+            doc,
+            start_line,
+            end_line,
+        };
+        let stdin = serde_json::to_string(&context)?;
+        let value = run_oneshot(&["inline-edit", "--cwd", &cwd], Some(&stdin))?;
+        serde_json::from_value::<AiInlineEditDraft>(value).map_err(AppError::from)
     })
     .await
     .map_err(|error| AppError::Ai(error.to_string()))?
@@ -583,6 +670,105 @@ fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
         return Ok(None);
     }
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+}
+
+/// Stream a one-shot codebase answer for the command palette. Events:
+/// `delta` (partial text), `reset` (drop streamed text), then `result`/`error`.
+/// Cancel with [`ai_ask_cancel`] using the same `id`.
+#[tauri::command(async)]
+pub fn ai_ask(
+    db: State<'_, Db>,
+    registry: State<'_, AskRegistry>,
+    id: String,
+    worktree_id: String,
+    question: String,
+    on_event: Channel<Value>,
+) -> AppResult<()> {
+    if question.trim().is_empty() {
+        return Err(AppError::InvalidInput("No question to ask.".to_string()));
+    }
+
+    let selected = db.worktree(&worktree_id)?;
+    let project_worktrees = db.list_worktrees(&selected.project_id)?;
+    let main = project_worktrees
+        .iter()
+        .find(|worktree| worktree.parent_id.is_none())
+        .cloned();
+    let cwd = main
+        .as_ref()
+        .map_or_else(|| selected.path.clone(), |worktree| worktree.path.clone());
+
+    let worktrees = project_worktrees
+        .into_iter()
+        .filter(|worktree| !worktree.hidden)
+        .map(|worktree| AskWorktreeRef {
+            title: worktree.title.clone().unwrap_or_default(),
+            branch: worktree.branch.clone(),
+            path: worktree.path.clone(),
+            selected: worktree.id == worktree_id,
+        })
+        .collect::<Vec<_>>();
+
+    let stdin = serde_json::to_string(&AskContext {
+        question,
+        worktrees,
+    })?;
+
+    let mut command = sidecar_command();
+    command.args(["ask", "--cwd", &cwd]);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+    if let Some(mut child_stdin) = child.stdin.take() {
+        child_stdin.write_all(stdin.as_bytes())?;
+    }
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Ai("failed to capture ai sidecar stdout".to_string()))?;
+
+    registry.0.lock()?.insert(id.clone(), child);
+
+    let map = registry.0.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let value: Value = serde_json::from_str(trimmed)
+                .unwrap_or_else(|_| json!({ "type": "log", "line": trimmed }));
+            let is_terminal = matches!(
+                value.get("type").and_then(Value::as_str),
+                Some("result" | "error")
+            );
+            let _ = on_event.send(value);
+            if is_terminal {
+                break;
+            }
+        }
+        let child = map.lock().ok().and_then(|mut guard| guard.remove(&id));
+        if let Some(mut child) = child {
+            let _ = child.wait();
+        }
+    });
+
+    Ok(())
+}
+
+/// Abort an in-flight palette Ask AI run and drop its sidecar.
+#[tauri::command]
+pub fn ai_ask_cancel(registry: State<'_, AskRegistry>, id: String) -> AppResult<()> {
+    if let Some(mut child) = registry.0.lock()?.remove(&id) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(())
 }
 
 /// Start an interactive OAuth login. Events (`auth`, `device-code`, `progress`,
