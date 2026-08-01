@@ -98,6 +98,18 @@ export const PICK_MODEL = {
   },
 } as const;
 
+/** Bounds on the shared model-fallback loop in `runPromptWithFallback`. */
+export const RUN_FALLBACK = {
+  /**
+   * Hard cap on candidate models tried for one request. A tier can offer twenty
+   * candidates, and when the real problem is a rejected key or an exhausted
+   * subscription every one of them fails — serially, at a round-trip each. Three
+   * attempts is enough to route around a single bad model while keeping the
+   * worst case short enough for an interactive helper to report an error in.
+   */
+  maxAttempts: 3,
+} as const;
+
 /** modelgrep API + on-disk cache settings for {@link loadModelInsights}. */
 export const MODEL_INSIGHTS = {
   baseUrl: "https://modelgrep.com/api/v1",
