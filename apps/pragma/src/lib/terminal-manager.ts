@@ -3,7 +3,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type IDisposable } from "@xterm/xterm";
 
-import type { Tab } from "@pragma/constants";
+import { constants, type Tab } from "@pragma/constants";
 
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import {
@@ -1402,6 +1402,44 @@ export class TerminalManager {
     }
     this.setVisible(tabId, visible);
   }
+
+  /**
+   * Installs the dev-only benchmark hook and returns whether it was installed.
+   *
+   * `@pragma/bench` measures the terminal from inside the webview, and the
+   * WebGL renderer leaves nothing in the DOM to read — no `.xterm-rows`, and a
+   * canvas whose pixels are not retrievable. So the benchmark needs the xterm
+   * instance itself, which lives only in this registry.
+   *
+   * The hook holds no references of its own: it resolves a tab id against the
+   * live map on every call, so a terminal it looked at once is still disposed,
+   * re-parented, and evicted from the WebGL LRU exactly as before. Reading is
+   * all it can do; input goes in as DOM events, the same way a user's does.
+   */
+  installBenchHook(): boolean {
+    if (!import.meta.env.DEV) {
+      return false;
+    }
+    const hook: TerminalBenchHook = {
+      version: 1,
+      tabs: () => [...this.terminals.keys()],
+      terminal: (tabId) => this.terminals.get(tabId)?.terminal,
+      element: (tabId) => this.terminals.get(tabId)?.container,
+    };
+    (window as unknown as Record<string, TerminalBenchHook>)[constants.bench.hookGlobal] = hook;
+    return true;
+  }
+}
+
+/**
+ * Read-only view of the live terminals, exposed on `window` in dev builds only.
+ * The property name is shared with the benchmark through `@pragma/constants`.
+ */
+interface TerminalBenchHook {
+  version: 1;
+  tabs: () => string[];
+  terminal: (tabId: string) => Terminal | undefined;
+  element: (tabId: string) => HTMLElement | undefined;
 }
 
 /** Takes at most `maxBytes` from ordered output chunks without joining the whole backlog. */
@@ -1439,3 +1477,9 @@ function takeOutputChunk(chunks: Uint8Array[], maxBytes: number): Uint8Array {
 }
 
 export const terminalManager = new TerminalManager();
+
+// Guarded here as well as inside the method so the call — and with it every
+// reference to the hook — is dropped from production bundles.
+if (import.meta.env.DEV) {
+  terminalManager.installBenchHook();
+}

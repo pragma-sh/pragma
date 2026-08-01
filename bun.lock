@@ -182,6 +182,14 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/bench": {
+      "name": "@pragma/bench",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+      },
+    },
     "packages/claude-code-plugin": {
       "name": "@pragma/claude-code-plugin",
       "version": "0.0.0",
@@ -1228,6 +1236,8 @@
     "@pragma/ai-helpers": ["@pragma/ai-helpers@workspace:packages/ai-helpers"],
 
     "@pragma/automations": ["@pragma/automations@workspace:packages/automations"],
+
+    "@pragma/bench": ["@pragma/bench@workspace:packages/bench"],
 
     "@pragma/claude-code-plugin": ["@pragma/claude-code-plugin@workspace:packages/claude-code-plugin"],
 

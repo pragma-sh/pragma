@@ -1,0 +1,25 @@
+[package]
+name = "pragma-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Terminal lag benchmark for Pragma: drives a real dev instance and measures keystroke and scroll render latency."
+
+[[bin]]
+name = "pragma-bench"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+pragma-client = { path = "../../crates/pragma-client" }
+pragma-constants = { path = "../constants" }
+pragma-platform = { version = "0.0.0", path = "../../crates/pragma-platform" }
+pragma-protocol = { path = "../../crates/pragma-protocol" }
+ratatui = "0.29"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

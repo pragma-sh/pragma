@@ -30,6 +30,9 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 
+# Benchmark output (`bun run benchmark`)
+bench-report.json
+
 # Logs / env
 *.log
 .env

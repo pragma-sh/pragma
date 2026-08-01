@@ -107,6 +107,7 @@ than no guide.
 │   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
+│   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
@@ -167,6 +168,9 @@ than no guide.
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
+- Anything that measures perceived terminal latency → `packages/bench`
+  (`bun run benchmark`). It drives a real dev window; do not add a headless
+  variant that claims to measure rendering.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
@@ -191,6 +195,7 @@ bun install                # Install all workspace deps
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
+bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
 
 # Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
 bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator

@@ -204,15 +204,18 @@ fn linux_cmdline_name(pid: u32) -> Option<String> {
 /// Ends a single process immediately.
 ///
 /// Returns whether the process was signalled. A `false` result usually means
-/// the pid is already gone, which callers generally treat as success.
+/// the pid is already gone, which callers generally treat as success — so the
+/// helper's own output is captured rather than inherited, like the Windows
+/// branch below. Otherwise every such call leaks `kill: 1234: No such process`
+/// into the caller's stderr, which reads as a failure of whatever was running.
 #[must_use]
 pub fn kill(pid: u32) -> bool {
     #[cfg(unix)]
     {
         command("kill")
             .args(["-KILL", &pid.to_string()])
-            .status()
-            .is_ok_and(|status| status.success())
+            .output()
+            .is_ok_and(|output| output.status.success())
     }
     #[cfg(windows)]
     {
