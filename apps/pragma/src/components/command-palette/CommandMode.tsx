@@ -10,6 +10,7 @@ import {
   PanelRight,
   RefreshCw,
   Server,
+  Sparkles,
   Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +26,7 @@ import {
   tunnelStop,
   type TunnelStatus,
 } from "@/lib/tauri";
+import { useAi } from "@/state/ai-context";
 import { useKanban } from "@/state/kanban-context";
 import { useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -38,6 +40,8 @@ interface CommandModeProps {
   close: () => void;
   worktrees: Worktree[];
   recencyByWorktree: Record<string, number>;
+  /** Start a one-shot Ask AI answer for the current command-mode query. */
+  onAskAi: (question: string) => void;
 }
 
 interface PaletteCommand {
@@ -53,11 +57,19 @@ type EditorLauncher = (typeof constants.editorLaunchers.options)[number];
 
 interface CommandModeListProps extends Pick<
   CommandModeProps,
-  "query" | "setSelectedEditorId" | "setQuery" | "close" | "worktrees" | "recencyByWorktree"
+  | "query"
+  | "setSelectedEditorId"
+  | "setQuery"
+  | "close"
+  | "worktrees"
+  | "recencyByWorktree"
+  | "onAskAi"
 > {
   commands: PaletteCommand[];
   editor: EditorLauncher | undefined;
   workspace: ReturnType<typeof useWorkspace>;
+  aiAvailable: boolean;
+  selectedWorktreeId: string | null;
 }
 
 function worktreeLabel(worktree: Worktree): string {
@@ -108,6 +120,9 @@ function CommandModeList({
   commands,
   editor,
   workspace,
+  onAskAi,
+  aiAvailable,
+  selectedWorktreeId,
 }: CommandModeListProps) {
   const editorWorktrees = useMemo(
     () => rankEditorWorktrees(worktrees, query, recencyByWorktree),
@@ -144,6 +159,13 @@ function CommandModeList({
     );
   }
 
+  const trimmedQuery = query.trim();
+  const selectedIsRemote =
+    selectedWorktreeId !== null && workspace.remoteWorktrees[selectedWorktreeId] === true;
+  // Ask AI spawns pragma-ai on the desktop client with local --cwd paths; remote
+  // SSH worktrees are refused until host-routed AI exists (see ai.rs).
+  const showAskAi =
+    aiAvailable && trimmedQuery.length > 0 && selectedWorktreeId !== null && !selectedIsRemote;
   const commandRows = commands.filter((command) => matches(query, command.label, command.keywords));
   const editorRows = constants.editorLaunchers.options.filter((option) =>
     matches(query, `Open in ${option.name}`, "editor worktree launcher"),
@@ -152,6 +174,14 @@ function CommandModeList({
   return (
     <CommandList className="max-h-[min(60vh,32rem)]">
       <CommandEmpty>No matching commands.</CommandEmpty>
+      {showAskAi ? (
+        <CommandGroup heading="AI">
+          <CommandItem onSelect={() => onAskAi(trimmedQuery)} value={`ask-ai:${trimmedQuery}`}>
+            <Sparkles />
+            <span className="truncate">Ask AI {trimmedQuery}</span>
+          </CommandItem>
+        </CommandGroup>
+      ) : null}
       {editorRows.length > 0 ? (
         <CommandGroup heading="Open worktree">
           {editorRows.map((option) => (
@@ -201,8 +231,10 @@ export function CommandMode({
   close,
   worktrees,
   recencyByWorktree,
+  onAskAi,
 }: CommandModeProps) {
   const workspace = useWorkspace();
+  const { available: aiAvailable } = useAi();
   const kanban = useKanban();
   const rightSidebar = useRightSidebar();
   const remoteAccess = useRemoteAccess();
@@ -326,11 +358,14 @@ export function CommandMode({
 
   return (
     <CommandModeList
+      aiAvailable={aiAvailable}
       close={close}
       commands={commands}
       editor={editor}
+      onAskAi={onAskAi}
       query={query}
       recencyByWorktree={recencyByWorktree}
+      selectedWorktreeId={workspace.selectedWorktreeId}
       setQuery={setQuery}
       setSelectedEditorId={setSelectedEditorId}
       workspace={workspace}

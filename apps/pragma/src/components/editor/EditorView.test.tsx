@@ -21,6 +21,9 @@ vi.mock("@/lib/file-watch", () => ({
 vi.mock("@/lib/terminal-manager", () => ({ TERMINAL_FONT_FAMILY: "monospace" }));
 vi.mock("@codemirror/language-data", () => ({ languages: [] }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/state/workspace-context", () => ({
+  useWorkspace: () => ({ remoteWorktrees: {} }),
+}));
 
 // CodeMirror's DOM measurement is unreliable under jsdom, so back it with a
 // plain textarea that forwards edits through the same `onChange` contract.

@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
   aiAuthMethods,
+  aiLogout,
   gatewayDevices,
   readConfig,
   readPluginManifests,
@@ -48,6 +50,7 @@ vi.mock("@/state/ai-context", () => ({
 
 vi.mock("@/lib/tauri", () => ({
   aiAuthMethods: vi.fn(),
+  aiLogout: vi.fn(),
   gatewayDevices: vi.fn(),
   readConfig: vi.fn(),
   readPluginManifests: vi.fn(),
@@ -233,5 +236,44 @@ describe("SettingsWorkspace", () => {
 
     expect(await screen.findByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("AI auth options")).toBeInTheDocument();
+  });
+
+  it("signs out one AI provider and re-reads status", async () => {
+    const refresh = vi.fn();
+    vi.mocked(useAi).mockReturnValue({
+      status: { available: true, signedIn: ["anthropic", "openai-codex"] },
+      loading: false,
+      available: true,
+      needsSetup: false,
+      refresh,
+      dismissSetup: vi.fn(),
+    });
+    vi.mocked(aiLogout).mockResolvedValue({ available: true, signedIn: ["anthropic"] });
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+
+    // Providers with no auth-method entry still render (and sign out) by id.
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out of openai-codex" }));
+
+    await waitFor(() => expect(aiLogout).toHaveBeenCalledWith("openai-codex"));
+    expect(refresh).toHaveBeenCalled();
+    expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Signed out of openai-codex.");
+  });
+
+  it("keeps the provider listed when signing out fails", async () => {
+    vi.mocked(aiLogout).mockRejectedValue(new Error("sidecar unavailable"));
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "AI Providers" }));
+
+    const button = await screen.findByRole("button", { name: "Sign out of Anthropic" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("sidecar unavailable"));
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
+    expect(button).not.toBeDisabled();
   });
 });

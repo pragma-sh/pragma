@@ -47,6 +47,7 @@ import { useKanban } from "@/state/kanban-context";
 import { useOpenPorts } from "@/state/open-ports-context";
 import { useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { AskAiPanel, type AskAiSession } from "./AskAiPanel";
 import { CommandMode } from "./CommandMode";
 import { rankPaletteItems } from "./palette-ranking";
 
@@ -444,6 +445,7 @@ function useResetPaletteOnOpenChange(
   setScopedWorktreeId: React.Dispatch<React.SetStateAction<string | null>>,
   setHostMatches: React.Dispatch<React.SetStateAction<PaletteSearchMatch[]>>,
   setHostError: React.Dispatch<React.SetStateAction<string | null>>,
+  setAskSession: React.Dispatch<React.SetStateAction<AskAiSession | null>>,
 ) {
   useEffect(() => {
     if (open) {
@@ -455,9 +457,11 @@ function useResetPaletteOnOpenChange(
     setScopedWorktreeId(null);
     setHostMatches([]);
     setHostError(null);
+    setAskSession(null);
   }, [
     mode,
     open,
+    setAskSession,
     setHostError,
     setHostMatches,
     setQuery,
@@ -629,6 +633,7 @@ function usePaletteState() {
   const [hostMatches, setHostMatches] = useState<PaletteSearchMatch[]>([]);
   const [hostError, setHostError] = useState<string | null>(null);
   const [pullRequests, setPullRequests] = useState<PalettePullRequest[]>([]);
+  const [askSession, setAskSession] = useState<AskAiSession | null>(null);
   const generationRef = useRef(0);
   return {
     query,
@@ -646,6 +651,8 @@ function usePaletteState() {
     setHostError,
     pullRequests,
     setPullRequests,
+    askSession,
+    setAskSession,
     generationRef,
   };
 }
@@ -710,6 +717,7 @@ function usePaletteAsyncData({
     state.setScopedWorktreeId,
     state.setHostMatches,
     state.setHostError,
+    state.setAskSession,
   );
   useClosePaletteOnProjectChange(scope.projectId, onOpenChange);
   useWorktreeMruLoading(open, scope.projectId, state.setRecencyByWorktree);
@@ -880,6 +888,11 @@ function usePaletteActions({
   const onEscapeKeyDown: NonNullable<
     React.ComponentProps<typeof CommandDialog>["onEscapeKeyDown"]
   > = (event) => {
+    if (state.askSession) {
+      event.preventDefault();
+      state.setAskSession(null);
+      return;
+    }
     if (state.selectedEditorId) {
       event.preventDefault();
       state.setSelectedEditorId(null);
@@ -959,75 +972,141 @@ export function CommandPalette({ open, onOpenChange, mode }: CommandPaletteProps
       className="sm:max-w-2xl"
     >
       <Command shouldFilter={false}>
-        <CommandInput
-          onKeyDown={actions.onInputKeyDown}
-          onValueChange={state.setQuery}
-          placeholder={
-            commandMode
-              ? state.selectedEditorId
-                ? "Search worktrees..."
-                : "Search commands..."
-              : "Search worktrees, ports, scripts, PRs, agents, files, terminals, code..."
-          }
-          value={state.query}
+        <PaletteShell
+          actions={actions}
+          commandMode={commandMode}
+          commandQuery={commandQuery}
+          rows={rows}
+          scope={scope}
+          state={state}
+          workspace={workspace}
         />
-        {commandMode ? (
-          <CommandMode
-            close={actions.close}
-            query={commandQuery}
-            recencyByWorktree={state.recencyByWorktree}
-            selectedEditorId={state.selectedEditorId}
-            setQuery={state.setQuery}
-            setSelectedEditorId={state.setSelectedEditorId}
-            worktrees={scope.visibleWorktrees}
-          />
-        ) : (
-          <CommandList className="max-h-[min(60vh,32rem)]">
-            <CommandEmpty>No matching project results.</CommandEmpty>
-            <ScopeResults
-              activateTabLocation={workspace.activateTabLocation}
-              activeWorktrees={scope.activeWorktrees}
-              close={actions.close}
-              goToScopedWorktree={actions.goToScopedWorktree}
-              projectId={scope.projectId}
-              runningScriptRows={rows.runningScriptRows}
-              scopedWorktreeId={state.scopedWorktreeId}
-              selectScope={actions.selectScope}
-              worktreeById={scope.worktreeById}
-              worktreeRows={rows.worktreeRows}
-            />
-            <PullRequestResults openPullRequest={actions.openPullRequest} rows={rows.prRows} />
-            <PortResults
-              activateTab={actions.activateTab}
-              rows={rows.portRows}
-              tabById={rows.tabById}
-              worktreeById={scope.worktreeById}
-            />
-            <AgentResults
-              agentsById={rows.agentById}
-              close={actions.close}
-              navigateToAgentLocation={workspace.navigateToAgentLocation}
-              projectId={scope.projectId}
-              projectTabs={workspace.projectTabs}
-              rows={rows.agentRows}
-            />
-            <FileResults
-              activateTab={actions.activateTab}
-              fileMatches={rows.fileMatches}
-              openFile={actions.openFile}
-              openFileRows={rows.openFileRows}
-              terminalRows={rows.terminalRows}
-              worktreeById={scope.worktreeById}
-            />
-            <CodeResults
-              codeMatches={rows.codeMatches}
-              deferredQuery={state.deferredQuery}
-              hostError={state.hostError}
-              openFile={actions.openFile}
-            />
-          </CommandList>
-        )}
       </Command>
     </CommandDialog>
+  );
+}
+
+function PaletteShell({
+  actions,
+  commandMode,
+  commandQuery,
+  rows,
+  scope,
+  state,
+  workspace,
+}: {
+  actions: ReturnType<typeof usePaletteActions>;
+  commandMode: boolean;
+  commandQuery: string;
+  rows: ReturnType<typeof usePaletteRows>;
+  scope: ReturnType<typeof usePaletteScope>;
+  state: ReturnType<typeof usePaletteState>;
+  workspace: Workspace;
+}) {
+  if (state.askSession) {
+    return <AskAiPanel onDone={() => state.setAskSession(null)} session={state.askSession} />;
+  }
+
+  return (
+    <>
+      <CommandInput
+        onKeyDown={actions.onInputKeyDown}
+        onValueChange={state.setQuery}
+        placeholder={palettePlaceholder(commandMode, state.selectedEditorId)}
+        value={state.query}
+      />
+      {commandMode ? (
+        <CommandMode
+          close={actions.close}
+          onAskAi={(question) => {
+            const worktreeId = workspace.selectedWorktreeId;
+            if (!worktreeId) return;
+            state.setAskSession({ question, worktreeId });
+          }}
+          query={commandQuery}
+          recencyByWorktree={state.recencyByWorktree}
+          selectedEditorId={state.selectedEditorId}
+          setQuery={state.setQuery}
+          setSelectedEditorId={state.setSelectedEditorId}
+          worktrees={scope.visibleWorktrees}
+        />
+      ) : (
+        <PaletteSearchResults
+          actions={actions}
+          rows={rows}
+          scope={scope}
+          state={state}
+          workspace={workspace}
+        />
+      )}
+    </>
+  );
+}
+
+function palettePlaceholder(commandMode: boolean, selectedEditorId: string | null): string {
+  if (!commandMode) {
+    return "Search worktrees, ports, scripts, PRs, agents, files, terminals, code...";
+  }
+  return selectedEditorId ? "Search worktrees..." : "Search commands...";
+}
+
+function PaletteSearchResults({
+  actions,
+  rows,
+  scope,
+  state,
+  workspace,
+}: {
+  actions: ReturnType<typeof usePaletteActions>;
+  rows: ReturnType<typeof usePaletteRows>;
+  scope: ReturnType<typeof usePaletteScope>;
+  state: ReturnType<typeof usePaletteState>;
+  workspace: Workspace;
+}) {
+  return (
+    <CommandList className="max-h-[min(60vh,32rem)]">
+      <CommandEmpty>No matching project results.</CommandEmpty>
+      <ScopeResults
+        activateTabLocation={workspace.activateTabLocation}
+        activeWorktrees={scope.activeWorktrees}
+        close={actions.close}
+        goToScopedWorktree={actions.goToScopedWorktree}
+        projectId={scope.projectId}
+        runningScriptRows={rows.runningScriptRows}
+        scopedWorktreeId={state.scopedWorktreeId}
+        selectScope={actions.selectScope}
+        worktreeById={scope.worktreeById}
+        worktreeRows={rows.worktreeRows}
+      />
+      <PullRequestResults openPullRequest={actions.openPullRequest} rows={rows.prRows} />
+      <PortResults
+        activateTab={actions.activateTab}
+        rows={rows.portRows}
+        tabById={rows.tabById}
+        worktreeById={scope.worktreeById}
+      />
+      <AgentResults
+        agentsById={rows.agentById}
+        close={actions.close}
+        navigateToAgentLocation={workspace.navigateToAgentLocation}
+        projectId={scope.projectId}
+        projectTabs={workspace.projectTabs}
+        rows={rows.agentRows}
+      />
+      <FileResults
+        activateTab={actions.activateTab}
+        fileMatches={rows.fileMatches}
+        openFile={actions.openFile}
+        openFileRows={rows.openFileRows}
+        terminalRows={rows.terminalRows}
+        worktreeById={scope.worktreeById}
+      />
+      <CodeResults
+        codeMatches={rows.codeMatches}
+        deferredQuery={state.deferredQuery}
+        hostError={state.hostError}
+        openFile={actions.openFile}
+      />
+    </CommandList>
   );
 }

@@ -1465,6 +1465,70 @@ export function aiCommitAllAndGeneratePullRequestDraft(
   });
 }
 
+/** One exact-text replacement an inline edit proposes for the open buffer. */
+export interface AiInlineEditReplacement {
+  /** Text to find in the buffer; matched exactly, and expected to be unique. */
+  oldText: string;
+  /** Replacement text. Empty means the match is deleted. */
+  newText: string;
+}
+
+/** The replacements plus the one-line summary shown above the inline diff. */
+export interface AiInlineEditDraft {
+  summary: string;
+  edits: AiInlineEditReplacement[];
+}
+
+/**
+ * Rewrites part of an open editor buffer from a natural-language instruction
+ * (standard model, read-only tools over the whole worktree).
+ *
+ * `doc` is the live buffer, which may be unsaved — the returned replacements are
+ * anchored in that text, not in the file on disk, and nothing is written until
+ * the user accepts a hunk.
+ */
+export function aiInlineEdit(input: {
+  worktreeId: string;
+  filePath: string;
+  doc: string;
+  instruction: string;
+  /** 1-based first line of the selection. */
+  startLine: number;
+  /** 1-based last line of the selection, inclusive. */
+  endLine: number;
+}): Promise<AiInlineEditDraft> {
+  return invoke<AiInlineEditDraft>("ai_inline_edit", input);
+}
+
+/** An event streamed from the `pragma-ai` sidecar during a palette Ask AI run. */
+export type AiAskEvent =
+  | { type: "delta"; text: string }
+  | { type: "reset" }
+  | { type: "result"; text: string }
+  | { type: "error"; code?: string; error: string }
+  | { type: "log"; line: string };
+
+/**
+ * Streams a one-shot codebase answer (standard model, read-only tools over the
+ * project). Cancel with {@link aiAskCancel} using the same `id`.
+ */
+export function aiAsk(
+  id: string,
+  worktreeId: string,
+  question: string,
+  onEvent: (event: AiAskEvent) => void,
+): Promise<void> {
+  const channel = new Channel<AiAskEvent>();
+  // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
+  channel.onmessage = onEvent;
+  return invoke<void>("ai_ask", { id, worktreeId, question, onEvent: channel });
+}
+
+/** Aborts an in-flight palette Ask AI run and drops its sidecar. */
+export function aiAskCancel(id: string): Promise<void> {
+  return invoke("ai_ask_cancel", { id });
+}
+
 /**
  * Starts an interactive OAuth login, streaming events through the returned
  * channel. Answer prompts with {@link aiLoginRespond} and abort with

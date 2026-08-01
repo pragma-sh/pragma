@@ -994,6 +994,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
     app.manage(ai::LoginRegistry::default());
+    app.manage(ai::AskRegistry::default());
     app.manage(control::BrowserHistory::default());
     // Mirror the workspace (projects/worktrees/tabs) to pragma-server so a paired
     // phone can render the session launcher without being the controller. Debounced
@@ -1179,6 +1180,9 @@ pub fn run() {
             ai::ai_generate_commit_message,
             ai::ai_generate_pull_request_draft,
             ai::ai_commit_all_and_generate_pull_request_draft,
+            ai::ai_inline_edit,
+            ai::ai_ask,
+            ai::ai_ask_cancel,
             ai::ai_login,
             ai::ai_login_respond,
             ai::ai_login_cancel,
