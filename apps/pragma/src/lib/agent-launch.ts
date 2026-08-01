@@ -216,7 +216,6 @@ export async function startBackgroundAgentSession(
 
   const write = (data: string) => void ptyWrite(tabId, data);
   const alternateScreen = createAlternateScreenTracker();
-  let ownsOutputChannel = true;
   // A racing terminal mount may have already spawned this session (mobile
   // `tabOpened` used to select the tab). Treat "already exists" as success so
   // the start command + prefill still land in the live PTY.
@@ -226,13 +225,12 @@ export async function startBackgroundAgentSession(
     if (!isSessionAlreadyExists(cause)) {
       throw cause;
     }
-    ownsOutputChannel = false;
   }
   window.setTimeout(() => {
     void ptyWrite(tabId, `${command}\r`);
     scheduleStartupInput(agent, write);
     if (message) {
-      scheduleBackgroundPrefill(agent, message, write, ownsOutputChannel ? alternateScreen : null);
+      scheduleBackgroundPrefill(agent, message, write, alternateScreen);
     }
   }, AGENT_START_DELAY_MS);
 }

@@ -242,6 +242,8 @@ describe("startBackgroundAgentSession", () => {
     vi.advanceTimersByTime(500);
     expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "claude\r");
     vi.advanceTimersByTime(2500);
+    expect(ptyWriteMock).not.toHaveBeenCalledWith("tab-1", `${ESC}[200~Fix the bug${ESC}[201~`);
+    vi.advanceTimersByTime(constants.agents.altScreenExtraWaitMs);
     expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", `${ESC}[200~Fix the bug${ESC}[201~`);
   });
 
