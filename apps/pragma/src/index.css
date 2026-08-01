@@ -1,8 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "streamdown/styles.css";
 
 @plugin "@tailwindcss/typography";
+
+/* streamdown is hoisted to the monorepo root node_modules */
+@source "../../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
