@@ -1,7 +1,13 @@
 import { constants } from "@pragma/constants";
 
 import { modelLaunchArgs } from "@/lib/agent-model-selection";
-import { type AgentConfig, type AgentModelSelection, ptySpawn, ptyWrite } from "@/lib/tauri";
+import {
+  type AgentConfig,
+  type AgentModelSelection,
+  ptySpawn,
+  ptyWrite,
+  type PtyMessage,
+} from "@/lib/tauri";
 import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, terminalManager } from "@/lib/terminal-manager";
 
 /**
@@ -33,6 +39,7 @@ const DEFAULT_PREFILL_SUBMIT_DELAY_MS = 200;
 // newline submitting the prompt early.
 const BRACKETED_PASTE_START = "[200~";
 const BRACKETED_PASTE_END = "[201~";
+const ALT_SCREEN_SEQUENCES = ["[?1049h", "[?1047h", "[?47h"];
 
 /** Builds the shell command that launches an agent from its `start` argv. */
 export function agentStartCommand(start: string[]): string {
@@ -98,8 +105,72 @@ function scheduleStartupInput(agent: AgentConfig, write: (data: string) => void)
  */
 function schedulePrefill(agent: AgentConfig, message: string, write: (data: string) => void): void {
   window.setTimeout(() => {
-    write(prefillBody(agent, message));
-    window.setTimeout(() => write(prefillSubmit(agent)), prefillSubmitDelayMs(agent));
+    submitPrefill(agent, message, write);
+  }, prefillDelayMs(agent));
+}
+
+function submitPrefill(agent: AgentConfig, message: string, write: (data: string) => void): void {
+  write(prefillBody(agent, message));
+  window.setTimeout(() => write(prefillSubmit(agent)), prefillSubmitDelayMs(agent));
+}
+
+interface AlternateScreenTracker {
+  handle: (message: PtyMessage) => void;
+  hasEntered: () => boolean;
+  onEntered: (listener: () => void) => () => void;
+}
+
+/** Tracks alternate-screen entry across arbitrarily split PTY output chunks. */
+function createAlternateScreenTracker(): AlternateScreenTracker {
+  const decoder = new TextDecoder();
+  const listeners = new Set<() => void>();
+  let entered = false;
+  let tail = "";
+  return {
+    handle(message) {
+      if (entered || !(message instanceof ArrayBuffer)) return;
+      const output = `${tail}${decoder.decode(new Uint8Array(message), { stream: true })}`;
+      tail = output.slice(-32);
+      if (!ALT_SCREEN_SEQUENCES.some((sequence) => output.includes(sequence))) return;
+      entered = true;
+      for (const listener of listeners) listener();
+      listeners.clear();
+    },
+    hasEntered: () => entered,
+    onEntered(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** Waits for a fresh background TUI to own its input before typing the prompt. */
+function scheduleBackgroundPrefill(
+  agent: AgentConfig,
+  message: string,
+  write: (data: string) => void,
+  alternateScreen: AlternateScreenTracker | null,
+): void {
+  window.setTimeout(() => {
+    if (agent.prefillMode === "plain" || !alternateScreen || alternateScreen.hasEntered()) {
+      submitPrefill(agent, message, write);
+      return;
+    }
+
+    let settleTimer: number | undefined;
+    let sent = false;
+    const stopListening = alternateScreen.onEntered(() => {
+      settleTimer = window.setTimeout(send, constants.agents.altScreenSettleMs);
+    });
+    const fallbackTimer = window.setTimeout(send, constants.agents.altScreenExtraWaitMs);
+    function send(): void {
+      if (sent) return;
+      sent = true;
+      stopListening();
+      window.clearTimeout(fallbackTimer);
+      if (settleTimer !== undefined) window.clearTimeout(settleTimer);
+      submitPrefill(agent, message, write);
+    }
   }, prefillDelayMs(agent));
 }
 
@@ -144,12 +215,30 @@ export async function startBackgroundAgentSession(
   const message = prefill?.trim() ? prefill : null;
 
   const write = (data: string) => void ptyWrite(tabId, data);
-  await ptySpawn(tabId, worktreeId, cwd, cols, rows, () => {});
+  const alternateScreen = createAlternateScreenTracker();
+  let ownsOutputChannel = true;
+  // A racing terminal mount may have already spawned this session (mobile
+  // `tabOpened` used to select the tab). Treat "already exists" as success so
+  // the start command + prefill still land in the live PTY.
+  try {
+    await ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle);
+  } catch (cause) {
+    if (!isSessionAlreadyExists(cause)) {
+      throw cause;
+    }
+    ownsOutputChannel = false;
+  }
   window.setTimeout(() => {
     void ptyWrite(tabId, `${command}\r`);
     scheduleStartupInput(agent, write);
     if (message) {
-      schedulePrefill(agent, message, write);
+      scheduleBackgroundPrefill(agent, message, write, ownsOutputChannel ? alternateScreen : null);
     }
   }, AGENT_START_DELAY_MS);
+}
+
+/** True when a PTY spawn failed because this tab already has a live session. */
+function isSessionAlreadyExists(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /already exists/i.test(message);
 }

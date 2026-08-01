@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ControlMethod, DiffSide, Tab, TabKind, Worktree};
+use pragma_constants::{ControlMethod, DiffSide, ProtocolRpcMethod, Tab, TabKind, Worktree};
+use pragma_core::tabs::TabsRequest;
 use pragma_protocol::{
     read_json_frame, write_json_frame, ControlEnvelope, ControlResult, RequestFrame, RequestKind,
     ServerFrame,
@@ -1031,10 +1032,15 @@ struct NewWorktreeArgs {
 /// Handles `agentSessionLaunch`: resolves or creates the target worktree and a
 /// new terminal tab, replies `{ worktreeId, tabId }`, and emits the
 /// `pragma:agent-session-launch` Tauri event so the frontend runs the proven
-/// Kanban background-launch sequence (refreshProject →
-/// `startBackgroundAgentSession` → `startWatcherForAgentSession`). The reply
-/// is immediate; the PTY spawn + agent launch happen asynchronously in the
-/// frontend listener, so a remote caller never blocks on TUI startup.
+/// Kanban background-launch sequence (`startBackgroundAgentSession` →
+/// `startWatcherForAgentSession`). The reply is immediate; the PTY spawn +
+/// agent launch happen asynchronously in the frontend listener, so a remote
+/// caller never blocks on TUI startup.
+///
+/// The tab is announced as `tabOpenedBackground` (not `tabOpened`) so the UI
+/// refreshes without selecting it. Selecting would mount a terminal and spawn
+/// an empty shell that races the background agent `ptySpawn`, leaving a plain
+/// terminal with no agent command or prompt prefill.
 fn agent_session_launch(
     app: &AppHandle,
     payload: serde_json::Value,
@@ -1086,7 +1092,12 @@ fn agent_session_launch(
         None,
         None,
     )?;
-    emit_tabs_changed(app, "tabOpened", &tab);
+    // Tag the tab as agent-owned on the daemon before any workspace publish so
+    // mobile/desktop list overlays see the agent icon immediately (SQLite does
+    // not store agent metadata).
+    let agent_title = agent_display_title(&args.agent_id);
+    mark_launched_tab_agent(app, &tab, &args.agent_id, &agent_title);
+    emit_tabs_changed(app, "tabOpenedBackground", &tab);
     app.state::<crate::workspace_mirror::WorkspacePublisher>()
         .trigger();
     let result = AgentSessionLaunchResult {
@@ -1109,6 +1120,37 @@ fn agent_session_launch(
         }),
     );
     json(result)
+}
+
+/// Seeds a temporary display title from a catalog agent id (`plugin.agent` →
+/// last segment). The frontend replaces it with the agent's real name once the
+/// plugin catalog resolves.
+fn agent_display_title(agent_id: &str) -> String {
+    agent_id
+        .rsplit('.')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(agent_id)
+        .to_string()
+}
+
+/// Best-effort daemon `setAgent` so remote clients see an agent tab before the
+/// frontend listener finishes. Failures are non-fatal: the FE still marks the
+/// tab when it resolves the plugin agent.
+fn mark_launched_tab_agent(app: &AppHandle, tab: &Tab, agent_id: &str, title: &str) {
+    let db = app.state::<Db>();
+    let hosts = app.state::<Hosts>();
+    let Ok(pty) = hosts.for_project(&db, &tab.project_id) else {
+        return;
+    };
+    let Ok(payload) = serde_json::to_value(TabsRequest::SetAgent {
+        tab: Box::new(tab.clone()),
+        agent_id: agent_id.to_string(),
+        title: title.to_string(),
+    }) else {
+        return;
+    };
+    let _ = pty.rpc(ProtocolRpcMethod::Tabs, payload);
 }
 
 /// Brokered CLI agent starts are unsupported now that agents are plugin-defined
@@ -1196,7 +1238,7 @@ fn shell_join(argv: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_join, BrowserHistory};
+    use super::{agent_display_title, shell_join, BrowserHistory};
 
     #[test]
     fn shell_join_preserves_argv_boundaries_through_a_shell_reparse() {
@@ -1223,6 +1265,12 @@ mod tests {
     #[test]
     fn shell_join_single_plain_argument_is_unquoted() {
         assert_eq!(shell_join(&["status".to_string()]), "status");
+    }
+
+    #[test]
+    fn agent_display_title_uses_the_catalog_id_tail() {
+        assert_eq!(agent_display_title("pragma.claude-code"), "claude-code");
+        assert_eq!(agent_display_title("opencode"), "opencode");
     }
 
     #[test]
