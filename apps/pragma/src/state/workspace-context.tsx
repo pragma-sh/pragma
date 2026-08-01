@@ -2865,6 +2865,15 @@ function useTerminalLinkOpener(
   );
 }
 
+/** Resolves the project/worktree a new tab should attach to, or `undefined` if none is selected. */
+function resolveActiveWorktree(
+  state: WorkspaceState,
+): { projectId: string; worktreeId: string } | undefined {
+  const projectId = state.selectedProjectId;
+  const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+  return projectId && worktreeId ? { projectId, worktreeId } : undefined;
+}
+
 /** Opens (or focuses) editor/diff/PR-review/daemon-log tabs, deduped per worktree. */
 function useTabOpeners(
   state: WorkspaceState,
@@ -2888,11 +2897,11 @@ function useTabOpeners(
       paneId: string | undefined,
       commit?: string | null,
     ) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         return;
       }
+      const { projectId, worktreeId } = active;
       const existing = state.tabs.find(
         (tab) =>
           tab.kind === kind &&
@@ -2921,7 +2930,7 @@ function useTabOpeners(
         dispatch({ type: "load-error", error: errorMessage(cause) });
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openFileTab = useCallback(
@@ -2937,11 +2946,11 @@ function useTabOpeners(
 
   const openPluginWebView = useCallback(
     async (request: OpenPluginWebViewRequest) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         throw new Error("Cannot open plugin web view without an active worktree");
       }
+      const { projectId, worktreeId } = active;
       const existing = request.dedupeKey
         ? state.tabs.find(
             (tab) =>
@@ -2972,16 +2981,16 @@ function useTabOpeners(
         throw cause;
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openReviewTab = useCallback(
     async (prNumber: number, title: string) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         return;
       }
+      const { projectId, worktreeId } = active;
       const existing = state.tabs.find(
         (tab) =>
           tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
@@ -3007,15 +3016,15 @@ function useTabOpeners(
         dispatch({ type: "load-error", error: errorMessage(cause) });
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openDaemonLogTab = useCallback(async () => {
-    const projectId = state.selectedProjectId;
-    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-    if (!projectId || !worktreeId) {
+    const active = resolveActiveWorktree(state);
+    if (!active) {
       return;
     }
+    const { projectId, worktreeId } = active;
     const existing = state.tabs.find((tab) => tab.kind === "log");
     if (existing) {
       dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
@@ -3027,7 +3036,7 @@ function useTabOpeners(
     } catch (cause) {
       dispatch({ type: "load-error", error: errorMessage(cause) });
     }
-  }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+  }, [dispatch, state]);
 
   return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView };
 }
