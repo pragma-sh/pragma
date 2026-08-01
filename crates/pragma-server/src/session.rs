@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use pragma_constants::CONSTANTS;
-use pragma_platform::shell;
+use pragma_platform::{process, shell};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -288,15 +288,40 @@ impl Session {
         Ok(())
     }
 
+    /// Ends the shell and everything it spawned.
+    ///
+    /// `portable_pty`'s own `Child::kill` only sends `SIGHUP` to the shell's
+    /// own pid on Unix — anything the shell forked (a backgrounded dev
+    /// server, a `zsh-async` prompt worker, an unrelated disowned job) is
+    /// orphaned to launchd instead of dying with it, which is how sessions
+    /// closed in the UI leave processes running for the rest of the machine's
+    /// uptime. [`process::kill_process_tree`] instead walks and kills the
+    /// shell's whole descendant tree, which also reaches a backgrounded job
+    /// that job control moved into its own process group.
     pub fn kill(&self) -> Result<(), SessionError> {
-        if let Some(mut child) = self
+        let Some(mut child) = self
             .child
             .lock()
             .map_err(|_| SessionError::LockPoisoned)?
             .take()
-        {
-            child.kill()?;
+        else {
+            return Ok(());
+        };
+        if let Some(pid) = self.root_pid {
+            let _ = process::kill_process_tree(pid);
+        } else {
+            // No pid recorded (spawn-time failure to read it back) — fall
+            // back to portable_pty's own single-process signal rather than
+            // leaving the shell running with nothing to address it by.
+            let _ = child.kill();
         }
+        // Reap now instead of letting `child` drop unwaited: `portable_pty`'s
+        // Unix `Child` is a bare `std::process::Child`, whose `Drop` does not
+        // wait() on it, so an un-reaped kill leaves a zombie pinned until the
+        // server itself exits. The reader thread's own post-EOF `wait()`
+        // no longer has a child to reap here — `take()` above already moved
+        // it out from under that path.
+        let _ = child.wait();
         Ok(())
     }
 
@@ -1116,6 +1141,81 @@ mod tests {
         let marker = "pragma-pty-marker";
         // `echo` exists in every shell this resolves to, PowerShell included.
         spawn_and_expect(&format!("echo {marker}\r"), marker.as_bytes());
+    }
+
+    /// Regression test for the resource leak this session's `kill` fixes:
+    /// `portable_pty`'s own `Child::kill` only signals the shell's own pid, so
+    /// anything the shell backgrounded (a dev server, a disowned job) used to
+    /// survive the session being killed and pile up as orphaned processes.
+    /// Backgrounds a `sleep` under the session's shell, kills the session, and
+    /// asserts the backgrounded process is gone too — not just the shell.
+    ///
+    /// Unix-only because the setup uses POSIX shell syntax (`&`, `$!`) the
+    /// platform default shell resolves to on Unix but not on Windows
+    /// (PowerShell); the mechanism under test itself
+    /// ([`process::kill_process_tree`]) is cross-platform.
+    #[test]
+    #[cfg(unix)]
+    fn kill_terminates_the_whole_process_group_not_just_the_shell() {
+        if std::env::var_os("PRAGMA_TEST_PTY").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = Session::spawn_with_exit_handler(
+            "test-tab-group-kill".to_string(),
+            "test-worktree".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+            80,
+            24,
+            "unused-socket",
+            |_| {},
+        )
+        .expect("a shell spawns on a pseudo-terminal");
+
+        let marker_file = dir.path().join("child.pid");
+        session
+            .write(&format!("sleep 60 & echo $! > {}\r", marker_file.display()))
+            .expect("the shell accepts input");
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let child_pid: u32 = loop {
+            if let Ok(contents) = std::fs::read_to_string(&marker_file) {
+                if let Ok(pid) = contents.trim().parse() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "backgrounded child pid was never written"
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(
+            process_is_alive(child_pid),
+            "backgrounded child should be running before kill"
+        );
+
+        session.kill().expect("kill succeeds");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while process_is_alive(child_pid) {
+            assert!(
+                Instant::now() < deadline,
+                "backgrounded child survived session kill"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_is_alive(pid: u32) -> bool {
+        // Captured rather than inherited: a dead pid is the expected steady
+        // state once the poll loop above succeeds, and `kill -0` writes
+        // "No such process" to stderr on every such check.
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .is_ok_and(|output| output.status.success())
     }
 
     /// Writes a project config declaring `shell` and returns its worktree root.
