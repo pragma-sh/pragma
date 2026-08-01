@@ -129,7 +129,13 @@
       };
     }
 
-    /** True once the app has a live terminal for `tabId` (and, for the TUI payload, it has painted). */
+    /**
+     * True once the app has a live terminal for `tabId` (and, for the TUI payload, it has painted).
+     * Each branch reports a distinct "not ready yet" reason (no hook, no mounted
+     * terminal, no painted status row); collapsing them would erase exactly the
+     * diagnostic detail this method exists to produce.
+     */
+    // fallow-ignore-next-line complexity
     ready(tabId, markerPrefix) {
       // Distinguished from "the tab has not mounted" because the two have
       // completely different fixes, and both used to report the same sentence.
@@ -169,7 +175,12 @@
         : { ready: false, reason: "payload has not painted its status row" };
     }
 
-    /** Begins a scenario and returns at once; progress is read with `poll`. */
+    /**
+     * Begins a scenario and returns at once; progress is read with `poll`.
+     * The guards (already running, no terminal) must fail fast before `state`
+     * exists, so they cannot move into the object the rest of the method builds.
+     */
+    // fallow-ignore-next-line complexity
     start(options) {
       if (this.state && this.state.running) {
         return { started: false, reason: "a scenario is already running" };
@@ -250,6 +261,11 @@
         state.unfocused = true;
       };
       window.addEventListener("blur", onBlur);
+      // One `onRender` subscription deliberately serves both loops (paint
+      // bookkeeping, mouse-mode integrity, and waking pending waiters);
+      // splitting it would need a second subscription and lose the "read
+      // the frame once" guarantee.
+      // fallow-ignore-next-line complexity
       const subscription = terminal.onRender(() => {
         context.painted = {
           time: performance.now(),
@@ -382,6 +398,11 @@
      * attribute a movement to a notch. Sending the next only after the screen
      * moved keeps one notch equal to one sample.
      */
+    // Turnaround geometry, per-notch send/wait/record, and the optional
+    // pacing gap are one sequential loop by design (see the scroll doc
+    // comment above); splitting it would scatter state that only makes
+    // sense read top to bottom.
+    // fallow-ignore-next-line complexity
     async #runScroll(element, options, state, context) {
       // The scrollback payload parks at the *bottom* of its 5000 lines, so a
       // downward notch has nowhere to go and every sample times out — 100%
@@ -414,6 +435,10 @@
      * Only `scroll-buffer` can run out: xterm's own viewport is bounded by the
      * scrollback, whereas the TUI wraps its offset.
      */
+    // Only `scroll-buffer` can run out of scrollback, so the early return
+    // plus two bound checks are the whole rule; a table or lookup would be
+    // less readable than the guards.
+    // fallow-ignore-next-line complexity
     #turnAtTheEnds(scenario, terminal, direction) {
       if (scenario !== "scroll-buffer") {
         return direction;
@@ -455,6 +480,10 @@
      * never arrive, and be counted as a dropped frame, so it fails loudly here
      * instead.
      */
+    // The keyCode-48 boundary and the digit/letter `code` split are xterm's
+    // own rules (see the doc comment above); a helper per branch would just
+    // relocate the same conditions.
+    // fallow-ignore-next-line complexity
     #sendKey(element, character) {
       const target =
         element.querySelector(".xterm-helper-textarea") ?? element.querySelector(".xterm");
