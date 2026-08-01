@@ -23,12 +23,12 @@ import {
   EditorView,
   ViewPlugin,
   type ViewUpdate,
-  WidgetType,
   lineNumbers,
 } from "@codemirror/view";
 
 import { loadLanguageExtension } from "@/components/editor/codemirror-language";
 import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
+import { PortalWidget } from "@/components/editor/portal-widget";
 
 /**
  * An inline review comment anchored to a 1-based line in the new (right-hand)
@@ -56,36 +56,6 @@ export interface MergeDiffHandle {
   scrollCommentIntoView(key: string): void;
 }
 
-/** Block widget whose DOM is a stable container we render a React portal into. */
-class CommentWidget extends WidgetType {
-  constructor(
-    private readonly key: string,
-    private readonly onMount: (key: string, el: HTMLElement) => void,
-    private readonly onUnmount: (key: string) => void,
-  ) {
-    super();
-  }
-
-  override eq(other: CommentWidget): boolean {
-    return other.key === this.key;
-  }
-
-  override toDOM(): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "cm-review-comment";
-    this.onMount(this.key, el);
-    return el;
-  }
-
-  override destroy(): void {
-    this.onUnmount(this.key);
-  }
-
-  override ignoreEvent(): boolean {
-    return true;
-  }
-}
-
 function commentDecorations(
   newText: string,
   comments: DiffComment[],
@@ -103,7 +73,7 @@ function commentDecorations(
       pos,
       pos,
       Decoration.widget({
-        widget: new CommentWidget(comment.key, onMount, onUnmount),
+        widget: new PortalWidget(comment.key, "cm-review-comment", onMount, onUnmount),
         block: true,
         side: 1,
       }),

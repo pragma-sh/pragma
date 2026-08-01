@@ -215,10 +215,16 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it("fires onClearTerminal for cmd+k on mac", async () => {
+  it("fires onClearTerminal for cmd+k on mac when a terminal is focused", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
     const onClearTerminal = vi.fn();
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    const textarea = document.createElement("textarea");
+    terminal.append(textarea);
+    document.body.append(terminal);
+    textarea.focus();
 
     renderHook(() => useShortcuts(options({ onClearTerminal })));
 
@@ -227,12 +233,19 @@ describe("useShortcuts", () => {
 
     expect(onClearTerminal).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
+    terminal.remove();
   });
 
-  it("fires onClearTerminal for ctrl+k on linux", async () => {
+  it("fires onClearTerminal for ctrl+k on linux when a terminal is focused", async () => {
     getPlatformMock.mockResolvedValue("linux");
     loadKeybindingsMock.mockResolvedValue(config());
     const onClearTerminal = vi.fn();
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    const textarea = document.createElement("textarea");
+    terminal.append(textarea);
+    document.body.append(terminal);
+    textarea.focus();
 
     renderHook(() => useShortcuts(options({ onClearTerminal })));
 
@@ -240,12 +253,41 @@ describe("useShortcuts", () => {
     dispatchKeydown({ ctrlKey: true, key: "k" });
 
     expect(onClearTerminal).toHaveBeenCalledTimes(1);
+    terminal.remove();
+  });
+
+  it("leaves cmd+k alone outside a terminal so the editor can own it", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onClearTerminal = vi.fn();
+    const editor = document.createElement("div");
+    editor.className = "cm-editor";
+    const content = document.createElement("div");
+    content.contentEditable = "true";
+    editor.append(content);
+    document.body.append(editor);
+    content.focus();
+
+    renderHook(() => useShortcuts(options({ onClearTerminal })));
+
+    await flushLoad();
+    const event = dispatchKeydown({ metaKey: true, key: "k" });
+
+    expect(onClearTerminal).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    editor.remove();
   });
 
   it("defers to an active plugin command binding that collides with a built-in shortcut", async () => {
     getPlatformMock.mockResolvedValue("mac");
     loadKeybindingsMock.mockResolvedValue(config());
     const onClearTerminal = vi.fn();
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    const textarea = document.createElement("textarea");
+    terminal.append(textarea);
+    document.body.append(terminal);
+    textarea.focus();
 
     setActivePluginCommandKeybindings([{ bindings: [{ chord: "cmd+k" }] }]);
     renderHook(() => useShortcuts(options({ onClearTerminal })));
@@ -255,6 +297,7 @@ describe("useShortcuts", () => {
 
     expect(onClearTerminal).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+    terminal.remove();
   });
 
   it("fires onNewBrowserTab for cmd+b on mac", async () => {

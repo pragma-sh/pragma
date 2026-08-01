@@ -27,6 +27,7 @@ import {
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
 import { useEditorFind } from "@/components/editor/use-editor-find";
+import { useInlineEdit } from "@/components/editor/use-inline-edit";
 import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-markdown-find";
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -176,11 +177,13 @@ function MarkdownViewBar({
 function MarkdownRaw({
   doc,
   filePath,
+  worktreeId,
   onChange,
   save,
 }: {
   doc: string;
   filePath: string | null;
+  worktreeId: string;
   onChange: (value: string) => void;
   save: (contents: string) => Promise<void>;
 }) {
@@ -189,7 +192,14 @@ function MarkdownRaw({
   const saveKeymap = useEditorKeymap(save);
   const find = useEditorFind(viewRef);
   const findKeymap = useEditorFindKeymap(find.openBar);
-  const extensions = useEditorExtensions(languageExtension, saveKeymap, findKeymap, find.extension);
+  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath });
+  const extensions = useEditorExtensions(
+    languageExtension,
+    saveKeymap,
+    findKeymap,
+    find.extension,
+    inlineEdit.extension,
+  );
   return (
     <div className="relative h-full">
       <CodeMirror
@@ -209,6 +219,7 @@ function MarkdownRaw({
         value={doc}
       />
       <EditorFindReplaceBar find={find} />
+      {inlineEdit.portals}
     </div>
   );
 }
@@ -266,7 +277,13 @@ export function MarkdownView({ tab }: { tab: Tab }) {
         <div className="flex h-full min-h-0 flex-col">
           <MarkdownViewBar modeToggle={modeToggle} />
           <div className="min-h-0 flex-1 overflow-hidden">
-            <MarkdownRaw doc={doc} filePath={filePath} onChange={onChange} save={save} />
+            <MarkdownRaw
+              doc={doc}
+              filePath={filePath}
+              onChange={onChange}
+              save={save}
+              worktreeId={worktreeId}
+            />
           </div>
         </div>
       )}

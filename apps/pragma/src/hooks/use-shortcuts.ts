@@ -9,7 +9,7 @@ import {
   setLoadedKeybindingsConfig,
   workspaceIndexForAction,
 } from "@/lib/keybindings";
-import { isTextEditingContext } from "@/lib/native-editing";
+import { isTerminalEditingContext, isTextEditingContext } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
 import { getPlatform, loadKeybindings } from "@/lib/tauri";
@@ -58,7 +58,6 @@ const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
   closeTopTab: "onCloseTopTab",
   newTerminalTab: "onNewTerminalTab",
   newBrowserTab: "onNewBrowserTab",
-  clearTerminal: "onClearTerminal",
   browserReload: "onBrowserReload",
   browserDevtools: "onBrowserDevtools",
   browserCopyUrl: "onBrowserCopyUrl",
@@ -158,6 +157,11 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         return;
       }
 
+      if (action === "clearTerminal") {
+        handleClearTerminalAction(event, current);
+        return;
+      }
+
       if (action === "deleteFile") {
         handleDeleteFileAction(event, current);
         return;
@@ -169,6 +173,19 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [shortcutState]);
+}
+
+/**
+ * `clearTerminal` (⌘/Ctrl+K by default) only applies inside a focused terminal.
+ * Elsewhere the chord is free for the active surface — e.g. the editor's inline
+ * AI edit — so we must not preventDefault outside `.xterm`.
+ */
+function handleClearTerminalAction(event: KeyboardEvent, current: UseShortcutsOptions): void {
+  if (!isTerminalEditingContext(document.activeElement)) {
+    return;
+  }
+  event.preventDefault();
+  current.onClearTerminal();
 }
 
 /** `deleteFile` is a native OS text-editing chord in inputs/terminal/editor; only
