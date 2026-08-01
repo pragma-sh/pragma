@@ -54,22 +54,22 @@ The Rust side parses the last non-empty line.
 
 ## Module map (`src/`)
 
-| File                | Responsibility                                                                    |
-| ------------------- | --------------------------------------------------------------------------------- |
-| `cli.ts`            | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch    |
-| `index.ts`          | Public package surface — re-exports only; import from here, not deep paths        |
-| `auth.ts`           | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys       |
-| `pick-model.ts`     | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)            |
-| `constants.ts`      | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)      |
-| `model-date.ts`     | Parses release dates out of model ids for the recency filter                      |
-| `model-insights.ts` | modelgrep client + disk cache — throughput, latency, benchmark scores             |
-| `prompts.ts`        | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested      |
-| `session.ts`        | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`               |
-| `run-failure.ts`    | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`           |
-| `commit-message.ts` | `git diff --cached` → one commit message (fast model)                             |
-| `commit-plan.ts`    | Whole-worktree diff → a multi-commit plan (standard model)                        |
-| `pull-request.ts`   | Committed branch diff → PR title + body (standard model, tools enabled)           |
-| `inline-edit.ts`    | Editor buffer + instruction → exact-text replacements (standard, read-only tools) |
+| File                | Responsibility                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `cli.ts`            | The `pragma-ai` sidecar entrypoint — arg parsing, NDJSON I/O, command dispatch      |
+| `index.ts`          | Public package surface — re-exports only; import from here, not deep paths          |
+| `auth.ts`           | Auth methods, `AuthStorage`/`ModelRegistry` creation, OAuth login, API keys         |
+| `pick-model.ts`     | Ranks/selects a model for a `ModelKind` (`fast` / `standard` / `high`)              |
+| `constants.ts`      | `PICK_MODEL` / `MODEL_INSIGHTS` knobs + `ModelKind`. **TS-only** (see below)        |
+| `model-date.ts`     | Parses release dates out of model ids for the recency filter                        |
+| `model-insights.ts` | modelgrep client + disk cache — throughput, latency, benchmark scores               |
+| `prompts.ts`        | All prompt text + diff char limits + draft cleaners. Versioned & unit-tested        |
+| `session.ts`        | `createPragmaSession` / `runPromptToText` / `runPromptWithFallback`                 |
+| `run-failure.ts`    | Classifies a failed attempt (model vs provider) + `NoWorkingModelError`             |
+| `commit-message.ts` | `git diff --cached` → one commit message (fast model)                               |
+| `commit-plan.ts`    | Whole-worktree diff → a multi-commit plan (standard model)                          |
+| `pull-request.ts`   | Committed branch diff → PR title + body (standard model, tools enabled)             |
+| `inline-edit.ts`    | Editor buffer + instruction → exact-text replacements (standard, read-only tools)   |
 | `ask-ai.ts`         | Command-palette Q&A → streaming markdown (standard, read-only tools, whole project) |
 
 **`inline-edit` never writes.** Its tools are pinned to `INLINE_EDIT_TOOLS`
@@ -88,11 +88,11 @@ the Tauri channel the same way login streams OAuth events.
 
 Three tiers, all picked automatically from the user's **authenticated** models:
 
-| Tier       | Ceiling | Ranks on                           | Used by                            |
-| ---------- | ------- | ---------------------------------- | ---------------------------------- |
-| `fast`     | Sonnet  | Throughput (prefers non-reasoning) | commit message                     |
+| Tier       | Ceiling | Ranks on                           | Used by                                    |
+| ---------- | ------- | ---------------------------------- | ------------------------------------------ |
+| `fast`     | Sonnet  | Throughput (prefers non-reasoning) | commit message                             |
 | `standard` | Sonnet  | Capability weighed against price   | commit plan, PR draft, inline edit, ask AI |
-| `high`     | Opus    | Capability alone                   | _no consumer yet_                  |
+| `high`     | Opus    | Capability alone                   | _no consumer yet_                          |
 
 `fast` shares the mid-tier ceiling with `standard` because its goal is latency,
 and paying frontier rates for speed is never the trade you want.
