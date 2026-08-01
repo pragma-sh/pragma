@@ -1,0 +1,68 @@
+{
+  "name": "pragma-kimi",
+  "version": "0.0.0",
+  "description": "Report Kimi Code agent status into Pragma via pragma-cli.",
+  "author": {
+    "name": "Pragma"
+  },
+  "license": "MIT",
+  "keywords": ["pragma", "agent"],
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" cleared",
+      "timeout": 10
+    },
+    {
+      "event": "SessionEnd",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" cleared",
+      "timeout": 10
+    },
+    {
+      "event": "UserPromptSubmit",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" started",
+      "timeout": 10
+    },
+    {
+      "event": "Stop",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" stopped",
+      "timeout": 20
+    },
+    {
+      "event": "StopFailure",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" failed",
+      "timeout": 10
+    },
+    {
+      "event": "Interrupt",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" interrupted",
+      "timeout": 10
+    },
+    {
+      "event": "SubagentStart",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" subagent-start",
+      "timeout": 10
+    },
+    {
+      "event": "SubagentStop",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" subagent-stop",
+      "timeout": 10
+    },
+    {
+      "event": "PostToolUse",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" running",
+      "timeout": 10
+    },
+    {
+      "event": "PermissionRequest",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" permission",
+      "timeout": 10
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "command": "sh \"$KIMI_PLUGIN_ROOT/hooks/report.sh\" question",
+      "timeout": 10
+    }
+  ]
+}

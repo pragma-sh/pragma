@@ -322,6 +322,20 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/kimi-plugin": {
+      "name": "@pragma/kimi-plugin",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pragma/plugin": "workspace:*",
+        "@pragma/watcher-kit": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "bunup": "^0.16.32",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/opencode-plugin": {
       "name": "@pragma/opencode-plugin",
       "version": "0.0.0",
@@ -1307,6 +1321,8 @@
     "@pragma/github-helpers": ["@pragma/github-helpers@workspace:packages/github-helpers"],
 
     "@pragma/grok-plugin": ["@pragma/grok-plugin@workspace:packages/grok-plugin"],
+
+    "@pragma/kimi-plugin": ["@pragma/kimi-plugin@workspace:packages/kimi-plugin"],
 
     "@pragma/opencode-plugin": ["@pragma/opencode-plugin@workspace:packages/opencode-plugin"],
 
