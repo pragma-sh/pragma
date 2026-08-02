@@ -2360,7 +2360,10 @@ mod tests {
 
         registry.write(&id, "exit\r").expect("request shell exit");
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // 20s, not 10s: matches the real-PTY tests in session.rs. A loaded
+        // Windows CI runner spawning pwsh.exe under parallel test execution
+        // can take several seconds just to start and tear down the shell.
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !registry.is_empty() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
