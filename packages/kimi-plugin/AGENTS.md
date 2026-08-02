@@ -114,8 +114,11 @@ supported `provider list --json` / `provider list` CLI through `ctx.sdk.exec.run
 aliases to launcher entries, and immediately drops provider data (including credentials).
 Do not import `node:fs` or read `~/.kimi-code/config.toml` directly: the same bundle loads
 inside the production desktop webview, where Node built-ins make the whole plugin fail,
-and direct local reads target the wrong machine for remote projects. The configured
-default model comes first; without one, declaration order is preserved. Do not
+and direct local reads target the wrong machine for remote projects. Aliases marked
+`disabled` are dropped during parsing — Kimi rejects them at launch, so offering one in
+the picker only produces a session that fails to start, and a disabled default would
+otherwise become the launcher's first entry. The configured default model comes first;
+without one, declaration order is preserved. Do not
 alphabetize this list: `agent verify` defaults to its first entry, and alphabetizing
 previously selected a stale `Big Pickle` alias that never completed. Kimi has no
 reasoning-effort flag (`-m` takes an alias only), so entries carry no `reasoning` list.

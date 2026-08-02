@@ -45,7 +45,10 @@ export function kimiModelsFromConfig(
   return entries;
 }
 
-/** Parses `kimi provider list --json` without retaining provider credentials. */
+/**
+ * Parses `kimi provider list --json` without retaining provider credentials,
+ * skipping aliases Kimi reports as disabled.
+ */
 export function parseKimiProviderModels(output: string): Record<string, KimiConfigModel> {
   let value: unknown;
   try {
@@ -62,6 +65,8 @@ export function parseKimiProviderModels(output: string): Record<string, KimiConf
     if (model === undefined || typeof model.model !== "string" || model.model.length === 0) {
       continue;
     }
+    // A disabled alias is rejected by Kimi at launch, so it must never reach the picker.
+    if (model.disabled === true) continue;
     parsed[alias] = {
       provider: typeof model.provider === "string" ? model.provider : "",
       model: model.model,

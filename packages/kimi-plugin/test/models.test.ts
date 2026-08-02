@@ -25,6 +25,10 @@ const WITH_MODELS = JSON.stringify({
     "opencode/glm-5": {
       provider: "opencode",
       model: "glm-5",
+    },
+    "opencode/big-pickle": {
+      provider: "opencode",
+      model: "big-pickle",
       disabled: true,
     },
   },
@@ -41,6 +45,10 @@ describe("parseKimiProviderModels", () => {
       "opencode/claude-sonnet-4-6": { provider: "opencode", model: "claude-sonnet-4-6" },
       "opencode/glm-5": { provider: "opencode", model: "glm-5" },
     });
+  });
+
+  it("drops aliases Kimi reports as disabled", () => {
+    expect(parseKimiProviderModels(WITH_MODELS)["opencode/big-pickle"]).toBeUndefined();
   });
 
   it("drops invalid aliases and malformed output", () => {
@@ -68,6 +76,16 @@ describe("kimiModelsFromConfig", () => {
       { id: "opencode/glm-5", name: "glm-5" },
       { id: "opencode/gpt-5.5-pro", name: "GPT 5.5 Pro (Opencode)" },
       { id: "opencode/claude-sonnet-4-6", name: "claude-sonnet-4-6" },
+    ]);
+  });
+
+  it("never fronts a disabled default alias", () => {
+    expect(
+      kimiModelsFromConfig(parseKimiProviderModels(WITH_MODELS), "opencode/big-pickle"),
+    ).toEqual([
+      { id: "opencode/gpt-5.5-pro", name: "GPT 5.5 Pro (Opencode)" },
+      { id: "opencode/claude-sonnet-4-6", name: "claude-sonnet-4-6" },
+      { id: "opencode/glm-5", name: "glm-5" },
     ]);
   });
 });
