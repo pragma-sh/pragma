@@ -1,7 +1,14 @@
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+// `waitFor`'s 1s default is a wall clock, not a work budget: the files that
+// mount CodeMirror (diff/review/editor surfaces) render far slower than that
+// when the whole suite runs in parallel on a loaded machine, which showed up as
+// tests that pass alone and fail in the full run. Waiting longer costs nothing
+// when the condition is met — only a genuinely failing test pays it.
+configure({ asyncUtilTimeout: 5_000 });
 
 // Mirror `main.tsx`: register curated brand icons so `<Icon icon="lucide:…" />`
 // / `simple-icons:…` resolve synchronously. Without this, Iconify schedules an

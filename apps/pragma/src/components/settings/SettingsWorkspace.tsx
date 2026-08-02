@@ -29,6 +29,7 @@ import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import {
   aiAuthMethods,
+  aiLogout,
   gatewayDevices,
   readConfig,
   readPluginManifests,
@@ -652,6 +653,48 @@ function GitHubAccount({
   );
 }
 
+/**
+ * One connected AI provider, with the control that removes its credentials.
+ *
+ * Signing out matters more here than it looks: the pi credential store is shared
+ * with the `pi` CLI, so a provider can appear connected that the user never
+ * signed in to from Pragma — and model selection will happily route work to it.
+ */
+function AiProviderRow({ provider, label }: { provider: string; label: string }) {
+  const { refresh } = useAi();
+  const [signingOut, setSigningOut] = useState(false);
+
+  const signOut = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      await aiLogout(provider);
+      await refresh();
+      toast.success(`Signed out of ${label}.`);
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      // The row normally unmounts on refresh; reset anyway so a backend that
+      // reports the provider as still connected cannot leave a dead button.
+      setSigningOut(false);
+    }
+  }, [provider, label, refresh]);
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <p className="min-w-0 truncate text-sm">{label}</p>
+      <Button
+        aria-label={`Sign out of ${label}`}
+        disabled={signingOut}
+        onClick={() => void signOut()}
+        size="sm"
+        variant="outline"
+      >
+        <LogOut /> Sign out
+      </Button>
+    </div>
+  );
+}
+
 function AiProvidersSection() {
   const { status } = useAi();
   const [methods, setMethods] = useState<AiAuthMethod[]>([]);
@@ -670,16 +713,18 @@ function AiProvidersSection() {
     <div className="space-y-5">
       <SettingsCard
         title="Connected providers"
-        description="Providers with stored credentials that power commit messages and other AI helpers."
+        description="Providers with stored credentials that power commit messages and other AI helpers. Credentials are shared with the pi CLI, so signing out here signs out there too."
       >
         {signedIn.length === 0 ? (
           <p className="text-sm text-muted-foreground">No AI providers connected yet.</p>
         ) : (
           <div className="divide-y">
             {signedIn.map((provider) => (
-              <p className="py-3 text-sm first:pt-0 last:pb-0" key={provider}>
-                {providerLabel(provider, methods)}
-              </p>
+              <AiProviderRow
+                key={provider}
+                label={providerLabel(provider, methods)}
+                provider={provider}
+              />
             ))}
           </div>
         )}

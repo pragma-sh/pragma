@@ -747,6 +747,41 @@ load/save/dirty/⌘-S lifecycle lives in `components/editor/use-editor-file.tsx`
 `instanceof`, and separate direct / transitive copies crash optimized builds. Do not alias
 the package to its physical `dist` file; that bypasses package-aware dynamic language loading.
 
+**Inline AI edit** — ⌘/Ctrl+K in any CodeMirror surface (plain editor tabs and the
+markdown Raw mode) opens a design-mode-style pill under the highlighted lines; the
+answer lands in the buffer as a red/green diff with an accept/reject bar above each
+hunk. Pieces:
+`lib/inline-edit.ts` (pure: apply the model's exact-text replacements, build the preview
+document and its hunk offsets from `@codemirror/merge`'s `Chunk`, resolve one hunk),
+`components/editor/inline-edit-extension.ts` (session `StateField`, decorations, the
+keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
+`InlineEditHunkBar.tsx`. Rules that are easy to break:
+
+- **The buffer is the source of truth, not the file.** The request carries the live
+  (often unsaved) document and the model gets **read-only** tools (`read`, `grep`,
+  `find`, `ls`) so it can search the repo but cannot write it — see
+  `INLINE_EDIT_TOOLS` in `@pragma/ai-helpers`. Nothing reaches disk until the user
+  accepts a hunk and saves.
+- **Local worktrees only (for now).** `ai_inline_edit` (and the other worktree-scoped
+  AI commands) spawn `pragma-ai` on the desktop client with a local `--cwd`. Remote
+  SSH paths must not be passed through — they would fail or inspect an unrelated local
+  checkout. The Rust command refuses remote hosts; the editor also skips opening the
+  pill when `remoteWorktrees[worktreeId]` is true. Host-routed AI is future work.
+- **While reviewing, the document holds both sides**, so ⌘/Ctrl-S is intercepted and
+  refuses with a toast until every hunk is resolved.
+- **Hunk offsets are only valid against the document they were computed from.** Resolving
+  one hunk shifts the rest; the `StateField` maps them through `tr.changes` — never cache
+  them outside it.
+- The keyboard scheme is the primary interface (buttons mirror it): Enter submits,
+  Esc backs out (rejecting everything left in a review), Abort (while running) drops
+  the in-flight request and restores the editable pill, ⌘/Ctrl+Enter and
+  ⌘/Ctrl+Backspace accept/reject the focused hunk, adding Shift widens either to all
+  hunks, and Alt+↑/↓ walks between them. The prompt UI mirrors the browser design-mode
+  pill (rounded input + circular action button; pulse + stop while loading).
+- Block widgets are React portals over the shared `components/editor/portal-widget.ts`
+  (also used by `MergeDiff`'s review comments): identity is the widget `key`, so a
+  redraw reuses the DOM and the prompt box keeps what the user typed.
+
 **Markdown tabs** — `editor` tabs whose file is markdown (`isMarkdownPath`: `.md` /
 `.markdown` / `.mdown`, **not** `.mdx` — JSX would be mangled) render
 `components/editor/MarkdownView.tsx` instead of `EditorView` (dispatch in
@@ -756,6 +791,46 @@ lists, `MarkdownToolbar.tsx`) and Raw (the standard CodeMirror surface). Both mo
 share the same file lifecycle; unsaved edits survive the mode switch via
 `currentDocRef`. The `getMarkdown` TipTap helper is shared with the PR body editor
 in `components/editor/tiptap-markdown.ts`.
+
+**PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
+`components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
+dispatch; the `TabKind` stays `editor`). It is a **viewer**, not an editor: no dirty
+state, no save, no `use-editor-file` lifecycle. Rendering is EmbedPDF's headless React
+plugins (`@embedpdf/plugin-{viewport,scroll,render,zoom,selection,interaction-manager,
+document-manager}`) styled with Tailwind here — `PdfDocument` wires the plugin stack,
+`PdfPage` composes one page, `PdfToolbar` / `PdfZoomControls` / `PdfPageControls` are the
+chrome, `use-pdf-zoom-shortcuts` binds ⌘/Ctrl `+` `-` `0` `9`. Two things are load-bearing:
+
+- **The pdfium wasm is bundled, never fetched, and its URL must be absolute.**
+  `pdf-engine.ts` imports it as `@embedpdf/pdfium/pdfium.wasm?url` and passes
+  `fontFallback: null`; EmbedPDF's default is a jsDelivr URL plus CDN font packs, which a
+  desktop app must not depend on. Vite hands back a **root-relative** path, and the engine
+  runs in a worker created from a `blob:` URL where that path has no base — WebKit fails it
+  with `TypeError: URL is not valid or contains user credentials.` EmbedPDF swallows the
+  error, so the only symptom is a document stuck on "opening" forever. `absoluteWasmUrl()`
+  resolves it against `location.href`; `pdf-engine.test.ts` pins that. That module also
+  refcounts one shared engine across every open PDF tab — it is a worker plus a
+  multi-megabyte module, so per-tab engines are not an option.
+- **The bytes arrive in chunks.** `read_file` refuses binary content outright, so
+  `use-pdf-file.ts` walks `readFileChunk` until the host reports `eof` (see
+  `constants.files`). This is also why a remote SSH project's PDFs work unchanged.
+
+**Media tabs** — `editor` tabs whose file is a raster image, video, or audio clip
+(`isMediaPath` in `components/media/media-path.ts`) render `components/media/MediaView.tsx`
+instead of `EditorView` (same `PANE_CONTENT_RENDERERS` dispatch; the `TabKind` stays
+`editor`). **SVG stays in the code editor** so the source remains editable. The viewer is
+read-only: images and videos fit the pane (capped at native size so small media stays
+centered), with wheel / toolbar / ⌘± zoom and drag-to-pan; audio uses `AudioPlayer`
+(themed play/seek/volume over a hidden `<audio>`, plus a file-type icon well). Bytes load
+through the shared chunked reader in `lib/binary-file.ts` (`useBinaryFile` — also what PDF
+uses) and are served to `<img>` / `<video>` / `<audio>` as a revoked-on-unmount blob URL.
+
+A pane renders **only its active tab**, so switching tabs unmounts the viewer outright.
+Both caches exist for that reason and neither is an optimization to "clean up": the engine
+survives zero references for `ENGINE_IDLE_MS` and `lib/binary-file.ts` keeps the last few
+files' bytes, or every switch back would re-start the wasm worker and re-read the whole
+file. The byte cache hands out `buffer.slice(0)` because the engine may transfer the buffer
+to its worker and detach it; a reload (retry, or the file changing on disk) drops the entry.
 
 **Icons:** vscode-icons render offline via `lib/file-icons.ts` (`addCollection` once —
 never let `@iconify/react` fetch over the network). Launcher brand icons come from a
@@ -833,6 +908,14 @@ Commands reuse existing workspace actions for remote access, server troubleshoot
 tab/view navigation, and editor launch. Editor commands drill into non-hidden worktrees
 sorted by `worktree_mru`; remote worktrees remain visible but disabled because editor
 launchers run on the local client.
+
+When Pragma AI is available (`useAi().available`) and the command query is non-empty,
+the top row is **Ask AI {message}** — hidden for remote (SSH) worktrees, because the
+sidecar still runs on the desktop client with local `--cwd` paths (same local-only
+guard as inline edit). Selecting it replaces the list with a one-shot
+streaming answer (`streamdown`) over the standard model with read-only tools
+(`read`/`grep`/`find`/`ls`) across the project; the prompt names every worktree and
+marks the currently selected one. Escape/Stop cancels the sidecar (`ai_ask_cancel`).
 
 Default tab close/new and command-palette chords are native menu accelerators because
 macOS/WebKit may consume them before webview listeners. `useShortcuts` defers those exact

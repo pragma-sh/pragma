@@ -1,6 +1,7 @@
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { buildCommitMessagePrompt, cleanCommitMessage } from "./prompts.ts";
+import { loadModelInsights } from "./model-insights.ts";
 import { selectModelCandidates } from "./pick-model.ts";
 import { createPragmaSession, runPromptToText } from "./session.ts";
 
@@ -23,7 +24,7 @@ export class NoStagedChangesError extends Error {
 }
 
 /**
- * Generate a Conventional Commits message from a staged diff using a quick
+ * Generate a Conventional Commits message from a staged diff using a fast
  * (non-reasoning) model. Throws {@link NoStagedChangesError} when the diff is
  * empty.
  */
@@ -35,16 +36,17 @@ export async function generateCommitMessage(
   }
 
   const prompt = buildCommitMessagePrompt(options.stagedDiff);
-  const candidates = selectModelCandidates("quick", options.registry.getAvailable());
+  const insights = await loadModelInsights();
+  const candidates = selectModelCandidates("fast", options.registry.getAvailable(), { insights });
   if (candidates.length === 0) {
-    throw new Error("No quick model is available. Sign in to a provider that offers one.");
+    throw new Error("No fast model is available. Sign in to a provider that offers one.");
   }
 
   let lastError: unknown;
   for (const model of candidates) {
     // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one message.
     const { session } = await createPragmaSession({
-      modelKind: "quick",
+      modelKind: "fast",
       model,
       cwd: options.cwd,
       authStorage: options.authStorage,

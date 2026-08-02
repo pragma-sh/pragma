@@ -8,8 +8,10 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ModelKind } from "./constants.ts";
-import { pickModel } from "./pick-model.ts";
+import { type ModelKind, RUN_FALLBACK } from "./constants.ts";
+import { loadModelInsights, type ModelInsights } from "./model-insights.ts";
+import { pickModel, selectModelCandidates } from "./pick-model.ts";
+import { type AttemptFailure, describeFailure, NoWorkingModelError } from "./run-failure.ts";
 
 /** Options for {@link createPragmaSession}. */
 export interface CreatePragmaSessionOptions {
@@ -30,6 +32,8 @@ export interface CreatePragmaSessionOptions {
   customTools?: ToolDefinition[];
   /** Explicit model to run. Defaults to {@link pickModel}. */
   model?: Model<Api>;
+  /** modelgrep data used when this call has to pick the model itself. */
+  insights?: ModelInsights;
 }
 
 /** Result of {@link createPragmaSession}. */
@@ -102,6 +106,7 @@ export async function createPragmaSession(
     pickModel(options.modelKind, {
       authStorage: options.authStorage,
       registry: options.registry,
+      insights: options.insights,
     });
   if (!model) {
     throw new Error(
@@ -122,6 +127,88 @@ export async function createPragmaSession(
   });
 
   return { session, model };
+}
+
+/** Options for {@link runPromptWithFallback} — one feature's whole model setup. */
+export interface RunPromptWithFallbackOptions {
+  /** Tier to select candidates from. */
+  modelKind: ModelKind;
+  /** Working directory — drives AGENTS.md discovery, skills, and tool scope. */
+  cwd: string;
+  authStorage: AuthStorage;
+  registry: ModelRegistry;
+  /** Selective tool allowlist; omitted means pi's defaults. */
+  tools?: string[];
+}
+
+/** Run one prompt against one model, disposing the session either way. */
+async function attemptPrompt<T>(
+  options: RunPromptWithFallbackOptions,
+  model: Model<Api>,
+  prompt: string,
+  parse: (raw: string) => T,
+): Promise<T> {
+  const { session } = await createPragmaSession({
+    modelKind: options.modelKind,
+    model,
+    cwd: options.cwd,
+    authStorage: options.authStorage,
+    registry: options.registry,
+    tools: options.tools,
+  });
+  try {
+    return parse(await runPromptToText(session, prompt));
+  } finally {
+    session.dispose();
+  }
+}
+
+/**
+ * Run one prompt against the best available model of a tier, falling back
+ * through the remaining candidates when a model errors, and parse the answer.
+ *
+ * Features that must survive one dead provider share this path: pick candidates
+ * from the user's authenticated models, try them **serially** (parallel attempts
+ * would charge several providers for one answer), and dispose each session.
+ *
+ * Two bounds keep a broken setup from turning into a minute of silence. A
+ * failure that indicts the credential or the account (see {@link classifyFailure})
+ * retires every remaining model of that provider, and the run gives up after
+ * {@link RUN_FALLBACK.maxAttempts} attempts regardless — an interactive helper
+ * that has lost three round-trips is better off reporting why than continuing to
+ * poll a catalog. Throws {@link NoWorkingModelError}, which names each provider's
+ * own error, or a plain error when the tier has no available model at all.
+ */
+export async function runPromptWithFallback<T>(
+  options: RunPromptWithFallbackOptions,
+  prompt: string,
+  parse: (raw: string) => T,
+): Promise<T> {
+  const insights = await loadModelInsights();
+  const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
+    insights,
+  });
+  if (candidates.length === 0) {
+    throw new Error(
+      `No ${options.modelKind} model is available. Sign in to a provider that offers one.`,
+    );
+  }
+
+  const failures: AttemptFailure[] = [];
+  const retiredProviders = new Set<string>();
+  for (const model of candidates) {
+    if (retiredProviders.has(model.provider)) continue;
+    if (failures.length >= RUN_FALLBACK.maxAttempts) break;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one answer.
+      return await attemptPrompt(options, model, prompt, parse);
+    } catch (error) {
+      const failure = describeFailure(model, error);
+      failures.push(failure);
+      if (failure.scope === "provider") retiredProviders.add(model.provider);
+    }
+  }
+  throw new NoWorkingModelError(options.modelKind, failures);
 }
 
 /**
@@ -203,8 +290,19 @@ function handleSessionAgentEnd(
  * Send one prompt and resolve with the assistant's final text. Accumulates
  * streamed text deltas and resolves when the agent run ends. Rejects if the
  * model reports an error.
+ *
+ * When `onDelta` is set, each assistant text delta is forwarded as it arrives.
+ * A model-side retry clears the accumulator and calls `onReset` so a UI stream
+ * can drop the abandoned attempt.
  */
-export function runPromptToText(session: AgentSession, prompt: string): Promise<string> {
+export function runPromptToText(
+  session: AgentSession,
+  prompt: string,
+  options?: {
+    onDelta?: (delta: string) => void;
+    onReset?: () => void;
+  },
+): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const state: PromptRunState = {
       text: "",
@@ -221,10 +319,19 @@ export function runPromptToText(session: AgentSession, prompt: string): Promise<
 
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "message_update") {
+        const before = state.text.length;
         handleSessionMessageUpdate(event, state, finish, reject);
+        if (options?.onDelta && state.text.length > before) {
+          options.onDelta(state.text.slice(before));
+        }
       } else if (event.type === "message_end") {
         handleSessionMessageEnd(event, state);
       } else if (event.type === "agent_end") {
+        if (event.willRetry) {
+          resetPromptRunState(state);
+          options?.onReset?.();
+          return;
+        }
         handleSessionAgentEnd(event, state, finish, resolve, reject);
       }
     });
@@ -233,4 +340,54 @@ export function runPromptToText(session: AgentSession, prompt: string): Promise<
       finish(() => reject(error instanceof Error ? error : new Error(String(error))));
     });
   });
+}
+
+/**
+ * Like {@link runPromptWithFallback}, but streams assistant text deltas from
+ * the attempt that ultimately succeeds. Failed attempts before any terminal
+ * answer never emit deltas to the caller (each attempt gets a fresh session).
+ */
+export async function runPromptStreamingWithFallback(
+  options: RunPromptWithFallbackOptions,
+  prompt: string,
+  onDelta: (delta: string) => void,
+  onReset?: () => void,
+): Promise<string> {
+  const insights = await loadModelInsights();
+  const candidates = selectModelCandidates(options.modelKind, options.registry.getAvailable(), {
+    insights,
+  });
+  if (candidates.length === 0) {
+    throw new Error(
+      `No ${options.modelKind} model is available. Sign in to a provider that offers one.`,
+    );
+  }
+
+  const failures: AttemptFailure[] = [];
+  const retiredProviders = new Set<string>();
+  for (const model of candidates) {
+    if (retiredProviders.has(model.provider)) continue;
+    if (failures.length >= RUN_FALLBACK.maxAttempts) break;
+    // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one answer.
+    const { session } = await createPragmaSession({
+      modelKind: options.modelKind,
+      model,
+      cwd: options.cwd,
+      authStorage: options.authStorage,
+      registry: options.registry,
+      tools: options.tools,
+    });
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- fallbacks are intentionally serial to avoid charging multiple providers for one answer.
+      return await runPromptToText(session, prompt, { onDelta, onReset });
+    } catch (error) {
+      onReset?.();
+      const failure = describeFailure(model, error);
+      failures.push(failure);
+      if (failure.scope === "provider") retiredProviders.add(model.provider);
+    } finally {
+      session.dispose();
+    }
+  }
+  throw new NoWorkingModelError(options.modelKind, failures);
 }

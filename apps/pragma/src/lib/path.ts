@@ -11,6 +11,16 @@ export function basename(path: string): string {
   return index === -1 ? trimmed : trimmed.slice(index + 1);
 }
 
+/**
+ * Returns the lower-case extension without its dot, or "" when there is none.
+ * A leading dot names the file (`.gitignore`), so it is not an extension.
+ */
+export function extname(path: string): string {
+  const name = basename(path);
+  const index = name.lastIndexOf(".");
+  return index <= 0 ? "" : name.slice(index + 1).toLowerCase();
+}
+
 /** Returns the parent directory of a path, or "" for a top-level entry. */
 export function dirname(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
@@ -24,16 +34,4 @@ export function joinPath(...segments: string[]): string {
     .map((segment) => segment.replace(/^\/+|\/+$/g, ""))
     .filter((segment) => segment.length > 0)
     .join("/");
-}
-
-/** Strips a `base` directory prefix from `path`, returning the remainder. */
-export function relativeTo(base: string, path: string): string {
-  const prefix = base.replace(/\/+$/, "");
-  if (prefix === "") {
-    return path;
-  }
-  if (path === prefix) {
-    return "";
-  }
-  return path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path;
 }

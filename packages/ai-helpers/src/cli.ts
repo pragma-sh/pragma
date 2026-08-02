@@ -15,6 +15,8 @@
  *   commit-message --cwd <path>   (diff on stdin) → { type: "result", message } | error
  *   commit-plan --cwd <path>      (JSON context on stdin) → { type: "result", commits } | error
  *   pull-request --cwd <path>     (JSON context on stdin) → { type: "result", title, body } | error
+ *   inline-edit --cwd <path>      (JSON context on stdin) → { type: "result", summary, edits } | error
+ *   ask --cwd <path>              (JSON context on stdin) → streams delta/reset; → { type: "result", text } | error
  *   login --provider <id>         streaming OAuth; → { type: "result", provider } | error
  */
 import { readStdinLines } from "@pragma/sidecar-kit";
@@ -25,16 +27,21 @@ import {
   createModelRegistry,
   generateCommitMessage,
   generateCommitPlan,
+  generateInlineEdit,
   generatePullRequestDraft,
   isAiAvailable,
   listAuthMethods,
   loginOAuth,
   NoCommittedChangesError,
+  NoInstructionError,
+  NoQuestionError,
   NoWorktreeChangesError,
   logout,
   NoStagedChangesError,
   setApiKey,
   signedInProviders,
+  streamAskAi,
+  type AskAiWorktreeRef,
 } from "./index.ts";
 
 function emit(event: Record<string, unknown>): void {
@@ -169,12 +176,35 @@ async function runLogout(args: string[]): Promise<number> {
   return 0;
 }
 
-async function runCommitMessage(args: string[]): Promise<number> {
+type AuthSession = {
+  cwd: string;
+  authStorage: ReturnType<typeof createAuthStorage>;
+  registry: ReturnType<typeof createModelRegistry>;
+};
+
+/** Shared cwd + auth + registry setup for one-shot stdin commands. */
+async function withAuthSession(args: string[]): Promise<AuthSession> {
   const cwd = flag(args, "cwd") ?? process.cwd();
-  const stagedDiff = await readAllStdin();
   const authStorage = createAuthStorage();
   const registry = createModelRegistry(authStorage);
-  const message = await generateCommitMessage({ stagedDiff, cwd, authStorage, registry });
+  return { cwd, authStorage, registry };
+}
+
+/** Parse stdin JSON, then attach the shared auth session. */
+async function withStdinContext<T>(
+  args: string[],
+  parse: (raw: string) => T,
+): Promise<T & AuthSession> {
+  const session = await withAuthSession(args);
+  return { ...parse(await readAllStdin()), ...session };
+}
+
+async function runCommitMessage(args: string[]): Promise<number> {
+  const session = await withAuthSession(args);
+  const message = await generateCommitMessage({
+    stagedDiff: await readAllStdin(),
+    ...session,
+  });
   emit({ type: "result", message });
   return 0;
 }
@@ -200,11 +230,8 @@ function parseCommitPlanContext(raw: string): {
 }
 
 async function runCommitPlan(args: string[]): Promise<number> {
-  const cwd = flag(args, "cwd") ?? process.cwd();
-  const context = parseCommitPlanContext(await readAllStdin());
-  const authStorage = createAuthStorage();
-  const registry = createModelRegistry(authStorage);
-  const plan = await generateCommitPlan({ ...context, cwd, authStorage, registry });
+  const context = await withStdinContext(args, parseCommitPlanContext);
+  const plan = await generateCommitPlan(context);
   emit({ type: "result", commits: plan.commits });
   return 0;
 }
@@ -227,12 +254,66 @@ function parsePullRequestContext(raw: string): {
 }
 
 async function runPullRequest(args: string[]): Promise<number> {
-  const cwd = flag(args, "cwd") ?? process.cwd();
-  const context = parsePullRequestContext(await readAllStdin());
-  const authStorage = createAuthStorage();
-  const registry = createModelRegistry(authStorage);
-  const draft = await generatePullRequestDraft({ ...context, cwd, authStorage, registry });
+  const context = await withStdinContext(args, parsePullRequestContext);
+  const draft = await generatePullRequestDraft(context);
   emit({ type: "result", title: draft.title, body: draft.body });
+  return 0;
+}
+
+// fallow-ignore-next-line complexity -- JSON field defaults for the NDJSON stdin contract; each arm is a missing-key fallback.
+function parseInlineEditContext(raw: string): {
+  filePath: string;
+  instruction: string;
+  doc: string;
+  startLine: number;
+  endLine: number;
+} {
+  const context = JSON.parse(raw) as {
+    filePath?: string;
+    instruction?: string;
+    doc?: string;
+    startLine?: number;
+    endLine?: number;
+  };
+  const startLine = context.startLine ?? 1;
+  return {
+    filePath: context.filePath ?? "",
+    instruction: context.instruction ?? "",
+    doc: context.doc ?? "",
+    startLine,
+    endLine: context.endLine ?? startLine,
+  };
+}
+
+async function runInlineEdit(args: string[]): Promise<number> {
+  const context = await withStdinContext(args, parseInlineEditContext);
+  const draft = await generateInlineEdit(context);
+  emit({ type: "result", summary: draft.summary, edits: draft.edits });
+  return 0;
+}
+
+function parseAskContext(raw: string): {
+  question: string;
+  worktrees: AskAiWorktreeRef[];
+} {
+  const context = JSON.parse(raw) as {
+    question?: string;
+    worktrees?: AskAiWorktreeRef[];
+  };
+  return {
+    question: context.question ?? "",
+    worktrees: Array.isArray(context.worktrees) ? context.worktrees : [],
+  };
+}
+
+async function runAsk(args: string[]): Promise<number> {
+  const context = await withStdinContext(args, parseAskContext);
+  const text = await streamAskAi({
+    ...context,
+    onDelta: (delta) => emit({ type: "delta", text: delta }),
+    onReset: () => emit({ type: "reset" }),
+  });
+  emit({ type: "result", text });
   return 0;
 }
 
@@ -251,6 +332,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   "commit-message": runCommitMessage,
   "commit-plan": runCommitPlan,
   "pull-request": runPullRequest,
+  "inline-edit": runInlineEdit,
+  ask: runAsk,
   login: runLoginCommand,
 };
 
@@ -273,17 +356,23 @@ async function dispatchCommand(command: string | undefined, args: string[]): Pro
   return 2;
 }
 
+const TYPED_ERROR_CODES: ReadonlyArray<[new (...args: never[]) => Error, string]> = [
+  [NoStagedChangesError, "no-staged"],
+  [NoCommittedChangesError, "no-committed"],
+  [NoWorktreeChangesError, "no-changes"],
+  [NoInstructionError, "no-instruction"],
+  [NoQuestionError, "no-question"],
+];
+
 /** Maps a thrown error to its NDJSON `code` for the "nothing to do" cases. */
 function emitCommandError(error: unknown): void {
-  if (error instanceof NoStagedChangesError) {
-    emitError(error, "no-staged");
-  } else if (error instanceof NoCommittedChangesError) {
-    emitError(error, "no-committed");
-  } else if (error instanceof NoWorktreeChangesError) {
-    emitError(error, "no-changes");
-  } else {
-    emitError(error);
+  for (const [ErrorClass, code] of TYPED_ERROR_CODES) {
+    if (error instanceof ErrorClass) {
+      emitError(error, code);
+      return;
+    }
   }
+  emitError(error);
 }
 
 main().then(

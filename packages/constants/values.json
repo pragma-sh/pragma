@@ -59,6 +59,10 @@
     "soundExtensions": ["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "webm"],
     "notificationsEnabled": true
   },
+  "files": {
+    "chunkBytes": 4194304,
+    "maxBinaryBytes": 268435456
+  },
   "protocol": {
     "rpcMethods": [
       "git",

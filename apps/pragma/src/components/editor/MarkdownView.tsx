@@ -27,10 +27,12 @@ import {
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
 import { useEditorFind } from "@/components/editor/use-editor-find";
+import { useInlineEdit } from "@/components/editor/use-inline-edit";
 import { markdownFindExtension, useMarkdownFind } from "@/components/editor/use-markdown-find";
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { basename } from "@/lib/path";
+import { extname } from "@/lib/path";
+import { useWorkspace } from "@/state/workspace-context";
 
 const lowlight = createLowlight(common);
 
@@ -39,10 +41,7 @@ const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown"]);
 
 /** True when the file should open in the markdown preview/editor surface. */
 export function isMarkdownPath(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const name = basename(filePath).toLowerCase();
-  const dot = name.lastIndexOf(".");
-  return dot !== -1 && MARKDOWN_EXTENSIONS.has(name.slice(dot + 1));
+  return filePath !== null && MARKDOWN_EXTENSIONS.has(extname(filePath));
 }
 
 type MarkdownMode = "editor" | "raw";
@@ -179,11 +178,15 @@ function MarkdownViewBar({
 function MarkdownRaw({
   doc,
   filePath,
+  worktreeId,
+  isRemote,
   onChange,
   save,
 }: {
   doc: string;
   filePath: string | null;
+  worktreeId: string;
+  isRemote: boolean;
   onChange: (value: string) => void;
   save: (contents: string) => Promise<void>;
 }) {
@@ -192,7 +195,14 @@ function MarkdownRaw({
   const saveKeymap = useEditorKeymap(save);
   const find = useEditorFind(viewRef);
   const findKeymap = useEditorFindKeymap(find.openBar);
-  const extensions = useEditorExtensions(languageExtension, saveKeymap, findKeymap, find.extension);
+  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath, isRemote });
+  const extensions = useEditorExtensions(
+    languageExtension,
+    saveKeymap,
+    findKeymap,
+    find.extension,
+    inlineEdit.extension,
+  );
   return (
     <div className="relative h-full">
       <CodeMirror
@@ -212,6 +222,7 @@ function MarkdownRaw({
         value={doc}
       />
       <EditorFindReplaceBar find={find} />
+      {inlineEdit.portals}
     </div>
   );
 }
@@ -224,6 +235,8 @@ function MarkdownRaw({
  */
 export function MarkdownView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
+  const workspace = useWorkspace();
+  const isRemote = workspace.remoteWorktrees[worktreeId] === true;
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
   const [mode, setMode] = useState<MarkdownMode>("editor");
@@ -269,7 +282,14 @@ export function MarkdownView({ tab }: { tab: Tab }) {
         <div className="flex h-full min-h-0 flex-col">
           <MarkdownViewBar modeToggle={modeToggle} />
           <div className="min-h-0 flex-1 overflow-hidden">
-            <MarkdownRaw doc={doc} filePath={filePath} onChange={onChange} save={save} />
+            <MarkdownRaw
+              doc={doc}
+              filePath={filePath}
+              isRemote={isRemote}
+              onChange={onChange}
+              save={save}
+              worktreeId={worktreeId}
+            />
           </div>
         </div>
       )}

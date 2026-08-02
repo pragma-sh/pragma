@@ -15,8 +15,10 @@ import {
   useSaveShortcut,
 } from "@/components/editor/use-editor-file";
 import { useEditorFind } from "@/components/editor/use-editor-find";
+import { useInlineEdit } from "@/components/editor/use-inline-edit";
 import { EditorFindReplaceBar } from "@/components/find-replace/EditorFindReplaceBar";
 import { clearEditorLocation, useEditorLocation } from "@/state/editor-location-store";
+import { useWorkspace } from "@/state/workspace-context";
 
 /** Resolve a language grammar lazily by filename; plain text on no match. */
 export function useEditorLanguage(filePath: string | null): Extension | null {
@@ -76,12 +78,16 @@ export function useEditorFindKeymap(openFindBar: () => void): Extension {
   );
 }
 
-/** The full CodeMirror extension set (theme + save/find keymaps + search state + resolved language). */
+/**
+ * The full CodeMirror extension set (theme + save/find keymaps + search state +
+ * inline AI edit + resolved language).
+ */
 export function useEditorExtensions(
   languageExtension: Extension | null,
   saveKeymap: Extension,
   findKeymap: Extension,
   findExtension: Extension,
+  inlineEditExtension: Extension,
 ): Extension[] {
   return useMemo(() => {
     const base = [
@@ -90,9 +96,10 @@ export function useEditorExtensions(
       saveKeymap,
       findKeymap,
       findExtension,
+      inlineEditExtension,
     ];
     return languageExtension ? [...base, languageExtension] : base;
-  }, [saveKeymap, findKeymap, findExtension, languageExtension]);
+  }, [saveKeymap, findKeymap, findExtension, inlineEditExtension, languageExtension]);
 }
 
 /**
@@ -103,6 +110,8 @@ export function useEditorExtensions(
 // fallow-ignore-next-line complexity -- wires together file load/save/language/keymap/find hooks for one CodeMirror instance; each hook already owns its own logic, this just composes them.
 export function EditorView({ tab }: { tab: Tab }) {
   const { id: tabId, worktreeId, filePath } = tab;
+  const workspace = useWorkspace();
+  const isRemote = workspace.remoteWorktrees[worktreeId] === true;
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
   const viewRef = useRef<CodeMirrorView | null>(null);
@@ -114,7 +123,14 @@ export function EditorView({ tab }: { tab: Tab }) {
   const saveKeymap = useEditorKeymap(save);
   const find = useEditorFind(viewRef);
   const findKeymap = useEditorFindKeymap(find.openBar);
-  const extensions = useEditorExtensions(languageExtension, saveKeymap, findKeymap, find.extension);
+  const inlineEdit = useInlineEdit({ viewRef, worktreeId, filePath, isRemote });
+  const extensions = useEditorExtensions(
+    languageExtension,
+    saveKeymap,
+    findKeymap,
+    find.extension,
+    inlineEdit.extension,
+  );
   const handleSaveShortcut = useSaveShortcut(save, currentDocRef);
   const onChange = (value: string) => {
     baseOnChange(value);
@@ -158,6 +174,7 @@ export function EditorView({ tab }: { tab: Tab }) {
         value={state.kind === "ready" ? state.doc : ""}
       />
       <EditorFindReplaceBar find={find} />
+      {inlineEdit.portals}
     </div>
   );
 }

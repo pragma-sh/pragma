@@ -27,7 +27,7 @@ Dual TS + Rust in one package, like `packages/constants`:
 | ------------------ | ------------------------------------------------------------------------ |
 | `src/index.ts`     | `bun run benchmark` launcher. Builds the binary, execs it. Nothing else. |
 | `src/main.rs`      | `pragma-bench` CLI: `run`, `tui`, `lines`                                |
-| `src/tui.rs`       | The ratatui payload: 5000 lines, mouse capture, status row, `--auto-ms` |
+| `src/tui.rs`       | The ratatui payload: 5000 lines, mouse capture, status row, `--auto-ms`  |
 | `src/lines.rs`     | The scrollback payload: same corpus, dumped and parked                   |
 | `src/corpus.rs`    | The content both payloads render                                         |
 | `src/instance.rs`  | Dev-instance lifecycle: spawn, discover, register project, open tabs     |
@@ -71,7 +71,7 @@ input, so it scrolls itself for the whole benchmark with nobody driving it.
   the payload tab exists. A PTY spawning and a shell starting are one-off costs;
   a scenario that began while nine of them were still landing would measure the
   start-up.
-- **Only ever one tab is driven.** The measured payload tab is opened *last*,
+- **Only ever one tab is driven.** The measured payload tab is opened _last_,
   because `tabOpened` makes the new tab the active one — whichever tab was opened
   last is the one in front, and only the tab in front is painted.
 - **A background tab stays mounted, hidden, and fed.** `SplitHost` retains a
@@ -240,7 +240,7 @@ you see a scenario reporting all drops, this is the list to check.
    driver re-resolves the app's pid on "No bridge found", and `measure` re-injects
    the runner and reopens the load tabs and then the payload tab once before
    failing. The load tabs are part of that recovery because a fresh document
-   mounts only the *active* tab: the surviving load payloads would still be
+   mounts only the _active_ tab: the surviving load payloads would still be
    running with nothing attached to them, so the run would silently continue
    against an idle window.
 

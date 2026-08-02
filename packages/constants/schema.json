@@ -21,7 +21,8 @@
     "tunnel",
     "keybindings",
     "agentStatus",
-    "bench"
+    "bench",
+    "files"
   ],
   "properties": {
     "app": {
@@ -74,6 +75,9 @@
     },
     "bench": {
       "$ref": "#/definitions/Bench"
+    },
+    "files": {
+      "$ref": "#/definitions/FileReadLimits"
     }
   },
   "definitions": {
@@ -2231,6 +2235,52 @@
         },
         "kind": {
           "$ref": "#/definitions/FileChangeKind"
+        }
+      }
+    },
+    "FileReadLimits": {
+      "title": "FileReadLimits",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunkBytes", "maxBinaryBytes"],
+      "description": "Limits for reading a binary file in chunks over the `filesystem` RPC. A single chunk plus its base64 expansion must stay well inside the protocol's frame limit, so the host rejects any request for more than `chunkBytes` at once and the frontend loops until the whole file is read.",
+      "properties": {
+        "chunkBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest number of raw bytes one `readBytesRange` request may return. Base64 inflates this by 4/3 on the wire."
+        },
+        "maxBinaryBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest binary file a viewer will assemble in memory from chunks. Bigger files are refused with a message instead of exhausting the webview's heap."
+        }
+      }
+    },
+    "FileChunk": {
+      "title": "FileChunk",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base64", "offset", "byteSize", "eof"],
+      "description": "One base64-encoded slice of a binary file, returned by a chunked read.",
+      "properties": {
+        "base64": {
+          "type": "string",
+          "description": "The slice's bytes, base64-encoded. Empty once the offset is at or past the end of the file."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Byte offset the slice was read from."
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total on-disk size of the file in bytes, so a caller can size its buffer from the first chunk."
+        },
+        "eof": {
+          "type": "boolean",
+          "description": "True when this slice reaches the end of the file and no further request is needed."
         }
       }
     },

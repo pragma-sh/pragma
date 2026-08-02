@@ -7,6 +7,7 @@ import {
   type CommitPlanDraft,
   type CommitPlanPromptContext,
 } from "./prompts.ts";
+import { loadModelInsights } from "./model-insights.ts";
 import { selectModelCandidates } from "./pick-model.ts";
 import { createPragmaSession, runPromptToText } from "./session.ts";
 
@@ -81,7 +82,10 @@ export async function generateCommitPlan(
   }
 
   const prompt = buildCommitPlanPrompt(options);
-  const candidates = selectModelCandidates("standard", options.registry.getAvailable());
+  const insights = await loadModelInsights();
+  const candidates = selectModelCandidates("standard", options.registry.getAvailable(), {
+    insights,
+  });
   if (candidates.length === 0) {
     throw new Error("No standard model is available. Sign in to a provider that offers one.");
   }

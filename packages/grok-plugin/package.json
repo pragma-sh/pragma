@@ -1,0 +1,39 @@
+{
+  "name": "@pragma/grok-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Grok Build CLI plugin that reports agent status to Pragma via native hooks.",
+  "files": [
+    ".grok-plugin",
+    "assets",
+    "dist",
+    "hooks",
+    "scripts",
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./pragma-plugin": "./src/pragma-plugin.ts"
+  },
+  "scripts": {
+    "build": "bun build src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "install:local": "bun run scripts/install-local.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/plugin": "workspace:*",
+    "@pragma/watcher-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "bunup": "^0.16.32",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "pragma": {
+    "pluginId": "pragma.grok",
+    "main": "./dist/pragma-plugin.mjs"
+  }
+}
