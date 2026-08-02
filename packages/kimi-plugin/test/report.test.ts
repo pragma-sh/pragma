@@ -105,17 +105,17 @@ function run(
   return reportCalls().slice(before.length);
 }
 
-/** Whether a *working* `python3` is on PATH (prompt/message parsing depends on it). */
-const hasPython3 = (() => {
+/** Whether a *working* `node` is on PATH (prompt/message parsing depends on it). */
+const hasNode = (() => {
   try {
-    execFileSync("python3", ["-c", ""], { stdio: "ignore" });
+    execFileSync("node", ["-e", "process.exit(0)"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 })();
 
-const itWithPython3 = hasPython3 ? it : it.skip;
+const itWithNode = hasNode ? it : it.skip;
 
 /** Kimi's UserPromptSubmit stdin with a ContentPart array prompt. */
 function promptStdin(text: string, sessionId = "session-parent"): string {
@@ -148,7 +148,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(true);
   });
 
-  itWithPython3("surfaces the prompt as a user bubble and names the session once", () => {
+  itWithNode("surfaces the prompt as a user bubble and names the session once", () => {
     run("started", { stdin: promptStdin("Explain this repo", "session-a") });
 
     expect(messagePayloads()).toEqual(
@@ -375,7 +375,7 @@ describe("report.sh", () => {
     ).toEqual(["agent report --agent kimi started"]);
   });
 
-  itWithPython3("surfaces the tool output as an assistant message on PostToolUse", () => {
+  itWithNode("surfaces the tool output as an assistant message on PostToolUse", () => {
     run("started", { stdin: promptStdin("hi") });
     run("running", {
       stdin: JSON.stringify({
@@ -402,7 +402,7 @@ describe("report.sh", () => {
     ).toEqual([]);
   });
 
-  itWithPython3("raises a command attention on PermissionRequest", () => {
+  itWithNode("raises a command attention on PermissionRequest", () => {
     run("started", { stdin: promptStdin("hi") });
     const raised = run("permission", {
       stdin: JSON.stringify({
@@ -422,7 +422,7 @@ describe("report.sh", () => {
     ).toBe(true);
   });
 
-  itWithPython3("raises a question attention on AskUserQuestion PreToolUse", () => {
+  itWithNode("raises a question attention on AskUserQuestion PreToolUse", () => {
     run("started", { stdin: promptStdin("hi") });
     const raised = run("question", {
       stdin: JSON.stringify({
@@ -442,7 +442,7 @@ describe("report.sh", () => {
     ).toBe(true);
   });
 
-  itWithPython3("raises a generic question attention with text and a request-id", () => {
+  itWithNode("raises a generic question attention with text and a request-id", () => {
     run("started", { stdin: promptStdin("hi") });
     const raised = run("question", {
       stdin: JSON.stringify({

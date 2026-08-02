@@ -71,86 +71,98 @@ message() {
 }
 
 # Content-bearing messages (the user's prompt) need real JSON parsing/escaping
-# that POSIX sh cannot do safely; python3 ships with macOS and every mainstream
-# Linux distro. When it's missing these helpers do nothing and the bridge
-# degrades to the coarse status-only messages above.
-#
-# Windows is the exception, and being on PATH is not proof of being usable there:
-# it ships an App Execution Alias at
-# ~/AppData/Local/Microsoft/WindowsApps/python3 that only prints "Python was not
-# found" and exits nonzero. That satisfies `command -v`, so the emptiness checks
-# below would wrongly take the has-python branch. Run it once and drop it unless
-# it actually executes.
-py3="$(command -v python3 2>/dev/null || true)"
-if [ -n "$py3" ] && ! "$py3" -c '' >/dev/null 2>&1; then
-  py3=""
+# that POSIX sh cannot do safely. Kimi itself ships as an npm package, so any
+# machine that can run `kimi` already has a working `node` on PATH -- unlike
+# python3, this adds no dependency beyond what Kimi already requires. When
+# node is missing these helpers do nothing and the bridge degrades to the
+# coarse status-only messages above.
+node_bin="$(command -v node 2>/dev/null || true)"
+if [ -n "$node_bin" ] && ! "$node_bin" -e 'process.exit(0)' >/dev/null 2>&1; then
+  node_bin=""
 fi
 
 # Prints a top-level string field from the JSON document passed as $2.
 json_field() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$2" | "$py3" -c '
-import json, sys
-try:
-    value = (json.load(sys.stdin) or {}).get(sys.argv[1])
-except Exception:
-    value = None
-if isinstance(value, str):
-    print(value)
-' "$1" 2>/dev/null
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$2" | JSON_FIELD_KEY="$1" "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  let value;
+  try {
+    value = (JSON.parse(data) || {})[process.env.JSON_FIELD_KEY];
+  } catch {
+    value = undefined;
+  }
+  if (typeof value === "string") process.stdout.write(value + "\n");
+});
+' 2>/dev/null
 }
 
 # Prints a top-level JSON value of any type (not just strings) from the
 # document passed as $2, verbatim. json_field above refuses non-string values,
 # so this exists to hand the ContentPart array under `prompt` to prompt_text.
 json_raw() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$2" | "$py3" -c '
-import json, sys
-try:
-    value = (json.load(sys.stdin) or {}).get(sys.argv[1])
-except Exception:
-    value = None
-if value is not None:
-    print(json.dumps(value, ensure_ascii=False))
-' "$1" 2>/dev/null
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$2" | JSON_FIELD_KEY="$1" "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  let value;
+  try {
+    value = (JSON.parse(data) || {})[process.env.JSON_FIELD_KEY];
+  } catch {
+    value = undefined;
+  }
+  if (value !== undefined && value !== null) process.stdout.write(JSON.stringify(value) + "\n");
+});
+' 2>/dev/null
 }
 
 # Kimi hands `UserPromptSubmit` a ContentPart array (`prompt`) rather than a
 # plain string; joins the text parts so chat bubbles and derived session names
 # show what the user actually typed.
 prompt_text() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$1" | "$py3" -c '
-import json, sys
-try:
-    value = json.load(sys.stdin) or ""
-except Exception:
-    value = ""
-if isinstance(value, str):
-    print(value)
-    sys.exit(0)
-if not isinstance(value, list):
-    sys.exit(0)
-parts = []
-for part in value:
-    if isinstance(part, dict) and part.get("type") == "text":
-        text = part.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-print("".join(parts))
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  let value;
+  try {
+    value = JSON.parse(data || "\"\"");
+  } catch {
+    value = "";
+  }
+  if (typeof value === "string") {
+    process.stdout.write(value + "\n");
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  const parts = [];
+  for (const part of value) {
+    if (part && typeof part === "object" && part.type === "text" && typeof part.text === "string") {
+      parts.push(part.text);
+    }
+  }
+  process.stdout.write(parts.join("") + "\n");
+});
 ' 2>/dev/null
 }
 
 # Prints a tab-title-sized session name derived from the prompt's first line.
-# Silent no-op without python3 (the session simply stays unnamed).
+# Silent no-op without node (the session simply stays unnamed).
 session_name_from_prompt() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$1" | "$py3" -c '
-import sys
-lines = sys.stdin.read().strip().splitlines()
-line = lines[0].strip() if lines else ""
-print(line if len(line) <= 48 else line[:47].rstrip() + "\u2026")
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  const lines = data.trim().split(/\r?\n/);
+  const line = (lines[0] || "").trim();
+  const out = line.length <= 48 ? line : line.slice(0, 47).replace(/\s+$/, "") + "\u2026";
+  process.stdout.write(out + "\n");
+});
 ' 2>/dev/null
 }
 
@@ -168,23 +180,23 @@ report_session_name() {
 }
 
 # Reports a rich message whose text is JSON-escaped (safe for arbitrary
-# content). Silent no-op without python3 or when the text is empty.
+# content). Silent no-op without node or when the text is empty.
 content_message() {
   role="$1"
   text="$2"
-  [ -n "$py3" ] && [ -n "$text" ] || return 0
+  [ -n "$node_bin" ] && [ -n "$text" ] || return 0
   id="${agent}-${tab}-$(date +%s)-$$-$role"
   ts="$(message_ts_ms)"
   active="$(tracked_subagent_count)"
-  payload=$("$py3" -c '
-import json, sys
-print(json.dumps({
-    "id": sys.argv[1],
-    "role": sys.argv[2],
-    "text": sys.argv[3],
-    "subAgentsActive": int(sys.argv[5]),
-    "ts": int(sys.argv[4]),
-}))' "$id" "$role" "$text" "$ts" "$active" 2>/dev/null)
+  payload=$(MSG_ID="$id" MSG_ROLE="$role" MSG_TEXT="$text" MSG_TS="$ts" MSG_ACTIVE="$active" "$node_bin" -e '
+process.stdout.write(JSON.stringify({
+  id: process.env.MSG_ID,
+  role: process.env.MSG_ROLE,
+  text: process.env.MSG_TEXT,
+  subAgentsActive: Number(process.env.MSG_ACTIVE),
+  ts: Number(process.env.MSG_TS),
+}));
+' 2>/dev/null)
   [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
@@ -192,27 +204,33 @@ print(json.dumps({
 # Prints the question text from a PreToolUse `AskUserQuestion` payload ($1)
 # when it carries exactly one question. Empty for multi-question payloads
 # (those fall back to a generic attention + Kimi's native question UI) or
-# without python3.
+# without node.
 question_text() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$1" | "$py3" -c '
-import json, sys
-try:
-    tool_input = (json.load(sys.stdin) or {}).get("tool_input") or {}
-except Exception:
-    sys.exit(0)
-if isinstance(tool_input, str):
-    try:
-        tool_input = json.loads(tool_input)
-    except Exception:
-        tool_input = {}
-if not isinstance(tool_input, dict):
-    sys.exit(0)
-questions = tool_input.get("questions") or []
-if isinstance(questions, list) and len(questions) == 1 and isinstance(questions[0], dict):
-    text = questions[0].get("question")
-    if isinstance(text, str) and text:
-        print(text)
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  let toolInput;
+  try {
+    toolInput = (JSON.parse(data) || {}).tool_input;
+  } catch {
+    return;
+  }
+  if (typeof toolInput === "string") {
+    try {
+      toolInput = JSON.parse(toolInput);
+    } catch {
+      toolInput = {};
+    }
+  }
+  if (!toolInput || typeof toolInput !== "object") return;
+  const questions = toolInput.questions;
+  if (Array.isArray(questions) && questions.length === 1 && questions[0] && typeof questions[0] === "object") {
+    const text = questions[0].question;
+    if (typeof text === "string" && text) process.stdout.write(text + "\n");
+  }
+});
 ' 2>/dev/null
 }
 
@@ -221,70 +239,76 @@ if isinstance(questions, list) and len(questions) == 1 and isinstance(questions[
 # when the tool has no command field, so the approval toast always shows
 # *something* to approve.
 extract_command() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$1" | "$py3" -c '
-import json, sys
-try:
-    payload = json.load(sys.stdin) or {}
-except Exception:
-    sys.exit(0)
-tool_input = payload.get("tool_input") or {}
-if isinstance(tool_input, str):
-    try:
-        tool_input = json.loads(tool_input)
-    except Exception:
-        tool_input = {}
-if not isinstance(tool_input, dict):
-    tool_input = {}
-command = tool_input.get("command")
-if isinstance(command, str) and command:
-    print(command)
-    sys.exit(0)
-name = payload.get("tool_name") or "tool"
-path = tool_input.get("file_path") or tool_input.get("filePath") or tool_input.get("path")
-print(f"{name} {path}" if isinstance(path, str) and path else name)
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  let payload;
+  try {
+    payload = JSON.parse(data) || {};
+  } catch {
+    return;
+  }
+  let toolInput = payload.tool_input || {};
+  if (typeof toolInput === "string") {
+    try {
+      toolInput = JSON.parse(toolInput);
+    } catch {
+      toolInput = {};
+    }
+  }
+  if (!toolInput || typeof toolInput !== "object") toolInput = {};
+  const command = toolInput.command;
+  if (typeof command === "string" && command) {
+    process.stdout.write(command + "\n");
+    return;
+  }
+  const name = payload.tool_name || "tool";
+  const path = toolInput.file_path || toolInput.filePath || toolInput.path;
+  process.stdout.write((typeof path === "string" && path ? `${name} ${path}` : name) + "\n");
+});
 ' 2>/dev/null
 }
 
 # Subagent accounting. Kimi subagents share the parent session id, and parallel
 # subagents all carry the default profile name (`coder`), so there is no stable
 # per-child id across SubagentStart/SubagentStop to key markers on. The only
-# correct primitive is a shared active-child COUNT, mutated atomically through a
-# python3 flock so the parallel start/stop hook invocations cannot lose updates
-# (POSIX sh has no atomic increment). Without python3 the count stays 0 and the
-# bridge degrades to status-only reporting, the same as content messages.
+# correct primitive is a shared active-child COUNT, mutated under a `mkdir`-based
+# exclusive lock so the parallel start/stop hook invocations cannot lose updates
+# (POSIX sh has no atomic increment, but POSIX guarantees `mkdir` is atomic, so
+# this needs no interpreter at all).
 count_file="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
+count_lock="${count_file}.lock"
 
-# Mutates the shared subagent count (`inc`/`dec`/`reset`) under an exclusive
-# flock and prints the new value. No-op (prints nothing) without python3.
+# Mutates the shared subagent count (`inc`/`dec`/`reset`) under the `mkdir` lock
+# and prints the new value.
 subagent_count() {
-  [ -n "$py3" ] || return 0
-  "$py3" -c '
-import fcntl, os, sys
-path, op = sys.argv[1], sys.argv[2]
-fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-f = os.fdopen(fd, "r+")
-try:
-    fcntl.flock(f, fcntl.LOCK_EX)
-    try:
-        value = int(f.read().strip() or "0")
-    except ValueError:
-        value = 0
-    if op == "inc":
-        value += 1
-    elif op == "dec":
-        value = max(0, value - 1)
-    else:
-        value = 0
-    f.seek(0)
-    f.truncate()
-    f.write(str(value))
-    f.flush()
-    os.fsync(f.fileno())
-finally:
-    fcntl.flock(f, fcntl.LOCK_UN)
-    f.close()
-' "$count_file" "$1" 2>/dev/null
+  tries=0
+  until mkdir "$count_lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 200 ] || break
+    sleep 0.02
+  done
+  value=0
+  [ -f "$count_file" ] && value="$(cat "$count_file" 2>/dev/null)"
+  case "$value" in
+    '' | *[!0-9]*) value=0 ;;
+  esac
+  case "$1" in
+    inc) value=$((value + 1)) ;;
+    dec)
+      if [ "$value" -gt 0 ]; then
+        value=$((value - 1))
+      else
+        value=0
+      fi
+      ;;
+    *) value=0 ;;
+  esac
+  printf '%s' "$value" >"$count_file"
+  rmdir "$count_lock" 2>/dev/null
+  printf '%s' "$value"
 }
 
 track_subagent() {

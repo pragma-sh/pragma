@@ -58,9 +58,13 @@ needs-input dot, `cleared` = remove the dot. `cleared` is deliberately used for 
 `session_id` and add no distinguishing field; parallel subagents even share the default
 profile name (`coder`), so there is no stable per-child id across `SubagentStart`/
 `SubagentStop` to key markers on. `report.sh` therefore keeps one active-child count,
-mutated atomically through a `python3` flock (POSIX sh has no atomic increment, and two
-parallel start/stop hook invocations must not lose updates). Without `python3` the count
-stays 0 and the bridge degrades to status-only reporting, the same as content messages.
+mutated under a `mkdir`-based exclusive lock (POSIX sh has no atomic increment, but POSIX
+guarantees `mkdir` is atomic, so counting needs no interpreter). Content-bearing messages
+(the user's prompt, tool output, question/command text) still need real JSON
+parsing/escaping that POSIX sh can't do safely; those go through `node`, not `python3` —
+Kimi itself ships as an npm package, so any machine that can run `kimi` already has a
+working `node` on PATH. Without `node` those helpers degrade to coarse status-only
+messages; subagent counting is unaffected either way.
 A `Stop`/`StopFailure` arriving while the count is non-zero is a subagent turn ending —
 never a parent completion — so the tab stays on `started` until the parent's own `Stop`.
 
