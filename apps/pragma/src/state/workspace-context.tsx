@@ -1450,10 +1450,27 @@ function reduceHydrateSelection(
 }
 
 function reduceSetTabs(state: WorkspaceState, action: ActionOf<"set-tabs">): WorkspaceState {
+  // A refresh can race a local `set-tab-agent`: list_tabs may still lack the
+  // daemon overlay. Keep any in-memory agent identity the refresh omitted.
+  const previousById = new Map(state.tabs.map((tab) => [tab.id, tab]));
+  const tabs = action.tabs.map((tab) => {
+    if (tab.agentId) {
+      return tab;
+    }
+    const previous = previousById.get(tab.id);
+    if (!previous?.agentId) {
+      return tab;
+    }
+    return {
+      ...tab,
+      agentId: previous.agentId,
+      title: tab.userRenamed ? tab.title : (previous.title ?? tab.title),
+    };
+  });
   return {
     ...state,
-    tabs: action.tabs,
-    splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
+    tabs,
+    splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, tabs),
   };
 }
 
@@ -3159,6 +3176,10 @@ function useWorkspaceChangedListener(
         removeAgentStatusForTab(tabId);
         releaseAlertLatchForTab(tabId);
       }
+      // `tabOpened` is for interactive CLI opens (select so the user sees it).
+      // `tabOpenedBackground` is for mobile/Kanban-style agent launches: refresh
+      // the snapshot only — selecting would mount a terminal and spawn an empty
+      // shell that races the background agent `ptySpawn`.
       if (payload.action === "tabOpened" && payload.worktreeId && payload.tabId) {
         dispatch({
           type: "select-worktree",

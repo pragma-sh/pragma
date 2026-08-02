@@ -54,7 +54,12 @@ paired with a desktop — streams live agent chat and launches new sessions.
 - **Live data** (`lib/data/data-context.tsx`): when paired it subscribes to
   `client.workspace.subscribe()` (projects/worktrees/tabs) + the `agentStatus`
   protocol event, mapping rows to view models via the pure
-  `lib/data/workspace-map.ts`. `resolveInboxItem` publishes the decision/answer
+  `lib/data/workspace-map.ts`. The worktree agent list is **tab-driven**: every
+  open terminal tab tagged with an agent (`Tab.agentId`, set generically for
+  any catalog agent at launch — first- or third-party) or carrying a live
+  status report (a manually started agent) appears, active or inactive, and
+  disappears when the tab closes; reports only overlay the status dot.
+  `resolveInboxItem` publishes the decision/answer
   through the client. Opening a completed chat marks its done status seen locally and
   on the host. Long-press agent-row action sheets rename through `client.sessions.rename()`
   or kill the matching PTY, then hide cleared rows locally.

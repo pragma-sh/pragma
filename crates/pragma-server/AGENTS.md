@@ -83,7 +83,9 @@ still brokers to desktop when connected — unless the payload sets `headless: t
 which forces the server-side path even with a controller attached (used by
 `pragma-cli agent verify` so scenario sessions never open desktop tabs). Otherwise the
 server resolves agent launch metadata from the plugin catalog, spawns the PTY, and
-schedules startup/prefill input. Bracketed (TUI) prefills do not trust `prefillDelayMs`
+schedules startup/prefill input. The mirrored tab is tagged with the catalog `agentId`
+and display name so paired phones render an agent tab (icon) immediately. Bracketed (TUI)
+prefills do not trust `prefillDelayMs`
 alone: after the configured delay the launcher also waits (bounded, +15s) for the
 session output to show an alternate-screen enter sequence before typing, because a
 prompt typed before the TUI takes the screen is silently swallowed — concurrent cold

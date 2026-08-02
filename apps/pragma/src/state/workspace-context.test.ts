@@ -678,6 +678,19 @@ describe("workspaceReducer", () => {
     expect(state.tabs[0]?.title).toBe("My run");
   });
 
+  it("set-tabs keeps a local agent tag when the refresh row still lacks agentId", () => {
+    const tagged = workspaceReducer(
+      { ...baseState, tabs: [tab("one")] },
+      { type: "set-tab-agent", tabId: "one", agentId: "pragma.claude-code", title: "Claude Code" },
+    );
+    const refreshed = workspaceReducer(tagged, {
+      type: "set-tabs",
+      tabs: [{ ...tab("one"), title: null, agentId: null }],
+    });
+    expect(refreshed.tabs[0]?.agentId).toBe("pragma.claude-code");
+    expect(refreshed.tabs[0]?.title).toBe("Claude Code");
+  });
+
   it("set-session-title renames agent tabs and can rename repeatedly", () => {
     const withAgent = workspaceReducer(
       { ...baseState, tabs: [tab("one")] },

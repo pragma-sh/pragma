@@ -1241,12 +1241,22 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Shared agent-launch timing used by both the frontend's terminal-write scheduling and the Rust CLI/broker launch path.",
-      "required": ["startDelayMs"],
+      "required": ["startDelayMs", "altScreenExtraWaitMs", "altScreenSettleMs"],
       "properties": {
         "startDelayMs": {
           "type": "integer",
           "minimum": 0,
           "description": "Delay before writing an agent's start command to a freshly spawned PTY, giving the shell time to become ready. There is no readiness signal from the PTY, so this is a best-effort fixed delay."
+        },
+        "altScreenExtraWaitMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum extra wait for a bracketed-prefill agent to enter its alternate screen before the prompt is sent anyway."
+        },
+        "altScreenSettleMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delay after a late alternate-screen entry before sending the prompt, allowing the TUI input widget to mount."
         }
       }
     },
