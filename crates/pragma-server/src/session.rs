@@ -227,6 +227,8 @@ impl Session {
         });
         Self::start_coalescer(Arc::clone(&session), output_rx);
         Self::start_reader(Arc::clone(&session), reader);
+        #[cfg(windows)]
+        Self::start_exit_watcher(Arc::clone(&session));
         Ok(session)
     }
 
@@ -359,6 +361,53 @@ impl Session {
             }
             Err(_) => None,
         }
+    }
+
+    /// Polls for the shell process exiting on its own, independent of the PTY
+    /// reader thread.
+    ///
+    /// Windows-only: `portable_pty`'s `ConPTY` backend keeps the output pipe
+    /// open until the pseudoconsole itself is torn down (dropping `master`),
+    /// not when the last attached process exits — that only happens once this
+    /// `Session` is dropped, which in turn only happens once exit is detected,
+    /// so [`start_reader`](Self::start_reader)'s `read()`-returns-EOF path can
+    /// never fire here and would block forever. Unix's real PTY does not have
+    /// this problem (the slave's fd closing already gives the reader a timely
+    /// EOF), so it keeps using that faster, ordering-correct path exclusively;
+    /// this poll loop only needs to exist on the platform where it is the sole
+    /// way to observe exit.
+    #[cfg(windows)]
+    fn start_exit_watcher(session: Arc<Self>) {
+        const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+        thread::spawn(move || loop {
+            thread::sleep(EXIT_POLL_INTERVAL);
+            if session.has_exited() {
+                return;
+            }
+            let status = {
+                let Ok(mut child) = session.child.lock() else {
+                    return;
+                };
+                // `None` means killed (or already reaped) out from under us —
+                // nothing left to watch.
+                let Some(child) = child.as_mut() else {
+                    return;
+                };
+                child.try_wait()
+            };
+            let Ok(Some(status)) = status else { continue };
+            let code = i32::try_from(status.exit_code()).unwrap_or(i32::MAX);
+            // Stash rather than take()-and-send directly: the reader thread's
+            // read() is still blocked and may eventually unblock once this
+            // session's `master` drops, at which point it would try to
+            // recover the same exit code through this same slot (see
+            // `reaped_exit_code`'s doc comment).
+            if let Ok(mut reaped) = session.reaped_exit_code.lock() {
+                *reaped = ReapedExitCode::Reaped(Some(code));
+            }
+            let _ = session.output_tx.send(OutputMsg::Exit(Some(code)));
+            return;
+        });
     }
 
     fn start_reader(session: Arc<Self>, mut reader: Box<dyn Read + Send>) {
