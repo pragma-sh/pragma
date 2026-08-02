@@ -338,12 +338,19 @@ and best-effort.
 ## Remote agent session launch
 
 `control.rs` handles the brokered `agentSessionLaunch` control method: it resolves or
-creates the target worktree + a new terminal tab via the existing Rust paths, replies
-`{ worktreeId, tabId }` immediately, then emits the `pragma:agent-session-launch` Tauri
-event. A `workspace-context.tsx` listener runs the proven Kanban background-launch
-sequence (`refreshProject` → `startBackgroundAgentSession` → `startWatcherForAgentSession`)
-so board-invisible launches from a phone work identically to a Kanban card start. The PTY
-spawns directly — no mounted terminal needed.
+creates the target worktree + a new terminal tab via the existing Rust paths, tags the
+tab as agent-owned on the daemon (`setAgent`), replies `{ worktreeId, tabId }`
+immediately, then emits the `pragma:agent-session-launch` Tauri event. The tab change is
+announced as `tabOpenedBackground` so the UI refreshes without selecting the tab —
+selecting would mount a terminal and spawn an empty shell that races the background
+agent `ptySpawn` (leaving a plain terminal with no agent command or prompt). A
+`workspace-context.tsx` listener runs the proven Kanban background-launch sequence
+(`startBackgroundAgentSession` → `startWatcherForAgentSession`) so board-invisible
+launches from a phone work identically to a Kanban card start. The PTY spawns
+directly — no mounted terminal needed. Bracketed prompt prefills wait for the PTY's
+alternate-screen enter sequence (bounded by the same 15-second fallback used by
+headless server launches) before typing, so slow agent startup cannot swallow the
+phone's prompt; plain-mode agents retain their configured fixed delay.
 
 ## Server sidecar + instance channel
 
@@ -554,7 +561,8 @@ with the agent's display name, and shell OSC titles are ignored entirely. Agent
 `src-tauri/src/control.rs`, then emit `worktreeChanged` / `tabsChanged` Tauri events.
 `workspace-context.tsx` listens for those events and refreshes the selected project's
 SQLite snapshot; `tabOpened` also selects the target worktree/tab so CLI-opened tabs are
-visible immediately.
+visible immediately. `tabOpenedBackground` (mobile agent launches) refreshes without
+selecting, so a terminal mount cannot race the background agent spawn.
 
 ## Window chrome — transparency is macOS-only
 

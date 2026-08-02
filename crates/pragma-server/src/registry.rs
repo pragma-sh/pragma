@@ -155,14 +155,7 @@ fn shell_quote(value: &str) -> String {
 
 /// Alternate-screen enter sequences a TUI emits once it takes the terminal.
 const ALT_SCREEN_SEQUENCES: [&[u8]; 3] = [b"\x1b[?1049h", b"\x1b[?1047h", b"\x1b[?47h"];
-/// Extra time past `prefillDelayMs` a bracketed prefill waits for the TUI's
-/// alternate screen. Concurrent cold starts (parallel `agent verify` launches)
-/// routinely push TUI startup past the fixed delay, and a prompt typed before
-/// the TUI takes the screen is silently swallowed by the shell.
-const ALT_SCREEN_EXTRA_WAIT: Duration = Duration::from_secs(15);
 const ALT_SCREEN_POLL: Duration = Duration::from_millis(200);
-/// Settle after a late alternate-screen entry so the input widget is mounted.
-const ALT_SCREEN_SETTLE: Duration = Duration::from_millis(500);
 
 /// Waits (bounded by [`ALT_SCREEN_EXTRA_WAIT`]) for the session's TUI to enter
 /// the alternate screen. Returns immediately when the screen is already taken;
@@ -177,11 +170,14 @@ fn wait_for_alt_screen(session: &Session) {
     if entered() {
         return;
     }
-    let deadline = Instant::now() + ALT_SCREEN_EXTRA_WAIT;
+    let deadline = Instant::now()
+        + Duration::from_millis(pragma_constants::CONSTANTS.agents.alt_screen_extra_wait_ms);
     while Instant::now() < deadline {
         thread::sleep(ALT_SCREEN_POLL);
         if entered() {
-            thread::sleep(ALT_SCREEN_SETTLE);
+            thread::sleep(Duration::from_millis(
+                pragma_constants::CONSTANTS.agents.alt_screen_settle_ms,
+            ));
             return;
         }
     }
@@ -494,7 +490,7 @@ impl Registry {
             }
             (None, Some(spec)) => self.create_worktree_headless(&args.project_id, &spec)?,
         };
-        let (plugin_id, launch, command) = self.resolve_agent_launch(
+        let (plugin_id, launch, command, agent_name) = self.resolve_agent_launch(
             &args.agent_id,
             args.model_id.as_deref(),
             args.reasoning_id.as_deref(),
@@ -523,7 +519,13 @@ impl Registry {
         thread::spawn(move || {
             schedule_agent_launch(&session, &launch, &command, prompt.as_deref());
         });
-        self.append_mirrored_tab(&args.project_id, &worktree_id, &tab_id);
+        self.append_mirrored_tab(
+            &args.project_id,
+            &worktree_id,
+            &tab_id,
+            &args.agent_id,
+            &agent_name,
+        );
         Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
     }
 
@@ -645,13 +647,20 @@ impl Registry {
     /// Merges the headless launch's terminal tab into the mirrored snapshot so
     /// remote subscribers can render it. Best-effort: the desktop's next
     /// publish replaces the snapshot with its own durable rows.
-    fn append_mirrored_tab(&self, project_id: &str, worktree_id: &str, tab_id: &str) {
+    fn append_mirrored_tab(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+        tab_id: &str,
+        agent_id: &str,
+        agent_title: &str,
+    ) {
         let tab = Tab {
             id: tab_id.to_string(),
             project_id: project_id.to_string(),
             worktree_id: worktree_id.to_string(),
             kind: TabKind::Terminal,
-            title: None,
+            title: Some(agent_title.to_string()),
             url: None,
             file_path: None,
             diff_side: None,
@@ -661,7 +670,7 @@ impl Registry {
             plugin_view_id: None,
             plugin_payload: None,
             plugin_dedupe_key: None,
-            agent_id: None,
+            agent_id: Some(agent_id.to_string()),
             user_renamed: false,
             order_index: 0,
             created_at: now_timestamp(),
@@ -695,7 +704,7 @@ impl Registry {
         model_id: Option<&str>,
         reasoning_id: Option<&str>,
         model_cmd: Option<&str>,
-    ) -> Result<(String, Value, String), String> {
+    ) -> Result<(String, Value, String, String), String> {
         let catalog = self
             .plugins
             .handle_rpc(&json!({ "action": "catalog" }))
@@ -736,7 +745,12 @@ impl Registry {
             .as_str()
             .ok_or_else(|| "agent catalog entry has no plugin id".to_string())?
             .to_string();
-        Ok((plugin_id, agent["launch"].clone(), command))
+        let agent_name = agent["name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(agent_id)
+            .to_string();
+        Ok((plugin_id, agent["launch"].clone(), command, agent_name))
     }
 
     /// Subscribes to the workspace snapshot-then-delta stream. The snapshot is

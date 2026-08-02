@@ -1,13 +1,16 @@
 import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma/constants";
 
-import { normalizeQuestionOptions, type AgentTab, type InboxItem } from "../types";
+import { statusRank } from "../agent-status";
+import { runtimeAgentId } from "../launch-form";
 import { displayTabTitle } from "../tab-title";
+import { normalizeQuestionOptions, type AgentTab, type InboxItem } from "../types";
 
 // Pure, RN-free mapping from the host's WorkspaceSnapshot + live agent statuses
 // into the view models the existing screens already consume (AgentTab,
 // InboxItem). Projects and Worktrees pass through untouched (they ARE the
-// domain types); the agent overlay comes from the `agentStatus` subscription.
-// Kept side-effect-free so the derivation is unit tested without a device.
+// domain types); the status/attention overlay comes from the `agentStatus`
+// subscription. Kept side-effect-free so the derivation is unit tested without
+// a device.
 
 /** Human label for a worktree row: its title, else its branch. */
 export function worktreeLabel(worktree: Worktree): string {
@@ -15,34 +18,80 @@ export function worktreeLabel(worktree: Worktree): string {
 }
 
 /**
- * Builds the per-worktree agent-tab map by overlaying live agent statuses onto
- * the snapshot's tabs. Only tabs that currently host a reporting agent appear
- * (mirrors the fixtures, where a tab with no agent shows no status dot).
+ * Builds the per-worktree agent-tab map from the snapshot's open tabs, so the
+ * phone mirrors every agent session the host has open — the tab is the sync
+ * qualifier, active or inactive. A terminal tab qualifies when it is tagged
+ * with an agent (`Tab.agentId`, set for any catalog agent at launch, first- or
+ * third-party) or has a live status report (a manually started agent that
+ * reports through its plugin). Closing the tab drops it from the snapshot and
+ * therefore from this map; a report for a tab the snapshot no longer carries
+ * is ignored. Status reports only overlay the dot/attention state — a session
+ * with no report yet still appears, dotless.
  */
 export function agentTabsBySnapshot(
   tabs: Tab[],
   statuses: AgentReportPayload[],
   liveTitles: Readonly<Record<string, string>> = {},
 ): Record<string, AgentTab[]> {
-  const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
+  const reportsByTabId = reportsByTab(statuses);
   const result: Record<string, AgentTab[]> = {};
-  for (const status of newestStatusesFirst(statuses, tabsById)) {
-    if (!status.status) {
-      // A stored session-name-only report (no status yet) has no dot to show.
-      continue;
-    }
-    const tab = tabsById.get(status.tabId);
+  for (const tab of newestTabsFirst(tabs)) {
+    if (tab.kind !== "terminal") continue;
+    const report = reportsByTabId.get(tab.id);
+    const agent = report?.agent ?? (tab.agentId ? runtimeAgentId(tab.agentId) : null);
+    if (!agent) continue;
     const agentTab: AgentTab = {
-      id: status.tabId,
-      worktreeId: status.worktreeId,
-      agent: status.agent,
-      title: displayTabTitle(liveTitles[status.tabId] ?? tab?.title),
-      status: status.status,
-      attentionKind: status.attentionKind ?? null,
+      id: tab.id,
+      worktreeId: tab.worktreeId,
+      agent,
+      title: displayTabTitle(liveTitles[tab.id] ?? tab.title),
+      status: report?.status ?? "cleared",
+      attentionKind: report?.attentionKind ?? null,
     };
-    (result[status.worktreeId] ??= []).push(agentTab);
+    (result[tab.worktreeId] ??= []).push(agentTab);
   }
   return result;
+}
+
+/** One open agent tab's merged report: identity plus its most-urgent status. */
+interface MergedReport {
+  agent: string;
+  status: AgentTab["status"] | null;
+  attentionKind: AgentTab["attentionKind"];
+}
+
+/**
+ * Collapses each tab's reports into one. Any report (even a status-less
+ * session-name one) supplies the agent identity; the status/attention fields
+ * come from the highest-priority report so several reporting agents on one tab
+ * roll up the same way the desktop aggregates them (attention > running >
+ * done > cleared).
+ */
+function reportsByTab(statuses: AgentReportPayload[]): Map<string, MergedReport> {
+  const result = new Map<string, MergedReport>();
+  for (const report of statuses) {
+    const existing = result.get(report.tabId);
+    if (!existing) {
+      result.set(report.tabId, {
+        agent: report.agent,
+        status: report.status ?? null,
+        attentionKind: report.attentionKind ?? null,
+      });
+      continue;
+    }
+    if (statusRank(report.status ?? null) > statusRank(existing.status)) {
+      existing.status = report.status ?? null;
+      existing.attentionKind = report.attentionKind ?? null;
+    }
+  }
+  return result;
+}
+
+/** Orders tabs newest-first so the freshest session leads each group. */
+function newestTabsFirst(tabs: Tab[]): Tab[] {
+  // Hermes does not yet provide Array.prototype.toSorted.
+  // oxlint-disable-next-line unicorn/no-array-sort
+  return [...tabs].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 /**
@@ -136,7 +185,7 @@ function newestStatusesFirst(
  * subscription payload. The wire shape isn't strongly typed at the SDK boundary,
  * so we accept a bare array or a `{ agents | statuses }` wrapper and drop any
  * entry missing the routing fields — an unknown shape degrades to no statuses
- * rather than throwing.
+ * rather than throwing. `status` may be null (a session-name-only report).
  */
 export function parseAgentStatuses(payload: unknown): AgentReportPayload[] {
   const list = Array.isArray(payload)
@@ -171,6 +220,6 @@ function isAgentReport(value: unknown): value is AgentReportPayload {
     typeof value.agent === "string" &&
     typeof value.worktreeId === "string" &&
     typeof value.tabId === "string" &&
-    typeof value.status === "string"
+    (typeof value.status === "string" || value.status === null)
   );
 }
