@@ -139,6 +139,9 @@ lib/
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop
   agent-status.ts                # status rollup priority
   haptics.ts                     # haptic intent wrappers
+  push.ts                        # Expo push: permission, token registration, unregister
+  push-route.ts                  # pure: notification data → chat route (Vitest)
+  use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
 ```
 
 ## Rules
@@ -154,6 +157,14 @@ lib/
 - **Never call `expo-haptics` / `expo-glass-effect` / `expo-symbols` directly** from a
   screen — go through `lib/haptics.ts`, `GlassSurface`, and `IconSymbol` so fallbacks
   and platform checks stay in one place.
+- **Push notifications come from the host, not from here.** The gateway watches its own
+  agent stream and sends through Expo (`crates/pragma-gateway/src/push/`), so alerts
+  arrive with the app closed. This app only registers its Expo token
+  (`POST /v1/push/tokens`, refreshed on every launch while paired), unregisters on
+  unpair, and routes a tap to `/chat/[tabId]` with the ids the push carried. Token
+  minting needs an EAS project id from the runtime manifest or `extra.eas.projectId`
+  in `app.json`; without it `registerForPush` returns `unsupported` and the app runs
+  unchanged.
 - **Status rollup matches the desktop.** `agent-status.ts` priority is
   attention > running > done; `cleared`/none render no dot.
 - **Monorepo Metro.** `metro.config.js` watches the repo root and resolves the hoisted

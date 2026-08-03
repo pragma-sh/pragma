@@ -15,6 +15,7 @@ import {
 } from "react";
 
 import type { ConnectionConfig } from "./pairing";
+import { unregisterFromPush } from "./push";
 import { constants } from "@pragma/constants";
 
 // App-wide owner of the single PragmaClient. The chat hook and the live data
@@ -186,10 +187,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const unpair = useCallback(async () => {
+    // Tell the host to stop pushing before the client (and its token) go away.
+    if (client) await unregisterFromPush(client);
     await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
     setStored(null);
     setStatus("unpaired");
-  }, []);
+  }, [client]);
 
   const handleUnauthorized = useCallback(() => {
     // The host regenerated its token: drop everything and force a re-pair.
