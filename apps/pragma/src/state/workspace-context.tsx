@@ -40,6 +40,7 @@ import {
   shouldAlertForStatus,
   type AgentAlertOptions,
 } from "@/lib/agent-alert";
+import type { AgentAlertLocation } from "@/lib/agent-notification-text";
 import { startAgentInTab, startBackgroundAgentSession } from "@/lib/agent-launch";
 import {
   parseNewSessionDeepLink,
@@ -2026,6 +2027,11 @@ interface AgentReportContext {
   isTabCurrentlyViewed: (tabId: string) => boolean;
   shouldAlertForStatus: (payload: AgentReportPayload) => boolean;
   resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
+  describeAgentLocation: (
+    projectId: string | null,
+    worktreeId: string,
+    tabId: string,
+  ) => AgentAlertLocation;
   navigateToAgentLocation: (projectId: string, worktreeId: string, tabId: string) => void;
   alertAgent: (payload: AgentReportPayload, options?: AgentAlertOptions) => Promise<void>;
 }
@@ -2071,7 +2077,11 @@ function alertUnseenAgentStatus(payload: AgentReportPayload, ctx: AgentReportCon
       const onGoTo = projectId
         ? () => void ctx.navigateToAgentLocation(projectId, payload.worktreeId, payload.tabId)
         : undefined;
-      void ctx.alertAgent(payload, { projectId: projectId ?? undefined, onGoTo });
+      void ctx.alertAgent(payload, {
+        projectId: projectId ?? undefined,
+        location: ctx.describeAgentLocation(projectId, payload.worktreeId, payload.tabId),
+        onGoTo,
+      });
       return undefined;
     });
   }
@@ -2373,6 +2383,18 @@ function useAgentNavigation(
   };
 }
 
+/**
+ * A tab's own name, or null while it still carries the default title for its kind
+ * ("Shell") — which says nothing the worktree name in the alert does not.
+ */
+function namedTabTitle(tab: Tab | undefined): string | null {
+  if (!tab) {
+    return null;
+  }
+  const title = tab.title?.trim();
+  return title && title !== defaultTabTitle(tab.kind) ? title : null;
+}
+
 /** Resolves the owning project for a worktree id (lazy-loading projects as needed). */
 function useWorktreeResolution(
   stateRef: RefObject<WorkspaceState>,
@@ -2380,6 +2402,11 @@ function useWorktreeResolution(
   dispatch: WorkspaceDispatch,
 ): {
   resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
+  describeAgentLocation: (
+    projectId: string | null,
+    worktreeId: string,
+    tabId: string,
+  ) => AgentAlertLocation;
   isTabCurrentlyViewed: (tabId: string) => boolean;
 } {
   const resolveProjectForWorktree = useCallback(
@@ -2404,6 +2431,21 @@ function useWorktreeResolution(
     [dispatch, worktreeProjectIdRef],
   );
 
+  const describeAgentLocation = useCallback(
+    (projectId: string | null, worktreeId: string, tabId: string): AgentAlertLocation => {
+      const current = stateRef.current;
+      const worktree = Object.values(current.worktrees)
+        .flat()
+        .find((candidate) => candidate.id === worktreeId);
+      return {
+        projectName: current.projects.find((project) => project.id === projectId)?.name ?? null,
+        worktreeName: worktree ? (worktree.title ?? worktree.branch) : null,
+        tabName: namedTabTitle(current.tabs.find((tab) => tab.id === tabId)),
+      };
+    },
+    [stateRef],
+  );
+
   const isTabCurrentlyViewed = useCallback(
     (tabId: string) => {
       const current = stateRef.current;
@@ -2421,7 +2463,7 @@ function useWorktreeResolution(
     [stateRef],
   );
 
-  return { resolveProjectForWorktree, isTabCurrentlyViewed };
+  return { resolveProjectForWorktree, describeAgentLocation, isTabCurrentlyViewed };
 }
 
 /** Subscribes to agent status/reset/cli-path/notification events and routes them. */
@@ -4021,11 +4063,8 @@ function useAgentManagement({
     navigateToAgentLocation,
     goBackFromAgent,
   } = useAgentNavigation(stateRef, dispatch);
-  const { resolveProjectForWorktree, isTabCurrentlyViewed } = useWorktreeResolution(
-    stateRef,
-    worktreeProjectIdRef,
-    dispatch,
-  );
+  const { resolveProjectForWorktree, describeAgentLocation, isTabCurrentlyViewed } =
+    useWorktreeResolution(stateRef, worktreeProjectIdRef, dispatch);
   // Renames the hosting tab to the agent-reported session name. User renames
   // win; the persisted title update leaves `userRenamed` untouched.
   const applySessionName = useCallback(
@@ -4053,6 +4092,7 @@ function useAgentManagement({
     isTabCurrentlyViewed,
     shouldAlertForStatus,
     resolveProjectForWorktree,
+    describeAgentLocation,
     navigateToAgentLocation,
     alertAgent,
   });
