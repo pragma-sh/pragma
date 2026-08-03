@@ -1,6 +1,7 @@
 export { PragmaClient } from "./client";
 export { AssetsClient, type FetchedAsset } from "./assets-client";
 export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
+export { PushClient, type PushRegistration } from "./push-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 export { PragmaGatewayError, PragmaTransportError } from "./errors";
