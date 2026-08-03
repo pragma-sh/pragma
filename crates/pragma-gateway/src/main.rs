@@ -4,6 +4,7 @@ mod config;
 mod devices;
 mod error;
 mod http;
+mod push;
 mod routes;
 
 use std::collections::HashMap;
@@ -82,16 +83,28 @@ fn run(args: Args) -> GatewayResult<()> {
         },
     )?;
 
+    let devices = Arc::new(Mutex::new(devices::DeviceRegistry::new(
+        config
+            .socket_path
+            .with_file_name(CONSTANTS.gateway.devices_file.as_str()),
+    )));
+    let presence = push::DesktopPresence::default();
+    // Push is best-effort infrastructure: a gateway that cannot build an HTTPS
+    // client still serves every other route, it just never wakes a phone.
+    let push_worker = push::PushWorker::new(client.clone(), Arc::clone(&devices), presence.clone());
+    if let Some(worker) = push_worker.as_ref() {
+        worker.start();
+    } else {
+        eprintln!("push notifications are disabled: no HTTPS client could be built");
+    }
     let state = AppState {
         client,
         token: config.token,
         gateway_version: env!("CARGO_PKG_VERSION"),
         pending_spawn_streams: Arc::new(Mutex::new(HashMap::default())),
-        devices: Arc::new(Mutex::new(devices::DeviceRegistry::new(
-            config
-                .socket_path
-                .with_file_name(CONSTANTS.gateway.devices_file.as_str()),
-        ))),
+        devices,
+        push: push_worker,
+        presence,
     };
     // Model providers may invoke slow host tools. Keep catalog refresh off the
     // startup path so clients can use the newly advertised gateway immediately.
