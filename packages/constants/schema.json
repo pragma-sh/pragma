@@ -21,6 +21,7 @@
     "tunnel",
     "keybindings",
     "agentStatus",
+    "tabs",
     "files"
   ],
   "properties": {
@@ -71,6 +72,9 @@
     },
     "agentStatus": {
       "$ref": "#/definitions/AgentStatusDefaults"
+    },
+    "tabs": {
+      "$ref": "#/definitions/TabDefaults"
     },
     "files": {
       "$ref": "#/definitions/FileReadLimits"
@@ -682,7 +686,14 @@
       "title": "Gateway",
       "type": "object",
       "additionalProperties": false,
-      "required": ["discoveryFile", "tokenFile", "devicesFile", "tokenHeader", "deviceHeaders"],
+      "required": [
+        "discoveryFile",
+        "tokenFile",
+        "devicesFile",
+        "tokenHeader",
+        "deviceHeaders",
+        "push"
+      ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
         "discoveryFile": {
@@ -712,6 +723,38 @@
             "appVersion": { "type": "string" }
           },
           "description": "HTTP headers carrying installation-scoped mobile device metadata."
+        },
+        "push": {
+          "$ref": "#/definitions/GatewayPush"
+        }
+      }
+    },
+    "GatewayPush": {
+      "title": "GatewayPush",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sendUrl", "batchSize", "presenceTtlMs", "tokenPrefixes"],
+      "description": "Expo push delivery constants. The gateway watches the agent status stream and pushes to every registered phone; the mobile app registers its Expo token through `/v1/push/tokens`.",
+      "properties": {
+        "sendUrl": {
+          "type": "string",
+          "description": "Expo push service endpoint the gateway POSTs batches of messages to."
+        },
+        "batchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest number of messages sent in one request; Expo documents 100 per call."
+        },
+        "presenceTtlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a desktop presence heartbeat counts as current. While a heartbeat says the desktop is focused, phone pushes are suppressed — the user is already looking at the alert. A desktop that dies without blurring stops suppressing after this window."
+        },
+        "tokenPrefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Accepted Expo push token prefixes. A token that matches none is rejected at registration rather than failing later inside Expo."
         }
       }
     },
@@ -754,7 +797,8 @@
         "maxSoundSeconds",
         "maxSoundBytes",
         "soundExtensions",
-        "notificationsEnabled"
+        "notificationsEnabled",
+        "notificationText"
       ],
       "description": "Shipped defaults and limits for agent alert notifications and sounds. A user overrides these per install/project via the `agentStatus` key of `.pragma/config.json`.",
       "properties": {
@@ -783,6 +827,76 @@
         "notificationsEnabled": {
           "type": "boolean",
           "description": "Whether platform notifications fire for agent alerts when the user has not configured `agentStatus.notificationsEnabled`."
+        },
+        "notificationText": {
+          "$ref": "#/definitions/AgentNotificationText"
+        }
+      }
+    },
+    "TabDefaults": {
+      "title": "TabDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultTitles"],
+      "description": "Shipped tab defaults shared by the desktop app and any host that has to reason about a tab's name.",
+      "properties": {
+        "defaultTitles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fallback", "browser", "log", "prReview", "pluginWebview"],
+          "description": "Fallback title per tab kind, used for a tab whose shell or page has not named itself. A tab still carrying its default title has no name worth showing in a notification, so both languages compare against these.",
+          "properties": {
+            "fallback": { "type": "string" },
+            "browser": { "type": "string" },
+            "log": { "type": "string" },
+            "prReview": { "type": "string" },
+            "pluginWebview": { "type": "string" }
+          }
+        }
+      }
+    },
+    "AgentNotificationText": {
+      "title": "AgentNotificationText",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "doneTitle",
+        "attentionTitle",
+        "questionTitle",
+        "commandTitle",
+        "locationSeparator",
+        "tabSuffix",
+        "unknownLocation"
+      ],
+      "description": "Templates for the text of an agent alert. Rendered identically by the desktop toast, the desktop platform notification, and the Expo push the gateway sends to a paired phone, so all three read the same. `{agent}`, `{project}`, `{worktree}`, and `{tab}` are substituted; no other placeholder is recognised.",
+      "properties": {
+        "doneTitle": {
+          "type": "string",
+          "description": "Title when the agent finished its turn. Takes `{agent}`."
+        },
+        "attentionTitle": {
+          "type": "string",
+          "description": "Title when the agent needs attention for an unclassified reason. Takes `{agent}`."
+        },
+        "questionTitle": {
+          "type": "string",
+          "description": "Title when the agent is waiting for an answer. Takes `{agent}`."
+        },
+        "commandTitle": {
+          "type": "string",
+          "description": "Title when the agent is asking to run a command. Takes `{agent}`."
+        },
+        "locationSeparator": {
+          "type": "string",
+          "description": "Joins the project and worktree names in the body line."
+        },
+        "tabSuffix": {
+          "type": "string",
+          "description": "Appended to the body when the reporting tab has a name of its own. Takes `{tab}`."
+        },
+        "unknownLocation": {
+          "type": "string",
+          "description": "Body used when neither the project nor the worktree could be resolved — a report can arrive for a worktree the client has not loaded yet."
         }
       }
     },
