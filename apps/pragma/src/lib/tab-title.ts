@@ -14,6 +14,9 @@ export function defaultTabTitle(kind: TabKind): string {
   if (kind === "log") {
     return titles.log;
   }
+  if (kind === "scratchpad") {
+    return "Scratchpad";
+  }
   if (kind === "pr-review") {
     return titles.prReview;
   }

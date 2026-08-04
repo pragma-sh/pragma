@@ -264,7 +264,7 @@ const TOOLBAR_SECTIONS: ToolbarAction[][] = [
 ];
 
 /** Formatting toolbar for the WYSIWYG markdown surface. */
-export function MarkdownToolbar({ editor }: { editor: Editor }) {
+export function MarkdownToolbar({ editor, children }: { editor: Editor; children?: ReactNode }) {
   // Re-compute on selection/doc changes so active/enabled states track the caret.
   const state = useEditorState({
     editor,
@@ -305,6 +305,12 @@ export function MarkdownToolbar({ editor }: { editor: Editor }) {
       <ToolbarDivider />
       <LinkControl active={state.link} editor={editor} />
       <TableControl editor={editor} inTable={state.table} />
+      {children ? (
+        <>
+          <ToolbarDivider />
+          {children}
+        </>
+      ) : null}
     </div>
   );
 }

@@ -59,6 +59,8 @@ The Rust side parses `values.json` against the schema-generated types at startup
   `ReadBytesRange` request to `chunkBytes` (keep it well under the 16 MB protocol frame:
   base64 adds a third) and the frontend refuses to assemble anything past
   `maxBinaryBytes` in the webview's heap.
+- `scratchpads.*` — managed local MDX directory, extension, frontmatter key, and metadata
+  version shared by CLI, Rust host, and desktop editor.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

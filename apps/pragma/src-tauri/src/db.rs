@@ -885,6 +885,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Terminal => "terminal",
         TabKind::Browser => "browser",
         TabKind::Editor => "editor",
+        TabKind::Scratchpad => "scratchpad",
         TabKind::Diff => "diff",
         TabKind::Log => "log",
         TabKind::PrReview => "pr-review",
@@ -897,6 +898,7 @@ fn kind_from_str(value: &str) -> TabKind {
     match value {
         "browser" => TabKind::Browser,
         "editor" => TabKind::Editor,
+        "scratchpad" => TabKind::Scratchpad,
         "diff" => TabKind::Diff,
         "log" => TabKind::Log,
         "pr-review" => TabKind::PrReview,

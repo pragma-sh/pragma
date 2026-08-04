@@ -13,8 +13,8 @@ use comfy_table::{ContentArrangement, Table};
 use crate::broker;
 use crate::cli::{
     AgentStartArgs, BrowserCommand, BrowserScreenshotArgs, BrowserScrollArgs, DiffSideArg,
-    SplitAddTabArgs, SplitCommand, SplitSetArgs, TabExecArgs, TabListArgs, TabOpenArgs,
-    WorktreeCommand, WorktreeCreateArgs, WorktreeDeleteArgs,
+    ScratchpadCreateArgs, SplitAddTabArgs, SplitCommand, SplitSetArgs, TabExecArgs, TabListArgs,
+    TabOpenArgs, WorktreeCommand, WorktreeCreateArgs, WorktreeDeleteArgs,
 };
 use crate::output::Output;
 use crate::server;
@@ -280,6 +280,47 @@ pub fn tab_exec(args: &TabExecArgs, out: &Output) -> Result<(), CliError> {
     let stderr = value.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
     print!("{stdout}");
     eprint!("{stderr}");
+    Ok(())
+}
+
+// -------------------------- scratchpad --------------------------
+
+pub fn scratchpad_create(args: &ScratchpadCreateArgs, out: &Output) -> Result<(), CliError> {
+    let title = args.title.trim();
+    if title.is_empty() {
+        return Err(CliError::other("scratchpad title cannot be empty"));
+    }
+    let contents = if args.file == "-" {
+        server::read_stdin()?
+    } else {
+        let is_mdx = std::path::Path::new(&args.file)
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("mdx"));
+        if !is_mdx {
+            return Err(CliError::other("scratchpad source must be an .mdx file"));
+        }
+        std::fs::read_to_string(&args.file)
+            .map_err(|error| CliError::other(format!("read {}: {error}", args.file)))?
+    };
+    let worktree_id = server::worktree_id(None)?;
+    let agent_tab_id = server::env("PRAGMA_TAB_ID").map_err(CliError::config)?;
+    let value = broker::request(
+        ControlMethod::ScratchpadCreate,
+        serde_json::json!({
+            "worktreeId": worktree_id,
+            "agentTabId": agent_tab_id,
+            "title": title,
+            "contents": contents,
+        }),
+    )?;
+    print_line(out, &value, |v| {
+        let path = v
+            .get("filePath")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("scratchpad");
+        format!("created {path}")
+    });
     Ok(())
 }
 

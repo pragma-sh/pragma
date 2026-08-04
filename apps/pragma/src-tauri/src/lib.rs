@@ -27,6 +27,7 @@ mod ports;
 pub(crate) use pragma_core::process_env;
 mod projects;
 mod pty;
+mod scratchpads;
 mod scripts;
 mod ssh_host;
 mod window_chrome;
@@ -832,6 +833,11 @@ fn create_tab(
     diff_commit: Option<String>,
     pr_number: Option<i64>,
 ) -> AppResult<Tab> {
+    if matches!(kind, TabKind::Scratchpad) {
+        return Err(AppError::InvalidInput(
+            "scratchpads must be created with pragma-cli scratchpad create".to_string(),
+        ));
+    }
     let tab = db.create_tab(
         &project_id,
         &worktree_id,
@@ -895,7 +901,8 @@ fn close_tab(
         | TabKind::Diff
         | TabKind::PrReview
         | TabKind::Log
-        | TabKind::PluginWebview => {}
+        | TabKind::PluginWebview
+        | TabKind::Scratchpad => {}
     }
     plugins::stop_watchers_for_tab(&tab.id)?;
     db.delete_tab(&tab_id)?;
@@ -1091,7 +1098,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
     automations::start(app.handle().clone(), pty.clone());
-    control::start(app.handle().clone(), pty);
+    control::start(app.handle().clone(), pty, LOCAL_HOST.to_string());
     ssh_host::reconnect_remote_hosts(app.handle().clone());
     if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
         log::warn!("failed to load keybindings config: {error}");
@@ -1188,6 +1195,9 @@ pub fn run() {
             agent_notifications::show_agent_notification,
             control::start_agent,
             control::exec_in_worktree,
+            scratchpads::scratchpad_prompt_agent,
+            scratchpads::list_scratchpads,
+            scratchpads::open_scratchpad_tab,
             project_icon,
             list_tabs,
             create_tab,

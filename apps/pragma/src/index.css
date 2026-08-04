@@ -343,6 +343,120 @@
     border: 1px solid var(--border);
     padding: 0.25rem 0.5rem;
   }
+
+  /* Scratchpad comment picker. This is the in-app browser's design mode, port
+     for port: crosshair cursor, a ring-bordered box with its own tint layer
+     gliding between elements, and a rounded pill with a circular "+" to submit.
+     The element label the browser overlay shows is deliberately dropped: a
+     scratchpad author picks prose and components, not tags. Otherwise keep it
+     in step with `DESIGN_SCRIPT` in `src-tauri/src/browser.rs` — that script
+     paints the same overlay inside a page, so the two must not drift. It reads the same theme tokens; the script
+     only copies them into `--pragma-*` because a page cannot see ours. */
+  .tiptap.scratchpad-picking,
+  .tiptap.scratchpad-picking * {
+    cursor: crosshair;
+  }
+  .tiptap.scratchpad-picking {
+    caret-color: transparent;
+    user-select: none;
+  }
+  /* A rendered JSX block is a sandboxed iframe, which eats every pointer event
+     it sits under — the picker would see a hole where the component is. Letting
+     the pointer through to the node view's own wrapper (still editor DOM) is
+     what makes components pickable like any other block. */
+  .tiptap.scratchpad-picking [data-mdx-rendered] iframe {
+    pointer-events: none;
+  }
+  .scratchpad-design-box {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 40;
+    pointer-events: none;
+    opacity: 0;
+    border: 1px solid var(--ring);
+    border-radius: 3px;
+    box-sizing: border-box;
+    will-change: transform, width, height;
+    transition:
+      transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      width 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 120ms linear;
+  }
+  /* The tint is its own layer: opacity on the box would fade the border too. */
+  .scratchpad-design-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--ring);
+    opacity: 0.14;
+  }
+  .scratchpad-design-box[data-visible="true"] {
+    opacity: 1;
+  }
+  .scratchpad-design-box[data-selected="true"] {
+    border-width: 2px;
+  }
+  .scratchpad-design-box[data-selected="true"] .scratchpad-design-fill {
+    opacity: 0.22;
+  }
+  .scratchpad-design-pill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 5px 5px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+    font: 400 13px/1.4 var(--font-sans);
+    transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .scratchpad-design-pill input {
+    all: unset;
+    width: 260px;
+    color: inherit;
+    font: inherit;
+  }
+  .scratchpad-design-pill input::placeholder {
+    color: var(--muted-foreground);
+  }
+  .scratchpad-design-pill button {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .scratchpad-design-pill button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .scratchpad-design-pill button:not(:disabled):hover {
+    background: var(--primary-hover);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scratchpad-design-box,
+    .scratchpad-design-pill {
+      transition: none;
+    }
+  }
 }
 
 /* macOS vibrancy: the surfaces behind the translucent project rail must not

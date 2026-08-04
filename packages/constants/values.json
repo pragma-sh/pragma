@@ -87,6 +87,12 @@
     "chunkBytes": 4194304,
     "maxBinaryBytes": 268435456
   },
+  "scratchpads": {
+    "directory": ".pragma/scratchpads",
+    "extension": "mdx",
+    "frontmatterKey": "pragmaScratchpad",
+    "version": 1
+  },
   "protocol": {
     "rpcMethods": [
       "git",

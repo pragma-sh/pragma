@@ -31,6 +31,7 @@ import type {
   AutomationInfo,
   AutomationRootRegistration,
   OpenPort,
+  ScratchpadSummary,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -768,6 +769,29 @@ export function readFileChunk(
 /** Overwrites a worktree-relative file with UTF-8 text (does not create parents). */
 export function writeFile(worktreeId: string, path: string, contents: string): Promise<void> {
   return invoke("write_file", { worktreeId, path, contents });
+}
+
+/** Sends user feedback from a scratchpad to one attached agent tab. */
+export function scratchpadPromptAgent(
+  worktreeId: string,
+  tabId: string,
+  text: string,
+): Promise<void> {
+  return invoke("scratchpad_prompt_agent", { worktreeId, tabId, text });
+}
+
+/** Lists every managed scratchpad file in a worktree, open or not. */
+export function listScratchpads(worktreeId: string): Promise<ScratchpadSummary[]> {
+  return invoke<ScratchpadSummary[]>("list_scratchpads", { worktreeId });
+}
+
+/** Opens a tab for an existing scratchpad file, reusing one already open. */
+export function openScratchpadTab(
+  worktreeId: string,
+  filePath: string,
+  title: string,
+): Promise<Tab> {
+  return invoke<Tab>("open_scratchpad_tab", { worktreeId, filePath, title });
 }
 
 /**

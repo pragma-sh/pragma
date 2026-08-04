@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import type { EditorView as CodeMirrorView } from "@codemirror/view";
+import type { EditorView as ProseMirrorView } from "@tiptap/pm/view";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
@@ -39,6 +40,26 @@ const lowlight = createLowlight(common);
 /** Markdown extensions that get the WYSIWYG surface (`.mdx` stays in the raw editor — JSX would be mangled). */
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown"]);
 
+/** Rich-editor selection carried into raw Markdown for inline AI. */
+export interface MarkdownInlineEditRequest {
+  selectedText: string;
+  occurrence: number;
+}
+
+/**
+ * Describes the current TipTap selection for inline AI. The occurrence index
+ * disambiguates which copy of the selected text raw Markdown should rewrite.
+ */
+export function inlineEditRequestFor(view: ProseMirrorView): MarkdownInlineEditRequest {
+  const { from, to } = view.state.selection;
+  const selectedText = view.state.doc.textBetween(from, to, "\n");
+  const before = view.state.doc.textBetween(0, from, "\n");
+  return {
+    selectedText,
+    occurrence: selectedText ? before.split(selectedText).length - 1 : 0,
+  };
+}
+
 /** True when the file should open in the markdown preview/editor surface. */
 export function isMarkdownPath(filePath: string | null): boolean {
   return filePath !== null && MARKDOWN_EXTENSIONS.has(extname(filePath));
@@ -57,11 +78,13 @@ function MarkdownWysiwyg({
   doc,
   modeToggle,
   onChange,
+  onInlineEdit,
   onSave,
 }: {
   doc: string;
   modeToggle: ReactNode;
   onChange: (markdown: string) => void;
+  onInlineEdit: (request: MarkdownInlineEditRequest) => void;
   onSave: () => void;
 }) {
   const onChangeRef = useRef(onChange);
@@ -105,13 +128,20 @@ function MarkdownWysiwyg({
         class:
           "tiptap prose prose-invert prose-sm max-w-3xl min-h-full px-6 py-4 focus:outline-none",
       },
-      handleKeyDown: (_view, event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      handleKeyDown: (view, event) => {
+        if (!event.metaKey && !event.ctrlKey) return false;
+        const key = event.key.toLowerCase();
+        if (key === "k" && !event.altKey && !event.shiftKey) {
+          event.preventDefault();
+          onInlineEdit(inlineEditRequestFor(view));
+          return true;
+        }
+        if (key === "s") {
           event.preventDefault();
           onSaveRef.current();
           return true;
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        if (key === "f") {
           event.preventDefault();
           findRef.current.openBar();
           return true;
@@ -175,9 +205,11 @@ function MarkdownViewBar({
 }
 
 /** Raw CodeMirror surface sharing the standard editor theme/grammar/save keymap. */
-function MarkdownRaw({
+export function MarkdownRaw({
   doc,
   filePath,
+  inlineEditRequest,
+  onInlineEditRequestHandled,
   worktreeId,
   isRemote,
   onChange,
@@ -185,6 +217,8 @@ function MarkdownRaw({
 }: {
   doc: string;
   filePath: string | null;
+  inlineEditRequest: MarkdownInlineEditRequest | null;
+  onInlineEditRequestHandled: () => void;
   worktreeId: string;
   isRemote: boolean;
   onChange: (value: string) => void;
@@ -217,6 +251,22 @@ function MarkdownRaw({
         }}
         onCreateEditor={(view) => {
           viewRef.current = view;
+          if (inlineEditRequest) {
+            const from = inlineEditRequest.selectedText
+              ? nthIndexOf(doc, inlineEditRequest.selectedText, inlineEditRequest.occurrence)
+              : -1;
+            if (from >= 0) {
+              view.dispatch({
+                selection: { anchor: from, head: from + inlineEditRequest.selectedText.length },
+              });
+            }
+            onInlineEditRequestHandled();
+            queueMicrotask(() => {
+              if (viewRef.current === view) {
+                inlineEdit.open(view);
+              }
+            });
+          }
         }}
         theme="none"
         value={doc}
@@ -240,6 +290,9 @@ export function MarkdownView({ tab }: { tab: Tab }) {
   const savedDocRef = useRef("");
   const currentDocRef = useRef("");
   const [mode, setMode] = useState<MarkdownMode>("editor");
+  const [inlineEditRequest, setInlineEditRequest] = useState<MarkdownInlineEditRequest | null>(
+    null,
+  );
   const { state, load } = useEditorFileLoader(tab, savedDocRef, currentDocRef);
   const save = useEditorSave(tabId, worktreeId, filePath, savedDocRef);
   const onChange = useEditorOnChange(tabId, savedDocRef, currentDocRef);
@@ -276,6 +329,10 @@ export function MarkdownView({ tab }: { tab: Tab }) {
           doc={doc}
           modeToggle={modeToggle}
           onChange={onChange}
+          onInlineEdit={(request) => {
+            setInlineEditRequest(request);
+            setMode("raw");
+          }}
           onSave={() => void save(currentDocRef.current)}
         />
       ) : (
@@ -285,7 +342,9 @@ export function MarkdownView({ tab }: { tab: Tab }) {
             <MarkdownRaw
               doc={doc}
               filePath={filePath}
+              inlineEditRequest={inlineEditRequest}
               isRemote={isRemote}
+              onInlineEditRequestHandled={() => setInlineEditRequest(null)}
               onChange={onChange}
               save={save}
               worktreeId={worktreeId}
@@ -295,4 +354,13 @@ export function MarkdownView({ tab }: { tab: Tab }) {
       )}
     </div>
   );
+}
+
+function nthIndexOf(source: string, query: string, occurrence: number): number {
+  let index = -1;
+  for (let current = 0; current <= occurrence; current += 1) {
+    index = source.indexOf(query, index + 1);
+    if (index < 0) return -1;
+  }
+  return index;
 }

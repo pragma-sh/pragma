@@ -23,7 +23,8 @@
     "agentStatus",
     "tabs",
     "bench",
-    "files"
+    "files",
+    "scratchpads"
   ],
   "properties": {
     "app": {
@@ -82,6 +83,9 @@
     },
     "files": {
       "$ref": "#/definitions/FileReadLimits"
+    },
+    "scratchpads": {
+      "$ref": "#/definitions/Scratchpads"
     }
   },
   "definitions": {
@@ -167,7 +171,8 @@
         "browserEval",
         "browserScreenshot",
         "agentStart",
-        "agentSessionLaunch"
+        "agentSessionLaunch",
+        "scratchpadCreate"
       ]
     },
     "Protocol": {
@@ -1669,9 +1674,59 @@
     },
     "TabKind": {
       "title": "TabKind",
-      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
+      "description": "Discriminates what a tab hosts: a shell terminal, an embedded browser, a file editor, a scratchpad, a read-only diff, the read-only daemon log viewer, a pull-request review, or a plugin web view.",
       "type": "string",
-      "enum": ["terminal", "browser", "editor", "diff", "log", "pr-review", "plugin-webview"]
+      "enum": [
+        "terminal",
+        "browser",
+        "editor",
+        "scratchpad",
+        "diff",
+        "log",
+        "pr-review",
+        "plugin-webview"
+      ]
+    },
+    "Scratchpads": {
+      "title": "Scratchpads",
+      "description": "Managed scratchpad file contract shared by the CLI, desktop host, and editor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directory", "extension", "frontmatterKey", "version"],
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "extension": {
+          "type": "string"
+        },
+        "frontmatterKey": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ScratchpadSummary": {
+      "title": "ScratchpadSummary",
+      "description": "A managed scratchpad file discovered on disk, independent of whether it currently has an open tab.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "filePath"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path to the scratchpad's MDX file."
+        }
+      }
     },
     "AgentStatus": {
       "title": "AgentStatus",
