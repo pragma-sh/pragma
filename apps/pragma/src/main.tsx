@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { constants } from "@pragma/constants";
 import { Toaster } from "@/components/ui/sonner";
 import { primeNotificationPermission } from "@/lib/agent-alert";
+import { startGatewayPresenceReporting } from "@/lib/gateway-presence";
 import { isMacPlatform } from "@/lib/platform";
 import "@/plugins/bootstrap-bridge";
 import "@/lib/brand-icons";
@@ -41,6 +42,10 @@ if (isMacPlatform()) {
 // Request OS notification permission while the window is frontmost at launch, so
 // background agent alerts can fire immediately instead of prompting when unfocused.
 primeNotificationPermission();
+
+// Let the gateway know when this window is in front, so a paired phone is not
+// pushed an alert the user is already reading here.
+startGatewayPresenceReporting();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

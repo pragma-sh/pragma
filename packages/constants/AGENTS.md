@@ -44,6 +44,13 @@ The Rust side parses `values.json` against the schema-generated types at startup
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and
   Rust (`keybindings::default_config`). `keybindings.configFileName` is the editable
   overrides file, resolved against the home directory (global) or the project root.
+- `agentStatus.notificationText` — templates for agent alert wording (`{agent}`,
+  `{project}`, `{worktree}`, `{tab}`), rendered by the desktop toast/banner
+  (`apps/pragma/src/lib/agent-notification-text.ts`) and by the gateway's Expo push
+  (`crates/pragma-gateway/src/push/text.rs`). `tabs.defaultTitles` is shared for the same
+  reason: both languages must agree on when a tab is still unnamed.
+- `gateway.push.*` — Expo push endpoint, batch size, accepted token prefixes, and how
+  long a desktop focus heartbeat suppresses phone pushes.
 - `agentStatus.*` — shipped defaults and limits for agent alerts: sounds directory,
   clip duration/byte caps, allowed extensions, and whether notifications are on. Users
   override them through the `agentStatus` block of a `.pragma/config.json`

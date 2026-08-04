@@ -13,6 +13,7 @@ use crate::client::GatewayClient;
 use crate::devices::DeviceRegistry;
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::response::error_response;
+use crate::push::{DesktopPresence, PushWorker};
 use crate::routes;
 
 use self::router::gateway_router;
@@ -33,6 +34,10 @@ pub struct AppState {
     pub pending_spawn_streams: PendingSpawnStreams,
     /// Authenticated mobile device history.
     pub devices: Arc<Mutex<DeviceRegistry>>,
+    /// Expo push delivery, absent when no HTTP client could be built.
+    pub push: Option<PushWorker>,
+    /// Last reported desktop window focus, which gates phone pushes.
+    pub presence: DesktopPresence,
 }
 
 /// Runs the blocking `tiny_http` accept loop.
@@ -178,6 +183,7 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
         }
         "agents.seen" => respond_json(request, routes::agents::mark_seen(state, &matched)),
         "subscriptions.events" => routes::subscriptions::events(request, state, &matched),
+        id if id.starts_with("push.") => routes::push::dispatch(request, state, id),
         _ => Ok(request.respond(with_cors(error_response(&GatewayError::NotFound).boxed()))?),
     }
 }
@@ -186,7 +192,7 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
 /// error as a JSON `ErrorBody` with the error's HTTP status. Route failures
 /// must never drop the request — a dropped `tiny_http` request turns into an
 /// empty 500 the SDK cannot explain to the user.
-fn respond_json(
+pub(crate) fn respond_json(
     request: Request,
     result: GatewayResult<Response<std::io::Cursor<Vec<u8>>>>,
 ) -> GatewayResult<()> {

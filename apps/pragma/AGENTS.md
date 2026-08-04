@@ -205,6 +205,23 @@ re-notifying. **Viewing a tab latches every `done`/`attention` status it current
 shows as seen** — the `visibleTabIds` effect reads `agentStatusesForTab` and latches
 them before `clearDoneStatusForTab` when a tab comes on screen.
 
+**Alert wording is templated in `@pragma/constants`, not written inline.**
+`lib/agent-notification-text.ts` renders `agentStatus.notificationText` into a title
+(agent name + what it wants) and a body naming the project, worktree, and tab the report
+came from — `workspace-context` resolves those names with `describeAgentLocation` and
+passes them as `AgentAlertOptions.location`. The same templates are rendered in Rust by
+`crates/pragma-gateway/src/push/text.rs` for phone pushes, so a toast, an OS banner, and
+a push read identically. Change the templates, and keep the two renderers in step.
+
+`lib/gateway-presence.ts` reports this window's focus to the gateway
+(`POST /v1/push/presence`, re-reported on a heartbeat) so a paired phone is not pushed an
+alert the user is already reading here. "Focused" is OS focus **and** document
+visibility, tracked as two independent inputs: an occluded or minimised window can still
+hold OS focus, and it can be hidden and restored without Tauri ever emitting a focus
+change, so reacting only to hiding would strand the window in the unfocused state and
+buzz the phone for alerts the user can see. Only a change in the conjunction is reported,
+so the heartbeat is not restarted on every visibility flip.
+
 macOS agent system notifications are clickable: the frontend calls the macOS-only
 `show_agent_notification` Tauri command instead of the generic notification plugin, and
 Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, tabId }`;

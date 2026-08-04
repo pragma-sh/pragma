@@ -154,8 +154,19 @@ describe("alertAgent", () => {
     await alertAgent(report());
 
     expect(sendNotificationMock).toHaveBeenCalledWith({
-      title: "OpenCode needs attention",
-      body: "The agent is waiting for an answer.",
+      title: "OpenCode is waiting for an answer",
+      body: "Open Pragma to continue.",
+    });
+  });
+
+  it("names the project, worktree, and tab the report came from", async () => {
+    await alertAgent(report(), {
+      location: { projectName: "pragma", worktreeName: "bugfix-auth", tabName: "dev" },
+    });
+
+    expect(sendNotificationMock).toHaveBeenCalledWith({
+      title: "OpenCode is waiting for an answer",
+      body: 'pragma / bugfix-auth \u00b7 tab "dev"',
     });
   });
 
@@ -165,8 +176,8 @@ describe("alertAgent", () => {
     await alertAgent(report({ tabId: "tab-1" }), { projectId: "project-1" });
 
     expect(showAgentNotificationMock).toHaveBeenCalledWith(
-      "OpenCode needs attention",
-      "The agent is waiting for an answer.",
+      "OpenCode is waiting for an answer",
+      "Open Pragma to continue.",
       "project-1",
       "worktree-1",
       "tab-1",
@@ -200,8 +211,8 @@ describe("alertAgent", () => {
     await expect(alertAgent(report({ tabId: "tab-audio-blocked" }))).resolves.toBeUndefined();
 
     expect(sendNotificationMock).toHaveBeenCalledWith({
-      title: "OpenCode needs attention",
-      body: "The agent is waiting for an answer.",
+      title: "OpenCode is waiting for an answer",
+      body: "Open Pragma to continue.",
     });
   });
 

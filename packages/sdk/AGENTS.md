@@ -7,7 +7,7 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, and `events`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, and `push`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 
 Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL` and
@@ -51,6 +51,13 @@ to live watchers). `prompt` is **optional** — omit it to attach to an existing
 without sending anything. `connect` supersedes the old read-only `subscribe()`; the standalone
 publishes are `client.agents.reportInput(...)` / `client.agents.reportInterrupt(...)` (or
 `pragma-cli agent input`).
+
+`client.push` covers Expo push for a paired phone: `register({ token })` /
+`unregister()` manage this installation's token (the gateway keys them by the
+`x-pragma-device-id` header the client already sends), `list()` reports registered
+phones, `test()` fires a check notification, and `presence({ focused })` is the
+desktop's focus heartbeat that suppresses phone pushes while the window is in front.
+Delivery itself is the gateway's job — nothing here talks to Expo.
 
 ## Rules
 

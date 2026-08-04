@@ -22,6 +22,13 @@ pub struct GatewayDevice {
     pub app_version: String,
     pub first_seen_at: u64,
     pub last_seen_at: u64,
+    /// Expo push token this installation registered, or `None` when it has not
+    /// asked for notifications (or revoked them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_token: Option<String>,
+    /// When the current push token was registered, in epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_registered_at: Option<u64>,
 }
 
 /// Persistent registry of authenticated mobile installations.
@@ -40,23 +47,11 @@ impl DeviceRegistry {
     /// identity headers remain valid but do not produce anonymous list entries.
     pub fn record(&self, request: &Request) -> GatewayResult<()> {
         let headers = &pragma_constants::CONSTANTS.gateway.device_headers;
-        let Some(id) = request_header(request, &headers.id).filter(|value| !value.is_empty())
+        let Some(id) = request_header(request, &headers.id).filter(|value| is_valid_id(value))
         else {
             return Ok(());
         };
-        if id.len() > 128
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-        {
-            return Ok(());
-        }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(u64::MAX);
+        let now = now_ms();
         let mut devices = read_devices(&self.path);
         let name = bounded_header(request, &headers.name, "Mobile device");
         let platform = bounded_header(request, &headers.platform, "unknown");
@@ -77,7 +72,13 @@ impl DeviceRegistry {
                 devices.remove(&oldest);
             }
         }
-        let first_seen_at = devices.get(id).map_or(now, |device| device.first_seen_at);
+        let existing = devices.get(id);
+        let first_seen_at = existing.map_or(now, |device| device.first_seen_at);
+        // Metadata is rewritten from headers on every request; the push
+        // registration is not carried in headers, so copy it forward or a single
+        // request would silently unsubscribe the phone.
+        let push_token = existing.and_then(|device| device.push_token.clone());
+        let push_registered_at = existing.and_then(|device| device.push_registered_at);
         devices.insert(
             id.to_string(),
             GatewayDevice {
@@ -87,10 +88,115 @@ impl DeviceRegistry {
                 app_version,
                 first_seen_at,
                 last_seen_at: now,
+                push_token,
+                push_registered_at,
             },
         );
         write_devices(&self.path, &devices)
     }
+
+    /// Lists every known device, newest contact first.
+    pub fn list(&self) -> Vec<GatewayDevice> {
+        let mut devices: Vec<GatewayDevice> = read_devices(&self.path).into_values().collect();
+        devices.sort_by_key(|device| std::cmp::Reverse(device.last_seen_at));
+        devices
+    }
+
+    /// Stores (or replaces) one device's Expo push token.
+    ///
+    /// Registering a token that another installation already holds clears it
+    /// there: Expo reissues a token to whichever install currently owns the
+    /// device, and leaving the stale owner in place would double-send.
+    pub fn set_push_token(&self, device_id: &str, token: &str) -> GatewayResult<()> {
+        let mut devices = read_devices(&self.path);
+        for device in devices.values_mut() {
+            if device.id != device_id && device.push_token.as_deref() == Some(token) {
+                device.push_token = None;
+                device.push_registered_at = None;
+            }
+        }
+        let now = now_ms();
+        let device = devices
+            .entry(device_id.to_string())
+            .or_insert_with(|| GatewayDevice {
+                id: device_id.to_string(),
+                name: "Mobile device".to_string(),
+                platform: "unknown".to_string(),
+                app_version: "unknown".to_string(),
+                first_seen_at: now,
+                last_seen_at: now,
+                push_token: None,
+                push_registered_at: None,
+            });
+        device.push_token = Some(token.to_string());
+        device.push_registered_at = Some(now);
+        write_devices(&self.path, &devices)
+    }
+
+    /// Stops push delivery to one device, keeping the rest of its record.
+    pub fn clear_push_token(&self, device_id: &str) -> GatewayResult<()> {
+        let mut devices = read_devices(&self.path);
+        let Some(device) = devices.get_mut(device_id) else {
+            return Ok(());
+        };
+        device.push_token = None;
+        device.push_registered_at = None;
+        write_devices(&self.path, &devices)
+    }
+
+    /// Drops a token Expo has rejected as permanently undeliverable.
+    pub fn forget_push_token(&self, token: &str) -> GatewayResult<()> {
+        let mut devices = read_devices(&self.path);
+        let mut changed = false;
+        for device in devices.values_mut() {
+            if device.push_token.as_deref() == Some(token) {
+                device.push_token = None;
+                device.push_registered_at = None;
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        write_devices(&self.path, &devices)
+    }
+
+    /// Every push token currently registered on this host.
+    pub fn push_tokens(&self) -> Vec<String> {
+        read_devices(&self.path)
+            .into_values()
+            .filter_map(|device| device.push_token)
+            .collect()
+    }
+}
+
+/// Milliseconds since the Unix epoch, saturating rather than panicking.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+/// Reads the installation id an authenticated mobile client sends, when it sent
+/// a well-formed one. Push registration is keyed by it.
+#[must_use]
+pub fn device_id(request: &Request) -> Option<String> {
+    let headers = &pragma_constants::CONSTANTS.gateway.device_headers;
+    request_header(request, &headers.id)
+        .filter(|value| is_valid_id(value))
+        .map(str::to_string)
+}
+
+/// Bounded, path-safe device ids only — the id is used as a registry map key.
+fn is_valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 fn bounded_header(request: &Request, field: &str, fallback: &str) -> String {
@@ -133,7 +239,7 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{read_devices, write_devices, GatewayDevice};
+    use super::{read_devices, write_devices, DeviceRegistry, GatewayDevice};
 
     #[test]
     fn device_registry_round_trips_atomically_with_owner_only_permissions() {
@@ -146,6 +252,8 @@ mod tests {
             app_version: "1.0.0".to_string(),
             first_seen_at: 10,
             last_seen_at: 20,
+            push_token: None,
+            push_registered_at: None,
         };
         let devices = BTreeMap::from([(device.id.clone(), device)]);
 
@@ -162,5 +270,65 @@ mod tests {
                 & 0o777,
             0o600
         );
+    }
+
+    fn registry() -> (tempfile::TempDir, DeviceRegistry) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = DeviceRegistry::new(dir.path().join("gateway-devices.json"));
+        (dir, registry)
+    }
+
+    #[test]
+    fn push_tokens_register_and_unregister() {
+        let (_dir, registry) = registry();
+
+        registry
+            .set_push_token("device-1", "ExponentPushToken[a]")
+            .expect("register");
+        assert_eq!(
+            registry.push_tokens(),
+            vec!["ExponentPushToken[a]".to_string()]
+        );
+
+        registry.clear_push_token("device-1").expect("unregister");
+        assert!(registry.push_tokens().is_empty());
+    }
+
+    #[test]
+    fn a_reissued_token_moves_to_its_new_owner() {
+        let (_dir, registry) = registry();
+        registry
+            .set_push_token("device-1", "ExponentPushToken[a]")
+            .expect("register first");
+
+        registry
+            .set_push_token("device-2", "ExponentPushToken[a]")
+            .expect("register second");
+
+        assert_eq!(
+            registry.push_tokens(),
+            vec!["ExponentPushToken[a]".to_string()]
+        );
+        let owner = registry
+            .list()
+            .into_iter()
+            .find(|device| device.push_token.is_some())
+            .expect("an owner");
+        assert_eq!(owner.id, "device-2");
+    }
+
+    #[test]
+    fn a_dead_token_is_forgotten_everywhere() {
+        let (_dir, registry) = registry();
+        registry
+            .set_push_token("device-1", "ExponentPushToken[a]")
+            .expect("register");
+
+        registry
+            .forget_push_token("ExponentPushToken[a]")
+            .expect("forget");
+
+        assert!(registry.push_tokens().is_empty());
+        assert_eq!(registry.list().len(), 1, "the device itself is kept");
     }
 }

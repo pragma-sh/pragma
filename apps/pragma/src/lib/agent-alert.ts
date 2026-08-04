@@ -9,6 +9,11 @@ import { createElement } from "react";
 import { toast } from "sonner";
 
 import {
+  agentAlertBody,
+  agentAlertTitle,
+  type AgentAlertLocation,
+} from "@/lib/agent-notification-text";
+import {
   agentStatusSettings,
   playAgentAlertSound,
   type EffectiveAgentStatusSettings,
@@ -80,6 +85,8 @@ export function releaseAlertLatchForTab(tabId: string): void {
 
 export interface AgentAlertOptions {
   projectId?: string;
+  /** Names of the project/worktree/tab the report came from, for the alert body. */
+  location?: AgentAlertLocation;
   onGoTo?: () => void;
 }
 
@@ -96,8 +103,8 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   const settings = await agentStatusSettings(options.projectId);
   await playAlertSound(settings, options.projectId);
   const agentName = await displayNameForAgent(payload.agent);
-  const title = titleFor(payload, agentName);
-  const description = descriptionFor(payload);
+  const title = agentAlertTitle(payload, agentName);
+  const description = agentAlertBody(options.location);
   const focused = await isAppFocused();
   if (isApprovableCommand(payload)) {
     void startWatcherForAgentSession({
@@ -437,27 +444,4 @@ function closeAudioContext(context: AudioContext): void {
   } catch {
     // Audio alerts are best-effort; cleanup failures should not break reporting.
   }
-}
-
-function titleFor(payload: AgentReportPayload, agentName: string): string {
-  if (payload.status === "done") {
-    return `${agentName} finished`;
-  }
-  if (payload.attentionKind === "command") {
-    return `${agentName} wants to run a command`;
-  }
-  return `${agentName} needs attention`;
-}
-
-function descriptionFor(payload: AgentReportPayload): string {
-  if (payload.status === "done") {
-    return "The agent has stopped in this worktree.";
-  }
-  if (payload.attentionKind === "question") {
-    return "The agent is waiting for an answer.";
-  }
-  if (payload.attentionKind === "command") {
-    return "Review the requested command in its terminal.";
-  }
-  return "Open the agent terminal to continue.";
 }

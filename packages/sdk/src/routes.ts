@@ -20,4 +20,7 @@ export const routes = {
   agentsSeen: (tabId: string): string => `/v1/tabs/${encodeURIComponent(tabId)}/agents/seen`,
   subscription: (event: string): string => `/v1/subscriptions/${encodeURIComponent(event)}`,
   control: (method: string): string => `/v1/control/${encodeURIComponent(method)}`,
+  pushTokens: "/v1/push/tokens",
+  pushTest: "/v1/push/test",
+  pushPresence: "/v1/push/presence",
 } as const;

@@ -15,6 +15,12 @@
       "name": "x-pragma-device-name",
       "platform": "x-pragma-device-platform",
       "appVersion": "x-pragma-app-version"
+    },
+    "push": {
+      "sendUrl": "https://exp.host/--/api/v2/push/send",
+      "batchSize": 100,
+      "presenceTtlMs": 90000,
+      "tokenPrefixes": ["ExponentPushToken[", "ExpoPushToken["]
     }
   },
   "platform": {
@@ -57,7 +63,25 @@
     "maxSoundSeconds": 5,
     "maxSoundBytes": 5242880,
     "soundExtensions": ["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "webm"],
-    "notificationsEnabled": true
+    "notificationsEnabled": true,
+    "notificationText": {
+      "doneTitle": "{agent} finished",
+      "attentionTitle": "{agent} needs attention",
+      "questionTitle": "{agent} is waiting for an answer",
+      "commandTitle": "{agent} wants to run a command",
+      "locationSeparator": " / ",
+      "tabSuffix": " · tab \"{tab}\"",
+      "unknownLocation": "Open Pragma to continue."
+    }
+  },
+  "tabs": {
+    "defaultTitles": {
+      "fallback": "Shell",
+      "browser": "New tab",
+      "log": "Server Logs",
+      "prReview": "PR Review",
+      "pluginWebview": "Plugin"
+    }
   },
   "files": {
     "chunkBytes": 4194304,

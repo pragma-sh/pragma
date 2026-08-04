@@ -83,6 +83,11 @@ pub fn gateway_router() -> Router {
         .route("GET", "/v1/assets/{hash}", "assets.get")
         .route("POST", "/v1/tabs/{tabId}/agents/seen", "agents.seen")
         .route("GET", "/v1/subscriptions/{event}", "subscriptions.events")
+        .route("POST", "/v1/push/tokens", "push.register")
+        .route("DELETE", "/v1/push/tokens", "push.unregister")
+        .route("GET", "/v1/push/tokens", "push.list")
+        .route("POST", "/v1/push/test", "push.test")
+        .route("POST", "/v1/push/presence", "push.presence")
 }
 
 fn split_url(url: &str) -> (&str, &str) {

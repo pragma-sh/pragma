@@ -5,6 +5,7 @@ import { EventsClient } from "./events-client";
 import { ExecClient } from "./exec-client";
 import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
+import { PushClient } from "./push-client";
 import { routes } from "./routes";
 import { SessionsClient } from "./sessions-client";
 import { Transport } from "./transport";
@@ -21,6 +22,7 @@ export class PragmaClient {
   readonly assets: AssetsClient;
   readonly events: EventsClient;
   readonly workspace: WorkspaceClient;
+  readonly push: PushClient;
 
   private readonly transport: Transport;
 
@@ -34,6 +36,7 @@ export class PragmaClient {
     this.assets = new AssetsClient(this.transport);
     this.events = new EventsClient(this.transport);
     this.workspace = new WorkspaceClient(this.events);
+    this.push = new PushClient(this.transport);
   }
 
   rpc<T = unknown>(

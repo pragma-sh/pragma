@@ -50,6 +50,37 @@
 - `GET /v1/agents/events` - stream agent status events.
 - `POST /v1/tabs/{tabId}/agents/seen` - mark done agents seen.
 - `GET /v1/subscriptions/{event}` - stream protocol snapshots and deltas.
+- `POST /v1/push/tokens` - register (or refresh) a phone's Expo push token.
+- `DELETE /v1/push/tokens` - stop pushing to that installation (unpair).
+- `GET /v1/push/tokens` - list phones registered for push.
+- `POST /v1/push/test` - send a test notification to every registered phone.
+- `POST /v1/push/presence` - desktop focus heartbeat; suppresses pushes while focused.
+
+## Push notifications
+
+The gateway is the process a phone talks to, so it is also the process that pushes
+to it (`src/push/`). Two background threads start with the gateway and reconnect
+forever: one mirrors the desktop's `workspace` snapshot (to turn ids into project /
+worktree / tab names), one reads the agent status stream and delivers.
+
+- **Registration lives on the device record.** A push token is one more field on the
+  `gateway-devices.json` entry keyed by `x-pragma-device-id`, so it inherits the
+  owner-only file and the existing identity. `record()` must copy the push fields
+  forward — headers do not carry them, and rewriting the record from headers alone
+  would silently unsubscribe the phone on the next request.
+- **The latch mirrors the desktop's.** The host replays its whole status snapshot on
+  every reconnect, so a report is pushed only when its status differs from the last one
+  pushed for that worktree+tab+agent (+`requestId` for a command approval). `running`
+  and `cleared` release it.
+- **Desktop focus suppresses.** While a heartbeat newer than `gateway.push.presenceTtlMs`
+  says a desktop window is focused, nothing is pushed — the user is already reading the
+  toast. The TTL is what stops a crashed desktop from muting a phone forever.
+- **Wording is not written here.** `push/text.rs` renders the templates in
+  `agentStatus.notificationText`; it is a deliberate twin of
+  `apps/pragma/src/lib/agent-notification-text.ts`. Change the templates, not the code,
+  and keep both renderers in step.
+- **Expo answers per message.** A `DeviceNotRegistered` ticket drops that token from the
+  registry; other errors are left alone (they are transient).
 
 ## Error responses
 
