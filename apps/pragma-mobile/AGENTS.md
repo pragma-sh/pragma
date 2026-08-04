@@ -180,7 +180,10 @@ implemented in `lib/widgets/`:
   pushed, so `lib/widgets/use-widget-sync.ts` (mounted in `app/_layout.tsx`) re-pushes on
   content change, coalesced to at most one push per 15s because WidgetKit budgets reloads.
   A widget therefore shows the state as of the last time the app ran; `updatedAt` rides
-  along in every snapshot for layouts that want to surface that.
+  along in every snapshot for layouts that want to surface that. It pushes nothing while
+  the connection status is `loading` — that status is the restore probe still running,
+  and collapsing it to `paired: false` would blank a paired user's widgets on every
+  launch until the throttled correction landed up to 15s later.
 - **Colors are SwiftUI named colors, not the app's tokens.** A widget has no NativeWind
   theme, and `red`/`orange`/`green`/`gray` already adapt to light, dark, and tinted
   rendering modes. `statusColor()` maps agent status onto them in the same

@@ -20,6 +20,11 @@ const MIN_PUSH_INTERVAL_MS = 15_000;
  */
 export function useWidgetSync(): void {
   const { status } = useConnection();
+  // `loading` is not an answer: it is the restore probe still running (and it
+  // recurs whenever a paired client is being rebuilt). Treating it as unpaired
+  // would flash "not paired" over content the widget is already showing
+  // correctly, so hold the push until the connection settles.
+  const settled = status !== "loading";
   const paired = status === "paired";
   const projects = useProjects();
   const worktrees = useWorktrees();
@@ -55,6 +60,7 @@ export function useWidgetSync(): void {
   const lastPushedAt = useRef(0);
 
   useEffect(() => {
+    if (!settled) return undefined;
     const elapsed = Date.now() - lastPushedAt.current;
     if (elapsed >= MIN_PUSH_INTERVAL_MS) {
       lastPushedAt.current = Date.now();
@@ -67,8 +73,10 @@ export function useWidgetSync(): void {
     }, MIN_PUSH_INTERVAL_MS - elapsed);
     return () => clearTimeout(timeout);
     // `signature` is the content identity; `content` is read at push time.
+    // `settled` is a dep because the first real push often carries the same
+    // signature the loading render produced (both are the empty snapshot).
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [signature, settled]);
 }
 
 /** Fans one snapshot out to every widget's timeline. Silent off iOS. */
