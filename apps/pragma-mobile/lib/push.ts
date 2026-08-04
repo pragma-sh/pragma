@@ -79,7 +79,15 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
+type EasProjectSource = { projectId?: string } | null | undefined;
+
 function easProjectId(): string | undefined {
-  const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
-  return Constants.easConfig?.projectId ?? extra?.eas?.projectId;
+  return (
+    projectIdOf(Constants.easConfig) ??
+    projectIdOf((Constants.expoConfig?.extra as { eas?: EasProjectSource } | undefined)?.eas)
+  );
+}
+
+function projectIdOf(source: EasProjectSource): string | undefined {
+  return source?.projectId;
 }
