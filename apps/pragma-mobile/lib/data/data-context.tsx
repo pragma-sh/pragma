@@ -474,6 +474,18 @@ export function useProjects(): Project[] {
   }, [projects]);
 }
 
+/** Every worktree across all projects, unordered. */
+export function useWorktrees(): Worktree[] {
+  const { worktrees } = useData();
+  return worktrees;
+}
+
+/** Agent tabs for every worktree, keyed by worktree id. */
+export function useAllAgentTabs(): Record<string, AgentTab[]> {
+  const { agentTabs } = useData();
+  return agentTabs;
+}
+
 /** A single project by id (or undefined). */
 export function useProject(projectId: string): Project | undefined {
   const { projects } = useData();

@@ -14,6 +14,7 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@expo/ui": "~57.0.8",
     "@pragma/constants": "workspace:*",
     "@pragma/sdk": "workspace:*",
     "@react-native-menu/menu": "^2.0.0",
@@ -26,7 +27,7 @@
     "expo-constants": "~57.0.3",
     "expo-glass-effect": "~57.0.0",
     "expo-haptics": "~57.0.0",
-    "expo-linking": "~57.0.1",
+    "expo-linking": "~57.0.4",
     "expo-notifications": "~57.0.8",
     "expo-router": "~57.0.3",
     "expo-secure-store": "~57.0.0",
@@ -34,6 +35,7 @@
     "expo-status-bar": "~57.0.0",
     "expo-symbols": "~57.0.0",
     "expo-system-ui": "~57.0.0",
+    "expo-widgets": "~57.0.7",
     "nativewind": "^4.2.6",
     "prismjs": "^1.30.0",
     "react": "19.2.3",
