@@ -39,6 +39,14 @@ import type {
 // children that are element nodes and never flattens nested arrays, so a mapped
 // list must be the sole child of its container or every row vanishes without a
 // warning.
+//
+// That closure ban is also why each layout below carries a
+// `fallow-ignore-next-line complexity`. A layout owns its whole widget — every
+// family branch, palette value, preview fixture, and row builder — and none of
+// it can move to a module-scope helper without breaking the stringification, so
+// the usual fix (decompose until CRAP drops under 30, i.e. cyclomatic <= 5) is
+// not available here. The nested `tile`/`row`/`group` builders are already the
+// most decomposition the directive allows.
 
 /** Props for the small "needs attention" widget. */
 export interface AttentionWidgetProps {
@@ -71,6 +79,7 @@ export interface ProjectsWidgetProps {
   url: string;
 }
 
+// fallow-ignore-next-line complexity
 const attentionLayout = (props: Partial<AttentionWidgetProps>, environment: WidgetEnvironment) => {
   "widget";
   const unpaired = props.paired === false;
@@ -158,6 +167,7 @@ const attentionLayout = (props: Partial<AttentionWidgetProps>, environment: Widg
   );
 };
 
+// fallow-ignore-next-line complexity
 const agentsLayout = (props: Partial<AgentsWidgetProps>, environment: WidgetEnvironment) => {
   "widget";
   const unpaired = props.paired === false;
@@ -210,6 +220,7 @@ const agentsLayout = (props: Partial<AgentsWidgetProps>, environment: WidgetEnvi
   );
 };
 
+// fallow-ignore-next-line complexity
 const inboxLayout = (props: Partial<InboxWidgetProps>, environment: WidgetEnvironment) => {
   "widget";
   const limit = environment.widgetFamily === "systemLarge" ? 4 : 2;
@@ -352,6 +363,7 @@ const inboxLayout = (props: Partial<InboxWidgetProps>, environment: WidgetEnviro
   );
 };
 
+// fallow-ignore-next-line complexity
 const projectsLayout = (props: Partial<ProjectsWidgetProps>, environment: WidgetEnvironment) => {
   "widget";
   // A group costs one row for the project plus one per worktree, so the budget
