@@ -2,7 +2,7 @@ import type { ConnectionConfig } from "./pairing";
 
 // Pure, RN-free bookkeeping for push revocations the host never acknowledged.
 // Unpairing must succeed offline, but a discarded revocation leaves the host
-// pushing agent-alert contents to a phone that is no longer paired — so the
+// pushing agent-alert contents to a phone that is no longer paired, so the
 // credentials needed to retry are queued here until the host confirms, or until
 // they expire. Storage and delivery live in `push.ts`.
 

@@ -174,7 +174,7 @@ lib/
   SecureStore) and `ConnectionProvider` retries them at startup before pairing;
   `pending-revocation.ts` holds the pure queue rules (one entry per host, capped, and
   expired after 30 days so unpaired credentials are not kept forever). Pairing a host
-  again forgets its queued revocation, and a 401 retires one — a rejected token can
+  again forgets its queued revocation, and a 401 retires one: a rejected token can
   never revoke anything.
 - **A registration in flight is ordered before the unregister, never racing it.** The
   `POST /v1/push/tokens` a launch fires is idempotent but not harmless: landing after an

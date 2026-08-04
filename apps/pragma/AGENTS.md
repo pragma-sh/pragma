@@ -212,7 +212,12 @@ a push read identically. Change the templates, and keep the two renderers in ste
 
 `lib/gateway-presence.ts` reports this window's focus to the gateway
 (`POST /v1/push/presence`, re-reported on a heartbeat) so a paired phone is not pushed an
-alert the user is already reading here.
+alert the user is already reading here. "Focused" is OS focus **and** document
+visibility, tracked as two independent inputs: an occluded or minimised window can still
+hold OS focus, and it can be hidden and restored without Tauri ever emitting a focus
+change, so reacting only to hiding would strand the window in the unfocused state and
+buzz the phone for alerts the user can see. Only a change in the conjunction is reported,
+so the heartbeat is not restarted on every visibility flip.
 
 macOS agent system notifications are clickable: the frontend calls the macOS-only
 `show_agent_notification` Tauri command instead of the generic notification plugin, and
