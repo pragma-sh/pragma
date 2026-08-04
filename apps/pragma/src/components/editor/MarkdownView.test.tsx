@@ -45,8 +45,24 @@ vi.mock("@uiw/react-codemirror", () => ({
 // `mockEditor` defaults to null (editor still instantiating) and individual
 // tests can swap in a fake editor instance to exercise the re-seed effect.
 let mockEditor: unknown = null;
+let tiptapOptions: {
+  editorProps?: {
+    handleKeyDown?: (
+      view: {
+        state: {
+          selection: { from: number; to: number };
+          doc: { textBetween: (from: number, to: number, separator: string) => string };
+        };
+      },
+      event: KeyboardEvent,
+    ) => boolean;
+  };
+} | null = null;
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => mockEditor,
+  useEditor: (options: typeof tiptapOptions) => {
+    tiptapOptions = options;
+    return mockEditor;
+  },
   useEditorState: () => ({}),
   EditorContent: () => <div aria-label="wysiwyg editor" />,
   Extension: { create: (config: unknown) => config },
@@ -119,6 +135,7 @@ afterEach(cleanup);
 beforeEach(() => {
   fileChangeListener = null;
   mockEditor = null;
+  tiptapOptions = null;
   readFileMock.mockReset();
   writeFileMock.mockReset();
   readFileMock.mockResolvedValue({
@@ -166,6 +183,28 @@ describe("MarkdownView", () => {
     pressTab(rawTab);
     const textarea = await screen.findByLabelText("raw editor");
     expect(textarea).toHaveValue("# Hello");
+  });
+
+  it("routes WYSIWYG Ctrl-K into the raw inline-edit surface", async () => {
+    render(<MarkdownView tab={markdownTab()} />);
+    await screen.findByRole("tab", { name: "Editor" });
+    const event = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true });
+    const textBetween = vi.fn(() => "Hello");
+
+    const handled = tiptapOptions?.editorProps?.handleKeyDown?.(
+      {
+        state: {
+          selection: { from: 1, to: 6 },
+          doc: { textBetween },
+        },
+      },
+      event,
+    );
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(textBetween).toHaveBeenCalledWith(1, 6, "\n");
+    expect(await screen.findByLabelText("raw editor")).toBeInTheDocument();
   });
 
   it("saves raw edits on Ctrl-S and clears the dirty flag", async () => {

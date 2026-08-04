@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Globe, Plus, SquareTerminal, X } from "lucide-react";
@@ -33,6 +33,12 @@ import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { useTabAgentStatus } from "@/state/agent-status-store";
 import { type SplitLayoutNode, type SplitPaneNode, useWorkspace } from "@/state/workspace-context";
+
+const ScratchpadView = lazy(() =>
+  import("@/components/scratchpad/ScratchpadView").then((module) => ({
+    default: module.ScratchpadView,
+  })),
+);
 
 export function SplitHost() {
   const workspace = useWorkspace();
@@ -121,6 +127,18 @@ function renderEditorTab(tab: Tab): ReactNode {
 const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string) => ReactNode>> = {
   browser: (tab) => <BrowserView active key={tab.id} tab={tab} />,
   editor: renderEditorTab,
+  scratchpad: (tab) => (
+    <Suspense
+      fallback={
+        <div className="grid h-full place-items-center text-sm text-muted-foreground">
+          Loading scratchpad...
+        </div>
+      }
+      key={tab.id}
+    >
+      <ScratchpadView tab={tab} />
+    </Suspense>
+  ),
   diff: (tab) => <DiffView key={tab.id} tab={tab} />,
   log: (tab) => <LogView key={tab.id} tab={tab} />,
   "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,

@@ -85,6 +85,7 @@ import {
   onTabsChanged,
   onWorktreeChanged,
   takePendingDeepLink,
+  openScratchpadTab as openScratchpadTabCommand,
   openWorktree as openWorktreeCommand,
   projectIcon,
   renameTab as renameTabCommand,
@@ -294,6 +295,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   openDaemonLogTab: () => Promise<void>;
   /** Opens (or focuses) a plugin-defined web view tab. */
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
+  /** Opens (or focuses) a managed scratchpad tab for a worktree-relative MDX file. */
+  openScratchpadFile: (filePath: string, title: string) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   renameTerminalTab: (tabId: string, title: string) => Promise<void>;
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>;
@@ -2878,6 +2881,7 @@ function useTabOpeners(
   openReviewTab: (prNumber: number, title: string) => Promise<void>;
   openDaemonLogTab: () => Promise<void>;
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
+  openScratchpadFile: (filePath: string, title: string) => Promise<void>;
 } {
   const openLocatorTab = useCallback(
     async (
@@ -3028,7 +3032,39 @@ function useTabOpeners(
     }
   }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
 
-  return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView };
+  const openScratchpadFile = useCallback(
+    async (filePath: string, title: string) => {
+      const projectId = state.selectedProjectId;
+      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+      if (!projectId || !worktreeId) {
+        return;
+      }
+      const existing = state.tabs.find(
+        (tab) =>
+          tab.kind === "scratchpad" && tab.worktreeId === worktreeId && tab.filePath === filePath,
+      );
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await openScratchpadTabCommand(worktreeId, filePath, title);
+        dispatch({ type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+      }
+    },
+    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+  );
+
+  return {
+    openFileTab,
+    openDiffTab,
+    openReviewTab,
+    openDaemonLogTab,
+    openPluginWebView,
+    openScratchpadFile,
+  };
 }
 
 /** Closes/renames/activates tabs and drops them from the managed-scripts set. */
@@ -4091,8 +4127,14 @@ function useTabManagement({
     tabsRef,
   );
   useTerminalLinkHandler(openFromTerminalLink);
-  const { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView } =
-    useTabOpeners(state, dispatch);
+  const {
+    openFileTab,
+    openDiffTab,
+    openReviewTab,
+    openDaemonLogTab,
+    openPluginWebView,
+    openScratchpadFile,
+  } = useTabOpeners(state, dispatch);
   const terminalTabIdsKey = useMemo(
     () =>
       state.tabs
@@ -4111,6 +4153,7 @@ function useTabManagement({
     openReviewTab,
     openDaemonLogTab,
     openPluginWebView,
+    openScratchpadFile,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4400,6 +4443,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     openReviewTab,
     openDaemonLogTab,
     openPluginWebView,
+    openScratchpadFile,
     closeTab,
     renameTerminalTab,
     markTabAgent,
@@ -4469,6 +4513,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openReviewTab,
       openDaemonLogTab,
       openPluginWebView,
+      openScratchpadFile,
       closeTab,
       renameTerminalTab,
       markTabAgent,
@@ -4499,6 +4544,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openReviewTab,
       openDaemonLogTab,
       openPluginWebView,
+      openScratchpadFile,
       closeTab,
       renameTerminalTab,
       markTabAgent,

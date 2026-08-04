@@ -2,7 +2,14 @@ import { useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
-import { GitPullRequest, Globe, PanelsTopLeft, ScrollText, SquareTerminal } from "lucide-react";
+import {
+  GitPullRequest,
+  Globe,
+  PanelsTopLeft,
+  ScrollText,
+  SquareTerminal,
+  StickyNote,
+} from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { useAgentsList } from "@/hooks/use-agents-list";
@@ -56,6 +63,10 @@ export function TabIcon({ tab }: { tab: Tab }) {
 
   if (tab.kind === "log") {
     return <ScrollText className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+
+  if (tab.kind === "scratchpad") {
+    return <StickyNote className="size-3.5 shrink-0 text-muted-foreground" />;
   }
 
   if (tab.kind === "pr-review") {

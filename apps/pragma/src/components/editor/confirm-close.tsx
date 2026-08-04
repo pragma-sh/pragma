@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { basename } from "@/lib/path";
 import { writeFile } from "@/lib/tauri";
-import { getTabDoc, isTabDirty, setTabDirty } from "@/state/editor-dirty-store";
+import { disposeTab, getTabDoc, isTabDirty, setTabDirty } from "@/state/editor-dirty-store";
 import { useWorkspace } from "@/state/workspace-context";
 
 type RequestClose = (tab: Tab) => void;
@@ -34,9 +34,10 @@ export function ConfirmCloseProvider({ children }: { children: ReactNode }) {
 
   const requestClose = useCallback<RequestClose>(
     (tab) => {
-      if (tab.kind === "editor" && isTabDirty(tab.id)) {
+      if ((tab.kind === "editor" || tab.kind === "scratchpad") && isTabDirty(tab.id)) {
         setPending(tab);
       } else {
+        disposeTab(tab.id);
         void workspace.closeTab(tab.id);
       }
     },
@@ -47,6 +48,7 @@ export function ConfirmCloseProvider({ children }: { children: ReactNode }) {
     const tab = pending;
     setPending(null);
     if (tab) {
+      disposeTab(tab.id);
       void workspace.closeTab(tab.id);
     }
   }, [pending, workspace]);
@@ -60,6 +62,7 @@ export function ConfirmCloseProvider({ children }: { children: ReactNode }) {
     try {
       await writeFile(tab.worktreeId, tab.filePath, getTabDoc(tab.id) ?? "");
       setTabDirty(tab.id, false);
+      disposeTab(tab.id);
       await workspace.closeTab(tab.id);
     } catch (cause) {
       // Save failed: keep the tab open and dirty so no edits are lost.

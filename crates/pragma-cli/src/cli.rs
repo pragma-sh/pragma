@@ -72,6 +72,29 @@ pub enum TopCommand {
         #[command(subcommand)]
         agent: AgentCommand,
     },
+    /// Agent-authored MDX scratchpads.
+    Scratchpad {
+        #[command(subcommand)]
+        scratchpad: ScratchpadCommand,
+    },
+}
+
+// -------------------------- scratchpad --------------------------
+
+#[derive(Debug, Subcommand)]
+pub enum ScratchpadCommand {
+    /// Create and open a managed scratchpad attached to the current agent tab.
+    Create(ScratchpadCreateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ScratchpadCreateArgs {
+    /// Scratchpad title shown in Pragma.
+    #[arg(long)]
+    pub title: String,
+    /// Source MDX file, or `-` to read MDX from stdin.
+    #[arg(value_name = "MDX_FILE|-", value_hint = clap::ValueHint::FilePath)]
+    pub file: String,
 }
 
 // -------------------------- worktree --------------------------
@@ -690,6 +713,27 @@ mod tests {
         };
         assert_eq!(args.parent, None);
         assert_eq!(args.branch, "feature/demo");
+    }
+
+    #[test]
+    fn scratchpad_create_parses_title_and_mdx_file() {
+        let cli = Cli::try_parse_from([
+            "pragma-cli",
+            "scratchpad",
+            "create",
+            "--title",
+            "Architecture",
+            "result.mdx",
+        ])
+        .expect("scratchpad create parses");
+        let TopCommand::Scratchpad {
+            scratchpad: ScratchpadCommand::Create(args),
+        } = cli.command
+        else {
+            panic!("expected scratchpad create");
+        };
+        assert_eq!(args.title, "Architecture");
+        assert_eq!(args.file, "result.mdx");
     }
 
     #[test]

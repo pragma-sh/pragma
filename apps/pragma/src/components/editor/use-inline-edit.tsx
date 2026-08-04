@@ -40,6 +40,8 @@ export interface InlineEdit {
   extension: Extension;
   /** The prompt box and hunk bars, rendered into CodeMirror's block widgets. */
   portals: ReactNode;
+  /** Open the prompt for the editor's current selection. */
+  open: (view: EditorView) => boolean;
 }
 
 interface UseInlineEditOptions {
@@ -185,6 +187,31 @@ export function useInlineEdit({
     view.dispatch({ effects: abortInlineEdit.of(null) });
   }, []);
 
+  const open = useCallback(
+    (view: EditorView) => {
+      if (!filePath) {
+        return false;
+      }
+      if (isRemote) {
+        toast.info("Inline AI edit is not available for remote worktrees yet.");
+        return false;
+      }
+      const range = view.state.selection.main;
+      const firstLine = view.state.doc.lineAt(range.from);
+      const lastLine = view.state.doc.lineAt(range.to);
+      runIdRef.current += 1;
+      view.dispatch({
+        effects: startInlineEdit.of({
+          anchor: lastLine.to,
+          selection: { from: firstLine.from, to: lastLine.to },
+          runId: runIdRef.current,
+        }),
+      });
+      return true;
+    },
+    [filePath, isRemote],
+  );
+
   const submit = useCallback(
     async (instruction: string) => {
       const view = viewRef.current;
@@ -222,35 +249,13 @@ export function useInlineEdit({
   );
 
   const extension = useMemo<Extension>(() => {
-    const start = (view: EditorView) => {
-      if (!filePath) {
-        return false;
-      }
-      if (isRemote) {
-        toast.info("Inline AI edit is not available for remote worktrees yet.");
-        return false;
-      }
-      const range = view.state.selection.main;
-      const firstLine = view.state.doc.lineAt(range.from);
-      const lastLine = view.state.doc.lineAt(range.to);
-      runIdRef.current += 1;
-      view.dispatch({
-        effects: startInlineEdit.of({
-          anchor: lastLine.to,
-          selection: { from: firstLine.from, to: lastLine.to },
-          runId: runIdRef.current,
-        }),
-      });
-      return true;
-    };
-
     return [
       inlineEditField,
       inlineEditDecorations,
       inlineEditTheme,
       inlineEditPortalHost.of(host),
       inlineEditKeymap({
-        start,
+        start: open,
         dismiss,
         resolve,
         moveFocus: (view, direction) => {
@@ -287,7 +292,7 @@ export function useInlineEdit({
         }
       }),
     ];
-  }, [dismiss, filePath, host, isRemote, resolve]);
+  }, [dismiss, host, open, resolve]);
 
   const rendered = portals.map((portal) => {
     if (!session) {
@@ -345,5 +350,5 @@ export function useInlineEdit({
     );
   });
 
-  return { extension, portals: rendered };
+  return { extension, portals: rendered, open };
 }

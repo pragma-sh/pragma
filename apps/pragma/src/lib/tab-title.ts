@@ -12,6 +12,9 @@ export function defaultTabTitle(kind: TabKind): string {
   if (kind === "log") {
     return "Server Logs";
   }
+  if (kind === "scratchpad") {
+    return "Scratchpad";
+  }
   if (kind === "pr-review") {
     return "PR Review";
   }

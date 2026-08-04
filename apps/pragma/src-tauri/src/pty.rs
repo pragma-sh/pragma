@@ -258,6 +258,11 @@ impl PtyClient {
         Ok(self.inner.report_agent_decision(decision)?)
     }
 
+    /// Publishes free-form input to one running agent tab.
+    pub fn report_agent_input(&self, input: &pragma_protocol::AgentInput) -> AppResult<()> {
+        Ok(self.inner.report_agent_input(input)?)
+    }
+
     /// Publishes a full workspace mirror (projects/worktrees/tabs) the server
     /// caches and broadcasts to `workspace` subscribers (e.g. a paired phone).
     /// Fire-and-forget: never blocks the caller.

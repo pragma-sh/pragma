@@ -31,9 +31,10 @@ pub use generated::{
     PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode,
     ProtocolEventKind, ProtocolRpcMethod, QuestionOption, RunScriptDefinition, RunScriptEntry,
     RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
-    ScriptRunStatus, Scripts, SettingsScope, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
-    SplitVertical, Tab, TabKind, TerminalBackend, Tunnel, WindowDefaults, WorkspaceSnapshot,
-    Worktree, WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl,
+    ScratchpadSummary, Scratchpads, ScriptRunStatus, Scripts, SettingsScope, SplitHorizontal,
+    SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend, Tunnel,
+    WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit,
+    WorktreeCommitList, WorktreeStatus, Wsl,
 };
 
 /// The parsed, shared constants.

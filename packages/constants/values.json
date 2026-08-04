@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 20,
+    "protocolVersion": 21,
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -56,6 +56,12 @@
   "files": {
     "chunkBytes": 4194304,
     "maxBinaryBytes": 268435456
+  },
+  "scratchpads": {
+    "directory": ".pragma/scratchpads",
+    "extension": "mdx",
+    "frontmatterKey": "pragmaScratchpad",
+    "version": 1
   },
   "protocol": {
     "rpcMethods": [

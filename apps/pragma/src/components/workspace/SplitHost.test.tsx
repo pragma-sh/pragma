@@ -91,6 +91,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       openReviewTab: vi.fn(),
       openDaemonLogTab: vi.fn(),
       openPluginWebView: vi.fn(),
+      openScratchpadFile: vi.fn(),
       closeTab: vi.fn(),
       renameTerminalTab: vi.fn(),
       markTabAgent: vi.fn(),

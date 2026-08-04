@@ -8,8 +8,9 @@
 //! locally. Thereafter every filesystem/git/terminal operation for that project
 //! routes over the bridge to the remote server (see `hosts.rs`).
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use pragma_client::router::ProjectRoute;
 use pragma_client::{
@@ -29,6 +30,7 @@ use crate::pty::PtyClient;
 /// forwarded socket path is deterministic.
 const REMOTE_CHANNEL: &str = pragma_protocol::PROD_CHANNEL;
 static REMOTE_RECONNECT_LOCK: Mutex<()> = Mutex::new(());
+static REMOTE_BRIDGED_HOSTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 /// How the user chose to authenticate. SSH agent is the default; key file and
 /// password are the alternatives surfaced under "More options".
@@ -124,7 +126,7 @@ pub async fn connect_remote_project(
             label: format!("{}@{}", request.user, request.host),
         },
     )?;
-    agent_events::start_for(app, client);
+    start_remote_bridges(app, client, id.clone());
     hosts
         .router()
         .set_project_route(&ProjectRoute {
@@ -198,7 +200,7 @@ pub fn reconnect_remote_hosts(app: AppHandle) {
                         );
                         continue;
                     }
-                    agent_events::start_for(app.clone(), client);
+                    start_remote_bridges(app.clone(), client, route.host_id.clone());
                 }
                 Err(error) => {
                     log::warn!(
@@ -248,8 +250,24 @@ pub async fn client_for_host(app: AppHandle, hosts: &Hosts, host_id: &str) -> Ap
             label: format!("{}@{}", preferences.user, preferences.host),
         },
     )?;
-    agent_events::start_for(app, client.clone());
+    start_remote_bridges(app, client.clone(), host_id.to_string());
     Ok(client)
+}
+
+/// Starts every long-lived desktop bridge for one connected remote host.
+fn start_remote_bridges(app: AppHandle, client: PtyClient, host_id: String) {
+    let Ok(mut bridged_hosts) = REMOTE_BRIDGED_HOSTS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+    else {
+        log::error!("remote bridge registry lock poisoned for host {host_id}");
+        return;
+    };
+    if !bridged_hosts.insert(host_id.clone()) {
+        return;
+    }
+    agent_events::start_for(app.clone(), client.clone());
+    crate::control::start(app, client, host_id);
 }
 
 /// Resolves the client for a worktree's host, reconnecting a persisted remote

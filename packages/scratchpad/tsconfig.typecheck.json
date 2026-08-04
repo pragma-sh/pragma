@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@pragma/sdk": ["../sdk/src/index.ts"]
+    }
+  }
+}
