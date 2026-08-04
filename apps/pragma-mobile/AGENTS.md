@@ -139,8 +139,9 @@ lib/
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop
   agent-status.ts                # status rollup priority
   haptics.ts                     # haptic intent wrappers
-  push.ts                        # Expo push: permission, token registration, unregister
+  push.ts                        # Expo push: permission, token registration, unregister + retry
   push-route.ts                  # pure: notification data → chat route (Vitest)
+  pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
   use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
 ```
 
@@ -165,6 +166,15 @@ lib/
   minting needs an EAS project id from the runtime manifest or `extra.eas.projectId`
   in `app.json`; without it `registerForPush` returns `unsupported` and the app runs
   unchanged.
+- **An unregister the host never acknowledged is queued, never dropped.** Unpair has to
+  work with the desktop unreachable, but discarding the failed `DELETE /v1/push/tokens`
+  would leave the gateway pushing agent-alert text to a phone that can no longer ask it
+  to stop. `push.ts` persists that host's credentials (`pragma.push-revocation.v1`,
+  SecureStore) and `ConnectionProvider` retries them at startup before pairing;
+  `pending-revocation.ts` holds the pure queue rules (one entry per host, capped, and
+  expired after 30 days so unpaired credentials are not kept forever). Pairing a host
+  again forgets its queued revocation, and a 401 retires one — a rejected token can
+  never revoke anything.
 - **Status rollup matches the desktop.** `agent-status.ts` priority is
   attention > running > done; `cleared`/none render no dot.
 - **Monorepo Metro.** `metro.config.js` watches the repo root and resolves the hoisted

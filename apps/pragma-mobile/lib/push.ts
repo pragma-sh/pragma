@@ -1,7 +1,17 @@
-import type { PragmaClient } from "@pragma/sdk";
+import { PragmaGatewayError, type PragmaClient } from "@pragma/sdk";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+
+import type { ConnectionConfig } from "./pairing";
+import {
+  dropRevocations,
+  livePendingRevocations,
+  parsePendingRevocations,
+  queueRevocation,
+  type PendingRevocation,
+} from "./pending-revocation";
 
 /** Whether push registration succeeded, and why it did not when it did not. */
 export type PushRegistration =
@@ -51,13 +61,85 @@ async function expoPushToken(projectId: string): Promise<string> {
   return (await Notifications.getExpoPushTokenAsync({ projectId })).data;
 }
 
-/** Stops the host pushing to this device. Called when the user unpairs. */
-export async function unregisterFromPush(client: PragmaClient): Promise<void> {
+/** Where credentials for an unacknowledged revocation wait for a retry. */
+const REVOCATION_STORE_KEY = "pragma.push-revocation.v1";
+
+/**
+ * Stops the host pushing to this device. Called when the user unpairs.
+ *
+ * Unpairing has to work with the host unreachable, but a revocation that is
+ * simply dropped leaves the host sending agent-alert contents to a phone that
+ * is no longer paired and can no longer ask it to stop. So a failed revocation
+ * keeps this host's credentials queued, and {@link flushPendingRevocations}
+ * retries on the next launch.
+ */
+export async function unregisterFromPush(
+  client: PragmaClient,
+  config: ConnectionConfig,
+): Promise<void> {
   try {
     await client.push.unregister();
+    await forgetPendingRevocations(config.url);
   } catch {
-    // Best effort: the host also drops tokens Expo reports as dead.
+    await queuePendingRevocation(config);
   }
+}
+
+/**
+ * Retries revocations an earlier unpair could not deliver. Call at startup,
+ * before pairing, so a host that was unreachable at unpair time still stops
+ * pushing as soon as the phone can reach it again.
+ */
+export async function flushPendingRevocations(
+  clientFor: (config: ConnectionConfig) => Promise<PragmaClient>,
+): Promise<void> {
+  const pending = livePendingRevocations(await readPendingRevocations(), Date.now());
+  if (pending.length === 0) return;
+  const revoked = await Promise.all(
+    pending.map((entry) => retryRevocation(entry.config, clientFor)),
+  );
+  await writePendingRevocations(pending.filter((_, index) => !revoked[index]));
+}
+
+/** Forgets queued revocations for a host, e.g. once it is paired again. */
+export async function forgetPendingRevocations(url: string): Promise<void> {
+  const pending = await readPendingRevocations();
+  if (!pending.some((entry) => entry.config.url === url)) return;
+  await writePendingRevocations(dropRevocations(pending, url));
+}
+
+/** True once the host has confirmed (or can never confirm) the revocation. */
+async function retryRevocation(
+  config: ConnectionConfig,
+  clientFor: (config: ConnectionConfig) => Promise<PragmaClient>,
+): Promise<boolean> {
+  try {
+    await (await clientFor(config)).push.unregister();
+    return true;
+  } catch (error) {
+    // A rejected token can never revoke anything, so retrying it forever only
+    // keeps dead credentials on the device: give up and let the host expire the
+    // registration when Expo reports the token dead.
+    return error instanceof PragmaGatewayError && error.httpStatus === 401;
+  }
+}
+
+async function queuePendingRevocation(config: ConnectionConfig): Promise<void> {
+  const pending = await readPendingRevocations();
+  await writePendingRevocations(queueRevocation(pending, config, Date.now()));
+}
+
+async function readPendingRevocations(): Promise<PendingRevocation[]> {
+  const raw = await SecureStore.getItemAsync(REVOCATION_STORE_KEY).catch(() => null);
+  return parsePendingRevocations(raw);
+}
+
+async function writePendingRevocations(pending: PendingRevocation[]): Promise<void> {
+  const write =
+    pending.length === 0
+      ? SecureStore.deleteItemAsync(REVOCATION_STORE_KEY)
+      : SecureStore.setItemAsync(REVOCATION_STORE_KEY, JSON.stringify(pending));
+  await write.catch(() => undefined);
 }
 
 async function ensurePermission(): Promise<boolean> {
