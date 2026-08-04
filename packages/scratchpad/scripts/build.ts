@@ -16,8 +16,13 @@ const result = spawnSync(
     "browser",
     "--dts",
     "--no-splitting",
-    "--packages",
-    "bundle",
+    // No `--packages bundle`: inlining `@pragma/sdk` makes Bun's Windows bundler
+    // panic ("Expected pretty file path to have only forward slashes") on the
+    // `node_modules\@pragma\sdk\dist\index.js` path, which is outside the entry
+    // root. Consumers (the desktop app's Vite build) resolve the workspace
+    // package themselves.
+    "--external",
+    "@pragma/sdk",
     "--external",
     "react",
     "--external",

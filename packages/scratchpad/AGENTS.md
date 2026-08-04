@@ -38,6 +38,17 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   `jsx-dev-runtime` intentionally leaves `jsxDEV` undefined. Keep bunup in the child
   process with startup `NODE_ENV=production` in `scripts/build.ts` until Bun honors
   `jsx.development: false` after startup.
+- **Never bundle dependencies into this package (`--packages bundle`).** Inlining
+  `@pragma/sdk` resolves it through `node_modules`, a path outside the entry root, and
+  Bun's Windows bundler panics on it with
+  `Expected pretty file path to have only forward slashes` for that backslashed
+  `node_modules` path. macOS and Linux build fine, so it only shows up in the Windows CI
+  build job. `@pragma/sdk` stays `--external`
+  and the consuming Vite build resolves the workspace package.
+- **`exports` subpaths beyond one segment are invisible to fallow.** It resolves
+  `@pragma/scratchpad/ui` but not `@pragma/scratchpad/ui/primitives`, which is why that
+  specifier is listed in `.fallowrc.jsonc`'s `ignoreUnresolvedImports`. Add any new nested
+  subpath there too, or the Fallow gate fails on an import that is actually valid.
 
 ## Commands
 
