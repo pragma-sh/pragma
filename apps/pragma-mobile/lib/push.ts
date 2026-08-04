@@ -68,6 +68,15 @@ async function registerToken(client: PragmaClient, signal: AbortSignal): Promise
   // Without an EAS project there is no push service to mint a token from.
   if (!projectId) return { ok: false, reason: "unsupported" };
   if (!(await ensurePermission())) return { ok: false, reason: "denied" };
+  return mintAndSendToken(client, projectId, signal);
+}
+
+/** Mints this device's token and hands it to the host, or reports why it could not. */
+async function mintAndSendToken(
+  client: PragmaClient,
+  projectId: string,
+  signal: AbortSignal,
+): Promise<PushRegistration> {
   try {
     const token = await expoPushToken(projectId);
     // Minting cannot be aborted, so re-check before the request that would
