@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -59,18 +59,21 @@ const AGENT_DECISION_REPLAY_LIMIT: usize = 64;
 /// client attaching mid-session (a paired phone opening a chat) sees the
 /// conversation so far instead of an empty transcript.
 const AGENT_MESSAGE_REPLAY_LIMIT: usize = 200;
+/// File deltas are advisory invalidations. Bound each subscriber so a build
+/// cannot enqueue millions of path events behind a slow client.
+const FILE_EVENT_CHANNEL_CAPACITY: usize = 64;
 pub struct Registry {
-    sessions: Mutex<HashMap<String, Arc<Session>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     socket_path: PathBuf,
     /// Directory beside the socket where server-owned state (the persisted
     /// workspace snapshot) lives.
     server_dir: PathBuf,
-    agent_statuses: Mutex<HashMap<AgentKey, AgentReportPayload>>,
+    agent_statuses: Arc<Mutex<HashMap<AgentKey, AgentReportPayload>>>,
     recent_agent_decisions: Mutex<Vec<RecentAgentDecision>>,
     recent_agent_answers: Mutex<Vec<RecentAgentAnswer>>,
     /// Chat-message history per live agent session (bounded, newest kept),
     /// replayed to new agent subscribers. Dropped with the session's tab.
-    recent_agent_messages: Mutex<HashMap<AgentKey, Vec<AgentMessage>>>,
+    recent_agent_messages: Arc<Mutex<HashMap<AgentKey, Vec<AgentMessage>>>>,
     agent_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     /// Subscribers to durable agent-status snapshots for generic protocol clients.
     agent_status_subscribers: Mutex<Vec<Sender<EventFrame>>>,
@@ -236,7 +239,7 @@ struct RecentAgentAnswer {
 /// (`Arc`) so the watcher's background callback can broadcast without holding
 /// the registry lock.
 struct WorktreeFileWatch {
-    subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+    subscribers: Arc<Mutex<Vec<SyncSender<EventFrame>>>>,
     /// The trusted absolute path the watcher is rooted at, so a worktree
     /// deletion (`kill_for_cwd`) can find and tear down the matching watcher.
     root: String,
@@ -255,12 +258,12 @@ fn prune_agent_answers(answers: &mut Vec<RecentAgentAnswer>) {
 impl Registry {
     pub fn new(socket_path: PathBuf, server_dir: PathBuf, _workspace_root: PathBuf) -> Self {
         Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
             socket_path,
-            agent_statuses: Mutex::new(HashMap::new()),
+            agent_statuses: Arc::new(Mutex::new(HashMap::new())),
             recent_agent_decisions: Mutex::new(Vec::new()),
             recent_agent_answers: Mutex::new(Vec::new()),
-            recent_agent_messages: Mutex::new(HashMap::new()),
+            recent_agent_messages: Arc::new(Mutex::new(HashMap::new())),
             agent_subscribers: Mutex::new(Vec::new()),
             agent_status_subscribers: Mutex::new(Vec::new()),
             file_watchers: Arc::new(Mutex::new(HashMap::new())),
@@ -819,15 +822,46 @@ impl Registry {
             return Err(RegistryError::AlreadyExists(session_id));
         }
         let socket_path = self.socket_path.to_string_lossy();
-        let session = Session::spawn(
+        let weak_sessions = Arc::downgrade(&self.sessions);
+        let weak_statuses = Arc::downgrade(&self.agent_statuses);
+        let weak_messages = Arc::downgrade(&self.recent_agent_messages);
+        let exited_session_id = session_id.clone();
+        let session = Session::spawn_with_exit_handler(
             session_id.clone(),
             worktree_id,
             cwd,
             cols,
             rows,
             &socket_path,
+            move |exited_session| {
+                let mut removed = false;
+                if let Some(sessions) = weak_sessions.upgrade() {
+                    if let Ok(mut sessions) = sessions.lock() {
+                        if sessions
+                            .get(&exited_session_id)
+                            .is_some_and(|current| Arc::ptr_eq(current, exited_session))
+                        {
+                            sessions.remove(&exited_session_id);
+                            removed = true;
+                        }
+                    }
+                }
+                if !removed {
+                    return;
+                }
+                if let Some(statuses) = weak_statuses.upgrade() {
+                    if let Ok(mut statuses) = statuses.lock() {
+                        statuses.retain(|(_, tab_id, _), _| tab_id != &exited_session_id);
+                    }
+                }
+                if let Some(messages) = weak_messages.upgrade() {
+                    if let Ok(mut messages) = messages.lock() {
+                        messages.retain(|(_, tab_id, _), _| tab_id != &exited_session_id);
+                    }
+                }
+            },
         )?;
-        let attach = session.attach()?;
+        let attach = session.attach(None)?;
         let mut sessions = self
             .sessions
             .lock()
@@ -837,7 +871,14 @@ impl Registry {
             session.kill()?;
             return Err(RegistryError::AlreadyExists(session_id));
         }
-        sessions.insert(session_id, session);
+        sessions.insert(session_id.clone(), Arc::clone(&session));
+        if session.has_exited()
+            && sessions
+                .get(&session_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &session))
+        {
+            sessions.remove(&session_id);
+        }
         Ok(attach)
     }
 
@@ -849,6 +890,7 @@ impl Registry {
         &self,
         session_id: &str,
         size: Option<(u16, u16)>,
+        cursor: Option<u64>,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
         let sessions = self
             .sessions
@@ -860,7 +902,7 @@ impl Registry {
         if let Some((cols, rows)) = size {
             session.resize(cols, rows)?;
         }
-        Ok(session.attach()?)
+        Ok(session.attach(cursor)?)
     }
 
     pub fn write(&self, session_id: &str, data: &str) -> Result<(), RegistryError> {
@@ -1153,7 +1195,7 @@ impl Registry {
         worktree_id: String,
         root: &str,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(FILE_EVENT_CHANNEL_CAPACITY);
         let mut watchers = self
             .file_watchers
             .lock()
@@ -1165,7 +1207,8 @@ impl Registry {
                 .map_err(|_| RegistryError::LockPoisoned)?
                 .push(tx);
         } else {
-            let subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>> = Arc::new(Mutex::new(vec![tx]));
+            let subscribers: Arc<Mutex<Vec<SyncSender<EventFrame>>>> =
+                Arc::new(Mutex::new(vec![tx]));
             let watcher = Self::start_file_watcher(
                 &worktree_id,
                 root,
@@ -1201,7 +1244,7 @@ impl Registry {
     fn start_file_watcher(
         worktree_id: &str,
         root: &str,
-        subscribers: Arc<Mutex<Vec<Sender<EventFrame>>>>,
+        subscribers: Arc<Mutex<Vec<SyncSender<EventFrame>>>>,
         file_watchers: Arc<Mutex<HashMap<String, WorktreeFileWatch>>>,
     ) -> Result<WorktreeWatcher, RegistryError> {
         let worktree_id = worktree_id.to_string();
@@ -1209,6 +1252,7 @@ impl Registry {
             let Ok(mut subscribers) = subscribers.lock() else {
                 return;
             };
+            let mut dropped_invalidations = 0;
             for change in changes {
                 let Ok(payload) = serde_json::to_value(&change) else {
                     continue;
@@ -1220,7 +1264,19 @@ impl Registry {
                         "change": payload,
                     }),
                 };
-                subscribers.retain(|tx| tx.send(event.clone()).is_ok());
+                subscribers.retain(|tx| match tx.try_send(event.clone()) {
+                    Ok(()) => true,
+                    Err(TrySendError::Full(_)) => {
+                        dropped_invalidations += 1;
+                        true
+                    }
+                    Err(TrySendError::Disconnected(_)) => false,
+                });
+            }
+            if dropped_invalidations > 0 {
+                eprintln!(
+                    "worktree {worktree_id} dropped {dropped_invalidations} redundant file invalidation(s) for slow subscribers"
+                );
             }
             if subscribers.is_empty() {
                 let file_watchers = Arc::clone(&file_watchers);
@@ -1459,7 +1515,8 @@ impl Default for Registry {
 mod tests {
     use std::process::Command;
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use pragma_constants::{NewWorktreeSpec, Project, Tab, TabKind, Worktree};
     use pragma_protocol::{
@@ -2113,7 +2170,7 @@ mod tests {
             .resize(&id, 120, 40)
             .expect("interactive client resize");
 
-        let (_scrollback, rx) = registry.attach(&id, None).expect("observer attach");
+        let (_scrollback, rx) = registry.attach(&id, None, None).expect("observer attach");
         registry.write(&id, "stty size\r").expect("write");
 
         let mut output = String::new();
@@ -2294,6 +2351,25 @@ mod tests {
         assert!(
             snapshot.is_empty(),
             "agent status for the exited tab should be cleared too"
+        );
+    }
+
+    #[test]
+    fn detached_session_removes_itself_after_shell_exit() {
+        let (registry, id, _dir) = spawn_session();
+
+        registry.write(&id, "exit\r").expect("request shell exit");
+
+        // 20s, not 10s: matches the real-PTY tests in session.rs. A loaded
+        // Windows CI runner spawning pwsh.exe under parallel test execution
+        // can take several seconds just to start and tear down the shell.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !registry.is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            registry.is_empty(),
+            "session should remove itself without an attached event forwarder"
         );
     }
 

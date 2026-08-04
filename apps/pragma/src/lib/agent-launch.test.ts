@@ -6,11 +6,13 @@ import type { AgentConfig } from "@/lib/tauri";
 
 const ptyWriteMock = vi.fn();
 const ptySpawnMock = vi.fn();
+const ptySpawnDetachedMock = vi.fn();
 const writeWhenReadyMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   ptyWrite: (...args: unknown[]) => ptyWriteMock(...args),
   ptySpawn: (...args: unknown[]) => ptySpawnMock(...args),
+  ptySpawnDetached: (...args: unknown[]) => ptySpawnDetachedMock(...args),
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
@@ -53,6 +55,7 @@ describe("startAgentInTab", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
+    ptyWriteMock.mockResolvedValue(undefined);
     writeWhenReadyMock.mockReset();
   });
 
@@ -158,25 +161,29 @@ describe("startBackgroundAgentSession", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     ptyWriteMock.mockReset();
+    ptyWriteMock.mockResolvedValue(undefined);
     ptySpawnMock.mockReset();
+    ptySpawnDetachedMock.mockReset();
     writeWhenReadyMock.mockReset();
-    ptySpawnMock.mockResolvedValue({ onmessage: vi.fn() });
+    ptySpawnMock.mockResolvedValue(undefined);
+    ptySpawnDetachedMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("spawns the daemon PTY before sending the start command", async () => {
+  it("spawns the daemon PTY detached before sending the start command", async () => {
     await startBackgroundAgentSession("tab-1", "wt-1", "/cwd", agent(["opencode"]));
-    expect(ptySpawnMock).toHaveBeenCalledWith(
+    expect(ptySpawnDetachedMock).toHaveBeenCalledWith(
       "tab-1",
       "wt-1",
       "/cwd",
       expect.any(Number),
       expect.any(Number),
-      expect.any(Function),
     );
+    // No prefill to watch for, so the unmounted tab's output never streams into the webview.
+    expect(ptySpawnMock).not.toHaveBeenCalled();
     // The start command is still gated behind the launch delay.
     expect(ptyWriteMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
@@ -262,6 +269,9 @@ describe("startBackgroundAgentSession", () => {
       { ...agent(["agent"]), prefillMode: "plain", prefillSubmit: `${ESC}[13;5u` },
       "Fix the bug",
     );
+    // A plain prefill needs no alternate-screen tracking, so it spawns detached.
+    expect(ptySpawnDetachedMock).toHaveBeenCalled();
+    expect(ptySpawnMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(3000);
     expect(ptyWriteMock).toHaveBeenCalledWith("tab-1", "Fix the bug");
     expect(ptyWriteMock).not.toHaveBeenCalledWith("tab-1", `${ESC}[13;5u`);

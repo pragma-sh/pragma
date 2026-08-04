@@ -204,15 +204,18 @@ fn linux_cmdline_name(pid: u32) -> Option<String> {
 /// Ends a single process immediately.
 ///
 /// Returns whether the process was signalled. A `false` result usually means
-/// the pid is already gone, which callers generally treat as success.
+/// the pid is already gone, which callers generally treat as success — so the
+/// helper's own output is captured rather than inherited, like the Windows
+/// branch below. Otherwise every such call leaks `kill: 1234: No such process`
+/// into the caller's stderr, which reads as a failure of whatever was running.
 #[must_use]
 pub fn kill(pid: u32) -> bool {
     #[cfg(unix)]
     {
         command("kill")
             .args(["-KILL", &pid.to_string()])
-            .status()
-            .is_ok_and(|status| status.success())
+            .output()
+            .is_ok_and(|output| output.status.success())
     }
     #[cfg(windows)]
     {
@@ -246,6 +249,49 @@ pub fn kill_tree(pid: u32) -> bool {
             .output()
             .is_ok_and(|output| output.status.success())
     }
+}
+
+/// Ends `pid` together with every process descended from it, at any depth.
+///
+/// [`kill_tree`] only reaches one generation (`pkill -P`/`taskkill /T`'s
+/// direct-child view), and a process-group signal (`kill -- -pid`) misses a
+/// backgrounded job entirely: an interactive shell's job control puts each
+/// `cmd &` in a *new* process group of its own, so it never shares the
+/// shell's group even though it stays the shell's child. This instead reads
+/// the whole process table once ([`list_processes`]) and walks it by parent
+/// pid — which job control does not change — so it reaches a backgrounded
+/// job and anything that job goes on to fork, not just what stayed in the
+/// shell's own process group.
+#[must_use]
+pub fn kill_process_tree(pid: u32) -> bool {
+    let Ok(processes) = list_processes() else {
+        return kill(pid);
+    };
+    let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (&child_pid, entry) in &processes {
+        children_by_parent
+            .entry(entry.parent_pid)
+            .or_default()
+            .push(child_pid);
+    }
+    let mut descendants = vec![pid];
+    let mut frontier = vec![pid];
+    while let Some(next) = frontier.pop() {
+        for &child in children_by_parent.get(&next).into_iter().flatten() {
+            descendants.push(child);
+            frontier.push(child);
+        }
+    }
+    // The whole tree was captured from one snapshot before any signal went
+    // out, so kill order does not matter: every pid killed here was already
+    // a confirmed descendant, regardless of which of its ancestors dies (and
+    // gets reparented away from) first.
+    let mut root_killed = false;
+    for target in descendants {
+        let ok = kill(target);
+        root_killed |= ok && target == pid;
+    }
+    root_killed
 }
 
 /// Ends every process whose command line mentions `pattern`.

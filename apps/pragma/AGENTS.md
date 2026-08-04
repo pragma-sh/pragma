@@ -79,6 +79,9 @@ apps/pragma/
    network, or file I/O must be `async fn` (+ `spawn_blocking` for blocking work, see
    `run_pty_task`) or at least `#[tauri::command(async)]`. Only trivially fast work
    (in-memory state, one SQLite row, native window calls) may stay plain sync.
+   `pty_write` is deliberately sync: it only resolves in-memory host state and performs a
+   bounded `try_send`; all socket work remains on `pragma-client`'s writer thread. Keeping
+   this enqueue command sync preserves invoke order for terminal bytes.
 
 ## UI: Tailwind v4 + shadcn/ui
 
@@ -279,6 +282,9 @@ inside a Pragma terminal): the status plugin can raise the toast, and the lazy w
 write the Approve/Deny keys back into that same PTY. Watcher lookup uses the qualified
 catalog agent id; `pragma-watch --agentId` uses the plugin-local watcher agent so runtime
 status, reply, and interjection events share one stream identity.
+Watcher children are keyed by session/tab/worktree, duplicate starts are ignored, and exited
+children are reaped. Tab close and worktree deletion stop matching children; plugin catalog
+replacement stops all old children before installing new watcher definitions.
 
 ## Remote access (tunnel + pair modal)
 
@@ -516,22 +522,56 @@ deep links only reach a packaged/registered app — `tauri dev` on macOS won't r
 ## Terminal rendering (xterm + WebGL)
 
 Terminal output → xterm in `src/lib/terminal-manager.ts`; never route through React
-state or the workspace reducer. Each terminal renders through the **WebGL addon**
-(`@xterm/addon-webgl`), loaded right after `terminal.open()` — xterm's DOM renderer is
-the dominant source of perceived typing latency. Loading is wrapped in `try/catch` and
-`onContextLoss` disposes the addon, so a missing/lost WebGL2 context falls back to the
-DOM renderer.
+state or the workspace reducer. Terminals use `@xterm/addon-webgl`; DOM rendering is too
+expensive for interactive TUIs and can stall the rest of the webview. WebGL contexts live in a
+bounded least-recently-used cache (`WEBGL_RENDERER_CACHE_SIZE`). Normal tab switches retain the
+renderer and glyph atlas, avoiding the visible top-to-bottom repaint caused by dispose/reload.
+A hidden terminal evicted after the cache fills keeps its xterm buffer, parser, and output stream;
+`TerminalView` restores WebGL in a layout effect before the revealed tab paints. This supports
+more terminals than the GPU context budget without replay or a visible fallback-renderer flash.
+Visible split panes may temporarily exceed the warm-context budget; excess contexts are shed as
+soon as those panes become hidden again.
+Context loss gets bounded consecutive retries, and a successful paint resets that retry budget.
+Keep `@xterm/xterm` and `@xterm/addon-webgl` pinned to versions built from the same upstream
+commit: their texture-atlas contracts change together. The current aligned beta includes atlas
+merge, shared-renderer invalidation, and texture-capacity fixes absent from stable 6.0/0.19.
 
 Frontend output writes are serialized through xterm's write callback
 (`pendingOutput` / `writeInFlight`) to coalesce bursts behind the in-flight
-parser/render pass. Scrollback is bounded to 500 lines (`TERMINAL_SCROLLBACK_LINES`).
+parser/render pass. Scrollback is bounded to 5000 lines (`TERMINAL_SCROLLBACK_LINES`).
+Queued renderer output is byte-capped (`TERMINAL_PENDING_OUTPUT_MAX_BYTES`). Each stream tracks
+an absolute server output-byte cursor: ordinary disconnect preserves xterm state and reconnects
+from that cursor, so only missing bytes arrive and existing output is never replayed. The server
+requests a bounded reset only when retained scrollback no longer covers the cursor. Renderer
+overflow still performs destructive bounded recovery rather than growing the webview heap.
+Stream generations make late attach/detach completions harmless. Each xterm parser write is at most
+`TERMINAL_WRITE_CHUNK_MAX_BYTES` (64 KiB). Recovery invalidates the old stream immediately,
+then waits for its current xterm write callback before reset/replay; if that callback does not
+drain within the bounded timeout, the widget is recreated instead. Every normal parser write has
+the same watchdog, so a lost xterm callback cannot permanently stall scrolling and echo. Never reset an xterm with
+an outstanding write callback or let a late callback mutate replacement state.
 
-**Keystroke input is fire-and-forget and pipelined:** `onData` fires `ptyWrite` without
-awaiting; on the Rust side `pty_write` only _enqueues_ onto a dedicated writer thread
-(`input_tx` / `start_input_writer` in `pragma-client`) that owns its own daemon
-connection. The writer drains any already-queued same-session input into one frame and
-sends `write_input_frame` binary frames; there is no per-keystroke JSON request or
-daemon response. `resize`/`kill` use the separate pooled `request_conn`.
+Ordinary React unmount calls generation-tokenized `TerminalManager.park`: it marks the view
+invisible but preserves the xterm instance, warm WebGL renderer, parser state, output stream, and
+queued output. Remount reparents that same widget without detach, reset, replay, or forced
+refresh unless its hidden renderer was LRU-evicted. A stale cleanup token cannot park a widget
+already moved to a newer host. Closing the tab still calls `dispose`, which detaches, destroys
+xterm, and kills the PTY.
+
+**Keystroke input is ordered, fire-and-forget, and pipelined:** every xterm `onData` path uses
+`writeWhenReady`. Input arriving before the current attach/spawn succeeds stays in a bounded
+byte/message queue and flushes once, in order, only for the current connection generation.
+Overflow is surfaced, never silently dropped. Once ready, sync `pty_write` invocations enqueue
+in call order onto `pragma-client`'s dedicated bounded writer thread. That thread owns its daemon
+connection, caps binary `write_input_frame` frames, and does not consume a frame or decrement
+queue accounting until that exact frame is accepted. A socket failure retries the same bytes
+with bounded exponential backoff before later bytes can advance. There is no per-keystroke JSON
+request or daemon response. `resize`/`kill` use the separate pooled request connections.
+
+Terminal focus is separate from fit and visibility. Only the active terminal in the focused
+pane receives `TerminalManager.focus`, scheduled after React reveals/reparents its DOM. Hidden
+tabs and active terminals in unfocused split panes must never receive focus; unrelated rerenders
+must not steal focus from find/replace, rename fields, dialogs, or editors.
 
 **Native OS text-editing chords** (macOS Cmd+Backspace/Left/Right,
 Option+Left/Right/Backspace; Linux Ctrl+Left/Right/Backspace/Delete) are translated to
@@ -546,12 +586,19 @@ Terminal grids are capped at 240×90 cells (`MAX_TERMINAL_COLS` / `MAX_TERMINAL_
 before both xterm and PTY resize — fullscreen TUIs redraw the entire grid per
 interaction, so unbounded sizes regress latency.
 
-**Wheel reports are rate-limited** (not rewritten) while a TUI has mouse tracking on.
-An `attachCustomWheelEventHandler` in `terminal-manager.ts` drops events that arrive
-within `MOUSE_WHEEL_REPORT_INTERVAL_MS` of the last forwarded one, **only when
-`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its
-own viewport and is left untouched. The interval is the scroll-feel knob; tune it rather
-than removing the throttle or rewriting reports.
+**Wheel reports are renderer-response-paced** while a TUI has mouse tracking on. Every wheel
+event reaches xterm so trackpad pixel deltas keep accumulating; the first generated report is
+sent immediately, then only the latest report waits until response bytes finish parsing and
+`terminal.onRender` confirms WebGL painted the next frame. The write callback alone is not
+backpressure: it fires before rendering.
+Never release several reports per redraw: macOS trackpad momentum then outruns fullscreen TUI
+rendering again and eventually starves the webview. A 250ms watchdog applies only when the prior
+report produces no output. Once response bytes arrive, no further report is admitted while they
+wait in xterm's parser; a separate short render watchdog covers a missing `onRender`. Sensitivity is 1 while mouse tracking is active (each
+threshold crossing is one report) and 3 for local scrollback's pixel damping. Pacing applies **only when
+`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its own
+viewport and is left untouched. A new gesture after `MOUSE_WHEEL_GESTURE_QUIET_MS` recovers
+from a prior report that produced no output at a scroll boundary.
 
 **Terminal font:** Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`, …) at **fontSize
 14 / lineHeight 1.0**. 14px is required — at 13px macOS WebKit rounds the cell to 15px
@@ -709,9 +756,9 @@ or matching remote branch for main/parentless worktrees.
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
 lifecycle actions: committed changes show compact remote sync with ahead/behind counts;
 a no-change child shows `WorktreeDeleteDialog`. Sync pulls first, auto-aborts conflicts,
-then pushes. The left sidebar polls
-`worktrees_merged_status` for the merge glyph as a fallback, and also subscribes to the
-shared per-worktree file watcher so filesystem changes refresh the glyph immediately.
+then pushes. The left sidebar polls `worktrees_merged_status` for the merge glyph while
+visible. It deliberately does not open an eager recursive watcher for every worktree; file
+watches are lazy, shared, and exist only while a mounted feature consumes file changes.
 
 **Editor/diff tabs** — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and
 `diff` (read-only `@codemirror/merge`) as `TabKind`s, opened via `openFileTab` /
