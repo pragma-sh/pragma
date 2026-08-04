@@ -24,6 +24,10 @@
     // Plugin resource bundles loaded at runtime by the Rust sidecar launcher
     // (plugins.rs), never statically imported by any entry point.
     "**/resources/plugins/**",
+    // `packages/bench/src/runner.js` is pulled in via Rust `include_str!`
+    // (scenarios.rs) and injected into the webview at runtime — never
+    // statically imported by any JS/TS entry point.
+    "packages/bench/src/runner.js",
   ],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],

@@ -44,6 +44,7 @@ import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover
 import { editorLaunchers } from "@/lib/editor-launchers";
 import { isMacPlatform } from "@/lib/platform";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
+import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { startWindowDrag } from "@/lib/window-drag";
 import {
@@ -408,7 +409,10 @@ function SplitParentTab({
           : "text-muted-foreground border-transparent bg-transparent hover:bg-muted",
       )}
       key="split-parent"
-      onClick={() => setActiveTab(tab.id)}
+      onClick={() => {
+        setActiveTab(tab.id);
+        if (tab.kind === "terminal") terminalManager.focus(tab.id);
+      }}
       title={`Split: ${displayTitle}`}
     >
       <ParentIcon className="text-primary size-3.5 shrink-0" />
@@ -474,7 +478,10 @@ function TerminalTabItem({
           ) : (
             <button
               className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                if (tab.kind === "terminal") terminalManager.focus(tab.id);
+              }}
               onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
             >
               <TabIcon tab={tab} />

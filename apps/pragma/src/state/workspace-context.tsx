@@ -1780,8 +1780,9 @@ async function createScriptTabForCommand(
   const offscreenHost = document.createElement("div");
   offscreenHost.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:80ch;height:24em;";
   document.body.append(offscreenHost);
-  terminalManager.mount(tab, ctx.cwd, offscreenHost);
+  const hostGeneration = terminalManager.mount(tab, ctx.cwd, offscreenHost);
   offscreenHost.remove();
+  terminalManager.park(tab.id, hostGeneration);
   // Script tabs are unattended (no one is sitting at the terminal to close
   // them), so a script that finishes or crashes on its own must close its
   // own tab; closeTab already drops the tab from managedScriptsState and
@@ -2881,6 +2882,15 @@ function useTerminalLinkOpener(
   );
 }
 
+/** Resolves the project/worktree a new tab should attach to, or `undefined` if none is selected. */
+function resolveActiveWorktree(
+  state: WorkspaceState,
+): { projectId: string; worktreeId: string } | undefined {
+  const projectId = state.selectedProjectId;
+  const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
+  return projectId && worktreeId ? { projectId, worktreeId } : undefined;
+}
+
 /** Opens (or focuses) editor/diff/PR-review/daemon-log tabs, deduped per worktree. */
 function useTabOpeners(
   state: WorkspaceState,
@@ -2904,11 +2914,11 @@ function useTabOpeners(
       paneId: string | undefined,
       commit?: string | null,
     ) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         return;
       }
+      const { projectId, worktreeId } = active;
       const existing = state.tabs.find(
         (tab) =>
           tab.kind === kind &&
@@ -2937,7 +2947,7 @@ function useTabOpeners(
         dispatch({ type: "load-error", error: errorMessage(cause) });
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openFileTab = useCallback(
@@ -2953,11 +2963,11 @@ function useTabOpeners(
 
   const openPluginWebView = useCallback(
     async (request: OpenPluginWebViewRequest) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         throw new Error("Cannot open plugin web view without an active worktree");
       }
+      const { projectId, worktreeId } = active;
       const existing = request.dedupeKey
         ? state.tabs.find(
             (tab) =>
@@ -2988,16 +2998,16 @@ function useTabOpeners(
         throw cause;
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openReviewTab = useCallback(
     async (prNumber: number, title: string) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
+      const active = resolveActiveWorktree(state);
+      if (!active) {
         return;
       }
+      const { projectId, worktreeId } = active;
       const existing = state.tabs.find(
         (tab) =>
           tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
@@ -3023,15 +3033,15 @@ function useTabOpeners(
         dispatch({ type: "load-error", error: errorMessage(cause) });
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    [dispatch, state],
   );
 
   const openDaemonLogTab = useCallback(async () => {
-    const projectId = state.selectedProjectId;
-    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-    if (!projectId || !worktreeId) {
+    const active = resolveActiveWorktree(state);
+    if (!active) {
       return;
     }
+    const { projectId, worktreeId } = active;
     const existing = state.tabs.find((tab) => tab.kind === "log");
     if (existing) {
       dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
@@ -3043,7 +3053,7 @@ function useTabOpeners(
     } catch (cause) {
       dispatch({ type: "load-error", error: errorMessage(cause) });
     }
-  }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+  }, [dispatch, state]);
 
   return { openFileTab, openDiffTab, openReviewTab, openDaemonLogTab, openPluginWebView };
 }
@@ -3143,13 +3153,29 @@ function useTabLifecycle(
 
 /** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
 function useWorkspaceChangedListener(
+  tabs: readonly Tab[],
   dispatch: WorkspaceDispatch,
   refreshProject: (projectId?: string | null) => Promise<void>,
 ): void {
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const refreshProjectRef = useRef(refreshProject);
   refreshProjectRef.current = refreshProject;
   const handleChanged = useCallback(
     (payload: WorkspaceChangedEvent) => {
+      const removedTabIds =
+        payload.action === "tabClosed" && payload.tabId
+          ? [payload.tabId]
+          : payload.action === "worktreeDeleted" && payload.worktreeId
+            ? tabsRef.current
+                .filter((tab) => tab.worktreeId === payload.worktreeId)
+                .map((tab) => tab.id)
+            : [];
+      for (const tabId of removedTabIds) {
+        terminalManager.dispose(tabId);
+        removeAgentStatusForTab(tabId);
+        releaseAlertLatchForTab(tabId);
+      }
       // `tabOpened` is for interactive CLI opens (select so the user sees it).
       // `tabOpenedBackground` is for mobile/Kanban-style agent launches: refresh
       // the snapshot only — selecting would mount a terminal and spawn an empty
@@ -3632,14 +3658,23 @@ function useWorktreeActions(
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      const removedTabs = state.tabs.filter((tab) => tab.worktreeId === worktreeId);
       await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+      for (const tab of removedTabs) {
+        terminalManager.dispose(tab.id);
+        removeAgentStatusForTab(tab.id);
+        releaseAlertLatchForTab(tab.id);
+        if (tab.kind === "browser") {
+          void browserClose(tab.id);
+        }
+      }
       dispatch({ type: "remove-worktree", worktreeId });
       setManagedScriptsState((current) => {
         const { [worktreeId]: _, ...remaining } = current;
         return remaining;
       });
     },
-    [dispatch, setManagedScriptsState],
+    [dispatch, setManagedScriptsState, state.tabs],
   );
 
   const renameWorktree = useCallback(
@@ -3961,6 +3996,9 @@ function useSplitActions(
       } else {
         dispatch({ type: "set-active-tab", worktreeId: selectedWorktreeId, tabId });
       }
+      if (visibleTabs.find((tab) => tab.id === tabId)?.kind === "terminal") {
+        terminalManager.focus(tabId, true);
+      }
     },
     [
       activeTabId,
@@ -4161,7 +4199,7 @@ function useWorkspaceListeners({
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
 }): void {
   useProjectLoading(state, dispatch, reload);
-  useWorkspaceChangedListener(dispatch, refreshProject);
+  useWorkspaceChangedListener(state.tabs, dispatch, refreshProject);
   useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
 }
 

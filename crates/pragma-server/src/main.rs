@@ -224,7 +224,9 @@ fn next_request(stream: &mut LocalStream, registry: &Registry) -> Option<Request
         let bytes = match read_frame(stream).ok()? {
             Frame::Json(bytes) => bytes,
             Frame::Input { session_id, data } => {
-                let _ = registry.write_bytes(&session_id, &data);
+                if let Err(error) = registry.write_bytes(&session_id, &data) {
+                    eprintln!("terminal input rejected for session {session_id}: {error}");
+                }
                 continue;
             }
             Frame::Output { .. } => continue,
@@ -365,8 +367,9 @@ fn handle_request(
             // Only resize when the attacher declares a viewport; a size-less
             // attach (plugin watcher) observes without disturbing the PTY grid.
             let size = request.cols.zip(request.rows);
+            let cursor = parse_terminal_cursor(request.data)?;
             let (scrollback, rx) = registry
-                .attach(&session_id, size)
+                .attach(&session_id, size, cursor)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
             Ok(Outcome {
                 event_stream: Some(EventStream { scrollback, rx }),
@@ -470,6 +473,15 @@ fn handle_agent_publish(
 /// client request error.
 fn parse_data<T: serde::de::DeserializeOwned>(data: &str) -> Result<T, HandledRequestError> {
     serde_json::from_str(data).map_err(|err| HandledRequestError::Request(err.to_string()))
+}
+
+fn parse_terminal_cursor(data: Option<String>) -> Result<Option<u64>, HandledRequestError> {
+    data.map(|value| {
+        value
+            .parse::<u64>()
+            .map_err(|_| HandledRequestError::Request("invalid terminal output cursor".to_string()))
+    })
+    .transpose()
 }
 
 fn handle_ports_rpc(
@@ -846,7 +858,14 @@ fn forward_events(
             let event = match rx.recv_timeout(EVENT_STREAM_POLL_INTERVAL) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    // Session subscriber queues disconnect slow consumers rather
+                    // than buffering without bound. Close the socket so the
+                    // client observes that loss and can reconnect for bounded
+                    // scrollback recovery instead of waiting on a silent stream.
+                    hang_up(&writer);
+                    break;
+                }
             };
             if let EventFrame::Exit { session_id, .. } = &event {
                 // The session's process exited on its own (no `Kill` request
@@ -859,6 +878,12 @@ fn forward_events(
             }
         }
     });
+}
+
+fn hang_up(writer: &Arc<Mutex<LocalStream>>) {
+    if let Ok(writer) = writer.lock() {
+        let _ = writer.shutdown(Shutdown::Both);
+    }
 }
 
 /// Writes one event to the client, and on failure shuts the whole connection

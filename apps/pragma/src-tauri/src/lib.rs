@@ -524,6 +524,7 @@ async fn pty_spawn(
     cwd: String,
     cols: u16,
     rows: u16,
+    stream_generation: u64,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     // Resolve which host owns this worktree's project and pin the session to it,
@@ -538,12 +539,48 @@ async fn pty_spawn(
                 log::warn!("failed to ensure pragma-gateway before PTY spawn: {error}");
             }
         }
-        client.spawn(session_id, worktree_id, cwd, cols, rows, on_event)
+        client.spawn(
+            session_id,
+            worktree_id,
+            cwd,
+            cols,
+            rows,
+            stream_generation,
+            on_event,
+        )
     })
     .await
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Detached spawn carries session routing and geometry.
+async fn pty_spawn_detached(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
+    session_id: String,
+    worktree_id: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> AppResult<()> {
+    let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
+    let is_local_host = host_id == LOCAL_HOST;
+    let client = ssh_host::client_for_host(app, &hosts, &host_id).await?;
+    hosts.bind_session(session_id.clone(), host_id)?;
+    run_pty_task(move || {
+        if is_local_host {
+            if let Err(error) = client.ensure_gateway() {
+                log::warn!("failed to ensure pragma-gateway before detached PTY spawn: {error}");
+            }
+        }
+        client.spawn_detached(session_id, worktree_id, cwd, cols, rows)
+    })
+    .await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // PTY attach carries geometry + exact stream identity.
 async fn pty_attach(
     app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
@@ -551,6 +588,8 @@ async fn pty_attach(
     session_id: String,
     cols: u16,
     rows: u16,
+    cursor: Option<u64>,
+    stream_generation: u64,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     // Resolve (and re-bind) the session's host the same way `pty_spawn` does,
@@ -561,19 +600,27 @@ async fn pty_attach(
     // (which does resolve the real remote host) collides with the session
     // still alive there — surfacing as "session already exists".
     let client = ssh_host::client_for_session(app, &db, &hosts, &session_id).await?;
-    run_pty_task(move || client.attach(session_id, cols, rows, on_event)).await
+    run_pty_task(move || client.attach(session_id, cols, rows, cursor, stream_generation, on_event))
+        .await
 }
 
 #[tauri::command]
-async fn pty_write(
+fn pty_detach(
     hosts: tauri::State<'_, Hosts>,
     session_id: String,
-    data: String,
+    stream_generation: u64,
 ) -> AppResult<()> {
-    // Keystroke input is the latency-critical path. `write` only enqueues onto
-    // the dedicated writer thread (no socket I/O, no daemon round-trip), so there
-    // is nothing to offload — running it inline keeps every keystroke off the
-    // blocking-pool scheduler entirely.
+    hosts
+        .for_session(&session_id)?
+        .detach(&session_id, stream_generation);
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_write(hosts: tauri::State<'_, Hosts>, session_id: String, data: String) -> AppResult<()> {
+    // This synchronous command only resolves in-memory host state and performs
+    // a bounded non-blocking enqueue. Socket I/O stays on pragma-client's writer
+    // thread, so command invocation order is preserved without blocking the UI.
     hosts.for_session(&session_id)?.write(session_id, data)
 }
 
@@ -690,11 +737,24 @@ async fn watch_worktree_files(
     db: tauri::State<'_, Db>,
     hosts: tauri::State<'_, Hosts>,
     worktree_id: String,
+    subscription_id: u64,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let root = db.worktree(&worktree_id)?.path;
     let client = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
-    run_pty_task(move || client.watch_files(worktree_id, root, on_event)).await
+    run_pty_task(move || client.watch_files(subscription_id, worktree_id, root, on_event)).await
+}
+
+/// Stops one exact filesystem subscription on whichever host owns it.
+#[tauri::command]
+fn stop_watching_worktree_files(
+    hosts: tauri::State<'_, Hosts>,
+    subscription_id: u64,
+) -> AppResult<()> {
+    for client in hosts.all_clients()? {
+        client.stop_watching_files(subscription_id);
+    }
+    Ok(())
 }
 
 async fn run_pty_task(task: impl FnOnce() -> AppResult<()> + Send + 'static) -> AppResult<()> {
@@ -814,12 +874,30 @@ fn create_plugin_webview_tab(
     Ok(tab)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn close_tab(
+    app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
+    hosts: tauri::State<'_, Hosts>,
     publisher: tauri::State<'_, workspace_mirror::WorkspacePublisher>,
     tab_id: String,
 ) -> AppResult<()> {
+    let tab = db.tab(&tab_id)?;
+    match tab.kind {
+        TabKind::Terminal => {
+            if let Ok(client) = hosts.for_worktree(&db, &tab.worktree_id) {
+                let _ = client.kill(tab.id.clone());
+            }
+            let _ = hosts.unbind_session(&tab.id);
+        }
+        TabKind::Browser => browser::browser_close(app, tab.id.clone())?,
+        TabKind::Editor
+        | TabKind::Diff
+        | TabKind::PrReview
+        | TabKind::Log
+        | TabKind::PluginWebview => {}
+    }
+    plugins::stop_watchers_for_tab(&tab.id)?;
     db.delete_tab(&tab_id)?;
     publisher.trigger();
     Ok(())
@@ -1077,12 +1155,15 @@ pub fn run() {
             tunnel_stop,
             tunnel_status,
             pty_spawn,
+            pty_spawn_detached,
             pty_attach,
+            pty_detach,
             pty_write,
             pty_resize,
             pty_kill,
             pty_kill_for_path,
             watch_worktree_files,
+            stop_watching_worktree_files,
             mark_agents_seen,
             resolve_agent_approval,
             worktrees_are_remote,

@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 20,
+    "protocolVersion": 21,
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -45,6 +45,12 @@
   },
   "keybindings": {
     "configFileName": ".pragma/keybindings.json"
+  },
+  "bench": {
+    "hookGlobal": "__PRAGMA_BENCH__",
+    "runnerGlobal": "__PRAGMA_BENCH_RUNNER__",
+    "markerPrefix": "PRAGMABENCH",
+    "tabTitle": "pragma-bench"
   },
   "agentStatus": {
     "soundsDirName": ".pragma/assets/sounds",

@@ -1,4 +1,8 @@
-import { gatewayConnectionInfo, startPluginWatcher } from "@/lib/tauri";
+import {
+  gatewayConnectionInfo,
+  startPluginWatcher,
+  type StartPluginWatcherRequest,
+} from "@/lib/tauri";
 
 import { pluginAgentId } from "./agents";
 import type { PluginRecord } from "./registry";
@@ -12,12 +16,20 @@ interface PluginWatcherRecord {
 }
 
 const watcherByAgent = new Map<string, PluginWatcherRecord>();
-const activeWatcherSessionKeys = new Set<string>();
+let watcherGeneration = 0;
+let lifecycleQueue = Promise.resolve();
+
+type WatcherLifecycleRequest = StartPluginWatcherRequest & {
+  operation: "start" | "stop" | "stopAll";
+};
 
 /** Replaces active plugin watcher contributions for the current project scope. */
 export function setPluginWatchers(records: readonly PluginRecord[]): void {
+  watcherGeneration += 1;
+  void stopAllPluginWatchers().catch((error: unknown) => {
+    console.error("failed to stop plugin watchers before refresh", error);
+  });
   watcherByAgent.clear();
-  activeWatcherSessionKeys.clear();
   for (const record of records) {
     if (record.status !== "loaded" || !record.definition || !record.mainPath) {
       continue;
@@ -48,32 +60,66 @@ export async function startWatcherForAgentSession(params: {
   if (!watcher) {
     return;
   }
-  const sessionKey = watcherSessionKey(params);
-  if (activeWatcherSessionKeys.has(sessionKey)) {
+  const generation = watcherGeneration;
+  const gateway = await gatewayConnectionInfo();
+  await lifecycleQueue;
+  if (generation !== watcherGeneration || watcherByAgent.get(params.agentId) !== watcher) {
     return;
   }
-  activeWatcherSessionKeys.add(sessionKey);
-  const gateway = await gatewayConnectionInfo();
-  try {
-    await startPluginWatcher({
-      ...watcher,
-      sessionId: params.sessionId,
-      tabId: params.tabId,
-      worktreeId: params.worktreeId,
-      gatewayUrl: gateway.baseUrl,
-      gatewayToken: gateway.token,
-    });
-  } catch (error) {
-    activeWatcherSessionKeys.delete(sessionKey);
-    throw error;
-  }
+  const request: WatcherLifecycleRequest = {
+    ...watcher,
+    operation: "start",
+    sessionId: params.sessionId,
+    tabId: params.tabId,
+    worktreeId: params.worktreeId,
+    gatewayUrl: gateway.baseUrl,
+    gatewayToken: gateway.token,
+  };
+  await enqueueLifecycle(request);
 }
 
-function watcherSessionKey(params: {
-  agentId: string;
+/** Stops watcher process associated with one terminal session. */
+export async function stopPluginWatchersForSession(params: {
   sessionId: string;
   tabId: string;
   worktreeId: string;
-}): string {
-  return [params.agentId, params.sessionId, params.tabId, params.worktreeId].join("\u0000");
+}): Promise<void> {
+  const request: WatcherLifecycleRequest = {
+    operation: "stop",
+    pluginId: "",
+    pluginMain: "",
+    agentId: "",
+    watcherAgent: "",
+    config: {},
+    sessionId: params.sessionId,
+    tabId: params.tabId,
+    worktreeId: params.worktreeId,
+    gatewayUrl: "",
+    gatewayToken: "",
+  };
+  await enqueueLifecycle(request);
+}
+
+/** Stops every watcher process before plugin contributions are replaced. */
+export async function stopAllPluginWatchers(): Promise<void> {
+  const request: WatcherLifecycleRequest = {
+    operation: "stopAll",
+    pluginId: "",
+    pluginMain: "",
+    agentId: "",
+    watcherAgent: "",
+    config: {},
+    sessionId: "",
+    tabId: "",
+    worktreeId: "",
+    gatewayUrl: "",
+    gatewayToken: "",
+  };
+  await enqueueLifecycle(request);
+}
+
+function enqueueLifecycle(request: WatcherLifecycleRequest): Promise<void> {
+  const operation = lifecycleQueue.catch(() => undefined).then(() => startPluginWatcher(request));
+  lifecycleQueue = operation.catch(() => undefined);
+  return operation;
 }

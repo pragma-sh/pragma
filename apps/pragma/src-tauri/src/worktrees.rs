@@ -1,14 +1,15 @@
 use std::path::PathBuf;
 
-use pragma_constants::{Worktree, WorktreeStatus};
+use pragma_constants::{TabKind, Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::db::{Db, WorktreeMru};
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::hosts::Hosts;
 use crate::scripts;
+use crate::{browser, plugins};
 
 #[tauri::command]
 pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Worktree>> {
@@ -137,14 +138,15 @@ pub fn hide_worktree(
 /// directory so the shells don't have an open handle to a now-vanished cwd.
 #[tauri::command(async)]
 pub fn delete_worktree(
+    app: AppHandle,
     worktree_id: String,
     delete_branch: bool,
     force: bool,
-    db: State<'_, Db>,
-    hosts: State<'_, Hosts>,
-    locks: State<'_, GitLocks>,
-    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
 ) -> AppResult<()> {
+    let db = app.state::<Db>();
+    let hosts = app.state::<Hosts>();
+    let locks = app.state::<GitLocks>();
+    let publisher = app.state::<crate::workspace_mirror::WorkspacePublisher>();
     let worktree = db.worktree(&worktree_id)?;
     if worktree.is_main {
         return Err(AppError::InvalidInput(
@@ -171,7 +173,6 @@ pub fn delete_worktree(
     if let Err(error) = pty.kill_for_cwd(worktree.path.clone()) {
         log::warn!("failed to kill sessions for {}: {error}", worktree.path);
     }
-
     git::host_rpc::<()>(
         &pty,
         &GitRequest::RemoveWorktree {
@@ -206,6 +207,18 @@ pub fn delete_worktree(
         }
     }
 
+    if let Err(error) = plugins::stop_watchers_for_worktree(&worktree_id) {
+        log::warn!("failed to stop plugin watchers for {worktree_id}: {error}");
+    }
+    for tab in db
+        .list_tabs(&worktree.project_id)?
+        .into_iter()
+        .filter(|tab| tab.worktree_id == worktree_id && matches!(tab.kind, TabKind::Browser))
+    {
+        if let Err(error) = browser::browser_close(app.clone(), tab.id.clone()) {
+            log::warn!("failed to close browser tab {}: {error}", tab.id);
+        }
+    }
     db.delete_worktree(&worktree_id)?;
     publisher.trigger();
     Ok(())

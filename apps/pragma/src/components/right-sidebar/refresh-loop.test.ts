@@ -48,4 +48,24 @@ describe("startRefreshLoop", () => {
     window.dispatchEvent(new Event("focus"));
     expect(refresh).toHaveBeenCalledTimes(2);
   });
+
+  it("does not start another refresh while one is in flight", async () => {
+    let finishRefresh: (() => void) | undefined;
+    const pendingRefresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const refresh = vi.fn().mockReturnValueOnce(pendingRefresh).mockResolvedValue(undefined);
+    const stop = startRefreshLoop(refresh, 1000);
+
+    vi.advanceTimersByTime(3000);
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    finishRefresh?.();
+    await pendingRefresh;
+    await Promise.resolve();
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    stop();
+  });
 });

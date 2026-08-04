@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 
 import type { Tab } from "@pragma/constants";
 import "@xterm/xterm/css/xterm.css";
@@ -8,11 +8,12 @@ import { useTerminalFind } from "@/components/terminal/use-terminal-find";
 import { terminalManager } from "@/lib/terminal-manager";
 
 interface TerminalViewProps {
+  active: boolean;
   tab: Tab;
   cwd: string;
 }
 
-function TerminalViewComponent({ tab, cwd }: TerminalViewProps) {
+function TerminalViewComponent({ active, tab, cwd }: TerminalViewProps) {
   const ref = useRef<HTMLDivElement>(null);
   const find = useTerminalFind(tab.id);
 
@@ -21,14 +22,21 @@ function TerminalViewComponent({ tab, cwd }: TerminalViewProps) {
     if (!element) {
       return;
     }
-    terminalManager.mount(tab, cwd, element);
+    const hostGeneration = terminalManager.mount(tab, cwd, element);
     const observer = new ResizeObserver(() => terminalManager.resize(tab.id));
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      terminalManager.park(tab.id, hostGeneration);
+    };
     // `tab` identity changes on every project refresh; the id is the stable
     // terminal key, so depend on it (and cwd) to avoid needless re-subscribes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on tab.id, not the tab object identity.
   }, [cwd, tab.id]);
+
+  useLayoutEffect(() => {
+    terminalManager.setVisible(tab.id, active);
+  }, [active, tab.id]);
 
   return (
     <div className="relative h-full w-full">
@@ -60,5 +68,6 @@ function TerminalViewComponent({ tab, cwd }: TerminalViewProps) {
 /** xterm owns its own DOM; tab title updates should not re-render the terminal. */
 export const TerminalView = memo(
   TerminalViewComponent,
-  (previous, next) => previous.cwd === next.cwd && previous.tab.id === next.tab.id,
+  (previous, next) =>
+    previous.active === next.active && previous.cwd === next.cwd && previous.tab.id === next.tab.id,
 );

@@ -9,6 +9,7 @@ members = [
   "crates/pragma-platform",
   "crates/pragma-protocol",
   "crates/pragma-server",
+  "packages/bench",
   "packages/constants",
 ]
 

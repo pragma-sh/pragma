@@ -21,6 +21,7 @@
     "tunnel",
     "keybindings",
     "agentStatus",
+    "bench",
     "files"
   ],
   "properties": {
@@ -71,6 +72,9 @@
     },
     "agentStatus": {
       "$ref": "#/definitions/AgentStatusDefaults"
+    },
+    "bench": {
+      "$ref": "#/definitions/Bench"
     },
     "files": {
       "$ref": "#/definitions/FileReadLimits"
@@ -742,6 +746,31 @@
         "configFileName": {
           "type": "string",
           "description": "Relative path of the keybindings file (e.g. `.pragma/keybindings.json`). A project file only needs the actions it overrides; missing actions fall back to the global file, then to the built-in defaults."
+        }
+      }
+    },
+    "Bench": {
+      "title": "Bench",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hookGlobal", "runnerGlobal", "markerPrefix", "tabTitle"],
+      "description": "Names the terminal benchmark (`@pragma/bench`) and the desktop app agree on. The app installs the hook global in dev builds only; the benchmark's injected runner reads it back by the same name.",
+      "properties": {
+        "hookGlobal": {
+          "type": "string",
+          "description": "`window` property under which a dev build exposes read-only access to its live xterm instances. Absent in production builds."
+        },
+        "runnerGlobal": {
+          "type": "string",
+          "description": "`window` property the benchmark installs its own injected scenario runner under. Owned by the benchmark, never by the app."
+        },
+        "markerPrefix": {
+          "type": "string",
+          "description": "Leading token of the status line the `pragma-bench tui` payload paints on its first row. The runner scans painted frames for it to learn which input the terminal has finished rendering."
+        },
+        "tabTitle": {
+          "type": "string",
+          "description": "Title given to the terminal tab the benchmark opens, so a run is identifiable in the UI and reclaimable after a crash."
         }
       }
     },
