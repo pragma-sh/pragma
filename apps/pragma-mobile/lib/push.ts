@@ -12,11 +12,22 @@ import {
   queueRevocation,
   type PendingRevocation,
 } from "./pending-revocation";
+import { createRegistrationGate } from "./registration-gate";
 
 /** Whether push registration succeeded, and why it did not when it did not. */
 export type PushRegistration =
   | { ok: true; token: string }
-  | { ok: false; reason: "denied" | "unsupported" | "failed" };
+  | { ok: false; reason: "denied" | "unsupported" | "failed" | "cancelled" };
+
+/** Orders registration against the revocation that unpairing sends after it. */
+const registrationGate = createRegistrationGate();
+
+/**
+ * How long a revocation waits for an in-flight registration before cancelling
+ * it. Long enough for a healthy host to answer, short enough that unpairing
+ * does not hang on one that has gone away.
+ */
+const REGISTRATION_SETTLE_MS = 5_000;
 
 // Expo push notifications for agent alerts. The host gateway watches its agent
 // stream and sends the same wording the desktop toast uses; this module only
@@ -39,20 +50,35 @@ export function configureNotificationHandler(): void {
  * Asks for notification permission and registers this device's Expo push token
  * with the paired host. Safe to call on every launch: Expo returns the same
  * token, and the host treats a repeat registration as a refresh.
+ *
+ * Pass `signal` to cancel a registration the caller no longer wants (the paired
+ * screen going away, for instance). The registration also runs through the gate
+ * {@link unregisterFromPush} waits on, so it can never land after the unpair
+ * that was meant to end it.
  */
-export async function registerForPush(client: PragmaClient): Promise<PushRegistration> {
+export function registerForPush(
+  client: PragmaClient,
+  options: { signal?: AbortSignal } = {},
+): Promise<PushRegistration> {
+  return registrationGate.run((signal) => registerToken(client, signal), options.signal);
+}
+
+async function registerToken(client: PragmaClient, signal: AbortSignal): Promise<PushRegistration> {
   const projectId = easProjectId();
   // Without an EAS project there is no push service to mint a token from.
   if (!projectId) return { ok: false, reason: "unsupported" };
   if (!(await ensurePermission())) return { ok: false, reason: "denied" };
   try {
     const token = await expoPushToken(projectId);
-    await client.push.register({ token });
+    // Minting cannot be aborted, so re-check before the request that would
+    // register a token the caller has since given up on.
+    if (signal.aborted) return { ok: false, reason: "cancelled" };
+    await client.push.register({ token }, { signal });
     return { ok: true, token };
   } catch {
     // A simulator without push entitlements, or an unreachable host: the app
     // works, it just will not be woken for alerts.
-    return { ok: false, reason: "failed" };
+    return { ok: false, reason: signal.aborted ? "cancelled" : "failed" };
   }
 }
 
@@ -72,11 +98,16 @@ const REVOCATION_STORE_KEY = "pragma.push-revocation.v1";
  * is no longer paired and can no longer ask it to stop. So a failed revocation
  * keeps this host's credentials queued, and {@link flushPendingRevocations}
  * retries on the next launch.
+ *
+ * A registration still in flight is waited on (then cancelled) first: a
+ * `POST /v1/push/tokens` that reached the host after this `DELETE` would
+ * re-register the token and resume delivery to a phone that just unpaired.
  */
 export async function unregisterFromPush(
   client: PragmaClient,
   config: ConnectionConfig,
 ): Promise<void> {
+  await registrationGate.settle(REGISTRATION_SETTLE_MS);
   try {
     await client.push.unregister();
     await forgetPendingRevocations(config.url);

@@ -142,6 +142,7 @@ lib/
   push.ts                        # Expo push: permission, token registration, unregister + retry
   push-route.ts                  # pure: notification data → chat route (Vitest)
   pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
+  registration-gate.ts           # pure: orders registration before unregister (Vitest)
   use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
 ```
 
@@ -175,6 +176,13 @@ lib/
   expired after 30 days so unpaired credentials are not kept forever). Pairing a host
   again forgets its queued revocation, and a 401 retires one — a rejected token can
   never revoke anything.
+- **A registration in flight is ordered before the unregister, never racing it.** The
+  `POST /v1/push/tokens` a launch fires is idempotent but not harmless: landing after an
+  unpair's `DELETE`, it re-arms delivery to a phone that is no longer paired.
+  `registration-gate.ts` (pure, Vitest) holds the single in-flight registration;
+  `unregisterFromPush` settles it first, cancelling it if the host takes longer than
+  `REGISTRATION_SETTLE_MS`. Callers pass an `AbortSignal` (the hook aborts on cleanup)
+  and a cancelled registration reports `reason: "cancelled"`, which is not warned about.
 - **Status rollup matches the desktop.** `agent-status.ts` priority is
   attention > running > done; `cleared`/none render no dot.
 - **Monorepo Metro.** `metro.config.js` watches the repo root and resolves the hoisted

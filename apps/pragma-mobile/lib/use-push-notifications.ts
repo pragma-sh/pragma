@@ -18,16 +18,16 @@ export function usePushNotifications(): void {
 
   useEffect(() => {
     if (!client || status !== "paired") return;
-    let cancelled = false;
-    void registerForPush(client).then((result) => {
-      if (!cancelled && !result.ok) {
+    // Aborting on cleanup matters beyond dropping the log line: a registration
+    // left running could reach the host after an unpair revoked the token.
+    const controller = new AbortController();
+    void registerForPush(client, { signal: controller.signal }).then((result) => {
+      if (!result.ok && result.reason !== "cancelled") {
         console.warn(`push notifications are off: ${result.reason}`);
       }
       return undefined;
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [client, status]);
 
   useEffect(() => {
