@@ -2867,6 +2867,64 @@ function useTerminalLinkOpener(
   );
 }
 
+/** The project/worktree pair a new tab would be created under, or `null` when none is selected. */
+function activeTabTarget(
+  selectedProjectId: string | null,
+  selectedWorktreeByProject: Record<string, string>,
+): TabTarget | null {
+  const projectId = selectedProjectId;
+  const worktreeId = projectId ? selectedWorktreeByProject[projectId] : undefined;
+  return projectId && worktreeId ? { projectId, worktreeId } : null;
+}
+
+/** The project/worktree a tab is created under. */
+type TabTarget = { projectId: string; worktreeId: string };
+
+/** One deduped tab-open: focus a matching tab, otherwise create one and add it. */
+type OpenDedupedTabRequest = {
+  /** Matches an already-open tab that should be focused instead of creating a new one. */
+  match: (tab: Tab, target: TabTarget) => boolean;
+  create: (target: TabTarget) => Promise<Tab>;
+  paneId?: string;
+  /** When set, a missing worktree throws with this message instead of silently returning. */
+  requireTargetError?: string;
+  /** Rethrow creation failures after reporting them, for callers that await success. */
+  rethrow?: boolean;
+};
+
+/**
+ * Shared open-or-focus flow behind every tab opener: resolve the active worktree, focus a
+ * matching tab if one exists, otherwise create the tab and dispatch it into the workspace.
+ */
+function useOpenDedupedTab(
+  state: WorkspaceState,
+  dispatch: WorkspaceDispatch,
+): (request: OpenDedupedTabRequest) => Promise<void> {
+  const { selectedProjectId, selectedWorktreeByProject, tabs } = state;
+  return useCallback(
+    async ({ match, create, paneId, requireTargetError, rethrow }: OpenDedupedTabRequest) => {
+      const target = activeTabTarget(selectedProjectId, selectedWorktreeByProject);
+      if (!target) {
+        if (requireTargetError) throw new Error(requireTargetError);
+        return;
+      }
+      const existing = tabs.find((tab) => match(tab, target));
+      if (existing) {
+        dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
+        return;
+      }
+      try {
+        const tab = await create(target);
+        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+      } catch (cause) {
+        dispatch({ type: "load-error", error: errorMessage(cause) });
+        if (rethrow) throw cause;
+      }
+    },
+    [dispatch, selectedProjectId, selectedWorktreeByProject, tabs],
+  );
+}
+
 /** Opens (or focuses) editor/diff/PR-review/daemon-log tabs, deduped per worktree. */
 function useTabOpeners(
   state: WorkspaceState,
@@ -2883,48 +2941,37 @@ function useTabOpeners(
   openPluginWebView: (request: OpenPluginWebViewRequest) => Promise<void>;
   openScratchpadFile: (filePath: string, title: string) => Promise<void>;
 } {
+  const openDedupedTab = useOpenDedupedTab(state, dispatch);
+
   const openLocatorTab = useCallback(
-    async (
+    (
       kind: "editor" | "diff",
       path: string,
       side: DiffSide | null,
       paneId: string | undefined,
       commit?: string | null,
-    ) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        return;
-      }
-      const existing = state.tabs.find(
-        (tab) =>
+    ) =>
+      openDedupedTab({
+        paneId,
+        match: (tab, { worktreeId }) =>
           tab.kind === kind &&
           tab.worktreeId === worktreeId &&
           tab.filePath === path &&
           tab.diffSide === side &&
           (tab.diffCommit ?? null) === (commit ?? null),
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await createTabCommand(
-          projectId,
-          worktreeId,
-          kind,
-          basename(path),
-          undefined,
-          path,
-          side,
-          commit ?? null,
-        );
-        dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: errorMessage(cause) });
-      }
-    },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+        create: ({ projectId, worktreeId }) =>
+          createTabCommand(
+            projectId,
+            worktreeId,
+            kind,
+            basename(path),
+            undefined,
+            path,
+            side,
+            commit ?? null,
+          ),
+      }),
+    [openDedupedTab],
   );
 
   const openFileTab = useCallback(
@@ -2939,122 +2986,70 @@ function useTabOpeners(
   );
 
   const openPluginWebView = useCallback(
-    async (request: OpenPluginWebViewRequest) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        throw new Error("Cannot open plugin web view without an active worktree");
-      }
-      const existing = request.dedupeKey
-        ? state.tabs.find(
-            (tab) =>
-              tab.kind === "plugin-webview" &&
-              tab.worktreeId === worktreeId &&
-              tab.pluginId === request.pluginId &&
-              tab.pluginViewId === request.pluginViewId &&
-              tab.pluginDedupeKey === request.dedupeKey,
-          )
-        : undefined;
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await createPluginWebViewTab({
-          projectId,
-          worktreeId,
-          title: request.title,
-          pluginId: request.pluginId,
-          pluginViewId: request.pluginViewId,
-          pluginPayload: request.payloadJson,
-          pluginDedupeKey: request.dedupeKey,
-        });
-        dispatch({ type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: errorMessage(cause) });
-        throw cause;
-      }
-    },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+    (request: OpenPluginWebViewRequest) =>
+      openDedupedTab({
+        requireTargetError: "Cannot open plugin web view without an active worktree",
+        rethrow: true,
+        match: (tab, { worktreeId }) =>
+          request.dedupeKey !== undefined &&
+          tab.kind === "plugin-webview" &&
+          tab.worktreeId === worktreeId &&
+          tab.pluginId === request.pluginId &&
+          tab.pluginViewId === request.pluginViewId &&
+          tab.pluginDedupeKey === request.dedupeKey,
+        create: ({ projectId, worktreeId }) =>
+          createPluginWebViewTab({
+            projectId,
+            worktreeId,
+            title: request.title,
+            pluginId: request.pluginId,
+            pluginViewId: request.pluginViewId,
+            pluginPayload: request.payloadJson,
+            pluginDedupeKey: request.dedupeKey,
+          }),
+      }),
+    [openDedupedTab],
   );
 
   const openReviewTab = useCallback(
-    async (prNumber: number, title: string) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        return;
-      }
-      const existing = state.tabs.find(
-        (tab) =>
+    (prNumber: number, title: string) =>
+      openDedupedTab({
+        match: (tab, { worktreeId }) =>
           tab.kind === "pr-review" && tab.worktreeId === worktreeId && tab.prNumber === prNumber,
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await createTabCommand(
-          projectId,
-          worktreeId,
-          "pr-review",
-          title,
-          undefined,
-          null,
-          null,
-          null,
-          prNumber,
-        );
-        dispatch({ type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: errorMessage(cause) });
-      }
-    },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+        create: ({ projectId, worktreeId }) =>
+          createTabCommand(
+            projectId,
+            worktreeId,
+            "pr-review",
+            title,
+            undefined,
+            null,
+            null,
+            null,
+            prNumber,
+          ),
+      }),
+    [openDedupedTab],
   );
 
-  const openDaemonLogTab = useCallback(async () => {
-    const projectId = state.selectedProjectId;
-    const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-    if (!projectId || !worktreeId) {
-      return;
-    }
-    const existing = state.tabs.find((tab) => tab.kind === "log");
-    if (existing) {
-      dispatch({ type: "set-active-tab", worktreeId: existing.worktreeId, tabId: existing.id });
-      return;
-    }
-    try {
-      const tab = await createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log"));
-      dispatch({ type: "add-tab", tab });
-    } catch (cause) {
-      dispatch({ type: "load-error", error: errorMessage(cause) });
-    }
-  }, [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs]);
+  const openDaemonLogTab = useCallback(
+    () =>
+      openDedupedTab({
+        match: (tab) => tab.kind === "log",
+        create: ({ projectId, worktreeId }) =>
+          createTabCommand(projectId, worktreeId, "log", defaultTabTitle("log")),
+      }),
+    [openDedupedTab],
+  );
 
   const openScratchpadFile = useCallback(
-    async (filePath: string, title: string) => {
-      const projectId = state.selectedProjectId;
-      const worktreeId = projectId ? state.selectedWorktreeByProject[projectId] : undefined;
-      if (!projectId || !worktreeId) {
-        return;
-      }
-      const existing = state.tabs.find(
-        (tab) =>
+    (filePath: string, title: string) =>
+      openDedupedTab({
+        match: (tab, { worktreeId }) =>
           tab.kind === "scratchpad" && tab.worktreeId === worktreeId && tab.filePath === filePath,
-      );
-      if (existing) {
-        dispatch({ type: "set-active-tab", worktreeId, tabId: existing.id });
-        return;
-      }
-      try {
-        const tab = await openScratchpadTabCommand(worktreeId, filePath, title);
-        dispatch({ type: "add-tab", tab });
-      } catch (cause) {
-        dispatch({ type: "load-error", error: errorMessage(cause) });
-      }
-    },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, state.tabs],
+        create: ({ worktreeId }) => openScratchpadTabCommand(worktreeId, filePath, title),
+      }),
+    [openDedupedTab],
   );
 
   return {

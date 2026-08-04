@@ -1,5 +1,7 @@
 import { constants } from "@pragma/constants";
 
+import { isNumber, isString, matchesShape, nullable } from "@/lib/type-guards";
+
 /** Managed metadata stored as JSON in scratchpad YAML frontmatter. */
 export interface ScratchpadMetadata {
   version: number;
@@ -72,14 +74,12 @@ export function scratchpadCommentsPath(filePath: string): string {
 }
 
 function isScratchpadMetadata(value: unknown): value is ScratchpadMetadata {
-  if (!value || typeof value !== "object") return false;
-  const metadata = value as Record<string, unknown>;
-  return (
-    typeof metadata.version === "number" &&
-    typeof metadata.id === "string" &&
-    typeof metadata.title === "string" &&
-    (typeof metadata.agentTabId === "string" || metadata.agentTabId === null) &&
-    (typeof metadata.agentId === "string" || metadata.agentId === null) &&
-    typeof metadata.createdAt === "number"
-  );
+  return matchesShape(value, {
+    version: isNumber,
+    id: isString,
+    title: isString,
+    agentTabId: nullable(isString),
+    agentId: nullable(isString),
+    createdAt: isNumber,
+  });
 }

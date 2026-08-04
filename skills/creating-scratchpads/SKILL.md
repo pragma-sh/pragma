@@ -12,7 +12,6 @@ Suggest (or just create) a scratchpad when the answer is more than linear text:
 
 - **Plan / design / architecture writeup** the user will read, edit, and comment on.
 
-
 - **Complex comparison, matrix, table, checklist, chart** — anything with structure.
 - **Long-running multi-tab work** — use `AgentProgress` for live status.
 - **Anything the user will keep and revisit.** Terminal scrollback is disposable; a scratchpad is a file with a tab.
@@ -33,7 +32,7 @@ The file argument must end in `.mdx` (or be `-`). The command copies source into
 
 Requires Pragma terminal environment (`PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`, `PRAGMA_SERVER_SOCKET`). Creator must be a terminal tab in the current worktree.
 
-The attached agent tab is what every interactive component talks back to — a user answer or diff decision arrives as input in *your* terminal. Write the document expecting to be prompted later.
+The attached agent tab is what every interactive component talks back to — a user answer or diff decision arrives as input in _your_ terminal. Write the document expecting to be prompted later.
 
 ## Authoring MDX
 

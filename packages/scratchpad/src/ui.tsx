@@ -196,44 +196,90 @@ function AskQuestionChoices({
         send();
       }}
     >
-      <div className="pragma-choices" role={multiple ? "group" : "radiogroup"}>
-        {items.map((option) => {
-          const value = choiceValue(option);
-          const checked = selected.includes(value);
-          return (
-            <Choice
-              checked={checked}
-              disabled={pending}
-              key={value}
-              label={
-                value === OTHER_VALUE && checked ? (
-                  <Input
-                    className="pragma-choice__other"
-                    disabled={pending}
-                    // The field sits inside the row's `<label>`; without this the
-                    // click would bubble and re-toggle the choice it belongs to.
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => setOther(event.target.value)}
-                    placeholder="Answer in your own words"
-                    value={other}
-                  />
-                ) : (
-                  option.label
-                )
-              }
-              multiple={multiple}
-              name={group}
-              onSelect={() => toggle(value)}
-            />
-          );
-        })}
+      <div className="pragma-choices" role={choiceGroupRole(multiple)}>
+        {items.map((option) => (
+          <ChoiceRow
+            checked={selected.includes(choiceValue(option))}
+            disabled={pending}
+            group={group}
+            key={choiceValue(option)}
+            multiple={multiple}
+            onOtherChange={setOther}
+            onSelect={toggle}
+            option={option}
+            other={other}
+          />
+        ))}
       </div>
-      <div className="pragma-row pragma-row--end">
-        <Button disabled={pending || !answer} type="submit" variant="primary">
-          {pending ? "Sending…" : submitLabel}
-        </Button>
-      </div>
+      <ChoiceSubmit answer={answer} label={submitLabel} pending={pending} />
     </form>
+  );
+}
+
+/** ARIA role for the choice container: a radiogroup unless several answers are allowed. */
+function choiceGroupRole(multiple: boolean): "group" | "radiogroup" {
+  return multiple ? "group" : "radiogroup";
+}
+
+/** Submit row for {@link AskQuestionChoices}, disabled until something is selected. */
+function ChoiceSubmit({
+  answer,
+  label,
+  pending,
+}: {
+  answer: string;
+  label: string;
+  pending: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="pragma-row pragma-row--end">
+      <Button disabled={pending || !answer} type="submit" variant="primary">
+        {pending ? "Sending…" : label}
+      </Button>
+    </div>
+  );
+}
+
+interface ChoiceRowProps {
+  checked: boolean;
+  disabled: boolean;
+  group: string;
+  multiple: boolean;
+  onOtherChange: (value: string) => void;
+  onSelect: (value: string) => void;
+  option: AskQuestionOption;
+  other: string;
+}
+
+/** One row of {@link AskQuestionChoices}, swapping "Other" for a text field once picked. */
+function ChoiceRow(props: ChoiceRowProps): React.JSX.Element {
+  const { checked, disabled, group, multiple, onOtherChange, onSelect, option, other } = props;
+  const value = choiceValue(option);
+  const isOtherField = value === OTHER_VALUE && checked;
+  return (
+    <Choice
+      checked={checked}
+      disabled={disabled}
+      label={
+        isOtherField ? (
+          <Input
+            className="pragma-choice__other"
+            disabled={disabled}
+            // The field sits inside the row's `<label>`; without this the
+            // click would bubble and re-toggle the choice it belongs to.
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onOtherChange(event.target.value)}
+            placeholder="Answer in your own words"
+            value={other}
+          />
+        ) : (
+          option.label
+        )
+      }
+      multiple={multiple}
+      name={group}
+      onSelect={() => onSelect(value)}
+    />
   );
 }
 

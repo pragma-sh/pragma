@@ -233,42 +233,63 @@ function rendersComponent(source: string, local: string): boolean {
   return new RegExp(`_jsx(?:s)?\\(\\s*${local}\\b`).test(source);
 }
 
+/** Splits a bare specifier into its package name and the subpath below it (`""` for the root). */
+function splitPackageSpecifier(specifier: string): { packageName: string; subpath: string } {
+  const segments = specifier.split("/");
+  const scoped = specifier.startsWith("@");
+  const packageName = scoped ? segments.slice(0, 2).join("/") : (segments[0] ?? "");
+  return { packageName, subpath: segments.slice(scoped ? 2 : 1).join("/") };
+}
+
+/** Reads and parses an installed package's `package.json`. */
+async function readPackageJson(
+  worktreeId: string,
+  packageRoot: string,
+  packageName: string,
+): Promise<Package> {
+  const raw = await readFile(worktreeId, `${packageRoot}/package.json`);
+  if (raw.binary || raw.truncated) throw new Error(`${packageName}/package.json is not readable`);
+  return JSON.parse(raw.text) as Package;
+}
+
+/** The entry a package's `exports` map declares for `subpath`, if it declares one. */
+function exportedEntry(pkg: Package, subpath: string): string | undefined {
+  return resolve(pkg, subpath ? `./${subpath}` : ".", {
+    browser: true,
+    conditions: [import.meta.env.DEV ? "development" : "production"],
+  })?.[0];
+}
+
+/** The pre-`exports` `browser`/`module`/`main` entry, falling back to `index.js`. */
+function legacyEntry(pkg: Package): string {
+  const browserFallback = legacy(pkg, { browser: true, fields: ["module", "main"] });
+  if (typeof browserFallback === "string") return browserFallback;
+  const fallback = legacy(pkg, { browser: false, fields: ["module", "main"] });
+  return typeof fallback === "string" ? fallback : "index.js";
+}
+
 async function resolveLocalPackage(
   worktreeId: string,
   specifier: string,
   importerDirectory: string,
 ): Promise<string | null> {
-  const segments = specifier.split("/");
-  const packageName = specifier.startsWith("@")
-    ? segments.slice(0, 2).join("/")
-    : (segments[0] ?? "");
+  const { packageName, subpath } = splitPackageSpecifier(specifier);
   if (!packageName) return null;
-  const subpath = segments.slice(packageName.startsWith("@") ? 2 : 1).join("/");
   const packageRoot = await nearestPackageRoot(worktreeId, importerDirectory, packageName);
   if (!packageRoot) return null;
-  const packageJsonPath = `${packageRoot}/package.json`;
-  const raw = await readFile(worktreeId, packageJsonPath);
-  if (raw.binary || raw.truncated) throw new Error(`${packageName}/package.json is not readable`);
-  const pkg = JSON.parse(raw.text) as Package;
-  const entryName = subpath ? `./${subpath}` : ".";
-  const exported = resolve(pkg, entryName, {
-    browser: true,
-    conditions: [import.meta.env.DEV ? "development" : "production"],
-  })?.[0];
-  if (subpath && pkg.exports && !exported) {
-    throw new Error(`${specifier} is not exported by installed package ${packageName}`);
-  }
+  const pkg = await readPackageJson(worktreeId, packageRoot, packageName);
+  const exported = exportedEntry(pkg, subpath);
+
   if (subpath && !exported) {
+    if (pkg.exports) {
+      throw new Error(`${specifier} is not exported by installed package ${packageName}`);
+    }
     const direct = await resolveLocalFile(worktreeId, `${packageRoot}/${subpath}`);
     if (!direct) throw new Error(`Could not resolve ${specifier} from installed package`);
     return direct;
   }
-  const browserFallback = legacy(pkg, { browser: true, fields: ["module", "main"] });
-  const fallback =
-    typeof browserFallback === "string"
-      ? browserFallback
-      : legacy(pkg, { browser: false, fields: ["module", "main"] });
-  const entry = exported ?? (typeof fallback === "string" ? fallback : "index.js");
+
+  const entry = exported ?? legacyEntry(pkg);
   const resolved = await resolveLocalFile(worktreeId, joinPath(packageRoot, entry));
   if (!resolved) throw new Error(`Could not resolve entry for installed package ${packageName}`);
   return resolved;

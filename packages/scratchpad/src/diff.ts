@@ -199,14 +199,19 @@ function diffSequences<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
   return [...head, ...diffMiddle(midA, midB), ...tail];
 }
 
-function diffMiddle<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
-  if (a.length === 0 || b.length === 0 || a.length * b.length > MAX_DP_CELLS) {
-    return [
-      ...a.map((value): Edit<T> => ({ kind: "remove", value })),
-      ...b.map((value): Edit<T> => ({ kind: "insert", value })),
-    ];
-  }
+/** Every element of `a` removed, then every element of `b` inserted. */
+function replaceAll<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
+  return [
+    ...a.map((value): Edit<T> => ({ kind: "remove", value })),
+    ...b.map((value): Edit<T> => ({ kind: "insert", value })),
+  ];
+}
 
+/**
+ * Row-major LCS table where cell `(i, j)` holds the LCS length of `a[i..]` and `b[j..]`.
+ * Row stride is `b.length + 1`, so the trailing row/column of zero sentinels is included.
+ */
+function lcsTable<T>(a: readonly T[], b: readonly T[]): Uint32Array {
   const width = b.length + 1;
   const lengths = new Uint32Array((a.length + 1) * width);
   for (let i = a.length - 1; i >= 0; i -= 1) {
@@ -217,7 +222,22 @@ function diffMiddle<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
           : Math.max(lengths[(i + 1) * width + j] ?? 0, lengths[i * width + j + 1] ?? 0);
     }
   }
+  return lengths;
+}
 
+function diffMiddle<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
+  if (a.length === 0 || b.length === 0 || a.length * b.length > MAX_DP_CELLS) {
+    return replaceAll(a, b);
+  }
+  return walkLcsTable(a, b, lcsTable(a, b));
+}
+
+/**
+ * Walks the LCS table from `(0, 0)`, taking the branch that keeps the longer
+ * common subsequence ahead of it, then replaces whatever tail is left over.
+ */
+function walkLcsTable<T>(a: readonly T[], b: readonly T[], lengths: Uint32Array): Edit<T>[] {
+  const width = b.length + 1;
   const edits: Edit<T>[] = [];
   let i = 0;
   let j = 0;
@@ -236,11 +256,5 @@ function diffMiddle<T>(a: readonly T[], b: readonly T[]): Edit<T>[] {
       j += 1;
     }
   }
-  for (const value of a.slice(i)) {
-    edits.push({ kind: "remove", value });
-  }
-  for (const value of b.slice(j)) {
-    edits.push({ kind: "insert", value });
-  }
-  return edits;
+  return [...edits, ...replaceAll(a.slice(i), b.slice(j))];
 }

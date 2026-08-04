@@ -2,6 +2,8 @@ import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
+import { isNumber, isString, matchesShape, nullable } from "@/lib/type-guards";
+
 /** One persisted scratchpad range comment. */
 export interface ScratchpadComment {
   id: string;
@@ -233,15 +235,13 @@ function sameRange(a: ScratchpadRange | null, b: ScratchpadRange | null): boolea
 }
 
 function isScratchpadComment(value: unknown): value is ScratchpadComment {
-  if (!value || typeof value !== "object") return false;
-  const comment = value as Record<string, unknown>;
-  return (
-    typeof comment.id === "string" &&
-    typeof comment.from === "number" &&
-    typeof comment.to === "number" &&
-    typeof comment.quote === "string" &&
-    typeof comment.text === "string" &&
-    typeof comment.createdAt === "number" &&
-    (typeof comment.resolvedAt === "number" || comment.resolvedAt === null)
-  );
+  return matchesShape(value, {
+    id: isString,
+    from: isNumber,
+    to: isNumber,
+    quote: isString,
+    text: isString,
+    createdAt: isNumber,
+    resolvedAt: nullable(isNumber),
+  });
 }

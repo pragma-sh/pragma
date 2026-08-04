@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
 import type { EditorView as CodeMirrorView } from "@codemirror/view";
+import type { EditorView as ProseMirrorView } from "@tiptap/pm/view";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
@@ -43,6 +44,20 @@ const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown"]);
 export interface MarkdownInlineEditRequest {
   selectedText: string;
   occurrence: number;
+}
+
+/**
+ * Describes the current TipTap selection for inline AI. The occurrence index
+ * disambiguates which copy of the selected text raw Markdown should rewrite.
+ */
+export function inlineEditRequestFor(view: ProseMirrorView): MarkdownInlineEditRequest {
+  const { from, to } = view.state.selection;
+  const selectedText = view.state.doc.textBetween(from, to, "\n");
+  const before = view.state.doc.textBetween(0, from, "\n");
+  return {
+    selectedText,
+    occurrence: selectedText ? before.split(selectedText).length - 1 : 0,
+  };
 }
 
 /** True when the file should open in the markdown preview/editor surface. */
@@ -113,29 +128,20 @@ function MarkdownWysiwyg({
         class:
           "tiptap prose prose-invert prose-sm max-w-3xl min-h-full px-6 py-4 focus:outline-none",
       },
-      handleKeyDown: (_view, event) => {
-        if (
-          (event.metaKey || event.ctrlKey) &&
-          !event.altKey &&
-          !event.shiftKey &&
-          event.key.toLowerCase() === "k"
-        ) {
+      handleKeyDown: (view, event) => {
+        if (!event.metaKey && !event.ctrlKey) return false;
+        const key = event.key.toLowerCase();
+        if (key === "k" && !event.altKey && !event.shiftKey) {
           event.preventDefault();
-          const { from, to } = _view.state.selection;
-          const selectedText = _view.state.doc.textBetween(from, to, "\n");
-          const before = _view.state.doc.textBetween(0, from, "\n");
-          onInlineEdit({
-            selectedText,
-            occurrence: selectedText ? before.split(selectedText).length - 1 : 0,
-          });
+          onInlineEdit(inlineEditRequestFor(view));
           return true;
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        if (key === "s") {
           event.preventDefault();
           onSaveRef.current();
           return true;
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        if (key === "f") {
           event.preventDefault();
           findRef.current.openBar();
           return true;

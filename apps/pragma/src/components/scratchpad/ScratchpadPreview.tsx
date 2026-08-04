@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { ScratchpadAgentProgress } from "@pragma/scratchpad";
-
 // oxlint-disable-next-line import/default -- Vite synthesizes default URL export for worker query.
 import frameRuntimeUrl from "@/components/scratchpad/scratchpad-frame-runtime.tsx?worker&url";
+import { useScratchpadFrameBridge } from "@/components/scratchpad/use-scratchpad-frame-bridge";
 import { buildScratchpadPreview } from "@/lib/mdx-preview";
 import { scratchpadTheme, type ScratchpadTheme } from "@/lib/scratchpad-theme";
-import { scratchpadPromptAgent } from "@/lib/tauri";
-import { THEME_CHANGED_EVENT } from "@/lib/theme";
-import { useAgentStatusSnapshot } from "@/state/agent-status-store";
-import { useWorkspace } from "@/state/workspace-context";
 
 /** Id of the frame's theme block, rewritten in place when the desktop theme changes. */
 const THEME_STYLE_ELEMENT_ID = "pragma-scratchpad-theme";
@@ -22,20 +17,6 @@ interface ScratchpadPreviewProps {
   onRequestAgentAttachment: () => Promise<boolean>;
 }
 
-interface FrameRequest {
-  channel: "pragma-scratchpad";
-  token: string;
-  type: "request";
-  id: string;
-  method:
-    | "promptAgent"
-    | "requestAgentAttachment"
-    | "subscribeAgentProgress"
-    | "unsubscribeAgentProgress";
-  text?: string;
-  tabIds?: string[];
-}
-
 /** Sandboxed live renderer for one scratchpad MDX component region. */
 export function ScratchpadPreview({
   source,
@@ -46,15 +27,10 @@ export function ScratchpadPreview({
 }: ScratchpadPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const tokenRef = useRef(crypto.randomUUID());
-  const subscriptionsRef = useRef(new Map<string, string[]>());
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(true);
   const [height, setHeight] = useState(96);
-  const workspace = useWorkspace();
-  const statuses = useAgentStatusSnapshot();
-  const getAttachedRef = useRef(getAttachedAgentTabId);
-  getAttachedRef.current = getAttachedAgentTabId;
 
   useEffect(() => {
     let current = true;
@@ -78,120 +54,16 @@ export function ScratchpadPreview({
     };
   }, [source, filePath, worktreeId]);
 
-  useEffect(() => {
-    const receive = (event: MessageEvent<unknown>): void => {
-      if (event.source !== iframeRef.current?.contentWindow) {
-        return;
-      }
-      if (isFrameRenderError(event.data, tokenRef.current)) {
-        setError(event.data.message);
-        return;
-      }
-      if (isFrameResize(event.data, tokenRef.current)) {
-        setHeight(Math.max(64, Math.min(event.data.height, 4096)));
-        return;
-      }
-      if (!isFrameRequest(event.data, tokenRef.current)) return;
-      const request = event.data;
-      if (request.method === "unsubscribeAgentProgress") {
-        subscriptionsRef.current.delete(request.id);
-        return;
-      }
-      if (request.method === "subscribeAgentProgress") {
-        subscriptionsRef.current.set(request.id, request.tabIds ?? []);
-        postProgress(request.id, request.tabIds ?? []);
-        return;
-      }
-      void handleRequest(request);
-    };
-    globalThis.addEventListener("message", receive);
-    return () => globalThis.removeEventListener("message", receive);
+  useScratchpadFrameBridge({
+    iframeRef,
+    token: tokenRef.current,
+    worktreeId,
+    srcDoc,
+    getAttachedAgentTabId,
+    onRequestAgentAttachment,
+    onRenderError: setError,
+    onResize: setHeight,
   });
-
-  useEffect(() => {
-    for (const [id, tabIds] of subscriptionsRef.current) postProgress(id, tabIds);
-    // Current render owns latest status/tab snapshot; callback identity is intentionally excluded.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [statuses, workspace.tabs]);
-
-  useEffect(() => {
-    subscriptionsRef.current.clear();
-  }, [srcDoc]);
-
-  // Theme edits and color-scheme switches restyle a live frame in place; a
-  // rebuild would discard the component state the scratchpad is holding.
-  useEffect(() => {
-    const publish = (): void => {
-      const theme = scratchpadTheme();
-      post({ type: "theme", mode: theme.mode, css: theme.css });
-    };
-    globalThis.addEventListener(THEME_CHANGED_EVENT, publish);
-    const observer = new MutationObserver(publish);
-    observer.observe(document.documentElement, {
-      attributeFilter: ["class"],
-      attributes: true,
-    });
-    return () => {
-      globalThis.removeEventListener(THEME_CHANGED_EVENT, publish);
-      observer.disconnect();
-    };
-    // `post` closes over a ref, so it is stable across renders by construction.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const post = (message: object): void => {
-    iframeRef.current?.contentWindow?.postMessage(
-      { channel: "pragma-scratchpad", token: tokenRef.current, ...message },
-      "*",
-    );
-  };
-
-  const progressFor = (tabIds: readonly string[]): ScratchpadAgentProgress[] => {
-    const requested = new Set(tabIds);
-    return workspace.tabs
-      .filter((tab) => requested.has(tab.id) && tab.worktreeId === worktreeId && tab.agentId)
-      .map((tab) => {
-        const live = statuses.find(
-          (status) => status.worktreeId === worktreeId && status.tabId === tab.id,
-        );
-        return {
-          tabId: tab.id,
-          title: tab.title ?? undefined,
-          agent: live?.agent ?? tab.agentId ?? undefined,
-          status: live?.status ?? "cleared",
-        };
-      });
-  };
-
-  const postProgress = (id: string, tabIds: readonly string[]): void => {
-    post({ type: "progress", id, entries: progressFor(tabIds) });
-  };
-
-  const handleRequest = async (request: FrameRequest): Promise<void> => {
-    try {
-      if (request.method === "requestAgentAttachment") {
-        const attached = await onRequestAgentAttachment();
-        post({ type: "response", id: request.id, value: attached });
-        return;
-      }
-      const tabId = getAttachedRef.current();
-      const attachedExists = workspace.tabs.some(
-        (tab) => tab.id === tabId && tab.worktreeId === worktreeId && tab.agentId,
-      );
-      if (!tabId || !attachedExists) {
-        post({ type: "response", id: request.id, value: "missing-agent" });
-        return;
-      }
-      await scratchpadPromptAgent(worktreeId, tabId, request.text ?? "");
-      post({ type: "response", id: request.id, value: "sent" });
-    } catch (cause) {
-      post({
-        type: "response",
-        id: request.id,
-        error: cause instanceof Error ? cause.message : String(cause),
-      });
-    }
-  };
 
   if (building)
     return (
@@ -279,43 +151,6 @@ function bridgeBootstrap(token: string): string {
     new ResizeObserver(reportSize).observe(document.documentElement);
     addEventListener("load", reportSize);
   })();`;
-}
-
-function isFrameRequest(value: unknown, token: string): value is FrameRequest {
-  if (!value || typeof value !== "object") return false;
-  const message = value as Record<string, unknown>;
-  return (
-    message.channel === "pragma-scratchpad" &&
-    message.token === token &&
-    message.type === "request" &&
-    typeof message.id === "string" &&
-    (message.method === "promptAgent" ||
-      message.method === "requestAgentAttachment" ||
-      message.method === "subscribeAgentProgress" ||
-      message.method === "unsubscribeAgentProgress")
-  );
-}
-
-function isFrameRenderError(
-  value: unknown,
-  token: string,
-): value is { token: string; type: "render-error"; message: string } {
-  if (!value || typeof value !== "object") return false;
-  const message = value as Record<string, unknown>;
-  return (
-    message.token === token &&
-    message.type === "render-error" &&
-    typeof message.message === "string"
-  );
-}
-
-function isFrameResize(
-  value: unknown,
-  token: string,
-): value is { token: string; type: "resize"; height: number } {
-  if (!value || typeof value !== "object") return false;
-  const message = value as Record<string, unknown>;
-  return message.token === token && message.type === "resize" && typeof message.height === "number";
 }
 
 function escapeHtmlAttribute(value: string): string {
