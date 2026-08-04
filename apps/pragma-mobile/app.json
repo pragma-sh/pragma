@@ -24,7 +24,47 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#ffffff",
-          "dark": { "backgroundColor": "#0b0b0c" }
+          "dark": {
+            "backgroundColor": "#0b0b0c"
+          }
+        }
+      ],
+      [
+        "expo-widgets",
+        {
+          "widgets": [
+            {
+              "name": "PragmaAttention",
+              "displayName": "Needs Attention",
+              "description": "How many agents are waiting on you.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "accessoryCircular",
+                  "accessoryRectangular",
+                  "accessoryInline"
+                ]
+              }
+            },
+            {
+              "name": "PragmaAgents",
+              "displayName": "Agent Status",
+              "description": "Agents working, needing attention, and done.",
+              "ios": { "supportedFamilies": ["systemMedium"] }
+            },
+            {
+              "name": "PragmaInbox",
+              "displayName": "Inbox",
+              "description": "The approvals and questions waiting for a decision.",
+              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+            },
+            {
+              "name": "PragmaProjects",
+              "displayName": "Projects",
+              "description": "Agent status rolled up per project.",
+              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+            }
+          ]
         }
       ]
     ],

@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionProvider, useConnection } from "@/lib/connection-context";
 import { DataProvider } from "@/lib/data/data-context";
 import { useThemeColors } from "@/lib/theme";
+import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
 
 /**
  * Root layout: global providers, tab navigator, and full-screen chat. Native headers and the
@@ -24,12 +25,19 @@ export default function RootLayout() {
         <ConnectionProvider>
           <DataProvider>
             <StatusBar style="auto" />
+            <WidgetSync />
             <ConnectionGate />
           </DataProvider>
         </ConnectionProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** Keeps the iOS home-screen widgets in step with the live workspace. */
+function WidgetSync() {
+  useWidgetSync();
+  return null;
 }
 
 /** Renders pairing as the whole app until the host connection is verified. */
