@@ -267,6 +267,15 @@ pub enum EventFrame {
         session_id: String,
         data: Vec<u8>,
     },
+    /// Starts terminal output delivery at an absolute byte cursor. A reconnect
+    /// resumes from its last accepted cursor; `reset` means that cursor fell
+    /// outside retained scrollback and the client must rebuild from this point.
+    Replay {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        cursor: u64,
+        reset: bool,
+    },
     /// Shell-emitted window title (OSC 0 / OSC 2).
     Title {
         #[serde(rename = "sessionId")]
@@ -765,6 +774,7 @@ mod tests {
             | ServerFrame::ControlResult(_)
             | ServerFrame::Event(
                 EventFrame::Output { .. }
+                | EventFrame::Replay { .. }
                 | EventFrame::Exit { .. }
                 | EventFrame::Agent { .. }
                 | EventFrame::AgentMessage { .. }

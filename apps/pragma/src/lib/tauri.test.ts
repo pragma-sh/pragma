@@ -39,6 +39,10 @@ import {
   openWorktree,
   paletteSearch,
   pathExists,
+  ptyAttach,
+  ptyDetach,
+  ptySpawn,
+  ptySpawnDetached,
   readAutomationSource,
   readFile,
   renameFile,
@@ -48,6 +52,7 @@ import {
   setWorktreeHidden,
   stageAll,
   stageFile,
+  stopWatchingWorktreeFiles,
   touchWorktreeMru,
   unstageAll,
   unstageFile,
@@ -55,9 +60,66 @@ import {
   worktreesAreRemote,
   worktreesMergedStatus,
   worktreeStatus,
+  watchWorktreeFiles,
   writeAutomationSource,
   writeFile,
 } from "./tauri";
+
+describe("stream IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("assigns distinct generations to PTY streams and detaches one exact generation", async () => {
+    const onEvent = vi.fn();
+    const spawned = await ptySpawn("session", "worktree", "/repo", 80, 24, onEvent);
+    const attached = await ptyAttach("session", 120, 40, 42, onEvent);
+
+    expect(attached.generation).toBeGreaterThan(spawned.generation);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "pty_spawn",
+      expect.objectContaining({ streamGeneration: spawned.generation }),
+    );
+    expect(invokeMock).toHaveBeenCalledWith(
+      "pty_attach",
+      expect.objectContaining({ cursor: 42, streamGeneration: attached.generation }),
+    );
+
+    void ptyDetach("session", spawned.generation);
+    expect(invokeMock).toHaveBeenCalledWith("pty_detach", {
+      sessionId: "session",
+      streamGeneration: spawned.generation,
+    });
+  });
+
+  it("spawns detached sessions without creating a channel", () => {
+    void ptySpawnDetached("session", "worktree", "/repo", 80, 24);
+    expect(invokeMock).toHaveBeenCalledWith("pty_spawn_detached", {
+      sessionId: "session",
+      worktreeId: "worktree",
+      cwd: "/repo",
+      cols: 80,
+      rows: 24,
+    });
+  });
+
+  it("tracks and stops exact filesystem subscriptions", async () => {
+    const subscription = await watchWorktreeFiles("worktree", vi.fn());
+    expect(invokeMock).toHaveBeenCalledWith(
+      "watch_worktree_files",
+      expect.objectContaining({
+        worktreeId: "worktree",
+        subscriptionId: subscription.subscriptionId,
+      }),
+    );
+
+    void stopWatchingWorktreeFiles(subscription.subscriptionId);
+    expect(invokeMock).toHaveBeenCalledWith("stop_watching_worktree_files", {
+      subscriptionId: subscription.subscriptionId,
+    });
+  });
+});
 
 describe("browser IPC wrappers", () => {
   beforeEach(() => {

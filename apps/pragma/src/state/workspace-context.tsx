@@ -1453,10 +1453,27 @@ function reduceHydrateSelection(
 }
 
 function reduceSetTabs(state: WorkspaceState, action: ActionOf<"set-tabs">): WorkspaceState {
+  // A refresh can race a local `set-tab-agent`: list_tabs may still lack the
+  // daemon overlay. Keep any in-memory agent identity the refresh omitted.
+  const previousById = new Map(state.tabs.map((tab) => [tab.id, tab]));
+  const tabs = action.tabs.map((tab) => {
+    if (tab.agentId) {
+      return tab;
+    }
+    const previous = previousById.get(tab.id);
+    if (!previous?.agentId) {
+      return tab;
+    }
+    return {
+      ...tab,
+      agentId: previous.agentId,
+      title: tab.userRenamed ? tab.title : (previous.title ?? tab.title),
+    };
+  });
   return {
     ...state,
-    tabs: action.tabs,
-    splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, action.tabs),
+    tabs,
+    splitRootByWorktree: rootsForTabs(state.splitRootByWorktree, tabs),
   };
 }
 
@@ -1766,8 +1783,9 @@ async function createScriptTabForCommand(
   const offscreenHost = document.createElement("div");
   offscreenHost.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:80ch;height:24em;";
   document.body.append(offscreenHost);
-  terminalManager.mount(tab, ctx.cwd, offscreenHost);
+  const hostGeneration = terminalManager.mount(tab, ctx.cwd, offscreenHost);
   offscreenHost.remove();
+  terminalManager.park(tab.id, hostGeneration);
   // Script tabs are unattended (no one is sitting at the terminal to close
   // them), so a script that finishes or crashes on its own must close its
   // own tab; closeTab already drops the tab from managedScriptsState and
@@ -3157,13 +3175,33 @@ function useTabLifecycle(
 
 /** Keeps the in-memory workspace snapshot synced after brokered CLI mutations. */
 function useWorkspaceChangedListener(
+  tabs: readonly Tab[],
   dispatch: WorkspaceDispatch,
   refreshProject: (projectId?: string | null) => Promise<void>,
 ): void {
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const refreshProjectRef = useRef(refreshProject);
   refreshProjectRef.current = refreshProject;
   const handleChanged = useCallback(
     (payload: WorkspaceChangedEvent) => {
+      const removedTabIds =
+        payload.action === "tabClosed" && payload.tabId
+          ? [payload.tabId]
+          : payload.action === "worktreeDeleted" && payload.worktreeId
+            ? tabsRef.current
+                .filter((tab) => tab.worktreeId === payload.worktreeId)
+                .map((tab) => tab.id)
+            : [];
+      for (const tabId of removedTabIds) {
+        terminalManager.dispose(tabId);
+        removeAgentStatusForTab(tabId);
+        releaseAlertLatchForTab(tabId);
+      }
+      // `tabOpened` is for interactive CLI opens (select so the user sees it).
+      // `tabOpenedBackground` is for mobile/Kanban-style agent launches: refresh
+      // the snapshot only — selecting would mount a terminal and spawn an empty
+      // shell that races the background agent `ptySpawn`.
       if (payload.action === "tabOpened" && payload.worktreeId && payload.tabId) {
         dispatch({
           type: "select-worktree",
@@ -3642,14 +3680,23 @@ function useWorktreeActions(
 
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
+      const removedTabs = state.tabs.filter((tab) => tab.worktreeId === worktreeId);
       await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+      for (const tab of removedTabs) {
+        terminalManager.dispose(tab.id);
+        removeAgentStatusForTab(tab.id);
+        releaseAlertLatchForTab(tab.id);
+        if (tab.kind === "browser") {
+          void browserClose(tab.id);
+        }
+      }
       dispatch({ type: "remove-worktree", worktreeId });
       setManagedScriptsState((current) => {
         const { [worktreeId]: _, ...remaining } = current;
         return remaining;
       });
     },
-    [dispatch, setManagedScriptsState],
+    [dispatch, setManagedScriptsState, state.tabs],
   );
 
   const renameWorktree = useCallback(
@@ -3971,6 +4018,9 @@ function useSplitActions(
       } else {
         dispatch({ type: "set-active-tab", worktreeId: selectedWorktreeId, tabId });
       }
+      if (visibleTabs.find((tab) => tab.id === tabId)?.kind === "terminal") {
+        terminalManager.focus(tabId, true);
+      }
     },
     [
       activeTabId,
@@ -4178,7 +4228,7 @@ function useWorkspaceListeners({
   setActiveTabRef: RefObject<(tabId: string | null) => void>;
 }): void {
   useProjectLoading(state, dispatch, reload);
-  useWorkspaceChangedListener(dispatch, refreshProject);
+  useWorkspaceChangedListener(state.tabs, dispatch, refreshProject);
   useTabMetaListeners(dispatch, tabsRef, terminalTabIdsKey, setActiveTabRef);
 }
 

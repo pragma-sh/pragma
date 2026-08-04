@@ -145,17 +145,18 @@ const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string
   "plugin-webview": (tab) => <PluginWebViewTab key={tab.id} tab={tab} />,
 };
 
-/** Render a pane's active tab, defaulting unknown kinds to a terminal view. */
+/** Render a pane's active non-terminal tab. */
 function renderActiveTab(activeTab: Tab, cwd: string): ReactNode {
   const render = PANE_CONTENT_RENDERERS[activeTab.kind];
   if (render) return render(activeTab, cwd);
-  return <TerminalView cwd={cwd} key={activeTab.id} tab={activeTab} />;
+  return null;
 }
 
 /** Focus/activate the active tab's surface when a pane receives focus. */
 function activatePaneTab(activeTab: Tab): void {
   if (activeTab.kind === "terminal") {
     terminalManager.activate(activeTab.id);
+    terminalManager.focus(activeTab.id);
     return;
   }
   if (activeTab.kind === "browser") {
@@ -187,6 +188,7 @@ function paneBorderClass(showBar: boolean, focused: boolean): string {
   return focused ? "border-primary/35" : "border-border";
 }
 
+// fallow-ignore-next-line complexity -- pane focus, drag drop zones, and terminal retention share one React surface; extracting would reintroduce prop drilling across the split tree.
 function SplitPane({
   pane,
   showPaneBars,
@@ -205,6 +207,9 @@ function SplitPane({
     () => tabs.find((tab) => tab.id === pane.activeTabId) ?? tabs[0] ?? null,
     [tabs, pane.activeTabId],
   );
+  const [retainedTerminalIds, setRetainedTerminalIds] = useState<Set<string>>(() =>
+    activeTab?.kind === "terminal" ? new Set([activeTab.id]) : new Set(),
+  );
   const focused = workspace.focusedPaneId === pane.id;
   const showBar = showPaneBars;
   const cwd = useMemo(
@@ -212,7 +217,12 @@ function SplitPane({
     [activeTab, worktreePathById, workspace.selectedWorktree?.path],
   );
 
-  const handlePointerDown = useCallback(() => workspace.focusPane(pane.id), [workspace, pane.id]);
+  const handlePointerDown = useCallback(() => {
+    workspace.focusPane(pane.id);
+    if (activeTab?.kind === "terminal") {
+      terminalManager.focus(activeTab.id, true);
+    }
+  }, [activeTab, workspace, pane.id]);
   const handleSplitDrop = useCallback(
     (tabId: string, target: DropTarget) =>
       workspace.splitTabAtPane(tabId, pane.id, target.direction, target.placement),
@@ -225,6 +235,19 @@ function SplitPane({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- keyed on the active tab's id/kind, not the per-render `activeTab` object identity.
   }, [activeTab?.id, activeTab?.kind, focused]);
 
+  useEffect(() => {
+    if (activeTab?.kind !== "terminal") return;
+    setRetainedTerminalIds((current) => {
+      if (current.has(activeTab.id)) return current;
+      return new Set(current).add(activeTab.id);
+    });
+  }, [activeTab?.id, activeTab?.kind]);
+
+  const retainedTerminals = tabs.filter(
+    (tab) =>
+      tab.kind === "terminal" && (tab.id === activeTab?.id || retainedTerminalIds.has(tab.id)),
+  );
+
   return (
     <section
       className={cn(
@@ -235,7 +258,24 @@ function SplitPane({
     >
       {showBar && <PaneBar activeTabId={activeTab?.id ?? null} pane={pane} tabs={tabs} />}
       <div className="relative min-h-0 flex-1">
-        {activeTab ? renderActiveTab(activeTab, cwd) : null}
+        {retainedTerminals.map((tab) => {
+          const active = tab.id === activeTab?.id;
+          const terminalCwd = resolvePaneCwd(
+            tab,
+            worktreePathById,
+            workspace.selectedWorktree?.path,
+          );
+          return (
+            <div
+              aria-hidden={!active}
+              className={cn("absolute inset-0", !active && "hidden")}
+              key={tab.id}
+            >
+              <TerminalView active={active} cwd={terminalCwd} tab={tab} />
+            </div>
+          );
+        })}
+        {activeTab && activeTab.kind !== "terminal" ? renderActiveTab(activeTab, cwd) : null}
         {isDragging && <PaneDropZone draggingTabId={draggingTabId} onDrop={handleSplitDrop} />}
       </div>
     </section>
@@ -310,6 +350,9 @@ function PaneBar({
               onClick={(event) => {
                 event.stopPropagation();
                 workspace.setPaneActiveTab(pane.id, tab.id);
+                if (tab.kind === "terminal") {
+                  terminalManager.focus(tab.id, true);
+                }
               }}
             >
               <TabIcon tab={tab} />

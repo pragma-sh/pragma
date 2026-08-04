@@ -87,9 +87,71 @@ describe("agentTabsBySnapshot", () => {
     });
   });
 
-  it("falls back to the terminal tab label when the tab is unknown", () => {
-    const map = agentTabsBySnapshot([], [status({ tabId: "gone" })]);
-    expect(map.w1?.[0]?.title).toBe("Shell");
+  it("includes an open agent tab with no status report, dotless", () => {
+    const map = agentTabsBySnapshot(
+      [tab({ id: "t1", agentId: "pragma.claude", title: "Claude" })],
+      [],
+    );
+    expect(map).toEqual({
+      w1: [
+        {
+          id: "t1",
+          worktreeId: "w1",
+          agent: "claude",
+          title: "Claude",
+          status: "cleared",
+          attentionKind: null,
+        },
+      ],
+    });
+  });
+
+  it("reduces a third-party catalog-qualified agent id to its runtime id", () => {
+    const map = agentTabsBySnapshot([tab({ agentId: "acme.myagent" })], []);
+    expect(map.w1?.[0]?.agent).toBe("myagent");
+  });
+
+  it("shows a manually started agent known only by a status-less report", () => {
+    const map = agentTabsBySnapshot(
+      [tab({ id: "t1", title: "refactor auth" })],
+      [status({ tabId: "t1", status: null })],
+    );
+    expect(map.w1).toEqual([
+      {
+        id: "t1",
+        worktreeId: "w1",
+        agent: "claude",
+        title: "refactor auth",
+        status: "cleared",
+        attentionKind: null,
+      },
+    ]);
+  });
+
+  it("rolls several reports on one tab up to the most urgent status", () => {
+    const map = agentTabsBySnapshot(
+      [tab({ id: "t1" })],
+      [
+        status({ tabId: "t1", agent: "claude", status: "done" }),
+        status({ tabId: "t1", agent: "claude", status: "attention", attentionKind: "question" }),
+      ],
+    );
+    expect(map.w1).toHaveLength(1);
+    expect(map.w1?.[0]).toMatchObject({ status: "attention", attentionKind: "question" });
+  });
+
+  it("drops reports whose tab is no longer open", () => {
+    expect(agentTabsBySnapshot([], [status({ tabId: "gone" })])).toEqual({});
+  });
+
+  it("omits plain shell tabs with no agent and no report", () => {
+    expect(agentTabsBySnapshot([tab()], [])).toEqual({});
+  });
+
+  it("omits non-terminal tabs even when tagged with an agent", () => {
+    expect(agentTabsBySnapshot([tab({ kind: "editor", agentId: "pragma.claude" })], [])).toEqual(
+      {},
+    );
   });
 
   it("prefers a live terminal title over the workspace snapshot", () => {
@@ -98,10 +160,6 @@ describe("agentTabsBySnapshot", () => {
     });
 
     expect(map.w1?.[0]?.title).toBe("Implement mobile session titles");
-  });
-
-  it("omits worktrees with no reporting agent", () => {
-    expect(agentTabsBySnapshot([tab()], [])).toEqual({});
   });
 
   it("orders agents from newest to oldest tab", () => {
@@ -252,6 +310,10 @@ describe("parseAgentStatuses", () => {
     expect(parseAgentStatuses([{ agent: "x" }, status()])).toHaveLength(1);
     expect(parseAgentStatuses("nope")).toEqual([]);
     expect(parseAgentStatuses(null)).toEqual([]);
+  });
+
+  it("keeps status-less session-name reports", () => {
+    expect(parseAgentStatuses([status({ status: null, sessionName: "refactor" })])).toHaveLength(1);
   });
 });
 

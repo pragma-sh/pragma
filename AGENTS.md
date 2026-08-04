@@ -57,8 +57,8 @@ than no guide.
 - **Mirror it in the skills.** Canonical first-party skill sources live under `skills/`
   and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes). If you
   change a workflow here, update the relevant skill (`pragma-architecture`,
-  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`) too, and add a new
-  skill when you add a substantial new workflow.
+  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`) too, and
+  add a new skill when you add a substantial new workflow.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
   AGENTS.md) so the next person (or agent) doesn't rediscover it.
@@ -108,6 +108,7 @@ than no guide.
 │   └── pragma-server/           # Persistent host server (local socket) → see crates/pragma-server/AGENTS.md
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
+│   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
@@ -121,6 +122,7 @@ than no guide.
 │   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
 │   ├── grok-plugin/             # xAI Grok Build CLI integration → see packages/grok-plugin/AGENTS.md
+│   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
 │   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
@@ -171,6 +173,9 @@ than no guide.
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
+- Anything that measures perceived terminal latency → `packages/bench`
+  (`bun run benchmark`). It drives a real dev window; do not add a headless
+  variant that claims to measure rendering.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).
@@ -195,6 +200,7 @@ bun install                # Install all workspace deps
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
+bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
 
 # Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
 bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
@@ -211,7 +217,7 @@ bun run rust:fmt           # cargo fmt --all
 bun run rust:clippy        # cargo clippy -D warnings
 bun run rust:test          # cargo test --workspace
 bun run fallow:check       # fallow audit (TS/JS): block on issues this branch introduces
-bun run check              # Everything CI checks, in one shot
+bun run check              # Lint + format/type checks + rustfmt/clippy (tests run separately)
 
 bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
@@ -275,7 +281,9 @@ Shared rules:
 
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
-compile-only Tauri build on macOS, Linux, **and** Windows. A separate **Fallow** workflow
+compile-only Tauri build on macOS, Linux, **and** Windows.
+
+A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
 `fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
 inline annotations, and fails the check on issues the PR introduces.

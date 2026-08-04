@@ -16,6 +16,11 @@ Every frame: `[4-byte BE length][1-byte tag][body]`
 Helpers: `write_output_frame` / `write_input_frame` (write); `read_frame` / `Frame`
 (read).
 
+Terminal event streams start with JSON `EventFrame::Replay { sessionId, cursor, reset }`.
+`cursor` is the absolute count of raw output bytes before following binary output; reconnecting
+clients send their last accepted cursor on `Attach`. `reset` means retained scrollback cannot cover
+the requested cursor. Protocol version 21 introduced this contract without changing binary layout.
+
 ## Instance channel helpers
 
 `pragma_protocol::dev_channel(workspace_root)` — deterministic hash of the absolute

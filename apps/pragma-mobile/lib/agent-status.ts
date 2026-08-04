@@ -11,14 +11,14 @@ const PRIORITY: Record<AgentStatus, number> = {
 };
 
 /** Sort rank for a status; `cleared`/absent rank below every real status. */
-function rankOf(status: AgentStatus | null): number {
-  return status && status !== "cleared" ? PRIORITY[status] : -1;
+export function statusRank(status: AgentStatus | null): number {
+  return status && status !== "cleared" ? (PRIORITY[status] ?? -1) : -1;
 }
 
 /** Roll a set of statuses up to the single most-urgent one, or null. */
 function aggregateStatus(statuses: AgentStatus[]): AgentStatus | null {
   return statuses.reduce<AgentStatus | null>(
-    (best, status) => (rankOf(status) > rankOf(best) ? status : best),
+    (best, status) => (statusRank(status) > statusRank(best) ? status : best),
     null,
   );
 }

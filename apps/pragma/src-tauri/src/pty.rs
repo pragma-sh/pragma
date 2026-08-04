@@ -33,7 +33,13 @@ const GATEWAY_READY_POLL: Duration = Duration::from_millis(100);
 /// its `forward_stream` reader thread — and the matching server-side thread +
 /// fd — blocked forever: the server only releases a connection when the
 /// client closes its end, and nothing here ever did.
-type SessionStreams = Arc<Mutex<HashMap<String, LocalStream>>>;
+struct TrackedSessionStream {
+    generation: u64,
+    stream: LocalStream,
+}
+
+type SessionStreams = Arc<Mutex<HashMap<String, TrackedSessionStream>>>;
+type FileStreams = Arc<Mutex<HashMap<u64, LocalStream>>>;
 
 /// Connection details for the local HTTP gateway, returned to the frontend so
 /// in-webview clients (e.g. the plugin SDK bridge) can call the HTTP API.
@@ -53,6 +59,7 @@ pub struct GatewayConnectionInfo {
 pub struct PtyClient {
     inner: PragmaClient,
     session_streams: SessionStreams,
+    file_streams: FileStreams,
 }
 
 /// Control events forwarded to the webview as JSON over the PTY channel.
@@ -62,10 +69,14 @@ pub struct PtyClient {
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum PtyEvent {
+    /// Output replay begins at this absolute byte cursor.
+    Replay { cursor: u64, reset: bool },
     /// Shell-emitted OSC title.
     Title { title: String },
     /// PTY process exit status.
     Exit { code: Option<i32> },
+    /// Event stream ended before PTY exit; frontend should reattach for replay.
+    Disconnected,
 }
 
 impl PtyEvent {
@@ -90,6 +101,7 @@ impl PtyClient {
                 resource_dir,
             )),
             session_streams: Arc::new(Mutex::new(HashMap::new())),
+            file_streams: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -100,6 +112,7 @@ impl PtyClient {
         Self {
             inner: PragmaClient::new_socket(socket_path),
             session_streams: Arc::new(Mutex::new(HashMap::new())),
+            file_streams: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -108,34 +121,53 @@ impl PtyClient {
     /// for it. A prior connection here means the client re-attached (or
     /// re-spawned) without ever disposing the old one — the exact leak this
     /// tracking exists to close.
-    fn track_stream(&self, session_id: &str, stream: &LocalStream) {
+    fn track_stream(&self, session_id: &str, generation: u64, stream: &LocalStream) {
         let Ok(cloned) = stream.try_clone() else {
             return;
         };
-        let previous = self
-            .session_streams
-            .lock()
-            .ok()
-            .and_then(|mut streams| streams.insert(session_id.to_string(), cloned));
+        let Ok(mut streams) = self.session_streams.lock() else {
+            return;
+        };
+        if streams
+            .get(session_id)
+            .is_some_and(|tracked| tracked.generation >= generation)
+        {
+            let _ = cloned.shutdown(Shutdown::Both);
+            return;
+        }
+        let previous = streams.insert(
+            session_id.to_string(),
+            TrackedSessionStream {
+                generation,
+                stream: cloned,
+            },
+        );
+        drop(streams);
         if let Some(previous) = previous {
-            let _ = previous.shutdown(Shutdown::Both);
+            let _ = previous.stream.shutdown(Shutdown::Both);
         }
     }
 
     /// Shuts down and forgets the tracked event-stream connection for
     /// `session_id`, if any. Called on dispose/kill so the connection closes
     /// immediately instead of waiting on the server to notice.
-    fn close_stream(&self, session_id: &str) {
-        let removed = self
-            .session_streams
-            .lock()
-            .ok()
-            .and_then(|mut streams| streams.remove(session_id));
+    fn close_stream(&self, session_id: &str, generation: Option<u64>) {
+        let removed = self.session_streams.lock().ok().and_then(|mut streams| {
+            if generation.is_some_and(|expected| {
+                streams
+                    .get(session_id)
+                    .is_some_and(|tracked| tracked.generation != expected)
+            }) {
+                return None;
+            }
+            streams.remove(session_id)
+        });
         if let Some(stream) = removed {
-            let _ = stream.shutdown(Shutdown::Both);
+            let _ = stream.stream.shutdown(Shutdown::Both);
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // Stream setup carries routing, geometry, generation, and channel.
     pub fn spawn(
         &self,
         session_id: String,
@@ -143,12 +175,13 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
+        stream_generation: u64,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
         let stream = self
             .inner
             .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows)?;
-        self.track_stream(&session_id, &stream);
+        self.track_stream(&session_id, stream_generation, &stream);
         forward_stream(stream, on_event);
         Ok(())
     }
@@ -195,14 +228,21 @@ impl PtyClient {
         session_id: String,
         cols: u16,
         rows: u16,
+        cursor: Option<u64>,
+        stream_generation: u64,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
         let stream = self
             .inner
-            .attach_stream(session_id.clone(), Some((cols, rows)))?;
-        self.track_stream(&session_id, &stream);
+            .attach_stream(session_id.clone(), Some((cols, rows)), cursor)?;
+        self.track_stream(&session_id, stream_generation, &stream);
         forward_stream(stream, on_event);
         Ok(())
+    }
+
+    /// Closes one exact frontend event stream without terminating its PTY.
+    pub fn detach(&self, session_id: &str, stream_generation: u64) {
+        self.close_stream(session_id, Some(stream_generation));
     }
 
     /// Opens a live filesystem-change subscription for a worktree and forwards
@@ -211,6 +251,7 @@ impl PtyClient {
     /// the caller — it is never accepted from the frontend.
     pub fn watch_files(
         &self,
+        subscription_id: u64,
         worktree_id: String,
         root: String,
         on_event: Channel<InvokeResponseBody>,
@@ -220,8 +261,30 @@ impl PtyClient {
             Some(worktree_id),
             Some(root),
         )?;
-        forward_file_stream(stream, on_event);
+        if let Ok(cloned) = stream.try_clone() {
+            if let Ok(mut streams) = self.file_streams.lock() {
+                streams.insert(subscription_id, cloned);
+            }
+        }
+        forward_file_stream(
+            stream,
+            on_event,
+            subscription_id,
+            Arc::clone(&self.file_streams),
+        );
         Ok(())
+    }
+
+    /// Closes an exact worktree file subscription.
+    pub fn stop_watching_files(&self, subscription_id: u64) {
+        let stream = self
+            .file_streams
+            .lock()
+            .ok()
+            .and_then(|mut streams| streams.remove(&subscription_id));
+        if let Some(stream) = stream {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
     }
 
     pub fn write(&self, session_id: String, data: String) -> AppResult<()> {
@@ -237,7 +300,7 @@ impl PtyClient {
         // just when the server's Exit-driven cleanup happens to run: this is
         // the client's only guaranteed chance to release the thread + fd it
         // holds for this session.
-        self.close_stream(&session_id);
+        self.close_stream(&session_id, None);
         Ok(self.inner.kill(session_id)?)
     }
 
@@ -543,6 +606,7 @@ pub(crate) fn workspace_root() -> PathBuf {
 
 fn forward_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>) {
     thread::spawn(move || {
+        let mut exited = false;
         while let Ok(frame) = read_frame(&mut stream) {
             match frame {
                 Frame::Output { data, .. } => {
@@ -551,12 +615,18 @@ fn forward_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>
                     }
                 }
                 Frame::Json(bytes) => match serde_json::from_slice::<ServerFrame>(&bytes) {
+                    Ok(ServerFrame::Event(EventFrame::Replay { cursor, reset, .. })) => {
+                        if forward_event(&on_event, PtyEvent::Replay { cursor, reset }).is_err() {
+                            break;
+                        }
+                    }
                     Ok(ServerFrame::Event(EventFrame::Title { title, .. })) => {
                         if forward_event(&on_event, PtyEvent::Title { title }).is_err() {
                             break;
                         }
                     }
                     Ok(ServerFrame::Event(EventFrame::Exit { code, .. })) => {
+                        exited = true;
                         let _ = forward_event(&on_event, PtyEvent::Exit { code });
                         break;
                     }
@@ -584,6 +654,9 @@ fn forward_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>
                 Frame::Input { .. } => {}
             }
         }
+        if !exited {
+            let _ = forward_event(&on_event, PtyEvent::Disconnected);
+        }
         let _ = stream.shutdown(Shutdown::Both);
     });
 }
@@ -592,7 +665,12 @@ fn forward_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>
 /// `fileChanged` delta carries `{ worktreeId, change }`; only the inner
 /// `change` ([`FileChange`](pragma_constants::FileChange)) is relayed as a JSON
 /// channel message. The initial empty snapshot and any other frame are ignored.
-fn forward_file_stream(mut stream: LocalStream, on_event: Channel<InvokeResponseBody>) {
+fn forward_file_stream(
+    mut stream: LocalStream,
+    on_event: Channel<InvokeResponseBody>,
+    subscription_id: u64,
+    streams: FileStreams,
+) {
     thread::spawn(move || {
         while let Ok(frame) = read_frame(&mut stream) {
             let Frame::Json(bytes) = frame else {
@@ -611,6 +689,9 @@ fn forward_file_stream(mut stream: LocalStream, on_event: Channel<InvokeResponse
             }
         }
         let _ = stream.shutdown(Shutdown::Both);
+        if let Ok(mut streams) = streams.lock() {
+            streams.remove(&subscription_id);
+        }
     });
 }
 
@@ -640,7 +721,29 @@ mod tests {
 
     use pragma_constants::CONSTANTS;
 
-    use super::{gateway_discovery_healthy, instance_channel, instance_data_dir, PtyClient};
+    use super::{
+        gateway_discovery_healthy, instance_channel, instance_data_dir, PtyClient, PtyEvent,
+    };
+
+    #[test]
+    fn disconnected_event_uses_the_frontend_wire_name() {
+        assert_eq!(
+            serde_json::to_value(PtyEvent::Disconnected).expect("serialize event"),
+            serde_json::json!({ "event": "disconnected" })
+        );
+    }
+
+    #[test]
+    fn replay_event_carries_incremental_output_cursor() {
+        assert_eq!(
+            serde_json::to_value(PtyEvent::Replay {
+                cursor: 42,
+                reset: false,
+            })
+            .expect("serialize event"),
+            serde_json::json!({ "event": "replay", "cursor": 42, "reset": false })
+        );
+    }
 
     #[test]
     fn log_path_sits_beside_socket() {

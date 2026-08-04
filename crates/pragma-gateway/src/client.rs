@@ -115,7 +115,7 @@ impl GatewayClient {
     ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
-            .attach_stream(session_id, size)
+            .attach_stream(session_id, size, None)
             .map_err(GatewayError::from)
     }
 

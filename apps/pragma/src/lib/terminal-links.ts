@@ -161,6 +161,11 @@ function readLineColumns(
   return { text, columnOf };
 }
 
+/** Reads line text through xterm's optimized buffer representation. */
+function readLineText(terminal: Terminal, bufferLineNumber: number): string | null {
+  return terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) ?? null;
+}
+
 /**
  * A link provider that decorates existing worktree files printed in the terminal
  * (e.g. compiler/test output, `ls`, grep) and opens them on click via the
@@ -199,13 +204,23 @@ export function createFileLinkProvider(
     if (!handler) {
       return undefined;
     }
+    // Most terminal rows contain no path. Avoid allocating a per-cell column map
+    // unless the cheap native line translation finds something worth mapping.
+    const text = readLineText(terminal, bufferLineNumber);
+    if (text === null) {
+      return undefined;
+    }
+    const candidates = findFilePathCandidates(text);
+    if (candidates.length === 0) {
+      return undefined;
+    }
     const mapped = readLineColumns(terminal, bufferLineNumber);
     if (!mapped) {
       return undefined;
     }
-    const { text, columnOf } = mapped;
+    const { columnOf } = mapped;
     const maybeLinks = await Promise.all(
-      findFilePathCandidates(text).map(async (candidate): Promise<ILink | null> => {
+      candidates.map(async (candidate): Promise<ILink | null> => {
         const relative = toWorktreeRelativePath(candidate.path, cwd);
         if (!relative) {
           return null;

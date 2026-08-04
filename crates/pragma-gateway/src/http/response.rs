@@ -175,6 +175,16 @@ pub fn event_json(event: EventFrame) -> Value {
             "sessionId": session_id,
             "dataBase64": base64_encode(&data),
         }),
+        EventFrame::Replay {
+            session_id,
+            cursor,
+            reset,
+        } => json!({
+            "type": "replay",
+            "sessionId": session_id,
+            "cursor": cursor,
+            "reset": reset,
+        }),
         EventFrame::Title { session_id, title } => json!({
             "type": "title",
             "sessionId": session_id,
@@ -294,6 +304,18 @@ mod tests {
         });
         assert_eq!(value["type"], "output");
         assert_eq!(value["dataBase64"], "aGk=");
+    }
+
+    #[test]
+    fn serializes_terminal_replay_cursor() {
+        let value = event_json(EventFrame::Replay {
+            session_id: "tab".to_string(),
+            cursor: 42,
+            reset: false,
+        });
+        assert_eq!(value["type"], "replay");
+        assert_eq!(value["cursor"], 42);
+        assert_eq!(value["reset"], false);
     }
 
     #[test]
