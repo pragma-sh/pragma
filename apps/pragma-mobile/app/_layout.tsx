@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectionProvider, useConnection } from "@/lib/connection-context";
 import { DataProvider } from "@/lib/data/data-context";
+import { usePushNotifications } from "@/lib/use-push-notifications";
 import { useThemeColors } from "@/lib/theme";
 import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
 
@@ -44,6 +45,7 @@ function WidgetSync() {
 function ConnectionGate() {
   const { status } = useConnection();
   const colors = useThemeColors();
+  usePushNotifications();
 
   if (status === "loading") return null;
 

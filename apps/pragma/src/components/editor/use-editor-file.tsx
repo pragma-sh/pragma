@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
 import { useWorktreeFileChange } from "@/lib/file-watch";
 import { readFile, writeFile } from "@/lib/tauri";
-import { disposeTab, isTabDirty, setTabDirty, setTabDoc } from "@/state/editor-dirty-store";
+import {
+  disposeTab,
+  getTabDoc,
+  isTabDirty,
+  setTabDirty,
+  setTabDoc,
+} from "@/state/editor-dirty-store";
 
 /** Lifecycle of a file-backed editor surface: loading, ready, or a terminal failure. */
 export type LoadState =
@@ -16,22 +22,46 @@ export type LoadState =
   | { kind: "unsupported"; reason: string }
   | { kind: "error"; message: string };
 
+/** What a file-backed editor surface exposes about its on-disk source. */
+export interface EditorFileLoader {
+  /** Current load lifecycle of the file. */
+  state: LoadState;
+  /** (Re)reads the file, showing the loading placeholder. Returns a cancel fn. */
+  load: () => () => void;
+  /**
+   * True when the file changed on disk while the tab had unsaved edits, so the
+   * change could not be applied automatically.
+   */
+  externalChange: boolean;
+  /** Re-reads the file, discarding unsaved edits. Clears {@link externalChange}. */
+  reloadFromDisk: () => void;
+}
+
 /** Loads the file into the editor, tracking dirty/doc state, and reloads on external changes. */
 export function useEditorFileLoader(
   tab: Tab,
   savedDocRef: RefObject<string>,
   currentDocRef: RefObject<string>,
-): { state: LoadState; load: () => () => void } {
+  options: { preserveOnUnmount?: boolean } = {},
+): EditorFileLoader {
   const { id: tabId, worktreeId, filePath } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [externalChange, setExternalChange] = useState(false);
 
   const load = useCallback(() => {
     if (!filePath) {
       setState({ kind: "error", message: "This tab has no file path." });
       return () => undefined;
     }
+    const preserved = options.preserveOnUnmount && isTabDirty(tabId) ? getTabDoc(tabId) : null;
+    if (preserved !== null) {
+      currentDocRef.current = preserved;
+      setState({ kind: "ready", doc: preserved });
+      return () => undefined;
+    }
     let cancelled = false;
     setState({ kind: "loading" });
+    setExternalChange(false);
     void (async () => {
       try {
         const contents = await readFile(worktreeId, filePath);
@@ -56,21 +86,82 @@ export function useEditorFileLoader(
     return () => {
       cancelled = true;
     };
-  }, [tabId, worktreeId, filePath, savedDocRef, currentDocRef]);
+  }, [tabId, worktreeId, filePath, savedDocRef, currentDocRef, options.preserveOnUnmount]);
+
+  /**
+   * Re-reads the file **without** dropping back to the loading placeholder, so
+   * an external edit lands in place instead of tearing the surface down and
+   * remounting it. With `force`, unsaved edits are discarded; without it, a
+   * dirty tab keeps the user's work and only raises {@link externalChange}.
+   */
+  const refresh = useCallback(
+    async (force = false) => {
+      if (!filePath) return;
+      if (!force && isTabDirty(tabId)) {
+        setExternalChange(true);
+        return;
+      }
+      try {
+        const contents = await readFile(worktreeId, filePath);
+        if (contents.truncated || contents.binary) return;
+        setExternalChange(false);
+        if (contents.text === currentDocRef.current && contents.text === savedDocRef.current) {
+          return;
+        }
+        savedDocRef.current = contents.text;
+        currentDocRef.current = contents.text;
+        setTabDoc(tabId, contents.text);
+        setTabDirty(tabId, false);
+        setState((previous) =>
+          previous.kind === "ready" ? { kind: "ready", doc: contents.text } : previous,
+        );
+      } catch {
+        // A transient read failure (e.g. an atomic replace mid-flight) must not
+        // replace already-good content with an error surface; the next change
+        // event or window focus retries.
+      }
+    },
+    [tabId, worktreeId, filePath, savedDocRef, currentDocRef],
+  );
 
   useEffect(() => load(), [load]);
 
   // Live preview: when the server's worktree watcher reports the open file
-  // changed on disk (e.g. an agent edits it), reload it — unless the user has
-  // unsaved edits, in which case their in-progress work must not be clobbered.
+  // changed on disk (e.g. an agent edits it), re-read it in place — unless the
+  // user has unsaved edits, in which case their in-progress work must not be
+  // clobbered and the change is surfaced as a reload affordance instead.
   useWorktreeFileChange(worktreeId, (change) => {
-    if (change.path === filePath && !isTabDirty(tabId)) load();
+    if (change.path === filePath) void refresh();
   });
 
-  // Drop transient dirty/doc state when the tab's editor unmounts.
-  useEffect(() => () => disposeTab(tabId), [tabId]);
+  // Belt to the watcher's braces: re-read when the window regains focus. The
+  // watcher is a live subscription that can be missed (the socket dropped, the
+  // machine slept, the change landed while the tab was unmounted), and a stale
+  // buffer that only a tab close fixes is worse than one extra read.
+  useEffect(() => {
+    if (!filePath) return;
+    const revalidate = (): void => {
+      if (globalThis.document.visibilityState === "visible") void refresh();
+    };
+    globalThis.addEventListener("focus", revalidate);
+    globalThis.document.addEventListener("visibilitychange", revalidate);
+    return () => {
+      globalThis.removeEventListener("focus", revalidate);
+      globalThis.document.removeEventListener("visibilitychange", revalidate);
+    };
+  }, [filePath, refresh]);
 
-  return { state, load };
+  const reloadFromDisk = useCallback(() => void refresh(true), [refresh]);
+
+  // Drop transient dirty/doc state when the tab's editor unmounts.
+  useEffect(
+    () => () => {
+      if (!options.preserveOnUnmount) disposeTab(tabId);
+    },
+    [tabId, options.preserveOnUnmount],
+  );
+
+  return { state, load, externalChange, reloadFromDisk };
 }
 
 /** Save the editor contents to disk on demand, updating dirty/doc state. */

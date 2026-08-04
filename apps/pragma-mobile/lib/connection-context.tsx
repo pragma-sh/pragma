@@ -15,6 +15,7 @@ import {
 } from "react";
 
 import type { ConnectionConfig } from "./pairing";
+import { flushPendingRevocations, forgetPendingRevocations, unregisterFromPush } from "./push";
 import { constants } from "@pragma/constants";
 
 // App-wide owner of the single PragmaClient. The chat hook and the live data
@@ -160,6 +161,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = useState<StoredState | null>(null);
 
   useRestoredConnection(setStored, setStatus);
+  useFlushedRevocations();
 
   const connection = useMemo(() => connectionState(stored), [stored]);
   const [client, setClient] = useState<PragmaClient | null>(null);
@@ -180,16 +182,24 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 
   const pair = useCallback(async (config: ConnectionConfig, hostName?: string) => {
     const next: StoredState = { config, hostName: hostName ?? null };
+    // Pairing this host again supersedes a revocation queued for it, which
+    // would otherwise unregister the token this session is about to register.
+    await forgetPendingRevocations(config.url);
     await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(next));
     setStored(next);
     setStatus("paired");
   }, []);
 
+  const config = connection.config;
   const unpair = useCallback(async () => {
+    // Tell the host to stop pushing before the client (and its token) go away.
+    // An unreachable host leaves the revocation queued, not dropped, so the
+    // next launch retries it instead of leaving the token live on the host.
+    if (client && config) await unregisterFromPush(client, config);
     await SecureStore.deleteItemAsync(STORE_KEY).catch(() => undefined);
     setStored(null);
     setStatus("unpaired");
-  }, []);
+  }, [client, config]);
 
   const handleUnauthorized = useCallback(() => {
     // The host regenerated its token: drop everything and force a re-pair.
@@ -256,6 +266,17 @@ function safeParse(raw: string): StoredState | null {
 
 function isStoredState(value: StoredState): boolean {
   return Boolean(value?.config?.url && value.config.token);
+}
+
+/**
+ * Retries push revocations an earlier unpair could not deliver. Runs before the
+ * user can pair again, so a host that was unreachable at unpair time stops
+ * pushing to this phone as soon as it is reachable.
+ */
+function useFlushedRevocations(): void {
+  useEffect(() => {
+    void flushPendingRevocations(clientFor);
+  }, []);
 }
 
 function useRestoredConnection(

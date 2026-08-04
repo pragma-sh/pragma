@@ -1,0 +1,16 @@
+{
+  "name": "@pragma/bench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Terminal lag benchmark: launches a Pragma dev instance, runs the pragma-bench ratatui payload in a real terminal tab, and measures keystroke and scroll render latency.",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3"
+  }
+}

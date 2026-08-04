@@ -50,5 +50,16 @@ local/remote connection decisions, and the SSH streamlocal bridge.
   SSH exists.
 - Do not parse or reframe PTY output in the bridge. It copies raw socket bytes.
 - Keep terminal output on `write_output_frame` / binary frame fast path.
+- Interactive attach accepts an absolute output-byte cursor. Preserve it across transport
+  reconnects so the server sends only missing output; `Replay.reset` is the explicit stale-cursor
+  path. Passive observers and first attach pass no cursor.
 - Keep terminal input on `write_input_frame` / binary fire-and-forget fast path. Do not
   reintroduce per-keystroke JSON requests or response draining.
+- Input delivery uses one message- and byte-bounded writer queue (`INPUT_QUEUE_CAPACITY` /
+  `INPUT_QUEUE_MAX_BYTES`) and splits writes at `INPUT_FRAME_DATA_MAX`. A full/disconnected
+  queue is an explicit error, never silent loss or unbounded memory growth.
+- Writer scheduling preserves per-session byte order while rotating across ready sessions;
+  one paste-heavy tab must not starve keystrokes from another tab.
+- Frame selection is transactional: failed socket writes retain the exact frame and its queue
+  accounting, reconnect, and retry with capped exponential backoff. Consume/decrement only
+  after `write_input_frame` succeeds; later bytes for that session never overtake a failure.

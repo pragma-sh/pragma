@@ -39,7 +39,6 @@ import { Button } from "@/components/ui/button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { editorLaunchers } from "@/lib/editor-launchers";
-import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
@@ -50,11 +49,6 @@ import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
-// Trailing debounce for file-watch-triggered merged-status refreshes. An agent
-// or build writing files emits a continuous stream of change events; refreshing
-// per event floods the daemon with git batches. One refresh per window is
-// plenty — the 2s interval poll is the backstop anyway.
-const MERGED_STATUS_FILE_EVENT_DEBOUNCE_MS = 500;
 
 /** True when both maps hold exactly the same worktree-id → merged entries. */
 function sameMergedStatus(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
@@ -86,8 +80,11 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
     let cancelled = false;
+    let refreshInFlight = false;
 
     async function refreshMergedStatus() {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
         const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
         if (!cancelled) {
@@ -101,6 +98,8 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
         if (!cancelled) {
           setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
         }
+      } finally {
+        refreshInFlight = false;
       }
     }
 
@@ -109,21 +108,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       return;
     }
 
-    let debounceTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (debounceTimer !== null) {
-        return;
-      }
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = null;
-        void refreshMergedStatus();
-      }, MERGED_STATUS_FILE_EVENT_DEBOUNCE_MS);
-    };
-
     void refreshMergedStatus();
-    const unwatch = worktrees.map((worktree) =>
-      subscribeToWorktreeFiles(worktree.id, scheduleRefresh),
-    );
     const interval = setInterval(() => {
       if (!document.hidden) {
         void refreshMergedStatus();
@@ -131,12 +116,6 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     }, MERGED_STATUS_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
-      for (const stop of unwatch) {
-        stop();
-      }
-      if (debounceTimer !== null) {
-        window.clearTimeout(debounceTimer);
-      }
       clearInterval(interval);
     };
   }, [worktrees]);

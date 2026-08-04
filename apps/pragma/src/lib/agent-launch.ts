@@ -5,6 +5,7 @@ import {
   type AgentConfig,
   type AgentModelSelection,
   ptySpawn,
+  ptySpawnDetached,
   ptyWrite,
   type PtyMessage,
 } from "@/lib/tauri";
@@ -214,20 +215,30 @@ export async function startBackgroundAgentSession(
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
   const message = prefill?.trim() ? prefill : null;
 
-  const write = (data: string) => void ptyWrite(tabId, data);
-  const alternateScreen = createAlternateScreenTracker();
+  const write = (data: string) => {
+    void ptyWrite(tabId, data).catch((error: unknown) => {
+      console.error(`background agent input queue rejected data for ${tabId}`, error);
+    });
+  };
+  // Only a bracketed prefill needs to watch the TUI's output for alternate-screen
+  // entry; every other background launch spawns detached so an unmounted tab's
+  // output never crosses the IPC boundary into the webview.
+  const alternateScreen =
+    message && agent.prefillMode !== "plain" ? createAlternateScreenTracker() : null;
   // A racing terminal mount may have already spawned this session (mobile
   // `tabOpened` used to select the tab). Treat "already exists" as success so
   // the start command + prefill still land in the live PTY.
   try {
-    await ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle);
+    await (alternateScreen
+      ? ptySpawn(tabId, worktreeId, cwd, cols, rows, alternateScreen.handle)
+      : ptySpawnDetached(tabId, worktreeId, cwd, cols, rows));
   } catch (cause) {
     if (!isSessionAlreadyExists(cause)) {
       throw cause;
     }
   }
   window.setTimeout(() => {
-    void ptyWrite(tabId, `${command}\r`);
+    write(`${command}\r`);
     scheduleStartupInput(agent, write);
     if (message) {
       scheduleBackgroundPrefill(agent, message, write, alternateScreen);

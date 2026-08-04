@@ -1,22 +1,27 @@
-import type { TabKind } from "@pragma/constants";
+import { constants, type TabKind } from "@pragma/constants";
 
 /**
  * The fallback title for a tab whose shell/page hasn't named it — or that
  * cleared its name (e.g. a TUI like opencode emitting an empty OSC 0/2 title on
- * exit). Keeps a tab from ever showing a blank label.
+ * exit). Keeps a tab from ever showing a blank label. Shared with the gateway,
+ * which treats a tab still carrying its default title as unnamed.
  */
 export function defaultTabTitle(kind: TabKind): string {
+  const titles = constants.tabs.defaultTitles;
   if (kind === "browser") {
-    return "New tab";
+    return titles.browser;
   }
   if (kind === "log") {
-    return "Server Logs";
+    return titles.log;
+  }
+  if (kind === "scratchpad") {
+    return "Scratchpad";
   }
   if (kind === "pr-review") {
-    return "PR Review";
+    return titles.prReview;
   }
   if (kind === "plugin-webview") {
-    return "Plugin";
+    return titles.pluginWebview;
   }
-  return "Shell";
+  return titles.fallback;
 }

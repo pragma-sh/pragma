@@ -79,6 +79,9 @@ apps/pragma/
    network, or file I/O must be `async fn` (+ `spawn_blocking` for blocking work, see
    `run_pty_task`) or at least `#[tauri::command(async)]`. Only trivially fast work
    (in-memory state, one SQLite row, native window calls) may stay plain sync.
+   `pty_write` is deliberately sync: it only resolves in-memory host state and performs a
+   bounded `try_send`; all socket work remains on `pragma-client`'s writer thread. Keeping
+   this enqueue command sync preserves invoke order for terminal bytes.
 
 ## UI: Tailwind v4 + shadcn/ui
 
@@ -202,6 +205,23 @@ re-notifying. **Viewing a tab latches every `done`/`attention` status it current
 shows as seen** — the `visibleTabIds` effect reads `agentStatusesForTab` and latches
 them before `clearDoneStatusForTab` when a tab comes on screen.
 
+**Alert wording is templated in `@pragma/constants`, not written inline.**
+`lib/agent-notification-text.ts` renders `agentStatus.notificationText` into a title
+(agent name + what it wants) and a body naming the project, worktree, and tab the report
+came from — `workspace-context` resolves those names with `describeAgentLocation` and
+passes them as `AgentAlertOptions.location`. The same templates are rendered in Rust by
+`crates/pragma-gateway/src/push/text.rs` for phone pushes, so a toast, an OS banner, and
+a push read identically. Change the templates, and keep the two renderers in step.
+
+`lib/gateway-presence.ts` reports this window's focus to the gateway
+(`POST /v1/push/presence`, re-reported on a heartbeat) so a paired phone is not pushed an
+alert the user is already reading here. "Focused" is OS focus **and** document
+visibility, tracked as two independent inputs: an occluded or minimised window can still
+hold OS focus, and it can be hidden and restored without Tauri ever emitting a focus
+change, so reacting only to hiding would strand the window in the unfocused state and
+buzz the phone for alerts the user can see. Only a change in the conjunction is reported,
+so the heartbeat is not restarted on every visibility flip.
+
 macOS agent system notifications are clickable: the frontend calls the macOS-only
 `show_agent_notification` Tauri command instead of the generic notification plugin, and
 Rust emits `pragma:agent-notification-clicked` with `{ projectId, worktreeId, tabId }`;
@@ -262,6 +282,9 @@ inside a Pragma terminal): the status plugin can raise the toast, and the lazy w
 write the Approve/Deny keys back into that same PTY. Watcher lookup uses the qualified
 catalog agent id; `pragma-watch --agentId` uses the plugin-local watcher agent so runtime
 status, reply, and interjection events share one stream identity.
+Watcher children are keyed by session/tab/worktree, duplicate starts are ignored, and exited
+children are reaped. Tab close and worktree deletion stop matching children; plugin catalog
+replacement stops all old children before installing new watcher definitions.
 
 ## Remote access (tunnel + pair modal)
 
@@ -499,22 +522,56 @@ deep links only reach a packaged/registered app — `tauri dev` on macOS won't r
 ## Terminal rendering (xterm + WebGL)
 
 Terminal output → xterm in `src/lib/terminal-manager.ts`; never route through React
-state or the workspace reducer. Each terminal renders through the **WebGL addon**
-(`@xterm/addon-webgl`), loaded right after `terminal.open()` — xterm's DOM renderer is
-the dominant source of perceived typing latency. Loading is wrapped in `try/catch` and
-`onContextLoss` disposes the addon, so a missing/lost WebGL2 context falls back to the
-DOM renderer.
+state or the workspace reducer. Terminals use `@xterm/addon-webgl`; DOM rendering is too
+expensive for interactive TUIs and can stall the rest of the webview. WebGL contexts live in a
+bounded least-recently-used cache (`WEBGL_RENDERER_CACHE_SIZE`). Normal tab switches retain the
+renderer and glyph atlas, avoiding the visible top-to-bottom repaint caused by dispose/reload.
+A hidden terminal evicted after the cache fills keeps its xterm buffer, parser, and output stream;
+`TerminalView` restores WebGL in a layout effect before the revealed tab paints. This supports
+more terminals than the GPU context budget without replay or a visible fallback-renderer flash.
+Visible split panes may temporarily exceed the warm-context budget; excess contexts are shed as
+soon as those panes become hidden again.
+Context loss gets bounded consecutive retries, and a successful paint resets that retry budget.
+Keep `@xterm/xterm` and `@xterm/addon-webgl` pinned to versions built from the same upstream
+commit: their texture-atlas contracts change together. The current aligned beta includes atlas
+merge, shared-renderer invalidation, and texture-capacity fixes absent from stable 6.0/0.19.
 
 Frontend output writes are serialized through xterm's write callback
 (`pendingOutput` / `writeInFlight`) to coalesce bursts behind the in-flight
-parser/render pass. Scrollback is bounded to 500 lines (`TERMINAL_SCROLLBACK_LINES`).
+parser/render pass. Scrollback is bounded to 5000 lines (`TERMINAL_SCROLLBACK_LINES`).
+Queued renderer output is byte-capped (`TERMINAL_PENDING_OUTPUT_MAX_BYTES`). Each stream tracks
+an absolute server output-byte cursor: ordinary disconnect preserves xterm state and reconnects
+from that cursor, so only missing bytes arrive and existing output is never replayed. The server
+requests a bounded reset only when retained scrollback no longer covers the cursor. Renderer
+overflow still performs destructive bounded recovery rather than growing the webview heap.
+Stream generations make late attach/detach completions harmless. Each xterm parser write is at most
+`TERMINAL_WRITE_CHUNK_MAX_BYTES` (64 KiB). Recovery invalidates the old stream immediately,
+then waits for its current xterm write callback before reset/replay; if that callback does not
+drain within the bounded timeout, the widget is recreated instead. Every normal parser write has
+the same watchdog, so a lost xterm callback cannot permanently stall scrolling and echo. Never reset an xterm with
+an outstanding write callback or let a late callback mutate replacement state.
 
-**Keystroke input is fire-and-forget and pipelined:** `onData` fires `ptyWrite` without
-awaiting; on the Rust side `pty_write` only _enqueues_ onto a dedicated writer thread
-(`input_tx` / `start_input_writer` in `pragma-client`) that owns its own daemon
-connection. The writer drains any already-queued same-session input into one frame and
-sends `write_input_frame` binary frames; there is no per-keystroke JSON request or
-daemon response. `resize`/`kill` use the separate pooled `request_conn`.
+Ordinary React unmount calls generation-tokenized `TerminalManager.park`: it marks the view
+invisible but preserves the xterm instance, warm WebGL renderer, parser state, output stream, and
+queued output. Remount reparents that same widget without detach, reset, replay, or forced
+refresh unless its hidden renderer was LRU-evicted. A stale cleanup token cannot park a widget
+already moved to a newer host. Closing the tab still calls `dispose`, which detaches, destroys
+xterm, and kills the PTY.
+
+**Keystroke input is ordered, fire-and-forget, and pipelined:** every xterm `onData` path uses
+`writeWhenReady`. Input arriving before the current attach/spawn succeeds stays in a bounded
+byte/message queue and flushes once, in order, only for the current connection generation.
+Overflow is surfaced, never silently dropped. Once ready, sync `pty_write` invocations enqueue
+in call order onto `pragma-client`'s dedicated bounded writer thread. That thread owns its daemon
+connection, caps binary `write_input_frame` frames, and does not consume a frame or decrement
+queue accounting until that exact frame is accepted. A socket failure retries the same bytes
+with bounded exponential backoff before later bytes can advance. There is no per-keystroke JSON
+request or daemon response. `resize`/`kill` use the separate pooled request connections.
+
+Terminal focus is separate from fit and visibility. Only the active terminal in the focused
+pane receives `TerminalManager.focus`, scheduled after React reveals/reparents its DOM. Hidden
+tabs and active terminals in unfocused split panes must never receive focus; unrelated rerenders
+must not steal focus from find/replace, rename fields, dialogs, or editors.
 
 **Native OS text-editing chords** (macOS Cmd+Backspace/Left/Right,
 Option+Left/Right/Backspace; Linux Ctrl+Left/Right/Backspace/Delete) are translated to
@@ -529,12 +586,19 @@ Terminal grids are capped at 240×90 cells (`MAX_TERMINAL_COLS` / `MAX_TERMINAL_
 before both xterm and PTY resize — fullscreen TUIs redraw the entire grid per
 interaction, so unbounded sizes regress latency.
 
-**Wheel reports are rate-limited** (not rewritten) while a TUI has mouse tracking on.
-An `attachCustomWheelEventHandler` in `terminal-manager.ts` drops events that arrive
-within `MOUSE_WHEEL_REPORT_INTERVAL_MS` of the last forwarded one, **only when
-`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its
-own viewport and is left untouched. The interval is the scroll-feel knob; tune it rather
-than removing the throttle or rewriting reports.
+**Wheel reports are renderer-response-paced** while a TUI has mouse tracking on. Every wheel
+event reaches xterm so trackpad pixel deltas keep accumulating; the first generated report is
+sent immediately, then only the latest report waits until response bytes finish parsing and
+`terminal.onRender` confirms WebGL painted the next frame. The write callback alone is not
+backpressure: it fires before rendering.
+Never release several reports per redraw: macOS trackpad momentum then outruns fullscreen TUI
+rendering again and eventually starves the webview. A 250ms watchdog applies only when the prior
+report produces no output. Once response bytes arrive, no further report is admitted while they
+wait in xterm's parser; a separate short render watchdog covers a missing `onRender`. Sensitivity is 1 while mouse tracking is active (each
+threshold crossing is one report) and 3 for local scrollback's pixel damping. Pacing applies **only when
+`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its own
+viewport and is left untouched. A new gesture after `MOUSE_WHEEL_GESTURE_QUIET_MS` recovers
+from a prior report that produced no output at a scroll boundary.
 
 **Terminal font:** Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`, …) at **fontSize
 14 / lineHeight 1.0**. 14px is required — at 13px macOS WebKit rounds the cell to 15px
@@ -692,9 +756,9 @@ or matching remote branch for main/parentless worktrees.
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
 lifecycle actions: committed changes show compact remote sync with ahead/behind counts;
 a no-change child shows `WorktreeDeleteDialog`. Sync pulls first, auto-aborts conflicts,
-then pushes. The left sidebar polls
-`worktrees_merged_status` for the merge glyph as a fallback, and also subscribes to the
-shared per-worktree file watcher so filesystem changes refresh the glyph immediately.
+then pushes. The left sidebar polls `worktrees_merged_status` for the merge glyph while
+visible. It deliberately does not open an eager recursive watcher for every worktree; file
+watches are lazy, shared, and exist only while a mounted feature consumes file changes.
 
 **Editor/diff tabs** — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and
 `diff` (read-only `@codemirror/merge`) as `TabKind`s, opened via `openFileTab` /
@@ -750,8 +814,84 @@ keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
 toggle switches WYSIWYG (TipTap + `tiptap-markdown` for GFM I/O, table kit, task
 lists, `MarkdownToolbar.tsx`) and Raw (the standard CodeMirror surface). Both modes
 share the same file lifecycle; unsaved edits survive the mode switch via
-`currentDocRef`. The `getMarkdown` TipTap helper is shared with the PR body editor
+`currentDocRef`. ⌘/Ctrl+K in WYSIWYG switches to Raw, carries the selected text into
+CodeMirror, and opens the shared inline AI edit prompt there so review hunks retain the
+standard CodeMirror diff workflow. The `getMarkdown` TipTap helper is shared with the PR body editor
 in `components/editor/tiptap-markdown.ts`.
+
+**Scratchpad tabs** — agent-authored MDX lives under each worktree's local,
+Git-excluded `.pragma/scratchpads/` directory and opens as dedicated `scratchpad`
+`TabKind`. Only `pragma-cli scratchpad create --title <title> <file.mdx>` creates one:
+broker validates current registered agent tab, adds required JSON-in-YAML frontmatter,
+writes through owning host, and opens tab. Frontend rejects MDX without that frontmatter.
+`ScratchpadView` has two modes: Editor rich-edits ordinary Markdown and renders MDX React
+components as live, lossless TipTap atom node views; Raw reuses CodeMirror + inline AI.
+A JSX flow element whose children can be edited is **not** atomized:
+`preprocessMdxForTiptap` emits a `pragma-mdx-container` (`MdxJsxContainer`, a non-atom
+`block+` node) carrying the open/close tags as attributes, and the children parse as
+ordinary editable document content framed by tag chips (`nestedMarkdownRegion` in
+`mdx-hybrid.tsx` decides; the children travel as pre-rendered HTML in `data-content`,
+decoded by the node's `parse.updateDOM` hook). Serialization writes the tags back around
+the children, so the source stays lossless. **Rewriting is recursive, and the depth rule
+is the whole point:** a plain HTML tag renders nothing of its own and supplies no React
+context, so it always becomes a container and each child is rewritten in turn — a
+container, or its own atom — which is what keeps `<article><section><div>` markdown
+editable three levels down instead of freezing the region into one iframe. A _component_
+(capitalized name, or a member expression) only renders correctly as a whole, so it stays
+an opaque live-preview atom unless its children are pure markdown. Rewriting also descends
+through `blockquote`/`list`/`listItem`, so an `<aside>` inside one list item no longer
+atomizes the entire list. Markdown that is inline JSX (`<div>text</div>` on one line,
+`Before <Badge>x</Badge> after`) is a _text_-level element whose children MDX does not
+parse as markdown; its enclosing block stays an atom, deliberately. Container children are
+rendered to HTML with remark-rehype (`allowDangerousHtml`, so nested container/atom markup
+survives) plus a task-list rewrite into `data-type="taskList"`/`"taskItem"` — without it a
+nested `- [x]` loses its checkbox on the way in.
+Rendered components compile with `@mdx-js/mdx` and `esbuild-wasm` into auto-sized,
+opaque-origin `sandbox="allow-scripts"` iframes inside the editable document.
+Local relative/package imports resolve before HTTPS/esm.sh fallback. Imported JSX
+components and document root render under error boundaries. Range comments persist in
+sibling JSON and submit as one prompt to attached agent; missing attachment opens
+same-worktree agent-tab picker. Renderer bridge requests are token-scoped and can only
+prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/components
+live in `@pragma/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
+document contains MDX regions.
+
+**A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
+this for every editor surface (plain, Markdown, scratchpad). Its `load()` — initial mount
+and the error-retry button — passes through `{ kind: "loading" }`, which tears the surface
+down; a _refresh_ (worktree watch event for the open path, or the window regaining focus)
+must not, because remounting a scratchpad discards TipTap state and rebuilds every MDX
+iframe. Refreshes therefore patch the `ready` state in place, no-op when the bytes match
+what is already loaded (so the tab's own save doesn't bounce off its own watch event), and
+swallow read errors so an atomic replace caught mid-flight can't replace good content with
+an error screen. A dirty tab is never overwritten: the loader raises `externalChange`
+instead, and `ScratchpadView` renders a "Changed on disk — reload" button that calls
+`reloadFromDisk()`. The window-focus re-read is deliberate redundancy — the watch is a
+live subscription that a dropped socket, a sleeping machine, or an unmounted tab can miss,
+and a buffer that only a tab close fixes is worse than one extra read. `ScratchpadsCard`
+watches the same events for `.pragma/scratchpads/` so an agent creating a scratchpad shows
+up in the sidebar without waiting on unrelated tab churn.
+
+**A scratchpad frame never restates a color.** The sandbox has its own document, so it
+sees neither Tailwind nor `index.css`. `lib/scratchpad-theme.ts` reads the computed value
+of every `THEME_TOKENS` variable (plus the radius/font/shadow support variables) off the
+live `<html>` element and hands the frame one `:root` block in a
+`<style id="pragma-scratchpad-theme">`, so `.pragma/theme.json` overrides apply inside
+components for free. Theme edits (`THEME_CHANGED_EVENT`) and root class changes rewrite
+that block through a `theme` bridge message rather than rebuilding the bundle — a rebuild
+would discard the component state the scratchpad is holding. Never hard-code a hex value
+in the preview document or in `@pragma/scratchpad`.
+
+Vite must allow CORS from the literal `null` origin in development: sandboxing removes
+the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
+graph until production bundling. Keep that exception alongside Vite's restricted localhost
+origin matcher; never replace it with unrestricted `cors: true` or weaken the iframe with
+`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` dependencies
+are also excluded from `@vitejs/plugin-react`: React Refresh expects the app's preamble
+and crashes when its injected HMR code runs in the isolated frame; Vite's standard
+TSX/JavaScript transforms are sufficient there. The frame bootstrap still defines
+no-op `$RefreshReg$` / `$RefreshSig$` hooks because Vite's optimized development build of
+`react-dom/client` contains signature calls even though the frame itself does not use HMR.
 
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`

@@ -44,6 +44,13 @@ The Rust side parses `values.json` against the schema-generated types at startup
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and
   Rust (`keybindings::default_config`). `keybindings.configFileName` is the editable
   overrides file, resolved against the home directory (global) or the project root.
+- `agentStatus.notificationText` — templates for agent alert wording (`{agent}`,
+  `{project}`, `{worktree}`, `{tab}`), rendered by the desktop toast/banner
+  (`apps/pragma/src/lib/agent-notification-text.ts`) and by the gateway's Expo push
+  (`crates/pragma-gateway/src/push/text.rs`). `tabs.defaultTitles` is shared for the same
+  reason: both languages must agree on when a tab is still unnamed.
+- `gateway.push.*` — Expo push endpoint, batch size, accepted token prefixes, and how
+  long a desktop focus heartbeat suppresses phone pushes.
 - `agentStatus.*` — shipped defaults and limits for agent alerts: sounds directory,
   clip duration/byte caps, allowed extensions, and whether notifications are on. Users
   override them through the `agentStatus` block of a `.pragma/config.json`
@@ -52,6 +59,8 @@ The Rust side parses `values.json` against the schema-generated types at startup
   `ReadBytesRange` request to `chunkBytes` (keep it well under the 16 MB protocol frame:
   base64 adds a third) and the frontend refuses to assemble anything past
   `maxBinaryBytes` in the webview's heap.
+- `scratchpads.*` — managed local MDX directory, extension, frontmatter key, and metadata
+  version shared by CLI, Rust host, and desktop editor.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

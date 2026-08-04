@@ -20,7 +20,7 @@ mod output;
 mod scrollback;
 mod server;
 
-use cli::{AgentCommand, Cli, TabCommand, TopCommand};
+use cli::{AgentCommand, Cli, ScratchpadCommand, TabCommand, TopCommand};
 use server::CliError;
 
 fn main() -> ExitCode {
@@ -69,6 +69,9 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::AwaitAnswer(args) => direct::agent_await_answer(args),
             AgentCommand::Input(args) => direct::agent_input(args, out),
             AgentCommand::Verify(args) => agent_verify::run(args, out),
+        },
+        TopCommand::Scratchpad { scratchpad } => match scratchpad {
+            ScratchpadCommand::Create(args) => commands::scratchpad_create(args, out),
         },
     }
 }

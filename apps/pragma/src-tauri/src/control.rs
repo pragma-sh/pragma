@@ -11,7 +11,11 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ControlMethod, DiffSide, ProtocolRpcMethod, Tab, TabKind, Worktree};
+use pragma_constants::{
+    ControlMethod, DiffSide, ProtocolRpcMethod, Tab, TabKind, Worktree, CONSTANTS,
+};
+use pragma_core::fs::FsRequest;
+use pragma_core::git::GitRequest;
 use pragma_core::tabs::TabsRequest;
 use pragma_protocol::{
     read_json_frame, write_json_frame, ControlEnvelope, ControlResult, RequestFrame, RequestKind,
@@ -21,10 +25,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
+use crate::config_file::ensure_host_dir;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::fs::fs_rpc;
 use crate::git::GitLocks;
-use crate::hosts::Hosts;
+use crate::hosts::{Hosts, LOCAL_HOST};
 use crate::pty::PtyClient;
 use crate::{browser, scripts, worktrees};
 
@@ -134,16 +140,16 @@ struct WorkspaceChangedEvent {
 }
 
 /// Starts the controller bridge.
-pub fn start(app: AppHandle, pty: PtyClient) {
+pub fn start(app: AppHandle, pty: PtyClient, source_host_id: String) {
     thread::spawn(move || loop {
-        if let Err(error) = register_once(&app, &pty) {
+        if let Err(error) = register_once(&app, &pty, &source_host_id) {
             log::warn!("control bridge disconnected: {error}");
             thread::sleep(Duration::from_millis(CONTROL_RECONNECT_MS));
         }
     });
 }
 
-fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
+fn register_once(app: &AppHandle, pty: &PtyClient, source_host_id: &str) -> AppResult<()> {
     let mut stream = pty.connect_with_spawn()?;
     let request = RequestFrame {
         request_id: format!("controller-{}", std::process::id()),
@@ -183,7 +189,7 @@ fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
                 }
             }
             ServerFrame::Control(envelope) => {
-                let result = dispatch(app, envelope.clone());
+                let result = dispatch(app, envelope.clone(), source_host_id);
                 let response = RequestFrame {
                     request_id: envelope.request_id,
                     kind: RequestKind::ControlResult,
@@ -209,8 +215,8 @@ fn register_once(app: &AppHandle, pty: &PtyClient) -> AppResult<()> {
     }
 }
 
-fn dispatch(app: &AppHandle, envelope: ControlEnvelope) -> ControlResult {
-    match dispatch_inner(app, envelope.method, envelope.payload) {
+fn dispatch(app: &AppHandle, envelope: ControlEnvelope, source_host_id: &str) -> ControlResult {
+    match dispatch_inner(app, envelope.method, envelope.payload, source_host_id) {
         Ok(payload) => ControlResult {
             ok: true,
             payload: Some(payload),
@@ -228,7 +234,9 @@ fn dispatch_inner(
     app: &AppHandle,
     method: ControlMethod,
     payload: serde_json::Value,
+    source_host_id: &str,
 ) -> AppResult<serde_json::Value> {
+    validate_control_source(app, source_host_id, &payload)?;
     match method {
         ControlMethod::WorktreesList => worktrees_list(app, payload),
         ControlMethod::WorktreeCreate => worktree_create(app, payload),
@@ -257,7 +265,52 @@ fn dispatch_inner(
         ControlMethod::BrowserScreenshot => browser_screenshot(app, payload),
         ControlMethod::AgentStart => agent_start(app, payload),
         ControlMethod::AgentSessionLaunch => agent_session_launch(app, payload),
+        ControlMethod::ScratchpadCreate => scratchpad_create(app, payload),
     }
+}
+
+/// Prevents a remote controller from targeting worktrees or tabs owned by another host.
+fn validate_control_source(
+    app: &AppHandle,
+    source_host_id: &str,
+    payload: &serde_json::Value,
+) -> AppResult<()> {
+    if source_host_id == LOCAL_HOST {
+        return Ok(());
+    }
+    let mut worktree_ids = ["worktreeId", "parentWorktreeId"]
+        .into_iter()
+        .filter_map(|key| payload.get(key).and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if let Some(parent) = payload
+        .get("newWorktree")
+        .and_then(|value| value.get("parentWorktreeId"))
+        .and_then(serde_json::Value::as_str)
+    {
+        worktree_ids.push(parent.to_string());
+    }
+    for key in ["tabId", "agentTabId"] {
+        if let Some(tab_id) = payload.get(key).and_then(serde_json::Value::as_str) {
+            worktree_ids.push(resolve_tab(app, tab_id)?.worktree_id);
+        }
+    }
+    if worktree_ids.is_empty() {
+        return Err(AppError::InvalidInput(
+            "remote control request has no host-scoped worktree or tab".to_string(),
+        ));
+    }
+    let db = app.state::<Db>();
+    let hosts = app.state::<Hosts>();
+    for worktree_id in worktree_ids {
+        let owner = hosts.host_id_for_worktree(&db, &worktree_id)?;
+        if owner != source_host_id {
+            return Err(AppError::InvalidInput(format!(
+                "remote control request cannot target worktree {worktree_id} on host {owner}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(payload: serde_json::Value) -> AppResult<T> {
@@ -427,13 +480,10 @@ fn worktree_delete(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
     let args: DeletePayload = parse(payload)?;
     let worktree = app.state::<Db>().worktree(&args.worktree_id)?;
     worktrees::delete_worktree(
+        app.clone(),
         args.worktree_id,
         args.delete_branch,
         args.force,
-        app.state::<Db>(),
-        app.state::<Hosts>(),
-        app.state::<GitLocks>(),
-        app.state::<crate::workspace_mirror::WorkspacePublisher>(),
     )?;
     emit_worktree_changed(
         app,
@@ -510,7 +560,9 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
         None,
     )?;
     if matches!(kind, TabKind::Terminal) {
-        let pty = app.state::<PtyClient>();
+        let pty = app
+            .state::<Hosts>()
+            .for_worktree(app.state::<Db>().inner(), &worktree.id)?;
         pty.spawn_detached(
             tab.id.clone(),
             worktree.id.clone(),
@@ -531,6 +583,26 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
 fn tab_close(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
     let args: TabIdPayload = parse(payload)?;
     let tab = resolve_tab(app, &args.tab_id)?;
+    match tab.kind {
+        TabKind::Terminal => {
+            let db = app.state::<Db>();
+            let hosts = app.state::<Hosts>();
+            if let Ok(client) = hosts.for_worktree(&db, &tab.worktree_id) {
+                let _ = client.kill(tab.id.clone());
+            }
+            let _ = hosts.unbind_session(&tab.id);
+        }
+        TabKind::Browser => {
+            browser::browser_close(app.clone(), tab.id.clone())?;
+        }
+        TabKind::Editor
+        | TabKind::Diff
+        | TabKind::PrReview
+        | TabKind::Log
+        | TabKind::PluginWebview
+        | TabKind::Scratchpad => {}
+    }
+    crate::plugins::stop_watchers_for_tab(&tab.id)?;
     app.state::<Db>().delete_tab(&tab.id)?;
     emit_tabs_changed(app, "tabClosed", &tab);
     app.state::<crate::workspace_mirror::WorkspacePublisher>()
@@ -585,6 +657,145 @@ fn tab_exec(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
         stderr: result.stderr,
         status: result.status,
     })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScratchpadCreatePayload {
+    worktree_id: String,
+    agent_tab_id: String,
+    title: String,
+    contents: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScratchpadMetadata<'a> {
+    version: u64,
+    id: &'a str,
+    title: &'a str,
+    agent_tab_id: &'a str,
+    agent_id: &'a str,
+    created_at: u64,
+}
+
+fn scratchpad_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
+    let args: ScratchpadCreatePayload = parse(payload)?;
+    let title = args.title.trim();
+    if title.is_empty() {
+        return Err(AppError::InvalidInput(
+            "scratchpad title cannot be empty".to_string(),
+        ));
+    }
+    let db = app.state::<Db>();
+    let worktree = db.worktree(&args.worktree_id)?;
+    let agent_tab = resolve_tab(app, &args.agent_tab_id)?;
+    if agent_tab.worktree_id != worktree.id || !matches!(agent_tab.kind, TabKind::Terminal) {
+        return Err(AppError::InvalidInput(
+            "scratchpad creator must be a terminal tab in the current worktree".to_string(),
+        ));
+    }
+    let client = app.state::<Hosts>().for_worktree(&db, &worktree.id)?;
+    let agent_id = crate::scratchpads::registered_agent_id(&client, &agent_tab)?;
+    let id = Uuid::new_v4().to_string();
+    let path = format!(
+        "{}/{}-{}.{}",
+        CONSTANTS.scratchpads.directory,
+        scratchpad_slug(title),
+        &id[..8],
+        CONSTANTS.scratchpads.extension
+    );
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| AppError::InvalidInput(format!("system clock is before epoch: {error}")))?
+        .as_secs();
+    let metadata = ScratchpadMetadata {
+        version: CONSTANTS.scratchpads.version.get(),
+        id: &id,
+        title,
+        agent_tab_id: &agent_tab.id,
+        agent_id: &agent_id,
+        created_at,
+    };
+    let document = scratchpad_document(&args.contents, &metadata)?;
+    client.rpc(
+        ProtocolRpcMethod::Git,
+        serde_json::to_value(GitRequest::EnsurePragmaExcluded {
+            project_root: worktree.path.clone(),
+        })?,
+    )?;
+    ensure_host_dir(&client, &worktree.path, &CONSTANTS.scratchpads.directory)?;
+    fs_rpc::<()>(
+        &client,
+        &FsRequest::WriteFile {
+            root: worktree.path.clone(),
+            path: path.clone(),
+            contents: document,
+        },
+    )?;
+    let tab = match db.create_tab(
+        &worktree.project_id,
+        &worktree.id,
+        TabKind::Scratchpad,
+        Some(title.to_string()),
+        None,
+        Some(path.clone()),
+        None,
+        None,
+        None,
+    ) {
+        Ok(tab) => tab,
+        Err(error) => {
+            let _ = fs_rpc::<()>(
+                &client,
+                &FsRequest::Delete {
+                    root: worktree.path,
+                    path,
+                },
+            );
+            return Err(error);
+        }
+    };
+    emit_tabs_changed(app, "tabOpened", &tab);
+    app.state::<crate::workspace_mirror::WorkspacePublisher>()
+        .trigger();
+    json(tab)
+}
+
+fn scratchpad_slug(title: &str) -> String {
+    let mut slug = String::new();
+    let mut separated = false;
+    for character in title.chars() {
+        if character.is_ascii_alphanumeric() {
+            if slug.len() < 64 {
+                slug.push(character.to_ascii_lowercase());
+            }
+            separated = false;
+        } else if slug.len() < 64 && !separated && !slug.is_empty() {
+            slug.push('-');
+            separated = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "scratchpad".to_string()
+    } else {
+        slug
+    }
+}
+
+fn scratchpad_document(source: &str, metadata: &ScratchpadMetadata<'_>) -> AppResult<String> {
+    let metadata = serde_json::to_string(metadata)?;
+    let entry = format!("{}: {metadata}", CONSTANTS.scratchpads.frontmatter_key);
+    if let Some(rest) = source.strip_prefix("---\n") {
+        return Ok(format!("---\n{entry}\n{rest}"));
+    }
+    if let Some(rest) = source.strip_prefix("---\r\n") {
+        return Ok(format!("---\n{entry}\n{rest}"));
+    }
+    Ok(format!("---\n{entry}\n---\n\n{source}"))
 }
 
 fn split_list(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
@@ -723,7 +934,9 @@ fn materialize_split_tab(
         None,
     )?;
     if matches!(kind, TabKind::Terminal) {
-        let pty = app.state::<PtyClient>();
+        let pty = app
+            .state::<Hosts>()
+            .for_worktree(app.state::<Db>().inner(), &worktree.id)?;
         pty.spawn_detached(
             tab.id.clone(),
             worktree.id.clone(),
@@ -1238,7 +1451,27 @@ fn shell_join(argv: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_display_title, shell_join, BrowserHistory};
+    use super::{
+        agent_display_title, scratchpad_document, scratchpad_slug, shell_join, BrowserHistory,
+        ScratchpadMetadata,
+    };
+
+    #[test]
+    fn scratchpad_document_adds_managed_frontmatter_without_losing_existing_fields() {
+        let metadata = ScratchpadMetadata {
+            version: 1,
+            id: "scratch-1",
+            title: "Architecture / Notes",
+            agent_tab_id: "tab-1",
+            agent_id: "opencode",
+            created_at: 1,
+        };
+        let document = scratchpad_document("---\ncustom: kept\n---\n# Body\n", &metadata)
+            .expect("scratchpad document");
+        assert!(document.starts_with("---\npragmaScratchpad: {"));
+        assert!(document.contains("\ncustom: kept\n---\n# Body\n"));
+        assert_eq!(scratchpad_slug(metadata.title), "architecture-notes");
+    }
 
     #[test]
     fn shell_join_preserves_argv_boundaries_through_a_shell_reparse() {

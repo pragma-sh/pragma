@@ -31,6 +31,7 @@ import type {
   AutomationInfo,
   AutomationRootRegistration,
   OpenPort,
+  ScratchpadSummary,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -55,12 +56,29 @@ export function getAppInfo(): Promise<AppInfo> {
  * it as bytes, never JSON, so escape-heavy redraws aren't inflated and can be
  * fed straight into xterm). See {@link PtyMessage}.
  */
-export type PtyEvent = { event: "title"; title: string } | { event: "exit"; code: number | null };
+export type PtyEvent =
+  | { event: "replay"; cursor: number; reset: boolean }
+  | { event: "title"; title: string }
+  | { event: "exit"; code: number | null }
+  | { event: "disconnected" };
 
 /** A message on a PTY channel: raw output bytes, or a JSON control event. */
 export type PtyMessage = ArrayBuffer | PtyEvent;
 
 export type PtyEventHandler = (message: PtyMessage) => void;
+
+export interface PtyStream {
+  channel: Channel<PtyMessage>;
+  generation: number;
+}
+
+let nextPtyStreamGeneration = 0;
+let nextFileSubscriptionId = 0;
+
+export interface WorktreeFileSubscription {
+  channel: Channel<FileChange>;
+  subscriptionId: number;
+}
 
 /** Agent launcher definition exposed by a Pragma plugin. */
 export interface AgentConfig {
@@ -332,8 +350,9 @@ export function ptySpawn(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyMessage>> {
+): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
+  const generation = ++nextPtyStreamGeneration;
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
   return invoke<void>("pty_spawn", {
@@ -342,8 +361,20 @@ export function ptySpawn(
     cwd,
     cols,
     rows,
+    streamGeneration: generation,
     onEvent: channel,
-  }).then(() => channel);
+  }).then(() => ({ channel, generation }));
+}
+
+/** Spawns a daemon PTY without forwarding output into the webview. */
+export function ptySpawnDetached(
+  sessionId: string,
+  worktreeId: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows });
 }
 
 /**
@@ -354,14 +385,26 @@ export function ptyAttach(
   sessionId: string,
   cols: number,
   rows: number,
+  cursor: number | null,
   onEvent: PtyEventHandler,
-): Promise<Channel<PtyMessage>> {
+): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
+  const generation = ++nextPtyStreamGeneration;
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onEvent;
-  return invoke<void>("pty_attach", { sessionId, cols, rows, onEvent: channel }).then(
-    () => channel,
-  );
+  return invoke<void>("pty_attach", {
+    sessionId,
+    cols,
+    rows,
+    cursor,
+    streamGeneration: generation,
+    onEvent: channel,
+  }).then(() => ({ channel, generation }));
+}
+
+/** Closes one output stream while leaving its daemon PTY running. */
+export function ptyDetach(sessionId: string, streamGeneration: number): Promise<void> {
+  return invoke("pty_detach", { sessionId, streamGeneration });
 }
 
 /** Writes raw terminal input to a daemon session. */
@@ -728,6 +771,29 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
   return invoke("write_file", { worktreeId, path, contents });
 }
 
+/** Sends user feedback from a scratchpad to one attached agent tab. */
+export function scratchpadPromptAgent(
+  worktreeId: string,
+  tabId: string,
+  text: string,
+): Promise<void> {
+  return invoke("scratchpad_prompt_agent", { worktreeId, tabId, text });
+}
+
+/** Lists every managed scratchpad file in a worktree, open or not. */
+export function listScratchpads(worktreeId: string): Promise<ScratchpadSummary[]> {
+  return invoke<ScratchpadSummary[]>("list_scratchpads", { worktreeId });
+}
+
+/** Opens a tab for an existing scratchpad file, reusing one already open. */
+export function openScratchpadTab(
+  worktreeId: string,
+  filePath: string,
+  title: string,
+): Promise<Tab> {
+  return invoke<Tab>("open_scratchpad_tab", { worktreeId, filePath, title });
+}
+
 /**
  * Renames (or moves) a worktree-relative entry. Both paths are resolved inside
  * the worktree; the source must exist and the destination must not.
@@ -768,17 +834,27 @@ export function cancelPaletteSearch(projectId: string, searchId: string): Promis
  * Subscribes to live filesystem changes under a worktree. The server runs one
  * recursive watcher per worktree and streams each {@link FileChange} (worktree-
  * relative POSIX path, `.git` filtered out) through a Tauri channel. Resolves
- * with the channel so callers can detach (`channel.onmessage = noop`) when they
- * unmount — Tauri has no explicit channel-close API.
+ * with the channel and native subscription id so callers can detach the handler
+ * and stop the exact server stream when their final listener unmounts.
  */
 export function watchWorktreeFiles(
   worktreeId: string,
   onChange: (change: FileChange) => void,
-): Promise<Channel<FileChange>> {
+): Promise<WorktreeFileSubscription> {
   const channel = new Channel<FileChange>();
+  const subscriptionId = ++nextFileSubscriptionId;
   // oxlint-disable-next-line unicorn/prefer-add-event-listener -- Tauri Channel exposes `onmessage` rather than EventTarget listeners.
   channel.onmessage = onChange;
-  return invoke<void>("watch_worktree_files", { worktreeId, onEvent: channel }).then(() => channel);
+  return invoke<void>("watch_worktree_files", {
+    worktreeId,
+    subscriptionId,
+    onEvent: channel,
+  }).then(() => ({ channel, subscriptionId }));
+}
+
+/** Stops one exact worktree filesystem subscription. */
+export function stopWatchingWorktreeFiles(subscriptionId: number): Promise<void> {
+  return invoke("stop_watching_worktree_files", { subscriptionId });
 }
 
 /**

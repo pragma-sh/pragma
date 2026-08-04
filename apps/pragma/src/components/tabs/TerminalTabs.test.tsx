@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalTabs } from "./TerminalTabs";
+import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
@@ -85,6 +86,7 @@ const mockWorkspace: WorkspaceContextValue = {
   openReviewTab: vi.fn(),
   openDaemonLogTab: vi.fn(),
   openPluginWebView: vi.fn(),
+  openScratchpadFile: vi.fn(),
   closeTab: vi.fn(),
   renameTerminalTab: vi.fn(),
   markTabAgent: vi.fn(),
@@ -122,6 +124,10 @@ vi.mock("@/components/editor/confirm-close", () => ({
   useConfirmClose: () => vi.fn(),
 }));
 
+vi.mock("@/lib/terminal-manager", () => ({
+  terminalManager: { focus: vi.fn() },
+}));
+
 afterEach(() => {
   cleanup();
   mockWorkspace.splitRootByWorktree = {};
@@ -157,6 +163,16 @@ describe("TerminalTabs", () => {
     expect(screen.getByTitle("Split: one")).toBeInTheDocument();
     expect(screen.queryByText("two")).not.toBeInTheDocument();
     expect(screen.queryByText("three")).not.toBeInTheDocument();
+  });
+
+  it("focuses the terminal when its top-level tab is clicked", async () => {
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByTitle("Split: one"));
+
+    expect(mockWorkspace.setActiveTab).toHaveBeenCalledWith("one");
+    expect(terminalManager.focus).toHaveBeenCalledWith("one");
   });
 
   it("runs project scripts from the header play button", async () => {

@@ -22,6 +22,8 @@ use crate::{CoreError, CoreResult};
 
 /// Git exclude entry that hides Pragma's worktree storage from the repo.
 const PRAGMA_WORKTREES_EXCLUDE: &str = ".pragma/worktrees/";
+/// Git exclude entry that keeps local scratchpad documents out of commits.
+const PRAGMA_SCRATCHPADS_EXCLUDE: &str = ".pragma/scratchpads/";
 
 /// One worktree's inputs for a merged-status batch check.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1141,9 +1143,9 @@ fn git_common_dir(path: &Path) -> CoreResult<PathBuf> {
     Ok(pragma_platform::path::canonicalize(absolute)?)
 }
 
-/// Ensures `.pragma/worktrees/` is excluded via the repository's
+/// Ensures Pragma's local worktrees and scratchpads are excluded via the repository's
 /// `info/exclude`, migrating a legacy broad `.pragma/` entry to the narrower
-/// path. Idempotent.
+/// paths. Idempotent.
 fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
     // Ask git for the git dir instead of assuming `<project>/.git`. Creating
     // that directory ourselves would leave behind a `.git` git does *not*
@@ -1155,6 +1157,7 @@ fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
     let exclude = info.join("exclude");
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
     let mut has_worktrees_exclude = false;
+    let mut has_scratchpads_exclude = false;
     let mut changed = false;
     let mut lines = Vec::new();
     for line in existing.lines() {
@@ -1164,11 +1167,19 @@ fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
                 has_worktrees_exclude = true;
                 lines.push(line.to_string());
             }
+            PRAGMA_SCRATCHPADS_EXCLUDE => {
+                has_scratchpads_exclude = true;
+                lines.push(line.to_string());
+            }
             _ => lines.push(line.to_string()),
         }
     }
     if !has_worktrees_exclude {
         lines.push(PRAGMA_WORKTREES_EXCLUDE.to_string());
+        changed = true;
+    }
+    if !has_scratchpads_exclude {
+        lines.push(PRAGMA_SCRATCHPADS_EXCLUDE.to_string());
         changed = true;
     }
     if changed {
@@ -1633,7 +1644,7 @@ mod tests {
         github_merge_base_branch, github_merge_in_progress, github_pull_branch, github_sync_branch,
         has_unmerged_paths, list_headless_worktrees, merge_worktree_to_parent, merged_status,
         stage_file, unstage_file, worktree_changes, worktree_commits, worktree_is_dirty,
-        MergedStatusItem, PRAGMA_WORKTREES_EXCLUDE,
+        MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -1680,6 +1691,9 @@ mod tests {
         assert!(exclude
             .lines()
             .any(|line| line.trim() == PRAGMA_WORKTREES_EXCLUDE));
+        assert!(exclude
+            .lines()
+            .any(|line| line.trim() == PRAGMA_SCRATCHPADS_EXCLUDE));
     }
 
     fn commit_all(dir: &Path, message: &str) {

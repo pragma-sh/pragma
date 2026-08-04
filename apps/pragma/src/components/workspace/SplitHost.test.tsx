@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SplitHost } from "./SplitHost";
 import { TabDragProvider } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
+import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
@@ -91,6 +92,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       openReviewTab: vi.fn(),
       openDaemonLogTab: vi.fn(),
       openPluginWebView: vi.fn(),
+      openScratchpadFile: vi.fn(),
       closeTab: vi.fn(),
       renameTerminalTab: vi.fn(),
       markTabAgent: vi.fn(),
@@ -137,7 +139,10 @@ vi.mock("@/lib/terminal-manager", () => ({
   terminalManager: {
     mount: vi.fn(),
     activate: vi.fn(),
+    focus: vi.fn(),
+    setVisible: vi.fn(),
     resize: vi.fn(),
+    park: vi.fn(),
     dispose: vi.fn(),
     onRequestFind: vi.fn(() => () => {}),
     getBufferLines: vi.fn(() => []),
@@ -183,11 +188,59 @@ afterEach(() => {
   splitTabAtPaneMock.mockClear();
   moveTabToPaneMock.mockClear();
   createTabInPaneMock.mockClear();
+  vi.mocked(terminalManager.activate).mockClear();
+  vi.mocked(terminalManager.focus).mockClear();
+  vi.mocked(terminalManager.park).mockClear();
 });
 
 describe("SplitHost", () => {
+  it("keeps visited terminals mounted when switching tabs in a pane", () => {
+    const originalRoot = mockWorkspace.splitRoot;
+    const originalActiveTabId = mockWorkspace.activeTabId;
+    mockWorkspace.tabs = [tab("one"), tab("two")];
+    mockWorkspace.splitRoot = {
+      kind: "pane",
+      id: "pane-only",
+      tabIds: ["one", "two"],
+      activeTabId: "one",
+    };
+
+    const view = render(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(terminalManager.mount).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "one" }),
+      expect.any(String),
+      expect.any(HTMLElement),
+    );
+
+    mockWorkspace.activeTabId = "two";
+    mockWorkspace.splitRoot = {
+      ...mockWorkspace.splitRoot,
+      activeTabId: "two",
+    };
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+
+    expect(terminalManager.mount).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "two" }),
+      expect.any(String),
+      expect.any(HTMLElement),
+    );
+    expect(terminalManager.park).not.toHaveBeenCalledWith("one", expect.anything());
+
+    mockWorkspace.splitRoot = originalRoot;
+    mockWorkspace.activeTabId = originalActiveTabId;
+  });
+
   it("moves split focus to a pane when its content is clicked", async () => {
-    renderHost();
+    const view = renderHost();
+    vi.mocked(terminalManager.focus).mockClear();
 
     const rightPane = screen.getByText("two").closest("section");
     expect(rightPane).not.toBeNull();
@@ -195,6 +248,85 @@ describe("SplitHost", () => {
     await userEvent.click(rightPane!);
 
     expect(focusPaneMock).toHaveBeenCalledWith("pane-right");
+
+    mockWorkspace.focusedPaneId = "pane-right";
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(terminalManager.focus).toHaveBeenCalledWith("two");
+    expect(terminalManager.focus).not.toHaveBeenCalledWith("one");
+    mockWorkspace.focusedPaneId = "pane-left";
+  });
+
+  it("focuses clicked and keyboard-cycled terminal tabs in the focused pane", async () => {
+    const originalRoot = mockWorkspace.splitRoot;
+    const originalActiveTabId = mockWorkspace.activeTabId;
+    const third = tab("three");
+    mockWorkspace.tabs = [tab("one"), tab("two"), third];
+    mockWorkspace.activeTabId = "one";
+    mockWorkspace.focusedPaneId = "pane-left";
+    mockWorkspace.splitRoot = {
+      kind: "split",
+      id: "split-tabs",
+      direction: "horizontal",
+      children: [
+        { kind: "pane", id: "pane-left", tabIds: ["one", "three"], activeTabId: "one" },
+        { kind: "pane", id: "pane-right", tabIds: ["two"], activeTabId: "two" },
+      ],
+    };
+    const view = render(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    vi.mocked(terminalManager.focus).mockClear();
+
+    await userEvent.click(screen.getByText("three"));
+    expect(mockWorkspace.setPaneActiveTab).toHaveBeenCalledWith("pane-left", "three");
+    mockWorkspace.activeTabId = "three";
+    mockWorkspace.splitRoot = {
+      ...mockWorkspace.splitRoot,
+      children: [
+        { kind: "pane", id: "pane-left", tabIds: ["one", "three"], activeTabId: "three" },
+        { kind: "pane", id: "pane-right", tabIds: ["two"], activeTabId: "two" },
+      ],
+    };
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(terminalManager.focus).toHaveBeenCalledWith("three");
+
+    vi.mocked(terminalManager.focus).mockClear();
+    mockWorkspace.activeTabId = "one";
+    mockWorkspace.splitRoot = {
+      ...mockWorkspace.splitRoot,
+      children: [
+        { kind: "pane", id: "pane-left", tabIds: ["one", "three"], activeTabId: "one" },
+        { kind: "pane", id: "pane-right", tabIds: ["two"], activeTabId: "two" },
+      ],
+    };
+    view.rerender(
+      <TabDragProvider>
+        <SplitHost />
+      </TabDragProvider>,
+    );
+    expect(terminalManager.focus).toHaveBeenCalledWith("one");
+    expect(terminalManager.focus).not.toHaveBeenCalledWith("three");
+
+    mockWorkspace.splitRoot = originalRoot;
+    mockWorkspace.activeTabId = originalActiveTabId;
+    mockWorkspace.focusedPaneId = "pane-left";
+  });
+
+  it("never lets the active terminal in an unfocused split pane steal focus", () => {
+    renderHost();
+
+    expect(terminalManager.focus).toHaveBeenCalledWith("one");
+    expect(terminalManager.focus).not.toHaveBeenCalledWith("two");
   });
 
   it("splits the target pane when a tab is dragged onto its content", () => {

@@ -24,6 +24,10 @@
     // Plugin resource bundles loaded at runtime by the Rust sidecar launcher
     // (plugins.rs), never statically imported by any entry point.
     "**/resources/plugins/**",
+    // `packages/bench/src/runner.js` is pulled in via Rust `include_str!`
+    // (scenarios.rs) and injected into the webview at runtime — never
+    // statically imported by any JS/TS entry point.
+    "packages/bench/src/runner.js",
   ],
   "workspaces": {
     "packages": ["apps/*", "packages/*"],
@@ -49,7 +53,11 @@
   "ignoreDependencies": ["@google/design.md", "expo-splash-screen", "expo-system-ui"],
   // `@pragma/constants` imports generated TS types that may not exist before
   // `bun run generate`; don't report that intentional generated edge.
-  "ignoreUnresolvedImports": ["./generated/constants"],
+  // `@pragma/scratchpad/ui/primitives` is a real export in that package's
+  // `exports` map (and resolves for tsc, Vite and Vitest); fallow's resolver
+  // only handles single-segment subpaths, so it reports the nested one as
+  // unresolved. Drop this entry once fallow resolves multi-segment subpaths.
+  "ignoreUnresolvedImports": ["./generated/constants", "@pragma/scratchpad/ui/primitives"],
   "duplicates": {
     "mode": "semantic",
     // Hide pair-only clones; focus on widespread copy-paste
