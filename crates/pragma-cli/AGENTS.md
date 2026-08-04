@@ -7,6 +7,7 @@ crate's debug binary).
 ## Current Usage
 
 ```sh
+pragma-cli scratchpad create --title "Architecture" result.mdx
 pragma-cli agent report --agent <id> started|stopped|attention|cleared
 # Session name: status-less report that renames the hosting tab (user renames win).
 pragma-cli agent report --agent <id> session-name --name "<name>"
@@ -26,6 +27,12 @@ pragma-cli agent input --agent <id> --text "<message>" [--request-id <id>]
 pragma-cli agent verify --agent <id> [--scenario <id>] [--abort-input '\x1b'] \
   [--model <id> | --pick-model-cmd "<raw model args>"] [--jobs <n>] [--headed]
 ```
+
+`scratchpad create` reads an MDX file (or `-` for stdin), writes a managed document under
+the current worktree's `.pragma/scratchpads/`, attaches `$PRAGMA_TAB_ID`, and opens a
+scratchpad tab. It requires the current tab to be a registered agent tab and the desktop
+controller to be connected. Scratchpad frontmatter is created by this command; agents do
+not write managed files directly.
 
 `agent await-decision` blocks on the agent event stream until a Pragma approval toast
 publishes the matching `AgentDecision`, then prints `allow`/`deny` (exit 0). On timeout it

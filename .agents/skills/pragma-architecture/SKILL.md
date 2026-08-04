@@ -28,6 +28,8 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/constants/` — dual TS+Rust package; the single source of truth for values
   shared across the language boundary (`schema.json` + `values.json`).
 - `packages/sdk/` — `@pragma/sdk`, a typed Node/Bun wrapper that shells out to `pragma-cli`.
+- `packages/scratchpad/` — `@pragma/scratchpad`, browser-safe interaction/runtime APIs and
+  UI components for agent-authored MDX scratchpads.
 - `packages/plugin/` — `@pragma/plugin`, the public TS API/runtime stub for pure Pragma
   plugins loaded from `.pragma/config.json`.
 - `packages/automations/` — `@pragma/automations`, the authoring API plus
@@ -53,6 +55,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 | Value/helper shared by multiple frontend modules | `apps/pragma/src/lib/`                                         |
 | Reusable logic/types a future app could use      | a NEW `packages/*` package                                     |
 | Typed JS wrapper over the Pragma CLI             | `packages/sdk` (`@pragma/sdk`)                                 |
+| Scratchpad runtime or first-party MDX component  | `packages/scratchpad` (`@pragma/scratchpad`)                   |
 | Public Pragma plugin authoring API               | `packages/plugin` (`@pragma/plugin`)                           |
 | Automation authoring API / host sidecar          | `packages/automations` (`@pragma/automations`)                 |
 | Pragma plugin scaffolder templates/CLI           | `packages/create-pragma-plugin`                                |

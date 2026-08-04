@@ -742,8 +742,84 @@ keymap), `use-inline-edit.tsx` (controller + portals), `InlineEditPrompt.tsx` /
 toggle switches WYSIWYG (TipTap + `tiptap-markdown` for GFM I/O, table kit, task
 lists, `MarkdownToolbar.tsx`) and Raw (the standard CodeMirror surface). Both modes
 share the same file lifecycle; unsaved edits survive the mode switch via
-`currentDocRef`. The `getMarkdown` TipTap helper is shared with the PR body editor
+`currentDocRef`. ⌘/Ctrl+K in WYSIWYG switches to Raw, carries the selected text into
+CodeMirror, and opens the shared inline AI edit prompt there so review hunks retain the
+standard CodeMirror diff workflow. The `getMarkdown` TipTap helper is shared with the PR body editor
 in `components/editor/tiptap-markdown.ts`.
+
+**Scratchpad tabs** — agent-authored MDX lives under each worktree's local,
+Git-excluded `.pragma/scratchpads/` directory and opens as dedicated `scratchpad`
+`TabKind`. Only `pragma-cli scratchpad create --title <title> <file.mdx>` creates one:
+broker validates current registered agent tab, adds required JSON-in-YAML frontmatter,
+writes through owning host, and opens tab. Frontend rejects MDX without that frontmatter.
+`ScratchpadView` has two modes: Editor rich-edits ordinary Markdown and renders MDX React
+components as live, lossless TipTap atom node views; Raw reuses CodeMirror + inline AI.
+A JSX flow element whose children can be edited is **not** atomized:
+`preprocessMdxForTiptap` emits a `pragma-mdx-container` (`MdxJsxContainer`, a non-atom
+`block+` node) carrying the open/close tags as attributes, and the children parse as
+ordinary editable document content framed by tag chips (`nestedMarkdownRegion` in
+`mdx-hybrid.tsx` decides; the children travel as pre-rendered HTML in `data-content`,
+decoded by the node's `parse.updateDOM` hook). Serialization writes the tags back around
+the children, so the source stays lossless. **Rewriting is recursive, and the depth rule
+is the whole point:** a plain HTML tag renders nothing of its own and supplies no React
+context, so it always becomes a container and each child is rewritten in turn — a
+container, or its own atom — which is what keeps `<article><section><div>` markdown
+editable three levels down instead of freezing the region into one iframe. A _component_
+(capitalized name, or a member expression) only renders correctly as a whole, so it stays
+an opaque live-preview atom unless its children are pure markdown. Rewriting also descends
+through `blockquote`/`list`/`listItem`, so an `<aside>` inside one list item no longer
+atomizes the entire list. Markdown that is inline JSX (`<div>text</div>` on one line,
+`Before <Badge>x</Badge> after`) is a _text_-level element whose children MDX does not
+parse as markdown; its enclosing block stays an atom, deliberately. Container children are
+rendered to HTML with remark-rehype (`allowDangerousHtml`, so nested container/atom markup
+survives) plus a task-list rewrite into `data-type="taskList"`/`"taskItem"` — without it a
+nested `- [x]` loses its checkbox on the way in.
+Rendered components compile with `@mdx-js/mdx` and `esbuild-wasm` into auto-sized,
+opaque-origin `sandbox="allow-scripts"` iframes inside the editable document.
+Local relative/package imports resolve before HTTPS/esm.sh fallback. Imported JSX
+components and document root render under error boundaries. Range comments persist in
+sibling JSON and submit as one prompt to attached agent; missing attachment opens
+same-worktree agent-tab picker. Renderer bridge requests are token-scoped and can only
+prompt same-worktree tabs or read same-worktree status. Public scratchpad APIs/components
+live in `@pragma/scratchpad`; heavy compiler/runtime code lazy-loads only when an Editor
+document contains MDX regions.
+
+**A file-backed tab re-reads in place, never by remounting.** `useEditorFileLoader` owns
+this for every editor surface (plain, Markdown, scratchpad). Its `load()` — initial mount
+and the error-retry button — passes through `{ kind: "loading" }`, which tears the surface
+down; a _refresh_ (worktree watch event for the open path, or the window regaining focus)
+must not, because remounting a scratchpad discards TipTap state and rebuilds every MDX
+iframe. Refreshes therefore patch the `ready` state in place, no-op when the bytes match
+what is already loaded (so the tab's own save doesn't bounce off its own watch event), and
+swallow read errors so an atomic replace caught mid-flight can't replace good content with
+an error screen. A dirty tab is never overwritten: the loader raises `externalChange`
+instead, and `ScratchpadView` renders a "Changed on disk — reload" button that calls
+`reloadFromDisk()`. The window-focus re-read is deliberate redundancy — the watch is a
+live subscription that a dropped socket, a sleeping machine, or an unmounted tab can miss,
+and a buffer that only a tab close fixes is worse than one extra read. `ScratchpadsCard`
+watches the same events for `.pragma/scratchpads/` so an agent creating a scratchpad shows
+up in the sidebar without waiting on unrelated tab churn.
+
+**A scratchpad frame never restates a color.** The sandbox has its own document, so it
+sees neither Tailwind nor `index.css`. `lib/scratchpad-theme.ts` reads the computed value
+of every `THEME_TOKENS` variable (plus the radius/font/shadow support variables) off the
+live `<html>` element and hands the frame one `:root` block in a
+`<style id="pragma-scratchpad-theme">`, so `.pragma/theme.json` overrides apply inside
+components for free. Theme edits (`THEME_CHANGED_EVENT`) and root class changes rewrite
+that block through a `theme` bridge message rather than rebuilding the bundle — a rebuild
+would discard the component state the scratchpad is holding. Never hard-code a hex value
+in the preview document or in `@pragma/scratchpad`.
+
+Vite must allow CORS from the literal `null` origin in development: sandboxing removes
+the iframe's origin, while `scratchpad-frame-runtime.tsx?worker&url` remains a Vite module
+graph until production bundling. Keep that exception alongside Vite's restricted localhost
+origin matcher; never replace it with unrestricted `cors: true` or weaken the iframe with
+`allow-same-origin`. That runtime and its prebuilt `packages/scratchpad/dist` dependencies
+are also excluded from `@vitejs/plugin-react`: React Refresh expects the app's preamble
+and crashes when its injected HMR code runs in the isolated frame; Vite's standard
+TSX/JavaScript transforms are sufficient there. The frame bootstrap still defines
+no-op `$RefreshReg$` / `$RefreshSig$` hooks because Vite's optimized development build of
+`react-dom/client` contains signature calls even though the frame itself does not use HMR.
 
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`

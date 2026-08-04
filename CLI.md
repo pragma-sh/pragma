@@ -15,11 +15,18 @@ UI if that directory isn't on `$PATH`).
 ## Usage
 
 ```sh
+pragma-cli scratchpad create --title "Architecture" result.mdx
 pragma-cli agent report --agent <id> started
 pragma-cli agent report --agent <id> stopped
 pragma-cli agent report --agent <id> attention [--kind question|command]
 pragma-cli agent report --agent <id> cleared
 ```
+
+`scratchpad create` is the managed path for presenting editable, interactive MDX to the
+user. It copies source into `.pragma/scratchpads/`, excludes that local directory from
+Git, records the current agent tab from `PRAGMA_TAB_ID`, and opens the result. Use `-` as
+the file argument to read MDX from stdin. Do not create scratchpad files manually: the
+desktop requires command-generated frontmatter.
 
 `--agent <id>` belongs to the `agent report` command. `<id>` is the stable id from the
 matching Pragma plugin agent definition.
