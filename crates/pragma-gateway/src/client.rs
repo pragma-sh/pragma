@@ -91,6 +91,38 @@ impl GatewayClient {
         )
     }
 
+    /// Reads a UTF-8 text file that lives under `root` on the host owning the
+    /// socket, returning `None` when it does not exist.
+    ///
+    /// Goes through the host's `filesystem` RPC rather than `std::fs` so the
+    /// gateway never assumes the files it serves are on its own disk, and so
+    /// path containment stays in the one place that enforces it (`pragma-core`
+    /// resolves `path` inside `root` and refuses to escape it).
+    pub fn read_text_file(&self, root: &str, path: &str) -> GatewayResult<Option<String>> {
+        let exists = self.rpc(
+            ProtocolRpcMethod::Filesystem,
+            json!({ "op": "pathExists", "root": root, "path": path }),
+        )?;
+        if exists.as_bool() != Some(true) {
+            return Ok(None);
+        }
+        let file = self.rpc(
+            ProtocolRpcMethod::Filesystem,
+            json!({ "op": "readFile", "root": root, "path": path }),
+        )?;
+        if file.get("binary").and_then(Value::as_bool) == Some(true)
+            || file.get("truncated").and_then(Value::as_bool) == Some(true)
+        {
+            return Err(GatewayError::InvalidPayload(format!(
+                "{path} must be a small UTF-8 text file"
+            )));
+        }
+        Ok(file
+            .get("text")
+            .and_then(Value::as_str)
+            .map(ToString::to_string))
+    }
+
     /// Spawns a session and returns its event stream.
     pub fn spawn_stream(
         &self,
