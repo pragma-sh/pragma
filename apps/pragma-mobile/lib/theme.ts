@@ -52,7 +52,7 @@ export function useThemeColors(): ThemeColors {
 }
 
 /** Replaces each base color the host theme overrides; leaves the rest shipped. */
-export function withOverrides(base: ThemeColors, overrides: ThemeOverrides): ThemeColors {
+function withOverrides(base: ThemeColors, overrides: ThemeOverrides): ThemeColors {
   const resolved = { ...base };
   for (const [name, token] of Object.entries(TOKEN_FOR_COLOR)) {
     const value = overrides[token];
@@ -61,5 +61,3 @@ export function withOverrides(base: ThemeColors, overrides: ThemeOverrides): The
   }
   return resolved;
 }
-
-export { DARK_COLORS, LIGHT_COLORS };

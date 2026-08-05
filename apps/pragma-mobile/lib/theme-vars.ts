@@ -27,7 +27,7 @@ const toHsl = converter("hsl");
  * token names, which is what makes the mirror a straight pass-through — keep
  * this list in step with `global.css`.
  */
-export const MOBILE_THEME_TOKENS = [
+const MOBILE_THEME_TOKENS = [
   "background",
   "foreground",
   "card",
@@ -50,9 +50,6 @@ export const MOBILE_THEME_TOKENS = [
   "input",
   "ring",
 ] as const;
-
-/** A token this app can theme. */
-export type MobileThemeToken = (typeof MOBILE_THEME_TOKENS)[number];
 
 /** Color overrides for one scheme, keyed by desktop token name. */
 export type ThemeOverrides = Partial<Record<string, string>>;
@@ -107,10 +104,6 @@ export function themeColor(value: string): string | null {
 }
 
 /**
- * Builds the NativeWind variable map for one scheme's overrides. Unknown tokens
- * and unparseable colors are dropped, so what is left always renders.
- */
-/**
  * Stable identity for a fetched host theme, so a poll that returns the same
  * colors can be dropped instead of re-rendering every themed screen. Only
  * `colors` is compared: which scopes contributed is not a visual difference.
@@ -119,6 +112,10 @@ export function themeKey(theme: HostTheme): string {
   return JSON.stringify(theme.colors ?? {});
 }
 
+/**
+ * Builds the NativeWind variable map for one scheme's overrides. Unknown tokens
+ * and unparseable colors are dropped, so what is left always renders.
+ */
 export function themeVars(overrides: ThemeOverrides | undefined): Record<string, string> {
   const vars: Record<string, string> = {};
   if (!overrides) return vars;
