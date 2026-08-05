@@ -78,6 +78,7 @@ fn default_tab_title(kind: TabKind) -> &'static str {
         TabKind::Log => titles.log.as_str(),
         TabKind::PrReview => titles.pr_review.as_str(),
         TabKind::PluginWebview => titles.plugin_webview.as_str(),
+        TabKind::Scratchpad => titles.scratchpad.as_str(),
         TabKind::Terminal | TabKind::Editor | TabKind::Diff => titles.fallback.as_str(),
     }
 }

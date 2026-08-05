@@ -80,7 +80,8 @@
       "browser": "New tab",
       "log": "Server Logs",
       "prReview": "PR Review",
-      "pluginWebview": "Plugin"
+      "pluginWebview": "Plugin",
+      "scratchpad": "Scratchpad"
     }
   },
   "files": {
