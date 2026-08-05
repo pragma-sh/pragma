@@ -106,7 +106,7 @@ paired with a desktop — streams live agent chat and launches new sessions.
 
 ```
 app/
-  _layout.tsx                     # providers: GestureHandlerRoot, SafeArea, Connection, Data, PortalHost
+  _layout.tsx                     # providers: GestureHandlerRoot, SafeArea, Connection, Theme, Data, PortalHost
   pair.tsx                        # QR + manual pairing (modal)
   (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (with badge)
   (tabs)/(projects)/              # Stack: drill-down
@@ -144,6 +144,9 @@ lib/
   pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
   registration-gate.ts           # pure: orders registration before unregister (Vitest)
   use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
+  theme-context.tsx              # fetches the host theme, applies it as NativeWind vars
+  theme-vars.ts                  # pure: desktop theme tokens → NativeWind vars (Vitest)
+  theme.ts                       # resolved colors for native props that take a string
 ```
 
 ## Rules
@@ -159,6 +162,27 @@ lib/
 - **Never call `expo-haptics` / `expo-glass-effect` / `expo-symbols` directly** from a
   screen — go through `lib/haptics.ts`, `GlassSurface`, and `IconSymbol` so fallbacks
   and platform checks stay in one place.
+- **The theme mirrors the desktop's, it is not redefined here.** `ThemeProvider`
+  (`lib/theme-context.tsx`) fetches `client.theme.get()` and applies the result as
+  NativeWind variables on a root view, so every `bg-background`-style class follows the
+  user's `.pragma/theme.json` with no per-screen work. Three things to know:
+  - **`global.css` stays the default.** Only overrides come over the wire; an unpaired
+    phone, a host with no theme file, or a failed fetch keeps the shipped palette. The
+    fetch failure is swallowed on purpose — there is nothing for the user to act on.
+  - **Conversion is `lib/theme-vars.ts`, and it is not just a copy.** Desktop themes are
+    `oklch(...)`; `tailwind.config.js` wraps every token as `hsl(var(--token))`, so each
+    value becomes a bare `H S% L%` triple (via culori) clamped to sRGB and snapped to
+    8-bit — without the snap, round-trip noise turns white into a saturated hue. Tokens
+    outside `MOBILE_THEME_TOKENS` and unparseable values are dropped, never thrown.
+  - **It is polled, on purpose.** A desktop theme edit rewrites a file the gateway only
+    reads on request; there is no `themeChanged` subscription to ride, so a one-shot
+    fetch at pair time strands the phone on a stale palette. `useHostTheme` re-reads
+    every 10s while the app is in front and again on return from the background, and
+    compares `themeKey` before setting state so an unchanged poll re-renders nothing. A
+    failed poll keeps the palette in effect rather than flashing back to defaults.
+  - **Native props cannot read classes.** Header tints, `placeholderTextColor`, and menus
+    go through `useThemeColors()` (`lib/theme.ts`), which resolves the same overrides
+    eagerly so both paths agree.
 - **Push notifications come from the host, not from here.** The gateway watches its own
   agent stream and sends through Expo (`crates/pragma-gateway/src/push/`), so alerts
   arrive with the app closed. This app only registers its Expo token

@@ -21,6 +21,7 @@
     "@rn-primitives/radio-group": "^1.5.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "culori": "^4.0.2",
     "expo": "^57.0.2",
     "expo-camera": "~57.0.0",
     "expo-constants": "~57.0.3",
@@ -50,8 +51,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
+    "@types/culori": "^4.0.1",
     "@types/react": "~19.2.0",
     "babel-preset-expo": "~57.0.1",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.1",
     "tailwindcss": "^3.4.17",
     "typescript": "~6.0.0",
     "vitest": "^4.1.8"
