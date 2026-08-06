@@ -6,6 +6,8 @@
 //! (see `crates/pragma-client/src/wsl.rs`), so the probe below works
 //! everywhere and simply reports no distributions where `wsl.exe` is absent.
 
+use std::num::NonZeroU64;
+
 use pragma_constants::{WslDistro, WslDistroList};
 
 /// Probes WSL: whether this is Windows, and which distributions are installed.
@@ -32,7 +34,10 @@ fn probe_wsl() -> WslDistroList {
             .map(|distro| WslDistro {
                 name: distro.name,
                 running: distro.running,
-                version: u64::from(distro.version),
+                // The schema pins the version to >= 1, so it is a `NonZero`.
+                // WSL only ever reports 1 or 2; a parsed 0 falls back to 1
+                // rather than dropping the distribution.
+                version: NonZeroU64::new(u64::from(distro.version)).unwrap_or(NonZeroU64::MIN),
                 default: distro.default,
             })
             .collect(),
