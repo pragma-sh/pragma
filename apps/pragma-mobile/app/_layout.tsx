@@ -11,6 +11,7 @@ import { DataProvider } from "@/lib/data/data-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { usePushNotifications } from "@/lib/use-push-notifications";
 import { useThemeColors } from "@/lib/theme";
+import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
 
 /**
  * Root layout: global providers, tab navigator, and full-screen chat. Native headers and the
@@ -28,6 +29,7 @@ export default function RootLayout() {
           <ThemeProvider>
             <DataProvider>
               <StatusBar style="auto" />
+              <WidgetSync />
               <ConnectionGate />
             </DataProvider>
           </ThemeProvider>
@@ -35,6 +37,12 @@ export default function RootLayout() {
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** Keeps the iOS home-screen widgets in step with the live workspace. */
+function WidgetSync() {
+  useWidgetSync();
+  return null;
 }
 
 /** Renders pairing as the whole app until the host connection is verified. */

@@ -79,9 +79,9 @@
       "fallback": "Shell",
       "browser": "New tab",
       "log": "Server Logs",
+      "scratchpad": "Scratchpad",
       "prReview": "PR Review",
-      "pluginWebview": "Plugin",
-      "scratchpad": "Scratchpad"
+      "pluginWebview": "Plugin"
     }
   },
   "files": {

@@ -877,15 +877,15 @@
         "defaultTitles": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["fallback", "browser", "log", "prReview", "pluginWebview", "scratchpad"],
+          "required": ["fallback", "browser", "log", "scratchpad", "prReview", "pluginWebview"],
           "description": "Fallback title per tab kind, used for a tab whose shell or page has not named itself. A tab still carrying its default title has no name worth showing in a notification, so both languages compare against these.",
           "properties": {
             "fallback": { "type": "string" },
             "browser": { "type": "string" },
             "log": { "type": "string" },
+            "scratchpad": { "type": "string" },
             "prReview": { "type": "string" },
-            "pluginWebview": { "type": "string" },
-            "scratchpad": { "type": "string" }
+            "pluginWebview": { "type": "string" }
           }
         }
       }

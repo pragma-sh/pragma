@@ -88,7 +88,7 @@ than no guide.
 | Tests             | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
 | Commits           | Conventional Commits (commitlint)                                                                                                                               |
 | Git hooks         | Husky + lint-staged                                                                                                                                             |
-| CI                | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
+| CI                | [RWX](https://www.rwx.com) for Linux (`.rwx/ci.yml`) + GitHub Actions for macOS/Windows (`.github/workflows/ci.yml`)                                            |
 | Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                           |
 
 ## Repository structure
@@ -140,6 +140,7 @@ than no guide.
 ├── turbo.json                   # Task graph
 ├── commitlint.config.js         # Conventional Commits rules
 ├── .oxlintrc.json / .oxfmtrc.json
+├── .rwx/                        # RWX run definitions (Linux CI)
 ├── .husky/                      # Git hooks
 └── .agents/skills/              # Installed skill view (also exposed through .claude/skills)
 ```
@@ -282,6 +283,18 @@ Shared rules:
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
 compile-only Tauri build on macOS, Linux, **and** Windows.
+
+**CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
+Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
+runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the
+TypeScript checks, the Rust checks, the Linux app build) lives in `.rwx/ci.yml`, and the
+macOS and Windows builds plus the Windows Rust suite stay in
+`.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
+RWX is a task DAG, not a job list: tasks with no `use:` run in parallel, caching is
+content-based (no cache actions — add a `filter:` to keep a task's cache key off files
+it doesn't read), and the default task timeout is **10 minutes**, so any long task needs
+an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
+validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
 
 A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
