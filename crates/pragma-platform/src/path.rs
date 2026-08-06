@@ -77,6 +77,21 @@ pub fn simplified(path: PathBuf) -> PathBuf {
     path
 }
 
+/// The user's home directory, however this platform spells it.
+///
+/// Windows sets `USERPROFILE`, not `HOME` — `HOME` exists there only when
+/// something like Git Bash injects it, which a GUI-launched host does not have.
+/// Reading `HOME` alone therefore resolves to nothing on Windows, which is how
+/// home-relative lookups (`~/.pragma/…`, `~/.local/bin`) silently vanish there.
+#[must_use]
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{canonicalize, simplified};

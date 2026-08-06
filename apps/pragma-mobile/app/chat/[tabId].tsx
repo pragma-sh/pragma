@@ -9,9 +9,15 @@ import { AttentionDock } from "@/components/chat/AttentionDock";
 import { Composer, composerKeyboardOffset } from "@/components/chat/Composer";
 import { MessageList } from "@/components/chat/MessageList";
 import { Text } from "@/components/ui/text";
-import { useAgentActions, useAgentTab, useWorktree } from "@/lib/data/data-context";
+import {
+  useAgentActions,
+  useAgentTab,
+  useProjectRootPath,
+  useWorktree,
+} from "@/lib/data/data-context";
 import { useAgentConnection } from "@/lib/use-agent-connection";
 import { displayTabTitle } from "@/lib/tab-title";
+import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel } from "@/lib/worktree-tree";
 
 /**
@@ -48,6 +54,8 @@ function LiveChat({ params }: { params: ChatParams }) {
 
 function ChatSession({ params, tab }: { params: ChatParams; tab: ReturnType<typeof useAgentTab> }) {
   const details = chatDetails(params, tab);
+  const worktree = useWorktree(details.worktreeId);
+  useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
   // Prefer launch-time params so a freshly launched session attaches before the
   // workspace snapshot catches up; fall back to the resolved tab afterwards.
   const { rows, attention, phase, send, interrupt, decide, answer } = useAgentConnection({

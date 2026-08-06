@@ -59,6 +59,12 @@ phones, `test()` fires a check notification, and `presence({ focused })` is the
 desktop's focus heartbeat that suppresses phone pushes while the window is in front.
 Delivery itself is the gateway's job — nothing here talks to Expo.
 
+`client.theme.get({ root? })` returns the user's merged `.pragma/theme.json` color
+overrides (`HostTheme`: `colors[mode][token]` plus `sources`). Pass an absolute `root`
+to layer that project's file over the global one; omit it for the global theme alone.
+Only overrides are returned — a client keeps its own shipped defaults for every token
+the user has not themed.
+
 ## Rules
 
 - Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.

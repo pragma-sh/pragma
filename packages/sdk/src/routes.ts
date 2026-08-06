@@ -17,6 +17,7 @@ export const routes = {
   agentCatalog: "/v1/agents/catalog",
   agentEvents: "/v1/agents/events",
   asset: (hash: string): string => `/v1/assets/${encodeURIComponent(hash)}`,
+  theme: "/v1/theme",
   agentsSeen: (tabId: string): string => `/v1/tabs/${encodeURIComponent(tabId)}/agents/seen`,
   subscription: (event: string): string => `/v1/subscriptions/${encodeURIComponent(event)}`,
   control: (method: string): string => `/v1/control/${encodeURIComponent(method)}`,

@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectionProvider, useConnection } from "@/lib/connection-context";
 import { DataProvider } from "@/lib/data/data-context";
+import { ThemeProvider } from "@/lib/theme-context";
 import { usePushNotifications } from "@/lib/use-push-notifications";
 import { useThemeColors } from "@/lib/theme";
 import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
@@ -15,8 +16,9 @@ import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
 /**
  * Root layout: global providers, tab navigator, and full-screen chat. Native headers and the
  * NativeWind theme both follow the system light/dark scheme automatically
- * (`userInterfaceStyle: "automatic"` in app.json). ConnectionProvider owns the
- * single app-wide PragmaClient. Until that client is verified, pairing replaces
+ * (`userInterfaceStyle: "automatic"` in app.json), and ThemeProvider layers the
+ * paired desktop's `.pragma/theme.json` colors over them. ConnectionProvider
+ * owns the single app-wide PragmaClient. Until that client is verified, pairing replaces
  * the app rather than appearing over navigable sample data.
  */
 export default function RootLayout() {
@@ -24,11 +26,13 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ConnectionProvider>
-          <DataProvider>
-            <StatusBar style="auto" />
-            <WidgetSync />
-            <ConnectionGate />
-          </DataProvider>
+          <ThemeProvider>
+            <DataProvider>
+              <StatusBar style="auto" />
+              <WidgetSync />
+              <ConnectionGate />
+            </DataProvider>
+          </ThemeProvider>
         </ConnectionProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
