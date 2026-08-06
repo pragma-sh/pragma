@@ -41,3 +41,6 @@ bench-report.json
 .fallow/
 .tokensave
 .playwright-mcp/
+
+# Logs/artifacts pulled down by `rwx logs` / `rwx artifacts`
+.rwx/downloads/
