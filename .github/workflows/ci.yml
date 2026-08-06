@@ -1,4 +1,10 @@
-name: CI
+# macOS and Windows CI.
+#
+# Everything that can run on Linux — commitlint, the TypeScript checks, the
+# Rust checks, and the Linux app build — lives in `.rwx/ci.yml` and runs on RWX.
+# RWX only runs Linux containers, so the two remaining desktop targets stay
+# here. Keep the two files in sync when a check is added or removed.
+name: CI (macOS & Windows)
 
 on:
   push:
@@ -14,99 +20,6 @@ permissions:
   contents: read
 
 jobs:
-  commitlint:
-    name: Commitlint (conventional commits)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - name: Validate PR commit messages
-        run: bunx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
-
-  frontend:
-    name: Frontend (lint, format, typecheck, test)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - name: Generate shared constants
-        run: bun run generate
-      - name: Lint (oxlint)
-        run: bun run lint
-      - name: Format check (oxfmt)
-        run: bun run format:check
-      - name: Typecheck
-        run: bun run typecheck
-      - name: Unit tests (vitest)
-        run: bun run test
-
-  rust:
-    name: Rust (rustfmt, clippy, test)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-      - name: Free disk space
-        # GitHub-hosted runners ship with ~14 GB free, which a debug Tauri +
-        # Rust workspace build (plus rust-cache) exhausts at link time
-        # ("No space left on device"). Reclaim the preinstalled toolchains we
-        # don't use to recover ~25-30 GB.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
-            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
-          sudo docker image prune --all --force || true
-          df -h
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libxdo-dev \
-            libgtk-3-dev \
-            libpipewire-0.3-dev \
-            libgbm-dev \
-            libclang-dev \
-            build-essential \
-            file
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - uses: Swatinem/rust-cache@v2
-      - run: bun install --frozen-lockfile
-      - name: Stage daemon sidecar
-        # tauri-build validates that the externalBin resource exists, so the
-        # pragma crate won't even compile (clippy/test) without the staged
-        # binary. The build job gets this via beforeBuildCommand; the rust job
-        # must stage it explicitly.
-        run: bash apps/pragma/src-tauri/scripts/stage-daemon-sidecar.sh
-      - name: Format check (rustfmt)
-        run: cargo fmt --all -- --check
-      - name: Lint (clippy)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Unit tests (cargo test)
-        # PRAGMA_TEST_PTY opts in to the test that spawns a real shell on a real
-        # pseudo-terminal (ConPTY on Windows). It is off by default because a
-        # sandboxed local executor may not be allowed to allocate one.
-        run: cargo test --workspace --all-features
-        env:
-          PRAGMA_TEST_PTY: "1"
-
   rust-windows:
     name: Rust on Windows (clippy, test)
     runs-on: blacksmith-4vcpu-windows-2025
@@ -139,44 +52,16 @@ jobs:
 
   build:
     name: Build app (${{ matrix.os }})
-    needs: [frontend, rust, rust-windows]
+    needs: [rust-windows]
     strategy:
       fail-fast: false
       matrix:
         os:
-          - blacksmith-4vcpu-ubuntu-2404
           - blacksmith-6vcpu-macos-latest
           - blacksmith-4vcpu-windows-2025
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Free disk space (Linux)
-        if: runner.os == 'Linux'
-        # See the rust job: reclaim preinstalled toolchains so the debug build
-        # has room to link ("No space left on device").
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
-            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
-          sudo docker image prune --all --force || true
-          df -h
-      - name: Install Tauri system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libxdo-dev \
-            libgtk-3-dev \
-            libpipewire-0.3-dev \
-            libgbm-dev \
-            libclang-dev \
-            build-essential \
-            file
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
