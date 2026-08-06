@@ -33,6 +33,7 @@ mod ssh_host;
 mod window_chrome;
 mod workspace_mirror;
 mod worktrees;
+mod wsl;
 
 use pragma_client::router::RouterDb;
 use pragma_constants::{
@@ -1182,6 +1183,7 @@ pub fn run() {
             projects::clone_project,
             projects::get_projects_directory,
             ssh_host::connect_remote_project,
+            wsl::list_wsl_distros,
             worktrees::list_worktrees,
             worktrees::touch_worktree_mru,
             worktrees::list_worktree_mru,

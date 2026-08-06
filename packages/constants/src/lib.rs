@@ -33,8 +33,9 @@ pub use generated::{
     RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
     RunScriptVerticalSplit, ScratchpadSummary, Scratchpads, ScriptRunStatus, Scripts,
     SettingsScope, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab,
-    TabKind, TerminalBackend, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
-    WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl,
+    TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel, WindowDefaults,
+    WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit, WorktreeCommitList,
+    WorktreeStatus, Wsl, WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.

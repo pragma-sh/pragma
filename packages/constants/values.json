@@ -74,6 +74,10 @@
       "unknownLocation": "Open Pragma to continue."
     }
   },
+  "terminalDefaults": {
+    "hiddenDistros": ["docker-desktop", "docker-desktop-data"],
+    "rememberLastShell": false
+  },
   "tabs": {
     "defaultTitles": {
       "fallback": "Shell",

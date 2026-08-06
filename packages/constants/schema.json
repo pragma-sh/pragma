@@ -21,6 +21,7 @@
     "tunnel",
     "keybindings",
     "agentStatus",
+    "terminalDefaults",
     "tabs",
     "bench",
     "files",
@@ -74,6 +75,9 @@
     },
     "agentStatus": {
       "$ref": "#/definitions/AgentStatusDefaults"
+    },
+    "terminalDefaults": {
+      "$ref": "#/definitions/TerminalDefaults"
     },
     "tabs": {
       "$ref": "#/definitions/TabDefaults"
@@ -948,6 +952,98 @@
         "soundName": {
           "type": ["string", "null"],
           "description": "File name (not a path) of the clip in the sounds directory played on every agent alert. Null plays the built-in chime instead."
+        }
+      }
+    },
+    "TerminalDefaults": {
+      "title": "TerminalDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hiddenDistros", "rememberLastShell"],
+      "description": "Shipped defaults for terminal launching. A user overrides these per install/project via the `terminal` key of `.pragma/config.json` (`TerminalSettings`).",
+      "properties": {
+        "hiddenDistros": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "WSL distribution names hidden from the shell picker by default because they back other tools rather than interactive shells (Docker Desktop's VM distros)."
+        },
+        "rememberLastShell": {
+          "type": "boolean",
+          "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        }
+      }
+    },
+    "TerminalSettings": {
+      "title": "TerminalSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `terminal` block of a global or project `.pragma/config.json`. Every field is optional: a project value overrides the global one, which overrides TerminalDefaults. Only meaningful on Windows, where both a native shell and WSL distributions are launchable; macOS and Linux always resolve to the native shell.",
+      "properties": {
+        "shell": {
+          "type": "string",
+          "description": "Native shell program (name on PATH or absolute path) launched for terminal sessions. On Windows this picks between the candidate shells (e.g. `pwsh.exe` vs `powershell.exe`); on macOS/Linux it wins over the `SHELL` environment variable."
+        },
+        "backend": {
+          "$ref": "#/definitions/TerminalBackend",
+          "description": "Which world the default terminal lives in: the host's own shell, or a Linux shell inside a WSL distribution."
+        },
+        "distro": {
+          "type": ["string", "null"],
+          "description": "WSL distribution launched when `backend` is `wsl`. Null uses the distribution WSL itself marks as default."
+        },
+        "hiddenDistros": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "WSL distribution names omitted from the shell picker. Replaces the shipped TerminalDefaults list rather than merging with it."
+        },
+        "rememberLastShell": {
+          "type": "boolean",
+          "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        }
+      }
+    },
+    "WslDistro": {
+      "title": "WslDistro",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "running", "version", "default"],
+      "description": "One installed WSL distribution, parsed from `wsl.exe --list --verbose`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Distribution name as WSL reports it (e.g. `Ubuntu-24.04`)."
+        },
+        "running": {
+          "type": "boolean",
+          "description": "Whether the distribution is currently running."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "WSL version the distribution runs under (1 or 2)."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether WSL treats this distribution as its default."
+        }
+      }
+    },
+    "WslDistroList": {
+      "title": "WslDistroList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["isWindows", "distros"],
+      "description": "Result of probing WSL availability from the desktop app. `distros` is empty on non-Windows platforms and on Windows installs without WSL.",
+      "properties": {
+        "isWindows": {
+          "type": "boolean",
+          "description": "Whether the app is running on Windows, the only platform where WSL distributions can exist."
+        },
+        "distros": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/WslDistro" },
+          "description": "Installed WSL distributions, before any user-configured hiding."
         }
       }
     },

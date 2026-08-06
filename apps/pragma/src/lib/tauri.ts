@@ -32,12 +32,13 @@ import type {
   AutomationRootRegistration,
   OpenPort,
   ScratchpadSummary,
+  WslDistroList,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
-export type { OpenPort } from "@pragma/constants";
+export type { OpenPort, WslDistro, WslDistroList } from "@pragma/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -1376,6 +1377,15 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 /** Returns the runtime platform name used to pick keybinding chords ("mac" or "linux"). */
 export function getPlatform(): Promise<"mac" | "linux"> {
   return invoke<"mac" | "linux">("platform_name");
+}
+
+/**
+ * Probes WSL: whether the app runs on Windows and which distributions are
+ * installed. A failed probe reports an empty list, so a machine without WSL is
+ * indistinguishable from a non-Windows host and every WSL feature stays hidden.
+ */
+export function listWslDistros(): Promise<WslDistroList> {
+  return invoke<WslDistroList>("list_wsl_distros");
 }
 
 /**
