@@ -311,9 +311,13 @@ without updating this guide and CI.
   CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
   `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
-  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on Blacksmith's
-  Windows Server 2025 image with the `rust-windows` job plus a
-  `blacksmith-4vcpu-windows-2025` entry in the `build` matrix.
+  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on the
+  GitHub-hosted `windows-latest` image with the `rust-windows` job plus a
+  `windows-latest` entry in the `build` matrix. Windows deliberately does **not** use
+  the Blacksmith pool the macOS build runs on: that pool left the job queued for half an
+  hour at a time and failed it in `Set up job` with "the self-hosted runner lost
+  communication with the server", which looks like a compile failure but never reaches a
+  compiler.
 - **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
   locks a running executable's image, our sidecars outlive the window by design, and a
   per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live
@@ -326,7 +330,7 @@ without updating this guide and CI.
 - **Never spell a shell script's runner as bare `bash` in a package script.** On Windows
   with WSL installed, `bash` on `PATH` is `C:\Windows\system32\bash.exe` — the WSL
   launcher — whose Linux `PATH` has no `rustc`, `cargo`, or `bun`, so the sidecar staging
-  dies with `rustc: command not found` (exit 127). CI's Blacksmith Windows image ships no
+  dies with `rustc: command not found` (exit 127). CI's `windows-latest` image ships no
   WSL, so this never fires there and only breaks developer machines. Go through
   `scripts/run-shell-script.ts`, which derives Git Bash from the resolved `git.exe`
   (override with `PRAGMA_BASH`) and is a plain `bash` everywhere else.

@@ -22,7 +22,11 @@ permissions:
 jobs:
   rust-windows:
     name: Rust on Windows (clippy, test)
-    runs-on: blacksmith-4vcpu-windows-2025
+    # GitHub-hosted, not Blacksmith: the Blacksmith Windows pool repeatedly left
+    # this job queued for half an hour or failed it in `Set up job` with
+    # "the self-hosted runner lost communication with the server", which reads
+    # like a compile failure but never runs a compiler.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       # No apt step and no GTK/WebKit: the Windows webview is WebView2, which
@@ -58,7 +62,7 @@ jobs:
       matrix:
         os:
           - blacksmith-6vcpu-macos-latest
-          - blacksmith-4vcpu-windows-2025
+          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
