@@ -70,7 +70,20 @@ export interface TuiWatcherOptions {
    * answer as a follow-up prompt (`Answer to question "<question>": <answer>`).
    */
   questionFreeTextMode?: "editor" | "interject";
+  /**
+   * How the question prompt's option rows are activated.
+   * `"digit"` (default): the TUI binds digits `1`–`9` to select-and-submit a
+   * row outright (opencode, Codex).
+   * `"arrow-space"`: rows are navigated with Down, marked with Space, and only
+   * then submitted with Enter (Junie's `space to select` list, which ignores
+   * digits entirely). Its custom-answer row is a plain input reached by moving
+   * past the last option — no Enter is needed to open it.
+   */
+  questionSelectMode?: QuestionSelectMode;
 }
+
+/** How a question TUI's option rows are activated. See `questionSelectMode`. */
+export type QuestionSelectMode = "digit" | "arrow-space";
 
 const DEFAULT_APPROVE_KEYS = "\r";
 const RIGHT_ARROW = "\x1b[C";
@@ -109,6 +122,7 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
     handleQuestionAnswers = handleDecisions,
     interjectSubmitDelayMs = 0,
     questionFreeTextMode = "editor",
+    questionSelectMode = "digit",
   } = options;
   return {
     agent,
@@ -120,6 +134,7 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
         handleQuestionAnswers,
         interjectSubmitDelayMs,
         questionFreeTextMode,
+        questionSelectMode,
         seenRequestIds: new Set<string>(),
         questionsByRequestId: new Map<string, CachedQuestion>(),
       };
@@ -161,6 +176,7 @@ interface WatcherRuntime {
   handleQuestionAnswers: boolean;
   interjectSubmitDelayMs: number;
   questionFreeTextMode: "editor" | "interject";
+  questionSelectMode: QuestionSelectMode;
   seenRequestIds: Set<string>;
   questionsByRequestId: Map<string, CachedQuestion>;
 }
@@ -276,7 +292,7 @@ async function handleAnswer(
     if (runtime.questionFreeTextMode === "interject") {
       await writeFallbackInterjectAnswer(ctx, runtime, cached, reply);
     } else {
-      await writeFreeTextAnswer(ctx, cached.options.length, reply);
+      await writeFreeTextAnswer(ctx, cached.options.length, reply, runtime.questionSelectMode);
     }
     return true;
   }
@@ -284,6 +300,7 @@ async function handleAnswer(
     dismissed: answer.dismissed,
     reply,
     options: cached.options,
+    selectMode: runtime.questionSelectMode,
   });
   if (strokes) await writeKeys(ctx, strokes);
   return true;
@@ -293,9 +310,10 @@ async function writeFreeTextAnswer(
   ctx: WatcherContext<TuiWatcherConfig>,
   optionCount: number,
   reply: string,
+  selectMode: QuestionSelectMode,
 ): Promise<void> {
   // The TUI reserves digit shortcuts for listed choices. Navigate to its virtual Other row.
-  await writeKeys(ctx, openOtherEditorKeys(optionCount));
+  await writeKeys(ctx, openOtherEditorKeys(optionCount, selectMode));
   await delay(QUESTION_OTHER_INPUT_DELAY_MS, ctx.signal);
   if (!ctx.signal.aborted) await writeKeys(ctx, `${reply}\r`);
 }
@@ -313,7 +331,7 @@ async function writeFallbackInterjectAnswer(
   cached: CachedQuestion,
   reply: string,
 ): Promise<void> {
-  await writeKeys(ctx, openOtherEditorKeys(cached.options.length));
+  await writeKeys(ctx, openOtherEditorKeys(cached.options.length, runtime.questionSelectMode));
   await delay(QUESTION_FALLBACK_STEP_DELAY_MS, ctx.signal);
   if (ctx.signal.aborted) return;
   await writeKeys(ctx, runtime.keys.abortKeys);
@@ -392,6 +410,7 @@ export function questionAnswerKeys(input: {
   dismissed: boolean;
   reply: string | null;
   options: string[];
+  selectMode?: QuestionSelectMode;
 }): string | null {
   if (input.dismissed || input.reply === null) {
     return QUESTION_REJECT_KEYS;
@@ -401,24 +420,38 @@ export function questionAnswerKeys(input: {
     return QUESTION_REJECT_KEYS;
   }
   const options = input.options;
+  const selectMode = input.selectMode ?? "digit";
   const matchIndex = options.findIndex((option) => option === reply);
   if (matchIndex >= 0) {
-    return selectOptionKeys(matchIndex, options.length);
+    return selectOptionKeys(matchIndex, options.length, selectMode);
   }
   // Free-text / "Other": open the custom-answer editor, type, submit.
-  return `${openOtherEditorKeys(options.length)}${reply}\r`;
+  return `${openOtherEditorKeys(options.length, selectMode)}${reply}\r`;
 }
 
-/** Opens the TUI's virtual custom-answer editor. */
-function openOtherEditorKeys(optionCount: number): string {
-  return `${DOWN_ARROW.repeat(optionCount)}\r`;
+/**
+ * Opens the TUI's virtual custom-answer editor. `arrow-space` lists put a plain
+ * input past the last option, so moving onto it is enough — an Enter there would
+ * submit the empty answer instead.
+ */
+function openOtherEditorKeys(optionCount: number, selectMode: QuestionSelectMode): string {
+  const navigate = DOWN_ARROW.repeat(optionCount);
+  return selectMode === "arrow-space" ? navigate : `${navigate}\r`;
 }
 
 /**
  * Keys that highlight option `index` (0-based) and activate it. Prefer digits
  * 1–9 (the TUI's fast path); fall back to Down arrows + Enter past digit 9.
  */
-function selectOptionKeys(index: number, optionCount: number): string {
+function selectOptionKeys(
+  index: number,
+  optionCount: number,
+  selectMode: QuestionSelectMode,
+): string {
+  if (selectMode === "arrow-space") {
+    // Down to the row, Space to mark it, Enter to submit the marked answer.
+    return `${DOWN_ARROW.repeat(index)} \r`;
+  }
   const total = optionCount + 1; // options + "Type your own answer"
   if (index < QUESTION_DIGIT_MAX && index < total) {
     return String(index + 1);

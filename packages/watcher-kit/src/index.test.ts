@@ -471,3 +471,29 @@ describe("questionFreeTextMode: interject", () => {
     expect(sendKeys).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("questionAnswerKeys in arrow-space mode", () => {
+  const options = ["Red", "Blue"];
+
+  it("navigates, marks and submits a listed option", () => {
+    expect(
+      questionAnswerKeys({ dismissed: false, reply: "Blue", options, selectMode: "arrow-space" }),
+    ).toBe("\x1b[B \r");
+    expect(
+      questionAnswerKeys({ dismissed: false, reply: "Red", options, selectMode: "arrow-space" }),
+    ).toBe(" \r");
+  });
+
+  it("moves onto the custom-answer input without opening it", () => {
+    // An Enter before the text would submit the empty answer in this TUI.
+    expect(
+      questionAnswerKeys({ dismissed: false, reply: "Gamma", options, selectMode: "arrow-space" }),
+    ).toBe("\x1b[B\x1b[BGamma\r");
+  });
+
+  it("still dismisses with Escape", () => {
+    expect(
+      questionAnswerKeys({ dismissed: true, reply: null, options, selectMode: "arrow-space" }),
+    ).toBe("\x1b");
+  });
+});
