@@ -154,6 +154,8 @@ lib/
   theme-context.tsx              # fetches the host theme, applies it as NativeWind vars
   theme-vars.ts                  # pure: desktop theme tokens → NativeWind vars (Vitest)
   theme.ts                       # resolved colors for native props that take a string
+  viewed-project.ts              # pure: focused screen's project theme root store (Vitest)
+  use-viewed-project.ts          # focus hook reporting a screen's project root to that store
 ```
 
 ## Widgets
@@ -253,6 +255,16 @@ implemented in `lib/widgets/`:
     every 10s while the app is in front and again on return from the background, and
     compares `themeKey` before setting state so an unchanged poll re-renders nothing. A
     failed poll keeps the palette in effect rather than flashing back to defaults.
+    Overlapping polls are sequence-guarded: only the latest request may apply, so a
+    fetch that started before a theme change cannot land after one that read it.
+  - **The project layer follows the focused screen.** This app has no selected project,
+    so the project, worktree, and chat screens report their project's main-worktree
+    path on focus (the projects list reports `null`) through the pure
+    `lib/viewed-project.ts` store (`useViewedProjectRoot` in
+    `lib/use-viewed-project.ts`); `ThemeProvider` passes it as `root` to
+    `client.theme.get({ root })`, layering that project's `.pragma/theme.json` over the
+    global one. The root is the **main worktree's path** (`useProjectRootPath`), the
+    same anchor the desktop uses for project-scoped `.pragma` files.
   - **Native props cannot read classes.** Header tints, `placeholderTextColor`, and menus
     go through `useThemeColors()` (`lib/theme.ts`), which resolves the same overrides
     eagerly so both paths agree.

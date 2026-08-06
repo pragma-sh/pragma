@@ -498,6 +498,19 @@ export function useWorktree(worktreeId: string): Worktree | undefined {
   return useMemo(() => worktrees.find((w) => w.id === worktreeId), [worktrees, worktreeId]);
 }
 
+/**
+ * The host path of a project's main worktree — the root every project-scoped
+ * `.pragma` file (theme, keybindings, config) hangs off, on whichever host
+ * owns the project. Undefined while the workspace is still loading.
+ */
+export function useProjectRootPath(projectId: string | undefined): string | undefined {
+  const { worktrees } = useData();
+  return useMemo(
+    () => worktrees.find((w) => w.projectId === projectId && w.isMain)?.path,
+    [worktrees, projectId],
+  );
+}
+
 /** The nested worktree tree (roots) for a project. */
 export function useWorktreeTree(projectId: string): WorktreeNode[] {
   const { worktrees } = useData();

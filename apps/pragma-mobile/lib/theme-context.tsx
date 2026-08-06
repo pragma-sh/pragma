@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { AppState, useColorScheme, View } from "react-native";
@@ -13,6 +14,7 @@ import { vars } from "nativewind";
 
 import { useConnection } from "./connection-context";
 import { themeKey, themeVars, type ThemeOverrides } from "./theme-vars";
+import { getViewedProjectRoot, subscribeViewedProject } from "./viewed-project";
 
 /**
  * Mirrors the desktop's user theme onto this app.
@@ -44,7 +46,8 @@ const ThemeContext = createContext<ThemeContextValue>({ overrides: {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { client } = useConnection();
-  const theme = useHostTheme(client);
+  const root = useSyncExternalStore(subscribeViewedProject, getViewedProjectRoot);
+  const theme = useHostTheme(client, root);
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
 
   const overrides = useMemo<ThemeOverrides>(() => theme?.colors?.[scheme] ?? {}, [theme, scheme]);
@@ -59,11 +62,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * The paired host's theme, refreshed while the app is in front and again the
- * moment it returns from the background — so a theme edited on the desktop with
- * the phone asleep is applied on the next look at the screen, not minutes later.
+ * The paired host's theme for the viewed project's root (its `.pragma/theme.json`
+ * layered over the global one), refreshed while the app is in front and again
+ * the moment it returns from the background — so a theme edited on the desktop
+ * with the phone asleep is applied on the next look at the screen, not minutes
+ * later.
  */
-function useHostTheme(client: PragmaClient | null): HostTheme | null {
+function useHostTheme(client: PragmaClient | null, root: string | null): HostTheme | null {
   // The theme is stored with the client that served it, so unpairing (or
   // pairing a different host) drops it by comparison at render time rather than
   // by clearing state from an effect.
@@ -71,18 +76,26 @@ function useHostTheme(client: PragmaClient | null): HostTheme | null {
   // Identity of the applied theme. Re-setting an equal object would rebuild the
   // variable map and re-render every screen on each poll.
   const applied = useRef<string | null>(null);
+  // Monotonic request id. Polls overlap (interval vs. foregrounding), and a
+  // fetch that started before the theme changed must not apply over one that
+  // read after: only the latest request may set state.
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     applied.current = null;
     if (!client) return undefined;
     let cancelled = false;
-    const refresh = async () => {
-      const next = await fetchTheme(client);
-      if (cancelled || next === null) return;
-      const key = themeKey(next);
+    const apply = (theme: HostTheme) => {
+      const key = themeKey(theme);
       if (key === applied.current) return;
       applied.current = key;
-      setFetched({ owner: client, theme: next });
+      setFetched({ owner: client, theme });
+    };
+    const refresh = async () => {
+      const seq = ++requestSeq.current;
+      const next = await fetchTheme(client, root);
+      if (cancelled || next === null || seq !== requestSeq.current) return;
+      apply(next);
     };
     void refresh();
     const timer = setInterval(() => {
@@ -96,7 +109,7 @@ function useHostTheme(client: PragmaClient | null): HostTheme | null {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [client]);
+  }, [client, root]);
 
   return fetched && fetched.owner === client ? fetched.theme : null;
 }
@@ -106,9 +119,9 @@ function useHostTheme(client: PragmaClient | null): HostTheme | null {
  * palette already in effect: a dropped tunnel is not a reason to flash back to
  * the shipped colors, and there is nothing here for the user to act on.
  */
-async function fetchTheme(client: PragmaClient): Promise<HostTheme | null> {
+async function fetchTheme(client: PragmaClient, root: string | null): Promise<HostTheme | null> {
   try {
-    return await client.theme.get();
+    return await client.theme.get(root ? { root } : {});
   } catch {
     return null;
   }

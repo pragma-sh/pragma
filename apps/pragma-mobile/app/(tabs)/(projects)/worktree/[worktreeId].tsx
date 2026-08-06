@@ -17,10 +17,12 @@ import {
   useAgentActions,
   useAgentTabs,
   useChildWorktrees,
+  useProjectRootPath,
   useWorktree,
 } from "@/lib/data/data-context";
 import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import type { AgentTab } from "@/lib/types";
+import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel, type WorktreeNode } from "@/lib/worktree-tree";
 
 /** A worktree's view: nested child worktrees, then its agent tabs. Nests until
@@ -33,6 +35,7 @@ export default function WorktreeScreen() {
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
   const [launchOpen, setLaunchOpen] = useState(false);
+  useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
 
   const openLaunchSheet = useCallback(() => {
     hapticImpact();

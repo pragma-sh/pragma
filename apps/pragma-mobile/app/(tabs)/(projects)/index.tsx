@@ -6,11 +6,14 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { Monogram, NavGroup, NavRow } from "@/components/NavRow";
 import { useProjects, useProjectStatus } from "@/lib/data/data-context";
 import type { Project } from "@/lib/types";
+import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
 /** Top-level list of all projects, styled as iOS Settings navigation rows. */
 export default function ProjectsScreen() {
   const projects = useProjects();
   const insets = useSafeAreaInsets();
+  // No project is in view here: the app theme falls back to the global layer.
+  useViewedProjectRoot(null);
 
   return (
     <>
