@@ -43,7 +43,16 @@
     // gets exactly one named wrapper here so the app never touches raw command
     // strings (see the file header). A few wrappers mirror commands no UI calls
     // yet — that 1:1 contract is intentional, not dead code.
-    { "file": "**/lib/tauri.ts", "exports": ["getAppInfo", "saveKeybindings", "aiLogout"] },
+    {
+      "file": "**/lib/tauri.ts",
+      "exports": [
+        "getAppInfo",
+        "saveKeybindings",
+        "aiLogout",
+        "listWslDistros",
+        "WslDistro",
+      ],
+    },
   ],
   // `@google/design.md` is the DesignSync CLI that generates DESIGN.md — a
   // tool invoked from the shell, intentionally never imported from source.
