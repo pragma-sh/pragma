@@ -78,7 +78,7 @@ export async function readJunieAcp(
  * conversation ends when the reader sees the response it is waiting for, which
  * closes the FIFO and makes Junie exit on EOF.
  */
-export function buildCommand(usage: boolean): string {
+function buildCommand(usage: boolean): string {
   const finalId = usage ? PROMPT_ID : SESSION_ID;
   return [
     `command -v junie >/dev/null 2>&1 || exit ${MISSING_STATUS};`,

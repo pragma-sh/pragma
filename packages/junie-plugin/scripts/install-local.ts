@@ -14,7 +14,7 @@
 // stacking duplicates. Because the installed commands point back at this
 // checkout, edits to `hooks/report.sh` take effect on Junie's next session with
 // no reinstall.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,17 +61,11 @@ process.stdout.write("Start a new Junie session to load them.\n");
 
 /** Reads Junie's config, treating a missing file as an empty one. */
 function readConfig(path: string): JunieConfig {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return {};
-    }
-    throw error;
+  if (!existsSync(path)) {
+    return {};
   }
-  const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!isPlainObject(parsed)) {
     throw new Error(`${path} is not a JSON object`);
   }
   return parsed as JunieConfig;
@@ -82,9 +76,21 @@ function readConfig(path: string): JunieConfig {
  * previous install of *this* package left behind so the result is idempotent.
  * Hooks contributed by other tools are kept untouched.
  */
-export function mergeHooks(
+function mergeHooks(
   existingHooks: Record<string, JunieHookEntry[]>,
   ownHooks: Record<string, JunieHookEntry[]>,
+  pluginRoot: string,
+): Record<string, JunieHookEntry[]> {
+  const merged = dropOwnEntries(existingHooks, pluginRoot);
+  for (const [event, entries] of Object.entries(ownHooks)) {
+    merged[event] = [...(merged[event] ?? []), ...entries];
+  }
+  return merged;
+}
+
+/** Keeps only hook entries that do not belong to this package. */
+function dropOwnEntries(
+  existingHooks: Record<string, JunieHookEntry[]>,
   pluginRoot: string,
 ): Record<string, JunieHookEntry[]> {
   const merged: Record<string, JunieHookEntry[]> = {};
@@ -94,13 +100,15 @@ export function mergeHooks(
       merged[event] = kept;
     }
   }
-  for (const [event, entries] of Object.entries(ownHooks)) {
-    merged[event] = [...(merged[event] ?? []), ...entries];
-  }
   return merged;
 }
 
 /** True when every command in an entry comes from this package. */
 function isOwnEntry(entry: JunieHookEntry, pluginRoot: string): boolean {
   return (entry.hooks ?? []).some((hook) => hook.command?.includes(pluginRoot));
+}
+
+/** Narrows an unknown to a plain object (not an array). */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

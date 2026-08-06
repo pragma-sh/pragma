@@ -131,11 +131,7 @@ export function peakKey(usage: JunieUsage): string {
  * the current balance exceeds it. Cache failures are not fatal: a missing or
  * unreadable file just means the current balance becomes the peak.
  */
-export async function recordPeak(
-  ctx: PluginContext,
-  key: string,
-  remaining: number,
-): Promise<number> {
+async function recordPeak(ctx: PluginContext, key: string, remaining: number): Promise<number> {
   const cwd = ctx.project?.path ?? "/tmp";
   const file = parsePeaksFile(await readPeaksText(ctx, cwd));
   const stored = file.peaks[key] ?? 0;
