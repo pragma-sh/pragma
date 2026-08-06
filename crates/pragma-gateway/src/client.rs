@@ -91,6 +91,17 @@ impl GatewayClient {
         )
     }
 
+    /// Returns the home directory of the host owning the socket. The global
+    /// theme file hangs off it, and when the daemon is reached through an SSH
+    /// bridge that path is on the remote machine — resolving it locally would
+    /// read the wrong user's file, or an unrelated coincidentally matching one.
+    pub fn home_dir(&self) -> GatewayResult<String> {
+        let home = self.rpc(ProtocolRpcMethod::Filesystem, json!({ "op": "homeDir" }))?;
+        home.as_str().map(ToString::to_string).ok_or_else(|| {
+            GatewayError::InvalidPayload("homeDir response must be a string".to_string())
+        })
+    }
+
     /// Reads a UTF-8 text file that lives under `root` on the host owning the
     /// socket, returning `None` when it does not exist.
     ///

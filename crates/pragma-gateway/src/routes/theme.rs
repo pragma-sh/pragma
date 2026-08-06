@@ -55,9 +55,8 @@ pub fn get(
     matched: &RouteMatch,
 ) -> GatewayResult<Response<std::io::Cursor<Vec<u8>>>> {
     let relative = CONSTANTS.theme.file_name.as_str();
-    let home = pragma_platform::path::home_dir()
-        .ok_or_else(|| GatewayError::Server("could not resolve the home directory".to_string()))?;
-    let global = read_theme_file(state, &home.to_string_lossy(), relative)?;
+    let home = state.client.home_dir()?;
+    let global = read_theme_file(state, &home, relative)?;
     let project = match matched.query.get("root") {
         Some(root) => {
             if !Path::new(root).is_absolute() {

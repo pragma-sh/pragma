@@ -46,6 +46,10 @@ Tauri or client presentation code.
   to see (e.g. a gitignored `.pragma/assets/sounds`). `ListFileNames` lists files
   unfiltered (optionally by extension) and `ReadBytes` / `WriteBytes` move bytes as
   base64 under the same `MAX_READ_BYTES` cap.
+- **`FsRequest::HomeDir` anchors user-scoped paths on the owning host.** It returns
+  the host's home directory (via the `pragma-platform` path seam) so a client that
+  reaches the daemon through an SSH bridge can root `~/.pragma/*` reads on the remote
+  machine instead of guessing the path locally.
 - **A binary too big for one frame is read with `ReadBytesRange`.** It returns a
   `FileChunk` (`base64` + `offset` + total `byteSize` + `eof`) capped at
   `constants.files.chunkBytes`, so the caller walks `offset` until `eof` instead of
