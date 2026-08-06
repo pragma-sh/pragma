@@ -1,0 +1,81 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" cleared",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" started",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" pre-tool",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" permission",
+            "timeout": 310
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" stopped",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" failed",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${JUNIE_PLUGIN_ROOT}/hooks/report.sh\" cleared",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
