@@ -115,10 +115,19 @@ function ScratchpadContent({
     }
   }, [agent, comments, open, save]);
 
+  // The sheet stays open until the host has taken the comment: clearing the
+  // block first would throw the typed text away on a failed write, and leave
+  // the rejected promise unhandled.
   const addComment = useCallback(
-    (text: string) => {
+    async (text: string): Promise<void> => {
       if (!picked) return;
-      void add(picked, text);
+      try {
+        await add(picked, text);
+      } catch (cause) {
+        hapticWarning();
+        Alert.alert("Couldn't add comment", errorText(cause));
+        return;
+      }
       setPicked(null);
       hapticSuccess();
     },
@@ -171,7 +180,11 @@ function ScratchpadContent({
           sending={sending}
         />
       </View>
-      <CommentComposerSheet block={picked} onCancel={() => setPicked(null)} onSubmit={addComment} />
+      <CommentComposerSheet
+        block={picked}
+        onCancel={() => setPicked(null)}
+        onSubmit={(text) => void addComment(text)}
+      />
       <AttachAgentDrawer
         agentTabs={agent.agentTabs}
         attachedTabId={agent.attachedTab?.id ?? null}

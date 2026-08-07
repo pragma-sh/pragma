@@ -3,14 +3,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
 
+/** Thrown by a write attempted before the existing thread is known. */
+const UNLOADED = "Comments aren't loaded yet.";
+
 /** A scratchpad's comment thread file, and the writes that keep it current. */
 export interface ScratchpadComments {
   comments: ScratchpadComment[];
-  /** False until the sibling file has been read; commenting stays off meanwhile. */
+  /**
+   * False until the sibling file has been read, and false again if the read
+   * failed; commenting stays off meanwhile and both writes reject.
+   */
   loaded: boolean;
-  /** Appends one comment anchored to a rendered block. */
+  /** Appends one comment anchored to a rendered block. Rejects if the write fails. */
   add: (block: ScratchpadBlock, text: string) => Promise<void>;
-  /** Replaces the set and writes it back to the host. */
+  /** Replaces the set and writes it back to the host. Rejects if the write fails. */
   save: (next: ScratchpadComment[]) => Promise<void>;
 }
 
@@ -46,10 +52,11 @@ export function useScratchpadComments(
         return undefined;
       })
       .catch(() => {
-        // An unreadable comment file must not block reading the scratchpad; the
-        // user simply starts from an empty thread rather than seeing an error
-        // they cannot act on from a phone.
-        if (!cancelled) setLoaded(true);
+        // An unreadable comment file must not block reading the scratchpad, but
+        // it must not be mistaken for an empty thread either: staying unloaded
+        // keeps commenting off, so a later write cannot rewrite the shared file
+        // from a baseline that dropped every existing comment.
+        if (!cancelled) setLoaded(false);
       });
     return () => {
       cancelled = true;
@@ -69,15 +76,17 @@ export function useScratchpadComments(
 
   const save = useCallback(
     async (next: ScratchpadComment[]): Promise<void> => {
+      if (!loaded) throw new Error(UNLOADED);
       setComments(next);
       if (!client || !worktreeRoot) return;
       await enqueue(() => client.scratchpads.setComments({ root: worktreeRoot, filePath }, next));
     },
-    [client, enqueue, filePath, worktreeRoot],
+    [client, enqueue, filePath, loaded, worktreeRoot],
   );
 
   const add = useCallback(
     async (block: ScratchpadBlock, text: string): Promise<void> => {
+      if (!loaded) throw new Error(UNLOADED);
       if (!client || !worktreeRoot) return;
       await enqueue(async () => {
         const comment = await client.scratchpads.comment({
@@ -89,7 +98,7 @@ export function useScratchpadComments(
         setComments((current) => [...current, comment]);
       });
     },
-    [client, enqueue, filePath, worktreeRoot],
+    [client, enqueue, filePath, loaded, worktreeRoot],
   );
 
   return { comments, loaded, add, save };
