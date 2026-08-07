@@ -1,10 +1,4 @@
-import type { PragmaClient } from "@pragma/sdk";
-import {
-  parseScratchpadComments,
-  scratchpadCommentsPath,
-  serializeScratchpadComments,
-  type ScratchpadComment,
-} from "@pragma/scratchpad-viewer";
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma/sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useConnection } from "./connection-context";
@@ -14,12 +8,15 @@ export interface ScratchpadComments {
   comments: ScratchpadComment[];
   /** False until the sibling file has been read; commenting stays off meanwhile. */
   loaded: boolean;
+  /** Appends one comment anchored to a rendered block. */
+  add: (block: ScratchpadBlock, text: string) => Promise<void>;
   /** Replaces the set and writes it back to the host. */
   save: (next: ScratchpadComment[]) => Promise<void>;
 }
 
 /**
- * Reads and writes the sibling `<file>.comments.json` the desktop owns.
+ * Reads and writes the sibling comment file the desktop owns, through the SDK's
+ * scratchpad namespace.
  *
  * It is the same file, in the same shape, on purpose: a comment left on a phone
  * has to show up in the desktop's "Resolve comments" handoff, and one left on
@@ -39,7 +36,8 @@ export function useScratchpadComments(
     if (!client || !worktreeRoot) return undefined;
     let cancelled = false;
     setLoaded(false);
-    readComments(client, worktreeRoot, filePath)
+    client.scratchpads
+      .getComments({ root: worktreeRoot, filePath })
       .then((existing) => {
         if (!cancelled) {
           setComments(existing);
@@ -58,37 +56,41 @@ export function useScratchpadComments(
     };
   }, [client, filePath, worktreeRoot]);
 
+  /** Runs one write after every write already queued, so none is lost. */
+  const enqueue = useCallback(async (write: () => Promise<void>): Promise<void> => {
+    const previous = writeQueue.current;
+    const next = (async () => {
+      await previous.catch(() => undefined);
+      await write();
+    })();
+    writeQueue.current = next;
+    await next;
+  }, []);
+
   const save = useCallback(
     async (next: ScratchpadComment[]): Promise<void> => {
       setComments(next);
       if (!client || !worktreeRoot) return;
-      const previous = writeQueue.current;
-      const write = (async () => {
-        await previous.catch(() => undefined);
-        await client.fs.writeFile({
-          root: worktreeRoot,
-          path: scratchpadCommentsPath(filePath),
-          contents: serializeScratchpadComments(next),
-        });
-      })();
-      writeQueue.current = write;
-      await write;
+      await enqueue(() => client.scratchpads.setComments({ root: worktreeRoot, filePath }, next));
     },
-    [client, filePath, worktreeRoot],
+    [client, enqueue, filePath, worktreeRoot],
   );
 
-  return { comments, loaded, save };
-}
+  const add = useCallback(
+    async (block: ScratchpadBlock, text: string): Promise<void> => {
+      if (!client || !worktreeRoot) return;
+      await enqueue(async () => {
+        const comment = await client.scratchpads.comment({
+          root: worktreeRoot,
+          filePath,
+          block,
+          text,
+        });
+        setComments((current) => [...current, comment]);
+      });
+    },
+    [client, enqueue, filePath, worktreeRoot],
+  );
 
-/** Reads the sibling comment file, treating a missing one as "no comments". */
-async function readComments(
-  client: PragmaClient,
-  root: string,
-  filePath: string,
-): Promise<ScratchpadComment[]> {
-  const path = scratchpadCommentsPath(filePath);
-  if (!(await client.fs.pathExists({ root, path }))) return [];
-  const file = await client.fs.readFile({ root, path });
-  if (file.binary || file.truncated) return [];
-  return parseScratchpadComments(file.text);
+  return { comments, loaded, add, save };
 }

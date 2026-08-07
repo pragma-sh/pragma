@@ -1,11 +1,9 @@
 import {
-  createScratchpadComment,
   markAllResolved,
   unresolvedComments,
   unresolvedCommentsPrompt,
-  type ScratchpadBlock,
 } from "@pragma/scratchpad-viewer";
-import type { ScratchpadFile } from "@pragma/sdk";
+import type { ScratchpadBlock, ScratchpadFile } from "@pragma/sdk";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, View, type ColorValue } from "react-native";
@@ -92,7 +90,7 @@ function ScratchpadContent({
   worktreeId: string;
 }) {
   const insets = useSafeAreaInsets();
-  const { comments, loaded, save } = useScratchpadComments(root, scratchpad.filePath);
+  const { add, comments, loaded, save } = useScratchpadComments(root, scratchpad.filePath);
   const agent = useScratchpadAgent(scratchpad, worktreeId, root, onReload);
   const [commentMode, setCommentMode] = useState(false);
   const [picked, setPicked] = useState<ScratchpadBlock | null>(null);
@@ -120,11 +118,11 @@ function ScratchpadContent({
   const addComment = useCallback(
     (text: string) => {
       if (!picked) return;
-      void save([...comments, createScratchpadComment(picked, text, Date.now(), randomId())]);
+      void add(picked, text);
       setPicked(null);
       hapticSuccess();
     },
-    [comments, picked, save],
+    [add, picked],
   );
 
   const renderCommentModeButton = useCallback(
@@ -264,8 +262,4 @@ function sentFeedback(sent: boolean): void {
 function submitLabel(openCount: number): string {
   if (openCount === 0) return "No comments yet";
   return `Send ${openCount} comment${openCount === 1 ? "" : "s"}`;
-}
-
-function randomId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

@@ -1,11 +1,10 @@
-import { attachScratchpadAgent } from "@pragma/scratchpad-viewer";
 import type { PragmaClient, ScratchpadFile } from "@pragma/sdk";
 import { useCallback, useRef, useState } from "react";
 import { Alert } from "react-native";
 
 import { useConnection } from "./connection-context";
 import { useAgentTabs } from "./data/data-context";
-import { attachedAgentTab, lastSegment } from "./scratchpad-agent";
+import { attachedAgentTab } from "./scratchpad-agent";
 import type { AgentTab } from "./types";
 import { errorText } from "./utils";
 
@@ -66,7 +65,13 @@ export function useScratchpadAgent(
       if (!client || !root) return;
       pickedTabId.current = tab.id;
       try {
-        await writeAttachment(client, root, scratchpad, tab);
+        await client.scratchpads.attachAgent({
+          root,
+          filePath: scratchpad.filePath,
+          tabId: tab.id,
+          agentId: tab.agent,
+          contents: scratchpad.contents,
+        });
         onAttached();
         closeDrawer(true);
       } catch (cause) {
@@ -79,19 +84,15 @@ export function useScratchpadAgent(
 
   const promptAgent = useCallback(
     async (text: string): Promise<"sent" | "missing-agent"> => {
-      const target = await resolveTarget();
-      if (!target || !client) return "missing-agent";
-      await client.agents.reportInput({
-        agent: lastSegment(target.agent),
-        worktreeId,
-        tabId: target.id,
-        text,
-      });
-      return "sent";
+      // `resolveTarget` only proves the attachment names a tab that is still
+      // open; the frontmatter on the host — re-read by `sendAttached` — is what
+      // addresses the message, so a stale local copy cannot misroute it.
+      if (!(await resolveTarget())) return "missing-agent";
+      return sendToAttachedAgent(client, root, scratchpad.filePath, worktreeId, text);
     },
     // `resolveTarget` closes over exactly these inputs.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [agentTabs, client, requestAttachment, scratchpad, worktreeId],
+    [agentTabs, client, requestAttachment, root, scratchpad, worktreeId],
   );
 
   /** The attached tab, asking for a new attachment when there is none. */
@@ -113,16 +114,19 @@ export function useScratchpadAgent(
   };
 }
 
-/** Rewrites the scratchpad's managed frontmatter with its new agent. */
-function writeAttachment(
-  client: PragmaClient,
-  root: string,
-  scratchpad: ScratchpadFile,
-  tab: AgentTab,
-): Promise<void> {
-  return client.fs.writeFile({
-    root,
-    path: scratchpad.filePath,
-    contents: attachScratchpadAgent(scratchpad.contents, { tabId: tab.id, agentId: tab.agent }),
-  });
+/**
+ * Delivers text to whatever agent the scratchpad's frontmatter names, reported
+ * as a two-state result because "nothing is attached" is a UI branch (raise the
+ * drawer), not a failure.
+ */
+async function sendToAttachedAgent(
+  client: PragmaClient | null,
+  root: string | undefined,
+  filePath: string,
+  worktreeId: string,
+  text: string,
+): Promise<"sent" | "missing-agent"> {
+  if (!client || !root) return "missing-agent";
+  const sent = await client.scratchpads.sendAttached({ root, filePath, worktreeId, text });
+  return sent.delivered ? "sent" : "missing-agent";
 }

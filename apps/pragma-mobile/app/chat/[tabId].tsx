@@ -8,6 +8,7 @@ import { WorktreeBackButton } from "@/components/WorktreeBackButton";
 import { AttentionDock } from "@/components/chat/AttentionDock";
 import { Composer, composerKeyboardOffset } from "@/components/chat/Composer";
 import { MessageList } from "@/components/chat/MessageList";
+import { ScratchpadPill } from "@/components/chat/ScratchpadPill";
 import {
   useAgentActions,
   useAgentTab,
@@ -76,6 +77,8 @@ function ChatSession({ params, tab }: { params: ChatParams; tab: ReturnType<type
         phase={phase}
         rows={rows}
         running={details.status === "running"}
+        tabId={details.tabId}
+        worktreeId={details.worktreeId}
       />
     </>
   );
@@ -135,6 +138,8 @@ function ChatBody({
   phase,
   rows,
   running,
+  tabId,
+  worktreeId,
 }: {
   attention: ReturnType<typeof useAgentConnection>["attention"];
   onAnswer: ReturnType<typeof useAgentConnection>["answer"];
@@ -144,6 +149,8 @@ function ChatBody({
   phase: ReturnType<typeof useAgentConnection>["phase"];
   rows: ReturnType<typeof useAgentConnection>["rows"];
   running: boolean;
+  tabId: string;
+  worktreeId: string;
 }) {
   return (
     <KeyboardAvoidingView
@@ -156,6 +163,7 @@ function ChatBody({
         {attention ? (
           <AttentionDock onAnswer={onAnswer} onDecide={onDecide} request={attention} />
         ) : null}
+        <ScratchpadPill tabId={tabId} worktreeId={worktreeId} />
         <Composer isRunning={running} onInterrupt={onInterrupt} onSend={onSend} />
       </SafeAreaView>
     </KeyboardAvoidingView>

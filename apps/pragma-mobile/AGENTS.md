@@ -85,6 +85,11 @@ paired with a desktop — streams live agent chat and launches new sessions.
   desktop's "Resolve comments" sends — then marks them resolved. Attachment is a drawer
   (`components/scratchpad/AttachAgentDrawer.tsx`) that rewrites the file's frontmatter;
   it opens only when send (or an interactive block) needs an agent and none is attached.
+  The reverse link is a pill: `components/chat/ScratchpadPill.tsx` finds the scratchpads
+  whose frontmatter names this chat's tab (`scratchpadsForAgentTab`) and shows the first
+  (`+N` when there are more) directly above the composer, tapping through to the
+  scratchpad screen. It sits **inside** the chat's `KeyboardAvoidingView`, which is what
+  keeps the keyboard from covering it — do not hoist it above that subtree.
 - **New worktree** (`components/NewWorktreeSheet.tsx`, from project/chat header "+"):
   agent picker uses same host catalog as launch. Submission uses the same headless-capable
   `client.agents.launch()` control route as existing-worktree launches.
@@ -141,7 +146,7 @@ app/
 components/
   ui/*                            # React Native Reusables primitives
   scratchpad/                     # ScratchpadWebView, ScratchpadLoading, CommentComposerSheet, AttachAgentDrawer
-  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock
+  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill
   AgentIcon                       # plugin agent icon fetched by hash (SVG/raster, cached)
   LaunchSheet                     # launch a new agent session (catalog-fed picker)
   LaunchAgentButton               # worktree header-right "+" → Launch sheet
@@ -160,7 +165,7 @@ lib/
   use-catalog.ts                 # cached host agent catalog
   use-scratchpads.ts             # a worktree's managed scratchpads, re-read on demand
   use-scratchpad-comments.ts     # the desktop's sibling comment file, read + serialized writes
-  scratchpad-agent.ts            # pure: attached-tab resolution + row label (Vitest)
+  scratchpad-agent.ts            # pure: attached-tab resolution, tab → scratchpads, row label (Vitest)
   data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest)
   types.ts                       # re-exports @pragma/constants domain types + view shapes
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop

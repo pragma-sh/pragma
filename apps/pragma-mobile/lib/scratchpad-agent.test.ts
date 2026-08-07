@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { attachedAgentTab, attachmentLabel, lastSegment } from "./scratchpad-agent";
+import { attachedAgentTab, attachmentLabel, scratchpadsForAgentTab } from "./scratchpad-agent";
 import type { AgentTab } from "./types";
 
 const tab = (overrides: Partial<AgentTab> = {}): AgentTab => ({
@@ -30,8 +30,15 @@ describe("scratchpad agent attachment", () => {
     expect(attachmentLabel({ agentTabId: null, agentId: null }, [])).toBe("No agent attached");
   });
 
-  it("reduces a catalog id to the runtime id the stream is keyed by", () => {
-    expect(lastSegment("my-plugin.opencode")).toBe("opencode");
-    expect(lastSegment("opencode")).toBe("opencode");
+  it("finds every scratchpad attached to one tab", () => {
+    const files = [
+      { id: "a", agentTabId: "tab-1" },
+      { id: "b", agentTabId: "tab-2" },
+      { id: "c", agentTabId: null },
+      { id: "d", agentTabId: "tab-1" },
+    ];
+    expect(scratchpadsForAgentTab("tab-1", files).map((file) => file.id)).toEqual(["a", "d"]);
+    expect(scratchpadsForAgentTab("tab-9", files)).toEqual([]);
+    expect(scratchpadsForAgentTab("", files)).toEqual([]);
   });
 });
