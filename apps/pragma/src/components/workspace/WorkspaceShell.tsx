@@ -5,7 +5,6 @@ import { toast } from "sonner";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
 import type { Tab } from "@pragma/constants";
-import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
@@ -27,6 +26,7 @@ import {
 import { errorMessage } from "@/lib/errors";
 import { terminalManager } from "@/lib/terminal-manager";
 import { useKanban } from "@/state/kanban-context";
+import { LeftSidebarProvider } from "@/state/left-sidebar-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -262,48 +262,47 @@ export function WorkspaceShell() {
   );
 
   return (
-    <RightSidebarProvider>
-      <TabDragProvider>
-        {/* h-full (not h-svh): WKWebView does not recompute viewport units (svh/vh)
+    <LeftSidebarProvider>
+      <RightSidebarProvider>
+        <TabDragProvider>
+          {/* h-full (not h-svh): WKWebView does not recompute viewport units (svh/vh)
             on live window resize, which froze the whole height chain — and with it
             the terminal's ResizeObserver — at the launch size. A percentage chain
             from html/body/#root (all height:100% in index.css) does recalc on
             resize, so the terminal re-fits. */}
-        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onContextMenu on <main> blocks the WebView debug menu behind Radix context menus; there is no interactive role that fits a full-shell capture. */}
-        <main
-          className="bg-background flex h-full overflow-hidden text-foreground"
-          onContextMenu={preventNativeContextMenu}
-        >
-          {/* Automations mode takes the full frame: its own sidebar + code view
-              replace the project sidebar, so the project sidebar is unmounted.
-              Kanban and the normal shell keep the project sidebar mounted. */}
-          {kanban.mode === "automations" ? (
-            <AutomationsWorkspace />
-          ) : kanban.mode === "settings" ? (
-            <SettingsWorkspace />
-          ) : (
-            <>
-              <ProjectSidebar />
-              {/* Kanban mode replaces the shell rather than overlaying it: native
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onContextMenu on <main> blocks the WebView debug menu behind Radix context menus; there is no interactive role that fits a full-shell capture. */}
+          <main
+            className="bg-background flex h-full overflow-hidden text-foreground"
+            onContextMenu={preventNativeContextMenu}
+          >
+            {/* Settings mode takes the full frame. Kanban and the normal shell
+              keep the project sidebar mounted. */}
+            {kanban.mode === "settings" ? (
+              <SettingsWorkspace />
+            ) : (
+              <>
+                <ProjectSidebar />
+                {/* Kanban mode replaces the shell rather than overlaying it: native
                   browser webviews float above HTML, so an overlay would be clipped.
                   The sidebar stays; only the terminal/right-sidebar area is swapped. */}
-              {kanban.mode === "kanban" ? (
-                <ProjectKanbanWorkspace />
-              ) : (
-                <WorkspaceContent kanban={kanban} workspace={workspace} />
-              )}
-            </>
-          )}
-          {/* Always-mounted dialogs (new-session / deep links) so they work in
+                {kanban.mode === "kanban" ? (
+                  <ProjectKanbanWorkspace />
+                ) : (
+                  <WorkspaceContent kanban={kanban} workspace={workspace} />
+                )}
+              </>
+            )}
+            {/* Always-mounted dialogs (new-session / deep links) so they work in
               both the normal shell and the Kanban board. */}
-          <WorkspaceDialogs />
-          <CommandPalette
-            mode={commandPaletteMode}
-            open={commandPaletteOpen}
-            onOpenChange={setCommandPaletteOpen}
-          />
-        </main>
-      </TabDragProvider>
-    </RightSidebarProvider>
+            <WorkspaceDialogs />
+            <CommandPalette
+              mode={commandPaletteMode}
+              open={commandPaletteOpen}
+              onOpenChange={setCommandPaletteOpen}
+            />
+          </main>
+        </TabDragProvider>
+      </RightSidebarProvider>
+    </LeftSidebarProvider>
   );
 }

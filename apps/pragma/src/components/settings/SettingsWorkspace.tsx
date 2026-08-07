@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BellRing,
   Blocks,
+  Clock,
   Keyboard,
   LogOut,
   Palette,
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import { constants, type AgentStatusSettings, type GitHubAuthMethod } from "@pragma/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
+import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
 import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
@@ -45,7 +47,15 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section = "plugins" | "keybindings" | "theme" | "agentStatus" | "github" | "ai" | "mobile";
+type Section =
+  | "plugins"
+  | "keybindings"
+  | "theme"
+  | "agentStatus"
+  | "github"
+  | "ai"
+  | "mobile"
+  | "automations";
 
 /** Sections that read and write per-project settings as well as global ones. */
 const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
@@ -54,6 +64,22 @@ const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
   "theme",
   "agentStatus",
 ]);
+
+const SECTIONS: ReadonlySet<string> = new Set<Section>([
+  "plugins",
+  "keybindings",
+  "theme",
+  "agentStatus",
+  "github",
+  "ai",
+  "mobile",
+  "automations",
+]);
+
+/** Narrows the `openSettings` target to a known section, defaulting to Plugins. */
+function initialSection(raw: string | null): Section {
+  return raw !== null && SECTIONS.has(raw) ? (raw as Section) : "plugins";
+}
 
 interface PluginConfig {
   path: string;
@@ -133,13 +159,21 @@ export function SettingsWorkspace() {
   const workspace = useWorkspace();
   const shell = useKanban();
   const [scope, setScope] = useState<ConfigScope>("global");
-  const [section, setSection] = useState<Section>("plugins");
+  const [section, setSection] = useState<Section>(() => initialSection(shell.settingsSection));
   const [loaded, setLoaded] = useState<LoadedConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const loadGeneration = useRef(0);
   const latestConfig = useRef<PragmaConfig | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+
+  // Honor deep-links while Settings is already mounted (command palette / menu).
+  useEffect(() => {
+    if (shell.settingsSection === null) return;
+    const next = initialSection(shell.settingsSection);
+    setSection(next);
+    if (!PROJECT_SECTIONS.has(next)) setScope("global");
+  }, [shell.settingsSection]);
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
@@ -164,8 +198,8 @@ export function SettingsWorkspace() {
   useEffect(() => void load(), [load]);
   useEffect(() => {
     if (scope === "project" && !workspace.selectedProjectId) setScope("global");
-    // GitHub, AI, and mobile settings are app-global, so project scope falls back
-    // to the first section that has a project layer.
+    // GitHub, AI, mobile, and automations are app-global, so project scope falls
+    // back to the first section that has a project layer.
     if (scope === "project" && !PROJECT_SECTIONS.has(section)) setSection("plugins");
   }, [scope, section, workspace.selectedProjectId]);
 
@@ -323,6 +357,13 @@ function GlobalSettingsNavigation({
       >
         Mobile & Gateway
       </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "automations"}
+        icon={<Clock />}
+        onClick={() => setSection("automations")}
+      >
+        Automations
+      </SettingsNavItem>
     </>
   );
 }
@@ -357,6 +398,15 @@ function SettingsContent({
         <div className="mx-auto max-w-3xl">
           <ThemeSection projectId={projectId} scope={scope} />
         </div>
+      </main>
+    );
+  }
+  // Automations manages its own data (the automations context, not
+  // config.json), so it also renders past the config load state.
+  if (section === "automations" && scope === "global") {
+    return (
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4">
+        <AutomationsWorkspace embedded />
       </main>
     );
   }

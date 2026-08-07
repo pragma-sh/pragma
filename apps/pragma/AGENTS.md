@@ -36,6 +36,7 @@ apps/pragma/
 │   │   ├── agent-pins.ts           # Cosmetic localStorage agent pins
 │   │   ├── worktree-pins.ts        # Cosmetic localStorage worktree pins (timestamped)
 │   │   ├── right-sidebar-context.tsx
+│   │   ├── left-sidebar-context.tsx   # Left project sidebar collapse/width (localStorage)
 │   │   ├── editor-dirty-store.ts   # Ephemeral editor dirty state (never in reducer)
 │   │   ├── review-done-store.ts    # Ephemeral per-file PR review done-toggle
 │   │   ├── review-focus-store.ts   # Ephemeral "scroll this review file into view" request
@@ -313,7 +314,11 @@ headers, and exposes supported global/project `.pragma/config.json` values throu
 `components/settings/SettingsWorkspace.tsx` is the shell: a scope toggle (Global /
 Project), a nav list, and one section component per panel (`SettingsCard` is shared).
 Sections listed in `PROJECT_SECTIONS` support both scopes; everything else is
-app-global and falls back to Plugins when the user switches to Project scope.
+app-global and falls back to Plugins when the user switches to Project scope. The
+**Automations** section (global scope) embeds `AutomationsWorkspace` and reads the
+automations context rather than `config.json`, so like Theme it renders past the
+config load state. `openSettings(section?)` deep-links a section (the command
+palette's "Open automations" uses it).
 
 **Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
 that actually applies after the `default → global → project` merge, whether it differs
@@ -1026,13 +1031,17 @@ keypress events needed for shifted input.
 
 ## Prompt Kanban board
 
-A **project-scoped prompt board** lives behind the sidebar's Kanban-icon button (it
+A **project-scoped prompt board** lives behind the Kanban-icon button in the top tab
+toolbar (`TerminalTabs`, between the usage-limits popover and the editor launcher; it
 replaced the new-session button). `state/kanban-context.tsx` (`useKanban`) is mounted in
 `App.tsx` **inside** `WorkspaceProvider` and is **always alive**, so it works in both
-shell modes. It owns a `mode: "normal" | "kanban"` switch: `WorkspaceShell` renders
+shell modes. It owns a `mode: "normal" | "kanban" | "settings"` switch: `WorkspaceShell` renders
 `ProjectKanbanWorkspace` in place of the terminal `<section>` + right sidebar in Kanban
 mode (the **sidebar stays**). Kanban **replaces** the shell rather than overlaying it —
 native browser webviews (BrowserView) float above HTML, so an overlay would be clipped.
+The automations UI is not a shell mode: it renders as the **Automations** section of the
+full-frame Settings workspace (`AutomationsWorkspace embedded`), reachable via the native
+Settings menu or `openSettings("automations")`.
 
 Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
 commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The

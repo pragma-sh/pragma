@@ -44,8 +44,8 @@ import {
 } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
-/** Which surface the workspace is showing: normal shell, Kanban board, or automations. */
-type WorkspaceMode = "normal" | "kanban" | "automations" | "settings";
+/** Which surface the workspace is showing: normal shell, Kanban board, or settings. */
+type WorkspaceMode = "normal" | "kanban" | "settings";
 
 /** Fields a draft card carries when created or edited. */
 interface KanbanDraftInput {
@@ -60,12 +60,12 @@ interface KanbanContextValue {
   mode: WorkspaceMode;
   /** Opens the board for the selected project (clears any return affordance). */
   openBoard: () => void;
-  /** Opens the host automations workspace. */
-  openAutomations: () => void;
-  /** Opens the full-frame Settings workspace. */
-  openSettings: () => void;
+  /** Opens the full-frame Settings workspace, optionally at a given section. */
+  openSettings: (section?: string) => void;
   /** Leaves Settings for the surface that opened it. */
   closeSettings: () => void;
+  /** Section Settings should open at, set by the last `openSettings` call. */
+  settingsSection: string | null;
   /** Exits the board to the normal shell without leaving a return affordance. */
   exitBoard: () => void;
   /** Returns to the board (the "Back to Kanban" control). */
@@ -485,9 +485,9 @@ function useKanbanBoardMode(projectId: string | null): {
   mode: WorkspaceMode;
   backToKanbanAvailable: boolean;
   openBoard: () => void;
-  openAutomations: () => void;
-  openSettings: () => void;
+  openSettings: (section?: string) => void;
   closeSettings: () => void;
+  settingsSection: string | null;
   exitBoard: () => void;
   returnToKanban: () => void;
   setBackToKanbanAvailable: (value: boolean) => void;
@@ -495,23 +495,22 @@ function useKanbanBoardMode(projectId: string | null): {
 } {
   const [mode, setMode] = useState<WorkspaceMode>("normal");
   const [backToKanbanAvailable, setBackToKanbanAvailable] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string | null>(null);
   const settingsReturnMode = useRef<Exclude<WorkspaceMode, "settings">>("normal");
   const openBoard = useCallback(() => {
     setBackToKanbanAvailable(false);
     setMode("kanban");
   }, []);
-  const openAutomations = useCallback(() => {
+  const openSettings = useCallback((section?: string) => {
     setBackToKanbanAvailable(false);
-    setMode("automations");
-  }, []);
-  const openSettings = useCallback(() => {
-    setBackToKanbanAvailable(false);
+    setSettingsSection(section ?? null);
     setMode((current) => {
       if (current !== "settings") settingsReturnMode.current = current;
       return "settings";
     });
   }, []);
   const closeSettings = useCallback(() => {
+    setSettingsSection(null);
     setMode(settingsReturnMode.current);
   }, []);
   const exitBoard = useCallback(() => {
@@ -531,9 +530,9 @@ function useKanbanBoardMode(projectId: string | null): {
     mode,
     backToKanbanAvailable,
     openBoard,
-    openAutomations,
     openSettings,
     closeSettings,
+    settingsSection,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -558,9 +557,9 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     mode,
     backToKanbanAvailable,
     openBoard,
-    openAutomations,
     openSettings,
     closeSettings,
+    settingsSection,
     exitBoard,
     returnToKanban,
     setBackToKanbanAvailable,
@@ -585,11 +584,11 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<KanbanContextValue>(
     () => ({
-      mode: projectId || mode === "automations" || mode === "settings" ? mode : "normal",
+      mode: projectId || mode === "settings" ? mode : "normal",
       openBoard,
-      openAutomations,
       openSettings,
       closeSettings,
+      settingsSection,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,
@@ -610,9 +609,9 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
       projectId,
       mode,
       openBoard,
-      openAutomations,
       openSettings,
       closeSettings,
+      settingsSection,
       exitBoard,
       returnToKanban,
       backToKanbanAvailable,

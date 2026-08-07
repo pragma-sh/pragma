@@ -27,6 +27,12 @@ import { useWorkspace } from "@/state/workspace-context";
 interface CreateWorktreeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Parent worktree to branch from. Defaults to the currently selected
+   * worktree; the sidebar's "New worktree off main" menu passes the project's
+   * main worktree id explicitly.
+   */
+  parentWorktreeId?: string;
 }
 
 /** Structural subset shared by the DOM and React keyboard events the form fields emit. */
@@ -89,7 +95,11 @@ function useWorktreeSubmission(): {
  * (⌘/Ctrl+↵ or the button). An empty prompt just creates the worktree and opens
  * a terminal in it — no agent session is started.
  */
-export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorktreeDialogProps) {
+export function CreateWorktreeDialog({
+  open: isOpen,
+  onOpenChange,
+  parentWorktreeId,
+}: CreateWorktreeDialogProps) {
   const workspace = useWorkspace();
   const {
     agents,
@@ -114,7 +124,7 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
 
   async function createAndLaunch() {
     const projectId = workspace.selectedProjectId;
-    const parentId = workspace.selectedWorktreeId;
+    const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
     if (!projectId || !parentId) return;
     const worktree = await createWorktree(projectId, parentId, branch, title.trim() || undefined);
     // Load the new worktree into state first so its terminal tab resolves its
@@ -136,7 +146,9 @@ export function CreateWorktreeDialog({ open: isOpen, onOpenChange }: CreateWorkt
   }
 
   function canStartSubmit(projectId: string | null): projectId is string {
-    return Boolean(projectId && workspace.selectedWorktreeId && canSubmit && !busy);
+    return Boolean(
+      projectId && (parentWorktreeId ?? workspace.selectedWorktreeId) && canSubmit && !busy,
+    );
   }
 
   /** Blocks creation only when the main worktree is behind the remote; otherwise proceeds. */
