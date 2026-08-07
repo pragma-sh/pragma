@@ -666,7 +666,7 @@ fn home_dir() -> CoreResult<String> {
 
 /// Reads a worktree-relative file. Oversized files report `truncated` without
 /// being read; non-UTF-8 files report `binary` with empty text.
-fn read_file(root: &str, path: &str) -> CoreResult<FileContents> {
+pub fn read_file(root: &str, path: &str) -> CoreResult<FileContents> {
     let target = resolve_in_worktree(Path::new(root), path)?;
     let metadata = std::fs::metadata(&target)?;
     let byte_size = metadata.len();

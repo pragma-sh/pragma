@@ -1,26 +1,12 @@
+import { parseScratchpadComments, type ScratchpadComment } from "@pragma/scratchpad-viewer";
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
-import { isNumber, isString, matchesShape, nullable } from "@/lib/type-guards";
-
-/** One persisted scratchpad range comment. */
-export interface ScratchpadComment {
-  id: string;
-  from: number;
-  to: number;
-  quote: string;
-  text: string;
-  createdAt: number;
-  resolvedAt: number | null;
-}
-
-/** Parses persisted comments, dropping malformed entries instead of breaking editor load. */
-export function parseScratchpadComments(source: string): ScratchpadComment[] {
-  const value: unknown = JSON.parse(source);
-  if (!Array.isArray(value)) throw new Error("Scratchpad comments must be an array.");
-  return value.filter(isScratchpadComment);
-}
+// The comment-thread file is shared with the mobile client, so its shape and
+// parser live in `@pragma/scratchpad-viewer`; this module owns only the TipTap
+// decorations and picker that are specific to the desktop editor.
+export { parseScratchpadComments, type ScratchpadComment };
 
 const commentKey = new PluginKey<ScratchpadComment[]>("scratchpadComments");
 
@@ -232,16 +218,4 @@ function domBlockRange(view: EditorView, left: number, top: number): ScratchpadR
 function sameRange(a: ScratchpadRange | null, b: ScratchpadRange | null): boolean {
   if (!a || !b) return a === b;
   return a.from === b.from && a.to === b.to;
-}
-
-function isScratchpadComment(value: unknown): value is ScratchpadComment {
-  return matchesShape(value, {
-    id: isString,
-    from: isNumber,
-    to: isNumber,
-    quote: isString,
-    text: isString,
-    createdAt: isNumber,
-    resolvedAt: nullable(isNumber),
-  });
 }

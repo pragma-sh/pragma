@@ -177,6 +177,7 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
         "agents.events" => routes::agents::events(request, state),
         "assets.get" => respond_json(request, routes::assets::get(state, &matched)),
         "theme.get" => respond_json(request, routes::theme::get(state, &matched)),
+        "scratchpads.list" => respond_json(request, routes::scratchpads::list(state, &matched)),
         "control" => {
             let mut req = request;
             let result = routes::control::control(&mut req, state, &matched);

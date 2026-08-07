@@ -7,7 +7,7 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, and `push`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 
 Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL` and
@@ -58,6 +58,13 @@ publishes are `client.agents.reportInput(...)` / `client.agents.reportInterrupt(
 phones, `test()` fires a check notification, and `presence({ focused })` is the
 desktop's focus heartbeat that suppresses phone pushes while the window is in front.
 Delivery itself is the gateway's job — nothing here talks to Expo.
+
+`client.scratchpads.getScratchpads({ root })` lists a worktree's managed
+scratchpads (`ScratchpadFile[]`): id, title, worktree-relative path, the full MDX
+source, and the agent tab the scratchpad is attached to. The host does the
+listing and frontmatter parsing (`pragma_core::scratchpads`, behind
+`GET /v1/scratchpads`), so a phone reads exactly what the desktop sidebar does —
+never re-implement that parse in a client.
 
 `client.theme.get({ root? })` returns the user's merged `.pragma/theme.json` color
 overrides (`HostTheme`: `colors[mode][token]` plus `sources`). Pass an absolute `root`

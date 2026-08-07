@@ -224,13 +224,13 @@ describe("createTuiWatcher with handleDecisions", () => {
   it("types an interjection's text and submits it", async () => {
     const { ctx, sendKeys } = context([input("focus on the tests")]);
     await approvalWatcher.watch(ctx as never);
-    expect(sendKeys).toHaveBeenCalledWith("focus on the tests\r");
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[200~focus on the tests\x1b[201~\r");
   });
 
   it("honors a configured submit key for interjections", async () => {
     const { ctx, sendKeys } = context([input("hello")], { submitKeys: "" });
     await approvalWatcher.watch(ctx as never);
-    expect(sendKeys).toHaveBeenCalledWith("hello");
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[200~hello\x1b[201~");
   });
 
   it("re-connects after the event stream drops and still answers later verdicts", async () => {
@@ -423,7 +423,14 @@ describe("createTuiWatcher without handleDecisions", () => {
     const { ctx, sendKeys } = context([decision(true), input("do the thing")]);
     await interjectWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenCalledTimes(2);
-    expect(sendKeys).toHaveBeenNthCalledWith(1, "do the thing");
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[200~do the thing\x1b[201~");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
+  });
+
+  it("bracket-pastes multiline interjections so newlines stay literal", async () => {
+    const { ctx, sendKeys } = context([input("line one\nline two")]);
+    await interjectWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[200~line one\nline two\x1b[201~");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
   });
 
@@ -454,7 +461,10 @@ describe("questionFreeTextMode: interject", () => {
     await fallbackQuestionWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");
     expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b");
-    expect(sendKeys).toHaveBeenNthCalledWith(3, 'Answer to question "Which?": forty-two\r');
+    expect(sendKeys).toHaveBeenNthCalledWith(
+      3,
+      '\x1b[200~Answer to question "Which?": forty-two\x1b[201~\r',
+    );
     expect(sendKeys).toHaveBeenCalledTimes(3);
   });
 

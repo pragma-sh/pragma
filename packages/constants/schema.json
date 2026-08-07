@@ -108,7 +108,8 @@
         "automations",
         "plugins",
         "tunnel",
-        "ports"
+        "ports",
+        "scratchpads"
       ]
     },
     "ProtocolEventKind": {
@@ -1726,6 +1727,41 @@
         "filePath": {
           "type": "string",
           "description": "Worktree-relative POSIX path to the scratchpad's MDX file."
+        }
+      }
+    },
+    "ScratchpadFile": {
+      "title": "ScratchpadFile",
+      "description": "A managed scratchpad plus its MDX source and attached-agent metadata, as served by the host's `scratchpads` RPC to clients that render the document themselves.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "filePath", "contents", "agentTabId", "agentId", "createdAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path to the scratchpad's MDX file."
+        },
+        "contents": {
+          "type": "string",
+          "description": "The full MDX source, frontmatter included."
+        },
+        "agentTabId": {
+          "type": ["string", "null"],
+          "description": "Terminal tab id this scratchpad prompts, or null when nothing is attached."
+        },
+        "agentId": {
+          "type": ["string", "null"],
+          "description": "Catalog agent id of the attached tab, or null when nothing is attached."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Epoch milliseconds the scratchpad was created, from its managed frontmatter."
         }
       }
     },

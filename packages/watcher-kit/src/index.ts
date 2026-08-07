@@ -79,6 +79,9 @@ const DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 const DEFAULT_SUBMIT_KEYS = "\r";
 /** Escape aborts an in-flight response in the TUIs this watcher targets. */
 const DEFAULT_ABORT_KEYS = "\x1b";
+/** Bracketed paste keeps newlines literal — Enter alone would submit mid-prompt. */
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 /** Escape rejects the question prompt when not editing free-text. */
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
@@ -340,17 +343,26 @@ function flattenWhitespace(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }
 
+/**
+ * Types an interjection into the live terminal, then submits it.
+ *
+ * Text is always bracketed-pasted so embedded newlines (scratchpad comment
+ * handoffs, multi-line chat) stay literal — a bare `\n` would submit mid-prompt
+ * in every TUI that treats Enter as send. Submit keys still travel in a
+ * separate write when `submitDelayMs` is set, matching paste-aware agents.
+ */
 async function handleInterjection(
   ctx: WatcherContext<TuiWatcherConfig>,
   submitKeys: string,
   submitDelayMs: number,
   text: string,
 ): Promise<void> {
+  const paste = `${BRACKETED_PASTE_START}${text}${BRACKETED_PASTE_END}`;
   if (submitDelayMs <= 0 || !submitKeys) {
-    await writeKeys(ctx, `${text}${submitKeys}`);
+    await writeKeys(ctx, `${paste}${submitKeys}`);
     return;
   }
-  await writeKeys(ctx, text);
+  await writeKeys(ctx, paste);
   await delay(submitDelayMs, ctx.signal);
   if (!ctx.signal.aborted) await writeKeys(ctx, submitKeys);
 }

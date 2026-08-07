@@ -13,9 +13,9 @@ Tauri or client presentation code.
 
 ## Status of the migration
 
-- **Done (host RPC):** `filesystem` (`fs.rs`), `git` (`git.rs`), and headless
-  lifecycle command execution (`exec.rs`) are implemented behind
-  `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
+- **Done (host RPC):** `filesystem` (`fs.rs`), `git` (`git.rs`), headless
+  lifecycle command execution (`exec.rs`), and managed scratchpad listing
+  (`scratchpads.rs`) are implemented behind `Core::handle_rpc`. The Tauri commands in `apps/pragma` resolve trusted
   absolute project/worktree roots (and, for git, DB-derived parent branches)
   from the client DB, then forward via `PragmaClient::rpc`. The host
   re-validates paths and runs the work on its own disk, so the same command
@@ -29,8 +29,13 @@ Tauri or client presentation code.
 - GitHub API/auth and AI are intentionally kept as local sidecars, not core RPC.
   Worktree-scoped git operations that support the GitHub PR flow still belong in the
   `git` RPC, because they must execute on the host that owns the worktree path.
-- Request payload enums (`fs::FsRequest`, `git::GitRequest`) are the client↔core
-  contract; both sides depend on this crate to build/parse them.
+- Request payload enums (`fs::FsRequest`, `git::GitRequest`,
+  `scratchpads::ScratchpadsRequest`) are the client↔core contract; both sides
+  depend on this crate to build/parse them.
+- `scratchpads::list` is the **only** place scratchpad frontmatter is parsed on
+  the host: the desktop's `list_scratchpads` command and the gateway's
+  `GET /v1/scratchpads` both go through it, so the sidebar and a paired phone
+  can never disagree about what a scratchpad is or which agent it is attached to.
 - `FsRequest::PaletteSearch` performs bounded filename and smart-case literal code
   search across client-resolved worktree roots. Git roots enumerate candidates through
   `git ls-files --cached --others --exclude-standard`, making `.gitignore`, linked-worktree

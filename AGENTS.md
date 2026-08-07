@@ -111,6 +111,7 @@ than no guide.
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
+│   ├── scratchpad-viewer/       # read-only scratchpad web-view document + shared file contract → see packages/scratchpad-viewer/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
@@ -170,6 +171,10 @@ than no guide.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
 - Agent-authored scratchpad runtime and UI components → `packages/scratchpad` (`@pragma/scratchpad`).
+- The scratchpad **file contract** (managed frontmatter, agent attachment, the
+  sibling comment-thread file) and the read-only web-view renderer native clients
+  embed → `packages/scratchpad-viewer` (`@pragma/scratchpad-viewer`). The desktop
+  imports the contract from there too — do not re-implement frontmatter parsing.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →

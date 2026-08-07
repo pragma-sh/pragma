@@ -74,6 +74,7 @@ export type {
   FileReadLimits,
   Scratchpads,
   ScratchpadSummary,
+  ScratchpadFile,
   PaletteSearchMatch,
   PaletteSearchResponse,
   OpenPort,

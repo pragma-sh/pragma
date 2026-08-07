@@ -16,6 +16,7 @@
   "dependencies": {
     "@expo/ui": "~57.0.8",
     "@pragma/constants": "workspace:*",
+    "@pragma/scratchpad-viewer": "workspace:*",
     "@pragma/sdk": "workspace:*",
     "@react-native-menu/menu": "^2.0.0",
     "@rn-primitives/portal": "^1.5.2",
@@ -48,6 +49,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
     "react-native-svg": "15.15.4",
+    "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.0",
     "tailwind-merge": "^3.6.0"
   },
