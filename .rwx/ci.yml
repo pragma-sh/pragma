@@ -46,11 +46,11 @@ tasks:
       ref: ${{ init.commit-sha }}
       github-token: ${{ github.token }}
 
-  # commitlint needs real history to walk the range, so it gets its own clone
-  # with the `.git` directory preserved. Keeping it separate leaves the `code`
-  # task above free of `.git` churn, which caches far better.
+  # commitlint and the fallow audit both need real history to walk a range
+  # against the base ref, so they share a clone with the `.git` directory
+  # preserved. Keeping it separate leaves the `code` task above free of `.git`
+  # churn, which caches far better.
   - key: code-with-history
-    if: ${{ init.lint-commits }}
     call: git/clone 2.0.8
     with:
       repository: https://github.com/pragma-sh/pragma.git
@@ -150,6 +150,64 @@ tasks:
     timeout: 20m
     runner:
       cpus: 4
+
+  - key: gh
+    call: github/install-cli 1.0.11
+
+  # fallow's code-intelligence audit (dead code + complexity + duplication),
+  # scoped to what this change touches. It diffs against the base ref, so it
+  # needs real history — hence `code-with-history`, which comes last so its
+  # `.git` directory wins the filesystem merge over the history-less tree
+  # `generate` carries down from `code`. `generate` is a prerequisite in its own
+  # right: fallow resolves imports statically, and the generated modules under
+  # gitignored `src/generated/**` would otherwise look unresolved.
+  - key: fallow
+    use: [gh, generate, code-with-history]
+    env:
+      BASE_REF: ${{ init.base-ref }}
+      BRANCH: ${{ init.branch }}
+      GH_REPO: pragma-sh/pragma
+      # git/clone doesn't leave usable credentials behind, and both the fetch
+      # and the `gh` calls need their own. Excluded from the cache key because
+      # the token is ephemeral.
+      GITHUB_TOKEN:
+        value: ${{ github.token }}
+        cache-key: excluded
+    run: |
+      # `--base` needs a resolvable ref. Fetch into the remote-tracking name
+      # rather than `refs/heads/$BASE_REF`: on a push to main that branch is
+      # checked out and git refuses to fetch into it.
+      git fetch --quiet \
+        "https://x-access-token:$GITHUB_TOKEN@github.com/pragma-sh/pragma.git" \
+        "$BASE_REF:refs/remotes/origin/$BASE_REF"
+
+      status=0
+      bunx fallow audit \
+        --base "origin/$BASE_REF" \
+        --gate new-only \
+        --fail-on-issues \
+        --format pr-comment-github \
+        --output-file fallow-comment.md || status=$?
+      cat fallow-comment.md
+
+      # Post (or update) the sticky report on the PR this branch belongs to.
+      # fallow prefixes the body with `<!-- fallow-id: fallow-results -->`, so
+      # matching on that marker keeps one comment instead of one per run.
+      pr="$(gh pr list --repo "$GH_REPO" --head "$BRANCH" --state open \
+        --json number --jq '.[0].number // empty')"
+      if [ -n "$pr" ]; then
+        existing="$(gh api "repos/$GH_REPO/issues/$pr/comments" --paginate \
+          --jq 'map(select(.body | startswith("<!-- fallow-id: fallow-results -->"))) | .[0].id // empty')"
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" \
+            -F body=@fallow-comment.md > /dev/null
+        else
+          gh api --method POST "repos/$GH_REPO/issues/$pr/comments" \
+            -F body=@fallow-comment.md > /dev/null
+        fi
+      fi
+
+      exit "$status"
 
   # `readGrokAcp` (packages/grok-plugin) streams `grok agent stdio` through an
   # `awk` watcher that touches a sentinel file the moment both JSON-RPC
