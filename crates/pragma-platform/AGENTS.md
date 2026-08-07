@@ -14,7 +14,7 @@ Nothing failed; the guarantee just evaporated.
 never a quietly-empty branch at a call site.** If you cannot implement a seam on a
 target, return an `Err` that says so. Do not no-op.
 
-## The five seams
+## The six seams
 
 | Module    | Unix                                 | Windows                                                 |
 | --------- | ------------------------------------ | ------------------------------------------------------- |
@@ -23,6 +23,7 @@ target, return an `Err` that says so. Do not no-op.
 | `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)`             |
 | `process` | `kill`, `pkill`, `ps`                | `taskkill`, `tasklist`, `Get-CimInstance Win32_Process` |
 | `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`                  |
+| `wsl`     | no distributions, ever               | parse `wsl.exe --list --verbose`                        |
 
 ### `path` — a canonical path git can read back
 
@@ -104,9 +105,27 @@ The native `terminal.shell` override is not applied to a WSL launch: it names a
 Windows/Unix program path, and running e.g. `pwsh.exe` inside the distribution is not
 what the user asked for.
 
+**Off Windows, a WSL profile resolves to the native launch instead of `wsl.exe`.** The
+profile is not a Windows-only value in practice: `.pragma/config.json` is checked in and
+shared across machines, a spawn request carries its own backend, and
+`platform.defaultBackend` is a shipped constant — so a macOS or Linux host does see one.
+Building the command anyway fails the spawn with an opaque "program not found" and the
+terminal simply never opens, which is why `profile_launch` takes the host's capability as
+a parameter (both branches are then testable on every platform) and falls back to the
+host's own shell, override included.
+
 Note `stem()` splits on both `/` and `\` rather than deferring to `Path::file_stem`,
 which only recognises the host's separator. A test caught this: a Windows PowerShell path
 examined on a Unix CI runner came back whole and fell through to the POSIX branch.
+
+### `wsl` — the same probe on both ends of the wire
+
+`wsl::list_distros` is here rather than in `pragma-client` because `pragma-server` answers
+the `wsl` RPC with it. The desktop app must ask _the host that owns a worktree_ what it
+has installed: an SSH project's terminals run on the remote machine, so a local probe
+hides that host's distributions and offers local ones it cannot launch. The parser is
+plain string handling and the module compiles everywhere, reporting nothing where
+`wsl.exe` is absent, so CI on Linux and macOS exercises it too.
 
 ## Adding a seam
 

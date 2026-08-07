@@ -225,25 +225,6 @@ export function onAgentCliPathWarning(handler: (path: string) => void): Promise<
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
 
-/** Request to start one host-side plugin watcher instance. */
-export interface StartPluginWatcherRequest {
-  pluginId: string;
-  pluginMain: string;
-  agentId: string;
-  watcherAgent: string;
-  config: unknown;
-  sessionId: string;
-  tabId: string;
-  worktreeId: string;
-  gatewayUrl: string;
-  gatewayToken: string;
-}
-
-/** Starts a detached watcher sidecar for a plugin-owned agent session. */
-export function startPluginWatcher(request: StartPluginWatcherRequest): Promise<void> {
-  return invoke("start_plugin_watcher", { request });
-}
-
 /** Workspace metadata event emitted after a brokered CLI mutation. */
 export interface WorkspaceChangedEvent {
   action: string;
@@ -1387,12 +1368,20 @@ export function getPlatform(): Promise<"mac" | "linux"> {
 }
 
 /**
- * Probes WSL: whether the app runs on Windows and which distributions are
- * installed. A failed probe reports an empty list, so a machine without WSL is
- * indistinguishable from a non-Windows host and every WSL feature stays hidden.
+ * Probes WSL on the host that owns `worktreeId`: whether it runs Windows and
+ * which distributions are installed there.
+ *
+ * The worktree decides which machine is asked. A project opened over SSH runs
+ * its terminals on the remote daemon's host, so probing the desktop machine
+ * would list distributions that host cannot launch and hide the ones it has.
+ * Omit `worktreeId` only where there is no worktree to scope to (global
+ * settings), which probes the local host.
+ *
+ * A failed probe reports an empty list, so an unreachable host is
+ * indistinguishable from one without WSL and every WSL feature stays hidden.
  */
-export function listWslDistros(): Promise<WslDistroList> {
-  return invoke<WslDistroList>("list_wsl_distros");
+export function listWslDistros(worktreeId?: string | null): Promise<WslDistroList> {
+  return invoke<WslDistroList>("list_wsl_distros", { worktreeId: worktreeId ?? null });
 }
 
 /**

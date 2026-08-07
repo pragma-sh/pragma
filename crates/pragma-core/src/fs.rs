@@ -79,6 +79,11 @@ pub enum FsRequest {
     CreateFolder { root: String, path: String },
     /// Reports whether a path exists.
     PathExists { root: String, path: String },
+    /// Returns the host's home directory, so a client can anchor user-scoped
+    /// files (`~/.pragma/theme.json`) on whichever host owns the socket
+    /// instead of guessing the path locally — a gateway reaching the daemon
+    /// through an SSH bridge cannot know the remote user's home.
+    HomeDir,
     /// Reads a file's contents.
     ReadFile { root: String, path: String },
     /// Overwrites a file with UTF-8 text.
@@ -148,6 +153,7 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
         FsRequest::CreateFile { root, path } => to_value(create_file(&root, &path)?),
         FsRequest::CreateFolder { root, path } => to_value(create_folder(&root, &path)?),
         FsRequest::PathExists { root, path } => to_value(path_exists(&root, &path)?),
+        FsRequest::HomeDir => to_value(home_dir()?),
         FsRequest::ReadFile { root, path } => to_value(read_file(&root, &path)?),
         FsRequest::WriteFile {
             root,
@@ -650,9 +656,17 @@ fn path_exists(root: &str, path: &str) -> CoreResult<bool> {
     Ok(target.exists())
 }
 
+/// The host's home directory, resolved through the platform seam so Windows
+/// finds `USERPROFILE` rather than coming up empty.
+fn home_dir() -> CoreResult<String> {
+    pragma_platform::path::home_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .ok_or_else(|| CoreError::Operation("could not resolve the home directory".to_string()))
+}
+
 /// Reads a worktree-relative file. Oversized files report `truncated` without
 /// being read; non-UTF-8 files report `binary` with empty text.
-fn read_file(root: &str, path: &str) -> CoreResult<FileContents> {
+pub fn read_file(root: &str, path: &str) -> CoreResult<FileContents> {
     let target = resolve_in_worktree(Path::new(root), path)?;
     let metadata = std::fs::metadata(&target)?;
     let byte_size = metadata.len();
@@ -910,6 +924,13 @@ mod tests {
         // gitignored is exercised directly too.
         let ignored = gitignored(dir.path(), &["ignored.txt".to_string()]);
         assert!(ignored.contains("ignored.txt"));
+    }
+
+    #[test]
+    fn home_dir_op_returns_an_absolute_host_path() {
+        let value = super::handle(serde_json::json!({ "op": "homeDir" })).expect("homeDir");
+        let home = value.as_str().expect("home dir string");
+        assert!(std::path::Path::new(home).is_absolute());
     }
 
     #[test]

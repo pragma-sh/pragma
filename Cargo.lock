@@ -5461,6 +5461,7 @@ version = "0.0.0"
 dependencies = [
  "pragma-constants",
  "tempfile",
+ "thiserror 2.0.19",
  "uds_windows",
 ]
 

@@ -11,20 +11,14 @@
 //! specifiers are supported for now; npm specifiers return a typed
 //! "not supported yet" error until remote fetching lands.
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
-use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
 use pragma_constants::CONSTANTS;
 
 use crate::error::{AppError, AppResult};
-use crate::pty::workspace_root;
 
 /// One `plugins[]` entry in a `.pragma/config.json` file.
 #[derive(Debug, Clone, Deserialize)]
@@ -92,114 +86,6 @@ pub struct PluginEntryResult {
     pub manifest: Option<PluginManifest>,
     /// Human-readable resolution error when it did not.
     pub error: Option<String>,
-}
-
-/// Request to start one host-side plugin watcher instance.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartWatcherRequest {
-    #[serde(default)]
-    pub operation: WatcherOperation,
-    pub plugin_id: String,
-    pub plugin_main: String,
-    #[serde(rename = "agentId")]
-    pub _agent_id: String,
-    pub watcher_agent: String,
-    pub config: serde_json::Value,
-    pub session_id: String,
-    pub tab_id: String,
-    pub worktree_id: String,
-    pub gateway_url: String,
-    pub gateway_token: String,
-}
-
-/// Lifecycle action handled by the watcher command.
-#[derive(Debug, Default, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WatcherOperation {
-    /// Starts a watcher unless this session already owns one.
-    #[default]
-    Start,
-    /// Stops watcher owned by one session.
-    Stop,
-    /// Stops every watcher before plugin contributions refresh.
-    StopAll,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct WatcherSessionKey {
-    session: String,
-    tab: String,
-    worktree: String,
-}
-
-impl From<&StartWatcherRequest> for WatcherSessionKey {
-    fn from(request: &StartWatcherRequest) -> Self {
-        Self {
-            session: request.session_id.clone(),
-            tab: request.tab_id.clone(),
-            worktree: request.worktree_id.clone(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct WatcherChildren<T = Child> {
-    children: HashMap<WatcherSessionKey, T>,
-}
-
-impl<T> Default for WatcherChildren<T> {
-    fn default() -> Self {
-        Self {
-            children: HashMap::new(),
-        }
-    }
-}
-
-impl<T> WatcherChildren<T> {
-    fn insert_if_vacant(&mut self, key: WatcherSessionKey, child: T) -> Result<(), T> {
-        match self.children.entry(key) {
-            Entry::Vacant(entry) => {
-                entry.insert(child);
-                Ok(())
-            }
-            Entry::Occupied(_) => Err(child),
-        }
-    }
-
-    fn remove(&mut self, key: &WatcherSessionKey) -> Option<T> {
-        self.children.remove(key)
-    }
-
-    fn take_all(&mut self) -> Vec<T> {
-        self.children.drain().map(|(_, child)| child).collect()
-    }
-
-    fn take_for_tab(&mut self, tab_id: &str) -> Vec<T> {
-        self.take_matching(|key| key.tab == tab_id)
-    }
-
-    fn take_for_worktree(&mut self, worktree_id: &str) -> Vec<T> {
-        self.take_matching(|key| key.worktree == worktree_id)
-    }
-
-    fn take_matching(&mut self, predicate: impl Fn(&WatcherSessionKey) -> bool) -> Vec<T> {
-        let keys = self
-            .children
-            .keys()
-            .filter(|key| predicate(key))
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.into_iter()
-            .filter_map(|key| self.children.remove(&key))
-            .collect()
-    }
-}
-
-static WATCHER_CHILDREN: OnceLock<Mutex<WatcherChildren>> = OnceLock::new();
-
-fn watcher_children() -> &'static Mutex<WatcherChildren> {
-    WATCHER_CHILDREN.get_or_init(|| Mutex::new(WatcherChildren::default()))
 }
 
 /// Minimal `package.json` shape for plugin manifests.
@@ -288,130 +174,6 @@ pub fn read_bundle(main_path: &Path) -> AppResult<String> {
             main_path.display()
         ))
     })
-}
-
-/// Starts or stops tracked `pragma-watch` sidecars.
-pub fn start_watcher(request: StartWatcherRequest) -> AppResult<()> {
-    let key = WatcherSessionKey::from(&request);
-    match request.operation {
-        WatcherOperation::Stop => {
-            let child = watcher_children().lock()?.remove(&key);
-            if let Some(child) = child {
-                stop_watcher_child(child);
-            }
-            return Ok(());
-        }
-        WatcherOperation::StopAll => {
-            let children = watcher_children().lock()?.take_all();
-            for child in children {
-                stop_watcher_child(child);
-            }
-            return Ok(());
-        }
-        WatcherOperation::Start => {}
-    }
-
-    let mut children = watcher_children().lock()?;
-    if let Some(child) = children.children.get_mut(&key) {
-        if child.try_wait()?.is_none() {
-            return Ok(());
-        }
-        children.remove(&key);
-    }
-    let mut command = watcher_command();
-    command
-        .args([
-            "--pluginId",
-            &request.plugin_id,
-            "--pluginMain",
-            &request.plugin_main,
-            "--agentId",
-            &request.watcher_agent,
-            "--watcherAgent",
-            &request.watcher_agent,
-            "--config",
-            &request.config.to_string(),
-            "--sessionId",
-            &request.session_id,
-            "--tabId",
-            &request.tab_id,
-            "--worktreeId",
-            &request.worktree_id,
-            "--gatewayUrl",
-            &request.gateway_url,
-            "--gatewayToken",
-            &request.gateway_token,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
-    let child = command.spawn()?;
-    let pid = child.id();
-    if let Err(child) = children.insert_if_vacant(key.clone(), child) {
-        stop_watcher_child(child);
-        return Err(AppError::Plugin(format!(
-            "watcher session became occupied while starting: {}",
-            request.session_id
-        )));
-    }
-    drop(children);
-    thread::spawn(move || reap_watcher_child(key, pid));
-    Ok(())
-}
-
-/// Stops every watcher process owned by one tab.
-pub fn stop_watchers_for_tab(tab_id: &str) -> AppResult<()> {
-    let children = watcher_children().lock()?.take_for_tab(tab_id);
-    for child in children {
-        stop_watcher_child(child);
-    }
-    Ok(())
-}
-
-/// Stops every watcher process owned by one worktree.
-pub fn stop_watchers_for_worktree(worktree_id: &str) -> AppResult<()> {
-    let children = watcher_children().lock()?.take_for_worktree(worktree_id);
-    for child in children {
-        stop_watcher_child(child);
-    }
-    Ok(())
-}
-
-fn stop_watcher_child(mut child: Child) {
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn reap_watcher_child(key: WatcherSessionKey, pid: u32) {
-    loop {
-        thread::sleep(Duration::from_millis(100));
-        let Ok(mut children) = watcher_children().lock() else {
-            return;
-        };
-        let Some(child) = children.children.get_mut(&key) else {
-            return;
-        };
-        if child.id() != pid {
-            return;
-        }
-        if matches!(child.try_wait(), Ok(None)) {
-            continue;
-        }
-        children.remove(&key);
-        return;
-    }
-}
-
-fn watcher_command() -> Command {
-    if cfg!(debug_assertions) {
-        let mut command = crate::process_env::command("bun");
-        command.arg(workspace_root().join("packages/watcher/src/cli.ts"));
-        command.current_dir(workspace_root());
-        command
-    } else {
-        let path = pragma_client::sidecar_executable("pragma-watch");
-        crate::process_env::command(&path.to_string_lossy())
-    }
 }
 
 /// Reads one scope's config file and resolves every declared entry.
@@ -587,77 +349,6 @@ fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn watcher_key(session_id: &str) -> WatcherSessionKey {
-        WatcherSessionKey {
-            session: session_id.to_owned(),
-            tab: "tab".to_owned(),
-            worktree: "worktree".to_owned(),
-        }
-    }
-
-    #[test]
-    fn watcher_registry_prevents_duplicates_and_releases_sessions() {
-        let mut children = WatcherChildren::default();
-        let key = watcher_key("session");
-
-        assert_eq!(children.insert_if_vacant(key.clone(), 1), Ok(()));
-        assert_eq!(children.insert_if_vacant(key.clone(), 2), Err(2));
-        assert_eq!(children.remove(&key), Some(1));
-        assert_eq!(children.insert_if_vacant(key, 3), Ok(()));
-    }
-
-    #[test]
-    fn watcher_registry_takes_only_matching_tab_or_worktree() {
-        let mut children = WatcherChildren::default();
-        let first = WatcherSessionKey {
-            session: "first".to_owned(),
-            tab: "tab-one".to_owned(),
-            worktree: "worktree-one".to_owned(),
-        };
-        let second = WatcherSessionKey {
-            session: "second".to_owned(),
-            tab: "tab-two".to_owned(),
-            worktree: "worktree-one".to_owned(),
-        };
-        let third = WatcherSessionKey {
-            session: "third".to_owned(),
-            tab: "tab-three".to_owned(),
-            worktree: "worktree-two".to_owned(),
-        };
-        children.insert_if_vacant(first, 1).unwrap();
-        children.insert_if_vacant(second, 2).unwrap();
-        children.insert_if_vacant(third, 3).unwrap();
-
-        assert_eq!(children.take_for_tab("tab-one"), vec![1]);
-        let mut worktree_children = children.take_for_worktree("worktree-one");
-        worktree_children.sort_unstable();
-        assert_eq!(worktree_children, vec![2]);
-        assert_eq!(children.take_all(), vec![3]);
-    }
-
-    #[test]
-    fn watcher_operation_defaults_and_deserializes() {
-        let mut value = serde_json::json!({
-            "pluginId": "plugin",
-            "pluginMain": "/plugin.js",
-            "agentId": "plugin.agent",
-            "watcherAgent": "agent",
-            "config": {},
-            "sessionId": "session",
-            "tabId": "tab",
-            "worktreeId": "worktree",
-            "gatewayUrl": "http://gateway",
-            "gatewayToken": "token"
-        });
-        let request: StartWatcherRequest = serde_json::from_value(value.clone()).unwrap();
-
-        assert!(matches!(request.operation, WatcherOperation::Start));
-
-        value["operation"] = serde_json::json!("stopAll");
-        let request: StartWatcherRequest = serde_json::from_value(value).unwrap();
-        assert!(matches!(request.operation, WatcherOperation::StopAll));
-    }
 
     /// Guards the specifier forms `resolve_local_dir` must accept. Windows
     /// absolute paths (`C:\…`) used to fall through every branch and surface as

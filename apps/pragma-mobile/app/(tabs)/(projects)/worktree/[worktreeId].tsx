@@ -17,10 +17,14 @@ import {
   useAgentActions,
   useAgentTabs,
   useChildWorktrees,
+  useProjectRootPath,
   useWorktree,
 } from "@/lib/data/data-context";
 import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
+import { attachmentLabel } from "@/lib/scratchpad-agent";
 import type { AgentTab } from "@/lib/types";
+import { useScratchpads } from "@/lib/use-scratchpads";
+import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel, type WorktreeNode } from "@/lib/worktree-tree";
 
 /** A worktree's view: nested child worktrees, then its agent tabs. Nests until
@@ -33,6 +37,7 @@ export default function WorktreeScreen() {
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
   const [launchOpen, setLaunchOpen] = useState(false);
+  useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
 
   const openLaunchSheet = useCallback(() => {
     hapticImpact();
@@ -54,6 +59,7 @@ export default function WorktreeScreen() {
         agentTabs={agentTabs}
         empty={empty}
         insetBottom={insets.bottom}
+        worktreeId={worktreeId}
         worktreeNodes={children}
       />
       <WorktreeLaunchSheet onOpenChange={setLaunchOpen} open={launchOpen} worktree={worktree} />
@@ -84,11 +90,13 @@ function WorktreeContents({
   agentTabs,
   empty,
   insetBottom,
+  worktreeId,
   worktreeNodes,
 }: {
   agentTabs: AgentTab[];
   empty: boolean;
   insetBottom: number;
+  worktreeId: string;
   worktreeNodes: WorktreeNode[];
 }) {
   return (
@@ -99,6 +107,7 @@ function WorktreeContents({
     >
       <WorktreesGroup nodes={worktreeNodes} />
       <AgentTabsGroup tabs={agentTabs} />
+      <ScratchpadsGroup agentTabs={agentTabs} worktreeId={worktreeId} />
       {empty ? (
         <Text className="px-4 py-6 text-muted-foreground">No nested worktrees or agents here.</Text>
       ) : null}
@@ -133,6 +142,45 @@ function WorktreesGroup({ nodes }: { nodes: WorktreeNode[] }) {
     <NavGroup title="Worktrees">
       {nodes.map((node) => (
         <WorktreeNavRow key={node.worktree.id} worktree={node.worktree} />
+      ))}
+    </NavGroup>
+  );
+}
+
+/**
+ * The worktree's managed scratchpads, listed in the same row style as its
+ * agents. Rendered only when the worktree has any — a worktree with no
+ * scratchpad directory should not grow an empty section.
+ */
+function ScratchpadsGroup({
+  agentTabs,
+  worktreeId,
+}: {
+  agentTabs: AgentTab[];
+  worktreeId: string;
+}) {
+  const { scratchpads } = useScratchpads(worktreeId);
+  if (scratchpads.length === 0) return null;
+
+  return (
+    <NavGroup title="Scratchpads">
+      {scratchpads.map((scratchpad) => (
+        <NavRow
+          key={scratchpad.id}
+          onPress={() =>
+            router.push({
+              pathname: "/scratchpad/[scratchpadId]",
+              params: {
+                scratchpadId: scratchpad.id,
+                filePath: scratchpad.filePath,
+                title: scratchpad.title,
+                worktreeId,
+              },
+            })
+          }
+          subtitle={attachmentLabel(scratchpad, agentTabs)}
+          title={scratchpad.title}
+        />
       ))}
     </NavGroup>
   );

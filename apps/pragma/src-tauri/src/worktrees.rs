@@ -4,12 +4,12 @@ use pragma_constants::{TabKind, Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
 use tauri::{AppHandle, Manager, State};
 
+use crate::browser;
 use crate::db::{Db, WorktreeMru};
 use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::hosts::Hosts;
 use crate::scripts;
-use crate::{browser, plugins};
 
 #[tauri::command]
 pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Worktree>> {
@@ -207,9 +207,6 @@ pub fn delete_worktree(
         }
     }
 
-    if let Err(error) = plugins::stop_watchers_for_worktree(&worktree_id) {
-        log::warn!("failed to stop plugin watchers for {worktree_id}: {error}");
-    }
     for tab in db
         .list_tabs(&worktree.project_id)?
         .into_iter()

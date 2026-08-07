@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use pragma_constants::{ShellProfile, TerminalBackend, CONSTANTS};
 
+use crate::wsl;
+
 /// Parses a shell profile from a `.pragma/config.json` `terminal` block.
 ///
 /// An unrecognised backend returns `None` so the caller can report the typo
@@ -97,8 +99,28 @@ pub fn resolve_launch(configured: Option<&str>) -> ShellLaunch {
 /// the session opens in the worktree the caller already set as the child's cwd.
 #[must_use]
 pub fn resolve_profile_launch(profile: &ShellProfile, configured: Option<&str>) -> ShellLaunch {
+    profile_launch(profile, configured, wsl::is_windows())
+}
+
+/// The launch rule, with the host's WSL capability injected so both branches
+/// are testable on every platform.
+///
+/// A WSL profile can reach a macOS or Linux host by more than one route: a
+/// `.pragma/config.json` is checked in and shared across machines, a spawn
+/// request names its own backend, and `platform.defaultBackend` is a shipped
+/// constant. `wsl.exe` exists on none of them, so constructing that command
+/// anyway fails the spawn with an opaque "program not found" — the terminal
+/// simply never opens. Falling back to the host's own shell honours the part of
+/// the request the host can actually satisfy: a working terminal in the
+/// worktree.
+fn profile_launch(
+    profile: &ShellProfile,
+    configured: Option<&str>,
+    wsl_available: bool,
+) -> ShellLaunch {
     match profile.backend {
         TerminalBackend::Native => resolve_launch(configured),
+        TerminalBackend::Wsl if !wsl_available => resolve_launch(configured),
         TerminalBackend::Wsl => ShellLaunch {
             program: CONSTANTS.platform.wsl.launcher.clone(),
             args: profile
@@ -250,8 +272,8 @@ mod tests {
     use pragma_constants::TerminalBackend;
 
     use super::{
-        find_on_path, parse_profile, pick_windows_shell, resolve_profile_launch, resolve_shell,
-        ShellProfile,
+        find_on_path, parse_profile, pick_windows_shell, profile_launch, resolve_profile_launch,
+        resolve_shell, ShellLaunch, ShellProfile,
     };
 
     fn wsl(distro: Option<&str>) -> ShellProfile {
@@ -259,6 +281,11 @@ mod tests {
             backend: TerminalBackend::Wsl,
             distro: distro.map(str::to_string),
         }
+    }
+
+    /// The launch a Windows host resolves, asserted from any platform.
+    fn on_windows(profile: &ShellProfile, configured: Option<&str>) -> ShellLaunch {
+        profile_launch(profile, configured, true)
     }
 
     #[test]
@@ -324,9 +351,7 @@ mod tests {
     #[test]
     fn a_blank_distro_means_the_wsl_default() {
         assert_eq!(parse_profile("wsl", Some("   ")), Some(wsl(None)));
-        assert!(resolve_profile_launch(&wsl(Some("  ")), None)
-            .args
-            .is_empty());
+        assert!(on_windows(&wsl(Some("  ")), None).args.is_empty());
     }
 
     /// A typo must surface, not silently launch a native shell where the user
@@ -341,7 +366,7 @@ mod tests {
     /// WSL tab silently opens the default distribution instead of the picked one.
     #[test]
     fn a_wsl_profile_launches_the_named_distribution() {
-        let launch = resolve_profile_launch(&wsl(Some("Ubuntu")), None);
+        let launch = on_windows(&wsl(Some("Ubuntu")), None);
         assert_eq!(
             launch.program,
             pragma_constants::CONSTANTS.platform.wsl.launcher
@@ -353,12 +378,51 @@ mod tests {
     /// a WSL launch would try to run e.g. `pwsh.exe` inside the distribution.
     #[test]
     fn a_native_shell_override_does_not_leak_into_a_wsl_launch() {
-        let launch = resolve_profile_launch(&wsl(None), Some("/usr/bin/fish"));
+        let launch = on_windows(&wsl(None), Some("/usr/bin/fish"));
         assert_eq!(
             launch.program,
             pragma_constants::CONSTANTS.platform.wsl.launcher
         );
         assert!(launch.args.is_empty());
+    }
+
+    /// `wsl.exe` does not exist on macOS or Linux, and a WSL profile reaches
+    /// those hosts through a shared `config.json`, a client spawn request, or
+    /// the shipped `platform.defaultBackend`. Building the command anyway fails
+    /// the spawn outright, so the host's own shell is the launch instead.
+    #[test]
+    fn a_wsl_profile_falls_back_to_the_host_shell_where_wsl_cannot_exist() {
+        for profile in [wsl(None), wsl(Some("Ubuntu"))] {
+            let launch = profile_launch(&profile, None, false);
+            assert_ne!(
+                launch.program,
+                pragma_constants::CONSTANTS.platform.wsl.launcher
+            );
+            assert_eq!(launch, super::resolve_launch(None));
+        }
+    }
+
+    /// Falling back means launching a native shell, so the native override is
+    /// the right shell to launch — it is no longer a foreign program path.
+    #[test]
+    fn the_non_windows_fallback_honours_the_configured_native_shell() {
+        let launch = profile_launch(&wsl(Some("Ubuntu")), Some("/usr/bin/fish"), false);
+        assert_eq!(launch.program, "/usr/bin/fish");
+    }
+
+    /// The public entry point has to agree with the host it is compiled for,
+    /// or the fallback is unreachable where it matters.
+    #[test]
+    fn the_public_launch_follows_the_hosts_capability() {
+        let launch = resolve_profile_launch(&wsl(Some("Ubuntu")), None);
+        if cfg!(windows) {
+            assert_eq!(
+                launch.program,
+                pragma_constants::CONSTANTS.platform.wsl.launcher
+            );
+        } else {
+            assert_eq!(launch, super::resolve_launch(None));
+        }
     }
 
     #[test]

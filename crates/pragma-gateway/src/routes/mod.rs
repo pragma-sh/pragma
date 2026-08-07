@@ -4,8 +4,10 @@ pub mod control;
 pub mod health;
 pub mod push;
 pub mod rpc;
+pub mod scratchpads;
 pub mod sessions;
 pub mod subscriptions;
+pub mod theme;
 
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::router::RouteMatch;

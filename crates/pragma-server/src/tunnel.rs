@@ -122,7 +122,7 @@ impl TunnelRegistry {
             .next()
             .ok_or_else(|| TunnelError::Message("tunnel command is empty".to_string()))?;
         self.set_status(TunnelStatus::Starting);
-        let child = pragma_platform::process::command(program)
+        let child = pragma_core::process_env::command(program)
             .args(parts)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -131,7 +131,11 @@ impl TunnelRegistry {
         let mut child = match child {
             Ok(child) => child,
             Err(error) => {
-                let message = format!("failed to start tunnel: {error}");
+                let message = if error.kind() == std::io::ErrorKind::NotFound {
+                    format!("failed to start tunnel: `{program}` not found on PATH")
+                } else {
+                    format!("failed to start tunnel: {error}")
+                };
                 self.set_status(TunnelStatus::Error(message.clone()));
                 return Err(TunnelError::Message(message));
             }

@@ -7,7 +7,9 @@ import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
 import { PushClient } from "./push-client";
 import { routes } from "./routes";
+import { ScratchpadsClient } from "./scratchpads-client";
 import { SessionsClient } from "./sessions-client";
+import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
 import type { PragmaClientConfig } from "./transport";
 import { WorkspaceClient } from "./workspace-client";
@@ -23,6 +25,8 @@ export class PragmaClient {
   readonly events: EventsClient;
   readonly workspace: WorkspaceClient;
   readonly push: PushClient;
+  readonly theme: ThemeClient;
+  readonly scratchpads: ScratchpadsClient;
 
   private readonly transport: Transport;
 
@@ -37,6 +41,8 @@ export class PragmaClient {
     this.events = new EventsClient(this.transport);
     this.workspace = new WorkspaceClient(this.events);
     this.push = new PushClient(this.transport);
+    this.theme = new ThemeClient(this.transport);
+    this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
   }
 
   rpc<T = unknown>(

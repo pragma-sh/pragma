@@ -75,7 +75,7 @@ it("submits interjections in a separate PTY write", async () => {
 
   await watcher?.watch(context as never);
 
-  expect(sendKeys).toHaveBeenNthCalledWith(1, "continue");
+  expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[200~continue\x1b[201~");
   expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
   expect(report).toHaveBeenCalledWith({
     agent: "cursor",

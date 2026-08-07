@@ -474,6 +474,18 @@ export function useProjects(): Project[] {
   }, [projects]);
 }
 
+/** Every worktree across all projects, unordered. */
+export function useWorktrees(): Worktree[] {
+  const { worktrees } = useData();
+  return worktrees;
+}
+
+/** Agent tabs for every worktree, keyed by worktree id. */
+export function useAllAgentTabs(): Record<string, AgentTab[]> {
+  const { agentTabs } = useData();
+  return agentTabs;
+}
+
 /** A single project by id (or undefined). */
 export function useProject(projectId: string): Project | undefined {
   const { projects } = useData();
@@ -484,6 +496,19 @@ export function useProject(projectId: string): Project | undefined {
 export function useWorktree(worktreeId: string): Worktree | undefined {
   const { worktrees } = useData();
   return useMemo(() => worktrees.find((w) => w.id === worktreeId), [worktrees, worktreeId]);
+}
+
+/**
+ * The host path of a project's main worktree — the root every project-scoped
+ * `.pragma` file (theme, keybindings, config) hangs off, on whichever host
+ * owns the project. Undefined while the workspace is still loading.
+ */
+export function useProjectRootPath(projectId: string | undefined): string | undefined {
+  const { worktrees } = useData();
+  return useMemo(
+    () => worktrees.find((w) => w.projectId === projectId && w.isMain)?.path,
+    [worktrees, projectId],
+  );
 }
 
 /** The nested worktree tree (roots) for a project. */

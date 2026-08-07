@@ -52,10 +52,12 @@ pub use ssh::{
     ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
 };
 
+// `WslDistro` is deliberately not re-exported: it is `pragma_constants`' type
+// now, shared with the `wsl` RPC's payload, so callers name it there.
 #[cfg(feature = "ssh")]
 pub use wsl::{
     default_bootstrap_command, list_distros, resolve_distro, socket_path_for, start_wsl_bridge,
-    WslBridgeConfig, WslDistro, WslError, WSL_CHANNEL,
+    WslBridgeConfig, WslError, WSL_CHANNEL,
 };
 
 const SERVER_DETACH_FLAG: &str = "--detach";

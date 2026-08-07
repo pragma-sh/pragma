@@ -46,21 +46,17 @@ fn user_path() -> OsString {
 
 /// The user's home directory, however this platform spells it.
 ///
-/// Windows sets `USERPROFILE`, not `HOME` — `HOME` exists there only when
-/// something like Git Bash injects it, which a GUI-launched host does not have.
-/// Reading `HOME` alone therefore skipped every home-relative entry below on
-/// Windows, including the `.local/bin` that `agent_cli` installs `pragma-cli`
-/// into, so agents could not find the helper on their `PATH`.
+/// Home lookup is a platform seam ([`pragma_platform::path::home_dir`]): on
+/// Windows the variable is `USERPROFILE`, not `HOME`, and reading `HOME` alone
+/// skipped every home-relative entry below there — including the `.local/bin`
+/// that `agent_cli` installs `pragma-cli` into, so agents could not find the
+/// helper on their `PATH`.
 ///
 /// Public because the global scope of `.pragma/config.json` is rooted here too,
 /// and the session layer must spell "home" exactly the same way.
 #[must_use]
 pub fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .or_else(|| env::var_os("USERPROFILE"))
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
+    pragma_platform::path::home_dir()
 }
 
 fn user_path_from(current: &OsStr, home: Option<&Path>) -> OsString {

@@ -6,7 +6,8 @@ import { NavGroup } from "@/components/NavRow";
 import { renderNewWorktreeButton } from "@/components/NewWorktreeButton";
 import { Text } from "@/components/ui/text";
 import { WorktreeNavRow } from "@/components/WorktreeNavRow";
-import { useProject, useWorktreeTree } from "@/lib/data/data-context";
+import { useProject, useProjectRootPath, useWorktreeTree } from "@/lib/data/data-context";
+import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
 /** A project's top-level view: its root worktree(s) as navigation rows. */
 export default function ProjectScreen() {
@@ -14,6 +15,7 @@ export default function ProjectScreen() {
   const project = useProject(projectId);
   const roots = useWorktreeTree(projectId);
   const insets = useSafeAreaInsets();
+  useViewedProjectRoot(useProjectRootPath(projectId));
 
   return (
     <>

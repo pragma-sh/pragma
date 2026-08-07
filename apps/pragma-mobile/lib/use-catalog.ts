@@ -3,6 +3,7 @@ import { PragmaGatewayError } from "@pragma/sdk";
 import { useEffect, useState } from "react";
 
 import { useConnection } from "./connection-context";
+import { runtimeAgentId } from "./launch-form";
 
 const CATALOG_RETRY_MS = 500;
 const CATALOG_RETRY_MAX_MS = 10_000;
@@ -92,9 +93,18 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** One catalog agent by id (e.g. to resolve its icon + display name). */
+/**
+ * One catalog agent by id (e.g. to resolve its icon + display name).
+ *
+ * Accepts either the catalog-qualified id (`pragma.claude-code`) or the
+ * runtime stream id tabs and agent reports carry (`claude-code`) — both are
+ * how the rest of the app names an agent, and icons must resolve either way.
+ */
 export function useCatalogAgent(agentId: string | undefined): CatalogAgent | undefined {
   const catalog = useCatalog();
-  if (!agentId) return undefined;
-  return catalog?.agents.find((agent) => agent.id === agentId);
+  if (!agentId || !catalog) return undefined;
+  return (
+    catalog.agents.find((agent) => agent.id === agentId) ??
+    catalog.agents.find((agent) => runtimeAgentId(agent.id) === agentId)
+  );
 }

@@ -633,26 +633,34 @@ function EditorLauncherMenu({
 
 /**
  * Label for the host's own shell in the shell submenu. The submenu only renders
- * when WSL distributions exist, which is Windows-only, so naming PowerShell
- * here is accurate rather than a guess.
+ * when the worktree's host reports WSL distributions, which makes it a Windows
+ * host, so naming PowerShell here is accurate rather than a guess.
  */
 const NATIVE_SHELL_LABEL = "PowerShell";
 
-/** The "new tab" dropdown for creating a terminal or browser tab. */
+/**
+ * The "new tab" dropdown for creating a terminal or browser tab.
+ *
+ * `worktreeId` scopes the distribution list to the host the new tab would spawn
+ * on. For a project opened over SSH that is the remote daemon's machine, whose
+ * distributions are the only ones it can actually launch.
+ */
 function NewTabMenu({
   shortcutModifier,
   disabled,
   projectId,
+  worktreeId,
   onCreateTerminal,
   onCreateBrowser,
 }: {
   shortcutModifier: string;
   disabled: boolean;
   projectId: string | null;
+  worktreeId: string | null;
   onCreateTerminal: (shell?: ShellProfile | null) => void;
   onCreateBrowser: () => void;
 }) {
-  const wsl = useWslDistros();
+  const wsl = useWslDistros(worktreeId);
   // "Default" here means the shell Settings → Terminal selected — the one a
   // plain ⌘T opens — not the distribution WSL itself marks as its default.
   const { defaultProfile, hiddenDistros } = useTerminalSettings(projectId);
@@ -795,6 +803,7 @@ export function TerminalTabs() {
             onCreateTerminal={(shell) => void workspace.createTerminalTab(undefined, shell)}
             projectId={workspace.selectedProjectId}
             shortcutModifier={shortcutModifier}
+            worktreeId={workspace.selectedWorktree?.id ?? null}
           />
         </div>
       </header>

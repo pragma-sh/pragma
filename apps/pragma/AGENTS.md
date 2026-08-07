@@ -275,16 +275,15 @@ Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
 at the top (newest pin first); each row exposes a hover pin button, a
 context-menu Pin/Unpin item, and a filled pin glyph that unpins when clicked.
 
-Plugin watchers are normally started when Pragma launches an agent session, but command
-approval reports also lazy-start the matching watcher for their tab. This keeps approval
-working when a user manually starts a watcher-backed agent (for example typing `opencode`
-inside a Pragma terminal): the status plugin can raise the toast, and the lazy watcher can
-write the Approve/Deny keys back into that same PTY. Watcher lookup uses the qualified
-catalog agent id; `pragma-watch --agentId` uses the plugin-local watcher agent so runtime
-status, reply, and interjection events share one stream identity.
-Watcher children are keyed by session/tab/worktree, duplicate starts are ignored, and exited
-children are reaped. Tab close and worktree deletion stop matching children; plugin catalog
-replacement stops all old children before installing new watcher definitions.
+**The desktop does not own plugin watchers — `pragma-server` does** (see
+`crates/pragma-server/AGENTS.md`). It used to: the frontend started a `pragma-watch`
+child per launched agent session and stopped them all whenever plugin contributions
+were replaced. That tied a watcher's life to a frontend that restarts, switches
+projects, and reloads plugins far more often than a session ends, so every such event
+silently orphaned every running agent — mobile interjections and answers reached the
+server and went nowhere, while the desktop noticed nothing because typing into the
+terminal bypasses watchers entirely. Sessions outlive the app; watchers must too. Do
+not reintroduce a watcher spawn here.
 
 ## Remote access (tunnel + pair modal)
 
@@ -327,11 +326,20 @@ selected scope's file through `read/writeKeybindingsFile`, then dispatch
 
 **Terminal** (`TerminalSection.tsx`) edits the `terminal` block of the scope's
 `config.json` (`{ backend, distro }`) — the shell a plain new tab opens in. The
-distribution list comes from `useWslDistros`, which probes `list_wsl_distros` **once per
-mount**: the probe shells out to `wsl.exe`, so a distribution installed while the app is
-running only appears after a reload. The same hook and the same `lib/shell-profile.ts`
-helpers back the new-tab menu, so the two surfaces can never disagree about what is
-installed or hidden.
+distribution list comes from `useWslDistros(worktreeId)`, which probes `list_wsl_distros`
+**once per worktree**: the probe shells out to `wsl.exe`, so a distribution installed
+while the app is running only appears after a reload or a worktree switch. The same hook
+and the same `lib/shell-profile.ts` helpers back the new-tab menu, so the two surfaces can
+never disagree about what is installed or hidden.
+
+**The probe is host-scoped, and the worktree is what picks the host.** `list_wsl_distros`
+does not run `wsl.exe` on the desktop machine — it sends a `wsl` RPC to the daemon that
+owns the worktree (`ssh_host::client_for_worktree`), which for a local project is the
+managed local server. A project opened over SSH runs its terminals on the remote machine,
+so probing locally would both hide that host's distributions and offer local ones it
+cannot launch. Pass `null` only where no worktree applies (global settings), which probes
+the local host. Anything that fails — an unreachable host, a daemon too old to know the
+method, no `wsl.exe` — degrades to an empty list, which hides every WSL affordance.
 
 In the new-tab menu, **Terminal** is a submenu (PowerShell, then the distributions) only
 when distributions exist; with none it stays a plain one-click item, because a submenu of

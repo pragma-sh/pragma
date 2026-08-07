@@ -1,0 +1,46 @@
+{
+  "name": "@pragma/scratchpad-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only scratchpad renderer: one self-contained HTML document that evaluates scratchpad MDX with live @pragma/scratchpad components and a touch comment layer.",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "pretest": "bun run build",
+    "pretypecheck": "bun scripts/build.ts --runtime-only",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "test": "bun --bun vitest run",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "@pragma/scratchpad-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@mdx-js/mdx": "^3.1.1",
+    "@pragma/scratchpad": "workspace:*",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "bunup": "^0.16.32",
+    "esbuild": "^0.25.12",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "remark-gfm": "^4.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

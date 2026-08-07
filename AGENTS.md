@@ -88,7 +88,7 @@ than no guide.
 | Tests             | Vitest (TS) + `cargo test` (Rust)                                                                                                                               |
 | Commits           | Conventional Commits (commitlint)                                                                                                                               |
 | Git hooks         | Husky + lint-staged                                                                                                                                             |
-| CI                | GitHub Actions (`.github/workflows/ci.yml`)                                                                                                                     |
+| CI                | [RWX](https://www.rwx.com) for Linux (`.rwx/ci.yml`) + GitHub Actions for macOS/Windows (`.github/workflows/ci.yml`)                                            |
 | Code intelligence | [fallow](https://fallow.tools) — dead-code / duplication / complexity audit (TS/JS only); config in `.fallowrc.jsonc`                                           |
 
 ## Repository structure
@@ -111,6 +111,8 @@ than no guide.
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
+│   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
+│   ├── scratchpad-viewer/       # read-only scratchpad web-view document → see packages/scratchpad-viewer/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
@@ -140,6 +142,7 @@ than no guide.
 ├── turbo.json                   # Task graph
 ├── commitlint.config.js         # Conventional Commits rules
 ├── .oxlintrc.json / .oxfmtrc.json
+├── .rwx/                        # RWX run definitions (Linux CI)
 ├── .husky/                      # Git hooks
 └── .agents/skills/              # Installed skill view (also exposed through .claude/skills)
 ```
@@ -169,6 +172,15 @@ than no guide.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
 - Agent-authored scratchpad runtime and UI components → `packages/scratchpad` (`@pragma/scratchpad`).
+- The scratchpad **file contract** (managed frontmatter, agent attachment, the
+  sibling comment-thread file) → `packages/scratchpad-contract`
+  (`@pragma/scratchpad-contract`); the read-only web-view renderer native clients
+  embed → `packages/scratchpad-viewer` (`@pragma/scratchpad-viewer`), which
+  re-exports the contract. The desktop, the SDK, and the mobile client all import
+  it — do not re-implement frontmatter parsing or comment serialization.
+- Anything a client does _with_ a scratchpad over the gateway (comment on one,
+  attach an agent, prompt the attached agent) → `client.scratchpads` in
+  `packages/sdk`, not a per-client reimplementation.
 - Public APIs for pure TypeScript Pragma plugins → `packages/plugin` (`@pragma/plugin`).
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
@@ -283,6 +295,18 @@ CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, o
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
 compile-only Tauri build on macOS, Linux, **and** Windows.
 
+**CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
+Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
+runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the
+TypeScript checks, the Rust checks, the Linux app build) lives in `.rwx/ci.yml`, and the
+macOS and Windows builds plus the Windows Rust suite stay in
+`.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
+RWX is a task DAG, not a job list: tasks with no `use:` run in parallel, caching is
+content-based (no cache actions — add a `filter:` to keep a task's cache key off files
+it doesn't read), and the default task timeout is **10 minutes**, so any long task needs
+an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
+validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
+
 A separate **Fallow** workflow
 (`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
 `fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
@@ -298,9 +322,13 @@ without updating this guide and CI.
   CI for the exact `apt` list. `xcap` pulls in `libspa-sys` (`libpipewire-0.3-dev`),
   `libgbm-dev`, and `libclang-dev` — all required at link time and must stay in that list.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
-  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on Blacksmith's
-  Windows Server 2025 image with the `rust-windows` job plus a
-  `blacksmith-4vcpu-windows-2025` entry in the `build` matrix.
+  on Windows 11 and with the Edge runtime on Windows 10. CI covers it on the
+  GitHub-hosted `windows-latest` image with the `rust-windows` job plus a
+  `windows-latest` entry in the `build` matrix. Windows deliberately does **not** use
+  the Blacksmith pool the macOS build runs on: that pool left the job queued for half an
+  hour at a time and failed it in `Set up job` with "the self-hosted runner lost
+  communication with the server", which looks like a compile failure but never reaches a
+  compiler.
 - **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
   locks a running executable's image, our sidecars outlive the window by design, and a
   per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live
@@ -313,7 +341,7 @@ without updating this guide and CI.
 - **Never spell a shell script's runner as bare `bash` in a package script.** On Windows
   with WSL installed, `bash` on `PATH` is `C:\Windows\system32\bash.exe` — the WSL
   launcher — whose Linux `PATH` has no `rustc`, `cargo`, or `bun`, so the sidecar staging
-  dies with `rustc: command not found` (exit 127). CI's Blacksmith Windows image ships no
+  dies with `rustc: command not found` (exit 127). CI's `windows-latest` image ships no
   WSL, so this never fires there and only breaks developer machines. Go through
   `scripts/run-shell-script.ts`, which derives Git Bash from the resolved `git.exe`
   (override with `PRAGMA_BASH`) and is a plain `bash` everywhere else.

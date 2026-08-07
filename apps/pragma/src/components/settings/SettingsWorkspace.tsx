@@ -295,6 +295,7 @@ export function SettingsWorkspace() {
           reload={load}
           scope={scope}
           section={section}
+          worktreeId={workspace.selectedWorktree?.id ?? null}
         />
       </div>
     </section>
@@ -396,6 +397,7 @@ function SettingsContent({
   reload,
   scope,
   section,
+  worktreeId,
 }: {
   error: string | null;
   loaded: LoadedConfig | null;
@@ -406,6 +408,7 @@ function SettingsContent({
   reload: () => Promise<void>;
   scope: ConfigScope;
   section: Section;
+  worktreeId: string | null;
 }) {
   // The Theme page reads `.pragma/theme.json`, not the `config.json` document
   // the rest of Settings loads, so it renders past that load state.
@@ -446,6 +449,9 @@ function SettingsContent({
               window.dispatchEvent(new Event(TERMINAL_SETTINGS_CHANGED_EVENT));
             }}
             settings={loaded.value.terminal ?? {}}
+            // Project-scoped settings describe the machine that project's
+            // terminals run on, which for an SSH project is not this one.
+            worktreeId={scope === "project" ? worktreeId : null}
           />
         ) : null}
         {loaded && section === "agentStatus" ? (

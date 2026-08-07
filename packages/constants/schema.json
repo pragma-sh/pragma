@@ -112,7 +112,9 @@
         "automations",
         "plugins",
         "tunnel",
-        "ports"
+        "ports",
+        "scratchpads",
+        "wsl"
       ]
     },
     "ProtocolEventKind": {
@@ -1050,11 +1052,11 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["isWindows", "distros"],
-      "description": "Result of probing WSL availability from the desktop app. `distros` is empty on non-Windows platforms and on Windows installs without WSL.",
+      "description": "Result of probing WSL availability on the host that owns a worktree — the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
       "properties": {
         "isWindows": {
           "type": "boolean",
-          "description": "Whether the app is running on Windows, the only platform where WSL distributions can exist."
+          "description": "Whether the host that answered the probe runs Windows, the only platform where WSL distributions can exist."
         },
         "distros": {
           "type": "array",
@@ -1838,6 +1840,41 @@
         "filePath": {
           "type": "string",
           "description": "Worktree-relative POSIX path to the scratchpad's MDX file."
+        }
+      }
+    },
+    "ScratchpadFile": {
+      "title": "ScratchpadFile",
+      "description": "A managed scratchpad plus its MDX source and attached-agent metadata, as served by the host's `scratchpads` RPC to clients that render the document themselves.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "filePath", "contents", "agentTabId", "agentId", "createdAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": "string",
+          "description": "Worktree-relative POSIX path to the scratchpad's MDX file."
+        },
+        "contents": {
+          "type": "string",
+          "description": "The full MDX source, frontmatter included."
+        },
+        "agentTabId": {
+          "type": ["string", "null"],
+          "description": "Terminal tab id this scratchpad prompts, or null when nothing is attached."
+        },
+        "agentId": {
+          "type": ["string", "null"],
+          "description": "Catalog agent id of the attached tab, or null when nothing is attached."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Epoch milliseconds the scratchpad was created, from its managed frontmatter."
         }
       }
     },

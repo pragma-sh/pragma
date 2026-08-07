@@ -138,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspace_root(),
     ));
     let core = Arc::new(Core);
+    start_watcher_reconciler(&registry);
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
         // must not take the whole process down with it: every other
@@ -162,6 +163,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             handle_client(stream, &registry, &core);
         });
     }
+}
+
+/// Keeps one `pragma-watch` sidecar alive per live agent session.
+///
+/// A timer rather than an event hook on purpose: watchers are also invalidated
+/// by things this server never sees as an event — a watcher crashing, a plugin
+/// bundle being replaced, the gateway restarting onto a new ephemeral port —
+/// so the reconciler re-derives the whole set instead of trusting a
+/// notification to arrive.
+fn start_watcher_reconciler(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    thread::spawn(move || loop {
+        registry.reconcile_watchers();
+        thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
 }
 
 fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<Core>) {
@@ -518,6 +534,33 @@ fn handle_ports_rpc(
     })
 }
 
+/// Answers "which WSL distributions does *this* host have installed?".
+///
+/// The desktop app cannot answer it for a worktree it does not own: a project
+/// opened over SSH runs its terminals on the remote machine, so probing the
+/// desktop's own `wsl.exe` would both hide the remote host's distributions and
+/// offer local ones the remote daemon has no way to launch. Routing the probe
+/// through the owning daemon makes the answer come from the machine that would
+/// actually run the shell.
+///
+/// A failed probe is reported as an empty list rather than an RPC error: the
+/// caller treats "no distributions" and "no WSL here" identically — both hide
+/// every WSL affordance — and an error would surface as a dialog the user can
+/// do nothing about.
+fn handle_wsl_rpc(request_id: String) -> Result<RpcResponseFrame, HandledRequestError> {
+    let distros =
+        pragma_platform::wsl::list_distros().unwrap_or_else(|_| pragma_platform::wsl::empty_list());
+    Ok(RpcResponseFrame {
+        request_id,
+        ok: true,
+        payload: Some(
+            serde_json::to_value(distros)
+                .map_err(|error| HandledRequestError::Request(error.to_string()))?,
+        ),
+        error: None,
+    })
+}
+
 fn handle_tabs_rpc(
     request_id: String,
     payload: serde_json::Value,
@@ -629,6 +672,9 @@ fn handle_rpc_request(
     }
     if matches!(rpc.method, ProtocolRpcMethod::Ports) {
         return handle_ports_rpc(request_id, rpc.payload, registry);
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Wsl) {
+        return handle_wsl_rpc(request_id);
     }
     if matches!(rpc.method, ProtocolRpcMethod::Tabs) {
         return handle_tabs_rpc(request_id, rpc.payload, registry);

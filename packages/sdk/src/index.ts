@@ -2,6 +2,8 @@ export { PragmaClient } from "./client";
 export { AssetsClient, type FetchedAsset } from "./assets-client";
 export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
 export { PushClient, type PushRegistration } from "./push-client";
+export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
 export { PragmaGatewayError, PragmaTransportError } from "./errors";
@@ -49,6 +51,18 @@ export type {
   WorkspaceSnapshot,
 } from "./types/agents";
 export type { CommandResult, ExecRunRequest } from "./types/exec";
+export type { HostTheme, ThemeMode, ThemeOverrides, ThemeSources } from "./types/theme";
+export type {
+  AttachScratchpadAgentOptions,
+  CommentScratchpadOptions,
+  GetScratchpadsOptions,
+  ScratchpadBlock,
+  ScratchpadComment,
+  ScratchpadFile,
+  ScratchpadRef,
+  SendAttachedOptions,
+  SendAttachedResult,
+} from "./types/scratchpads";
 export type {
   DirEntry,
   FileContents,

@@ -44,7 +44,7 @@ describe("pi watcher", () => {
 
     await watcher?.watch(context as never);
 
-    expect(sendKeys).toHaveBeenCalledWith("continue\r");
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[200~continue\x1b[201~\r");
     expect(report).toHaveBeenCalledWith({
       agent: "pi",
       tabId: "tab-1",

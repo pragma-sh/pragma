@@ -79,6 +79,9 @@ const DEFAULT_DENY_KEYS = `${RIGHT_ARROW}${RIGHT_ARROW}\r`;
 const DEFAULT_SUBMIT_KEYS = "\r";
 /** Escape aborts an in-flight response in the TUIs this watcher targets. */
 const DEFAULT_ABORT_KEYS = "\x1b";
+/** Bracketed paste keeps newlines literal — Enter alone would submit mid-prompt. */
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 /** Escape rejects the question prompt when not editing free-text. */
 const QUESTION_REJECT_KEYS = "\x1b";
 /** OpenCode's question TUI binds digits 1–9 to select+submit a single answer. */
@@ -124,12 +127,16 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
         questionsByRequestId: new Map<string, CachedQuestion>(),
       };
 
+      let failures = 0;
       while (!ctx.signal.aborted) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one live connection at a time; reconnect only after the previous stream ends.
           await consumeControlEvents(watcherContext, runtime);
-        } catch {
-          // Stream error (not an abort): fall through to re-connect below.
+          failures = 0;
+        } catch (error) {
+          // Stream error (not an abort): report it, then re-connect below.
+          failures += 1;
+          reportStreamFailure(agent, failures, error);
         }
         if (ctx.signal.aborted) {
           return;
@@ -140,6 +147,29 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
     },
   };
 }
+
+/**
+ * Reports a dropped agent-event stream on stderr, which the host server
+ * captures.
+ *
+ * Reconnecting silently is what made an unreachable gateway invisible: the
+ * watcher spun on a dead address forever while a phone's replies vanished with
+ * no trace anywhere. Logging is rate-limited to the first failure and then
+ * every {@link STREAM_FAILURE_LOG_EVERY} consecutive ones, so a gateway that
+ * stays down costs a line every few minutes rather than two per second.
+ */
+function reportStreamFailure(agent: string, consecutive: number, error: unknown): void {
+  if (consecutive !== 1 && consecutive % STREAM_FAILURE_LOG_EVERY !== 0) {
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  // `console.warn`, not `process.stderr`: this bundle is also loaded by the
+  // desktop webview, where `process` does not exist.
+  console.warn(JSON.stringify({ type: "watcher.streamError", agent, consecutive, error: message }));
+}
+
+/** Consecutive stream failures between repeat log lines (see {@link reportStreamFailure}). */
+const STREAM_FAILURE_LOG_EVERY = 240;
 
 interface ControlKeys {
   approveKeys: string;
@@ -340,17 +370,26 @@ function flattenWhitespace(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }
 
+/**
+ * Types an interjection into the live terminal, then submits it.
+ *
+ * Text is always bracketed-pasted so embedded newlines (scratchpad comment
+ * handoffs, multi-line chat) stay literal — a bare `\n` would submit mid-prompt
+ * in every TUI that treats Enter as send. Submit keys still travel in a
+ * separate write when `submitDelayMs` is set, matching paste-aware agents.
+ */
 async function handleInterjection(
   ctx: WatcherContext<TuiWatcherConfig>,
   submitKeys: string,
   submitDelayMs: number,
   text: string,
 ): Promise<void> {
+  const paste = `${BRACKETED_PASTE_START}${text}${BRACKETED_PASTE_END}`;
   if (submitDelayMs <= 0 || !submitKeys) {
-    await writeKeys(ctx, `${text}${submitKeys}`);
+    await writeKeys(ctx, `${paste}${submitKeys}`);
     return;
   }
-  await writeKeys(ctx, text);
+  await writeKeys(ctx, paste);
   await delay(submitDelayMs, ctx.signal);
   if (!ctx.signal.aborted) await writeKeys(ctx, submitKeys);
 }

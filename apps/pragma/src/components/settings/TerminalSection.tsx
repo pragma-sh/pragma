@@ -10,19 +10,25 @@ import { cn } from "@/lib/utils";
 /**
  * Default-shell settings, stored under `terminal` in the scope's `config.json`.
  *
- * Only Windows has a real choice to make here: macOS and Linux always run the
- * host's own shell, so the picker collapses to an explanation rather than a
+ * Only a Windows host has a real choice to make here: macOS and Linux always
+ * run their own shell, so the picker collapses to an explanation rather than a
  * list of one. The distributions come from the same probe the new-tab menu
  * uses, so both surfaces agree on what is installed.
+ *
+ * `worktreeId` names the host to probe — the machine whose shells these
+ * settings will actually select. It is `null` for global settings, which
+ * describe the local host.
  */
 export function TerminalSection({
   settings,
   persist,
+  worktreeId,
 }: {
   settings: TerminalSettings;
   persist: (patch: TerminalSettings) => Promise<void>;
+  worktreeId: string | null;
 }) {
-  const wsl = useWslDistros();
+  const wsl = useWslDistros(worktreeId);
   const distros = visibleDistros(wsl.distros, settings.hiddenDistros);
   // An unset backend means "whatever the platform default is", which today is
   // the native shell everywhere — the same thing the session layer resolves.

@@ -15,6 +15,7 @@ pub mod fs;
 pub mod git;
 pub mod process_env;
 pub mod rpc;
+pub mod scratchpads;
 pub mod tabs;
 pub mod watcher;
 
@@ -72,6 +73,7 @@ impl Core {
             ProtocolRpcMethod::Filesystem => fs::handle(payload),
             ProtocolRpcMethod::Git => git::handle(payload),
             ProtocolRpcMethod::Exec => exec::handle(payload),
+            ProtocolRpcMethod::Scratchpads => scratchpads::handle(payload),
             ProtocolRpcMethod::Database
             | ProtocolRpcMethod::Kanban
             | ProtocolRpcMethod::Worktrees
@@ -83,7 +85,10 @@ impl Core {
             | ProtocolRpcMethod::Automations
             | ProtocolRpcMethod::Plugins
             | ProtocolRpcMethod::Tunnel
-            | ProtocolRpcMethod::Ports => Err(CoreError::UnsupportedMethod(
+            | ProtocolRpcMethod::Ports
+            // Answered by `pragma-server`, which owns the host's process
+            // spawning; the core router never sees it.
+            | ProtocolRpcMethod::Wsl => Err(CoreError::UnsupportedMethod(
                 rpc::method_name(method).to_string(),
             )),
         }

@@ -37,6 +37,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "automations" => ProtocolRpcMethod::Automations,
         "plugins" => ProtocolRpcMethod::Plugins,
         "tunnel" => ProtocolRpcMethod::Tunnel,
+        "scratchpads" => ProtocolRpcMethod::Scratchpads,
         _ => return None,
     })
 }

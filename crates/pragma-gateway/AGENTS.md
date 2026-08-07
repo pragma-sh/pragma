@@ -55,6 +55,31 @@
 - `GET /v1/push/tokens` - list phones registered for push.
 - `POST /v1/push/test` - send a test notification to every registered phone.
 - `POST /v1/push/presence` - desktop focus heartbeat; suppresses pushes while focused.
+- `GET /v1/theme?root=...` - the user's merged `.pragma/theme.json` color overrides.
+- `GET /v1/scratchpads?root=...` - every managed scratchpad in that worktree, MDX
+  source and attached agent included. `root` is required and must be absolute;
+  listing and frontmatter parsing belong to `pragma_core::scratchpads`, so this
+  route only validates and forwards.
+
+## Theme
+
+`routes/theme.rs` serves the same layering the desktop applies: global
+(`~/.pragma/theme.json`) then, when `root` names an absolute project path, that
+project's file. Three rules keep it honest:
+
+- **Only user overrides go over the wire, never shipped defaults.** The desktop's
+  defaults are parsed from `apps/pragma/src/index.css` and are not another client's
+  defaults — a mobile client layers what it gets on top of its own palette.
+- **Reads go through the host `filesystem` RPC** (`Client::read_text_file`), not
+  gateway-local `std::fs`. Containment stays in `pragma-core`, and a remote host's
+  files are not on the gateway's disk. The global scope's home directory is also
+  resolved on the host (`FsRequest::HomeDir` via `Client::home_dir`), never on the
+  gateway: reached through an SSH streamlocal bridge, the gateway machine's home
+  is a different user's, so a locally resolved path would drop the remote user's
+  theme or read an unrelated coincidentally matching file.
+- **Unknown shapes are dropped, not rejected.** Modes come from
+  `CONSTANTS.theme.modes` and only string entries under `colors.<mode>` survive, so a
+  hand-edited or newer theme file still themes what the client understands.
 
 ## Push notifications
 
