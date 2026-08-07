@@ -25,7 +25,6 @@ import { buildDesignPrompt } from "@/lib/design-mode";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { type AgentConfig, type AgentModelSelection, createTab } from "@/lib/tauri";
-import { startWatcherForAgentSession } from "@/plugins/watchers";
 import { useWorkspace } from "@/state/workspace-context";
 
 interface DesignModePopoverProps {
@@ -204,12 +203,4 @@ async function launchDesignAgent(input: {
     input.prompt,
     input.selection,
   );
-  void startWatcherForAgentSession({
-    agentId: input.agent.id,
-    sessionId: tab.id,
-    tabId: tab.id,
-    worktreeId: input.worktreeId,
-  }).catch((cause: unknown) => {
-    console.warn(`failed to start watcher for ${input.agent.id}`, cause);
-  });
 }

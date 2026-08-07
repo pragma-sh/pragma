@@ -56,6 +56,10 @@
 - `POST /v1/push/test` - send a test notification to every registered phone.
 - `POST /v1/push/presence` - desktop focus heartbeat; suppresses pushes while focused.
 - `GET /v1/theme?root=...` - the user's merged `.pragma/theme.json` color overrides.
+- `GET /v1/scratchpads?root=...` - every managed scratchpad in that worktree, MDX
+  source and attached agent included. `root` is required and must be absolute;
+  listing and frontmatter parsing belong to `pragma_core::scratchpads`, so this
+  route only validates and forwards.
 
 ## Theme
 

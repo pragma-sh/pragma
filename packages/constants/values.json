@@ -109,7 +109,8 @@
       "exec",
       "automations",
       "plugins",
-      "tunnel"
+      "tunnel",
+      "scratchpads"
     ],
     "events": [
       "agentStatus",

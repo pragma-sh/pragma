@@ -602,7 +602,6 @@ fn tab_close(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_jso
         | TabKind::PluginWebview
         | TabKind::Scratchpad => {}
     }
-    crate::plugins::stop_watchers_for_tab(&tab.id)?;
     app.state::<Db>().delete_tab(&tab.id)?;
     emit_tabs_changed(app, "tabClosed", &tab);
     app.state::<crate::workspace_mirror::WorkspacePublisher>()
@@ -1245,10 +1244,11 @@ struct NewWorktreeArgs {
 /// Handles `agentSessionLaunch`: resolves or creates the target worktree and a
 /// new terminal tab, replies `{ worktreeId, tabId }`, and emits the
 /// `pragma:agent-session-launch` Tauri event so the frontend runs the proven
-/// Kanban background-launch sequence (`startBackgroundAgentSession` →
-/// `startWatcherForAgentSession`). The reply is immediate; the PTY spawn +
-/// agent launch happen asynchronously in the frontend listener, so a remote
-/// caller never blocks on TUI startup.
+/// Kanban background-launch sequence (`startBackgroundAgentSession`). The reply
+/// is immediate; the PTY spawn + agent launch happen asynchronously in the
+/// frontend listener, so a remote caller never blocks on TUI startup. The
+/// session's `pragma-watch` sidecar is the server's to start — see
+/// `pragma_server::watchers`.
 ///
 /// The tab is announced as `tabOpenedBackground` (not `tabOpened`) so the UI
 /// refreshes without selecting it. Selecting would mount a terminal and spawn

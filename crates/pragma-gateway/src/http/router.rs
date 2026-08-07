@@ -82,6 +82,7 @@ pub fn gateway_router() -> Router {
         .route("POST", "/v1/control/{method}", "control")
         .route("GET", "/v1/assets/{hash}", "assets.get")
         .route("GET", "/v1/theme", "theme.get")
+        .route("GET", "/v1/scratchpads", "scratchpads.list")
         .route("POST", "/v1/tabs/{tabId}/agents/seen", "agents.seen")
         .route("GET", "/v1/subscriptions/{event}", "subscriptions.events")
         .route("POST", "/v1/push/tokens", "push.register")

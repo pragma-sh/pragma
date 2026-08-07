@@ -138,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspace_root(),
     ));
     let core = Arc::new(Core);
+    start_watcher_reconciler(&registry);
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
         // must not take the whole process down with it: every other
@@ -162,6 +163,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             handle_client(stream, &registry, &core);
         });
     }
+}
+
+/// Keeps one `pragma-watch` sidecar alive per live agent session.
+///
+/// A timer rather than an event hook on purpose: watchers are also invalidated
+/// by things this server never sees as an event — a watcher crashing, a plugin
+/// bundle being replaced, the gateway restarting onto a new ephemeral port —
+/// so the reconciler re-derives the whole set instead of trusting a
+/// notification to arrive.
+fn start_watcher_reconciler(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    thread::spawn(move || loop {
+        registry.reconcile_watchers();
+        thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
 }
 
 fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<Core>) {

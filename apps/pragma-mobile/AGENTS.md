@@ -70,6 +70,26 @@ paired with a desktop — streams live agent chat and launches new sessions.
   creating a new git worktree from a mirrored parent.
 - **Home-screen widgets** (`lib/widgets/`, iOS only): `expo-widgets` renders four
   WidgetKit widgets from `@expo/ui/swift-ui` components. See _Widgets_ below.
+- **Scratchpads** (`app/scratchpad/[scratchpadId].tsx`): a worktree screen lists its
+  managed scratchpads (`lib/use-scratchpads.ts` → `client.scratchpads.getScratchpads`)
+  in the same row style as its agents, subtitled with the attached agent
+  (`lib/scratchpad-agent.ts`). Opening one shows `ScratchpadLoading` while the host
+  serves the file and again (as an overlay) until the web view's MDX is ready, then
+  renders the document **read-only** in a `react-native-webview` fed by
+  `@pragma/scratchpad-viewer`, so interactive `@pragma/scratchpad` components behave as
+  they do on the desktop. Comment mode (header toggle) turns the document into a
+  picker: tap a block to comment, or press and hold to preview where the comment lands
+  and drag before releasing. Comments are written to the desktop's own sibling
+  `<file>.mdx.comments.json` (`lib/use-scratchpad-comments.ts`), and the footer submits
+  every open one to the attached agent as a single message — the same handoff the
+  desktop's "Resolve comments" sends — then marks them resolved. Attachment is a drawer
+  (`components/scratchpad/AttachAgentDrawer.tsx`) that rewrites the file's frontmatter;
+  it opens only when send (or an interactive block) needs an agent and none is attached.
+  The reverse link is a pill: `components/chat/ScratchpadPill.tsx` finds the scratchpads
+  whose frontmatter names this chat's tab (`scratchpadsForAgentTab`) and shows the first
+  (`+N` when there are more) directly above the composer, tapping through to the
+  scratchpad screen. It sits **inside** the chat's `KeyboardAvoidingView`, which is what
+  keeps the keyboard from covering it — do not hoist it above that subtree.
 - **New worktree** (`components/NewWorktreeSheet.tsx`, from project/chat header "+"):
   agent picker uses same host catalog as launch. Submission uses the same headless-capable
   `client.agents.launch()` control route as existing-worktree launches.
@@ -102,8 +122,9 @@ paired with a desktop — streams live agent chat and launches new sessions.
   during prebuild. iOS only (`enableAndroid` is off).
 - **Native modules needing a dev-client rebuild** (`expo run:ios`): `expo-camera` (QR
   pairing), `expo-secure-store` (persisted connection config), `react-native-svg`
-  (agent icons), `expo-widgets` (the widget extension target). Pure-JS additions
-  (`@pragma/sdk`) do not.
+  (agent icons), `expo-widgets` (the widget extension target), `react-native-webview`
+  (the scratchpad viewer). Pure-JS additions (`@pragma/sdk`,
+  `@pragma/scratchpad-viewer`) do not.
 - **Tests**: pure logic (transcript store, pairing, workspace mapping, launch form) is
   Vitest-covered under `lib/**/*.test.ts` (`bun run --filter pragma-mobile test`, node
   env, RN-free). Screens/streaming are verified manually in the dev client.
@@ -120,10 +141,12 @@ app/
     project/[projectId].tsx       #   project → root worktree(s)
     worktree/[worktreeId].tsx     #   nested worktrees + agent tabs (header + launches agent)
   chat/[tabId].tsx                # full-screen live agent chat (outside tabs)
+  scratchpad/[scratchpadId].tsx   # read-only scratchpad web view + touch comments
   (tabs)/inbox/                   # Stack: swipeable event cards
 components/
   ui/*                            # React Native Reusables primitives
-  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock
+  scratchpad/                     # ScratchpadWebView, ScratchpadLoading, CommentComposerSheet, AttachAgentDrawer
+  chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill
   AgentIcon                       # plugin agent icon fetched by hash (SVG/raster, cached)
   LaunchSheet                     # launch a new agent session (catalog-fed picker)
   LaunchAgentButton               # worktree header-right "+" → Launch sheet
@@ -140,6 +163,9 @@ lib/
   pairing.ts                     # pure: QR/manual validation + protocol check (Vitest)
   launch-form.ts                 # pure: launch payload shaping (Vitest)
   use-catalog.ts                 # cached host agent catalog
+  use-scratchpads.ts             # a worktree's managed scratchpads, re-read on demand
+  use-scratchpad-comments.ts     # the desktop's sibling comment file, read + serialized writes
+  scratchpad-agent.ts            # pure: attached-tab resolution, tab → scratchpads, row label (Vitest)
   data/                          # data-context (live subscription vs. fixtures) + workspace-map (pure, Vitest)
   types.ts                       # re-exports @pragma/constants domain types + view shapes
   worktree-tree.ts               # nesting logic, kept in lockstep with desktop

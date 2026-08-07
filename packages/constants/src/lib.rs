@@ -31,10 +31,10 @@ pub use generated::{
     PaletteSearchResponse, Platform, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
     Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
     RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScratchpadSummary, Scratchpads, ScriptRunStatus, Scripts,
-    SettingsScope, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab,
-    TabKind, TerminalBackend, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
-    WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl,
+    RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptRunStatus,
+    Scripts, SettingsScope, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical,
+    Tab, TabKind, TerminalBackend, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree,
+    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl,
 };
 
 /// The parsed, shared constants.

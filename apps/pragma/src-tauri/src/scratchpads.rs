@@ -1,16 +1,14 @@
 //! Scratchpad-to-agent interaction routed through the worktree's owning host.
 
 use pragma_constants::{
-    AgentInput, FileContents, ProtocolRpcMethod, ScratchpadSummary, Tab, TabKind, CONSTANTS,
+    AgentInput, ProtocolRpcMethod, ScratchpadFile, ScratchpadSummary, Tab, TabKind,
 };
-use pragma_core::fs::FsRequest;
+use pragma_core::scratchpads::ScratchpadsRequest;
 use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
-use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::fs::fs_rpc;
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 use crate::workspace_mirror::WorkspacePublisher;
@@ -78,14 +76,13 @@ pub async fn scratchpad_prompt_agent(
     })
 }
 
-#[derive(Deserialize)]
-struct ScratchpadFrontmatter {
-    id: String,
-    title: String,
-}
-
 /// Lists every managed scratchpad file in a worktree's scratchpad directory,
 /// including ones whose tab was closed after creation.
+///
+/// Listing and frontmatter parsing live in `pragma-core` behind the
+/// `scratchpads` RPC, so the desktop, the gateway, and the mobile client all
+/// read the same contract from whichever host owns the files. The sidebar only
+/// needs the summary, so the source each entry carries is dropped here.
 #[tauri::command]
 pub async fn list_scratchpads(
     app: AppHandle,
@@ -95,42 +92,21 @@ pub async fn list_scratchpads(
 ) -> AppResult<Vec<ScratchpadSummary>> {
     let worktree = db.worktree(&worktree_id)?;
     let client = crate::ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
-    let names: Vec<String> = fs_rpc(
-        &client,
-        &FsRequest::ListFileNames {
+    let value = client.rpc(
+        ProtocolRpcMethod::Scratchpads,
+        serde_json::to_value(ScratchpadsRequest::List {
             root: worktree.path.clone(),
-            path: CONSTANTS.scratchpads.directory.clone(),
-            extensions: vec![CONSTANTS.scratchpads.extension.clone()],
-        },
+        })?,
     )?;
-    let mut summaries = Vec::with_capacity(names.len());
-    for name in names {
-        let file_path = format!("{}/{name}", CONSTANTS.scratchpads.directory);
-        let contents: FileContents = fs_rpc(
-            &client,
-            &FsRequest::ReadFile {
-                root: worktree.path.clone(),
-                path: file_path.clone(),
-            },
-        )?;
-        if contents.binary || contents.truncated {
-            continue;
-        }
-        if let Some(frontmatter) = parse_frontmatter(&contents.text) {
-            summaries.push(ScratchpadSummary {
-                id: frontmatter.id,
-                title: frontmatter.title,
-                file_path,
-            });
-        }
-    }
-    Ok(summaries)
-}
-
-fn parse_frontmatter(source: &str) -> Option<ScratchpadFrontmatter> {
-    let prefix = format!("{}: ", CONSTANTS.scratchpads.frontmatter_key);
-    let json = source.lines().find_map(|line| line.strip_prefix(&prefix))?;
-    serde_json::from_str(json).ok()
+    let files: Vec<ScratchpadFile> = serde_json::from_value(value)?;
+    Ok(files
+        .into_iter()
+        .map(|file| ScratchpadSummary {
+            id: file.id,
+            title: file.title,
+            file_path: file.file_path,
+        })
+        .collect())
 }
 
 /// Opens a tab for an existing scratchpad file, reusing an already-open tab

@@ -18,6 +18,7 @@ export const routes = {
   agentEvents: "/v1/agents/events",
   asset: (hash: string): string => `/v1/assets/${encodeURIComponent(hash)}`,
   theme: "/v1/theme",
+  scratchpads: "/v1/scratchpads",
   agentsSeen: (tabId: string): string => `/v1/tabs/${encodeURIComponent(tabId)}/agents/seen`,
   subscription: (event: string): string => `/v1/subscriptions/${encodeURIComponent(event)}`,
   control: (method: string): string => `/v1/control/${encodeURIComponent(method)}`,

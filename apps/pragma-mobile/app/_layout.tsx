@@ -14,7 +14,8 @@ import { useThemeColors } from "@/lib/theme";
 import { useWidgetSync } from "@/lib/widgets/use-widget-sync";
 
 /**
- * Root layout: global providers, tab navigator, and full-screen chat. Native headers and the
+ * Root layout: global providers, tab navigator, and the full-screen chat and
+ * scratchpad screens. Native headers and the
  * NativeWind theme both follow the system light/dark scheme automatically
  * (`userInterfaceStyle: "automatic"` in app.json), and ThemeProvider layers the
  * paired desktop's `.pragma/theme.json` colors over them. ConnectionProvider
@@ -76,6 +77,7 @@ function ConnectionGate() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
+        <Stack.Screen name="scratchpad/[scratchpadId]" options={{ headerShown: true }} />
       </Stack>
       <PortalHost />
     </>

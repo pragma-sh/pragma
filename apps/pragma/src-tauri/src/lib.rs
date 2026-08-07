@@ -454,12 +454,6 @@ fn read_plugin_bundle(main_path: String) -> AppResult<String> {
     plugins::read_bundle(std::path::Path::new(&main_path))
 }
 
-/// Starts a host-side watcher sidecar for a plugin-owned agent session.
-#[tauri::command(async)]
-fn start_plugin_watcher(request: plugins::StartWatcherRequest) -> AppResult<()> {
-    plugins::start_watcher(request)
-}
-
 /// Ensures the local HTTP gateway is running and returns its base URL + token.
 #[tauri::command]
 async fn gateway_connection_info(
@@ -904,7 +898,6 @@ fn close_tab(
         | TabKind::PluginWebview
         | TabKind::Scratchpad => {}
     }
-    plugins::stop_watchers_for_tab(&tab.id)?;
     db.delete_tab(&tab_id)?;
     publisher.trigger();
     Ok(())
@@ -1145,7 +1138,6 @@ pub fn run() {
             set_menu_accelerators_enabled,
             read_plugin_manifests,
             read_plugin_bundle,
-            start_plugin_watcher,
             gateway_connection_info,
             regenerate_gateway_token,
             gateway_devices,

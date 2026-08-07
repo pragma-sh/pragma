@@ -222,8 +222,30 @@ short bounded replay window, so a watcher that starts/subscribes just after the 
 click still sees the verdict without making approvals durable state.
 
 Free-form `AgentInput` always uses watcher delivery because each agent owns its TUI-specific
-submit keys and timing. Headless launches start their watcher from `watchers.rs`, so mobile
-replies keep working without a desktop-started watcher process.
+submit keys and timing.
+
+## Watcher supervision (`watchers.rs`)
+
+This server owns one `pragma-watch` sidecar per live agent session, because it owns the
+sessions. `WatcherSupervisor::reconcile` re-derives the desired set — every live session
+whose mirrored tab records an `agentId` — and starts what is missing, stops what is no
+longer wanted, and replaces what is stale. It runs on a timer (`RECONCILE_INTERVAL`, 5s)
+plus directly after a headless launch and after each workspace publish.
+
+A timer rather than a spawn hook, because the three ways a watcher goes bad are all
+invisible as events:
+
+- **The desktop restarted or reloaded plugins.** Watchers used to be desktop children
+  torn down on every plugin-contribution refresh, orphaning every running agent.
+- **The gateway restarted.** It binds an **ephemeral** port, so every already-running
+  watcher holds a dead `--gatewayUrl` and reconnects to nothing, forever. The
+  supervisor stores each watcher's credentials and replaces any that no longer match
+  the discovery file.
+- **The watcher itself exited** (bad bundle, crash). Short-lived exits are logged and
+  retried with exponential backoff (5s → 5m) so a broken plugin cannot hot-loop.
+
+Nothing else may spawn `pragma-watch`: two watchers on one session type every
+interjection twice.
 
 ## Port Inventory
 

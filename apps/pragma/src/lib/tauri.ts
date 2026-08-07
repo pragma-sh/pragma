@@ -223,25 +223,6 @@ export function onAgentCliPathWarning(handler: (path: string) => void): Promise<
   return listen<string>("pragma:agent-cli-path-warning", (event) => handler(event.payload));
 }
 
-/** Request to start one host-side plugin watcher instance. */
-export interface StartPluginWatcherRequest {
-  pluginId: string;
-  pluginMain: string;
-  agentId: string;
-  watcherAgent: string;
-  config: unknown;
-  sessionId: string;
-  tabId: string;
-  worktreeId: string;
-  gatewayUrl: string;
-  gatewayToken: string;
-}
-
-/** Starts a detached watcher sidecar for a plugin-owned agent session. */
-export function startPluginWatcher(request: StartPluginWatcherRequest): Promise<void> {
-  return invoke("start_plugin_watcher", { request });
-}
-
 /** Workspace metadata event emitted after a brokered CLI mutation. */
 export interface WorkspaceChangedEvent {
   action: string;
