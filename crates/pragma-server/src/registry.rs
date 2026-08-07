@@ -6,7 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
-    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, Tab, TabKind, Worktree,
+    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, ShellProfile, Tab,
+    TabKind, Worktree,
 };
 use pragma_core::git::GitRequest;
 use pragma_core::tabs::TabAgentMetadata;
@@ -500,8 +501,10 @@ impl Registry {
             args.model_cmd.as_deref(),
         )?;
         let tab_id = Uuid::new_v4().to_string();
+        // A headless launch has no shell picker behind it, so the project's own
+        // configured shell decides.
         let _events = self
-            .spawn(tab_id.clone(), worktree_id.clone(), cwd, 120, 40)
+            .spawn(tab_id.clone(), worktree_id.clone(), cwd, 120, 40, None)
             .map_err(|error| error.to_string())?;
         let session = self
             .sessions
@@ -675,6 +678,7 @@ impl Registry {
             plugin_dedupe_key: None,
             agent_id: Some(agent_id.to_string()),
             user_renamed: false,
+            shell: None,
             order_index: 0,
             created_at: now_timestamp(),
         };
@@ -809,6 +813,7 @@ impl Registry {
         cwd: String,
         cols: u16,
         rows: u16,
+        shell: Option<ShellProfile>,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
         // Reject duplicates before the expensive PTY open, but spawn the shell
         // outside the registry lock so concurrent writes/resizes/attaches to other
@@ -833,6 +838,7 @@ impl Registry {
             cols,
             rows,
             &socket_path,
+            shell,
             move |exited_session| {
                 let mut removed = false;
                 if let Some(sessions) = weak_sessions.upgrade() {
@@ -1581,6 +1587,7 @@ mod tests {
             agent_id: None,
             user_renamed: false,
             order_index: 0,
+            shell: None,
             created_at: "2026-01-01 00:00:00".to_string(),
         });
         snapshot
@@ -2155,7 +2162,7 @@ mod tests {
         let id = "session-1".to_string();
         let cwd = dir.path().to_string_lossy().into_owned();
         let (_scrollback, _rx) = registry
-            .spawn(id.clone(), "worktree-1".to_string(), cwd, 80, 24)
+            .spawn(id.clone(), "worktree-1".to_string(), cwd, 80, 24, None)
             .expect("session should spawn");
         (registry, id, dir)
     }

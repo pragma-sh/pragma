@@ -162,6 +162,7 @@ pub fn open_scratchpad_tab(
         None,
         None,
         None,
+        None,
     )?;
     publisher.trigger();
     Ok(tab)

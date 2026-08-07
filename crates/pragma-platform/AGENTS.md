@@ -95,6 +95,15 @@ _and_ its interactive arguments together — never hardcode `-l` at a call site.
 non-interactive commands, use `shell::default_shell` with `shell::command_args`; Windows
 PowerShell takes `-Command`, `cmd.exe` takes `/C`, and POSIX shells take `-c`.
 
+A session that names a shell world goes through `shell::resolve_profile_launch` instead,
+which maps a `ShellProfile` to its launch: the native branch is `resolve_launch`, and the
+WSL branch is `wsl.exe -d <distro>` (no `-d` at all for "whatever WSL calls default").
+That launch deliberately sets no working directory of its own — `wsl.exe` translates the
+Windows cwd it inherits into `/mnt/...`, so passing one as well would double-resolve it.
+The native `terminal.shell` override is not applied to a WSL launch: it names a
+Windows/Unix program path, and running e.g. `pwsh.exe` inside the distribution is not
+what the user asked for.
+
 Note `stem()` splits on both `/` and `\` rather than deferring to `Path::file_stem`,
 which only recognises the host's separator. A test caught this: a Windows PowerShell path
 examined on a Unix CI runner came back whole and fell through to the POSIX branch.

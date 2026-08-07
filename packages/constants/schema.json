@@ -558,6 +558,22 @@
       "enum": ["native", "wsl"],
       "description": "Which world a terminal session's shell lives in. `native` runs the host's own shell through the host's PTY (a pseudo-terminal on macOS and Linux, ConPTY on Windows). `wsl` runs a Linux shell inside a WSL distribution, served by a Linux `pragma-server` running in that distribution. Only Windows offers a real choice; macOS and Linux always resolve to `native`."
     },
+    "ShellProfile": {
+      "title": "ShellProfile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "description": "One concrete choice of shell world for a terminal session: the resolved form of a `TerminalSettings` default, or the profile a single tab was opened with. Carried on the spawn request so the session layer launches the same shell the picker named, and persisted on the tab so a respawned session keeps it.",
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/TerminalBackend"
+        },
+        "distro": {
+          "type": ["string", "null"],
+          "description": "WSL distribution launched when `backend` is `wsl`. Null uses the distribution WSL itself marks as default. Always null for `native`."
+        }
+      }
+    },
     "Platform": {
       "title": "Platform",
       "type": "object",
@@ -2315,6 +2331,17 @@
         "userRenamed": {
           "type": "boolean",
           "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) and agent session-name renames are ignored while this is true. Always false for non-terminal tabs."
+        },
+        "shell": {
+          "description": "Shell profile this terminal tab was opened with, so a session respawned after a daemon restart returns to the same shell instead of the current default. Optional rather than nullable: absent on every tab created before shell selection existed, and on non-terminal tabs.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "orderIndex": {
           "type": "integer"

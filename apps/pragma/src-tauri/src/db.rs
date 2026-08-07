@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use pragma_constants::{
     DiffSide, KanbanCompletedAction, KanbanPromptCard, KanbanPromptStatus, KanbanSchedulingMode,
-    Project, Tab, TabKind, Worktree,
+    Project, ShellProfile, Tab, TabKind, TerminalBackend, Worktree,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
@@ -309,6 +309,25 @@ impl Db {
             tx.commit()?;
             conn.execute_batch("PRAGMA user_version = 14;")?;
         }
+        // v15 records the shell a terminal tab was opened with, so a session
+        // respawned after the daemon restarted returns to the same shell
+        // instead of silently dropping a WSL tab back to the native default.
+        // Null on every pre-existing row, which reads as "whatever the project
+        // configures" — exactly the behaviour those tabs had before.
+        if version < 15 {
+            let has_shell_backend: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'shell_backend'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_shell_backend == 0 {
+                conn.execute_batch(
+                    "ALTER TABLE tabs ADD COLUMN shell_backend TEXT;
+                     ALTER TABLE tabs ADD COLUMN shell_distro TEXT;",
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version = 15;")?;
+        }
         Ok(())
     }
 
@@ -522,7 +541,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -535,7 +554,7 @@ impl Db {
     pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
              FROM tabs ORDER BY project_id, order_index, created_at",
         )?;
         let rows = stmt.query_map([], tab_from_row)?;
@@ -556,6 +575,7 @@ impl Db {
         diff_side: Option<DiffSide>,
         diff_commit: Option<String>,
         pr_number: Option<i64>,
+        shell: Option<ShellProfile>,
     ) -> AppResult<Tab> {
         self.create_tab_record(
             project_id,
@@ -571,6 +591,7 @@ impl Db {
             None,
             None,
             None,
+            shell,
         )
     }
 
@@ -601,6 +622,7 @@ impl Db {
             plugin_view_id,
             plugin_payload,
             plugin_dedupe_key,
+            None,
         )
     }
 
@@ -622,9 +644,11 @@ impl Db {
         plugin_view_id: Option<String>,
         plugin_payload: Option<String>,
         plugin_dedupe_key: Option<String>,
+        shell: Option<ShellProfile>,
     ) -> AppResult<Tab> {
         let id = Uuid::new_v4().to_string();
         {
+            let (shell_backend, shell_distro) = shell_to_columns(shell.as_ref());
             let conn = self.0.lock()?;
             let order_index: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
@@ -632,8 +656,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                 params![
                     id,
                     project_id,
@@ -649,7 +673,9 @@ impl Db {
                     plugin_view_id,
                     plugin_payload,
                     plugin_dedupe_key,
-                    order_index
+                    order_index,
+                    shell_backend,
+                    shell_distro
                 ],
             )?;
         }
@@ -853,7 +879,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at FROM tabs WHERE id = ?1",
+                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -864,7 +890,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -1035,7 +1061,38 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         user_renamed: row.get::<_, i64>(15)? == 1,
         order_index: row.get::<_, i64>(16)?,
         created_at: row.get(17)?,
+        shell: shell_from_row(row.get::<_, Option<String>>(18)?, row.get(19)?),
     })
+}
+
+/// Rebuilds a tab's shell profile from its two columns.
+///
+/// An absent or unrecognised backend yields `None` — "use whatever the project
+/// configures" — so a row written by a newer build, or hand-edited, degrades to
+/// the default instead of failing the whole tab load.
+fn shell_from_row(backend: Option<String>, distro: Option<String>) -> Option<ShellProfile> {
+    match backend?.as_str() {
+        "native" => Some(pragma_platform::shell::native_profile()),
+        "wsl" => Some(ShellProfile {
+            backend: TerminalBackend::Wsl,
+            distro,
+        }),
+        _ => None,
+    }
+}
+
+/// The two column values persisting a tab's shell profile.
+fn shell_to_columns(shell: Option<&ShellProfile>) -> (Option<&'static str>, Option<String>) {
+    match shell {
+        None => (None, None),
+        Some(profile) => (
+            Some(match profile.backend {
+                TerminalBackend::Native => "native",
+                TerminalBackend::Wsl => "wsl",
+            }),
+            profile.distro.clone(),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -1063,6 +1120,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Terminal,
                 Some("main".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -1168,6 +1226,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("browser tab should insert");
         assert_eq!(tab.kind, TabKind::Browser);
@@ -1208,6 +1267,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("browser tab should insert");
         let short_id = &tab.id[..8];
@@ -1238,6 +1298,7 @@ mod tests {
                 &worktrees[0].id,
                 TabKind::Log,
                 Some("Server Logs".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -1432,6 +1493,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .expect("tab should insert");
         db.delete_worktree(&parent.id)
@@ -1569,6 +1631,7 @@ mod tests {
                 &project.id,
                 &main.id,
                 TabKind::Terminal,
+                None,
                 None,
                 None,
                 None,

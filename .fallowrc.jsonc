@@ -45,13 +45,7 @@
     // yet — that 1:1 contract is intentional, not dead code.
     {
       "file": "**/lib/tauri.ts",
-      "exports": [
-        "getAppInfo",
-        "saveKeybindings",
-        "aiLogout",
-        "listWslDistros",
-        "WslDistro",
-      ],
+      "exports": ["getAppInfo", "saveKeybindings", "aiLogout"],
     },
   ],
   // `@google/design.md` is the DesignSync CLI that generates DESIGN.md — a

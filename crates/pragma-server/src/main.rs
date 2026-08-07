@@ -355,7 +355,7 @@ fn handle_request(
             let cols = request.cols.unwrap_or(80);
             let rows = request.rows.unwrap_or(24);
             let (scrollback, rx) = registry
-                .spawn(session_id, worktree_id, cwd, cols, rows)
+                .spawn(session_id, worktree_id, cwd, cols, rows, request.shell)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
             Ok(Outcome {
                 event_stream: Some(EventStream { scrollback, rx }),

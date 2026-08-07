@@ -37,8 +37,8 @@ mod wsl;
 
 use pragma_client::router::RouterDb;
 use pragma_constants::{
-    AgentDecision, AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, ProtocolRpcMethod, Tab,
-    TabKind, CONSTANTS,
+    AgentDecision, AppInfo, DiffSide, KeybindingsConfig, ProjectIcon, ProtocolRpcMethod,
+    ShellProfile, Tab, TabKind, CONSTANTS,
 };
 use pragma_core::tabs::{TabAgentMetadata, TabsRequest};
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -526,6 +526,7 @@ async fn pty_spawn(
     cwd: String,
     cols: u16,
     rows: u16,
+    shell: Option<ShellProfile>,
     stream_generation: u64,
     on_event: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
@@ -547,6 +548,7 @@ async fn pty_spawn(
             cwd,
             cols,
             rows,
+            shell,
             stream_generation,
             on_event,
         )
@@ -565,6 +567,7 @@ async fn pty_spawn_detached(
     cwd: String,
     cols: u16,
     rows: u16,
+    shell: Option<ShellProfile>,
 ) -> AppResult<()> {
     let host_id = hosts.host_id_for_worktree(&db, &worktree_id)?;
     let is_local_host = host_id == LOCAL_HOST;
@@ -576,7 +579,7 @@ async fn pty_spawn_detached(
                 log::warn!("failed to ensure pragma-gateway before detached PTY spawn: {error}");
             }
         }
-        client.spawn_detached(session_id, worktree_id, cwd, cols, rows)
+        client.spawn_detached(session_id, worktree_id, cwd, cols, rows, shell)
     })
     .await
 }
@@ -833,6 +836,7 @@ fn create_tab(
     diff_side: Option<DiffSide>,
     diff_commit: Option<String>,
     pr_number: Option<i64>,
+    shell: Option<ShellProfile>,
 ) -> AppResult<Tab> {
     if matches!(kind, TabKind::Scratchpad) {
         return Err(AppError::InvalidInput(
@@ -849,6 +853,7 @@ fn create_tab(
         diff_side,
         diff_commit,
         pr_number,
+        shell,
     )?;
     publisher.trigger();
     Ok(tab)

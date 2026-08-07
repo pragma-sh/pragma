@@ -32,13 +32,14 @@ import type {
   AutomationRootRegistration,
   OpenPort,
   ScratchpadSummary,
+  ShellProfile,
   WslDistroList,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
-export type { OpenPort, WslDistro, WslDistroList } from "@pragma/constants";
+export type { OpenPort, ShellProfile, WslDistroList } from "@pragma/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -351,6 +352,7 @@ export function ptySpawn(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
+  shell?: ShellProfile | null,
 ): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
   const generation = ++nextPtyStreamGeneration;
@@ -362,6 +364,7 @@ export function ptySpawn(
     cwd,
     cols,
     rows,
+    shell,
     streamGeneration: generation,
     onEvent: channel,
   }).then(() => ({ channel, generation }));
@@ -374,8 +377,9 @@ export function ptySpawnDetached(
   cwd: string,
   cols: number,
   rows: number,
+  shell?: ShellProfile | null,
 ): Promise<void> {
-  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows });
+  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows, shell });
 }
 
 /**
@@ -604,6 +608,7 @@ export function createTab(
   diffSide?: DiffSide | null,
   diffCommit?: string | null,
   prNumber?: number | null,
+  shell?: ShellProfile | null,
 ): Promise<Tab> {
   return invoke<Tab>("create_tab", {
     projectId,
@@ -617,6 +622,8 @@ export function createTab(
     // Only send `prNumber` for PR tabs; omitting it keeps the IPC arg shape
     // stable for the common non-PR case (an explicit null is still forwarded).
     ...(prNumber !== undefined && { prNumber }),
+    // Likewise `shell`: only a tab opened from the shell picker carries one.
+    ...(shell !== undefined && { shell }),
   });
 }
 

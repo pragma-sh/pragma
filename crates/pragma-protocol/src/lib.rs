@@ -96,6 +96,12 @@ pub struct RequestFrame {
     pub cols: Option<u16>,
     pub rows: Option<u16>,
     pub data: Option<String>,
+    /// Shell world the session launches in. Present only for
+    /// [`RequestKind::Spawn`], and only when the caller picked a shell
+    /// explicitly; `None` leaves the choice to the server's own resolution
+    /// (project `.pragma/config.json`, then the shipped default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<pragma_constants::ShellProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpc: Option<RpcRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -515,6 +521,7 @@ mod tests {
             cols: Some(80),
             rows: Some(24),
             data: None,
+            shell: None,
             rpc: None,
             subscription: None,
             control: None,
@@ -688,6 +695,7 @@ mod tests {
             cols: None,
             rows: None,
             data: None,
+            shell: None,
             rpc: None,
             subscription: None,
             control: Some(ControlRequest {

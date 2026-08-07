@@ -127,6 +127,7 @@ mod tests {
                 agent_id: None,
                 user_renamed: false,
                 order_index: 0,
+                shell: None,
                 created_at: "now".to_string(),
             }],
         }

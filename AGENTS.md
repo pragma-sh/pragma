@@ -410,8 +410,28 @@ Windows runs terminals in one of two worlds, and they are served differently:
   (`pragma-server --relay`). See `crates/pragma-client/src/wsl.rs` for why that beat
   forwarding a port over localhost.
 
-A project selects its shell in `.pragma/config.json` under `terminal.shell`; defaults
-live in `@pragma/constants` under `platform`.
+**The two WSL layers, and which one is built.** Selecting a WSL shell and serving a WSL
+session are separate problems, and only the first is wired up today:
+
+- **Shell selection (built).** A session can launch `wsl.exe -d <distro>` on the host's
+  own ConPTY. The chosen shell travels as a `ShellProfile` (`@pragma/constants`) on the
+  `Spawn` request, is resolved by `pragma_platform::shell::resolve_profile_launch`, and
+  is persisted on the tab (`tabs.shell_backend` / `shell_distro`) so a respawn after a
+  server restart returns to the same shell. The user picks it in the new-tab menu, or as
+  a default under Settings → Terminal.
+- **Host-level WSL (not built).** `start_wsl_bridge` exists in `pragma-client` but
+  nothing calls it. Until it does, a WSL terminal is served by the _Windows_ server, so
+  the `PRAGMA_*` environment the session exports names Windows paths that the Linux side
+  cannot open — agent plugins running inside such a tab do not report status. Wiring
+  that up means registering the distribution as a host (mirroring `ssh_host.rs`) rather
+  than adding another shell.
+
+A project selects its shell in `.pragma/config.json` under `terminal`: `shell` names the
+native program, `backend`/`distro` choose the world it runs in, and `hiddenDistros`
+trims the picker. Both Settings scopes are honoured — the project's file wins and the one
+under the home directory is the global default behind it — and each field falls back
+independently, so a project that pins only `shell` still inherits the global `backend`.
+Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
 
 ## Testing
 

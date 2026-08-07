@@ -20,6 +20,7 @@ import type {
   Project,
   ProjectIcon,
   ProjectScriptsConfig,
+  ShellProfile,
   Tab,
   Worktree,
   WorktreeStatus,
@@ -268,7 +269,12 @@ interface WorkspaceContextValue extends WorkspaceState {
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null) => void;
-  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  /**
+   * Opens a terminal tab. `shell` names the shell world it launches in (the
+   * new-tab shell picker); omitting it follows the project's configured
+   * default.
+   */
+  createTerminalTab: (worktreeId?: string, shell?: ShellProfile | null) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   /**
    * Launches an agent thread in a worktree: switches to it, opens a terminal
@@ -1999,9 +2005,21 @@ async function createTabOfKind(
   kind: "terminal" | "browser",
   projectId: string,
   worktreeId: string,
+  shell?: ShellProfile | null,
 ): Promise<Tab> {
   return kind === "terminal"
-    ? await createTabCommand(projectId, worktreeId, "terminal", defaultTabTitle("terminal"))
+    ? await createTabCommand(
+        projectId,
+        worktreeId,
+        "terminal",
+        defaultTabTitle("terminal"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        shell,
+      )
     : await createTabCommand(
         projectId,
         worktreeId,
@@ -2721,13 +2739,19 @@ function useTabCreation(
     kind: "terminal" | "browser",
     paneId: string | null,
     worktreeId?: string,
+    shell?: ShellProfile | null,
   ) => Promise<Tab | null>;
-  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  createTerminalTab: (worktreeId?: string, shell?: ShellProfile | null) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
 } {
   const createTab = useCallback(
-    async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
+    async (
+      kind: "terminal" | "browser",
+      paneId: string | null,
+      worktreeId?: string,
+      shell?: ShellProfile | null,
+    ) => {
       const projectId = resolveCreateTabProject(
         worktreeId,
         worktreeProjectIdRef.current,
@@ -2742,7 +2766,7 @@ function useTabCreation(
         return null;
       }
       try {
-        const tab = await createTabOfKind(kind, projectId, targetWorktreeId);
+        const tab = await createTabOfKind(kind, projectId, targetWorktreeId, shell);
         dispatchNewTab(dispatch, tab, paneId);
         return tab;
       } catch (cause) {
@@ -2754,7 +2778,8 @@ function useTabCreation(
   );
 
   const createTerminalTab = useCallback(
-    (worktreeId?: string) => createTab("terminal", null, worktreeId),
+    (worktreeId?: string, shell?: ShellProfile | null) =>
+      createTab("terminal", null, worktreeId, shell),
     [createTab],
   );
   const createBrowserTab = useCallback(

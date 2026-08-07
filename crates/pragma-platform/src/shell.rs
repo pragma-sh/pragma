@@ -10,51 +10,50 @@
 
 use std::path::{Path, PathBuf};
 
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ShellProfile, TerminalBackend, CONSTANTS};
 
-/// Which world a terminal session's shell runs in.
+/// Parses a shell profile from a `.pragma/config.json` `terminal` block.
 ///
-/// Only Windows offers a real choice. macOS and Linux always resolve to
-/// [`TerminalBackend::Native`].
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum TerminalBackend {
-    /// The host's own shell, on the host's own PTY.
-    #[default]
-    Native,
-    /// A Linux shell inside a WSL distribution, served by a Linux
-    /// `pragma-server` running in that distribution. `None` means the user's
-    /// default distribution.
-    Wsl { distro: Option<String> },
+/// An unrecognised backend returns `None` so the caller can report the typo
+/// rather than silently launching the wrong kind of terminal. `powershell` is
+/// accepted as a spelling of `native` because that is what the Windows default
+/// actually launches, and users reach for it.
+#[must_use]
+pub fn parse_profile(backend: &str, distro: Option<&str>) -> Option<ShellProfile> {
+    match backend.trim().to_ascii_lowercase().as_str() {
+        "native" | "powershell" => Some(native_profile()),
+        "wsl" => Some(ShellProfile {
+            backend: TerminalBackend::Wsl,
+            distro: distro
+                .map(str::trim)
+                .filter(|it| !it.is_empty())
+                .map(str::to_string),
+        }),
+        _ => None,
+    }
 }
 
-impl TerminalBackend {
-    /// Parses a backend from a `.pragma/config.json` value.
-    ///
-    /// An unrecognised value returns `None` so the caller can report the typo
-    /// rather than silently launching the wrong kind of terminal.
-    #[must_use]
-    pub fn parse(value: &str, distro: Option<&str>) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "native" | "powershell" => Some(Self::Native),
-            "wsl" => Some(Self::Wsl {
-                distro: distro
-                    .map(str::to_string)
-                    .filter(|it| !it.trim().is_empty()),
-            }),
-            _ => None,
-        }
+/// The host's own shell, on the host's own PTY.
+#[must_use]
+pub fn native_profile() -> ShellProfile {
+    ShellProfile {
+        backend: TerminalBackend::Native,
+        distro: None,
     }
+}
 
-    /// The backend used when a project configures none.
-    ///
-    /// WSL is never a default: it depends on a distribution being installed and
-    /// on a Linux `pragma-server` running inside it, so it is opt-in.
-    #[must_use]
-    pub fn configured_default() -> Self {
-        match CONSTANTS.platform.default_backend {
-            pragma_constants::TerminalBackend::Native => Self::Native,
-            pragma_constants::TerminalBackend::Wsl => Self::Wsl { distro: None },
-        }
+/// The profile used when neither the tab nor the project names one.
+///
+/// WSL is never a default: it depends on a distribution being installed, so it
+/// is opt-in through the shipped `platform.defaultBackend`.
+#[must_use]
+pub fn default_profile() -> ShellProfile {
+    match CONSTANTS.platform.default_backend {
+        TerminalBackend::Native => native_profile(),
+        TerminalBackend::Wsl => ShellProfile {
+            backend: TerminalBackend::Wsl,
+            distro: None,
+        },
     }
 }
 
@@ -85,6 +84,33 @@ pub fn resolve_launch(configured: Option<&str>) -> ShellLaunch {
     let program = resolve_shell(configured);
     let args = interactive_args(&program);
     ShellLaunch { program, args }
+}
+
+/// Resolves the launch for one shell profile.
+///
+/// `configured` is the project's native shell override; it is ignored for a WSL
+/// profile, whose shell is whatever login shell the distribution itself is set
+/// up with.
+///
+/// The WSL launch passes no working directory of its own: `wsl.exe` translates
+/// the Windows working directory it inherits into its `/mnt/...` equivalent, so
+/// the session opens in the worktree the caller already set as the child's cwd.
+#[must_use]
+pub fn resolve_profile_launch(profile: &ShellProfile, configured: Option<&str>) -> ShellLaunch {
+    match profile.backend {
+        TerminalBackend::Native => resolve_launch(configured),
+        TerminalBackend::Wsl => ShellLaunch {
+            program: CONSTANTS.platform.wsl.launcher.clone(),
+            args: profile
+                .distro
+                .as_deref()
+                .map(str::trim)
+                .filter(|distro| !distro.is_empty())
+                .map_or_else(Vec::new, |distro| {
+                    vec!["-d".to_string(), distro.to_string()]
+                }),
+        },
+    }
 }
 
 /// The arguments that make `program` behave as an interactive login shell.
@@ -221,7 +247,19 @@ pub fn find_on_path(name: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_on_path, pick_windows_shell, resolve_shell, TerminalBackend};
+    use pragma_constants::TerminalBackend;
+
+    use super::{
+        find_on_path, parse_profile, pick_windows_shell, resolve_profile_launch, resolve_shell,
+        ShellProfile,
+    };
+
+    fn wsl(distro: Option<&str>) -> ShellProfile {
+        ShellProfile {
+            backend: TerminalBackend::Wsl,
+            distro: distro.map(str::to_string),
+        }
+    }
 
     #[test]
     fn a_configured_shell_wins_over_every_default() {
@@ -273,28 +311,60 @@ mod tests {
 
     #[test]
     fn backends_parse_from_config_values() {
+        assert_eq!(parse_profile("native", None), Some(super::native_profile()));
         assert_eq!(
-            TerminalBackend::parse("native", None),
-            Some(TerminalBackend::Native)
+            parse_profile("WSL", Some("Ubuntu")),
+            Some(wsl(Some("Ubuntu")))
         );
-        assert_eq!(
-            TerminalBackend::parse("WSL", Some("Ubuntu")),
-            Some(TerminalBackend::Wsl {
-                distro: Some("Ubuntu".to_string())
-            })
-        );
-        assert_eq!(
-            TerminalBackend::parse("wsl", None),
-            Some(TerminalBackend::Wsl { distro: None })
-        );
+        assert_eq!(parse_profile("wsl", None), Some(wsl(None)));
+    }
+
+    /// A blank distribution is the same statement as an absent one — "use
+    /// whichever WSL calls default" — and must not reach `wsl.exe -d ""`.
+    #[test]
+    fn a_blank_distro_means_the_wsl_default() {
+        assert_eq!(parse_profile("wsl", Some("   ")), Some(wsl(None)));
+        assert!(resolve_profile_launch(&wsl(Some("  ")), None)
+            .args
+            .is_empty());
     }
 
     /// A typo must surface, not silently launch a native shell where the user
     /// asked for a Linux one.
     #[test]
     fn an_unknown_backend_is_rejected() {
-        assert_eq!(TerminalBackend::parse("wsl2", None), None);
-        assert_eq!(TerminalBackend::parse("", None), None);
+        assert_eq!(parse_profile("wsl2", None), None);
+        assert_eq!(parse_profile("", None), None);
+    }
+
+    /// The distribution has to reach `wsl.exe` as `-d <name>`; without it every
+    /// WSL tab silently opens the default distribution instead of the picked one.
+    #[test]
+    fn a_wsl_profile_launches_the_named_distribution() {
+        let launch = resolve_profile_launch(&wsl(Some("Ubuntu")), None);
+        assert_eq!(
+            launch.program,
+            pragma_constants::CONSTANTS.platform.wsl.launcher
+        );
+        assert_eq!(launch.args, vec!["-d".to_string(), "Ubuntu".to_string()]);
+    }
+
+    /// The native shell override is a Windows/Unix program path; applying it to
+    /// a WSL launch would try to run e.g. `pwsh.exe` inside the distribution.
+    #[test]
+    fn a_native_shell_override_does_not_leak_into_a_wsl_launch() {
+        let launch = resolve_profile_launch(&wsl(None), Some("/usr/bin/fish"));
+        assert_eq!(
+            launch.program,
+            pragma_constants::CONSTANTS.platform.wsl.launcher
+        );
+        assert!(launch.args.is_empty());
+    }
+
+    #[test]
+    fn a_native_profile_still_honours_the_configured_shell() {
+        let launch = resolve_profile_launch(&super::native_profile(), Some("/usr/bin/fish"));
+        assert_eq!(launch.program, "/usr/bin/fish");
     }
 
     /// `-l` is the failure this guards: PowerShell reads it as `-Login`, which

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use pragma_client::request_spawn;
 use pragma_client::{ClientError, LocalServerConfig, PragmaClient};
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ShellProfile, CONSTANTS};
 use pragma_platform::ipc::LocalStream;
 use pragma_platform::process;
 use pragma_protocol::{
@@ -175,12 +175,13 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
+        shell: Option<ShellProfile>,
         stream_generation: u64,
         on_event: Channel<InvokeResponseBody>,
     ) -> AppResult<()> {
-        let stream = self
-            .inner
-            .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows)?;
+        let stream =
+            self.inner
+                .spawn_stream(session_id.clone(), worktree_id, cwd, cols, rows, shell)?;
         self.track_stream(&session_id, stream_generation, &stream);
         forward_stream(stream, on_event);
         Ok(())
@@ -197,8 +198,9 @@ impl PtyClient {
         cwd: String,
         cols: u16,
         rows: u16,
+        shell: Option<ShellProfile>,
     ) -> AppResult<()> {
-        let request = request_spawn(session_id, worktree_id, cwd, cols, rows);
+        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, shell);
         let mut stream = self.connect_with_spawn()?;
         write_json_frame(&mut stream, &request)?;
         loop {

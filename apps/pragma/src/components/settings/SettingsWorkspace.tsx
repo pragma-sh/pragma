@@ -10,11 +10,17 @@ import {
   RefreshCw,
   Smartphone,
   Sparkles,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { constants, type AgentStatusSettings, type GitHubAuthMethod } from "@pragma/constants";
+import {
+  constants,
+  type AgentStatusSettings,
+  type GitHubAuthMethod,
+  type TerminalSettings,
+} from "@pragma/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
@@ -22,9 +28,11 @@ import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TERMINAL_SETTINGS_CHANGED_EVENT } from "@/hooks/use-terminal-settings";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -45,13 +53,22 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section = "plugins" | "keybindings" | "theme" | "agentStatus" | "github" | "ai" | "mobile";
+type Section =
+  | "plugins"
+  | "keybindings"
+  | "theme"
+  | "terminal"
+  | "agentStatus"
+  | "github"
+  | "ai"
+  | "mobile";
 
 /** Sections that read and write per-project settings as well as global ones. */
 const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
   "plugins",
   "keybindings",
   "theme",
+  "terminal",
   "agentStatus",
 ]);
 
@@ -69,6 +86,7 @@ interface PragmaConfig {
     [key: string]: unknown;
   };
   agentStatus?: AgentStatusSettings;
+  terminal?: TerminalSettings;
   [key: string]: unknown;
 }
 
@@ -86,8 +104,36 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   const config = value as PragmaConfig;
   validatePlugins(config.plugins);
   validateTunnel(config.tunnel);
+  validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
   return config;
+}
+
+function validateTerminal(terminal: PragmaConfig["terminal"]): void {
+  if (terminal === undefined) return;
+  if (!terminal || typeof terminal !== "object" || Array.isArray(terminal)) {
+    throw new Error("terminal must be an object");
+  }
+  validateBackend(terminal.backend);
+  validateDistro(terminal.distro);
+  validateOptionalField(terminal.shell, "terminal.shell", "string");
+  if (terminal.hiddenDistros !== undefined && !Array.isArray(terminal.hiddenDistros)) {
+    throw new Error("terminal.hiddenDistros must be an array");
+  }
+}
+
+/** The two shell worlds; anything else is a typo the user needs to see. */
+function validateBackend(backend: TerminalSettings["backend"]): void {
+  if (backend !== undefined && backend !== "native" && backend !== "wsl") {
+    throw new Error('terminal.backend must be "native" or "wsl"');
+  }
+}
+
+/** Null is meaningful here — it selects whichever distribution WSL calls default. */
+function validateDistro(distro: TerminalSettings["distro"]): void {
+  if (distro !== undefined && distro !== null && typeof distro !== "string") {
+    throw new Error("terminal.distro must be a string or null");
+  }
 }
 
 function validatePlugins(plugins: PragmaConfig["plugins"]): void {
@@ -117,14 +163,19 @@ function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
   if (!tunnel || typeof tunnel !== "object" || Array.isArray(tunnel)) {
     throw new Error("tunnel must be an object");
   }
-  validateTunnelField(tunnel.enabled, "enabled", "boolean");
-  validateTunnelField(tunnel.command, "command", "string");
-  validateTunnelField(tunnel.urlPattern, "urlPattern", "string");
+  validateOptionalField(tunnel.enabled, "tunnel.enabled", "boolean");
+  validateOptionalField(tunnel.command, "tunnel.command", "string");
+  validateOptionalField(tunnel.urlPattern, "tunnel.urlPattern", "string");
 }
 
-function validateTunnelField(value: unknown, name: string, type: "boolean" | "string"): void {
+/**
+ * Rejects a config field that is present but of the wrong type. Absent is
+ * always allowed: every field of every block here is optional, and a missing
+ * one means "use the default".
+ */
+function validateOptionalField(value: unknown, name: string, type: "boolean" | "string"): void {
   if (value !== undefined && typeof value !== type) {
-    throw new Error(`tunnel.${name} must be a ${type}`);
+    throw new Error(`${name} must be a ${type}`);
   }
 }
 
@@ -283,6 +334,13 @@ function SettingsNavigation({
         Theme
       </SettingsNavItem>
       <SettingsNavItem
+        active={section === "terminal"}
+        icon={<SquareTerminal />}
+        onClick={() => setSection("terminal")}
+      >
+        Terminal
+      </SettingsNavItem>
+      <SettingsNavItem
         active={section === "agentStatus"}
         icon={<BellRing />}
         onClick={() => setSection("agentStatus")}
@@ -375,6 +433,20 @@ function SettingsContent({
         ) : null}
         {section === "keybindings" ? (
           <KeybindingsSection projectId={projectId} scope={scope} />
+        ) : null}
+        {loaded && section === "terminal" ? (
+          <TerminalSection
+            persist={async (patch) => {
+              await persist((current) => ({
+                ...current,
+                terminal: { ...current.terminal, ...patch },
+              }));
+              // The new-tab menu marks the configured default; tell it to
+              // re-read rather than waiting for the workspace to remount.
+              window.dispatchEvent(new Event(TERMINAL_SETTINGS_CHANGED_EVENT));
+            }}
+            settings={loaded.value.terminal ?? {}}
+          />
         ) : null}
         {loaded && section === "agentStatus" ? (
           <AgentStatusSection

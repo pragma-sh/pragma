@@ -98,6 +98,7 @@ export type {
   TerminalBackend,
   TerminalDefaults,
   TerminalSettings,
+  ShellProfile,
   WslDistro,
   WslDistroList,
   SettingsScope,

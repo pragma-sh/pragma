@@ -51,7 +51,11 @@ fn user_path() -> OsString {
 /// Reading `HOME` alone therefore skipped every home-relative entry below on
 /// Windows, including the `.local/bin` that `agent_cli` installs `pragma-cli`
 /// into, so agents could not find the helper on their `PATH`.
-fn home_dir() -> Option<PathBuf> {
+///
+/// Public because the global scope of `.pragma/config.json` is rooted here too,
+/// and the session layer must spell "home" exactly the same way.
+#[must_use]
+pub fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .or_else(|| env::var_os("USERPROFILE"))

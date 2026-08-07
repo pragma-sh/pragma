@@ -1222,16 +1222,21 @@ export class TerminalManager {
           this.restartStream(tabId, managed);
           return null;
         }
-        return ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent).catch((spawnError) => {
-          if (!isCurrentConnection()) {
-            return null;
-          }
-          // Another creator may have won between attach and spawn. Re-attach
-          // once; preserve the spawn error when no session actually appeared.
-          return ptyAttach(tabId, cols, rows, null, onEvent).catch(() =>
-            Promise.reject(spawnError),
-          );
-        });
+        // The tab's own shell profile, so a session respawned after a server
+        // restart returns to the shell it was opened with rather than the
+        // current default.
+        return ptySpawn(tabId, tab.worktreeId, cwd, cols, rows, onEvent, tab.shell ?? null).catch(
+          (spawnError) => {
+            if (!isCurrentConnection()) {
+              return null;
+            }
+            // Another creator may have won between attach and spawn. Re-attach
+            // once; preserve the spawn error when no session actually appeared.
+            return ptyAttach(tabId, cols, rows, null, onEvent).catch(() =>
+              Promise.reject(spawnError),
+            );
+          },
+        );
       })
       .then((stream) => {
         if (!stream) {
