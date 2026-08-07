@@ -94,75 +94,29 @@ function prLifecycleIconClass(lifecycle: GitHubPrLifecycle | undefined): string 
   }
 }
 
-interface WorktreeTreeProps {
-  onCreateChild: () => void;
+/** Branch vs merge glyph + color for a worktree row. */
+function worktreeGlyph(
+  merged: boolean,
+  prLifecycle: GitHubPrLifecycle | undefined,
+): { Icon: typeof GitBranch; className: string | undefined } {
+  return {
+    Icon: merged || prLifecycle === "merged" ? GitMerge : GitBranch,
+    className: prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined),
+  };
 }
 
-export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
-  const workspace = useWorkspace();
-  const { authenticated } = useGitHub();
-  const pinTimes = useWorktreePins();
-  const worktrees = useMemo(
-    () =>
-      workspace.selectedProjectId ? (workspace.worktrees[workspace.selectedProjectId] ?? []) : [],
-    [workspace.selectedProjectId, workspace.worktrees],
-  );
-  const tree = useMemo(
-    () => buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden, pinTimes }),
-    [worktrees, pinTimes],
-  );
-  const hidden = worktrees.filter((w) => w.hidden);
-  const [showHidden, setShowHidden] = useState(false);
-  const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
+/**
+ * Poll GitHub PR lifecycle per child worktree (cached; background revalidate).
+ * Green = open PR, purple = merged, red = closed. Same cadence as the PR tab.
+ */
+function useWorktreePrLifecycles(
+  worktrees: Worktree[],
+  authenticated: boolean,
+): Record<string, GitHubPrLifecycle> {
   const [prLifecycleByWorktreeId, setPrLifecycleByWorktreeId] = useState<
     Record<string, GitHubPrLifecycle>
   >({});
 
-  useEffect(() => {
-    const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
-    let cancelled = false;
-    let refreshInFlight = false;
-
-    async function refreshMergedStatus() {
-      if (refreshInFlight) return;
-      refreshInFlight = true;
-      try {
-        const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
-        if (!cancelled) {
-          // Keep the previous object when nothing changed so the steady-state
-          // poll doesn't re-render the whole tree every tick.
-          setMergedByWorktreeId((previous) =>
-            sameMergedStatus(previous, merged) ? previous : merged,
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
-        }
-      } finally {
-        refreshInFlight = false;
-      }
-    }
-
-    if (childWorktrees.length === 0) {
-      setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
-      return;
-    }
-
-    void refreshMergedStatus();
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        void refreshMergedStatus();
-      }
-    }, MERGED_STATUS_REFRESH_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [worktrees]);
-
-  // Poll GitHub PR lifecycle per child worktree (cached; background revalidate).
-  // Green = open PR, purple = merged, red = closed. Same cadence as the PR tab.
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
     if (!authenticated || childWorktrees.length === 0) {
@@ -212,6 +166,117 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     };
   }, [worktrees, authenticated]);
 
+  return prLifecycleByWorktreeId;
+}
+
+/** Poll local merged-into-parent status for child worktrees. */
+function useWorktreeMergedStatus(worktrees: Worktree[]): Record<string, boolean> {
+  const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
+    let cancelled = false;
+    let refreshInFlight = false;
+
+    async function refreshMergedStatus() {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      try {
+        const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
+        if (!cancelled) {
+          // Keep the previous object when nothing changed so the steady-state
+          // poll doesn't re-render the whole tree every tick.
+          setMergedByWorktreeId((previous) =>
+            sameMergedStatus(previous, merged) ? previous : merged,
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
+        }
+      } finally {
+        refreshInFlight = false;
+      }
+    }
+
+    if (childWorktrees.length === 0) {
+      setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
+      return;
+    }
+
+    void refreshMergedStatus();
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        void refreshMergedStatus();
+      }
+    }, MERGED_STATUS_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [worktrees]);
+
+  return mergedByWorktreeId;
+}
+
+interface WorktreeTreeProps {
+  onCreateChild: () => void;
+}
+
+/** Collapsible list of hidden worktrees under the main tree. */
+function HiddenWorktreesSection({
+  hidden,
+  mergedByWorktreeId,
+  prLifecycleByWorktreeId,
+  onUnhide,
+}: {
+  hidden: Worktree[];
+  mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  onUnhide: (worktreeId: string) => void;
+}) {
+  const [showHidden, setShowHidden] = useState(false);
+  return (
+    <div className="pt-1">
+      <button
+        className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-accent/60"
+        onClick={() => setShowHidden((value) => !value)}
+      >
+        <ChevronRight className={cn("size-3 opacity-60", showHidden && "rotate-90")} />
+        {showHidden ? "Hide" : "Show"} {hidden.length} hidden
+      </button>
+      {showHidden
+        ? hidden.map((worktree) => (
+            <HiddenWorktreeRow
+              key={worktree.id}
+              merged={mergedByWorktreeId[worktree.id] === true}
+              onUnhide={() => onUnhide(worktree.id)}
+              prLifecycle={prLifecycleByWorktreeId[worktree.id]}
+              worktree={worktree}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
+  const workspace = useWorkspace();
+  const { authenticated } = useGitHub();
+  const pinTimes = useWorktreePins();
+  const worktrees = useMemo(
+    () =>
+      workspace.selectedProjectId ? (workspace.worktrees[workspace.selectedProjectId] ?? []) : [],
+    [workspace.selectedProjectId, workspace.worktrees],
+  );
+  const tree = useMemo(
+    () => buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden, pinTimes }),
+    [worktrees, pinTimes],
+  );
+  const hidden = worktrees.filter((w) => w.hidden);
+  const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
+  const prLifecycleByWorktreeId = useWorktreePrLifecycles(worktrees, authenticated);
+
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
   }
@@ -229,26 +294,12 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
         />
       ))}
       {hidden.length > 0 ? (
-        <div className="pt-1">
-          <button
-            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-sidebar-accent/60"
-            onClick={() => setShowHidden((value) => !value)}
-          >
-            <ChevronRight className={cn("size-3 opacity-60", showHidden && "rotate-90")} />
-            {showHidden ? "Hide" : "Show"} {hidden.length} hidden
-          </button>
-          {showHidden
-            ? hidden.map((worktree) => (
-                <HiddenWorktreeRow
-                  key={worktree.id}
-                  merged={mergedByWorktreeId[worktree.id] === true}
-                  onUnhide={() => void workspace.hideWorktree(worktree.id, false)}
-                  prLifecycle={prLifecycleByWorktreeId[worktree.id]}
-                  worktree={worktree}
-                />
-              ))
-            : null}
-        </div>
+        <HiddenWorktreesSection
+          hidden={hidden}
+          mergedByWorktreeId={mergedByWorktreeId}
+          onUnhide={(id) => void workspace.hideWorktree(id, false)}
+          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+        />
       ) : null}
     </div>
   );
@@ -700,8 +751,7 @@ function WorktreeRow({
   const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
   const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
-  // Show merge icon for a merged PR or a fully-merged local branch.
-  const WorktreeIcon = merged || prLifecycle === "merged" ? GitMerge : GitBranch;
+  const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
 
   const handleSelect = useCallback(() => {
@@ -794,8 +844,7 @@ function HiddenWorktreeRow({
   onUnhide: () => void;
 }) {
   const label = worktree.title ?? worktree.branch;
-  const WorktreeIcon = merged || prLifecycle === "merged" ? GitMerge : GitBranch;
-  const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
+  const { Icon: WorktreeIcon, className: iconClass } = worktreeGlyph(merged, prLifecycle);
   return (
     <div className="mt-1 flex items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-1.5">

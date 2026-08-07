@@ -390,18 +390,21 @@ function UnresolvedBadge({ count }: { count: number }) {
   );
 }
 
+/** Title chip label + class for the PR header state badge. */
+function prHeaderBadge(
+  pr: PullRequestSummary,
+  merging: boolean,
+): { label: string; className: string } {
+  if (merging) return { label: "merging", className: "bg-warning/20 text-warning" };
+  if (pr.merged) return { label: "merged", className: "bg-skill/20 text-skill" };
+  if (pr.draft) return { label: "draft", className: "bg-muted text-muted-foreground" };
+  if (pr.state === "open") return { label: pr.state, className: "bg-success/20 text-success" };
+  return { label: pr.state, className: "bg-destructive/20 text-destructive" };
+}
+
 /** Title + number, open-on-GitHub icon, state badge, base ← head chips, markdown body. */
 function HeaderCard({ pr, merging = false }: { pr: PullRequestSummary; merging?: boolean }) {
-  const stateLabel = merging ? "merging" : pr.merged ? "merged" : pr.draft ? "draft" : pr.state;
-  const stateClass = merging
-    ? "bg-warning/20 text-warning"
-    : pr.merged
-      ? "bg-skill/20 text-skill"
-      : pr.draft
-        ? "bg-muted text-muted-foreground"
-        : pr.state === "open"
-          ? "bg-success/20 text-success"
-          : "bg-destructive/20 text-destructive";
+  const { label: stateLabel, className: stateClass } = prHeaderBadge(pr, merging);
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
       <div className="flex items-start gap-2">
