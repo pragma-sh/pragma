@@ -35,12 +35,15 @@ When diagnosing latency, leverage these three pillars:
 ## 4. Examples
 
 ### N+1 Database Queries
+
 A loop in `pragma-server` fetching a list of PTYs one by one instead of a single request.
 
 ### Dependency Saturation
+
 A slow database query causing the `pragma-gateway` to wait, cascading latency to the client.
 
 ### Network Latency
+
 High latency between the native client and `pragma-server` over a bridged connection.
 
 ## 5. Best Practices
