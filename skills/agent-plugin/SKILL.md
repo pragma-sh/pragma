@@ -171,6 +171,11 @@ plugins install the published package normally.
   response the agent starts from it, and submits the real answer as a follow-up
   prompt: `Answer to question "<question>": <answer>`. Keep the default `"editor"`
   when the TUI has a real custom-answer row (OpenCode).
+- Set `questionSelectMode: "arrow-space"` when the question list does not bind digit
+  shortcuts and instead navigates with Down, marks with Space, and submits with Enter
+  (Junie). Keep the default `"digit"` for TUIs whose rows are select-and-submit digits
+  (OpenCode, Codex). Verify the real keymap against a live prompt; a wrong mode fails
+  only as a question timeout.
 - Use watcher for interjections when host has no mid-turn input hook.
 
 Add `defineUsageLimitProvider` when applicable. Return either `ready` with finite,
@@ -221,8 +226,13 @@ Set package metadata:
 ```
 
 Build agent-side TypeScript and Pragma-side bundle with Bunup. Keep icons and helpers in
-plugin package. Register development bundle through project/global `.pragma/config.json`
-`plugins[]`. Install runtime reporting through host's own mechanism:
+plugin package. **The Pragma-side `dist/pragma-plugin.mjs` must stay browser-safe:** the
+desktop webview loads it through a blob-URL `import()`, so a bare `node:fs` / `node:os`
+/ `node:path` import fails the whole plugin with "Importing a module script failed".
+Host I/O (caches, credential probes, model lists) goes through `ctx.sdk.exec.run` so it
+also hits the correct machine for a remote project. Register development bundle through
+project/global `.pragma/config.json` `plugins[]`. Install runtime reporting through
+host's own mechanism:
 
 - OpenCode: absolute built `dist/index.mjs` path in OpenCode `plugin` config.
 - Claude Code: marketplace add/install.
