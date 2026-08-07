@@ -31,7 +31,7 @@ type SourceState =
   | { kind: "unsupported"; reason: string }
   | { kind: "error"; message: string };
 
-export function AutomationsWorkspace() {
+export function AutomationsWorkspace({ embedded = false }: { embedded?: boolean }) {
   const kanban = useKanban();
   const { automations, loading } = useAutomations();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,26 +39,31 @@ export function AutomationsWorkspace() {
     automations.find((automation) => automation.id === selectedId) ?? automations[0] ?? null;
   const grouped = useMemo(() => groupAutomations(automations), [automations]);
 
-  return (
-    <section className="bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      {/* Titlebar drag strip: this workspace replaces the project sidebar (which
-          otherwise owns the drag handle), so it has to expose one itself. */}
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
-      <header
-        className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 pt-[calc(var(--titlebar-height,0px)+0.75rem)] pb-3"
-        onMouseDown={startWindowDrag}
-      >
-        <div>
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-cyan-300" />
-            <h1 className="text-sm font-semibold">Automations</h1>
-            {loading ? <Pill>loading</Pill> : null}
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Host-side cron and event automations from <code>~/.pragma</code> and project{" "}
-            <code>.pragma</code>.
-          </p>
+  const header = (
+    /* Titlebar drag strip: the standalone workspace replaces the project
+        sidebar (which otherwise owns the drag handle), so it exposes one
+        itself. Embedded in Settings the settings header owns the drag strip. */
+    /* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */
+    <header
+      className={
+        embedded
+          ? "flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 py-3"
+          : "flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 pt-[calc(var(--titlebar-height,0px)+0.75rem)] pb-3"
+      }
+      onMouseDown={embedded ? undefined : startWindowDrag}
+    >
+      <div>
+        <div className="flex items-center gap-2">
+          <Clock className="size-4 text-cyan-300" />
+          <h1 className="text-sm font-semibold">Automations</h1>
+          {loading ? <Pill>loading</Pill> : null}
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Host-side cron and event automations from <code>~/.pragma</code> and project{" "}
+          <code>.pragma</code>.
+        </p>
+      </div>
+      {embedded ? null : (
         <Button
           aria-label="Exit automations"
           size="icon-sm"
@@ -67,43 +72,62 @@ export function AutomationsWorkspace() {
         >
           <X />
         </Button>
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <aside className="w-72 shrink-0 overflow-auto border-r border-sidebar-border bg-sidebar p-3">
-          <AutomationGroup
-            automations={grouped.global}
-            label="Global"
-            selectedId={selected?.id ?? null}
-            onSelect={setSelectedId}
-          />
-          <AutomationGroup
-            automations={grouped.localMain}
-            label="Local"
-            selectedId={selected?.id ?? null}
-            onSelect={setSelectedId}
-          />
-          {grouped.worktrees.map(([label, items]) => (
-            <div className="mt-4 border-l border-sidebar-border pl-3" key={label}>
-              <AutomationGroup
-                automations={items}
-                label={`worktree: ${label}`}
-                selectedId={selected?.id ?? null}
-                onSelect={setSelectedId}
-              />
-            </div>
-          ))}
-        </aside>
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {selected ? (
-            <AutomationEditor automation={selected} />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              No automations found. Add a <code className="mx-1">.ts</code> file under{" "}
-              <code className="mx-1">.pragma/automations</code>.
-            </div>
-          )}
-        </main>
+      )}
+    </header>
+  );
+
+  const body = (
+    <div className="flex min-h-0 flex-1">
+      <aside className="w-72 shrink-0 overflow-auto border-r border-sidebar-border bg-sidebar p-3">
+        <AutomationGroup
+          automations={grouped.global}
+          label="Global"
+          selectedId={selected?.id ?? null}
+          onSelect={setSelectedId}
+        />
+        <AutomationGroup
+          automations={grouped.localMain}
+          label="Local"
+          selectedId={selected?.id ?? null}
+          onSelect={setSelectedId}
+        />
+        {grouped.worktrees.map(([label, items]) => (
+          <div className="mt-4 border-l border-sidebar-border pl-3" key={label}>
+            <AutomationGroup
+              automations={items}
+              label={`worktree: ${label}`}
+              selectedId={selected?.id ?? null}
+              onSelect={setSelectedId}
+            />
+          </div>
+        ))}
+      </aside>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {selected ? (
+          <AutomationEditor automation={selected} />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            No automations found. Add a <code className="mx-1">.ts</code> file under{" "}
+            <code className="mx-1">.pragma/automations</code>.
+          </div>
+        )}
+      </main>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="bg-canvas flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+        {header}
+        {body}
       </div>
+    );
+  }
+
+  return (
+    <section className="bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {header}
+      {body}
     </section>
   );
 }

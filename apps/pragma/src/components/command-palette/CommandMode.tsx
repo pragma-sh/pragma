@@ -319,10 +319,10 @@ export function CommandMode({
     {
       id: "automations",
       label: "Open automations",
-      keywords: "scheduled tasks workspace",
+      keywords: "scheduled tasks workspace settings",
       icon: Clock,
       run: () => {
-        kanban.openAutomations();
+        kanban.openSettings("automations");
         close();
       },
     },

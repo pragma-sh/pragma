@@ -1,8 +1,21 @@
-import { useEffect, useState } from "react";
-import { ChevronDown, Clock, LayoutGrid, Plus, Settings } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ChevronDown,
+  FolderPlus,
+  GitBranchPlus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
@@ -13,7 +26,7 @@ import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { startWindowDrag } from "@/lib/window-drag";
 import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rendering";
-import { useKanban } from "@/state/kanban-context";
+import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +34,13 @@ export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
   const workspace = useWorkspace();
-  const kanban = useKanban();
   const cycle = useProjectCycle();
+  const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
+
+  const projectId = workspace.selectedProjectId;
+  const mainWorktreeId = projectId
+    ? ((workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain)?.id ?? null)
+    : null;
 
   useEffect(() => {
     function openDialog() {
@@ -32,13 +50,19 @@ export function ProjectSidebar() {
     return () => window.removeEventListener("pragma:create-project", openDialog);
   }, []);
 
+  if (collapsed) {
+    return <CollapsedProjectSidebar onExpand={toggleCollapsed} />;
+  }
+
   return (
     <aside
-      className="bg-sidebar flex w-72 shrink-0 touch-pan-y flex-col border-r border-sidebar-border"
+      className="bg-sidebar relative flex shrink-0 touch-pan-y flex-col border-r border-sidebar-border"
+      style={{ width }}
       onWheel={cycle.onWheel}
       onTouchStart={cycle.onTouchStart}
       onTouchEnd={cycle.onTouchEnd}
     >
+      <SidebarResizeHandle onResize={setWidth} />
       {/* Draggable titlebar strip: clears the inset macOS traffic lights and
           gives the frameless window a drag handle. The project row itself is
           the drag handle so content sits right under the reserved titlebar. */}
@@ -50,45 +74,14 @@ export function ProjectSidebar() {
         <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
           {workspace.activeProject?.name ?? "Pragma"}
         </h2>
-        <div className="flex items-center gap-0.5">
-          <Button
-            aria-label="Toggle prompt board"
-            aria-pressed={kanban.mode === "kanban"}
-            disabled={!workspace.selectedProjectId}
-            size="icon-sm"
-            variant={kanban.mode === "kanban" ? "secondary" : "ghost"}
-            onClick={() => (kanban.mode === "kanban" ? kanban.exitBoard() : kanban.openBoard())}
-          >
-            <LayoutGrid />
-          </Button>
-          <Button
-            aria-label="Toggle automations"
-            aria-pressed={kanban.mode === "automations"}
-            size="icon-sm"
-            variant={kanban.mode === "automations" ? "secondary" : "ghost"}
-            onClick={() =>
-              kanban.mode === "automations" ? kanban.exitBoard() : kanban.openAutomations()
-            }
-          >
-            <Clock />
-          </Button>
-          <Button
-            aria-label="Open settings"
-            size="icon-sm"
-            variant="ghost"
-            onClick={kanban.openSettings}
-          >
-            <Settings />
-          </Button>
-          <Button
-            aria-label="Add project"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setProjectDialogOpen(true)}
-          >
-            <Plus />
-          </Button>
-        </div>
+        <Button
+          aria-label="Collapse project sidebar"
+          size="icon-sm"
+          variant="ghost"
+          onClick={toggleCollapsed}
+        >
+          <PanelLeftClose />
+        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
@@ -98,11 +91,115 @@ export function ProjectSidebar() {
         <ScratchpadsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />
-        <ProjectSwitcher />
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <ProjectSwitcher />
+          </div>
+          <AddMenu
+            worktreeDisabled={!mainWorktreeId}
+            onAddProject={() => setProjectDialogOpen(true)}
+            onNewWorktree={() => setWorktreeDialogOpen(true)}
+          />
+        </div>
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
-      <CreateWorktreeDialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen} />
+      <CreateWorktreeDialog
+        open={worktreeDialogOpen}
+        onOpenChange={setWorktreeDialogOpen}
+        parentWorktreeId={mainWorktreeId ?? undefined}
+      />
     </aside>
+  );
+}
+
+/** The "+" menu beside the project switcher: new worktree off main, or add a project. */
+function AddMenu({
+  worktreeDisabled,
+  onAddProject,
+  onNewWorktree,
+}: {
+  worktreeDisabled: boolean;
+  onAddProject: () => void;
+  onNewWorktree: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button aria-label="Add project or worktree" size="icon-sm" variant="ghost">
+          <Plus />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top">
+        <DropdownMenuItem disabled={worktreeDisabled} onSelect={onNewWorktree}>
+          <GitBranchPlus />
+          New worktree off main
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onAddProject}>
+          <FolderPlus />
+          Add project
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The collapsed strip: a single expand button, mirroring the right sidebar. */
+function CollapsedProjectSidebar({ onExpand }: { onExpand: () => void }) {
+  return (
+    <div className="bg-sidebar flex w-9 shrink-0 flex-col border-r border-sidebar-border">
+      {/* On macOS the collapsed strip sits under the inset traffic lights (their
+          x-inset overlaps a 36px rail), so the strip itself is the drag handle
+          and the expand button drops below the lights. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
+      <div
+        className="titlebar-pad flex flex-1 flex-col items-center pb-2"
+        onMouseDown={startWindowDrag}
+      >
+        <Button
+          aria-label="Expand project sidebar"
+          className="mt-2"
+          onClick={onExpand}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <PanelLeftOpen />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Right-edge drag handle that resizes the (left-anchored) sidebar. */
+function SidebarResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  return (
+    <div
+      aria-hidden
+      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/40"
+      onPointerDown={(event) => {
+        const parent = event.currentTarget.parentElement;
+        if (!parent) {
+          return;
+        }
+        dragRef.current = {
+          startX: event.clientX,
+          startWidth: parent.getBoundingClientRect().width,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const drag = dragRef.current;
+        if (!drag) {
+          return;
+        }
+        onResize(drag.startWidth + (event.clientX - drag.startX));
+      }}
+      onPointerUp={(event) => {
+        dragRef.current = null;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+    />
   );
 }
 
