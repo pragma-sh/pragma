@@ -39,16 +39,24 @@ import { Button } from "@/components/ui/button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { editorLaunchers } from "@/lib/editor-launchers";
-import { worktreesMergedStatus } from "@/lib/tauri";
+import {
+  findPullRequestForBranch,
+  pullRequestLifecycle,
+  type GitHubPrLifecycle,
+} from "@/lib/github";
+import { githubRepoRef, worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
+/** PR lifecycle poll — matches the Pull Request tab so both stay in lockstep. */
+const PR_STATUS_REFRESH_INTERVAL_MS = 10_000;
 
 /** True when both maps hold exactly the same worktree-id → merged entries. */
 function sameMergedStatus(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
@@ -57,12 +65,42 @@ function sameMergedStatus(a: Record<string, boolean>, b: Record<string, boolean>
   return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
 }
 
+/** True when both maps hold the same worktree-id → PR lifecycle entries. */
+function samePrLifecycle(
+  a: Record<string, GitHubPrLifecycle>,
+  b: Record<string, GitHubPrLifecycle>,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
+}
+
+/**
+ * Icon color for the worktree merge glyph from PR lifecycle:
+ * open → green, merged → purple (`skill`), closed → red. Draft / none stay default.
+ */
+function prLifecycleIconClass(lifecycle: GitHubPrLifecycle | undefined): string | undefined {
+  switch (lifecycle) {
+    case "open":
+      return "text-success";
+    case "merged":
+      return "text-skill";
+    case "closed":
+      return "text-destructive";
+    case "merging":
+      return "text-warning";
+    default:
+      return undefined;
+  }
+}
+
 interface WorktreeTreeProps {
   onCreateChild: () => void;
 }
 
 export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const workspace = useWorkspace();
+  const { authenticated } = useGitHub();
   const pinTimes = useWorktreePins();
   const worktrees = useMemo(
     () =>
@@ -76,6 +114,9 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const hidden = worktrees.filter((w) => w.hidden);
   const [showHidden, setShowHidden] = useState(false);
   const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
+  const [prLifecycleByWorktreeId, setPrLifecycleByWorktreeId] = useState<
+    Record<string, GitHubPrLifecycle>
+  >({});
 
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
@@ -120,6 +161,57 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     };
   }, [worktrees]);
 
+  // Poll GitHub PR lifecycle per child worktree (cached; background revalidate).
+  // Green = open PR, purple = merged, red = closed. Same cadence as the PR tab.
+  useEffect(() => {
+    const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
+    if (!authenticated || childWorktrees.length === 0) {
+      setPrLifecycleByWorktreeId((previous) =>
+        Object.keys(previous).length === 0 ? previous : {},
+      );
+      return;
+    }
+    let cancelled = false;
+    let refreshInFlight = false;
+
+    async function refreshPrLifecycle() {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      try {
+        const entries = await Promise.all(
+          childWorktrees.map(async (worktree) => {
+            try {
+              const repo = await githubRepoRef(worktree.id);
+              const pr = await findPullRequestForBranch(repo, { includeClosed: true });
+              return [worktree.id, pullRequestLifecycle(pr)] as const;
+            } catch {
+              return [worktree.id, "none" as const] as const;
+            }
+          }),
+        );
+        if (cancelled) return;
+        const next: Record<string, GitHubPrLifecycle> = {};
+        for (const [id, lifecycle] of entries) {
+          if (lifecycle !== "none") next[id] = lifecycle;
+        }
+        setPrLifecycleByWorktreeId((previous) =>
+          samePrLifecycle(previous, next) ? previous : next,
+        );
+      } finally {
+        refreshInFlight = false;
+      }
+    }
+
+    void refreshPrLifecycle();
+    const interval = setInterval(() => {
+      if (!document.hidden) void refreshPrLifecycle();
+    }, PR_STATUS_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [worktrees, authenticated]);
+
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
   }
@@ -133,6 +225,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
           mergedByWorktreeId={mergedByWorktreeId}
           node={node}
           onCreateChild={onCreateChild}
+          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
         />
       ))}
       {hidden.length > 0 ? (
@@ -150,6 +243,7 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
                   key={worktree.id}
                   merged={mergedByWorktreeId[worktree.id] === true}
                   onUnhide={() => void workspace.hideWorktree(worktree.id, false)}
+                  prLifecycle={prLifecycleByWorktreeId[worktree.id]}
                   worktree={worktree}
                 />
               ))
@@ -227,6 +321,7 @@ interface WorktreeRowLabelState {
   isMain: boolean;
   label: string;
   merged: boolean;
+  prLifecycle: GitHubPrLifecycle | undefined;
   pinned: boolean;
   selected: boolean;
   WorktreeIcon: typeof GitBranch;
@@ -301,6 +396,7 @@ function WorktreeNameField({ rename, label }: { rename: RenameApi; label: string
 function WorktreeRowPrimaryButton({
   isMain,
   merged,
+  prLifecycle,
   WorktreeIcon,
   agentStatus,
   handleSelect,
@@ -310,6 +406,7 @@ function WorktreeRowPrimaryButton({
 }: {
   isMain: boolean;
   merged: boolean;
+  prLifecycle: GitHubPrLifecycle | undefined;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
   handleSelect: () => void;
@@ -317,13 +414,15 @@ function WorktreeRowPrimaryButton({
   rename: RenameApi;
   label: string;
 }) {
+  // Prefer PR lifecycle color (open/merged/closed); fall back to local-merged green.
+  const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
   return (
     <button
       className="flex min-w-0 flex-1 items-center gap-2 text-left"
       onClick={handleSelect}
       onDoubleClick={isMain ? undefined : startRename}
     >
-      <WorktreeIcon className={cn("size-3.5 shrink-0", merged && "text-success")} />
+      <WorktreeIcon className={cn("size-3.5 shrink-0", iconClass)} />
       <WorktreeNameField label={label} rename={rename} />
       <AgentStatusDot status={agentStatus} />
     </button>
@@ -420,6 +519,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       isMain,
       label,
       merged,
+      prLifecycle,
       pinned,
       selected,
       WorktreeIcon,
@@ -456,6 +556,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
           isMain={isMain}
           label={label}
           merged={merged}
+          prLifecycle={prLifecycle}
           rename={rename}
           startRename={startRename}
           WorktreeIcon={WorktreeIcon}
@@ -579,11 +680,13 @@ function WorktreeRow({
   depth,
   onCreateChild,
   mergedByWorktreeId,
+  prLifecycleByWorktreeId,
 }: {
   node: WorktreeNode;
   depth: number;
   onCreateChild: () => void;
   mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {
   const workspace = useWorkspace();
   const kanban = useKanban();
@@ -596,7 +699,9 @@ function WorktreeRow({
   const isMain = node.worktree.isMain;
   const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
-  const WorktreeIcon = merged ? GitMerge : GitBranch;
+  const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
+  // Show merge icon for a merged PR or a fully-merged local branch.
+  const WorktreeIcon = merged || prLifecycle === "merged" ? GitMerge : GitBranch;
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
 
   const handleSelect = useCallback(() => {
@@ -637,6 +742,7 @@ function WorktreeRow({
               isMain,
               label,
               merged,
+              prLifecycle,
               pinned,
               selected,
               WorktreeIcon,
@@ -669,6 +775,7 @@ function WorktreeRow({
             node={child}
             onCreateChild={onCreateChild}
             mergedByWorktreeId={mergedByWorktreeId}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
           />
         ))}
     </div>
@@ -678,18 +785,21 @@ function WorktreeRow({
 function HiddenWorktreeRow({
   worktree,
   merged,
+  prLifecycle,
   onUnhide,
 }: {
   worktree: Worktree;
   merged: boolean;
+  prLifecycle: GitHubPrLifecycle | undefined;
   onUnhide: () => void;
 }) {
   const label = worktree.title ?? worktree.branch;
-  const WorktreeIcon = merged ? GitMerge : GitBranch;
+  const WorktreeIcon = merged || prLifecycle === "merged" ? GitMerge : GitBranch;
+  const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
   return (
     <div className="mt-1 flex items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-1.5">
-        <WorktreeIcon className={cn("size-3 shrink-0", merged && "text-success")} />
+        <WorktreeIcon className={cn("size-3 shrink-0", iconClass)} />
         <span className="truncate">{label}</span>
       </div>
       <Button aria-label={`Show ${label}`} size="icon-xs" variant="ghost" onClick={onUnhide}>

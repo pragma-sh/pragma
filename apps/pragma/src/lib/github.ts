@@ -2,7 +2,16 @@ import type { GitHubRepoRef } from "@pragma/constants";
 import { constants } from "@pragma/constants";
 import { Octokit } from "octokit";
 
+import {
+  cachedFetch,
+  githubCacheKeys,
+  invalidateGitHubCache,
+  peekGitHubCache,
+  type GitHubPrLifecycle,
+} from "@/lib/github-cache";
 import { githubToken } from "@/lib/tauri";
+
+export type { GitHubPrLifecycle } from "@/lib/github-cache";
 
 /**
  * The **single** Octokit entry point — the only place `new Octokit()` happens,
@@ -43,6 +52,21 @@ async function client(): Promise<Octokit> {
 /** Drops the cached client so the next call rebuilds it (after sign-in/out). */
 export function resetGitHubClient(): void {
   cached = null;
+  invalidateGitHubCache();
+}
+
+/**
+ * Lifecycle badge for a PR summary (or `none` when no PR). Used by the worktree
+ * sidebar merge glyph and the PR header chip.
+ */
+export function pullRequestLifecycle(
+  pr: Pick<PullRequestSummary, "state" | "merged" | "draft"> | null | undefined,
+): GitHubPrLifecycle {
+  if (!pr) return "none";
+  if (pr.merged) return "merged";
+  if (pr.state === "closed") return "closed";
+  if (pr.draft) return "draft";
+  return "open";
 }
 
 /** A pull request, reduced to the fields the UI renders. */
@@ -205,28 +229,33 @@ function toSummary(pr: PullLike): PullRequestSummary {
 }
 
 /**
- * Searches one repository for the open PR whose head is this worktree's branch.
+ * Searches one repository for the PR whose head is this worktree's branch.
  *
  * The `head`-filtered list is GitHub's documented path but is **eventually
  * consistent** — a just-opened PR can be missing from it for several seconds.
- * So when the filter comes back empty we fall back to scanning the open PRs and
- * matching `head.ref` locally, guaranteeing we surface an existing PR instead of
- * dropping back to the create view. The head filter is always qualified with the
- * origin owner (`owner:branch`), GitHub's cross-fork head syntax, so this works
- * whether `target` is the origin repo or its upstream parent.
+ * So when the filter comes back empty we fall back to scanning PRs and matching
+ * `head.ref` locally. Prefer open PRs; when `includeClosed` is set also check
+ * closed/merged so the sidebar can paint purple/red after merge.
+ *
+ * The head filter is always qualified with the origin owner (`owner:branch`),
+ * GitHub's cross-fork head syntax.
  */
 async function findPullInRepo(
   octokit: Octokit,
   repo: GitHubRepoRef,
   target: { owner: string; repo: string },
+  options?: { includeClosed?: boolean },
 ): Promise<PullRequestSummary | null> {
+  const state = options?.includeClosed ? "all" : "open";
   const { data } = await octokit.rest.pulls.list({
     owner: target.owner,
     repo: target.repo,
     head: `${repo.owner}:${repo.headBranch}`,
-    state: "open",
+    state,
   });
-  const filtered = data[0];
+  // Prefer an open PR when both open + closed match the head (reopened branches).
+  const filtered =
+    data.find((pr) => pr.state === "open") ?? (options?.includeClosed ? data[0] : undefined);
   if (filtered) {
     const { data: pull } = await octokit.rest.pulls.get({
       owner: target.owner,
@@ -235,13 +264,15 @@ async function findPullInRepo(
     });
     return toSummary(pull);
   }
-  const open = await octokit.paginate(octokit.rest.pulls.list, {
+  const listed = await octokit.paginate(octokit.rest.pulls.list, {
     owner: target.owner,
     repo: target.repo,
-    state: "open",
+    state,
     per_page: 100,
   });
-  const match = open.find((pr) => pr.head.ref === repo.headBranch);
+  const match =
+    listed.find((pr) => pr.head.ref === repo.headBranch && pr.state === "open") ??
+    (options?.includeClosed ? listed.find((pr) => pr.head.ref === repo.headBranch) : undefined);
   if (!match) {
     return null;
   }
@@ -266,16 +297,46 @@ async function findPullInRepo(
  */
 export async function findPullRequestForBranch(
   repo: GitHubRepoRef,
+  options?: { force?: boolean; includeClosed?: boolean },
 ): Promise<PullRequestSummary | null> {
-  const octokit = await client();
-  const fromOrigin = await findPullInRepo(octokit, repo, { owner: repo.owner, repo: repo.repo });
-  if (fromOrigin) {
-    return fromOrigin;
-  }
-  const upstream = (await listBaseRepoOptions(repo)).find((target) => target.isUpstream);
-  return upstream
-    ? findPullInRepo(octokit, repo, { owner: upstream.owner, repo: upstream.repo })
-    : null;
+  const keys = githubCacheKeys(repo);
+  // Separate cache key when including closed so the PR tab's open-only lookup
+  // never serves a merged PR and drops the user onto a closed view by mistake.
+  const cacheKey = options?.includeClosed
+    ? `${keys.prForBranch(repo.headBranch)}:all`
+    : keys.prForBranch(repo.headBranch);
+  return cachedFetch(
+    cacheKey,
+    async () => {
+      const octokit = await client();
+      const findOpts = { includeClosed: options?.includeClosed };
+      const fromOrigin = await findPullInRepo(
+        octokit,
+        repo,
+        { owner: repo.owner, repo: repo.repo },
+        findOpts,
+      );
+      if (fromOrigin) {
+        // Seed the by-number cache so getPullRequest / review tabs hit immediately.
+        void cachedFetch(keys.pr(fromOrigin.number), async () => fromOrigin, { force: true });
+        return fromOrigin;
+      }
+      const upstream = (await listBaseRepoOptions(repo)).find((target) => target.isUpstream);
+      const crossFork = upstream
+        ? await findPullInRepo(
+            octokit,
+            repo,
+            { owner: upstream.owner, repo: upstream.repo },
+            findOpts,
+          )
+        : null;
+      if (crossFork) {
+        void cachedFetch(keys.pr(crossFork.number), async () => crossFork, { force: true });
+      }
+      return crossFork;
+    },
+    { force: options?.force, ttlMs: 15_000 },
+  );
 }
 
 /** A repository a pull request can be opened against (the base-repository selector). */
@@ -301,32 +362,43 @@ interface RepoLike {
  * listed first because the default base lives there (the parent worktree branch).
  */
 export async function listBaseRepoOptions(repo: GitHubRepoRef): Promise<RepoTarget[]> {
-  const octokit = await client();
-  const { data } = await octokit.rest.repos.get({ owner: repo.owner, repo: repo.repo });
-  const info = data as RepoLike;
-  const options: RepoTarget[] = [
-    { owner: repo.owner, repo: repo.repo, defaultBranch: info.default_branch, isUpstream: false },
-  ];
-  if (info.fork && info.parent?.owner) {
-    options.push({
-      owner: info.parent.owner.login,
-      repo: info.parent.name,
-      defaultBranch: info.parent.default_branch,
-      isUpstream: true,
-    });
-  }
-  return options;
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(keys.baseRepos(repo.owner, repo.repo), async () => {
+    const octokit = await client();
+    const { data } = await octokit.rest.repos.get({ owner: repo.owner, repo: repo.repo });
+    const info = data as RepoLike;
+    const options: RepoTarget[] = [
+      {
+        owner: repo.owner,
+        repo: repo.repo,
+        defaultBranch: info.default_branch,
+        isUpstream: false,
+      },
+    ];
+    if (info.fork && info.parent?.owner) {
+      options.push({
+        owner: info.parent.owner.login,
+        repo: info.parent.name,
+        defaultBranch: info.parent.default_branch,
+        isUpstream: true,
+      });
+    }
+    return options;
+  });
 }
 
 /** Lists a repo's branch names (the base-branch dropdown), sorted alphabetically. */
 export async function listBranches(target: { owner: string; repo: string }): Promise<string[]> {
-  const octokit = await client();
-  const branches = await octokit.paginate(octokit.rest.repos.listBranches, {
-    owner: target.owner,
-    repo: target.repo,
-    per_page: 100,
+  const keys = githubCacheKeys(target);
+  return cachedFetch(keys.branches(target.owner, target.repo), async () => {
+    const octokit = await client();
+    const branches = await octokit.paginate(octokit.rest.repos.listBranches, {
+      owner: target.owner,
+      repo: target.repo,
+      per_page: 100,
+    });
+    return branches.map((branch) => branch.name).toSorted((a, b) => a.localeCompare(b));
   });
-  return branches.map((branch) => branch.name).toSorted((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -351,41 +423,64 @@ export async function createPullRequest(
     base: base.branch,
     draft: input.draft,
   });
-  return toSummary(data);
+  const summary = toSummary(data);
+  invalidateGitHubCache(githubCacheKeys(repo).prForBranch(repo.headBranch));
+  const keys = githubCacheKeys({ owner: base.owner, repo: base.repo });
+  void cachedFetch(keys.pr(summary.number), async () => summary, { force: true });
+  void cachedFetch(keys.prForBranch(repo.headBranch), async () => summary, { force: true });
+  return summary;
 }
 
 /** Fetches a single pull request by number. */
 export async function getPullRequest(
   repo: GitHubRepoRef,
   prNumber: number,
+  options?: { force?: boolean },
 ): Promise<PullRequestSummary> {
-  const octokit = await client();
-  const { data } = await octokit.rest.pulls.get({
-    owner: repo.owner,
-    repo: repo.repo,
-    pull_number: prNumber,
-  });
-  return toSummary(data);
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.pr(prNumber),
+    async () => {
+      const octokit = await client();
+      const { data } = await octokit.rest.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: prNumber,
+      });
+      return toSummary(data);
+    },
+    { force: options?.force, ttlMs: 15_000 },
+  );
 }
 
-/** Lists the PR's conversation (issue) comments — read-only in v1. */
+/** Lists the PR's conversation (issue) comments. */
 export async function listIssueComments(
   repo: GitHubRepoRef,
   prNumber: number,
+  options?: { force?: boolean },
 ): Promise<IssueComment[]> {
-  const octokit = await client();
-  const { data } = await octokit.rest.issues.listComments({
-    owner: repo.owner,
-    repo: repo.repo,
-    issue_number: prNumber,
-  });
-  return data.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    htmlUrl: comment.html_url,
-    createdAt: comment.created_at,
-    user: comment.user ? { login: comment.user.login, avatarUrl: comment.user.avatar_url } : null,
-  }));
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.comments(prNumber),
+    async () => {
+      const octokit = await client();
+      const { data } = await octokit.rest.issues.listComments({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: prNumber,
+      });
+      return data.map((comment) => ({
+        id: comment.id,
+        body: comment.body ?? "",
+        htmlUrl: comment.html_url,
+        createdAt: comment.created_at,
+        user: comment.user
+          ? { login: comment.user.login, avatarUrl: comment.user.avatar_url }
+          : null,
+      }));
+    },
+    { force: options?.force },
+  );
 }
 
 /** Posts a new conversation (issue) comment on the PR as the signed-in user. */
@@ -401,13 +496,19 @@ export async function createIssueComment(
     issue_number: prNumber,
     body,
   });
-  return {
+  const mapped: IssueComment = {
     id: comment.id,
     body: comment.body ?? "",
     htmlUrl: comment.html_url,
     createdAt: comment.created_at,
     user: comment.user ? { login: comment.user.login, avatarUrl: comment.user.avatar_url } : null,
   };
+  // Seed the comments cache so a follow-up list doesn't flash the pre-post set.
+  const keys = githubCacheKeys(repo);
+  const prior = peekGitHubCache<IssueComment[]>(keys.comments(prNumber)) ?? [];
+  const next = prior.some((entry) => entry.id === mapped.id) ? prior : [...prior, mapped];
+  void cachedFetch(keys.comments(prNumber), async () => next, { force: true });
+  return mapped;
 }
 
 /** GraphQL response shape for {@link listPullRequestCommits}. */
@@ -490,56 +591,77 @@ function toChecksState(state: string | null): ChecksStatus["state"] {
 export async function listPullRequestCommits(
   repo: GitHubRepoRef,
   prNumber: number,
+  options?: { force?: boolean },
 ): Promise<PullRequestCommit[]> {
-  const octokit = await client();
-  const commits: PullRequestCommit[] = [];
-  let after: string | null = null;
-  do {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- GitHub cursor pagination is sequential.
-    const data: PullRequestCommitsResponse = await octokit.graphql<PullRequestCommitsResponse>(
-      PULL_REQUEST_COMMITS_QUERY,
-      {
-        owner: repo.owner,
-        repo: repo.repo,
-        number: prNumber,
-        after,
-      },
-    );
-    const connection = data.repository.pullRequest.commits;
-    commits.push(
-      ...connection.nodes.map(({ commit }) => ({
-        authors: commit.authors.nodes.map((author) => ({
-          name: author.name,
-          user: author.user ? { login: author.user.login, avatarUrl: author.user.avatarUrl } : null,
-        })),
-        committedAt: commit.committedDate,
-        message: commit.messageHeadline,
-        sha: commit.oid,
-        status: toChecksState(commit.statusCheckRollup?.state ?? null),
-        url: commit.url,
-      })),
-    );
-    after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
-  } while (after);
-  return commits;
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.commits(prNumber),
+    async () => {
+      const octokit = await client();
+      const commits: PullRequestCommit[] = [];
+      let after: string | null = null;
+      do {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- GitHub cursor pagination is sequential.
+        const data: PullRequestCommitsResponse = await octokit.graphql<PullRequestCommitsResponse>(
+          PULL_REQUEST_COMMITS_QUERY,
+          {
+            owner: repo.owner,
+            repo: repo.repo,
+            number: prNumber,
+            after,
+          },
+        );
+        const connection = data.repository.pullRequest.commits;
+        commits.push(
+          ...connection.nodes.map(({ commit }) => ({
+            authors: commit.authors.nodes.map((author) => ({
+              name: author.name,
+              user: author.user
+                ? { login: author.user.login, avatarUrl: author.user.avatarUrl }
+                : null,
+            })),
+            committedAt: commit.committedDate,
+            message: commit.messageHeadline,
+            sha: commit.oid,
+            status: toChecksState(commit.statusCheckRollup?.state ?? null),
+            url: commit.url,
+          })),
+        );
+        after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+      } while (after);
+      return commits;
+    },
+    { force: options?.force },
+  );
 }
 
 /** Lists the files changed in a PR (the review file list). */
-export async function listPullFiles(repo: GitHubRepoRef, prNumber: number): Promise<PullFile[]> {
-  const octokit = await client();
-  const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
-    owner: repo.owner,
-    repo: repo.repo,
-    pull_number: prNumber,
-    per_page: 100,
-  });
-  return files.map((file) => ({
-    path: file.filename,
-    oldPath: file.previous_filename ?? null,
-    status: file.status,
-    additions: file.additions,
-    deletions: file.deletions,
-  }));
+export async function listPullFiles(
+  repo: GitHubRepoRef,
+  prNumber: number,
+  options?: { force?: boolean },
+): Promise<PullFile[]> {
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.files(prNumber),
+    async () => {
+      const octokit = await client();
+      const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+      return files.map((file) => ({
+        path: file.filename,
+        oldPath: file.previous_filename ?? null,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+      }));
+    },
+    { force: options?.force },
+  );
 }
 
 /**
@@ -551,24 +673,34 @@ export async function listPullFiles(repo: GitHubRepoRef, prNumber: number): Prom
 export async function listPullReviews(
   repo: GitHubRepoRef,
   prNumber: number,
+  options?: { force?: boolean },
 ): Promise<PullReview[]> {
-  const octokit = await client();
-  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
-    owner: repo.owner,
-    repo: repo.repo,
-    pull_number: prNumber,
-    per_page: 100,
-  });
-  return reviews
-    .filter((review) => (review.body ?? "").trim().length > 0 || review.state !== "COMMENTED")
-    .map((review) => ({
-      id: review.id,
-      body: review.body ?? "",
-      state: review.state as PullReview["state"],
-      htmlUrl: review.html_url,
-      submittedAt: review.submitted_at ?? null,
-      user: review.user ? { login: review.user.login, avatarUrl: review.user.avatar_url } : null,
-    }));
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.reviews(prNumber),
+    async () => {
+      const octokit = await client();
+      const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+      return reviews
+        .filter((review) => (review.body ?? "").trim().length > 0 || review.state !== "COMMENTED")
+        .map((review) => ({
+          id: review.id,
+          body: review.body ?? "",
+          state: review.state as PullReview["state"],
+          htmlUrl: review.html_url,
+          submittedAt: review.submitted_at ?? null,
+          user: review.user
+            ? { login: review.user.login, avatarUrl: review.user.avatar_url }
+            : null,
+        }));
+    },
+    { force: options?.force },
+  );
 }
 
 /** GraphQL response shape for {@link listReviewThreads}. */
@@ -576,41 +708,60 @@ interface ReviewThreadsResponse {
   repository: {
     pullRequest: {
       reviewThreads: {
+        pageInfo: {
+          endCursor: string | null;
+          hasNextPage: boolean;
+        };
         nodes: Array<{
           id: string;
           isResolved: boolean;
           path: string;
           line: number | null;
+          originalLine: number | null;
           comments: {
             nodes: Array<{
               databaseId: number | null;
               body: string;
               createdAt: string;
-              author: { login: string; avatarUrl: string } | null;
+              author: {
+                login: string;
+                // avatarUrl only exists on User / Bot / Mannequin — fetched via inline fragments.
+                avatarUrl?: string;
+              } | null;
             }>;
           };
         }>;
       };
-    };
-  };
+    } | null;
+  } | null;
 }
 
+// `Actor.avatarUrl` is not on the GraphQL interface — only concrete types have it.
+// Inline fragments keep the query valid; without them the whole threads call 400s
+// and the review UI shows zero comments.
 const REVIEW_THREADS_QUERY = `
-  query ($owner: String!, $repo: String!, $number: Int!) {
+  query ($owner: String!, $repo: String!, $number: Int!, $after: String) {
     repository(owner: $owner, name: $repo) {
       pullRequest(number: $number) {
-        reviewThreads(first: 100) {
+        reviewThreads(first: 100, after: $after) {
+          pageInfo { endCursor hasNextPage }
           nodes {
             id
             isResolved
             path
             line
+            originalLine
             comments(first: 50) {
               nodes {
                 databaseId
                 body
                 createdAt
-                author { login avatarUrl }
+                author {
+                  login
+                  ... on User { avatarUrl }
+                  ... on Bot { avatarUrl }
+                  ... on Mannequin { avatarUrl }
+                }
               }
             }
           }
@@ -623,32 +774,61 @@ const REVIEW_THREADS_QUERY = `
 /**
  * Lists the PR's review threads with their resolved state via GraphQL — REST
  * exposes neither the thread node id (needed to resolve) nor `isResolved`, so
- * this single GraphQL call subsumes `pulls.listReviewComments` for the review UI.
+ * this call subsumes `pulls.listReviewComments` for the review UI.
+ *
+ * `line` is null for outdated threads whose anchor left the latest diff; we fall
+ * back to `originalLine` so comments still render next to the closest remaining
+ * line rather than disappearing from the review tab.
  */
 export async function listReviewThreads(
   repo: GitHubRepoRef,
   prNumber: number,
+  options?: { force?: boolean },
 ): Promise<ReviewThread[]> {
-  const octokit = await client();
-  const data = await octokit.graphql<ReviewThreadsResponse>(REVIEW_THREADS_QUERY, {
-    owner: repo.owner,
-    repo: repo.repo,
-    number: prNumber,
-  });
-  return data.repository.pullRequest.reviewThreads.nodes.map((thread) => ({
-    id: thread.id,
-    path: thread.path,
-    line: thread.line,
-    isResolved: thread.isResolved,
-    comments: thread.comments.nodes.map((comment) => ({
-      id: comment.databaseId ?? 0,
-      body: comment.body,
-      createdAt: comment.createdAt,
-      user: comment.author
-        ? { login: comment.author.login, avatarUrl: comment.author.avatarUrl }
-        : null,
-    })),
-  }));
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.threads(prNumber),
+    async () => {
+      const octokit = await client();
+      const threads: ReviewThread[] = [];
+      let after: string | null = null;
+      do {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- GitHub cursor pagination is sequential.
+        const data: ReviewThreadsResponse = await octokit.graphql(REVIEW_THREADS_QUERY, {
+          owner: repo.owner,
+          repo: repo.repo,
+          number: prNumber,
+          after,
+        });
+        const connection = data.repository?.pullRequest?.reviewThreads;
+        if (!connection) {
+          break;
+        }
+        for (const thread of connection.nodes) {
+          threads.push({
+            id: thread.id,
+            path: thread.path,
+            line: thread.line ?? thread.originalLine,
+            isResolved: thread.isResolved,
+            comments: thread.comments.nodes.map((comment) => ({
+              id: comment.databaseId ?? 0,
+              body: comment.body,
+              createdAt: comment.createdAt,
+              user: comment.author
+                ? {
+                    login: comment.author.login,
+                    avatarUrl: comment.author.avatarUrl ?? "",
+                  }
+                : null,
+            })),
+          });
+        }
+        after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+      } while (after);
+      return threads;
+    },
+    { force: options?.force },
+  );
 }
 
 /** Marks a review thread resolved (GraphQL — REST can't resolve threads). */
@@ -723,36 +903,56 @@ function checksStateFromCounts(counts: ChecksCounts): ChecksStatus["state"] {
 }
 
 /** Summarizes CI checks + commit statuses for a ref (the merge card). */
-export async function getChecksStatus(repo: GitHubRepoRef, ref: string): Promise<ChecksStatus> {
-  const octokit = await client();
-  const [checks, combined] = await Promise.all([
-    octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref, per_page: 100 }),
-    octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref }),
-  ]);
+export async function getChecksStatus(
+  repo: GitHubRepoRef,
+  ref: string,
+  options?: { force?: boolean },
+): Promise<ChecksStatus> {
+  const keys = githubCacheKeys(repo);
+  return cachedFetch(
+    keys.checks(ref),
+    async () => {
+      const octokit = await client();
+      const [checks, combined] = await Promise.all([
+        octokit.rest.checks.listForRef({
+          owner: repo.owner,
+          repo: repo.repo,
+          ref,
+          per_page: 100,
+        }),
+        octokit.rest.repos.getCombinedStatusForRef({
+          owner: repo.owner,
+          repo: repo.repo,
+          ref,
+        }),
+      ]);
 
-  const items: CheckStatusItem[] = [
-    ...checks.data.check_runs.map((run) => ({
-      name: run.name || "GitHub check",
-      state: checkRunState(run),
-      url: run.details_url ?? null,
-    })),
-    ...combined.data.statuses.map((status) => ({
-      name: status.context || "Commit status",
-      state: commitStatusState(status.state),
-      url: status.target_url ?? null,
-    })),
-  ];
-  const counts: ChecksCounts = { passed: 0, failed: 0, pending: 0 };
-  for (const item of items) tallyItem(item, counts);
+      const items: CheckStatusItem[] = [
+        ...checks.data.check_runs.map((run) => ({
+          name: run.name || "GitHub check",
+          state: checkRunState(run),
+          url: run.details_url ?? null,
+        })),
+        ...combined.data.statuses.map((status) => ({
+          name: status.context || "Commit status",
+          state: commitStatusState(status.state),
+          url: status.target_url ?? null,
+        })),
+      ];
+      const counts: ChecksCounts = { passed: 0, failed: 0, pending: 0 };
+      for (const item of items) tallyItem(item, counts);
 
-  return {
-    state: checksStateFromCounts(counts),
-    total: items.length,
-    passed: counts.passed,
-    failed: counts.failed,
-    pending: counts.pending,
-    items,
-  };
+      return {
+        state: checksStateFromCounts(counts),
+        total: items.length,
+        passed: counts.passed,
+        failed: counts.failed,
+        pending: counts.pending,
+        items,
+      };
+    },
+    { force: options?.force, ttlMs: 15_000 },
+  );
 }
 
 /** Merges a pull request with the given strategy (default: a merge commit). */
@@ -768,4 +968,10 @@ export async function mergePullRequest(
     pull_number: prNumber,
     merge_method: method,
   });
+  // Drop every cached view of this PR so the next poll shows merged.
+  const keys = githubCacheKeys(repo);
+  invalidateGitHubCache(keys.pr(prNumber));
+  invalidateGitHubCache(keys.prForBranch(""));
+  // Also wipe branch-keyed entries for this repo (head branch unknown here).
+  invalidateGitHubCache(`pr-branch:${repo.owner}/${repo.repo}:`);
 }

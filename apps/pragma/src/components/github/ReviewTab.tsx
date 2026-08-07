@@ -86,33 +86,44 @@ function buildCommentKeys(files: PullFile[], threadsByPath: Map<string, ReviewTh
 function useReviewData(worktreeId: string, prNumber: number | null) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const active = useRef(true);
+  // First paint goes through loading; later background refetches keep ready data
+  // on screen so a cache hit doesn't flash the spinner again.
+  const hasReady = useRef(false);
 
-  const load = useCallback(async () => {
-    if (prNumber === null || prNumber === undefined) {
-      setState({ kind: "error", message: "This review tab is missing its pull request number." });
-      return;
-    }
-    setState({ kind: "loading" });
-    try {
-      const repo = await githubRepoRef(worktreeId);
-      const [pr, files, reviews, threads] = await Promise.all([
-        getPullRequest(repo, prNumber),
-        listPullFiles(repo, prNumber),
-        listPullReviews(repo, prNumber),
-        listReviewThreads(repo, prNumber),
-      ]);
-      if (active.current) {
-        setState({
-          kind: "ready",
-          data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
-        });
+  const load = useCallback(
+    async (force = false) => {
+      if (prNumber === null || prNumber === undefined) {
+        setState({ kind: "error", message: "This review tab is missing its pull request number." });
+        return;
       }
-    } catch (cause) {
-      if (active.current) {
-        setState({ kind: "error", message: errorMessage(cause) });
+      if (!hasReady.current) {
+        setState({ kind: "loading" });
       }
-    }
-  }, [worktreeId, prNumber]);
+      try {
+        const repo = await githubRepoRef(worktreeId);
+        // Parallel + cached: cache hits return immediately, misses coalesce, and a
+        // stale hit returns now while a background revalidate refreshes the store.
+        const [pr, files, reviews, threads] = await Promise.all([
+          getPullRequest(repo, prNumber, { force }),
+          listPullFiles(repo, prNumber, { force }),
+          listPullReviews(repo, prNumber, { force }),
+          listReviewThreads(repo, prNumber, { force }),
+        ]);
+        if (active.current) {
+          hasReady.current = true;
+          setState({
+            kind: "ready",
+            data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
+          });
+        }
+      } catch (cause) {
+        if (active.current && !hasReady.current) {
+          setState({ kind: "error", message: errorMessage(cause) });
+        }
+      }
+    },
+    [worktreeId, prNumber],
+  );
 
   // Optimistically flips one thread's resolved state in place — no refetch, so the
   // diff panes and decorations don't flash. Stable (functional update) so each
@@ -142,7 +153,8 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
 
   useEffect(() => {
     active.current = true;
-    void load();
+    hasReady.current = false;
+    void load(false);
     return () => {
       active.current = false;
     };

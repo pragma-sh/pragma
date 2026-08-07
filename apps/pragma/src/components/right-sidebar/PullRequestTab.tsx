@@ -7,7 +7,7 @@ import { CreatePullRequestView } from "@/components/github/CreatePullRequestView
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { ViewPullRequestView } from "@/components/github/ViewPullRequestView";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
-import { findPullRequestForBranch, type PullRequestSummary } from "@/lib/github";
+import { findPullRequestForBranch, getPullRequest, type PullRequestSummary } from "@/lib/github";
 import { type AiPullRequestDraft, githubRepoRef } from "@/lib/tauri";
 import { useGitHub } from "@/state/github-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -16,7 +16,8 @@ import { useWorkspace } from "@/state/workspace-context";
  * How often the Pull Request subtab re-resolves its state while mounted. GitHub
  * has no push channel here, so we poll like `ChangesTab` — but at a slower beat,
  * since each refresh is a remote API round-trip subject to rate limits and PR
- * state changes far less often than the working tree.
+ * state changes far less often than the working tree. Cached responses make
+ * each tick cheap when nothing changed.
  */
 const PR_REFRESH_INTERVAL_MS = 10_000;
 
@@ -29,7 +30,8 @@ const PR_REFRESH_INTERVAL_MS = 10_000;
  * - **an open PR** → the view view.
  *
  * Like `ChangesTab` it polls so externally created/merged PRs are reflected, and
- * drops in-flight responses for a stale worktree.
+ * drops in-flight responses for a stale worktree. Cache hits paint immediately;
+ * background revalidation keeps merge status fresh while the tab is open.
  */
 export function PullRequestTab({
   generatedDraft,
@@ -88,25 +90,54 @@ function PullRequestResolver({
   // Drops responses for a stale worktree (the resolver is keyed by worktree, so
   // this also guards against a poll landing after unmount).
   const active = useRef(true);
+  const hasResolved = useRef(false);
+  // Keep the last viewed PR number so a poll after merge still refreshes that PR
+  // (open-only branch lookup would otherwise drop us onto the create view).
+  const viewedPrNumber = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      const repo = await githubRepoRef(worktreeId);
-      const pr = await findPullRequestForBranch(repo);
-      if (!active.current) {
-        return;
+  const refresh = useCallback(
+    async (force = false) => {
+      try {
+        const repo = await githubRepoRef(worktreeId);
+        let pr: PullRequestSummary | null = null;
+        if (viewedPrNumber.current !== null) {
+          // Prefer the known PR so merge/close status updates in place.
+          try {
+            pr = await getPullRequest(repo, viewedPrNumber.current, { force });
+          } catch {
+            pr = null;
+            viewedPrNumber.current = null;
+          }
+        }
+        if (!pr) {
+          pr = await findPullRequestForBranch(repo, { force });
+        }
+        if (!active.current) {
+          return;
+        }
+        hasResolved.current = true;
+        if (pr) {
+          viewedPrNumber.current = pr.number;
+          setState({ kind: "view", repo, pr });
+        } else {
+          viewedPrNumber.current = null;
+          setState({ kind: "create", repo });
+        }
+      } catch (cause) {
+        if (active.current && !hasResolved.current) {
+          setState({ kind: "error", message: errorMessage(cause) });
+        }
       }
-      setState(pr ? { kind: "view", repo, pr } : { kind: "create", repo });
-    } catch (cause) {
-      if (active.current) {
-        setState({ kind: "error", message: errorMessage(cause) });
-      }
-    }
-  }, [worktreeId]);
+    },
+    [worktreeId],
+  );
 
   useEffect(() => {
     active.current = true;
-    const stopRefresh = startRefreshLoop(refresh, PR_REFRESH_INTERVAL_MS);
+    hasResolved.current = false;
+    // Poll with force=false so cache serves stale-while-revalidate; the loop
+    // still revalidates in the background on every tick + window focus.
+    const stopRefresh = startRefreshLoop(() => refresh(false), PR_REFRESH_INTERVAL_MS);
     return () => {
       active.current = false;
       stopRefresh();
@@ -124,7 +155,10 @@ function PullRequestResolver({
       <CreatePullRequestView
         initialDraft={generatedDraft}
         initialDraftKey={generatedDraftKey}
-        onCreated={(pr) => setState({ kind: "view", repo: state.repo, pr })}
+        onCreated={(pr) => {
+          viewedPrNumber.current = pr.number;
+          setState({ kind: "view", repo: state.repo, pr });
+        }}
         repo={state.repo}
         worktreeId={worktreeId}
       />
@@ -132,7 +166,7 @@ function PullRequestResolver({
   }
   return (
     <ViewPullRequestView
-      onChanged={() => void refresh()}
+      onChanged={() => void refresh(true)}
       pr={state.pr}
       repo={state.repo}
       worktreeId={worktreeId}
