@@ -127,12 +127,16 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
         questionsByRequestId: new Map<string, CachedQuestion>(),
       };
 
+      let failures = 0;
       while (!ctx.signal.aborted) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one live connection at a time; reconnect only after the previous stream ends.
           await consumeControlEvents(watcherContext, runtime);
-        } catch {
-          // Stream error (not an abort): fall through to re-connect below.
+          failures = 0;
+        } catch (error) {
+          // Stream error (not an abort): report it, then re-connect below.
+          failures += 1;
+          reportStreamFailure(agent, failures, error);
         }
         if (ctx.signal.aborted) {
           return;
@@ -143,6 +147,29 @@ export function createTuiWatcher(options: TuiWatcherOptions): WatcherDefinition<
     },
   };
 }
+
+/**
+ * Reports a dropped agent-event stream on stderr, which the host server
+ * captures.
+ *
+ * Reconnecting silently is what made an unreachable gateway invisible: the
+ * watcher spun on a dead address forever while a phone's replies vanished with
+ * no trace anywhere. Logging is rate-limited to the first failure and then
+ * every {@link STREAM_FAILURE_LOG_EVERY} consecutive ones, so a gateway that
+ * stays down costs a line every few minutes rather than two per second.
+ */
+function reportStreamFailure(agent: string, consecutive: number, error: unknown): void {
+  if (consecutive !== 1 && consecutive % STREAM_FAILURE_LOG_EVERY !== 0) {
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  // `console.warn`, not `process.stderr`: this bundle is also loaded by the
+  // desktop webview, where `process` does not exist.
+  console.warn(JSON.stringify({ type: "watcher.streamError", agent, consecutive, error: message }));
+}
+
+/** Consecutive stream failures between repeat log lines (see {@link reportStreamFailure}). */
+const STREAM_FAILURE_LOG_EVERY = 240;
 
 interface ControlKeys {
   approveKeys: string;

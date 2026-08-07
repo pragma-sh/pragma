@@ -270,6 +270,42 @@ describe("createTuiWatcher with handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledWith("\r");
   });
 
+  /**
+   * A watcher whose gateway is unreachable used to reconnect forever in total
+   * silence, which is how an orphaned watcher stayed invisible while a phone's
+   * replies disappeared. The first failure must leave a trace.
+   */
+  it("reports a failing connection instead of retrying silently", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const controller = new AbortController();
+    let attempts = 0;
+    const ctx = {
+      sdk: {
+        agents: {
+          connect: async () => {
+            attempts += 1;
+            if (attempts > 1) {
+              controller.abort();
+            }
+            throw new Error("failed to reach Pragma gateway");
+          },
+        },
+      },
+      agentId: "opencode",
+      config: undefined,
+      session: { id: "sess-1", tabId: "tab-1", worktreeId: "wt-1" },
+      output: (async function* () {})(),
+      sendKeys: vi.fn(async () => {}),
+      reportMessage: async () => {},
+      signal: controller.signal,
+    };
+    await approvalWatcher.watch(ctx as never);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("watcher.streamError");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("failed to reach Pragma gateway");
+    warn.mockRestore();
+  });
+
   it("survives a sendKeys failure and keeps answering", async () => {
     const { ctx, sendKeys } = context([
       commandAttention("req-1"),
