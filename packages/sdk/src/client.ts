@@ -42,7 +42,7 @@ export class PragmaClient {
     this.workspace = new WorkspaceClient(this.events);
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
-    this.scratchpads = new ScratchpadsClient(this.transport);
+    this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
   }
 
   rpc<T = unknown>(

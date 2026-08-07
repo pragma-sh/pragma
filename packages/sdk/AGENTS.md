@@ -52,6 +52,21 @@ without sending anything. `connect` supersedes the old read-only `subscribe()`; 
 publishes are `client.agents.reportInput(...)` / `client.agents.reportInterrupt(...)` (or
 `pragma-cli agent input`).
 
+`client.scratchpads` is the whole scratchpad surface, not just the list route.
+`getScratchpads({ root })` is the gateway call; the rest compose the filesystem
+and agent namespaces over the shared file contract
+(`@pragma/scratchpad-contract`), because that composition **is** the contract:
+`getComments` / `comment` / `setComments` read and write the sibling
+`<file>.mdx.comments.json` (a missing file is an empty thread, not an error),
+`attachAgent({ tabId, agentId })` records the attachment in managed frontmatter,
+and `sendAttached({ worktreeId, text })` re-reads that frontmatter on the host
+and interjects to the attached tab. `sendAttached` resolves
+`{ delivered: false }` when nothing is attached — the common case, since a
+scratchpad outlives the session that wrote it — so callers raise their own
+"attach an agent" UI instead of catching. It addresses the agent by
+`runtimeAgentId(...)` (the catalog id's last segment): the qualified id is
+invisible on the agent event stream.
+
 `client.push` covers Expo push for a paired phone: `register({ token })` /
 `unregister()` manage this installation's token (the gateway keys them by the
 `x-pragma-device-id` header the client already sends), `list()` reports registered
