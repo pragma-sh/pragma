@@ -10,10 +10,14 @@
 // is a session slash command whose reply arrives as an `agent_message_chunk`
 // notification. The session id is only known after `session/new` answers, so
 // the shell below keeps Junie's stdin open through a FIFO and feeds the prompt
-// back once it has read the id. `--cache-dir` points Junie's caches at a
-// throwaway directory so these probe sessions leave nothing behind but an empty
-// session folder (they never reach `sessions/index.jsonl`, so they do not show
-// up in `junie --resume`).
+// back once it has read the id. The program is POSIX-only (mkfifo, trap,
+// case…esac), so `readJunieAcp` probes for a POSIX shell before sending it —
+// `sdk.exec.run` uses the host's default shell, which is PowerShell or cmd on
+// Windows, where the program would only fail to parse. A Windows host
+// therefore reports Junie as missing rather than an empty catalog.
+// `--cache-dir` points Junie's caches at a throwaway directory so these probe
+// sessions leave nothing behind but an empty session folder (they never reach
+// `sessions/index.jsonl`, so they do not show up in `junie --resume`).
 import type { PluginContext } from "@pragma/plugin/catalog";
 
 /** Exit status the wrapper uses to say `junie` is not installed. */
@@ -30,6 +34,14 @@ const PROMPT_ID = 3;
 const POLL_SECONDS = "0.1";
 const POLL_ATTEMPTS = 900;
 
+/**
+ * Cheap POSIX-shell availability probe. Under PowerShell this parses as a
+ * subexpression and fails; under cmd `command` is not found; under any POSIX
+ * `sh` it exits 0. Written to fail in every non-POSIX shell rather than to
+ * succeed by accident.
+ */
+const SHELL_PROBE = "(command -v sh >/dev/null 2>&1) && exit 0 || exit 1";
+
 /** One JSON-RPC response line, already narrowed to result-or-error. */
 export type AcpResponse =
   | { ok: true; result: unknown }
@@ -40,6 +52,12 @@ export type AcpResponse =
 export interface AcpSnapshot {
   /** True when `junie` is not on PATH; every field below is then `undefined`. */
   missing: boolean;
+  /**
+   * True when the host has no POSIX shell to run the ACP driver in (e.g. a
+   * Windows host, where `sdk.exec.run` lands in PowerShell or cmd). Treated
+   * like `missing` by callers, but lets the usage provider say why.
+   */
+  unsupportedShell: boolean;
   /** The `session/new` response, whose `configOptions` hold the model catalog. */
   session: AcpResponse;
   /** Concatenated assistant text of the `/usage` reply, or null when not requested. */
@@ -55,15 +73,25 @@ export async function readJunieAcp(
   options: { usage: boolean },
 ): Promise<AcpSnapshot> {
   const cwd = ctx.project?.path ?? "/tmp";
+  // `sdk.exec.run` runs the command through the host's default shell. On
+  // Windows that is PowerShell or cmd, neither of which can parse the POSIX
+  // `sh` program below (mkfifo, trap, case…esac). Probe for `sh` first: with
+  // no POSIX shell there is no transport, and the model catalog and the usage
+  // refresh degrade to empty instead of failing on a parse error.
+  const [shell] = await ctx.sdk.exec.run({ cwd, commands: [SHELL_PROBE] });
+  if (shell?.status !== 0) {
+    return { missing: false, unsupportedShell: true, session: undefined, usageText: null };
+  }
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [buildCommand(options.usage)] });
   if (result?.status === MISSING_STATUS) {
-    return { missing: true, session: undefined, usageText: null };
+    return { missing: true, unsupportedShell: false, session: undefined, usageText: null };
   }
   if (!result || result.status !== 0) {
     throw new Error(result?.stderr.trim() || "Junie ACP request failed");
   }
   return {
     missing: false,
+    unsupportedShell: false,
     session: findResponse(result.stdout, SESSION_ID),
     usageText: options.usage ? collectAgentText(result.stdout) : null,
   };

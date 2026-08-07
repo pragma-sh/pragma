@@ -5,7 +5,8 @@
 # table in AGENTS.md). Each event becomes a `pragma-cli` status report for the
 # current Pragma terminal tab. Outside a Pragma terminal PRAGMA_SERVER_SOCKET /
 # PRAGMA_DAEMON_SOCKET are unset and there is no server to talk to, so every
-# event is a silent no-op (exit 0).
+# event is a silent no-op -- except PermissionRequest, which answers `ask`
+# instead, because Junie reads silence from a successful hook as approval.
 #
 # Junie's stdin envelope is snake_case (`hook_event_name`, `session_id`,
 # `tool_name`, `tool_input`, `last_assistant_message`, ...), like Claude Code's.
@@ -31,8 +32,17 @@
 
 set -u
 
-# Outside Pragma there is no server to report to; every event is a silent no-op.
-[ -n "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ] || exit 0
+# Outside Pragma there is no server to report to; every event is a silent no-op
+# EXCEPT `permission`: Junie reads a hook that exits 0 with no decision as an
+# approval, so silence would rubber-stamp the sensitive action without Pragma or
+# its native prompt. Return `ask` (Junie's "show your own prompt" verdict) and
+# only let the other events fall through silently.
+if [ -z "${PRAGMA_SERVER_SOCKET:-}${PRAGMA_DAEMON_SOCKET:-}" ]; then
+  if [ "${1:-}" = "permission" ]; then
+    printf '%s\n' '{"decision":"ask","reason":"Not running inside Pragma"}'
+  fi
+  exit 0
+fi
 
 agent="junie"
 pragma_cli="${PRAGMA_CLI:-pragma-cli}"
@@ -650,6 +660,11 @@ case "${1:-}" in
           printf '%s\n' '{"decision":"ask","reason":"No Pragma decision"}'
           ;;
       esac
+    else
+      # No in-flight turn is tracked (e.g. Junie was started outside Pragma, or
+      # the marker was lost), yet silence still means approve. Defer to Junie's
+      # own prompt.
+      printf '%s\n' '{"decision":"ask","reason":"No Pragma turn is tracked"}'
     fi
     ;;
 esac

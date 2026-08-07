@@ -78,7 +78,12 @@ Observed payloads (26.8.3):
   Claude Code's: a hook that exits 0 with no decision _approves_ the action. So the
   timeout branch cannot stay quiet the way `claude-code-plugin`'s does — it returns
   `{"decision":"ask"}`, which is Junie's "show your own prompt" verdict. Getting this
-  wrong would let an unattended tab approve everything.
+  wrong would let an unattended tab approve everything. The same rule bites twice more:
+  the outside-Pragma early exit (`PRAGMA_SERVER_SOCKET`/`PRAGMA_DAEMON_SOCKET` unset)
+  and the no-in-flight-turn branch of `permission` must also answer `ask` instead of
+  exiting silently — the hooks are installed globally (`~/.junie/config.json`), so a
+  Junie launched outside a Pragma terminal would otherwise have every sensitive action
+  rubber-stamped.
 - **`PermissionRequest`'s default hook timeout is 10s.** `hooks.json` raises it to 310 so
   it outlives `PRAGMA_APPROVAL_TIMEOUT` (300s) and the timeout branch, not Junie's
   timeout, decides.
@@ -144,6 +149,15 @@ id that only `session/new` can supply — so `buildCommand` writes a POSIX `sh` 
 that keeps Junie's stdin open through a FIFO and feeds the prompt back once the reader
 has parsed the id. `sdk.exec.run` has no stdin channel, and running it there (rather than
 in-process) is what makes a remote project's Junie the one that answers.
+
+**The program is POSIX-only, and `sdk.exec.run` uses the host's default shell.** On
+Windows that is PowerShell or cmd, where `trap`, `mkfifo`, and `case…esac` are syntax
+errors, so `readJunieAcp` first probes for a POSIX shell (`SHELL_PROBE`) and reports the
+host as `unsupportedShell` when none is there. Model discovery then returns an empty
+catalog (the launcher still opens on Junie's default model) and the usage provider
+reports `unsupported` instead of failing on a parse error. The peak-cache reads/writes
+in `usage-limits.ts` (`mkdir -p`, `cat`, `printf`) are POSIX-only for the same reason,
+but they are unreachable when the probe fails because the ACP read short-circuits first.
 
 `--cache-dir` points the probe at a throwaway directory. Junie still creates an empty
 `~/.junie/sessions/<id>/` per probe, but those never reach `sessions/index.jsonl`, so

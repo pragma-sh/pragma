@@ -46,7 +46,14 @@ export interface PeaksFile {
 
 /** Loads Junie plan usage through its ACP `/usage` session command. */
 export async function loadJunieUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
-  const { missing, usageText } = await readJunieAcp(ctx, { usage: true });
+  const { missing, unsupportedShell, usageText } = await readJunieAcp(ctx, { usage: true });
+  if (unsupportedShell) {
+    return {
+      status: "unavailable",
+      reason: "unsupported",
+      message: "Junie usage limits require a POSIX shell on the project's host.",
+    };
+  }
   if (missing) {
     return {
       status: "unavailable",

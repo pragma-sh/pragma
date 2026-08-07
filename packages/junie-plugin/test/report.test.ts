@@ -202,6 +202,34 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  it("asks rather than staying silent for a permission request outside Pragma", () => {
+    // Junie reads a hook that exits 0 with no decision as an approval, so the
+    // no-socket no-op must not apply to PermissionRequest.
+    const stdout = run("permission", {
+      socket: false,
+      stdin: JSON.stringify({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command: "rm -rf build" },
+      }),
+    });
+    expect(JSON.parse(stdout)).toMatchObject({ decision: "ask" });
+    expect(calls()).toEqual([]);
+  });
+
+  it("asks rather than staying silent for a permission request with no turn", () => {
+    // Inside Pragma but with no in-flight turn (no marker), the hook must still
+    // not auto-approve through silence.
+    const stdout = run("permission", {
+      stdin: JSON.stringify({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command: "rm -rf build" },
+      }),
+    });
+    expect(JSON.parse(stdout)).toMatchObject({ decision: "ask" });
+  });
+
   it("clears stale state on session start", () => {
     run("started", { stdin: startPayload("hi") });
     run("cleared", {
