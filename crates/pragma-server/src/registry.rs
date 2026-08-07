@@ -25,6 +25,7 @@ use crate::plugins_host::{PluginsError, PluginsRegistry};
 use crate::ports::{self, SessionOwner};
 use crate::session::{Session, SessionError};
 use crate::tunnel::{TunnelError, TunnelRegistry};
+use crate::watchers::{DesiredWatcher, WatcherSupervisor};
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -98,6 +99,10 @@ pub struct Registry {
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
     tunnel: Arc<TunnelRegistry>,
+    /// Owns one `pragma-watch` sidecar per live agent session — the process
+    /// that types a phone's interjections, answers, and verdicts into the
+    /// agent's TUI. See `crate::watchers`.
+    watchers: WatcherSupervisor,
 }
 
 type AgentKey = (String, String, String);
@@ -274,6 +279,7 @@ impl Registry {
             automations: AutomationsRegistry::new(server_dir.clone()),
             plugins: PluginsRegistry::new(server_dir.clone()),
             tunnel: TunnelRegistry::new(server_dir.clone()),
+            watchers: WatcherSupervisor::new(server_dir.clone()),
             server_dir,
         }
     }
@@ -360,6 +366,9 @@ impl Registry {
             subscription: ProtocolEventKind::Workspace,
             payload,
         });
+        // A publish is how a desktop-started agent tab first becomes visible
+        // here, and how a tab that dropped its agent stops being one.
+        self.reconcile_watchers();
     }
 
     /// Applies a server-originated mutation (a headless launch creating a
@@ -441,6 +450,54 @@ impl Registry {
         })
     }
 
+    /// Brings the running `pragma-watch` set in line with the live agent
+    /// sessions. Called on a timer, and directly after anything that changes
+    /// the set (a headless launch, a fresh workspace publish) so a new session
+    /// does not wait out a full tick for its watcher.
+    pub fn reconcile_watchers(&self) {
+        let desired = self.desired_watchers();
+        self.watchers.reconcile(&self.plugins, &desired);
+    }
+
+    /// One entry per live session whose mirrored tab records an agent.
+    ///
+    /// Both halves matter: the session map proves the PTY is still running
+    /// (the desktop's snapshot can outlive it, and does after a crash), while
+    /// the snapshot is the only place the tab's agent id lives.
+    fn desired_watchers(&self) -> Vec<DesiredWatcher> {
+        // The two locks are taken in sequence, never nested: the session map is
+        // copied out and released before the workspace lock is acquired.
+        let live: HashMap<String, String> = {
+            let Ok(sessions) = self.sessions.lock() else {
+                return Vec::new();
+            };
+            sessions
+                .values()
+                .map(|session| (session.id().to_string(), session.worktree_id().to_string()))
+                .collect()
+        };
+        let Ok(workspace) = self.workspace.lock() else {
+            return Vec::new();
+        };
+        let Some(snapshot) = workspace.as_ref() else {
+            return Vec::new();
+        };
+        snapshot
+            .tabs
+            .iter()
+            .filter(|tab| matches!(tab.kind, TabKind::Terminal))
+            .filter_map(|tab| {
+                let agent_id = tab.agent_id.clone()?;
+                let worktree_id = live.get(&tab.id)?;
+                Some(DesiredWatcher {
+                    tab_id: tab.id.clone(),
+                    worktree_id: worktree_id.clone(),
+                    agent_id,
+                })
+            })
+            .collect()
+    }
+
     /// Returns daemon-owned agent identity/title metadata for locally persisted tabs.
     pub fn tab_agent_metadata(&self, tab_ids: &[String]) -> Result<Vec<TabAgentMetadata>, String> {
         let workspace = self
@@ -493,7 +550,7 @@ impl Registry {
             }
             (None, Some(spec)) => self.create_worktree_headless(&args.project_id, &spec)?,
         };
-        let (plugin_id, launch, command, agent_name) = self.resolve_agent_launch(
+        let (_plugin_id, launch, command, agent_name) = self.resolve_agent_launch(
             &args.agent_id,
             args.model_id.as_deref(),
             args.reasoning_id.as_deref(),
@@ -510,14 +567,6 @@ impl Registry {
             .get(&tab_id)
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
-        crate::watchers::start_for_headless_launch(
-            &self.plugins,
-            &self.server_dir,
-            Some(&plugin_id),
-            &args.agent_id,
-            &tab_id,
-            &worktree_id,
-        );
         let prompt = args.prompt;
         thread::spawn(move || {
             schedule_agent_launch(&session, &launch, &command, prompt.as_deref());
@@ -529,6 +578,10 @@ impl Registry {
             &args.agent_id,
             &agent_name,
         );
+        // The tab is only now in the mirrored snapshot, which is where the
+        // watcher set is derived from — without this the phone that launched
+        // the agent would wait out a reconcile tick before it could reply.
+        self.reconcile_watchers();
         Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
     }
 
@@ -1629,6 +1682,52 @@ mod tests {
             .tab_agent_metadata(&["tab-1".to_string()])
             .expect("metadata should survive restart");
         assert_eq!(metadata[0].agent_id, "pragma.codex");
+    }
+
+    /// A watcher is wanted for a tab that names an agent *and* still has a live
+    /// PTY. The snapshot alone is not enough: it outlives sessions (a closed app
+    /// republishes stale tabs), and a watcher for a dead session would type into
+    /// nothing.
+    #[test]
+    fn desired_watchers_pair_live_sessions_with_agent_tabs() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let snapshot = snapshot_with_agent_tab("/tmp/sandbox");
+        let tab = snapshot.tabs[0].clone();
+        registry.publish_workspace(snapshot);
+
+        // An agent tab whose session never started (or already exited).
+        registry
+            .set_tab_agent(tab, "pragma.codex", "Codex")
+            .expect("agent metadata should persist");
+        assert!(registry.desired_watchers().is_empty());
+
+        registry
+            .spawn(
+                "tab-1".to_string(),
+                "worktree-main".to_string(),
+                dir.path().to_string_lossy().to_string(),
+                80,
+                24,
+            )
+            .expect("session should spawn");
+        let desired = registry.desired_watchers();
+        assert_eq!(desired.len(), 1);
+        assert_eq!(desired[0].tab_id, "tab-1");
+        assert_eq!(desired[0].worktree_id, "worktree-main");
+        assert_eq!(desired[0].agent_id, "pragma.codex");
+
+        // A plain terminal in the same worktree is not an agent session.
+        registry
+            .spawn(
+                "tab-2".to_string(),
+                "worktree-main".to_string(),
+                dir.path().to_string_lossy().to_string(),
+                80,
+                24,
+            )
+            .expect("session should spawn");
+        assert_eq!(registry.desired_watchers().len(), 1);
     }
 
     #[test]

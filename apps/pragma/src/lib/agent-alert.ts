@@ -20,7 +20,6 @@ import {
 } from "@/lib/agent-status-settings";
 import { resolveAgentApproval, showAgentNotification } from "@/lib/tauri";
 import { listPluginAgents } from "@/plugins/agents";
-import { startWatcherForAgentSession } from "@/plugins/watchers";
 
 let lastChime = 0;
 const CHIME_DEBOUNCE_MS = 750;
@@ -106,16 +105,6 @@ export async function alertAgent(payload: AgentReportPayload, options: AgentAler
   const title = agentAlertTitle(payload, agentName);
   const description = agentAlertBody(options.location);
   const focused = await isAppFocused();
-  if (isApprovableCommand(payload)) {
-    void startWatcherForAgentSession({
-      agentId: payload.agent,
-      sessionId: payload.tabId,
-      tabId: payload.tabId,
-      worktreeId: payload.worktreeId,
-    }).catch((cause: unknown) => {
-      console.warn(`failed to start watcher for ${payload.agent}`, cause);
-    });
-  }
   // A command approval must always surface its interactive Approve/Deny toast —
   // its whole point is answering without touching the terminal, and these reports
   // usually arrive while the window is unfocused. So render the toast even when

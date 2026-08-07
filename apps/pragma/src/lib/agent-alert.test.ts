@@ -9,7 +9,6 @@ const requestPermissionMock = vi.fn();
 const sendNotificationMock = vi.fn();
 const showAgentNotificationMock = vi.fn();
 const resolveAgentApprovalMock = vi.fn();
-const startWatcherForAgentSessionMock = vi.fn();
 const audioWindow = window as unknown as {
   AudioContext?: typeof AudioContext;
   webkitAudioContext?: typeof AudioContext;
@@ -24,10 +23,6 @@ vi.mock("@/lib/tauri", () => ({
 
 vi.mock("@/plugins/agents", () => ({
   listPluginAgents: () => listPluginAgentsMock(),
-}));
-
-vi.mock("@/plugins/watchers", () => ({
-  startWatcherForAgentSession: (...args: unknown[]) => startWatcherForAgentSessionMock(...args),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -133,7 +128,6 @@ describe("alertAgent", () => {
     sendNotificationMock.mockReset();
     showAgentNotificationMock.mockReset();
     resolveAgentApprovalMock.mockReset();
-    startWatcherForAgentSessionMock.mockReset();
 
     isFocusedMock.mockResolvedValue(false);
     isPermissionGrantedMock.mockResolvedValue(true);
@@ -141,7 +135,6 @@ describe("alertAgent", () => {
       { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
     ]);
     showAgentNotificationMock.mockResolvedValue(false);
-    startWatcherForAgentSessionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -233,12 +226,6 @@ describe("alertAgent", () => {
     );
 
     expect(customMock).toHaveBeenCalledTimes(1);
-    expect(startWatcherForAgentSessionMock).toHaveBeenCalledWith({
-      agentId: "opencode",
-      sessionId: "tab-cmd",
-      tabId: "tab-cmd",
-      worktreeId: "worktree-1",
-    });
     const render = customMock.mock.calls[0]?.[0] as (id: string) => unknown;
     const element = render("toast-1");
 

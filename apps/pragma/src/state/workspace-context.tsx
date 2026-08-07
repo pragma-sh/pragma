@@ -103,7 +103,6 @@ import {
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
-import { startWatcherForAgentSession } from "@/plugins/watchers";
 import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
@@ -2795,14 +2794,6 @@ function useSessionLaunch(
       }
       void markTabAgent(tab.id, agent);
       startAgentInTab(tab.id, agent, message, modelSelection);
-      void startWatcherForAgentSession({
-        agentId: agent.id,
-        sessionId: tab.id,
-        tabId: tab.id,
-        worktreeId,
-      }).catch((cause: unknown) => {
-        console.warn(`failed to start watcher for ${agent.id}`, cause);
-      });
       return tab;
     },
     [createTerminalTab, markTabAgent, selectWorktree],
@@ -3338,19 +3329,10 @@ function useProjectLoading(
         agent,
         request.prompt ?? undefined,
         { modelId: request.modelId, reasoningId: request.reasoningId, modelCmd: request.modelCmd },
-      )
-        .then(() =>
-          startWatcherForAgentSession({
-            agentId: agent.id,
-            sessionId: request.tabId,
-            tabId: request.tabId,
-            worktreeId: request.worktreeId,
-          }),
-        )
-        .catch((cause: unknown) => {
-          console.warn(`failed to launch remote agent ${agent.id}`, cause);
-          toast.error("Couldn't launch agent session from your phone.");
-        });
+      ).catch((cause: unknown) => {
+        console.warn(`failed to launch remote agent ${agent.id}`, cause);
+        toast.error("Couldn't launch agent session from your phone.");
+      });
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();

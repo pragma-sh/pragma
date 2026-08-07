@@ -275,16 +275,15 @@ Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
 at the top (newest pin first); each row exposes a hover pin button, a
 context-menu Pin/Unpin item, and a filled pin glyph that unpins when clicked.
 
-Plugin watchers are normally started when Pragma launches an agent session, but command
-approval reports also lazy-start the matching watcher for their tab. This keeps approval
-working when a user manually starts a watcher-backed agent (for example typing `opencode`
-inside a Pragma terminal): the status plugin can raise the toast, and the lazy watcher can
-write the Approve/Deny keys back into that same PTY. Watcher lookup uses the qualified
-catalog agent id; `pragma-watch --agentId` uses the plugin-local watcher agent so runtime
-status, reply, and interjection events share one stream identity.
-Watcher children are keyed by session/tab/worktree, duplicate starts are ignored, and exited
-children are reaped. Tab close and worktree deletion stop matching children; plugin catalog
-replacement stops all old children before installing new watcher definitions.
+**The desktop does not own plugin watchers — `pragma-server` does** (see
+`crates/pragma-server/AGENTS.md`). It used to: the frontend started a `pragma-watch`
+child per launched agent session and stopped them all whenever plugin contributions
+were replaced. That tied a watcher's life to a frontend that restarts, switches
+projects, and reloads plugins far more often than a session ends, so every such event
+silently orphaned every running agent — mobile interjections and answers reached the
+server and went nowhere, while the desktop noticed nothing because typing into the
+terminal bypasses watchers entirely. Sessions outlive the app; watchers must too. Do
+not reintroduce a watcher spawn here.
 
 ## Remote access (tunnel + pair modal)
 
