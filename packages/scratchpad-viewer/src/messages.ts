@@ -2,15 +2,14 @@
  * The two-way contract between a native client and the scratchpad viewer
  * document it hosts in a web view. Both sides import these types, so a change
  * to one end fails to typecheck at the other.
+ *
+ * The shapes that also exist on disk (a block anchor, a comment) come from
+ * `@pragma/scratchpad-contract` and are re-exported here so a host importing
+ * the viewer still gets the whole vocabulary from one place.
  */
+import type { ScratchpadBlock, ScratchpadComment } from "@pragma/scratchpad-contract";
 
-/** One block of the rendered document a comment can be attached to. */
-export interface ScratchpadBlock {
-  /** Index of the block among the document's top-level rendered blocks. */
-  index: number;
-  /** Plain-text excerpt of the block, used as the comment's quote. */
-  quote: string;
-}
+export type { ScratchpadBlock, ScratchpadComment };
 
 /** Messages the viewer document posts to its native host. */
 export type ScratchpadViewerMessage =
@@ -32,26 +31,6 @@ export type ScratchpadViewerMessage =
   | { type: "subscribeAgentProgress"; requestId: string; tabIds: string[] }
   /** The component's progress subscription was torn down. */
   | { type: "unsubscribeAgentProgress"; requestId: string };
-
-/** One persisted scratchpad comment, in the desktop's on-disk shape. */
-export interface ScratchpadComment {
-  id: string;
-  /**
-   * ProseMirror document positions the desktop editor decorates. A native
-   * client has no ProseMirror document, so it writes `0`/`0` and anchors by
-   * {@link ScratchpadComment.quote} and {@link ScratchpadComment.blockIndex}
-   * instead; the desktop then renders the comment without a highlight rather
-   * than highlighting the wrong range.
-   */
-  from: number;
-  to: number;
-  quote: string;
-  text: string;
-  createdAt: number;
-  resolvedAt: number | null;
-  /** Rendered block this comment was attached to, when written on mobile. */
-  blockIndex?: number;
-}
 
 /** Commands the native host sends into the viewer document. */
 export type ScratchpadViewerCommand =

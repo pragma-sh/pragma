@@ -1,8 +1,12 @@
 # packages/scratchpad-viewer — @pragma/scratchpad-viewer
 
-Renders a managed scratchpad **read-only** in any web view, and owns the shared
-scratchpad file contract (frontmatter, agent attachment, comment threads) that
-both the desktop and the mobile client edit.
+Renders a managed scratchpad **read-only** in any web view.
+
+The scratchpad **file contract** (frontmatter, agent attachment, comment
+threads) lives in `@pragma/scratchpad-contract` — the SDK needs it and cannot
+depend on this package. It is re-exported from this package's index, so an
+existing `@pragma/scratchpad-viewer` import of `parseScratchpadDocument`,
+`attachScratchpadAgent`, or the comment helpers keeps working.
 
 `buildScratchpadViewerHtml({ source, comments, mode, themeCss })` returns one
 self-contained HTML string. Today its consumer is `apps/pragma-mobile`
@@ -44,14 +48,10 @@ contract helpers.
   a literal fallback after its `var()`. The host passes **overrides only**,
   through `scratchpadThemeCss`, and they are declared in one `:root` block the
   host can rewrite in place (`#pragma-scratchpad-theme`).
-- **Comments are the desktop's file, in the desktop's shape.** A comment written
-  here lands in the same sibling `<file>.mdx.comments.json` and appears in the
-  desktop's "Resolve comments" handoff. The one deliberate difference is
-  `from`/`to`: those are ProseMirror positions in the desktop's editor document,
-  which a rendered page cannot compute, so a viewer-authored comment writes `0`
-  and anchors by `quote` plus `blockIndex`. The desktop skips decorating a
-  zero-width range, which is why it shows the comment without highlighting an
-  arbitrary paragraph rather than highlighting the wrong one.
+- **Comments are the desktop's file, in the desktop's shape** — see
+  `packages/scratchpad-contract/AGENTS.md` for the shape itself. A comment
+  written here lands in the same sibling `<file>.mdx.comments.json` and appears
+  in the desktop's "Resolve comments" handoff.
 - **The two message types are the contract.** `ScratchpadViewerMessage` (page →
   host) and `ScratchpadViewerCommand` (host → page) are imported by both ends,
   so a change on one side fails to typecheck on the other. Add to them rather

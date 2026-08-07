@@ -459,11 +459,22 @@
         "react": "^19.0.0",
       },
     },
+    "packages/scratchpad-contract": {
+      "name": "@pragma/scratchpad-contract",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pragma/constants": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/scratchpad-viewer": {
       "name": "@pragma/scratchpad-viewer",
       "version": "0.1.0",
       "dependencies": {
-        "@pragma/constants": "workspace:*",
+        "@pragma/scratchpad-contract": "workspace:*",
       },
       "devDependencies": {
         "@mdx-js/mdx": "^3.1.1",
@@ -486,6 +497,7 @@
       "version": "0.0.0",
       "devDependencies": {
         "@pragma/constants": "workspace:*",
+        "@pragma/scratchpad-contract": "workspace:*",
         "@types/node": "^24.10.1",
         "bunup": "^0.16.32",
         "typescript": "^6.0.3",
@@ -1497,6 +1509,8 @@
     "@pragma/plugins-host": ["@pragma/plugins-host@workspace:packages/plugins-host"],
 
     "@pragma/scratchpad": ["@pragma/scratchpad@workspace:packages/scratchpad"],
+
+    "@pragma/scratchpad-contract": ["@pragma/scratchpad-contract@workspace:packages/scratchpad-contract"],
 
     "@pragma/scratchpad-viewer": ["@pragma/scratchpad-viewer@workspace:packages/scratchpad-viewer"],
 
