@@ -312,6 +312,13 @@
   *::-webkit-scrollbar-thumb:hover {
     background-color: var(--muted-foreground);
   }
+
+  /* WebKit (the macOS and Linux webview) starts a native drag only from links,
+     images, and selected text unless an element opts in explicitly — `draggable`
+     alone is a no-op there, so the file tree's rows would never begin a drag. */
+  [draggable="true"] {
+    -webkit-user-drag: element;
+  }
 }
 
 @layer components {
