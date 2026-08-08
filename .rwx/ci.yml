@@ -193,17 +193,21 @@ tasks:
       # Post (or update) the sticky report on the PR this branch belongs to.
       # fallow prefixes the body with `<!-- fallow-id: fallow-results -->`, so
       # matching on that marker keeps one comment instead of one per run.
+      #
+      # Best-effort: the audit's own pass/fail ($status) is the real gate, so a
+      # `gh` call failing here (e.g. the installation token missing `issues:
+      # write` on this repo) must not fail the task and mask a clean audit.
       pr="$(gh pr list --repo "$GH_REPO" --head "$BRANCH" --state open \
-        --json number --jq '.[0].number // empty')"
+        --json number --jq '.[0].number // empty')" || pr=""
       if [ -n "$pr" ]; then
         existing="$(gh api "repos/$GH_REPO/issues/$pr/comments" --paginate \
-          --jq 'map(select(.body | startswith("<!-- fallow-id: fallow-results -->"))) | .[0].id // empty')"
+          --jq 'map(select(.body | startswith("<!-- fallow-id: fallow-results -->"))) | .[0].id // empty')" || existing=""
         if [ -n "$existing" ]; then
           gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" \
-            -F body=@fallow-comment.md > /dev/null
+            -F body=@fallow-comment.md > /dev/null || true
         else
           gh api --method POST "repos/$GH_REPO/issues/$pr/comments" \
-            -F body=@fallow-comment.md > /dev/null
+            -F body=@fallow-comment.md > /dev/null || true
         fi
       fi
 

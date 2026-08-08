@@ -67,6 +67,15 @@ bun_sidecars=(
   "@pragma/plugins-host:plugins-host:pragma-plugins"
 )
 
+# `@pragma/watcher` bundles `@pragma/sdk`'s raw TypeScript source directly
+# (its tsconfig `paths` maps `@pragma/sdk` there for cross-package
+# typechecking), which in turn imports `@pragma/scratchpad-contract` as a
+# real value import. That package ships a built `dist/` (see its AGENTS.md
+# for why), so it has to exist before any `bun build --compile` walks into
+# sdk's source, or module resolution fails with "Could not resolve
+# @pragma/scratchpad-contract".
+bun --filter @pragma/scratchpad-contract build
+
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
