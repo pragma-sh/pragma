@@ -963,7 +963,7 @@ errors via `toast.error(…)`.
 
 ## Worktree lifecycle
 
-`CreateWorktreeDialog` only *collects input*. It fetches the project main worktree's
+`CreateWorktreeDialog` only _collects input_. It fetches the project main worktree's
 remote status before creation; when main is behind it offers cancel, create without
 pulling, or pull then create. As soon as the last question is answered it hands the run
 to `worktree-creation-context` and closes — creation never blocks the app behind a modal.
@@ -976,8 +976,9 @@ are "Syncing base" (only when the user chose to sync), "Creating worktree", and 
 scripts". The scripts step is appended from the `pragma:worktree-create-stage` Tauri
 event, which `create_worktree` emits just before the project's `setup` commands run
 (they run inside that single command, so the frontend cannot otherwise see them); no
-event means no setup scripts and no step. A failure keeps the screen up with the message
-and a Dismiss button, since the form is already gone.
+event means no setup scripts and no step. A failure keeps the screen up with the message.
+Failures before creation offer Dismiss; failures while refreshing or opening an already-created
+worktree retain the launch request and offer Retry, which reopens it without creating the branch again.
 
 `Worktree` rows carry a `hidden` boolean (v3 migration). Hidden rows are filtered out of
 the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` and

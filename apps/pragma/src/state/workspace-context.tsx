@@ -266,8 +266,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   reload: () => Promise<void>;
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
-  selectWorktree: (worktreeId: string | null) => void;
-  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  selectWorktree: (worktreeId: string | null, projectId?: string) => void;
+  createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   /**
    * Launches an agent thread in a worktree: switches to it, opens a terminal
@@ -278,6 +278,7 @@ interface WorkspaceContextValue extends WorkspaceState {
     agent: AgentConfig,
     message?: string,
     modelSelection?: AgentModelSelection,
+    options?: WorktreeTargetOptions,
   ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
@@ -345,6 +346,11 @@ interface WorkspaceContextValue extends WorkspaceState {
   agentBackAvailable?: boolean;
   navigateToAgentLocation?: (projectId: string, worktreeId: string, tabId: string) => Promise<void>;
   goBackFromAgent?: () => Promise<void>;
+}
+
+/** Explicit owner for operations whose worktree is not in the loaded project snapshot. */
+interface WorktreeTargetOptions {
+  projectId?: string;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -2644,20 +2650,22 @@ function useProjectSelection(
         });
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
+        throw cause;
       }
     },
     [dispatch, selectedProjectIdRef],
   );
 
   const selectWorktree = useCallback(
-    (worktreeId: string | null) => {
+    (worktreeId: string | null, explicitProjectId?: string) => {
       if (!worktreeId) {
         return;
       }
       // Resolve the owning project from the worktree (ref, so it's correct for a
       // worktree in a project other than the captured selection — e.g. a deep
       // link), falling back to the current selection.
-      const projectId = worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
+      const projectId =
+        explicitProjectId ?? worktreeProjectIdRef.current[worktreeId] ?? state.selectedProjectId;
       if (!projectId) {
         return;
       }
@@ -2715,23 +2723,28 @@ function useTabCreation(
   state: WorkspaceState,
   dispatch: WorkspaceDispatch,
   worktreeProjectIdRef: RefObject<Record<string, string>>,
+  selectedProjectIdRef: RefObject<string | null>,
 ): {
   createTab: (
     kind: "terminal" | "browser",
     paneId: string | null,
     worktreeId?: string,
+    options?: WorktreeTargetOptions,
   ) => Promise<Tab | null>;
-  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>;
+  createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
 } {
   const createTab = useCallback(
-    async (kind: "terminal" | "browser", paneId: string | null, worktreeId?: string) => {
-      const projectId = resolveCreateTabProject(
-        worktreeId,
-        worktreeProjectIdRef.current,
-        state.selectedProjectId,
-      );
+    async (
+      kind: "terminal" | "browser",
+      paneId: string | null,
+      worktreeId?: string,
+      options?: WorktreeTargetOptions,
+    ) => {
+      const projectId =
+        options?.projectId ??
+        resolveCreateTabProject(worktreeId, worktreeProjectIdRef.current, state.selectedProjectId);
       const targetWorktreeId = resolveCreateTabWorktreeId(
         worktreeId,
         projectId,
@@ -2742,18 +2755,29 @@ function useTabCreation(
       }
       try {
         const tab = await createTabOfKind(kind, projectId, targetWorktreeId);
-        dispatchNewTab(dispatch, tab, paneId);
+        // The workspace only keeps tabs for its selected project. A background
+        // creation may finish after its owner is no longer selected.
+        if (selectedProjectIdRef.current === projectId) {
+          dispatchNewTab(dispatch, tab, paneId);
+        }
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
         return null;
       }
     },
-    [dispatch, state.selectedProjectId, state.selectedWorktreeByProject, worktreeProjectIdRef],
+    [
+      dispatch,
+      selectedProjectIdRef,
+      state.selectedProjectId,
+      state.selectedWorktreeByProject,
+      worktreeProjectIdRef,
+    ],
   );
 
   const createTerminalTab = useCallback(
-    (worktreeId?: string) => createTab("terminal", null, worktreeId),
+    (worktreeId?: string, options?: WorktreeTargetOptions) =>
+      createTab("terminal", null, worktreeId, options),
     [createTab],
   );
   const createBrowserTab = useCallback(
@@ -2771,14 +2795,15 @@ function useTabCreation(
 
 /** Launches an agent thread: switch worktree, open a terminal tab, start the agent. */
 function useSessionLaunch(
-  selectWorktree: (worktreeId: string | null) => void,
-  createTerminalTab: (worktreeId?: string) => Promise<Tab | null>,
+  selectWorktree: (worktreeId: string | null, projectId?: string) => void,
+  createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>,
   markTabAgent: (tabId: string, agent: AgentConfig) => Promise<void>,
 ): (
   worktreeId: string,
   agent: AgentConfig,
   message?: string,
   modelSelection?: AgentModelSelection,
+  options?: WorktreeTargetOptions,
 ) => Promise<Tab | null> {
   return useCallback(
     async (
@@ -2786,9 +2811,10 @@ function useSessionLaunch(
       agent: AgentConfig,
       message?: string,
       modelSelection?: AgentModelSelection,
+      options?: WorktreeTargetOptions,
     ): Promise<Tab | null> => {
-      selectWorktree(worktreeId);
-      const tab = await createTerminalTab(worktreeId);
+      selectWorktree(worktreeId, options?.projectId);
+      const tab = await createTerminalTab(worktreeId, options);
       if (!tab) {
         return null;
       }
@@ -3243,7 +3269,7 @@ function useWorkspaceChangedListener(
         });
         dispatch({ type: "set-active-tab", worktreeId: payload.worktreeId, tabId: payload.tabId });
       }
-      void refreshProjectRef.current(payload.projectId);
+      void refreshProjectRef.current(payload.projectId).catch(() => undefined);
     },
     [dispatch],
   );
@@ -4167,7 +4193,7 @@ function useTabManagement({
   worktreeProjectIdRef: RefObject<Record<string, string>>;
   selectedProjectIdRef: RefObject<string | null>;
   tabsRef: RefObject<Tab[]>;
-  selectWorktree: (worktreeId: string | null) => void;
+  selectWorktree: (worktreeId: string | null, projectId?: string) => void;
   selectProject: (projectId: string | null) => Promise<void>;
   resolveProjectForWorktree: (worktreeId: string) => Promise<string | null>;
   setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>;
@@ -4176,6 +4202,7 @@ function useTabManagement({
     state,
     dispatch,
     worktreeProjectIdRef,
+    selectedProjectIdRef,
   );
   const { closeTab, renameTerminalTab, markTabAgent, setActiveTab, setActiveTabRef } =
     useTabLifecycle(state, dispatch, setManagedScriptsState);

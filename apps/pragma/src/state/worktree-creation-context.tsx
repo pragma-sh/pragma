@@ -17,6 +17,7 @@ import {
   type AgentModelSelection,
 } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
+import type { Worktree } from "@pragma/constants";
 
 /** The stages a create-worktree run can move through, in display order. */
 export type WorktreeCreationStepId = "sync" | "create" | "scripts";
@@ -47,6 +48,7 @@ interface WorktreeCreationState {
   branch: string;
   steps: WorktreeCreationStep[];
   error: string | null;
+  retry: { request: WorktreeCreationRequest; worktree: Worktree } | null;
 }
 
 interface WorktreeCreationContextValue {
@@ -56,6 +58,8 @@ interface WorktreeCreationContextValue {
   startCreation: (request: WorktreeCreationRequest) => void;
   /** Clears a failed run's screen. */
   dismiss: () => void;
+  /** Retries opening a worktree after terminal/session launch fails. */
+  retry: () => void;
 }
 
 const STEP_LABELS: Record<WorktreeCreationStepId, string> = {
@@ -98,13 +102,43 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
   // callback closing over a stale `creation`.
   const runningRef = useRef(false);
 
+  const openCreatedWorktree = useCallback(
+    async (request: WorktreeCreationRequest, worktree: Worktree) => {
+      // This refresh intentionally skips state writes after a project switch.
+      // Pass the owner explicitly so terminal/session creation still routes to
+      // the project that created this worktree.
+      await workspace.refreshProject(request.projectId);
+      const options = { projectId: request.projectId };
+      const prompt = request.prompt?.trim();
+      if (prompt && request.agent) {
+        const tab = await workspace.startSession(
+          worktree.id,
+          request.agent,
+          prompt,
+          request.modelSelection,
+          options,
+        );
+        if (!tab) {
+          throw new Error("Couldn't start an agent session for the new worktree.");
+        }
+        return;
+      }
+      workspace.selectWorktree(worktree.id, request.projectId);
+      const tab = await workspace.createTerminalTab(worktree.id, options);
+      if (!tab) {
+        throw new Error("Couldn't open a terminal tab for the new worktree.");
+      }
+    },
+    [workspace],
+  );
+
   const run = useCallback(
     async (request: WorktreeCreationRequest) => {
       const steps = [
         ...(request.syncWorktreeId ? [step("sync", "active")] : []),
         step("create", request.syncWorktreeId ? "pending" : "active"),
       ];
-      setCreation({ branch: request.branch, steps, error: null });
+      setCreation({ branch: request.branch, steps, error: null, retry: null });
       // The setup scripts run inside `create_worktree`, so their stage only
       // becomes visible through the backend event.
       const unlisten = await onWorktreeCreateStage((stage) => {
@@ -134,17 +168,20 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
             ? { ...current, steps: current.steps.map((entry) => ({ ...entry, status: "done" })) }
             : current,
         );
-        // Load the new worktree into state first so its terminal tab resolves
-        // its cwd to the new worktree path.
-        await workspace.refreshProject(request.projectId);
-        const prompt = request.prompt?.trim();
-        if (prompt && request.agent) {
-          await workspace.startSession(worktree.id, request.agent, prompt, request.modelSelection);
-        } else {
-          workspace.selectWorktree(worktree.id);
-          await workspace.createTerminalTab(worktree.id);
+        try {
+          await openCreatedWorktree(request, worktree);
+          setCreation(null);
+        } catch (cause) {
+          setCreation((current) =>
+            current
+              ? {
+                  ...current,
+                  error: errorMessage(cause),
+                  retry: { request, worktree },
+                }
+              : current,
+          );
         }
-        setCreation(null);
       } catch (cause) {
         setCreation((current) => (current ? { ...current, error: errorMessage(cause) } : current));
       } finally {
@@ -152,7 +189,7 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
         runningRef.current = false;
       }
     },
-    [workspace],
+    [openCreatedWorktree],
   );
 
   const startCreation = useCallback(
@@ -165,9 +202,23 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
   );
 
   const dismiss = useCallback(() => setCreation(null), []);
+  const retry = useCallback(() => {
+    if (runningRef.current || !creation?.retry) return;
+    runningRef.current = true;
+    const { request, worktree } = creation.retry;
+    setCreation((current) => (current ? { ...current, error: null } : current));
+    void openCreatedWorktree(request, worktree)
+      .then(() => setCreation(null))
+      .catch((cause: unknown) => {
+        setCreation((current) => (current ? { ...current, error: errorMessage(cause) } : current));
+      })
+      .finally(() => {
+        runningRef.current = false;
+      });
+  }, [creation, openCreatedWorktree]);
   const value = useMemo(
-    () => ({ creation, startCreation, dismiss }),
-    [creation, startCreation, dismiss],
+    () => ({ creation, startCreation, dismiss, retry }),
+    [creation, startCreation, dismiss, retry],
   );
 
   return <WorktreeCreationContext value={value}>{children}</WorktreeCreationContext>;

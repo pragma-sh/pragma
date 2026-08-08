@@ -43,7 +43,7 @@ function StepRow({ step }: { step: WorktreeCreationStep }) {
  * browser webviews float above HTML and would clip an overlay.
  */
 export function WorktreeCreationScreen() {
-  const { creation, dismiss } = useWorktreeCreation();
+  const { creation, dismiss, retry } = useWorktreeCreation();
   if (!creation) {
     return null;
   }
@@ -68,9 +68,16 @@ export function WorktreeCreationScreen() {
         {creation.error ? (
           <div className="space-y-3 text-center">
             <p className="text-sm text-destructive">{creation.error}</p>
-            <Button size="sm" variant="secondary" onClick={dismiss}>
-              Dismiss
-            </Button>
+            <div className="flex justify-center gap-2">
+              {creation.retry ? (
+                <Button size="sm" onClick={retry}>
+                  Retry
+                </Button>
+              ) : null}
+              <Button size="sm" variant="secondary" onClick={dismiss}>
+                Dismiss
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>
