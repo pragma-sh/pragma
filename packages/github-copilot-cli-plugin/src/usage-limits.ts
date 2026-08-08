@@ -1,3 +1,4 @@
+import { runProviderCommand } from "@pragma/plugin/catalog";
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
 
 const QUOTA_REQUEST_ID = 2;
@@ -17,25 +18,22 @@ const USAGE_COMMAND = `exec "\${SHELL:-/bin/sh}" -lic ${shellQuote(COPILOT_USAGE
 
 /** Loads usage through Copilot CLI's authenticated runtime. */
 export async function loadGitHubCopilotUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
-  const [result] = await ctx.sdk.exec.run({
-    cwd: ctx.project?.path ?? "/tmp",
-    commands: [USAGE_COMMAND],
-  });
-  if (result?.status === 20) {
+  const outcome = await runProviderCommand(ctx, USAGE_COMMAND);
+  if (outcome.kind === "missing") {
     return {
       status: "unavailable",
       reason: "not-configured",
       message: "Install GitHub Copilot CLI to load usage limits.",
     };
   }
-  if (!result || result.status !== 0) {
-    const detail = result?.stderr.trim() || "GitHub Copilot usage request failed";
+  if (outcome.kind === "failed") {
+    const detail = outcome.stderr || "GitHub Copilot usage request failed";
     if (/auth|credential|login|logged in|sign in|401|403/i.test(detail)) {
       return authenticationRequired();
     }
     throw new Error(detail);
   }
-  return extractGitHubCopilotUsageLimits(result.stdout, Date.now());
+  return extractGitHubCopilotUsageLimits(outcome.stdout, Date.now());
 }
 
 /** Extracts Copilot's quota response from Content-Length-framed JSON-RPC output. */

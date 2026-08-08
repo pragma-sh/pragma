@@ -129,6 +129,19 @@ function ChatNavigation({ title, worktreeId }: { title: string | undefined; work
   );
 }
 
+interface ChatBodyProps {
+  attention: ReturnType<typeof useAgentConnection>["attention"];
+  onAnswer: ReturnType<typeof useAgentConnection>["answer"];
+  onDecide: ReturnType<typeof useAgentConnection>["decide"];
+  onInterrupt: ReturnType<typeof useAgentConnection>["interrupt"];
+  onSend: ReturnType<typeof useAgentConnection>["send"];
+  phase: ReturnType<typeof useAgentConnection>["phase"];
+  rows: ReturnType<typeof useAgentConnection>["rows"];
+  running: boolean;
+  tabId: string;
+  worktreeId: string;
+}
+
 function ChatBody({
   attention,
   onAnswer,
@@ -140,18 +153,7 @@ function ChatBody({
   running,
   tabId,
   worktreeId,
-}: {
-  attention: ReturnType<typeof useAgentConnection>["attention"];
-  onAnswer: ReturnType<typeof useAgentConnection>["answer"];
-  onDecide: ReturnType<typeof useAgentConnection>["decide"];
-  onInterrupt: ReturnType<typeof useAgentConnection>["interrupt"];
-  onSend: ReturnType<typeof useAgentConnection>["send"];
-  phase: ReturnType<typeof useAgentConnection>["phase"];
-  rows: ReturnType<typeof useAgentConnection>["rows"];
-  running: boolean;
-  tabId: string;
-  worktreeId: string;
-}) {
+}: ChatBodyProps) {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
