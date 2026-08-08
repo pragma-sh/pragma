@@ -114,6 +114,9 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const hasData = useRef(false);
+  // Comments posted before the initial load resolves — merged in once real data arrives,
+  // instead of fabricating empty commits/files/threads/checks for an in-flight PR.
+  const pendingOptimistic = useRef<Map<number, IssueComment>>(new Map());
 
   const load = useCallback(
     async (force = false) => {
@@ -127,7 +130,17 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
         ]);
         if (active.current) {
           hasData.current = true;
-          setData({ comments, commits, files, threads, checks });
+          const known = new Set(comments.map((entry) => entry.id));
+          const stillPending = [...pendingOptimistic.current.values()].filter(
+            (entry) => !known.has(entry.id),
+          );
+          setData({
+            comments: stillPending.length > 0 ? [...comments, ...stillPending] : comments,
+            commits,
+            files,
+            threads,
+            checks,
+          });
           setError(null);
         }
       } catch (cause) {
@@ -143,6 +156,7 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
   useEffect(() => {
     active.current = true;
     hasData.current = false;
+    pendingOptimistic.current.clear();
     void load(false);
     return () => {
       active.current = false;
@@ -151,15 +165,11 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
 
   /** Append a just-posted comment optimistically (real id replaces temp on success). */
   const prependComment = useCallback((comment: IssueComment) => {
+    pendingOptimistic.current.set(comment.id, comment);
     setData((prev) => {
       if (!prev) {
-        return {
-          comments: [comment],
-          commits: [],
-          files: [],
-          threads: [],
-          checks: { state: "none", total: 0, passed: 0, failed: 0, pending: 0, items: [] },
-        };
+        // Initial load hasn't resolved yet — held in pendingOptimistic and merged in by load().
+        return prev;
       }
       if (prev.comments.some((entry) => entry.id === comment.id)) {
         return prev;
@@ -169,6 +179,7 @@ function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
   }, []);
 
   const removeComment = useCallback((commentId: number) => {
+    pendingOptimistic.current.delete(commentId);
     setData((prev) => {
       if (!prev) return prev;
       return { ...prev, comments: prev.comments.filter((entry) => entry.id !== commentId) };

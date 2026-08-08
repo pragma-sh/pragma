@@ -3,11 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "description": "The scratchpad file contract: managed frontmatter, agent attachment, and the sibling comment-thread file. Source of truth shared by the desktop, the SDK, and the read-only viewer.",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
   },
   "scripts": {
+    "build": "bunup src/index.ts --format esm,cjs --target node --dts",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
@@ -16,6 +27,7 @@
     "@pragma/constants": "workspace:*"
   },
   "devDependencies": {
+    "bunup": "^0.16.32",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }

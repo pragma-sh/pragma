@@ -7,6 +7,7 @@ import {
   githubCacheKeys,
   invalidateGitHubCache,
   peekGitHubCache,
+  writeGitHubCache,
   type GitHubPrLifecycle,
 } from "@/lib/github-cache";
 import { githubToken } from "@/lib/tauri";
@@ -539,7 +540,7 @@ export async function createIssueComment(
   const keys = githubCacheKeys(repo);
   const prior = peekGitHubCache<IssueComment[]>(keys.comments(prNumber)) ?? [];
   const next = prior.some((entry) => entry.id === mapped.id) ? prior : [...prior, mapped];
-  void cachedFetch(keys.comments(prNumber), async () => next, { force: true });
+  writeGitHubCache(keys.comments(prNumber), next);
   return mapped;
 }
 

@@ -6,6 +6,7 @@ import {
   peekGitHubCache,
   resetGitHubCacheForTests,
   subscribeGitHubCache,
+  writeGitHubCache,
 } from "./github-cache";
 
 beforeEach(() => {
@@ -68,6 +69,15 @@ describe("cachedFetch", () => {
     expect(peekGitHubCache<number>("k")).toBe(1);
     invalidateGitHubCache("k");
     expect(peekGitHubCache("k")).toBeUndefined();
+    stop();
+  });
+
+  it("writeGitHubCache seeds a value and notifies listeners", () => {
+    const listener = vi.fn();
+    const stop = subscribeGitHubCache("seed", listener);
+    writeGitHubCache("seed", { ok: true });
+    expect(peekGitHubCache<{ ok: boolean }>("seed")).toEqual({ ok: true });
+    expect(listener).toHaveBeenCalledTimes(1);
     stop();
   });
 });

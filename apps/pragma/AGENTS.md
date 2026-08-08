@@ -134,8 +134,9 @@ read helper (PR summary, comments, commits, files, reviews, threads, checks, bra
 Fresh hits return immediately; stale hits return the cached value and kick a background
 revalidate so the next tick / subscriber sees fresher data without blocking paint.
 `force: true` bypasses. Mutations (`createIssueComment`, `createPullRequest`,
-`mergePullRequest`) seed or invalidate the relevant keys. The Pull Request tab and the
-worktree-sidebar PR lifecycle poll both ride this cache at a 10s cadence.
+`mergePullRequest`) seed or invalidate the relevant keys. The Pull Request tab, the
+PR review tab (metadata + local file diffs), and the worktree-sidebar PR lifecycle
+poll all ride this cache at a 10s cadence.
 
 **Review threads.** `listReviewThreads` paginates GraphQL, requests `originalLine` as a
 fallback when `line` is null (outdated anchors), and reads author avatars via

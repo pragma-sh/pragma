@@ -6,6 +6,7 @@
  * without blocking the UI. Concurrent fetches for the same key coalesce.
  */
 
+/** Lifecycle state used by GitHub pull-request status indicators. */
 export type GitHubPrLifecycle = "open" | "draft" | "merged" | "closed" | "merging" | "none";
 
 interface CacheEntry<T> {
@@ -42,6 +43,15 @@ export function subscribeGitHubCache(key: string, listener: () => void): () => v
 export function peekGitHubCache<T>(key: string): T | undefined {
   const entry = store.get(key);
   return entry ? (entry.value as T) : undefined;
+}
+
+/**
+ * Synchronously write a value (and refresh its TTL). Used to seed optimistic
+ * mutations so a following SWR read does not clobber UI with a stale snapshot.
+ */
+export function writeGitHubCache<T>(key: string, value: T): void {
+  store.set(key, { value, fetchedAt: Date.now() });
+  notify(key);
 }
 
 /** Drops one key, every key with a prefix, or the whole cache. */
@@ -82,16 +92,16 @@ export async function cachedFetch<T>(
   }
 
   if (!force && existing) {
-    void revalidate(key, fetcher);
+    void revalidate(key, fetcher, force);
     return existing.value;
   }
 
-  return revalidate(key, fetcher);
+  return revalidate(key, fetcher, force);
 }
 
-async function revalidate<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+async function revalidate<T>(key: string, fetcher: () => Promise<T>, force = false): Promise<T> {
   const pending = inFlight.get(key) as Promise<T> | undefined;
-  if (pending) return pending;
+  if (pending && !force) return pending;
 
   const request = fetcher()
     .then((value) => {

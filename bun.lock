@@ -480,6 +480,7 @@
         "@pragma/constants": "workspace:*",
       },
       "devDependencies": {
+        "bunup": "^0.16.32",
         "typescript": "^6.0.3",
         "vitest": "^4.1.8",
       },
