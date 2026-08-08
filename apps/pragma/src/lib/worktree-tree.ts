@@ -77,29 +77,42 @@ export function buildWorktreeTree(
   return roots.toSorted(compare);
 }
 
+/** Sibling order: pins, then main, then PR bucket, then label. */
 function compareNodes(a: WorktreeNode, b: WorktreeNode, options: BuildWorktreeTreeOptions): number {
-  const aPin = options.pinTimes?.get(a.worktree.id);
-  const bPin = options.pinTimes?.get(b.worktree.id);
-  const aPinned = aPin !== undefined;
-  const bPinned = bPin !== undefined;
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
+  return (
+    comparePins(a, b, options.pinTimes) ||
+    compareMain(a, b) ||
+    comparePrRank(a, b, options.prLifecycles) ||
+    labelFor(a.worktree).localeCompare(labelFor(b.worktree))
+  );
+}
+
+/** Pinned rows above unpinned ones, newest pin first. */
+function comparePins(
+  a: WorktreeNode,
+  b: WorktreeNode,
+  pinTimes: ReadonlyMap<string, number> | undefined,
+): number {
+  const aPin = pinTimes?.get(a.worktree.id);
+  const bPin = pinTimes?.get(b.worktree.id);
+  if (aPin === undefined || bPin === undefined) {
+    return Number(bPin !== undefined) - Number(aPin !== undefined);
   }
-  if (aPinned && bPinned) {
-    // Newest pin first so clicking Pin moves the row to the top.
-    return bPin - aPin;
-  }
-  // Main heads the unpinned rows.
-  if (a.worktree.isMain !== b.worktree.isMain) {
-    return a.worktree.isMain ? -1 : 1;
-  }
-  const rankDelta =
-    prSortRank(options.prLifecycles?.[a.worktree.id]) -
-    prSortRank(options.prLifecycles?.[b.worktree.id]);
-  if (rankDelta !== 0) {
-    return rankDelta;
-  }
-  return labelFor(a.worktree).localeCompare(labelFor(b.worktree));
+  return bPin - aPin;
+}
+
+/** Main heads the rows it is grouped with. */
+function compareMain(a: WorktreeNode, b: WorktreeNode): number {
+  return Number(b.worktree.isMain) - Number(a.worktree.isMain);
+}
+
+/** No PR first, then open PRs, then closed or merged ones. */
+function comparePrRank(
+  a: WorktreeNode,
+  b: WorktreeNode,
+  prLifecycles: Readonly<Record<string, GitHubPrLifecycle>> | undefined,
+): number {
+  return prSortRank(prLifecycles?.[a.worktree.id]) - prSortRank(prLifecycles?.[b.worktree.id]);
 }
 
 function labelFor(worktree: Worktree): string {
