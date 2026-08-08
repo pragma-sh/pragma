@@ -332,11 +332,7 @@ without updating this guide and CI.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it on the
   GitHub-hosted `windows-latest` image with the `rust-windows` job plus a
-  `windows-latest` entry in the `build` matrix. Windows deliberately does **not** use
-  the Blacksmith pool the macOS build runs on: that pool left the job queued for half an
-  hour at a time and failed it in `Set up job` with "the self-hosted runner lost
-  communication with the server", which looks like a compile failure but never reaches a
-  compiler.
+  `windows-latest` entry in the `build` matrix.
 - **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
   locks a running executable's image, our sidecars outlive the window by design, and a
   per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live
