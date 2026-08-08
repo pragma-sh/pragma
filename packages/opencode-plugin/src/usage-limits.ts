@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
@@ -38,14 +40,19 @@ SELECT
 FROM usage
 `.trim();
 
+// `exec.run` interprets each command through the host's default shell:
+// PowerShell on Windows, a POSIX shell everywhere else. Neither the
+// existence check nor the query quoting is portable between the two.
 const USAGE_COMMAND =
-  "command -v opencode >/dev/null 2>&1 || exit 20; " +
-  `opencode db ${shellQuote(USAGE_QUERY)} --format json`;
+  process.platform === "win32"
+    ? `if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) { exit 20 }; opencode db ${powershellQuote(USAGE_QUERY)} --format json`
+    : "command -v opencode >/dev/null 2>&1 || exit 20; " +
+      `opencode db ${shellQuote(USAGE_QUERY)} --format json`;
 
 /** Loads device-local OpenCode Go usage from OpenCode's supported database command. */
 export async function loadOpenCodeGoUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
   const [result] = await ctx.sdk.exec.run({
-    cwd: ctx.project?.path ?? "/tmp",
+    cwd: ctx.project?.path ?? os.tmpdir(),
     commands: [USAGE_COMMAND],
   });
   if (result?.status === 20) {
@@ -152,4 +159,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function powershellQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
