@@ -15,7 +15,8 @@ packages/opencode-plugin/
 ├── src/
 │   ├── index.ts             # PragmaOpencodePlugin entry point
 │   ├── hooks.ts             # Two-flag state machine (busy + attention)
-│   └── pragma-plugin.ts     # Agent + watcher definition loaded by plugin sidecars
+│   ├── pragma-plugin.ts     # Agent + watcher definition loaded by plugin sidecars
+│   └── usage-limits.ts      # OpenCode Go local cost-window aggregation
 └── dist/
     ├── index.mjs            # opencode status plugin (Bunup; git-ignored)
     └── pragma-plugin.mjs    # Agent/watcher bundle
@@ -218,5 +219,15 @@ from the `provider` field or the `provider/model` id prefix. Fast variants stay 
 model entries when opencode exposes separate IDs. Reasoning is omitted unless opencode
 exposes reliable per-model reasoning levels.
 
-OpenCode exposes no account usage provider, so its agent declares `usageLimits` in
-`excludeFeatures`; verification skips that optional scenario explicitly.
+OpenCode Go usage comes from the supported `opencode db <query> --format json` command.
+The provider sums assistant-message costs whose provider is `opencode-go` against Go's
+documented $12/5-hour, $30/week, and $60/month limits. The 5-hour reset follows the first
+local message in the active rolling window; weekly reset is Monday UTC; monthly reset is
+the next UTC calendar month because OpenCode's local database does not expose the account's
+subscription anchor.
+
+This source is device-local. Requests from other devices or agents do not appear, so the
+provider can undercount account-wide usage. Do not read browser cookies or OpenCode's raw
+credential file to improve it; switch to an OpenCode-owned authenticated usage endpoint if
+one becomes available. A machine with no local `opencode-go` messages reports `unsupported`,
+and transport or parser failures throw so `agent verify` detects regressions.
