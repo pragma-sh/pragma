@@ -48,5 +48,8 @@
     "turbo": "^2.9.18",
     "typescript": "^6.0.3"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "bun@1.3.14",
+  "patchedDependencies": {
+    "bunup@0.16.32": "patches/bunup@0.16.32.patch"
+  }
 }
