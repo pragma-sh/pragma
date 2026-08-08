@@ -21,8 +21,9 @@ import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { rememberModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
 import { isMacPlatform } from "@/lib/platform";
-import { createWorktree, githubFetchAndSync, githubPullBranch } from "@/lib/tauri";
+import { githubFetchAndSync } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 
 interface CreateWorktreeDialogProps {
   open: boolean;
@@ -39,6 +40,36 @@ interface CreateWorktreeDialogProps {
 type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"> & {
   preventDefault: () => void;
 };
+
+interface MainBehindAlertProps {
+  behind: number;
+  mainWorktreeId: string | null;
+  onCancel: () => void;
+  onConfirm: (pullFirst: boolean) => void;
+}
+
+function MainBehindAlert({ behind, mainWorktreeId, onCancel, onConfirm }: MainBehindAlertProps) {
+  return (
+    <AlertDialog open={mainWorktreeId !== null} onOpenChange={(open) => !open && onCancel()}>
+      <AlertDialogContent className="data-[size=default]:sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
+          <AlertDialogDescription>
+            Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
+            worktree?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="outline" onClick={() => onConfirm(false)}>
+            Create without syncing
+          </Button>
+          <AlertDialogAction onClick={() => onConfirm(true)}>Sync and create</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 /**
  * Fetches the main worktree's sync status, treating a failed fetch (offline,
@@ -70,7 +101,7 @@ function useWorktreeFormFields(): {
   return { branch, setBranch, title, setTitle, message, setMessage };
 }
 
-/** Submission state: in-flight flag, last error, and the main-behind confirmation gate. */
+/** Submission state: the pre-flight sync check and the main-behind confirmation gate. */
 function useWorktreeSubmission(): {
   error: string | null;
   setError: (value: string | null) => void;
@@ -101,6 +132,7 @@ export function CreateWorktreeDialog({
   parentWorktreeId,
 }: CreateWorktreeDialogProps) {
   const workspace = useWorkspace();
+  const { startCreation } = useWorktreeCreation();
   const {
     agents,
     modelsByAgent,
@@ -121,23 +153,34 @@ export function CreateWorktreeDialog({
   }
 
   const canSubmit = branch.trim().length > 0;
+  const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
+  const parent = (workspace.worktrees[workspace.selectedProjectId ?? ""] ?? []).find(
+    (worktree) => worktree.id === parentId,
+  );
+  const parentLabel = parent?.title?.trim() || parent?.branch || null;
 
-  async function createAndLaunch() {
+  /**
+   * Hands the run off to the background flow and closes immediately: creation
+   * (and the optional sync) is reported by the full-frame progress screen, so
+   * the modal never blocks the app while it runs.
+   */
+  function handOff(syncWorktreeId: string | null) {
     const projectId = workspace.selectedProjectId;
-    const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
     if (!projectId || !parentId) return;
-    const worktree = await createWorktree(projectId, parentId, branch, title.trim() || undefined);
-    // Load the new worktree into state first so its terminal tab resolves its
-    // cwd to the new worktree path.
-    await workspace.refreshProject(projectId);
     const prompt = message.trim();
     if (prompt && selectedAgent) {
       rememberModelSelection(selectedAgent.id, modelSelection);
-      await workspace.startSession(worktree.id, selectedAgent, prompt, modelSelection);
-    } else {
-      workspace.selectWorktree(worktree.id);
-      await workspace.createTerminalTab(worktree.id);
     }
+    startCreation({
+      projectId,
+      parentWorktreeId: parentId,
+      branch,
+      title: title.trim() || undefined,
+      prompt,
+      agent: selectedAgent,
+      modelSelection,
+      syncWorktreeId,
+    });
     onOpenChange(false);
     setBranch("");
     setTitle("");
@@ -146,12 +189,10 @@ export function CreateWorktreeDialog({
   }
 
   function canStartSubmit(projectId: string | null): projectId is string {
-    return Boolean(
-      projectId && (parentWorktreeId ?? workspace.selectedWorktreeId) && canSubmit && !busy,
-    );
+    return Boolean(projectId && parentId && canSubmit && !busy);
   }
 
-  /** Blocks creation only when the main worktree is behind the remote; otherwise proceeds. */
+  /** Asks about syncing only when the main worktree is behind the remote. */
   async function checkMainAndCreate(projectId: string) {
     const main = (workspace.worktrees[projectId] ?? []).find((worktree) => worktree.isMain);
     if (!main) {
@@ -163,7 +204,7 @@ export function CreateWorktreeDialog({
       setMainWorktreeId(main.id);
       return;
     }
-    await createAndLaunch();
+    handOff(null);
   }
 
   async function submit() {
@@ -182,20 +223,10 @@ export function CreateWorktreeDialog({
     }
   }
 
-  async function confirmCreate(pullFirst: boolean) {
-    if (busy) return;
+  function confirmCreate(pullFirst: boolean) {
     const mainId = mainWorktreeId;
     setMainWorktreeId(null);
-    setBusy(true);
-    setError(null);
-    try {
-      if (pullFirst && mainId) await githubPullBranch(mainId);
-      await createAndLaunch();
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-    }
+    handOff(pullFirst ? mainId : null);
   }
 
   function handleKeyDown(event: SubmitKeyEvent) {
@@ -213,7 +244,9 @@ export function CreateWorktreeDialog({
   return (
     <ModalShell className="max-w-2xl">
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold">New worktree at</h2>
+        <h2 className="text-lg font-semibold">
+          {parentLabel ? `New worktree at ${parentLabel}` : "New worktree"}
+        </h2>
         <p className="text-sm text-muted-foreground">
           Branches from the selected parent worktree HEAD. Add a prompt to launch an agent session
           in it.
@@ -283,31 +316,12 @@ export function CreateWorktreeDialog({
           </Button>
         </div>
       </form>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) setMainWorktreeId(null);
-        }}
-        open={mainWorktreeId !== null}
-      >
-        <AlertDialogContent className="data-[size=default]:sm:max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
-            <AlertDialogDescription>
-              Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
-              worktree?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="outline" onClick={() => void confirmCreate(false)}>
-              Create without syncing
-            </Button>
-            <AlertDialogAction onClick={() => void confirmCreate(true)}>
-              Sync and create
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MainBehindAlert
+        behind={behind}
+        mainWorktreeId={mainWorktreeId}
+        onCancel={() => setMainWorktreeId(null)}
+        onConfirm={confirmCreate}
+      />
     </ModalShell>
   );
 }

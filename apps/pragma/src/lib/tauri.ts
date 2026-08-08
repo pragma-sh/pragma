@@ -524,6 +524,26 @@ export function createWorktree(
   return invoke<Worktree>("create_worktree", { projectId, parentWorktreeId, branch, title });
 }
 
+/** A create-worktree progress update emitted from inside `create_worktree`. */
+export interface WorktreeCreateStage {
+  projectId: string;
+  worktreeId: string;
+  /** Only `"scripts"` today: the project's `setup` commands are about to run. */
+  stage: "scripts";
+}
+
+/**
+ * Subscribes to create-worktree progress. Only stages the frontend cannot
+ * observe itself are emitted (the setup scripts run inside `create_worktree`).
+ */
+export function onWorktreeCreateStage(
+  handler: (stage: WorktreeCreateStage) => void,
+): Promise<UnlistenFn> {
+  return listen<WorktreeCreateStage>("pragma:worktree-create-stage", (event) =>
+    handler(event.payload),
+  );
+}
+
 /** Reports whether a worktree has uncommitted, staged, or untracked changes. */
 export function worktreeStatus(worktreeId: string): Promise<WorktreeStatus> {
   return invoke<WorktreeStatus>("worktree_status", { worktreeId });
