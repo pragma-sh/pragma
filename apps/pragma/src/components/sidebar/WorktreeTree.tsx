@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  Fragment,
   type ComponentPropsWithoutRef,
   type RefObject,
   useCallback,
@@ -36,6 +37,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
 import { editorLaunchers } from "@/lib/editor-launchers";
@@ -269,29 +271,42 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       workspace.selectedProjectId ? (workspace.worktrees[workspace.selectedProjectId] ?? []) : [],
     [workspace.selectedProjectId, workspace.worktrees],
   );
-  const tree = useMemo(
-    () => buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden, pinTimes }),
-    [worktrees, pinTimes],
-  );
   const hidden = worktrees.filter((w) => w.hidden);
   const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
   const prLifecycleByWorktreeId = useWorktreePrLifecycles(worktrees, authenticated);
+  const tree = useMemo(
+    () =>
+      buildWorktreeTree(worktrees, {
+        predicate: (w) => !w.hidden,
+        pinTimes,
+        prLifecycles: prLifecycleByWorktreeId,
+      }),
+    [worktrees, pinTimes, prLifecycleByWorktreeId],
+  );
 
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
   }
 
+  // Pinned rows sort first; the rule below the last one sets them apart from
+  // the rest of the tree. Only drawn when both sides are non-empty.
+  const pinnedRootCount = tree.filter((node) => pinTimes.has(node.worktree.id)).length;
+  const separatorIndex =
+    pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
+
   return (
     <div className="space-y-1">
-      {tree.map((node) => (
-        <WorktreeRow
-          key={node.worktree.id}
-          depth={0}
-          mergedByWorktreeId={mergedByWorktreeId}
-          node={node}
-          onCreateChild={onCreateChild}
-          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-        />
+      {tree.map((node, index) => (
+        <Fragment key={node.worktree.id}>
+          {index === separatorIndex ? <Separator className="my-2" /> : null}
+          <WorktreeRow
+            depth={0}
+            mergedByWorktreeId={mergedByWorktreeId}
+            node={node}
+            onCreateChild={onCreateChild}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+          />
+        </Fragment>
       ))}
       {hidden.length > 0 ? (
         <HiddenWorktreesSection

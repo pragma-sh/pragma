@@ -24,16 +24,46 @@ function worktree(
 }
 
 describe("buildWorktreeTree", () => {
-  it("nests worktrees by parent id and keeps main first", () => {
+  it("nests worktrees by parent id, with main a flat row on top", () => {
     const tree = buildWorktreeTree([
       worktree("child", "main", "feature"),
       worktree("main", null, "main", true),
       worktree("grandchild", "child", "nested"),
     ]);
 
-    expect(tree[0]?.worktree.id).toBe("main");
-    expect(tree[0]?.children[0]?.worktree.id).toBe("child");
-    expect(tree[0]?.children[0]?.children[0]?.worktree.id).toBe("grandchild");
+    expect(tree.map((node) => node.worktree.id)).toEqual(["main", "child"]);
+    expect(tree[0]?.children).toEqual([]);
+    expect(tree[1]?.children[0]?.worktree.id).toBe("grandchild");
+  });
+
+  it("orders siblings by PR state: no PR, then open, then closed/merged", () => {
+    const tree = buildWorktreeTree(
+      [
+        worktree("main", null, "main", true),
+        worktree("merged", "main", "merged-branch"),
+        worktree("bare", "main", "zzz-no-pr"),
+        worktree("open", "main", "open-branch"),
+        worktree("closed", "main", "aaa-closed"),
+        worktree("draft", "main", "aaa-draft"),
+      ],
+      {
+        prLifecycles: {
+          merged: "merged",
+          open: "open",
+          closed: "closed",
+          draft: "draft",
+        },
+      },
+    );
+
+    expect(tree.map((node) => node.worktree.id)).toEqual([
+      "main",
+      "bare",
+      "draft",
+      "open",
+      "closed",
+      "merged",
+    ]);
   });
 
   it("filters out rows that the predicate rejects and promotes their children", () => {
@@ -68,11 +98,11 @@ describe("buildWorktreeTree", () => {
       },
     );
 
-    expect(tree.map((node) => node.worktree.id)).toEqual(["gamma", "alpha", "main"]);
-    expect(tree[2]?.children.map((node) => node.worktree.id)).toEqual(["beta"]);
+    // Pinned rows lead, newest pin first; main heads the unpinned rows.
+    expect(tree.map((node) => node.worktree.id)).toEqual(["gamma", "alpha", "main", "beta"]);
   });
 
-  it("sorts pinned roots above unpinned when already a root", () => {
+  it("sorts pinned roots above main and other unpinned roots", () => {
     const tree = buildWorktreeTree(
       [
         worktree("main", null, "main", true),
