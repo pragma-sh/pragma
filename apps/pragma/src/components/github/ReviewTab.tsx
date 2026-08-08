@@ -14,11 +14,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { type DiffComment, type MergeDiffHandle, MergeDiff } from "@/components/editor/MergeDiff";
 import { FixCommentDialog } from "@/components/github/FixCommentDialog";
 import { FixItListDialog } from "@/components/github/FixItListDialog";
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
 import { ActorAvatar } from "@/components/github/ViewPullRequestView";
-import { type DiffComment, type MergeDiffHandle, MergeDiff } from "@/components/editor/MergeDiff";
+import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
 import {
   type PullFile,
@@ -32,8 +33,10 @@ import {
   resolveReviewThread,
   unresolveReviewThread,
 } from "@/lib/github";
+import { githubCacheKeys, subscribeGitHubCache, writeGitHubCache } from "@/lib/github-cache";
 import { reviewThreadToFixItComment } from "@/lib/fix-it-prompt";
-import { githubPrFileDiff, githubRepoRef } from "@/lib/tauri";
+import { fileDiffsEqual, loadPrFileDiff, prFileDiffCacheKey } from "@/lib/pr-file-diff";
+import { githubRepoRef } from "@/lib/tauri";
 import {
   addFixItComment,
   type FixItComment,
@@ -43,6 +46,13 @@ import {
 } from "@/state/fix-it-store";
 import { useReviewDone, setReviewDone } from "@/state/review-done-store";
 import { clearReviewFocus, useReviewFocus } from "@/state/review-focus-store";
+
+/**
+ * How often the review tab re-fetches PR metadata, files, comments, and local
+ * diffs while mounted. Matches the Pull Request sidebar cadence: GitHub has no
+ * push channel here, and cached responses keep each tick cheap.
+ */
+const REVIEW_REFRESH_INTERVAL_MS = 10_000;
 
 interface ReviewData {
   repo: GitHubRepoRef;
@@ -82,41 +92,94 @@ function buildCommentKeys(files: PullFile[], threadsByPath: Map<string, ReviewTh
   return keys;
 }
 
+/** Compact signature so background refreshes can skip no-op React updates. */
+function reviewDataSignature(data: ReviewData): string {
+  const files = data.files
+    .map((file) => `${file.path}:${file.status}:${file.additions}:${file.deletions}`)
+    .join("|");
+  const reviews = data.reviews
+    .map((review) => `${review.id}:${review.state}:${review.body}`)
+    .join("|");
+  const threads = [...data.threadsByPath.entries()]
+    .flatMap(([path, list]) =>
+      list.map(
+        (thread) =>
+          `${path}:${thread.id}:${thread.isResolved}:${thread.line}:${thread.comments
+            .map((comment) => `${comment.id}:${comment.body}`)
+            .join(",")}`,
+      ),
+    )
+    .join("|");
+  const pr = data.pr;
+  return `${pr.number}:${pr.headSha}:${pr.title}:${pr.state}:${pr.merged}:${pr.baseRef}:${files}:${reviews}:${threads}`;
+}
+
+/** Flatten path → threads for seeding the GitHub SWR store after an optimistic flip. */
+function flattenThreads(threadsByPath: Map<string, ReviewThread[]>): ReviewThread[] {
+  const threads: ReviewThread[] = [];
+  for (const list of threadsByPath.values()) {
+    threads.push(...list);
+  }
+  return threads;
+}
+
 /** Load the PR + files + reviews + threads, and own the optimistic thread-resolve flip. */
 function useReviewData(worktreeId: string, prNumber: number | null) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const active = useRef(true);
+  // First paint goes through loading; later background refetches keep ready data
+  // on screen so a cache hit doesn't flash the spinner again.
+  const hasReady = useRef(false);
+  const signature = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (prNumber === null || prNumber === undefined) {
-      setState({ kind: "error", message: "This review tab is missing its pull request number." });
-      return;
-    }
-    setState({ kind: "loading" });
-    try {
-      const repo = await githubRepoRef(worktreeId);
-      const [pr, files, reviews, threads] = await Promise.all([
-        getPullRequest(repo, prNumber),
-        listPullFiles(repo, prNumber),
-        listPullReviews(repo, prNumber),
-        listReviewThreads(repo, prNumber),
-      ]);
-      if (active.current) {
-        setState({
-          kind: "ready",
-          data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
-        });
+  const load = useCallback(
+    async (force = false) => {
+      if (prNumber === null || prNumber === undefined) {
+        setState({ kind: "error", message: "This review tab is missing its pull request number." });
+        return;
       }
-    } catch (cause) {
-      if (active.current) {
-        setState({ kind: "error", message: errorMessage(cause) });
+      if (!hasReady.current) {
+        setState({ kind: "loading" });
       }
-    }
-  }, [worktreeId, prNumber]);
+      try {
+        const repo = await githubRepoRef(worktreeId);
+        // Parallel + cached: cache hits return immediately, misses coalesce, and a
+        // stale hit returns now while a background revalidate refreshes the store.
+        const [pr, files, reviews, threads] = await Promise.all([
+          getPullRequest(repo, prNumber, { force }),
+          listPullFiles(repo, prNumber, { force }),
+          listPullReviews(repo, prNumber, { force }),
+          listReviewThreads(repo, prNumber, { force }),
+        ]);
+        if (!active.current) {
+          return;
+        }
+        const data: ReviewData = {
+          repo,
+          pr,
+          files,
+          reviews,
+          threadsByPath: groupThreadsByPath(threads),
+        };
+        const nextSignature = reviewDataSignature(data);
+        if (signature.current === nextSignature) {
+          return;
+        }
+        signature.current = nextSignature;
+        hasReady.current = true;
+        setState({ kind: "ready", data });
+      } catch (cause) {
+        if (active.current && !hasReady.current) {
+          setState({ kind: "error", message: errorMessage(cause) });
+        }
+      }
+    },
+    [worktreeId, prNumber],
+  );
 
   // Optimistically flips one thread's resolved state in place — no refetch, so the
-  // diff panes and decorations don't flash. Stable (functional update) so each
-  // file's memoized inline-comment content only changes when its threads actually do.
+  // diff panes and decorations don't flash. Also seeds the threads cache so a
+  // follow-up SWR poll cannot clobber the flip with a pre-resolve snapshot.
   const setThreadResolved = useCallback((threadId: string, isResolved: boolean) => {
     setState((prev) => {
       if (prev.kind !== "ready") {
@@ -125,6 +188,7 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
       // Clone only the bucket that holds this thread; every other path keeps its
       // array reference so its memoized inline comments don't recompute.
       const threadsByPath = new Map(prev.data.threadsByPath);
+      let found = false;
       for (const [path, threads] of threadsByPath) {
         const index = threads.findIndex((thread) => thread.id === threadId);
         const current = index === -1 ? undefined : threads[index];
@@ -134,19 +198,62 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
         const updated = threads.slice();
         updated[index] = { ...current, isResolved };
         threadsByPath.set(path, updated);
+        found = true;
         break;
       }
-      return { kind: "ready", data: { ...prev.data, threadsByPath } };
+      if (!found) {
+        return prev;
+      }
+      const data = { ...prev.data, threadsByPath };
+      writeGitHubCache(
+        githubCacheKeys(prev.data.repo).threads(prev.data.pr.number),
+        flattenThreads(threadsByPath),
+      );
+      signature.current = reviewDataSignature(data);
+      return { kind: "ready", data };
     });
   }, []);
 
   useEffect(() => {
     active.current = true;
-    void load();
+    hasReady.current = false;
+    signature.current = null;
+    // Poll with force=false so cache serves stale-while-revalidate; each tick
+    // + window focus still revalidates in the background while the tab is open.
+    const stopRefresh = startRefreshLoop(() => load(false), REVIEW_REFRESH_INTERVAL_MS);
     return () => {
       active.current = false;
+      stopRefresh();
     };
   }, [load]);
+
+  // When a background revalidate finishes writing the store, re-read so the UI
+  // picks up new comments/files without waiting for the next interval tick.
+  const repoIdentity =
+    state.kind === "ready" ? `${state.data.repo.owner}/${state.data.repo.repo}` : null;
+  useEffect(() => {
+    if (prNumber === null || prNumber === undefined || !repoIdentity) {
+      return;
+    }
+    const slash = repoIdentity.indexOf("/");
+    const owner = repoIdentity.slice(0, slash);
+    const repo = repoIdentity.slice(slash + 1);
+    const keys = githubCacheKeys({ owner, repo });
+    const apply = () => {
+      void load(false);
+    };
+    const stops = [
+      subscribeGitHubCache(keys.pr(prNumber), apply),
+      subscribeGitHubCache(keys.files(prNumber), apply),
+      subscribeGitHubCache(keys.reviews(prNumber), apply),
+      subscribeGitHubCache(keys.threads(prNumber), apply),
+    ];
+    return () => {
+      for (const stop of stops) {
+        stop();
+      }
+    };
+  }, [load, prNumber, repoIdentity]);
 
   return { state, setThreadResolved };
 }
@@ -228,6 +335,10 @@ function shouldHandleReviewArrowKey(
  * `review-done-store`, collapses the diff when checked), a side-by-side
  * `base...HEAD` diff from `github_pr_file_diff`, and the file's inline review
  * threads, each resolvable via `resolveReviewThread` (resolved threads dim).
+ *
+ * Data + diffs use the same SWR + 10s refresh pattern as the Pull Request sidebar:
+ * first paint can hit the GitHub/local-diff cache immediately; interval and focus
+ * polls revalidate in the background without flashing a loading spinner.
  */
 export function ReviewTab({ tab }: { tab: Tab }) {
   const { worktreeId, prNumber } = tab;
@@ -601,27 +712,13 @@ function FileReview({
   );
 }
 
-/** Lazily loads + renders a single file's local `base...HEAD` diff. */
-function FileDiffPane({
-  base,
-  comments,
-  file,
-  registerCommentReveal,
-  worktreeId,
-}: {
-  base: string;
-  comments: DiffComment[];
-  file: PullFile;
-  registerCommentReveal: (key: string, reveal: (() => void) | null) => void;
-  worktreeId: string;
-}) {
-  const [diff, setDiff] = useState<FileDiff | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const diffRef = useRef<MergeDiffHandle>(null);
-
-  // Register a reveal callback per inline comment so the toolbar can scroll a
-  // below-the-fold comment into the virtualized diff before centering it.
+/** Registers a reveal callback per inline comment so the toolbar can scroll a
+ * below-the-fold comment into the virtualized diff before centering it. */
+function useCommentReveals(
+  comments: DiffComment[],
+  registerCommentReveal: (key: string, reveal: (() => void) | null) => void,
+  diffRef: React.RefObject<MergeDiffHandle | null>,
+): void {
   useEffect(() => {
     for (const comment of comments) {
       registerCommentReveal(comment.key, () => diffRef.current?.scrollCommentIntoView(comment.key));
@@ -631,31 +728,68 @@ function FileDiffPane({
         registerCommentReveal(comment.key, null);
       }
     };
-  }, [comments, registerCommentReveal]);
-  // The diff only "captures" wheel scrolling once the user clicks into it. Until
-  // then a wheel over the pane is redirected to the review scroll container, so
-  // the user can scroll past the file instead of the fixed-height diff trapping
-  // the scroll. A ref (not state) keeps the wheel listener from re-subscribing.
-  const engaged = useRef(false);
+  }, [comments, registerCommentReveal, diffRef]);
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+/** Loads (and keeps fresh) a single file's local `base...HEAD` diff. */
+function useFileDiff(
+  worktreeId: string,
+  base: string,
+  file: PullFile,
+): { diff: FileDiff | null; error: string | null } {
+  const [diff, setDiff] = useState<FileDiff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const active = useRef(true);
+  const hasDiff = useRef(false);
+
+  const loadDiff = useCallback(
+    async (force = false) => {
       try {
-        const result = await githubPrFileDiff(worktreeId, base, file.path, file.oldPath);
-        if (!cancelled) {
-          setDiff(result);
+        const result = await loadPrFileDiff(worktreeId, base, file.path, file.oldPath, { force });
+        if (!active.current) {
+          return;
         }
+        hasDiff.current = true;
+        setError(null);
+        setDiff((prev) => (fileDiffsEqual(prev, result) ? prev : result));
       } catch (cause) {
-        if (!cancelled) {
+        if (active.current && !hasDiff.current) {
           setError(errorMessage(cause));
         }
       }
-    })();
+    },
+    [worktreeId, base, file.path, file.oldPath],
+  );
+
+  useEffect(() => {
+    active.current = true;
+    hasDiff.current = false;
+    const stopRefresh = startRefreshLoop(() => loadDiff(false), REVIEW_REFRESH_INTERVAL_MS);
     return () => {
-      cancelled = true;
+      active.current = false;
+      stopRefresh();
     };
-  }, [worktreeId, base, file.path, file.oldPath]);
+  }, [loadDiff]);
+
+  // Background revalidate of this file's cache key updates the pane immediately.
+  useEffect(() => {
+    const key = prFileDiffCacheKey(worktreeId, base, file.path, file.oldPath);
+    return subscribeGitHubCache(key, () => {
+      void loadDiff(false);
+    });
+  }, [worktreeId, base, file.path, file.oldPath, loadDiff]);
+
+  return { diff, error };
+}
+
+/** Redirects wheel scrolling over the pane to the review scroll container until
+ * the user clicks in — otherwise the fixed-height diff traps the scroll. */
+function useWheelRedirect(wrapperRef: React.RefObject<HTMLDivElement | null>): {
+  onPointerDown: () => void;
+  onPointerLeave: () => void;
+} {
+  // A ref (not state) keeps the wheel listener from re-subscribing.
+  const engaged = useRef(false);
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -676,7 +810,38 @@ function FileDiffPane({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [wrapperRef]);
+
+  return {
+    onPointerDown: () => {
+      engaged.current = true;
+    },
+    onPointerLeave: () => {
+      engaged.current = false;
+    },
+  };
+}
+
+/** Lazily loads + renders a single file's local `base...HEAD` diff. */
+function FileDiffPane({
+  base,
+  comments,
+  file,
+  registerCommentReveal,
+  worktreeId,
+}: {
+  base: string;
+  comments: DiffComment[];
+  file: PullFile;
+  registerCommentReveal: (key: string, reveal: (() => void) | null) => void;
+  worktreeId: string;
+}) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const diffRef = useRef<MergeDiffHandle>(null);
+
+  useCommentReveals(comments, registerCommentReveal, diffRef);
+  const { diff, error } = useFileDiff(worktreeId, base, file);
+  const wheelHandlers = useWheelRedirect(wrapperRef);
 
   let content: React.ReactNode;
   if (error) {
@@ -701,16 +866,7 @@ function FileDiffPane({
   // never changes once it mounts — that keeps a pending scroll-into-view request
   // landing on the right file even while diffs above it are still loading.
   return (
-    <div
-      className="h-80 min-h-0"
-      onPointerDown={() => {
-        engaged.current = true;
-      }}
-      onPointerLeave={() => {
-        engaged.current = false;
-      }}
-      ref={wrapperRef}
-    >
+    <div className="h-80 min-h-0" ref={wrapperRef} {...wheelHandlers}>
       {content}
     </div>
   );

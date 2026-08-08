@@ -45,11 +45,17 @@ let workspaceMock = {
 
 vi.mock("@/lib/tauri", () => ({
   worktreesMergedStatus: (...args: unknown[]) => worktreesMergedStatusMock(...args),
+  githubRepoRef: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/file-watch", () => ({
   subscribeToWorktreeFiles: (worktreeId: string, listener: unknown) =>
     subscribeToWorktreeFilesMock(worktreeId, listener),
+}));
+
+vi.mock("@/lib/github", () => ({
+  findPullRequestForBranch: vi.fn().mockResolvedValue(null),
+  pullRequestLifecycle: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("@/state/workspace-context", () => ({
@@ -58,6 +64,10 @@ vi.mock("@/state/workspace-context", () => ({
 
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({ exitBoard: vi.fn() }),
+}));
+
+vi.mock("@/state/github-context", () => ({
+  useGitHub: () => ({ authenticated: false }),
 }));
 
 import { WorktreeTree } from "./WorktreeTree";

@@ -89,6 +89,18 @@ the user has not themed.
 
 ## Rules
 
+- **`build` marks `@pragma/scratchpad-contract` `--external`.** Letting bunup
+  bundle/dts-inline it crashes on Windows (`panic: Expected pretty file path
+to have only forward slashes` — a long-standing unfixed upstream bug,
+  oven-sh/bun#14843, #14972, #15007, #15421) when it walks that
+  workspace-symlinked package's source during `--dts` generation. Marking it
+  external stops bunup from ever opening those files: the emitted
+  `dist/index.d.ts` just re-exports its types (`export * from
+"@pragma/scratchpad-contract"`), and `dist/index.js` keeps a plain import
+  instead of inlining it — resolved at runtime the same way any other
+  workspace package is. If `bun run build` starts panicking again with that
+  message, suspect a _new_ raw-src workspace dependency needing the same
+  `--external` treatment before reaching for anything more invasive.
 - Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.
 - No `node:` imports in SDK source; keep it fetch/ReadableStream/TextDecoder based.
 - `env.ts` is the only SDK file that touches process env, and it must use guarded

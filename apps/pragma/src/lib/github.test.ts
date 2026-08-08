@@ -32,8 +32,10 @@ import {
   listBaseRepoOptions,
   listPullRequestCommits,
   listReviewThreads,
+  pullRequestLifecycle,
   resetGitHubClient,
 } from "./github";
+import { resetGitHubCacheForTests } from "./github-cache";
 
 const repo: GitHubRepoRef = {
   owner: "acme",
@@ -46,7 +48,18 @@ const repo: GitHubRepoRef = {
 beforeEach(() => {
   vi.clearAllMocks();
   resetGitHubClient();
+  resetGitHubCacheForTests();
   githubToken.mockResolvedValue("token-123");
+});
+
+describe("pullRequestLifecycle", () => {
+  it("maps open / draft / merged / closed", () => {
+    expect(pullRequestLifecycle(null)).toBe("none");
+    expect(pullRequestLifecycle({ state: "open", merged: false, draft: false })).toBe("open");
+    expect(pullRequestLifecycle({ state: "open", merged: false, draft: true })).toBe("draft");
+    expect(pullRequestLifecycle({ state: "closed", merged: true, draft: false })).toBe("merged");
+    expect(pullRequestLifecycle({ state: "closed", merged: false, draft: false })).toBe("closed");
+  });
 });
 
 describe("client auth", () => {
@@ -364,12 +377,14 @@ describe("listReviewThreads", () => {
       repository: {
         pullRequest: {
           reviewThreads: {
+            pageInfo: { endCursor: null, hasNextPage: false },
             nodes: [
               {
                 id: "T1",
                 isResolved: false,
                 path: "src/a.ts",
                 line: 12,
+                originalLine: 10,
                 comments: {
                   nodes: [
                     {
@@ -395,6 +410,30 @@ describe("listReviewThreads", () => {
       createdAt: "2026-01-01",
       user: { login: "octo", avatarUrl: "https://avatars/octo" },
     });
+  });
+
+  it("falls back to originalLine when line is null (outdated thread)", async () => {
+    octokit.graphql.mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { endCursor: null, hasNextPage: false },
+            nodes: [
+              {
+                id: "T2",
+                isResolved: false,
+                path: "src/b.ts",
+                line: null,
+                originalLine: 44,
+                comments: { nodes: [] },
+              },
+            ],
+          },
+        },
+      },
+    });
+    const threads = await listReviewThreads(repo, 42);
+    expect(threads[0]).toMatchObject({ id: "T2", line: 44 });
   });
 });
 

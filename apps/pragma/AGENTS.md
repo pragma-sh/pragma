@@ -129,6 +129,25 @@ same discipline as the `invoke()` rule. Components import typed helpers
 a client. The client is lazily built from the stored token (`githubToken()`) and cached
 by token, so sign-in/out rebuilds it (`resetGitHubClient`).
 
+**Response cache.** `lib/github-cache.ts` is a stale-while-revalidate store over every
+read helper (PR summary, comments, commits, files, reviews, threads, checks, branches).
+Fresh hits return immediately; stale hits return the cached value and kick a background
+revalidate so the next tick / subscriber sees fresher data without blocking paint.
+`force: true` bypasses. Mutations (`createIssueComment`, `createPullRequest`,
+`mergePullRequest`) seed or invalidate the relevant keys. The Pull Request tab, the
+PR review tab (metadata + local file diffs), and the worktree-sidebar PR lifecycle
+poll all ride this cache at a 10s cadence.
+
+**Review threads.** `listReviewThreads` paginates GraphQL, requests `originalLine` as a
+fallback when `line` is null (outdated anchors), and reads author avatars via
+`... on User/Bot/Mannequin` fragments — `Actor.avatarUrl` is **not** on the GraphQL
+interface and a bare `author { avatarUrl }` 400s the whole call (zero comments).
+
+**PR lifecycle colors.** `pullRequestLifecycle` maps a summary to
+`open | draft | merged | closed | none`. Sidebar merge glyph: green = open, purple
+(`text-skill`) = merged, red = closed. Header chip adds a yellow `merging` state while
+the merge mutation is in flight. Conversation comments post **optimistically**.
+
 Everything **secret/OS/git** stays in Rust (`src-tauri/src/github.rs`): the token is
 stored in a **`0600` plaintext file** (`github-token`, owned by `TokenStore`) — the
 same model the `gh` CLI uses, and **never SQLite**. The OS keychain is deliberately

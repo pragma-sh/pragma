@@ -108,40 +108,85 @@ interface PullData {
   checks: ChecksStatus;
 }
 
-/** Loads the PR's conversation, files, review threads, and checks. */
+/** Loads the PR's conversation, files, review threads, and checks (cached + parallel). */
 function usePullRequestData(repo: GitHubRepoRef, pr: PullRequestSummary) {
   const [data, setData] = useState<PullData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
+  const hasData = useRef(false);
+  // Comments posted before the initial load resolves — merged in once real data arrives,
+  // instead of fabricating empty commits/files/threads/checks for an in-flight PR.
+  const pendingOptimistic = useRef<Map<number, IssueComment>>(new Map());
 
-  const load = useCallback(async () => {
-    try {
-      const [comments, commits, files, threads, checks] = await Promise.all([
-        listIssueComments(repo, pr.number),
-        listPullRequestCommits(repo, pr.number),
-        listPullFiles(repo, pr.number),
-        listReviewThreads(repo, pr.number),
-        getChecksStatus(repo, pr.headSha),
-      ]);
-      if (active.current) {
-        setData({ comments, commits, files, threads, checks });
+  const load = useCallback(
+    async (force = false) => {
+      try {
+        const [comments, commits, files, threads, checks] = await Promise.all([
+          listIssueComments(repo, pr.number, { force }),
+          listPullRequestCommits(repo, pr.number, { force }),
+          listPullFiles(repo, pr.number, { force }),
+          listReviewThreads(repo, pr.number, { force }),
+          getChecksStatus(repo, pr.headSha, { force }),
+        ]);
+        if (active.current) {
+          hasData.current = true;
+          const known = new Set(comments.map((entry) => entry.id));
+          const stillPending = [...pendingOptimistic.current.values()].filter(
+            (entry) => !known.has(entry.id),
+          );
+          setData({
+            comments: stillPending.length > 0 ? [...comments, ...stillPending] : comments,
+            commits,
+            files,
+            threads,
+            checks,
+          });
+          setError(null);
+        }
+      } catch (cause) {
+        // Keep prior data on screen when a background refresh fails.
+        if (active.current && !hasData.current) {
+          setError(errorMessage(cause));
+        }
       }
-    } catch (cause) {
-      if (active.current) {
-        setError(errorMessage(cause));
-      }
-    }
-  }, [repo, pr.number, pr.headSha]);
+    },
+    [repo, pr.number, pr.headSha],
+  );
 
   useEffect(() => {
     active.current = true;
-    void load();
+    hasData.current = false;
+    pendingOptimistic.current.clear();
+    void load(false);
     return () => {
       active.current = false;
     };
   }, [load]);
 
-  return { data, error, load };
+  /** Append a just-posted comment optimistically (real id replaces temp on success). */
+  const prependComment = useCallback((comment: IssueComment) => {
+    pendingOptimistic.current.set(comment.id, comment);
+    setData((prev) => {
+      if (!prev) {
+        // Initial load hasn't resolved yet — held in pendingOptimistic and merged in by load().
+        return prev;
+      }
+      if (prev.comments.some((entry) => entry.id === comment.id)) {
+        return prev;
+      }
+      return { ...prev, comments: [...prev.comments, comment] };
+    });
+  }, []);
+
+  const removeComment = useCallback((commentId: number) => {
+    pendingOptimistic.current.delete(commentId);
+    setData((prev) => {
+      if (!prev) return prev;
+      return { ...prev, comments: prev.comments.filter((entry) => entry.id !== commentId) };
+    });
+  }, []);
+
+  return { data, error, load, prependComment, removeComment };
 }
 
 /** path → count of unresolved review threads, for the per-file badge. */
@@ -254,12 +299,14 @@ function ChangedFilesSection({
 function MergeOrStatus({
   checks,
   onChanged,
+  onMergingChange,
   pr,
   repo,
   worktreeId,
 }: {
   checks: ChecksStatus | null;
   onChanged: () => void;
+  onMergingChange?: (merging: boolean) => void;
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
   worktreeId: string;
@@ -269,6 +316,7 @@ function MergeOrStatus({
       <MergeCard
         checks={checks}
         onChanged={onChanged}
+        onMergingChange={onMergingChange}
         pr={pr}
         repo={repo}
         worktreeId={worktreeId}
@@ -294,20 +342,25 @@ export function ViewPullRequestView({
   pr,
   worktreeId,
   onChanged,
+  merging = false,
 }: {
   repo: GitHubRepoRef;
   pr: PullRequestSummary;
   worktreeId: string;
   onChanged: () => void;
+  /** True while a merge mutation is in flight (shows the "merging" badge). */
+  merging?: boolean;
 }) {
   const workspace = useWorkspace();
-  const { data, error, load } = usePullRequestData(repo, pr);
+  const { data, error, load, prependComment, removeComment } = usePullRequestData(repo, pr);
   const unresolvedByPath = useUnresolvedByPath(data?.threads);
   const changedFiles = useMemo(() => (data?.files ?? []).map(toChangedFile), [data?.files]);
+  const [localMerging, setLocalMerging] = useState(false);
+  const showMerging = merging || localMerging;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3 text-sm">
-      <HeaderCard pr={pr} />
+      <HeaderCard merging={showMerging} pr={pr} />
       <Conversation
         comments={data?.comments ?? null}
         commits={data?.commits ?? null}
@@ -319,10 +372,17 @@ export function ViewPullRequestView({
         unresolvedByPath={unresolvedByPath}
         workspace={workspace}
       />
-      <CommentBox onPosted={() => void load()} prNumber={pr.number} repo={repo} />
+      <CommentBox
+        onOptimistic={prependComment}
+        onOptimisticRevert={removeComment}
+        onPosted={() => void load(true)}
+        prNumber={pr.number}
+        repo={repo}
+      />
       <MergeOrStatus
         checks={data?.checks ?? null}
         onChanged={onChanged}
+        onMergingChange={setLocalMerging}
         pr={pr}
         repo={repo}
         worktreeId={worktreeId}
@@ -341,16 +401,21 @@ function UnresolvedBadge({ count }: { count: number }) {
   );
 }
 
+/** Title chip label + class for the PR header state badge. */
+function prHeaderBadge(
+  pr: PullRequestSummary,
+  merging: boolean,
+): { label: string; className: string } {
+  if (merging) return { label: "merging", className: "bg-warning/20 text-warning" };
+  if (pr.merged) return { label: "merged", className: "bg-skill/20 text-skill" };
+  if (pr.draft) return { label: "draft", className: "bg-muted text-muted-foreground" };
+  if (pr.state === "open") return { label: pr.state, className: "bg-success/20 text-success" };
+  return { label: pr.state, className: "bg-destructive/20 text-destructive" };
+}
+
 /** Title + number, open-on-GitHub icon, state badge, base ← head chips, markdown body. */
-function HeaderCard({ pr }: { pr: PullRequestSummary }) {
-  const stateLabel = pr.merged ? "merged" : pr.draft ? "draft" : pr.state;
-  const stateClass = pr.merged
-    ? "bg-skill/20 text-skill"
-    : pr.draft
-      ? "bg-muted text-muted-foreground"
-      : pr.state === "open"
-        ? "bg-success/20 text-success"
-        : "bg-destructive/20 text-destructive";
+function HeaderCard({ pr, merging = false }: { pr: PullRequestSummary; merging?: boolean }) {
+  const { label: stateLabel, className: stateClass } = prHeaderBadge(pr, merging);
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
       <div className="flex items-start gap-2">
@@ -489,20 +554,26 @@ function CommitAuthorAvatar({
 /**
  * The markdown comment composer pinned below the conversation: a TipTap editor
  * whose markdown is posted as an issue comment on the signed-in user's behalf.
- * Submits on click or ⌘/Ctrl+Enter, clears on success, and asks the parent to
- * reload so the new comment joins the conversation.
+ * Submits on click or ⌘/Ctrl+Enter. The comment lands in the conversation
+ * **optimistically** (temp negative id) and is replaced by the real one on
+ * success; a failed post reverts the optimistic row and toasts.
  */
 function CommentBox({
   repo,
   prNumber,
   onPosted,
+  onOptimistic,
+  onOptimisticRevert,
 }: {
   repo: GitHubRepoRef;
   prNumber: number;
   onPosted: () => void;
+  onOptimistic: (comment: IssueComment) => void;
+  onOptimisticRevert: (commentId: number) => void;
 }) {
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
+  const tempId = useRef(-1);
 
   const submit = useCallback(async () => {
     const trimmed = body.trim();
@@ -510,16 +581,29 @@ function CommentBox({
       return;
     }
     setPosting(true);
+    const optimisticId = tempId.current--;
+    const optimistic: IssueComment = {
+      id: optimisticId,
+      body: trimmed,
+      htmlUrl: "",
+      createdAt: new Date().toISOString(),
+      user: null,
+    };
+    onOptimistic(optimistic);
+    setBody("");
     try {
-      await createIssueComment(repo, prNumber, trimmed);
-      setBody("");
+      const posted = await createIssueComment(repo, prNumber, trimmed);
+      onOptimisticRevert(optimisticId);
+      onOptimistic(posted);
       onPosted();
     } catch (cause) {
+      onOptimisticRevert(optimisticId);
+      setBody(trimmed);
       toast.error(errorMessage(cause));
     } finally {
       setPosting(false);
     }
-  }, [body, posting, repo, prNumber, onPosted]);
+  }, [body, posting, repo, prNumber, onPosted, onOptimistic, onOptimisticRevert]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -573,12 +657,14 @@ function MergeCard({
   repo,
   worktreeId,
   onChanged,
+  onMergingChange,
 }: {
   checks: ChecksStatus | null;
   pr: PullRequestSummary;
   repo: GitHubRepoRef;
   worktreeId: string;
   onChanged: () => void;
+  onMergingChange?: (merging: boolean) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -587,16 +673,19 @@ function MergeCard({
   const merge = useCallback(async () => {
     setConfirming(false);
     setMerging(true);
+    onMergingChange?.(true);
     try {
       await mergePullRequest(repo, pr.number);
       toast.success(`Merged pull request #${pr.number}`);
       setCleanup(true);
+      onChanged();
     } catch (cause) {
       toast.error(errorMessage(cause));
     } finally {
       setMerging(false);
+      onMergingChange?.(false);
     }
-  }, [repo, pr.number]);
+  }, [repo, pr.number, onChanged, onMergingChange]);
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
