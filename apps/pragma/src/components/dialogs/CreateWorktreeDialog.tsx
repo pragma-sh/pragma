@@ -41,6 +41,36 @@ type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shift
   preventDefault: () => void;
 };
 
+interface MainBehindAlertProps {
+  behind: number;
+  mainWorktreeId: string | null;
+  onCancel: () => void;
+  onConfirm: (pullFirst: boolean) => void;
+}
+
+function MainBehindAlert({ behind, mainWorktreeId, onCancel, onConfirm }: MainBehindAlertProps) {
+  return (
+    <AlertDialog open={mainWorktreeId !== null} onOpenChange={(open) => !open && onCancel()}>
+      <AlertDialogContent className="data-[size=default]:sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
+          <AlertDialogDescription>
+            Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
+            worktree?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="outline" onClick={() => onConfirm(false)}>
+            Create without syncing
+          </Button>
+          <AlertDialogAction onClick={() => onConfirm(true)}>Sync and create</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /**
  * Fetches the main worktree's sync status, treating a failed fetch (offline,
  * auth lapsed, remote unreachable) as "status unknown" rather than an error —
@@ -286,31 +316,12 @@ export function CreateWorktreeDialog({
           </Button>
         </div>
       </form>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) setMainWorktreeId(null);
-        }}
-        open={mainWorktreeId !== null}
-      >
-        <AlertDialogContent className="data-[size=default]:sm:max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
-            <AlertDialogDescription>
-              Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
-              worktree?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="outline" onClick={() => confirmCreate(false)}>
-              Create without syncing
-            </Button>
-            <AlertDialogAction onClick={() => confirmCreate(true)}>
-              Sync and create
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MainBehindAlert
+        behind={behind}
+        mainWorktreeId={mainWorktreeId}
+        onCancel={() => setMainWorktreeId(null)}
+        onConfirm={confirmCreate}
+      />
     </ModalShell>
   );
 }

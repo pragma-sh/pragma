@@ -29,7 +29,7 @@ export interface WorktreeCreationStep {
 }
 
 /** Everything the flow needs once the dialog has collected all user input. */
-export interface WorktreeCreationRequest {
+interface WorktreeCreationRequest {
   projectId: string;
   parentWorktreeId: string;
   branch: string;
@@ -43,7 +43,7 @@ export interface WorktreeCreationRequest {
 }
 
 /** Live progress for the full-frame creating-worktree screen. */
-export interface WorktreeCreationState {
+interface WorktreeCreationState {
   branch: string;
   steps: WorktreeCreationStep[];
   error: string | null;
