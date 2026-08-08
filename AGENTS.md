@@ -316,7 +316,7 @@ comment is posted by the task itself: `--format pr-comment-github` prefixes the 
 `<!-- fallow-id: fallow-results -->`, and the task matches that marker to update the
 existing comment instead of adding one per run. **Inline annotations are not reproduced** —
 they came from the action's SARIF upload; the findings live in the task log and the
-comment. The task needs `code-with-history` (fallow diffs against a real base) *and*
+comment. The task needs `code-with-history` (fallow diffs against a real base) _and_
 `generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
 modules must exist first).
 

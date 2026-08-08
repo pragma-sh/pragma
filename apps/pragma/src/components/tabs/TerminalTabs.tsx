@@ -827,7 +827,12 @@ export function TerminalTabs() {
           <NewTabMenu
             disabled={!workspace.selectedWorktree}
             onCreateBrowser={() => void workspace.createBrowserTab()}
-            onCreateTerminal={(shell) => void workspace.createTerminalTab(undefined, shell)}
+            onCreateTerminal={(shell) =>
+              void workspace.createTerminalTab(
+                undefined,
+                shell === undefined ? undefined : { shell },
+              )
+            }
             projectId={workspace.selectedProjectId}
             shortcutModifier={shortcutModifier}
             worktreeId={workspace.selectedWorktree?.id ?? null}

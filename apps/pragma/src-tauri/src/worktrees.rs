@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use pragma_constants::{TabKind, Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::browser;
 use crate::db::{Db, WorktreeMru};
@@ -10,6 +10,22 @@ use crate::error::{AppError, AppResult};
 use crate::git::{self, GitLocks};
 use crate::hosts::Hosts;
 use crate::scripts;
+
+/// Frontend progress signal for the multi-step create-worktree flow. Only the
+/// stages the frontend cannot observe on its own are emitted — the setup
+/// scripts run inside the single `create_worktree` call, so the loading screen
+/// would otherwise have no way to show them.
+const WORKTREE_CREATE_STAGE_EVENT: &str = "pragma:worktree-create-stage";
+
+/// One create-worktree progress update. `stage` is currently only `"scripts"`,
+/// emitted right before the project's `setup` commands run.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeCreateStage {
+    pub project_id: String,
+    pub worktree_id: String,
+    pub stage: String,
+}
 
 #[tauri::command]
 pub fn list_worktrees(db: State<'_, Db>, project_id: String) -> AppResult<Vec<Worktree>> {
@@ -29,6 +45,7 @@ pub fn list_worktree_mru(db: State<'_, Db>, project_id: String) -> AppResult<Vec
 #[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn create_worktree(
+    app: AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     locks: State<'_, GitLocks>,
@@ -78,6 +95,16 @@ pub fn create_worktree(
         &path,
     )?;
     let config = scripts::load_project_scripts_on_host(&pty, &project.path)?;
+    if !config.setup.is_empty() {
+        let _ = app.emit(
+            WORKTREE_CREATE_STAGE_EVENT,
+            WorktreeCreateStage {
+                project_id: project_id.clone(),
+                worktree_id: worktree_id.clone(),
+                stage: "scripts".to_string(),
+            },
+        );
+    }
     scripts::run_headless_commands(&pty, &project, &worktree, "setup", config.setup.as_slice())?;
     publisher.trigger();
     Ok(worktree)

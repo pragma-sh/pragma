@@ -373,8 +373,10 @@ describe("TerminalTabs", () => {
     await userEvent.click(await screen.findByText("Ubuntu"));
 
     expect(mockWorkspace.createTerminalTab).toHaveBeenCalledWith(undefined, {
-      backend: "wsl",
-      distro: "Ubuntu",
+      shell: {
+        backend: "wsl",
+        distro: "Ubuntu",
+      },
     });
   });
 

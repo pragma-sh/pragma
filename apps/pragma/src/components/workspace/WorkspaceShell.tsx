@@ -14,6 +14,7 @@ import { TabDragProvider } from "@/components/tabs/tab-drag-context";
 import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { SplitHost } from "@/components/workspace/SplitHost";
 import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
+import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import {
@@ -29,6 +30,7 @@ import { useKanban } from "@/state/kanban-context";
 import { LeftSidebarProvider } from "@/state/left-sidebar-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 
 type Workspace = ReturnType<typeof useWorkspace>;
 
@@ -241,6 +243,7 @@ function WorkspaceContent({
 export function WorkspaceShell() {
   const workspace = useWorkspace();
   const kanban = useKanban();
+  const { creation } = useWorktreeCreation();
   const requestClose = useConfirmClose();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteMode, setCommandPaletteMode] = useState<"search" | "command">("search");
@@ -285,7 +288,11 @@ export function WorkspaceShell() {
                 {/* Kanban mode replaces the shell rather than overlaying it: native
                   browser webviews float above HTML, so an overlay would be clipped.
                   The sidebar stays; only the terminal/right-sidebar area is swapped. */}
-                {kanban.mode === "kanban" ? (
+                {/* Creating a worktree takes over the same area for the same
+                  reason: it is a full-frame loading screen, not an overlay. */}
+                {creation ? (
+                  <WorktreeCreationScreen />
+                ) : kanban.mode === "kanban" ? (
                   <ProjectKanbanWorkspace />
                 ) : (
                   <WorkspaceContent kanban={kanban} workspace={workspace} />

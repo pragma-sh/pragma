@@ -6,18 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listPluginAgentsMock = vi.fn();
 const resolvePluginAgentModelsMock = vi.fn();
-const createWorktreeMock = vi.fn();
 const githubFetchAndSyncMock = vi.fn();
-const githubPullBranchMock = vi.fn();
-const startSessionMock = vi.fn();
-const refreshProjectMock = vi.fn();
-const selectWorktreeMock = vi.fn();
-const createTerminalTabMock = vi.fn();
+const startCreationMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
-  createWorktree: (...args: unknown[]) => createWorktreeMock(...args),
   githubFetchAndSync: (...args: unknown[]) => githubFetchAndSyncMock(...args),
-  githubPullBranch: (...args: unknown[]) => githubPullBranchMock(...args),
+}));
+
+vi.mock("@/state/worktree-creation-context", () => ({
+  useWorktreeCreation: () => ({
+    creation: null,
+    startCreation: startCreationMock,
+    dismiss: vi.fn(),
+  }),
 }));
 
 vi.mock("@/plugins/agents", () => ({
@@ -61,11 +62,18 @@ const workspaceMock = {
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   selectedWorktree: { id: "main", isMain: true } as Partial<Worktree>,
-  worktrees: { p: [{ ...newWorktree, id: "main", isMain: true, parentId: null }] },
-  refreshProject: refreshProjectMock,
-  startSession: startSessionMock,
-  selectWorktree: selectWorktreeMock,
-  createTerminalTab: createTerminalTabMock,
+  worktrees: {
+    p: [
+      {
+        ...newWorktree,
+        id: "main",
+        branch: "main",
+        title: null,
+        isMain: true,
+        parentId: null,
+      },
+    ],
+  },
 };
 
 vi.mock("@/state/workspace-context", () => ({
@@ -82,17 +90,12 @@ describe("CreateWorktreeDialog", () => {
     resolvePluginAgentModelsMock.mockResolvedValue([
       { id: "sonnet", name: "Sonnet", reasoning: [] },
     ]);
-    createWorktreeMock.mockResolvedValue(newWorktree);
     githubFetchAndSyncMock.mockResolvedValue({
       branch: "main",
       ahead: 0,
       behind: 0,
       hasUpstream: true,
     });
-    githubPullBranchMock.mockResolvedValue(undefined);
-    refreshProjectMock.mockResolvedValue(undefined);
-    startSessionMock.mockResolvedValue({ id: "tab" });
-    createTerminalTabMock.mockResolvedValue({ id: "tab" });
   });
 
   afterEach(() => {
@@ -100,10 +103,10 @@ describe("CreateWorktreeDialog", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps branch, title and agent at the top with the prompt below", async () => {
+  it("names the parent worktree in the heading and keeps the fields in order", async () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "New worktree at" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "New worktree at main" })).toBeInTheDocument();
     expect(screen.getByLabelText("Branch name")).toBeInTheDocument();
     expect(screen.getByLabelText("Display title")).toBeInTheDocument();
     expect(screen.getByLabelText("Prompt")).toBeInTheDocument();
@@ -126,7 +129,7 @@ describe("CreateWorktreeDialog", () => {
     expect(await screen.findByRole("menuitem", { name: /OpenCode/ })).toBeInTheDocument();
   });
 
-  it("launches an agent session when a prompt is written", async () => {
+  it("hands the run off with the prompt and agent, then closes right away", async () => {
     const onOpenChange = vi.fn();
     render(<CreateWorktreeDialog open onOpenChange={onOpenChange} />);
 
@@ -140,21 +143,21 @@ describe("CreateWorktreeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
 
     await waitFor(() =>
-      expect(createWorktreeMock).toHaveBeenCalledWith("p", "main", "feature", "Feature"),
+      expect(startCreationMock).toHaveBeenCalledWith({
+        projectId: "p",
+        parentWorktreeId: "main",
+        branch: "feature",
+        title: "Feature",
+        prompt: "Do the thing",
+        agent: expect.objectContaining({ id: "claude" }),
+        modelSelection: { modelId: null, reasoningId: null },
+        syncWorktreeId: null,
+      }),
     );
-    await waitFor(() =>
-      expect(startSessionMock).toHaveBeenCalledWith(
-        "wt-new",
-        expect.objectContaining({ id: "claude" }),
-        "Do the thing",
-        { modelId: null, reasoningId: null },
-      ),
-    );
-    expect(createTerminalTabMock).not.toHaveBeenCalled();
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
-  it("does not start a session when the prompt is empty", async () => {
+  it("hands off an empty prompt when none is written", async () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
     await waitFor(() =>
@@ -164,10 +167,9 @@ describe("CreateWorktreeDialog", () => {
     fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
     fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
 
-    await waitFor(() => expect(createWorktreeMock).toHaveBeenCalled());
-    await waitFor(() => expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new"));
-    expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new");
-    expect(startSessionMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(startCreationMock).toHaveBeenCalledWith(expect.objectContaining({ prompt: "" })),
+    );
   });
 
   it("disables submit until a branch name is entered", async () => {
@@ -182,7 +184,7 @@ describe("CreateWorktreeDialog", () => {
     expect(screen.getByRole("button", { name: /Create worktree/ })).toBeEnabled();
   });
 
-  it("asks to pull when main is behind before creating", async () => {
+  it("asks to pull when main is behind and passes the sync target to the flow", async () => {
     githubFetchAndSyncMock.mockResolvedValue({
       branch: "main",
       ahead: 0,
@@ -194,33 +196,32 @@ describe("CreateWorktreeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
 
     expect(await screen.findByText("Main is behind remote")).toBeInTheDocument();
-    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(startCreationMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Sync and create" }));
 
-    await waitFor(() => expect(githubPullBranchMock).toHaveBeenCalledWith("main"));
-    await waitFor(() => expect(createWorktreeMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(startCreationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ syncWorktreeId: "main" }),
+      ),
+    );
   });
 
-  it("keeps form values and aborts creation when pull conflicts", async () => {
+  it("skips the sync when the user creates without syncing", async () => {
     githubFetchAndSyncMock.mockResolvedValue({
       branch: "main",
       ahead: 1,
       behind: 1,
       hasUpstream: true,
     });
-    githubPullBranchMock.mockRejectedValue(
-      new Error("Remote changes conflict with local commits. Pull was aborted."),
-    );
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
-    const branchInput = screen.getByLabelText("Branch name") as HTMLInputElement;
-    fireEvent.change(branchInput, { target: { value: "feature" } });
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "feature" } });
     fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Sync and create" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create without syncing" }));
 
-    expect(
-      await screen.findByText("Remote changes conflict with local commits. Pull was aborted."),
-    ).toBeInTheDocument();
-    expect(branchInput.value).toBe("feature");
-    expect(createWorktreeMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(startCreationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ syncWorktreeId: null }),
+      ),
+    );
   });
 });
