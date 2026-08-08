@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Columns2,
   Globe,
+  LayoutGrid,
   Pencil,
   Hammer,
   Play,
@@ -66,6 +67,8 @@ import {
   type VisiblePluginContribution,
 } from "@/plugins/rendering";
 import { useTabAgentStatus } from "@/state/agent-status-store";
+import { useKanban } from "@/state/kanban-context";
+import { useLeftSidebar } from "@/state/left-sidebar-context";
 import {
   type ScriptButtonInfo,
   type SplitDirection,
@@ -303,8 +306,13 @@ function TerminalToolbar({
   workspace: Workspace;
   topperItems: VisiblePluginContribution<TopperItemDefinition>[];
 }) {
+  // With the project sidebar collapsed on macOS, the inset traffic lights
+  // (x-inset 12 + three ~14px buttons) sit over the toolbar's left edge — pad
+  // past them so the first control stays clickable.
+  const { collapsed: sidebarCollapsed } = useLeftSidebar();
+  const clearTrafficLights = sidebarCollapsed && isMacPlatform();
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className={cn("flex min-w-0 items-center gap-1", clearTrafficLights && "pl-16")}>
       <AgentsMenu />
       {workspace.scriptButtons.map((button) => {
         const active = workspace.activeScripts.find((script) => script.name === button.name);
@@ -638,6 +646,24 @@ function EditorLauncherMenu({
  */
 const NATIVE_SHELL_LABEL = "PowerShell";
 
+/** The prompt-board (Kanban) toggle, between the usage-limits and editor controls. */
+function KanbanToggle() {
+  const kanban = useKanban();
+  const workspace = useWorkspace();
+  return (
+    <Button
+      aria-label="Toggle prompt board"
+      aria-pressed={kanban.mode === "kanban"}
+      disabled={!workspace.selectedProjectId}
+      size="icon-sm"
+      variant={kanban.mode === "kanban" ? "secondary" : "ghost"}
+      onClick={() => (kanban.mode === "kanban" ? kanban.exitBoard() : kanban.openBoard())}
+    >
+      <LayoutGrid />
+    </Button>
+  );
+}
+
 /**
  * The "new tab" dropdown for creating a terminal or browser tab.
  *
@@ -766,6 +792,7 @@ export function TerminalTabs() {
           <div className="flex shrink-0 items-center justify-end gap-1">
             <PluginTopperItems items={rightTopperItems} />
             <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
+            <KanbanToggle />
             <EditorLauncherMenu
               disabled={editorDisabled}
               onSelect={openEditor}

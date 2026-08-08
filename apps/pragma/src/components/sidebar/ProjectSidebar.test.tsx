@@ -1,14 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-const openSettingsMock = vi.fn();
 
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({
     mode: "normal",
     openBoard: vi.fn(),
-    openAutomations: vi.fn(),
-    openSettings: openSettingsMock,
+    openSettings: vi.fn(),
     exitBoard: vi.fn(),
   }),
 }));
@@ -17,6 +15,7 @@ vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => ({
     activeProject: { name: "Pragma" },
     selectedProjectId: "project-1",
+    worktrees: { "project-1": [{ id: "main-1", isMain: true }] },
   }),
 }));
 
@@ -39,19 +38,40 @@ vi.mock("@/components/sidebar/OpenPortsCard", () => ({ OpenPortsCard: () => null
 vi.mock("@/components/dialogs/CreateProjectDialog", () => ({ CreateProjectDialog: () => null }));
 vi.mock("@/components/dialogs/CreateWorktreeDialog", () => ({ CreateWorktreeDialog: () => null }));
 
+import { LeftSidebarProvider } from "@/state/left-sidebar-context";
 import { ProjectSidebar } from "./ProjectSidebar";
+
+function renderSidebar() {
+  return render(
+    <LeftSidebarProvider>
+      <ProjectSidebar />
+    </LeftSidebarProvider>,
+  );
+}
 
 afterEach(() => {
   cleanup();
-  openSettingsMock.mockReset();
+  localStorage.clear();
 });
 
 describe("ProjectSidebar", () => {
-  it("opens settings from the gear button", () => {
-    render(<ProjectSidebar />);
+  it("collapses to a strip and expands again", () => {
+    renderSidebar();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse project sidebar" }));
+    expect(screen.queryByRole("button", { name: "Collapse project sidebar" })).toBeNull();
 
-    expect(openSettingsMock).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Expand project sidebar" }));
+    expect(screen.getByRole("button", { name: "Collapse project sidebar" })).toBeTruthy();
+  });
+
+  it("offers new-worktree and add-project entries from the plus menu", async () => {
+    renderSidebar();
+
+    // Radix dropdown triggers open on pointerdown, not click.
+    await userEvent.click(screen.getByRole("button", { name: "Add project or worktree" }));
+
+    expect(await screen.findByText("New worktree off main")).toBeTruthy();
+    expect(screen.getByText("Add project")).toBeTruthy();
   });
 });

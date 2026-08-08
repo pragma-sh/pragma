@@ -125,6 +125,7 @@ than no guide.
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
 │   ├── grok-plugin/             # xAI Grok Build CLI integration → see packages/grok-plugin/AGENTS.md
 │   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
+│   ├── junie-plugin/            # JetBrains Junie CLI integration → see packages/junie-plugin/AGENTS.md
 │   ├── github-copilot-cli-plugin/ # GitHub Copilot CLI integration → see packages/github-copilot-cli-plugin/AGENTS.md
 │   ├── plugins-host/            # `@pragma/plugins-host` plugin catalog sidecar (`pragma-plugins`) → see packages/plugins-host/AGENTS.md
 │   └── dev-test-plugin/         # `@pragma/dev-test-plugin` sample plugin (sidebar tabs/cards + web view + SDK event hook) → see packages/dev-test-plugin/AGENTS.md
@@ -298,7 +299,8 @@ compile-only Tauri build on macOS, Linux, **and** Windows.
 **CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
 Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
 runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the
-TypeScript checks, the Rust checks, the Linux app build) lives in `.rwx/ci.yml`, and the
+TypeScript checks, the Rust checks, the fallow audit, the Linux app build) lives in
+`.rwx/ci.yml`, and the
 macOS and Windows builds plus the Windows Rust suite stay in
 `.github/workflows/ci.yml`. **Adding or removing a check means touching both files.**
 RWX is a task DAG, not a job list: tasks with no `use:` run in parallel, caching is
@@ -307,10 +309,16 @@ it doesn't read), and the default task timeout is **10 minutes**, so any long ta
 an explicit `timeout:`. Iterate without pushing via `rwx run .rwx/ci.yml --wait`, and
 validate edits with `rwx lint .rwx/ci.yml`; both need `rwx login` first.
 
-A separate **Fallow** workflow
-(`.github/workflows/fallow.yml`) runs `fallow audit` on each PR via the
-`fallow-rs/fallow@v2` action — it scopes to the PR diff, posts a summary comment plus
-inline annotations, and fails the check on issues the PR introduces.
+The **fallow** audit is an RWX task (`fallow` in `.rwx/ci.yml`), not a GitHub Action —
+there is no `fallow-rs/fallow` RWX package, so it runs the CLI directly. It scopes to the
+diff against the base ref and fails on issues the change introduces. The sticky PR summary
+comment is posted by the task itself: `--format pr-comment-github` prefixes the body with
+`<!-- fallow-id: fallow-results -->`, and the task matches that marker to update the
+existing comment instead of adding one per run. **Inline annotations are not reproduced** —
+they came from the action's SARIF upload; the findings live in the task log and the
+comment. The task needs `code-with-history` (fallow diffs against a real base) *and*
+`generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
+modules must exist first).
 
 ## Platform targets
 
@@ -324,11 +332,7 @@ without updating this guide and CI.
 - **Windows** needs no system packages: the webview is WebView2, which ships with the OS
   on Windows 11 and with the Edge runtime on Windows 10. CI covers it on the
   GitHub-hosted `windows-latest` image with the `rust-windows` job plus a
-  `windows-latest` entry in the `build` matrix. Windows deliberately does **not** use
-  the Blacksmith pool the macOS build runs on: that pool left the job queued for half an
-  hour at a time and failed it in `Set up job` with "the self-hosted runner lost
-  communication with the server", which looks like a compile failure but never reaches a
-  compiler.
+  `windows-latest` entry in the `build` matrix.
 - **The per-user NSIS installer has to stop the sidecars, not just the app.** Windows
   locks a running executable's image, our sidecars outlive the window by design, and a
   per-user NSIS install puts them in `%LOCALAPPDATA%\Pragma` — so reinstalling over a live

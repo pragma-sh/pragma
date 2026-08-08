@@ -134,6 +134,19 @@ vi.mock("@/state/workspace-context", () => ({
   useWorkspace: (): WorkspaceContextValue => mockWorkspace,
 }));
 
+vi.mock("@/state/kanban-context", () => ({
+  useKanban: () => ({
+    mode: "normal",
+    openBoard: vi.fn(),
+    openSettings: vi.fn(),
+    exitBoard: vi.fn(),
+  }),
+}));
+
+vi.mock("@/state/left-sidebar-context", () => ({
+  useLeftSidebar: () => ({ collapsed: false }),
+}));
+
 vi.mock("@/components/editor/confirm-close", () => ({
   useConfirmClose: () => vi.fn(),
 }));

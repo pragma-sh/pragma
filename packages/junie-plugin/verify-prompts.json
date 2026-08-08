@@ -1,0 +1,6 @@
+{
+  "command-allow": "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-approval` and workdir `/etc`, then report its output. Do not substitute another command or workdir.",
+  "command-deny": "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-denied` and workdir `/etc`, then stop if permission is denied. Do not substitute another command or workdir.",
+  "decision-timeout": "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-timeout` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir.",
+  "abort-mid-approval": "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-abort-approval` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."
+}
