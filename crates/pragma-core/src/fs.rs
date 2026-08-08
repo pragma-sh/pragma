@@ -128,7 +128,7 @@ pub enum FsRequest {
         from: String,
         to: String,
     },
-    /// Deletes a file or empty directory.
+    /// Deletes a file or directory tree.
     Delete { root: String, path: String },
     /// Searches filenames and literal code lines across trusted worktree roots.
     PaletteSearch {
@@ -602,13 +602,12 @@ fn gitignored(root: &Path, rel_paths: &[String]) -> HashSet<String> {
 }
 
 /// Lists the immediate entries of a worktree-relative directory (`""` = root),
-/// hiding `.git` and gitignored entries, sorted directories-first then by name.
+/// hiding only `.git`, sorted directories-first then by name.
 fn list_dir(root: &str, path: &str) -> CoreResult<Vec<DirEntry>> {
     let root = Path::new(root);
     let dir = resolve_in_worktree(root, path)?;
 
     let mut entries: Vec<DirEntry> = Vec::new();
-    let mut rel_paths: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -617,7 +616,6 @@ fn list_dir(root: &str, path: &str) -> CoreResult<Vec<DirEntry>> {
         }
         let is_dir = entry.path().is_dir();
         let rel = join_rel(path, &name);
-        rel_paths.push(rel.clone());
         entries.push(DirEntry {
             name,
             path: rel,
@@ -625,8 +623,6 @@ fn list_dir(root: &str, path: &str) -> CoreResult<Vec<DirEntry>> {
         });
     }
 
-    let ignored = gitignored(root, &rel_paths);
-    entries.retain(|entry| !ignored.contains(&entry.path));
     entries.sort_by(|a, b| {
         b.is_dir
             .cmp(&a.is_dir)
@@ -826,20 +822,13 @@ fn rename(root: &str, from_path: &str, to_path: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Deletes a worktree-relative file or empty directory. Refuses to recurse — a
-/// non-empty directory must be deleted entry-by-entry.
+/// Deletes a worktree-relative file or directory tree.
 fn delete(root: &str, path: &str) -> CoreResult<()> {
     let target = resolve_in_worktree(Path::new(root), path)?;
 
     let metadata = std::fs::symlink_metadata(&target)?;
     if metadata.is_dir() {
-        let is_empty = std::fs::read_dir(&target)?.next().is_none();
-        if !is_empty {
-            return Err(CoreError::InvalidPayload(
-                "directory is not empty".to_string(),
-            ));
-        }
-        std::fs::remove_dir(&target)?;
+        std::fs::remove_dir_all(&target)?;
     } else {
         std::fs::remove_file(&target)?;
     }
@@ -909,7 +898,7 @@ mod tests {
     }
 
     #[test]
-    fn list_dir_hides_git_and_gitignored() {
+    fn list_dir_hides_git_and_keeps_gitignored() {
         let dir = tempdir().expect("tempdir");
         git_init(dir.path());
         std::fs::write(dir.path().join(".gitignore"), "ignored.txt\n").expect("write gitignore");
@@ -919,7 +908,7 @@ mod tests {
         let entries = super::list_dir(&dir.path().to_string_lossy(), "").expect("list");
         let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
         assert!(names.contains(&"kept.txt"));
-        assert!(!names.contains(&"ignored.txt"));
+        assert!(names.contains(&"ignored.txt"));
         assert!(!names.contains(&".git"));
         // gitignored is exercised directly too.
         let ignored = gitignored(dir.path(), &["ignored.txt".to_string()]);
