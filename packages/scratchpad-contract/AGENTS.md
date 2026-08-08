@@ -18,17 +18,9 @@ comment written on a phone stops showing up in the desktop's handoff.
   `@pragma/scratchpad`, which depends on `@pragma/sdk` — so the SDK could not
   import it without a cycle (turbo rejects the graph outright). Keep this
   package free of every workspace dependency except `@pragma/constants`.
-- **Ships a built `dist/`, like `@pragma/sdk` and `@pragma/plugin` — not raw
-  `src/index.ts` like `@pragma/constants`.** `bun run build` (`bunup … --dts`)
-  runs via turbo's `^build` dependency before any consumer builds. This is a
-  workaround for a Bun/Windows crash (`panic: Expected pretty file path to
-have only forward slashes`, a long-standing unfixed upstream bug —
-  oven-sh/bun#14843, #14972, #15007, #15421) that `bunup --dts` hit only for
-  this package's _two-hop_ workspace-symlink chain (`@pragma/sdk` →
-  `@pragma/scratchpad-contract` → `@pragma/constants`) once this package was
-  extracted; `@pragma/constants` itself (one hop, still raw `src/index.ts`)
-  never triggered it. If you see that panic again on a Windows build, suspect
-  the same class of fix before anything else.
+- **Source is the published artifact.** `exports` points at `src/index.ts`, like
+  `@pragma/constants`, so there is no build step to sequence. Consumers that
+  bundle (the SDK via bunup, the viewer via esbuild) inline it.
 - **`from`/`to` are ProseMirror positions, and only the desktop can compute
   them.** Any other client writes `0`/`0` and anchors by `quote` +
   `blockIndex`; `createScratchpadComment` is the only supported way to build one.
