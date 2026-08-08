@@ -399,6 +399,7 @@ fn worktree_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
     let args: WorktreeCreatePayload = parse(payload)?;
     let project_id = project_from_worktree(app, &args.parent_worktree_id)?;
     let worktree = worktrees::create_worktree(
+        app.clone(),
         app.state::<Db>(),
         app.state::<Hosts>(),
         app.state::<GitLocks>(),
@@ -1264,6 +1265,7 @@ fn agent_session_launch(
         (Some(id), None) => app.state::<Db>().worktree(&id)?,
         (None, Some(spec)) => {
             let worktree = worktrees::create_worktree(
+                app.clone(),
                 app.state::<Db>(),
                 app.state::<Hosts>(),
                 app.state::<GitLocks>(),
