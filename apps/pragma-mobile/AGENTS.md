@@ -235,7 +235,8 @@ implemented in `lib/widgets/`:
   generated `ios/ExpoWidgetsTarget/<Name>.swift`. After editing `app.json`, run
   `bun run prebuild` and reinstall the dev client, or the removed size stays in the gallery.
 - **The project widget mirrors the app's worktree tree.** `PragmaProjects` lists each
-  project with its worktrees nested beneath it, in `buildWorktreeTree` order (main first),
+  project with its worktrees nested beneath it, in `buildWorktreeTree` order (main first, as
+  a flat row that never parents other worktrees),
   indented by depth — the same structure the Projects → project screens drill through. A
   worktree earns a row only when it is _live_: an agent that is `running`/`attention`, or
   `done` and not yet viewed. `cleared` (viewed, or never reporting) is not news, so it is
