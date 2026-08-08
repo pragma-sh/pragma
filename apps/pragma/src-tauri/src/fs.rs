@@ -162,6 +162,28 @@ pub async fn write_file(
     )
 }
 
+/// Writes a base64-encoded file dropped into the worktree.
+#[tauri::command]
+pub async fn write_file_bytes(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    path: String,
+    contents: String,
+) -> AppResult<()> {
+    let root = worktree_root(&db, &worktree_id)?;
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
+    fs_rpc(
+        &pty,
+        &FsRequest::WriteBytes {
+            root,
+            path,
+            contents,
+        },
+    )
+}
+
 /// Renames (or moves) a worktree-relative entry.
 #[tauri::command]
 pub async fn rename_file(
@@ -184,7 +206,7 @@ pub async fn rename_file(
     )
 }
 
-/// Deletes a worktree-relative file or empty directory.
+/// Deletes a worktree-relative file or directory tree.
 #[tauri::command]
 pub async fn delete_file(
     app: tauri::AppHandle,
