@@ -107,7 +107,7 @@ function OpenCards() {
 /** One row in the agent launcher list. */
 function AgentRow({ agent, pinned }: { agent: AgentConfig; pinned: boolean }) {
   const workspace = useWorkspace();
-  const worktreeId = workspace.selectedWorktreeId;
+  const worktreeId = workspace.selectedWorktree?.id;
 
   return (
     <div className="group flex items-center gap-1">
