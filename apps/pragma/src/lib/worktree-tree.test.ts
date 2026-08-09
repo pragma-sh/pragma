@@ -52,6 +52,7 @@ describe("buildWorktreeTree", () => {
           open: "open",
           closed: "closed",
           draft: "draft",
+          bare: "none",
         },
       },
     );
@@ -64,6 +65,22 @@ describe("buildWorktreeTree", () => {
       "closed",
       "merged",
     ]);
+  });
+
+  it("orders a worktree with an unknown lifecycle by label, not as a no-PR row", () => {
+    // `unknown` has no entry: its lookup is still loading or failed. It must not
+    // jump ahead of `open`, whose PR did resolve — it falls back to label order.
+    const tree = buildWorktreeTree(
+      [
+        worktree("main", null, "main", true),
+        worktree("unknown", "main", "zzz-unknown"),
+        worktree("open", "main", "aaa-open"),
+        worktree("bare", "main", "bbb-no-pr"),
+      ],
+      { prLifecycles: { open: "open", bare: "none" } },
+    );
+
+    expect(tree.map((node) => node.worktree.id)).toEqual(["main", "bare", "open", "unknown"]);
   });
 
   it("filters out rows that the predicate rejects and promotes their children", () => {

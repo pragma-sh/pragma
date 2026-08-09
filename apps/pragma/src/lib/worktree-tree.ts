@@ -16,16 +16,22 @@ export interface BuildWorktreeTreeOptions {
    *  siblings, newest pin first. */
   pinTimes?: ReadonlyMap<string, number>;
   /** worktree id → PR lifecycle. Drives sibling ordering: worktrees with no PR
-   *  come first, then open/draft PRs, then closed or merged ones. */
+   *  come first, then open/draft PRs, then closed or merged ones. A worktree
+   *  with no entry has an unknown lifecycle (still loading, or the lookup
+   *  failed) and is left out of PR ordering entirely — pass `"none"` to say a
+   *  worktree is known to have no PR. */
   prLifecycles?: Readonly<Record<string, GitHubPrLifecycle>>;
 }
 
 /**
  * Sort bucket for a worktree's PR state: 0 = no PR, 1 = open (incl. draft and
- * merging), 2 = closed or merged.
+ * merging), 2 = closed or merged. `undefined` means the lifecycle is unknown
+ * and the worktree is deliberately unranked.
  */
-function prSortRank(lifecycle: GitHubPrLifecycle | undefined): number {
+function prSortRank(lifecycle: GitHubPrLifecycle | undefined): number | undefined {
   switch (lifecycle) {
+    case "none":
+      return 0;
     case "open":
     case "draft":
     case "merging":
@@ -34,7 +40,7 @@ function prSortRank(lifecycle: GitHubPrLifecycle | undefined): number {
     case "closed":
       return 2;
     default:
-      return 0;
+      return undefined;
   }
 }
 
@@ -106,13 +112,22 @@ function compareMain(a: WorktreeNode, b: WorktreeNode): number {
   return Number(b.worktree.isMain) - Number(a.worktree.isMain);
 }
 
-/** No PR first, then open PRs, then closed or merged ones. */
+/**
+ * No PR first, then open PRs, then closed or merged ones. A worktree whose
+ * lifecycle is unknown ties, so it falls through to label ordering instead of
+ * claiming the no-PR bucket ahead of worktrees that do have a PR.
+ */
 function comparePrRank(
   a: WorktreeNode,
   b: WorktreeNode,
   prLifecycles: Readonly<Record<string, GitHubPrLifecycle>> | undefined,
 ): number {
-  return prSortRank(prLifecycles?.[a.worktree.id]) - prSortRank(prLifecycles?.[b.worktree.id]);
+  const aRank = prSortRank(prLifecycles?.[a.worktree.id]);
+  const bRank = prSortRank(prLifecycles?.[b.worktree.id]);
+  if (aRank === undefined || bRank === undefined) {
+    return 0;
+  }
+  return aRank - bRank;
 }
 
 function labelFor(worktree: Worktree): string {

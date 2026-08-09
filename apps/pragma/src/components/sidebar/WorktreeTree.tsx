@@ -141,18 +141,23 @@ function useWorktreePrLifecycles(
               const pr = await findPullRequestForBranch(repo, { includeClosed: true });
               return [worktree.id, pullRequestLifecycle(pr)] as const;
             } catch {
-              return [worktree.id, "none" as const] as const;
+              // Failed lookup: report no lifecycle at all rather than "none",
+              // so a transient GitHub error can't sort the row into the no-PR
+              // bucket ahead of worktrees whose PRs did resolve.
+              return [worktree.id, undefined] as const;
             }
           }),
         );
         if (cancelled) return;
-        const next: Record<string, GitHubPrLifecycle> = {};
-        for (const [id, lifecycle] of entries) {
-          if (lifecycle !== "none") next[id] = lifecycle;
-        }
-        setPrLifecycleByWorktreeId((previous) =>
-          samePrLifecycle(previous, next) ? previous : next,
-        );
+        setPrLifecycleByWorktreeId((previous) => {
+          const next: Record<string, GitHubPrLifecycle> = {};
+          for (const [id, lifecycle] of entries) {
+            // Carry the last known lifecycle forward across a failed refresh.
+            const resolved = lifecycle ?? previous[id];
+            if (resolved !== undefined) next[id] = resolved;
+          }
+          return samePrLifecycle(previous, next) ? previous : next;
+        });
       } finally {
         refreshInFlight = false;
       }
