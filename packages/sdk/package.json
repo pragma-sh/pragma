@@ -19,7 +19,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "bunup src/index.ts --format esm,cjs --target node --dts --external @pragma/scratchpad-contract",
+    "build": "bunup src/index.ts --format esm,cjs --target node --dts",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."

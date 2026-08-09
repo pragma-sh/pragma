@@ -89,18 +89,15 @@ the user has not themed.
 
 ## Rules
 
-- **`build` marks `@pragma/scratchpad-contract` `--external`.** Letting bunup
-  bundle/dts-inline it crashes on Windows (`panic: Expected pretty file path
-to have only forward slashes` — a long-standing unfixed upstream bug,
-  oven-sh/bun#14843, #14972, #15007, #15421) when it walks that
-  workspace-symlinked package's source during `--dts` generation. Marking it
-  external stops bunup from ever opening those files: the emitted
-  `dist/index.d.ts` just re-exports its types (`export * from
-"@pragma/scratchpad-contract"`), and `dist/index.js` keeps a plain import
-  instead of inlining it — resolved at runtime the same way any other
-  workspace package is. If `bun run build` starts panicking again with that
-  message, suspect a _new_ raw-src workspace dependency needing the same
-  `--external` treatment before reaching for anything more invasive.
+- **`build` bundles `@pragma/scratchpad-contract` normally.** It used to need
+  `--external` to dodge a Windows crash (`panic: Expected pretty file path to
+have only forward slashes`) when bunup walked that workspace-symlinked
+  package's source. That was a Bun bug, not a bunup one — a plugin's catch-all
+  `onResolve` deferring on a bare specifier that resolves into `node_modules`
+  (oven-sh/bun#26798, fixed after 1.3.14) — and it is patched repo-wide in
+  `patches/bunup@0.16.32.patch`, so `dist/` inlines the contract again and is
+  self-contained. If that panic ever returns, fix it in the patch rather than
+  marking more workspace dependencies external.
 - Never hand-build gateway routes in a plugin — import from `@pragma/sdk`.
 - No `node:` imports in SDK source; keep it fetch/ReadableStream/TextDecoder based.
 - `env.ts` is the only SDK file that touches process env, and it must use guarded
