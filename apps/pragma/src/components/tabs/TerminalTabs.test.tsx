@@ -1,4 +1,4 @@
-import type { Tab } from "@pragma/constants";
+import type { ShellProfile, Tab } from "@pragma/constants";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,20 @@ function tab(id: string): Tab {
     agentId: null,
     userRenamed: false,
     orderIndex: 0,
+    createdAt: "now",
+  };
+}
+
+function worktree(): NonNullable<WorkspaceContextValue["selectedWorktree"]> {
+  return {
+    id: "worktree",
+    projectId: "project",
+    parentId: null,
+    branch: "main",
+    title: null,
+    path: "/tmp/project",
+    isMain: true,
+    hidden: false,
     createdAt: "now",
   };
 }
@@ -141,8 +155,27 @@ vi.mock("@/lib/terminal-manager", () => ({
   terminalManager: { focus: vi.fn() },
 }));
 
+/** Distributions the WSL probe reports; per-test so both branches are covered. */
+let wslDistros: { name: string; running: boolean; version: number; default: boolean }[] = [];
+/** The shell Settings → Terminal has selected; null means none configured. */
+let configuredDefault: ShellProfile | null = null;
+
+vi.mock("@/hooks/use-wsl-distros", () => ({
+  useWslDistros: () => ({ isWindows: wslDistros.length > 0, distros: wslDistros }),
+}));
+
+vi.mock("@/hooks/use-terminal-settings", () => ({
+  TERMINAL_SETTINGS_CHANGED_EVENT: "pragma:terminal-settings-changed",
+  useTerminalSettings: () => ({
+    defaultProfile: configuredDefault,
+    hiddenDistros: undefined,
+  }),
+}));
+
 afterEach(() => {
   cleanup();
+  wslDistros = [];
+  configuredDefault = null;
   mockWorkspace.splitRootByWorktree = {};
   mockWorkspace.selectedWorktree = null;
   mockWorkspace.selectedWorktreeId = "worktree";
@@ -300,5 +333,120 @@ describe("TerminalTabs", () => {
     await userEvent.click(buildButton);
 
     expect(mockWorkspace.runScript).toHaveBeenCalledWith("build");
+  });
+
+  /// Without WSL there is nothing to choose between, so Terminal must stay a
+  /// one-click item rather than becoming a submenu the user has to hover.
+  it("opens a terminal directly when no WSL distribution exists", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    expect(mockWorkspace.createTerminalTab).toHaveBeenCalledWith(undefined, undefined);
+  });
+
+  it("nests PowerShell and each distribution under Terminal when WSL exists", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [
+      { name: "Ubuntu", running: false, version: 2, default: true },
+      { name: "Debian", running: false, version: 2, default: false },
+    ];
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    expect(await screen.findByText("PowerShell")).toBeTruthy();
+    expect(screen.getByText("Ubuntu")).toBeTruthy();
+    expect(screen.getByText("Debian")).toBeTruthy();
+  });
+
+  it("launches the picked distribution rather than the default shell", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [{ name: "Ubuntu", running: false, version: 2, default: true }];
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+    await userEvent.click(await screen.findByText("Ubuntu"));
+
+    expect(mockWorkspace.createTerminalTab).toHaveBeenCalledWith(undefined, {
+      shell: {
+        backend: "wsl",
+        distro: "Ubuntu",
+      },
+    });
+  });
+
+  /// Regression: the badge used to follow `distro.default`, WSL's own default
+  /// distribution, so the menu marked Ubuntu as the default even when Settings
+  /// had chosen PowerShell.
+  it("marks the shell Settings selected, not WSL's own default distribution", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [{ name: "Ubuntu", running: false, version: 2, default: true }];
+    configuredDefault = null; // nothing configured → the native shell
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    const badges = await screen.findAllByText("Default");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.closest("[role='menuitem']")?.textContent).toContain("PowerShell");
+  });
+
+  it("moves the badge to the distribution Settings selected", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [
+      { name: "Ubuntu", running: false, version: 2, default: true },
+      { name: "Debian", running: false, version: 2, default: false },
+    ];
+    configuredDefault = { backend: "wsl", distro: "Debian" };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    const badges = await screen.findAllByText("Default");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.closest("[role='menuitem']")?.textContent).toContain("Debian");
+  });
+
+  /// A bare "use WSL's default" configuration names no distribution, so the
+  /// badge has to resolve to whichever one WSL actually calls default.
+  it("resolves a distro-less WSL default to the distribution WSL names", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [
+      { name: "Ubuntu", running: false, version: 2, default: true },
+      { name: "Debian", running: false, version: 2, default: false },
+    ];
+    configuredDefault = { backend: "wsl", distro: null };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    const badges = await screen.findAllByText("Default");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.closest("[role='menuitem']")?.textContent).toContain("Ubuntu");
+  });
+
+  /// Docker Desktop's VM distributions back other tools and are not usable
+  /// interactive shells, so the shipped hide list has to apply to this menu.
+  it("omits distributions hidden by the shipped defaults", async () => {
+    mockWorkspace.selectedWorktree = worktree();
+    wslDistros = [
+      { name: "Ubuntu", running: false, version: 2, default: true },
+      { name: "docker-desktop", running: false, version: 2, default: false },
+    ];
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("New tab"));
+    await userEvent.click(screen.getByText("Terminal"));
+
+    expect(await screen.findByText("Ubuntu")).toBeTruthy();
+    expect(screen.queryByText("docker-desktop")).toBeNull();
   });
 });

@@ -4,6 +4,7 @@
 // documented programmatic entry point — so neither the launcher nor the usage
 // provider ever touches `~/.grok/auth.json`. Grok owns its credentials and
 // refresh; Pragma never reads or prints a token.
+import { runProviderCommand } from "@pragma/plugin/catalog";
 import type { PluginContext } from "@pragma/plugin/catalog";
 
 /** Exit status the wrapper uses to say `grok` is not installed. */
@@ -77,20 +78,17 @@ export interface AcpSnapshot {
 
 /** Runs the ACP handshake plus the billing call and returns both responses. */
 export async function readGrokAcp(ctx: PluginContext): Promise<AcpSnapshot> {
-  const [result] = await ctx.sdk.exec.run({
-    cwd: ctx.project?.path ?? "/tmp",
-    commands: [COMMAND],
-  });
-  if (result?.status === MISSING_STATUS) {
+  const outcome = await runProviderCommand(ctx, COMMAND, MISSING_STATUS);
+  if (outcome.kind === "missing") {
     return { missing: true, initialize: undefined, billing: undefined };
   }
-  if (!result || result.status !== 0) {
-    throw new Error(result?.stderr.trim() || "Grok ACP request failed");
+  if (outcome.kind === "failed") {
+    throw new Error(outcome.stderr || "Grok ACP request failed");
   }
   return {
     missing: false,
-    initialize: findResponse(result.stdout, INITIALIZE_ID),
-    billing: findResponse(result.stdout, BILLING_ID),
+    initialize: findResponse(outcome.stdout, INITIALIZE_ID),
+    billing: findResponse(outcome.stdout, BILLING_ID),
   };
 }
 

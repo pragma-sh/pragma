@@ -1,7 +1,7 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@iconify/react";
-import { constants, type EditorLauncher, type Tab } from "@pragma/constants";
+import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma/constants";
 import {
   ArrowLeft,
   ChevronDown,
@@ -33,7 +33,11 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,8 +46,17 @@ import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
+import { useTerminalSettings } from "@/hooks/use-terminal-settings";
+import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { editorLaunchers } from "@/lib/editor-launchers";
 import { isMacPlatform } from "@/lib/platform";
+import {
+  effectiveDefaultProfile,
+  NATIVE_PROFILE,
+  sameProfile,
+  visibleDistros,
+  wslProfile,
+} from "@/lib/shell-profile";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
@@ -626,6 +639,13 @@ function EditorLauncherMenu({
   );
 }
 
+/**
+ * Label for the host's own shell in the shell submenu. The submenu only renders
+ * when the worktree's host reports WSL distributions, which makes it a Windows
+ * host, so naming PowerShell here is accurate rather than a guess.
+ */
+const NATIVE_SHELL_LABEL = "PowerShell";
+
 /** The prompt-board (Kanban) toggle, between the usage-limits and editor controls. */
 function KanbanToggle() {
   const kanban = useKanban();
@@ -644,18 +664,38 @@ function KanbanToggle() {
   );
 }
 
-/** The "new tab" dropdown for creating a terminal or browser tab. */
+/**
+ * The "new tab" dropdown for creating a terminal or browser tab.
+ *
+ * `worktreeId` scopes the distribution list to the host the new tab would spawn
+ * on. For a project opened over SSH that is the remote daemon's machine, whose
+ * distributions are the only ones it can actually launch.
+ */
 function NewTabMenu({
   shortcutModifier,
   disabled,
+  projectId,
+  worktreeId,
   onCreateTerminal,
   onCreateBrowser,
 }: {
   shortcutModifier: string;
   disabled: boolean;
-  onCreateTerminal: () => void;
+  projectId: string | null;
+  worktreeId: string | null;
+  onCreateTerminal: (shell?: ShellProfile | null) => void;
   onCreateBrowser: () => void;
 }) {
+  const wsl = useWslDistros(worktreeId);
+  // "Default" here means the shell Settings → Terminal selected — the one a
+  // plain ⌘T opens — not the distribution WSL itself marks as its default.
+  const { defaultProfile, hiddenDistros } = useTerminalSettings(projectId);
+  const distros = visibleDistros(wsl.distros, hiddenDistros);
+  const resolvedDefault = effectiveDefaultProfile(defaultProfile ?? NATIVE_PROFILE, distros);
+  const defaultBadge = (profile: ShellProfile) =>
+    sameProfile(resolvedDefault, profile) ? (
+      <DropdownMenuShortcut>Default</DropdownMenuShortcut>
+    ) : null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -670,11 +710,41 @@ function NewTabMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onCreateTerminal}>
-          <SquareTerminal />
-          Terminal
-          <DropdownMenuShortcut>{shortcutModifier}T</DropdownMenuShortcut>
-        </DropdownMenuItem>
+        {/* With no distributions to choose between there is nothing to nest, so
+            Terminal stays a plain item rather than a submenu of one. */}
+        {distros.length === 0 ? (
+          <DropdownMenuItem onSelect={() => onCreateTerminal()}>
+            <SquareTerminal />
+            Terminal
+            <DropdownMenuShortcut>{shortcutModifier}T</DropdownMenuShortcut>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <SquareTerminal />
+              Terminal
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-48">
+              <DropdownMenuItem onSelect={() => onCreateTerminal(NATIVE_PROFILE)}>
+                <SquareTerminal />
+                {NATIVE_SHELL_LABEL}
+                {defaultBadge(NATIVE_PROFILE)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>WSL</DropdownMenuLabel>
+              {distros.map((distro) => (
+                <DropdownMenuItem
+                  key={distro.name}
+                  onSelect={() => onCreateTerminal(wslProfile(distro.name))}
+                >
+                  <Icon className="size-4" icon="simple-icons:linux" />
+                  {distro.name}
+                  {defaultBadge(wslProfile(distro.name))}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
         <DropdownMenuItem onSelect={onCreateBrowser}>
           <Globe />
           Browser
@@ -757,8 +827,15 @@ export function TerminalTabs() {
           <NewTabMenu
             disabled={!workspace.selectedWorktree}
             onCreateBrowser={() => void workspace.createBrowserTab()}
-            onCreateTerminal={() => void workspace.createTerminalTab()}
+            onCreateTerminal={(shell) =>
+              void workspace.createTerminalTab(
+                undefined,
+                shell === undefined ? undefined : { shell },
+              )
+            }
+            projectId={workspace.selectedProjectId}
             shortcutModifier={shortcutModifier}
+            worktreeId={workspace.selectedWorktree?.id ?? null}
           />
         </div>
       </header>

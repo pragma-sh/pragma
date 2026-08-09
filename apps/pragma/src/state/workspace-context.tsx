@@ -20,6 +20,7 @@ import type {
   Project,
   ProjectIcon,
   ProjectScriptsConfig,
+  ShellProfile,
   Tab,
   Worktree,
   WorktreeStatus,
@@ -267,6 +268,11 @@ interface WorkspaceContextValue extends WorkspaceState {
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null, projectId?: string) => void;
+  /**
+   * Opens a terminal tab. `options.shell` names the shell world it launches in
+   * (the new-tab shell picker); omitting it follows the project's configured
+   * default.
+   */
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
   /**
@@ -351,6 +357,7 @@ interface WorkspaceContextValue extends WorkspaceState {
 /** Explicit owner for operations whose worktree is not in the loaded project snapshot. */
 interface WorktreeTargetOptions {
   projectId?: string;
+  shell?: ShellProfile | null;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -2004,9 +2011,21 @@ async function createTabOfKind(
   kind: "terminal" | "browser",
   projectId: string,
   worktreeId: string,
+  shell?: ShellProfile | null,
 ): Promise<Tab> {
   return kind === "terminal"
-    ? await createTabCommand(projectId, worktreeId, "terminal", defaultTabTitle("terminal"))
+    ? await createTabCommand(
+        projectId,
+        worktreeId,
+        "terminal",
+        defaultTabTitle("terminal"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        shell,
+      )
     : await createTabCommand(
         projectId,
         worktreeId,
@@ -2754,7 +2773,7 @@ function useTabCreation(
         return null;
       }
       try {
-        const tab = await createTabOfKind(kind, projectId, targetWorktreeId);
+        const tab = await createTabOfKind(kind, projectId, targetWorktreeId, options?.shell);
         // The workspace only keeps tabs for its selected project. A background
         // creation may finish after its owner is no longer selected.
         if (selectedProjectIdRef.current === projectId) {

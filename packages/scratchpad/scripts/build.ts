@@ -16,11 +16,12 @@ const result = spawnSync(
     "browser",
     "--dts",
     "--no-splitting",
-    // No `--packages bundle`: inlining `@pragma/sdk` makes Bun's Windows bundler
-    // panic ("Expected pretty file path to have only forward slashes") on the
-    // `node_modules\@pragma\sdk\dist\index.js` path, which is outside the entry
-    // root. Consumers (the desktop app's Vite build) resolve the workspace
-    // package themselves.
+    // No `--packages bundle`: consumers (the desktop app's Vite build) resolve
+    // `@pragma/sdk` themselves, so inlining it here would ship a second copy of
+    // the SDK — and a second set of its module-level singletons — into the app
+    // bundle. This used to double as a workaround for a Windows bunup panic;
+    // that cause is gone (see patches/bunup@0.16.32.patch), the dedupe reason
+    // is not.
     "--external",
     "@pragma/sdk",
     "--external",

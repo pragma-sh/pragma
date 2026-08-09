@@ -348,6 +348,43 @@ selected scope's file through `read/writeKeybindingsFile`, then dispatch
 `pragma:keybindings-changed` so live shortcuts reload. Rust validates every write with
 `keybindings::validate_overrides`, so a bad patch can never break all shortcuts.
 
+**Terminal** (`TerminalSection.tsx`) edits the `terminal` block of the scope's
+`config.json` (`{ backend, distro }`) — the shell a plain new tab opens in. The
+distribution list comes from `useWslDistros(worktreeId)`, which probes `list_wsl_distros`
+**once per worktree**: the probe shells out to `wsl.exe`, so a distribution installed
+while the app is running only appears after a reload or a worktree switch. The same hook
+and the same `lib/shell-profile.ts` helpers back the new-tab menu, so the two surfaces can
+never disagree about what is installed or hidden.
+
+**The probe is host-scoped, and the worktree is what picks the host.** `list_wsl_distros`
+does not run `wsl.exe` on the desktop machine — it sends a `wsl` RPC to the daemon that
+owns the worktree (`ssh_host::client_for_worktree`), which for a local project is the
+managed local server. A project opened over SSH runs its terminals on the remote machine,
+so probing locally would both hide that host's distributions and offer local ones it
+cannot launch. Pass `null` only where no worktree applies (global settings), which probes
+the local host. Anything that fails — an unreachable host, a daemon too old to know the
+method, no `wsl.exe` — degrades to an empty list, which hides every WSL affordance.
+
+In the new-tab menu, **Terminal** is a submenu (PowerShell, then the distributions) only
+when distributions exist; with none it stays a plain one-click item, because a submenu of
+one is just a hover the user cannot skip. A pick from that submenu is passed to
+`createTerminalTab(worktreeId, shell)` and persisted on the tab, so it survives a server
+restart. **⌘T/Ctrl+T deliberately passes no profile at all**: the session layer then
+resolves the project's `terminal` block, then the global one, so the shortcut always
+opens whatever Settings currently calls the default — copying the default onto the tab
+instead would freeze it at the value it had when the tab was opened.
+
+**The submenu's "Default" badge means the shell Settings selected, never
+`WslDistro.default`.** Those are two unrelated defaults and conflating them is the bug
+this note exists to prevent: WSL's flag names the distribution `wsl.exe` starts without
+`-d`, which says nothing about what Pragma opens. `useTerminalSettings` resolves the
+badge from both config scopes with the same project-first, same-scope-wins rule the
+server applies, so the badge always names the shell ⌘T would actually launch. A bare
+`{ backend: "wsl" }` with no `distro` is resolved onto the WSL-default distribution by
+`effectiveDefaultProfile`, otherwise it would match no menu entry and draw no badge at
+all. Settings dispatches `TERMINAL_SETTINGS_CHANGED_EVENT` after writing so the badge
+moves without a remount.
+
 **Agent Status** (`AgentStatusSection.tsx`) edits the `agentStatus` block of the
 scope's `config.json` (`{ notificationsEnabled, soundName }`). Clips live in
 `CONSTANTS.agentStatus.soundsDirName` (`.pragma/assets/sounds`) under the home

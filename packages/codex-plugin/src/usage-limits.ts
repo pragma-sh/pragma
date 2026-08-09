@@ -1,3 +1,4 @@
+import { runProviderCommand } from "@pragma/plugin/catalog";
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
 
 const RATE_LIMITS_REQUEST_ID = 2;
@@ -24,21 +25,18 @@ const USAGE_COMMAND =
 
 /** Loads Codex plan limits through its supported app-server account API. */
 export async function loadCodexUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
-  const [result] = await ctx.sdk.exec.run({
-    cwd: ctx.project?.path ?? "/tmp",
-    commands: [USAGE_COMMAND],
-  });
-  if (result?.status === 20) {
+  const outcome = await runProviderCommand(ctx, USAGE_COMMAND);
+  if (outcome.kind === "missing") {
     return {
       status: "unavailable",
       reason: "not-configured",
       message: "Install Codex CLI to load usage limits.",
     };
   }
-  if (!result || result.status !== 0) {
-    throw new Error(result?.stderr.trim() || "Codex usage request failed");
+  if (outcome.kind === "failed") {
+    throw new Error(outcome.stderr || "Codex usage request failed");
   }
-  return extractCodexUsageLimits(result.stdout, Date.now());
+  return extractCodexUsageLimits(outcome.stdout, Date.now());
 }
 
 /** Scans app-server NDJSON output for the rate-limit response and normalizes it. */

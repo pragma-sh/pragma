@@ -85,7 +85,10 @@ impl Core {
             | ProtocolRpcMethod::Automations
             | ProtocolRpcMethod::Plugins
             | ProtocolRpcMethod::Tunnel
-            | ProtocolRpcMethod::Ports => Err(CoreError::UnsupportedMethod(
+            | ProtocolRpcMethod::Ports
+            // Answered by `pragma-server`, which owns the host's process
+            // spawning; the core router never sees it.
+            | ProtocolRpcMethod::Wsl => Err(CoreError::UnsupportedMethod(
                 rpc::method_name(method).to_string(),
             )),
         }

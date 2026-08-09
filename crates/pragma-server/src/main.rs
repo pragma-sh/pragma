@@ -371,7 +371,7 @@ fn handle_request(
             let cols = request.cols.unwrap_or(80);
             let rows = request.rows.unwrap_or(24);
             let (scrollback, rx) = registry
-                .spawn(session_id, worktree_id, cwd, cols, rows)
+                .spawn(session_id, worktree_id, cwd, cols, rows, request.shell)
                 .map_err(|err| HandledRequestError::Request(err.to_string()))?;
             Ok(Outcome {
                 event_stream: Some(EventStream { scrollback, rx }),
@@ -534,6 +534,33 @@ fn handle_ports_rpc(
     })
 }
 
+/// Answers "which WSL distributions does *this* host have installed?".
+///
+/// The desktop app cannot answer it for a worktree it does not own: a project
+/// opened over SSH runs its terminals on the remote machine, so probing the
+/// desktop's own `wsl.exe` would both hide the remote host's distributions and
+/// offer local ones the remote daemon has no way to launch. Routing the probe
+/// through the owning daemon makes the answer come from the machine that would
+/// actually run the shell.
+///
+/// A failed probe is reported as an empty list rather than an RPC error: the
+/// caller treats "no distributions" and "no WSL here" identically — both hide
+/// every WSL affordance — and an error would surface as a dialog the user can
+/// do nothing about.
+fn handle_wsl_rpc(request_id: String) -> Result<RpcResponseFrame, HandledRequestError> {
+    let distros =
+        pragma_platform::wsl::list_distros().unwrap_or_else(|_| pragma_platform::wsl::empty_list());
+    Ok(RpcResponseFrame {
+        request_id,
+        ok: true,
+        payload: Some(
+            serde_json::to_value(distros)
+                .map_err(|error| HandledRequestError::Request(error.to_string()))?,
+        ),
+        error: None,
+    })
+}
+
 fn handle_tabs_rpc(
     request_id: String,
     payload: serde_json::Value,
@@ -645,6 +672,9 @@ fn handle_rpc_request(
     }
     if matches!(rpc.method, ProtocolRpcMethod::Ports) {
         return handle_ports_rpc(request_id, rpc.payload, registry);
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Wsl) {
+        return handle_wsl_rpc(request_id);
     }
     if matches!(rpc.method, ProtocolRpcMethod::Tabs) {
         return handle_tabs_rpc(request_id, rpc.payload, registry);

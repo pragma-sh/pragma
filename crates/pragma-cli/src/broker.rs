@@ -31,6 +31,7 @@ pub fn request(
         cols: None,
         rows: None,
         data: None,
+        shell: None,
         rpc: None,
         subscription: None,
         control: Some(ControlRequest { method, payload }),

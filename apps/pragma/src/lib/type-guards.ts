@@ -18,11 +18,6 @@ export const isString: FieldGuard = (value) => typeof value === "string";
 /** Accepts a `number`. */
 export const isNumber: FieldGuard = (value) => typeof value === "number";
 
-/** Accepts `null` in addition to whatever `guard` accepts. */
-export function nullable(guard: FieldGuard): FieldGuard {
-  return (value) => value === null || guard(value);
-}
-
 /** Accepts any one of `expected`, compared with `===`. */
 export function isOneOf(...expected: readonly unknown[]): FieldGuard {
   return (value) => expected.includes(value);

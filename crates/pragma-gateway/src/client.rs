@@ -135,6 +135,9 @@ impl GatewayClient {
     }
 
     /// Spawns a session and returns its event stream.
+    ///
+    /// The shell is left to the server to resolve: the phone has no shell
+    /// picker, so a session it opens follows the project's configured default.
     pub fn spawn_stream(
         &self,
         session_id: String,
@@ -145,7 +148,7 @@ impl GatewayClient {
     ) -> GatewayResult<LocalStream> {
         self.ensure_protocol()?;
         self.client
-            .spawn_stream(session_id, worktree_id, cwd, cols, rows)
+            .spawn_stream(session_id, worktree_id, cwd, cols, rows, None)
             .map_err(GatewayError::from)
     }
 

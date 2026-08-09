@@ -32,12 +32,14 @@ import type {
   AutomationRootRegistration,
   OpenPort,
   ScratchpadSummary,
+  ShellProfile,
+  WslDistroList,
 } from "@pragma/constants";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
-export type { OpenPort } from "@pragma/constants";
+export type { OpenPort, ShellProfile, WslDistroList } from "@pragma/constants";
 
 /**
  * Typed bridge to the Rust backend commands.
@@ -331,6 +333,7 @@ export function ptySpawn(
   cols: number,
   rows: number,
   onEvent: PtyEventHandler,
+  shell?: ShellProfile | null,
 ): Promise<PtyStream> {
   const channel = new Channel<PtyMessage>();
   const generation = ++nextPtyStreamGeneration;
@@ -342,6 +345,7 @@ export function ptySpawn(
     cwd,
     cols,
     rows,
+    shell,
     streamGeneration: generation,
     onEvent: channel,
   }).then(() => ({ channel, generation }));
@@ -354,8 +358,9 @@ export function ptySpawnDetached(
   cwd: string,
   cols: number,
   rows: number,
+  shell?: ShellProfile | null,
 ): Promise<void> {
-  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows });
+  return invoke("pty_spawn_detached", { sessionId, worktreeId, cwd, cols, rows, shell });
 }
 
 /**
@@ -604,6 +609,7 @@ export function createTab(
   diffSide?: DiffSide | null,
   diffCommit?: string | null,
   prNumber?: number | null,
+  shell?: ShellProfile | null,
 ): Promise<Tab> {
   return invoke<Tab>("create_tab", {
     projectId,
@@ -617,6 +623,8 @@ export function createTab(
     // Only send `prNumber` for PR tabs; omitting it keeps the IPC arg shape
     // stable for the common non-PR case (an explicit null is still forwarded).
     ...(prNumber !== undefined && { prNumber }),
+    // Likewise `shell`: only a tab opened from the shell picker carries one.
+    ...(shell !== undefined && { shell }),
   });
 }
 
@@ -1381,6 +1389,23 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 /** Returns the runtime platform name used to pick keybinding chords ("mac" or "linux"). */
 export function getPlatform(): Promise<"mac" | "linux"> {
   return invoke<"mac" | "linux">("platform_name");
+}
+
+/**
+ * Probes WSL on the host that owns `worktreeId`: whether it runs Windows and
+ * which distributions are installed there.
+ *
+ * The worktree decides which machine is asked. A project opened over SSH runs
+ * its terminals on the remote daemon's host, so probing the desktop machine
+ * would list distributions that host cannot launch and hide the ones it has.
+ * Omit `worktreeId` only where there is no worktree to scope to (global
+ * settings), which probes the local host.
+ *
+ * A failed probe reports an empty list, so an unreachable host is
+ * indistinguishable from one without WSL and every WSL feature stays hidden.
+ */
+export function listWslDistros(worktreeId?: string | null): Promise<WslDistroList> {
+  return invoke<WslDistroList>("list_wsl_distros", { worktreeId: worktreeId ?? null });
 }
 
 /**

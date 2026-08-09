@@ -160,6 +160,7 @@ fn register_once(app: &AppHandle, pty: &PtyClient, source_host_id: &str) -> AppR
         cols: None,
         rows: None,
         data: None,
+        shell: None,
         rpc: None,
         subscription: None,
         control: None,
@@ -199,6 +200,7 @@ fn register_once(app: &AppHandle, pty: &PtyClient, source_host_id: &str) -> AppR
                     cols: None,
                     rows: None,
                     data: None,
+                    shell: None,
                     rpc: None,
                     subscription: None,
                     control: None,
@@ -559,6 +561,7 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
         args.diff_side.as_deref().map(diff_side).transpose()?,
         None,
         None,
+        None,
     )?;
     if matches!(kind, TabKind::Terminal) {
         let pty = app
@@ -570,6 +573,7 @@ fn tab_open(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json
             worktree.path.clone(),
             DEFAULT_COLS,
             DEFAULT_ROWS,
+            None,
         )?;
         if let Some(command) = args.command {
             let _ = pty.write(tab.id.clone(), format!("{command}\r"));
@@ -740,6 +744,7 @@ fn scratchpad_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<s
         Some(title.to_string()),
         None,
         Some(path.clone()),
+        None,
         None,
         None,
         None,
@@ -932,6 +937,7 @@ fn materialize_split_tab(
         diff_side,
         None,
         None,
+        None,
     )?;
     if matches!(kind, TabKind::Terminal) {
         let pty = app
@@ -943,6 +949,7 @@ fn materialize_split_tab(
             worktree.path.clone(),
             DEFAULT_COLS,
             DEFAULT_ROWS,
+            None,
         )?;
         if let Some(command) = spec.command {
             let _ = pty.write(tab.id.clone(), format!("{command}\r"));
@@ -1300,6 +1307,7 @@ fn agent_session_launch(
         &worktree.project_id,
         &worktree.id,
         TabKind::Terminal,
+        None,
         None,
         None,
         None,

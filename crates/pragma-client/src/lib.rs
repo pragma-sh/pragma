@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, CONSTANTS};
+use pragma_constants::{ProtocolErrorCode, ProtocolRpcMethod, ShellProfile, CONSTANTS};
 use pragma_platform::ipc::{self, LocalStream};
 use pragma_platform::process;
 use pragma_protocol::{
@@ -52,10 +52,12 @@ pub use ssh::{
     ssh_exec, start_ssh_bridge, RemoteAuth, SshBridgeConfig, SshConnectConfig, SshExecResult,
 };
 
+// `WslDistro` is deliberately not re-exported: it is `pragma_constants`' type
+// now, shared with the `wsl` RPC's payload, so callers name it there.
 #[cfg(feature = "ssh")]
 pub use wsl::{
     default_bootstrap_command, list_distros, resolve_distro, socket_path_for, start_wsl_bridge,
-    WslBridgeConfig, WslDistro, WslError, WSL_CHANNEL,
+    WslBridgeConfig, WslError, WSL_CHANNEL,
 };
 
 const SERVER_DETACH_FLAG: &str = "--detach";
@@ -250,8 +252,9 @@ impl PragmaClient {
         cwd: String,
         cols: u16,
         rows: u16,
+        shell: Option<ShellProfile>,
     ) -> ClientResult<LocalStream> {
-        let request = request_spawn(session_id, worktree_id, cwd, cols, rows);
+        let request = request_spawn(session_id, worktree_id, cwd, cols, rows, shell);
         self.open_event_stream(&request)
     }
 
@@ -905,6 +908,9 @@ pub fn cargo_executable() -> PathBuf {
 }
 
 /// Builds a `Spawn` request frame.
+///
+/// `shell` names the shell world the session launches in; `None` leaves the
+/// choice to the server (project config, then the shipped default).
 #[must_use]
 pub fn request_spawn(
     session_id: String,
@@ -912,16 +918,20 @@ pub fn request_spawn(
     cwd: String,
     cols: u16,
     rows: u16,
+    shell: Option<ShellProfile>,
 ) -> RequestFrame {
-    request_frame(
-        RequestKind::Spawn,
-        Some(session_id),
-        Some(worktree_id),
-        Some(cwd),
-        Some(cols),
-        Some(rows),
-        None,
-    )
+    RequestFrame {
+        shell,
+        ..request_frame(
+            RequestKind::Spawn,
+            Some(session_id),
+            Some(worktree_id),
+            Some(cwd),
+            Some(cols),
+            Some(rows),
+            None,
+        )
+    }
 }
 
 /// Builds an `Attach` request frame. A `Some` size resizes the PTY to the
@@ -1145,6 +1155,7 @@ pub fn request_control(method: pragma_protocol::ControlMethod, payload: Value) -
         cols: None,
         rows: None,
         data: None,
+        shell: None,
         rpc: None,
         subscription: None,
         control: Some(ControlRequest { method, payload }),
@@ -1168,6 +1179,7 @@ pub fn request_subscribe(
         cols: None,
         rows: None,
         data: None,
+        shell: None,
         rpc: None,
         subscription: Some(SubscriptionRequest {
             event,
@@ -1190,6 +1202,7 @@ pub fn request_rpc(method: ProtocolRpcMethod, payload: Value) -> RequestFrame {
         cols: None,
         rows: None,
         data: None,
+        shell: None,
         rpc: Some(RpcRequest { method, payload }),
         subscription: None,
         control: None,
@@ -1215,6 +1228,7 @@ fn request_frame(
         cols,
         rows,
         data,
+        shell: None,
         rpc: None,
         subscription: None,
         control: None,

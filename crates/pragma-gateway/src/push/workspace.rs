@@ -127,6 +127,7 @@ mod tests {
                 agent_id: None,
                 user_renamed: false,
                 order_index: 0,
+                shell: None,
                 created_at: "now".to_string(),
             }],
         }
@@ -160,6 +161,10 @@ mod tests {
     fn ignores_a_tab_still_using_its_default_title() {
         assert_eq!(named_tab_title(Some("Shell"), TabKind::Terminal), None);
         assert_eq!(named_tab_title(Some("New tab"), TabKind::Browser), None);
+        assert_eq!(
+            named_tab_title(Some("Scratchpad"), TabKind::Scratchpad),
+            None
+        );
         assert_eq!(named_tab_title(Some("  "), TabKind::Terminal), None);
         assert_eq!(
             named_tab_title(Some("Shell"), TabKind::Browser),

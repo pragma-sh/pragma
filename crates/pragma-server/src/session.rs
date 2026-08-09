@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use pragma_constants::CONSTANTS;
+use pragma_constants::{ShellProfile, CONSTANTS};
 use pragma_platform::{process, shell};
 use serde::Deserialize;
 use thiserror::Error;
@@ -170,6 +170,9 @@ pub struct Session {
 
 impl Session {
     /// Spawns a session and invokes `on_exit` after its final exit event is recorded.
+    // Session setup carries identity, geometry, the server socket, and the shell
+    // to launch; the arguments are all genuinely independent.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn_with_exit_handler(
         id: String,
         worktree_id: String,
@@ -177,6 +180,7 @@ impl Session {
         cols: u16,
         rows: u16,
         server_socket: &str,
+        requested_shell: Option<ShellProfile>,
         on_exit: impl FnOnce(&Arc<Session>) + Send + 'static,
     ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
@@ -185,7 +189,13 @@ impl Session {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        let launch = shell::resolve_launch(project_shell(&cwd).as_deref());
+        // The shell the caller picked wins; otherwise the project's `terminal`
+        // block decides, then the global one, then the shipped default.
+        let scopes = terminal_scopes(&cwd);
+        let profile = requested_shell
+            .or_else(|| configured_profile(&scopes))
+            .unwrap_or_else(shell::default_profile);
+        let launch = shell::resolve_profile_launch(&profile, configured_shell(&scopes).as_deref());
         let mut command = CommandBuilder::new(&launch.program);
         command.args(&launch.args);
         command.cwd(&cwd);
@@ -986,17 +996,54 @@ fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
     })
 }
 
-/// Reads a project's configured shell from its `.pragma/config.json`.
+/// Reads the `terminal` blocks that apply to a session, project scope first.
 ///
-/// Returns `None` when the file is absent, unreadable, or names no shell —
-/// every one of which means "use the platform default" rather than an error, so
-/// a malformed config never stops a terminal from opening.
-fn project_shell(cwd: &str) -> Option<String> {
-    let path = Path::new(cwd).join(&CONSTANTS.plugins.config_file_name);
-    let contents = std::fs::read_to_string(path).ok()?;
+/// Settings has two scopes and both must be honoured here: the project's own
+/// `.pragma/config.json` wins, and the one under the home directory is the
+/// global default behind it. Returning both (rather than merging) lets each
+/// field fall back independently, so a project that pins only `shell` still
+/// inherits the global `backend`.
+///
+/// Every field is read tolerantly: a file that is absent, unreadable,
+/// malformed, or carries a typo in one field must still open a terminal, so
+/// each miss degrades to "use the default" rather than an error.
+fn terminal_scopes(cwd: &str) -> Vec<serde_json::Value> {
+    let global = pragma_core::process_env::home_dir().and_then(|home| terminal_block(&home));
+    [terminal_block(Path::new(cwd)), global]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// The `terminal` block of the `.pragma/config.json` under `root`, if any.
+fn terminal_block(root: &Path) -> Option<serde_json::Value> {
+    let contents = std::fs::read_to_string(root.join(&CONSTANTS.plugins.config_file_name)).ok()?;
     let config: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    config
-        .get("terminal")?
+    config.get("terminal").cloned()
+}
+
+/// The first scope that names a shell profile.
+fn configured_profile(scopes: &[serde_json::Value]) -> Option<ShellProfile> {
+    scopes.iter().find_map(|scope| profile_in(Some(scope)))
+}
+
+/// The first scope that names a native shell program.
+fn configured_shell(scopes: &[serde_json::Value]) -> Option<String> {
+    scopes.iter().find_map(|scope| shell_in(Some(scope)))
+}
+
+/// The shell profile one `terminal` block names, if any.
+fn profile_in(terminal: Option<&serde_json::Value>) -> Option<ShellProfile> {
+    let backend = terminal?.get("backend")?.as_str()?;
+    let distro = terminal
+        .and_then(|it| it.get("distro"))
+        .and_then(serde_json::Value::as_str);
+    shell::parse_profile(backend, distro)
+}
+
+/// The native shell program one `terminal` block names, if any.
+fn shell_in(terminal: Option<&serde_json::Value>) -> Option<String> {
+    terminal?
         .get("shell")?
         .as_str()
         .map(str::trim)
@@ -1057,8 +1104,9 @@ mod tests {
     use std::sync::mpsc::{self, TryRecvError, TrySendError};
 
     use super::{
-        fan_out, gateway_env, path_with_cli_dir_from, pragma_cli_path_from, project_shell, thread,
-        Duration, Instant, OscChunk, OscParser, OutputCoalescer, OutputMsg, Scrollback, Session,
+        configured_profile, configured_shell, fan_out, gateway_env, path_with_cli_dir_from,
+        pragma_cli_path_from, shell, terminal_block, thread, Duration, Instant, OscChunk,
+        OscParser, OutputCoalescer, OutputMsg, Scrollback, Session, ShellProfile,
         OSC_PENDING_MAX_BYTES, OSC_TITLE_MAX_BYTES, OUTPUT_CHANNEL_CAPACITY,
     };
     use pragma_constants::CONSTANTS;
@@ -1160,6 +1208,7 @@ mod tests {
             80,
             24,
             "unused-socket",
+            None,
             |_| {},
         )
         .expect("a shell spawns on a pseudo-terminal");
@@ -1217,6 +1266,7 @@ mod tests {
             80,
             24,
             "unused-socket",
+            None,
             |_| {},
         )
         .expect("a shell spawns on a pseudo-terminal");
@@ -1267,26 +1317,49 @@ mod tests {
             .is_ok_and(|output| output.status.success())
     }
 
-    /// Writes a project config declaring `shell` and returns its worktree root.
-    fn project_with_shell(dir: &std::path::Path, shell: &str) -> String {
+    /// Writes a project config with the given `terminal` block and returns its
+    /// worktree root.
+    fn project_with_terminal(dir: &std::path::Path, terminal: &str) -> String {
         let config = dir.join(&CONSTANTS.plugins.config_file_name);
         std::fs::create_dir_all(config.parent().expect("config parent")).expect("config dir");
-        std::fs::write(&config, format!(r#"{{"terminal":{{"shell":"{shell}"}}}}"#))
-            .expect("write config");
+        std::fs::write(&config, format!(r#"{{"terminal":{terminal}}}"#)).expect("write config");
         dir.to_string_lossy().into_owned()
+    }
+
+    /// Writes a project config declaring `shell` and returns its worktree root.
+    fn project_with_shell(dir: &std::path::Path, shell: &str) -> String {
+        project_with_terminal(dir, &format!(r#"{{"shell":"{shell}"}}"#))
+    }
+
+    /// Only the project scope, so these tests stay independent of whatever
+    /// `.pragma/config.json` the machine running them happens to have at home.
+    fn scopes_of(cwd: &str) -> Vec<serde_json::Value> {
+        terminal_block(Path::new(cwd)).into_iter().collect()
+    }
+
+    fn wsl_profile(distro: &str) -> ShellProfile {
+        ShellProfile {
+            backend: pragma_constants::TerminalBackend::Wsl,
+            distro: Some(distro.to_string()),
+        }
     }
 
     #[test]
     fn a_project_can_choose_its_own_shell() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cwd = project_with_shell(dir.path(), "/usr/bin/fish");
-        assert_eq!(project_shell(&cwd).as_deref(), Some("/usr/bin/fish"));
+        assert_eq!(
+            configured_shell(&scopes_of(&cwd)).as_deref(),
+            Some("/usr/bin/fish")
+        );
     }
 
     #[test]
     fn a_project_without_a_config_uses_the_platform_default() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert_eq!(project_shell(&dir.path().to_string_lossy()), None);
+        let cwd = dir.path().to_string_lossy().into_owned();
+        assert_eq!(configured_shell(&scopes_of(&cwd)), None);
+        assert_eq!(configured_profile(&scopes_of(&cwd)), None);
     }
 
     /// A broken config must not stop a terminal from opening — falling back to
@@ -1297,14 +1370,90 @@ mod tests {
         let config = dir.path().join(&CONSTANTS.plugins.config_file_name);
         std::fs::create_dir_all(config.parent().expect("config parent")).expect("config dir");
         std::fs::write(&config, "{ not json").expect("write config");
-        assert_eq!(project_shell(&dir.path().to_string_lossy()), None);
+        let cwd = dir.path().to_string_lossy().into_owned();
+        assert_eq!(configured_shell(&scopes_of(&cwd)), None);
     }
 
     #[test]
     fn a_blank_configured_shell_is_ignored() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cwd = project_with_shell(dir.path(), "   ");
-        assert_eq!(project_shell(&cwd), None);
+        assert_eq!(configured_shell(&scopes_of(&cwd)), None);
+    }
+
+    #[test]
+    fn a_project_can_default_to_a_wsl_distribution() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd = project_with_terminal(dir.path(), r#"{"backend":"wsl","distro":"Ubuntu"}"#);
+        assert_eq!(
+            configured_profile(&scopes_of(&cwd)),
+            Some(wsl_profile("Ubuntu"))
+        );
+    }
+
+    /// Settings writes the global scope by default, so a default chosen there
+    /// has to reach the session layer — but a project that names its own shell
+    /// still outranks it.
+    #[test]
+    fn the_project_scope_outranks_the_global_one() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let home = tempfile::tempdir().expect("tempdir");
+        let cwd = project_with_terminal(project.path(), r#"{"backend":"wsl","distro":"Ubuntu"}"#);
+        project_with_terminal(home.path(), r#"{"backend":"native"}"#);
+
+        let global_only = [terminal_block(home.path())]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            configured_profile(&global_only),
+            Some(shell::native_profile())
+        );
+
+        let both = [terminal_block(Path::new(&cwd)), terminal_block(home.path())]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(configured_profile(&both), Some(wsl_profile("Ubuntu")));
+    }
+
+    /// Each field falls back on its own: a project that pins only `shell` must
+    /// still inherit the global `backend` rather than silently resetting it.
+    #[test]
+    fn scopes_fall_back_field_by_field() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let home = tempfile::tempdir().expect("tempdir");
+        project_with_terminal(project.path(), r#"{"shell":"/usr/bin/fish"}"#);
+        project_with_terminal(home.path(), r#"{"backend":"wsl","distro":"Ubuntu"}"#);
+
+        let scopes = [terminal_block(project.path()), terminal_block(home.path())]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            configured_shell(&scopes).as_deref(),
+            Some("/usr/bin/fish"),
+            "the project's own shell wins"
+        );
+        assert_eq!(
+            configured_profile(&scopes),
+            Some(wsl_profile("Ubuntu")),
+            "and the global backend is still inherited"
+        );
+    }
+
+    /// A typo in `backend` must not take the project's `shell` down with it:
+    /// the fields are read independently so one bad value degrades alone.
+    #[test]
+    fn an_unknown_backend_leaves_the_configured_shell_intact() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cwd =
+            project_with_terminal(dir.path(), r#"{"backend":"wsl2","shell":"/usr/bin/fish"}"#);
+        assert_eq!(configured_profile(&scopes_of(&cwd)), None);
+        assert_eq!(
+            configured_shell(&scopes_of(&cwd)).as_deref(),
+            Some("/usr/bin/fish")
+        );
     }
 
     #[test]

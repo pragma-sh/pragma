@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 21,
+    "protocolVersion": 22,
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -74,6 +74,10 @@
       "unknownLocation": "Open Pragma to continue."
     }
   },
+  "terminalDefaults": {
+    "hiddenDistros": ["docker-desktop", "docker-desktop-data"],
+    "rememberLastShell": false
+  },
   "tabs": {
     "defaultTitles": {
       "fallback": "Shell",
@@ -110,7 +114,8 @@
       "automations",
       "plugins",
       "tunnel",
-      "scratchpads"
+      "scratchpads",
+      "wsl"
     ],
     "events": [
       "agentStatus",

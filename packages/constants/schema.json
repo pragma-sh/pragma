@@ -21,6 +21,7 @@
     "tunnel",
     "keybindings",
     "agentStatus",
+    "terminalDefaults",
     "tabs",
     "bench",
     "files",
@@ -75,6 +76,9 @@
     "agentStatus": {
       "$ref": "#/definitions/AgentStatusDefaults"
     },
+    "terminalDefaults": {
+      "$ref": "#/definitions/TerminalDefaults"
+    },
     "tabs": {
       "$ref": "#/definitions/TabDefaults"
     },
@@ -109,7 +113,8 @@
         "plugins",
         "tunnel",
         "ports",
-        "scratchpads"
+        "scratchpads",
+        "wsl"
       ]
     },
     "ProtocolEventKind": {
@@ -555,6 +560,22 @@
       "enum": ["native", "wsl"],
       "description": "Which world a terminal session's shell lives in. `native` runs the host's own shell through the host's PTY (a pseudo-terminal on macOS and Linux, ConPTY on Windows). `wsl` runs a Linux shell inside a WSL distribution, served by a Linux `pragma-server` running in that distribution. Only Windows offers a real choice; macOS and Linux always resolve to `native`."
     },
+    "ShellProfile": {
+      "title": "ShellProfile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "description": "One concrete choice of shell world for a terminal session: the resolved form of a `TerminalSettings` default, or the profile a single tab was opened with. Carried on the spawn request so the session layer launches the same shell the picker named, and persisted on the tab so a respawned session keeps it.",
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/TerminalBackend"
+        },
+        "distro": {
+          "type": ["string", "null"],
+          "description": "WSL distribution launched when `backend` is `wsl`. Null uses the distribution WSL itself marks as default. Always null for `native`."
+        }
+      }
+    },
     "Platform": {
       "title": "Platform",
       "type": "object",
@@ -949,6 +970,98 @@
         "soundName": {
           "type": ["string", "null"],
           "description": "File name (not a path) of the clip in the sounds directory played on every agent alert. Null plays the built-in chime instead."
+        }
+      }
+    },
+    "TerminalDefaults": {
+      "title": "TerminalDefaults",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hiddenDistros", "rememberLastShell"],
+      "description": "Shipped defaults for terminal launching. A user overrides these per install/project via the `terminal` key of `.pragma/config.json` (`TerminalSettings`).",
+      "properties": {
+        "hiddenDistros": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "WSL distribution names hidden from the shell picker by default because they back other tools rather than interactive shells (Docker Desktop's VM distros)."
+        },
+        "rememberLastShell": {
+          "type": "boolean",
+          "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        }
+      }
+    },
+    "TerminalSettings": {
+      "title": "TerminalSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `terminal` block of a global or project `.pragma/config.json`. Every field is optional: a project value overrides the global one, which overrides TerminalDefaults. Only meaningful on Windows, where both a native shell and WSL distributions are launchable; macOS and Linux always resolve to the native shell.",
+      "properties": {
+        "shell": {
+          "type": "string",
+          "description": "Native shell program (name on PATH or absolute path) launched for terminal sessions. On Windows this picks between the candidate shells (e.g. `pwsh.exe` vs `powershell.exe`); on macOS/Linux it wins over the `SHELL` environment variable."
+        },
+        "backend": {
+          "$ref": "#/definitions/TerminalBackend",
+          "description": "Which world the default terminal lives in: the host's own shell, or a Linux shell inside a WSL distribution."
+        },
+        "distro": {
+          "type": ["string", "null"],
+          "description": "WSL distribution launched when `backend` is `wsl`. Null uses the distribution WSL itself marks as default."
+        },
+        "hiddenDistros": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "WSL distribution names omitted from the shell picker. Replaces the shipped TerminalDefaults list rather than merging with it."
+        },
+        "rememberLastShell": {
+          "type": "boolean",
+          "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        }
+      }
+    },
+    "WslDistro": {
+      "title": "WslDistro",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "running", "version", "default"],
+      "description": "One installed WSL distribution, parsed from `wsl.exe --list --verbose`.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Distribution name as WSL reports it (e.g. `Ubuntu-24.04`)."
+        },
+        "running": {
+          "type": "boolean",
+          "description": "Whether the distribution is currently running."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "WSL version the distribution runs under (1 or 2)."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether WSL treats this distribution as its default."
+        }
+      }
+    },
+    "WslDistroList": {
+      "title": "WslDistroList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["isWindows", "distros"],
+      "description": "Result of probing WSL availability on the host that owns a worktree — the desktop machine for a local project, the remote daemon's machine for an SSH one. `distros` is empty on non-Windows hosts and on Windows installs without WSL.",
+      "properties": {
+        "isWindows": {
+          "type": "boolean",
+          "description": "Whether the host that answered the probe runs Windows, the only platform where WSL distributions can exist."
+        },
+        "distros": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/WslDistro" },
+          "description": "Installed WSL distributions, before any user-configured hiding."
         }
       }
     },
@@ -2255,6 +2368,17 @@
         "userRenamed": {
           "type": "boolean",
           "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) and agent session-name renames are ignored while this is true. Always false for non-terminal tabs."
+        },
+        "shell": {
+          "description": "Shell profile this terminal tab was opened with, so a session respawned after a daemon restart returns to the same shell instead of the current default. Optional rather than nullable: absent on every tab created before shell selection existed, and on non-terminal tabs.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ShellProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "orderIndex": {
           "type": "integer"

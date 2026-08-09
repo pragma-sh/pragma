@@ -39,6 +39,40 @@ export interface UsageLimitsUnavailable {
 /** Result returned by a usage-limit provider. Unexpected failures should throw. */
 export type UsageLimitsResult = UsageLimitsReady | UsageLimitsUnavailable;
 
+/**
+ * Exit status a provider's shell wrapper uses to report that the agent CLI is
+ * not on PATH, distinguishing "not installed" from a genuine command failure.
+ */
+export const CLI_MISSING_STATUS = 20;
+
+/** Outcome of one provider CLI invocation. */
+export type ProviderCommandOutcome =
+  | { kind: "missing" }
+  /** Non-zero exit. `stderr` is trimmed and may be empty. */
+  | { kind: "failed"; stderr: string }
+  | { kind: "ok"; stdout: string };
+
+/**
+ * Runs a single provider command in the active project and classifies its exit
+ * status. Callers map `missing`/`failed` onto their own messages, since the
+ * wording and the reasons worth special-casing differ per agent.
+ */
+export async function runProviderCommand<TConfig>(
+  ctx: PluginContext<TConfig>,
+  command: string,
+  missingStatus: number = CLI_MISSING_STATUS,
+): Promise<ProviderCommandOutcome> {
+  const [result] = await ctx.sdk.exec.run({
+    cwd: ctx.project?.path ?? "/tmp",
+    commands: [command],
+  });
+  if (result?.status === missingStatus) return { kind: "missing" };
+  if (!result || result.status !== 0) {
+    return { kind: "failed", stderr: result?.stderr.trim() ?? "" };
+  }
+  return { kind: "ok", stdout: result.stdout };
+}
+
 /** A plugin-owned usage source rendered by Pragma's shared usage-limits UI. */
 export interface UsageLimitProviderDefinition<TConfig = unknown> {
   id: string;

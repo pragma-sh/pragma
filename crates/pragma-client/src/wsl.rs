@@ -40,23 +40,14 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::CONSTANTS;
+use pragma_constants::{WslDistro, CONSTANTS};
 use thiserror::Error;
 
 use crate::bridge;
 
-/// One installed WSL distribution.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WslDistro {
-    /// Distribution name, as `wsl.exe -d` expects it.
-    pub name: String,
-    /// Whether the distribution is currently running.
-    pub running: bool,
-    /// WSL major version (1 or 2).
-    pub version: u8,
-    /// Whether this is the user's default distribution.
-    pub default: bool,
-}
+/// Enumerating distributions is a platform seam, shared with `pragma-server` so
+/// a remote host can answer the same question about itself.
+pub use pragma_platform::wsl::list_distros;
 
 /// Errors raised while enumerating distributions or running the bridge.
 #[derive(Debug, Error)]
@@ -64,6 +55,9 @@ pub enum WslError {
     /// Local I/O failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// The distribution probe failed — no `wsl.exe`, or `wsl.exe` errored.
+    #[error(transparent)]
+    Probe(#[from] pragma_platform::wsl::WslError),
     /// `wsl.exe` is absent, i.e. WSL is not installed.
     #[error("WSL is not available on this machine: {0}")]
     Unavailable(String),
@@ -141,32 +135,9 @@ pub fn socket_path_for(state_dir: &std::path::Path, distro: &str) -> PathBuf {
     bridge::bridge_socket_path(state_dir, &format!("wsl-{sanitized}"))
 }
 
-/// Lists the installed WSL distributions.
-pub fn list_distros() -> Result<Vec<WslDistro>, WslError> {
-    let launcher = &CONSTANTS.platform.wsl.launcher;
-    let args: Vec<&str> = CONSTANTS
-        .platform
-        .wsl
-        .list_args
-        .iter()
-        .map(String::as_str)
-        .collect();
-    let output = pragma_platform::process::command(launcher)
-        .args(&args)
-        .output()
-        .map_err(|error| WslError::Unavailable(error.to_string()))?;
-    if !output.status.success() {
-        return Err(WslError::Failed {
-            status: output.status.to_string(),
-            message: decode_utf16le(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(parse_distros(&decode_utf16le(&output.stdout)))
-}
-
 /// Resolves the distribution a bridge should use.
 pub fn resolve_distro(requested: Option<&str>) -> Result<WslDistro, WslError> {
-    let distros = list_distros()?;
+    let distros = list_distros()?.distros;
     match requested {
         Some(name) => distros
             .into_iter()
@@ -311,105 +282,8 @@ async fn bootstrap(distro: &str, command: &str) -> Result<(), WslError> {
     })
 }
 
-/// Decodes `wsl.exe` output, which is UTF-16LE rather than the UTF-8 every
-/// other tool Pragma shells out to produces.
-///
-/// Falls back to a lossy UTF-8 read when the byte count is odd, which is what a
-/// non-UTF-16 error message from a failed launch looks like.
-fn decode_utf16le(bytes: &[u8]) -> String {
-    if !bytes.len().is_multiple_of(2) {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect();
-    String::from_utf16_lossy(&units)
-}
-
-/// Parses the table `wsl --list --verbose` prints.
-///
-/// The header row is skipped, and a leading `*` marks the default
-/// distribution. Rows that do not carry all three columns are dropped rather
-/// than partially filled, so a distribution is never reported with a wrong
-/// version.
-fn parse_distros(output: &str) -> Vec<WslDistro> {
-    output
-        .lines()
-        .map(|line| line.trim_start_matches('\u{feff}').trim_end())
-        .filter(|line| !line.trim().is_empty())
-        .skip(1)
-        .filter_map(|line| {
-            let default = line.trim_start().starts_with('*');
-            let rest = line.trim_start().trim_start_matches('*').trim();
-            let mut fields = rest.split_whitespace();
-            let name = fields.next()?.to_string();
-            let state = fields.next()?;
-            let version = fields.next()?.parse().ok()?;
-            Some(WslDistro {
-                name,
-                running: state.eq_ignore_ascii_case("Running"),
-                version,
-                default,
-            })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{decode_utf16le, parse_distros, WslDistro};
-
-    fn utf16le(text: &str) -> Vec<u8> {
-        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
-    }
-
-    #[test]
-    fn wsl_output_is_decoded_from_utf16() {
-        assert_eq!(decode_utf16le(&utf16le("Ubuntu")), "Ubuntu");
-    }
-
-    /// A failed launch can print a plain byte string rather than UTF-16. That
-    /// must still be readable, because it is the message the user is shown.
-    #[test]
-    fn an_odd_length_response_is_read_as_utf8() {
-        assert_eq!(decode_utf16le(b"wsl not found"), "wsl not found");
-    }
-
-    #[test]
-    fn distributions_are_parsed_with_their_default_marked() {
-        let output = "  NAME      STATE           VERSION\n\
-                      * Ubuntu    Running         2\n\
-                        Debian    Stopped         2\n";
-        assert_eq!(
-            parse_distros(output),
-            vec![
-                WslDistro {
-                    name: "Ubuntu".to_string(),
-                    running: true,
-                    version: 2,
-                    default: true,
-                },
-                WslDistro {
-                    name: "Debian".to_string(),
-                    running: false,
-                    version: 1 + 1,
-                    default: false,
-                },
-            ]
-        );
-    }
-
-    /// `wsl.exe` emits a UTF-16 byte-order mark; leaving it attached would make
-    /// the first distribution's name fail to match the one the user configured.
-    #[test]
-    fn a_byte_order_mark_does_not_contaminate_the_first_row() {
-        let output = "\u{feff}  NAME    STATE     VERSION\n* Ubuntu  Running   2\n";
-        let parsed = parse_distros(output);
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].name, "Ubuntu");
-    }
-
     /// The bootstrap must pin the channel and clear `XDG_RUNTIME_DIR`, or the
     /// server binds a socket the relay then cannot find.
     #[test]
@@ -444,19 +318,5 @@ mod tests {
             super::socket_path_for(dir, "Ubuntu"),
             super::socket_path_for(dir, "Debian")
         );
-    }
-
-    #[test]
-    fn a_machine_with_no_distributions_parses_to_nothing() {
-        assert!(parse_distros("  NAME  STATE  VERSION\n").is_empty());
-    }
-
-    /// A row missing its version column must be dropped: defaulting the version
-    /// would report a WSL1 distribution as WSL2 (or the reverse), and the two
-    /// differ in exactly the networking behaviour this bridge works around.
-    #[test]
-    fn an_incomplete_row_is_dropped() {
-        let output = "  NAME    STATE     VERSION\n* Ubuntu  Running\n";
-        assert!(parse_distros(output).is_empty());
     }
 }

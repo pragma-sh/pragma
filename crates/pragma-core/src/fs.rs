@@ -8,11 +8,10 @@
 //! whichever host owns the socket — local for local projects, the remote box for
 //! SSH-bridged projects.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -560,47 +559,6 @@ fn join_rel(prefix: &str, name: &str) -> String {
     }
 }
 
-/// Returns the subset of `rel_paths` that git would ignore, in one batched
-/// `git check-ignore` call. Best-effort: any failure yields an empty set so the
-/// tree still renders (it just won't hide ignored files).
-fn gitignored(root: &Path, rel_paths: &[String]) -> HashSet<String> {
-    if rel_paths.is_empty() {
-        return HashSet::new();
-    }
-    let Ok(mut child) = process_env::command("git")
-        .args([
-            "-C",
-            &root.to_string_lossy(),
-            "check-ignore",
-            "--stdin",
-            "-z",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return HashSet::new();
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let mut buffer = Vec::new();
-        for path in rel_paths {
-            buffer.extend_from_slice(path.as_bytes());
-            buffer.push(0);
-        }
-        let _ = stdin.write_all(&buffer);
-    }
-    let Ok(output) = child.wait_with_output() else {
-        return HashSet::new();
-    };
-    output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|slice| !slice.is_empty())
-        .map(|slice| String::from_utf8_lossy(slice).into_owned())
-        .collect()
-}
-
 /// Lists the immediate entries of a worktree-relative directory (`""` = root),
 /// hiding only `.git`, sorted directories-first then by name.
 fn list_dir(root: &str, path: &str) -> CoreResult<Vec<DirEntry>> {
@@ -841,9 +799,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{
-        gitignored, palette_search, resolve_in_worktree, PaletteSearchRoot, MAX_READ_BYTES,
-    };
+    use super::{palette_search, resolve_in_worktree, PaletteSearchRoot, MAX_READ_BYTES};
 
     fn git_init(path: &std::path::Path) {
         Command::new("git")
@@ -910,9 +866,6 @@ mod tests {
         assert!(names.contains(&"kept.txt"));
         assert!(names.contains(&"ignored.txt"));
         assert!(!names.contains(&".git"));
-        // gitignored is exercised directly too.
-        let ignored = gitignored(dir.path(), &["ignored.txt".to_string()]);
-        assert!(ignored.contains("ignored.txt"));
     }
 
     #[test]

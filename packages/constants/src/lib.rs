@@ -10,7 +10,11 @@ use std::sync::LazyLock;
 mod generated {
     // typify-generated code is not held to our hand-written lint standards.
     #![allow(clippy::all, clippy::pedantic)]
-    typify::import_types!("schema.json");
+    // `PartialEq` is added for every generated type because these are value
+    // objects that both languages compare: a shell profile, a tab, a worktree
+    // status. Without it each comparison has to be spelled out field by field,
+    // which drifts the moment the schema gains a field.
+    typify::import_types!(schema = "schema.json", derives = [PartialEq]);
 }
 
 pub use generated::{
@@ -32,9 +36,10 @@ pub use generated::{
     Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
     RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
     RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptRunStatus,
-    Scripts, SettingsScope, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical,
-    Tab, TabKind, TerminalBackend, Tunnel, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl,
+    Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
+    SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel,
+    WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit,
+    WorktreeCommitList, WorktreeStatus, Wsl, WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.
