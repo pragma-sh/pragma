@@ -57,3 +57,7 @@ bun run --filter @pragma/scratchpad build
 bun run --filter @pragma/scratchpad typecheck
 bun run --filter @pragma/scratchpad test
 ```
+
+Root `turbo` runs this package's `build` before `test`/`typecheck` (same-package
+`dependsOn: ["build"]`). Do not reintroduce a `pretest` rebuild — concurrent
+turbo `build` + `pretest` races bunup on `dist/` (ENOENT on `primitives.cjs`).
