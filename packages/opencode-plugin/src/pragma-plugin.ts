@@ -1,11 +1,14 @@
 import {
   defineAgent,
   definePlugin,
+  defineUsageLimitProvider,
   type AgentModelEntry,
   type PluginContext,
   type PluginDefinition,
 } from "@pragma/plugin/catalog";
 import { createTuiWatcher } from "@pragma/watcher-kit";
+
+import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
 
@@ -20,6 +23,16 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
   name: "OpenCode",
   description: "Launch OpenCode from Pragma.",
   watchers: [createTuiWatcher({ agent: "opencode", handleDecisions: true })],
+  usageLimits: [
+    defineUsageLimitProvider({
+      id: "opencode-go",
+      title: "OpenCode Go",
+      dashboardUrl: "https://opencode.ai/auth",
+      iconPath: "assets/opencode.svg",
+      primaryLimitId: "rolling",
+      load: loadOpenCodeGoUsageLimits,
+    }),
+  ],
   agents: [
     defineAgent({
       id: "opencode",
@@ -27,7 +40,6 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/opencode.svg",
       launch: { command: ["opencode"] },
-      excludeFeatures: ["usageLimits"],
       prefillDelayMs: 6000,
       models: async (ctx) =>
         parseOpenCodeModels(

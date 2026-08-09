@@ -1225,6 +1225,7 @@ pub fn run() {
             fs::read_file,
             fs::read_file_chunk,
             fs::write_file,
+            fs::write_file_bytes,
             fs::rename_file,
             fs::delete_file,
             fs::palette_search,

@@ -734,8 +734,8 @@ export function deleteKanbanCard(id: string): Promise<void> {
 
 /**
  * Lists the immediate entries of a worktree-relative directory (`""` = root),
- * sorted directories-first then by name. Hidden `.git` and gitignored entries
- * are filtered out by the backend.
+ * sorted directories-first then by name. Only the internal `.git` directory is
+ * hidden; gitignored entries remain available for file management.
  */
 export function listDirEntries(worktreeId: string, path: string): Promise<DirEntry[]> {
   return invoke<DirEntry[]>("list_dir_entries", { worktreeId, path });
@@ -780,6 +780,11 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
   return invoke("write_file", { worktreeId, path, contents });
 }
 
+/** Writes one base64-encoded file dropped into a worktree directory. */
+export function writeFileBytes(worktreeId: string, path: string, contents: string): Promise<void> {
+  return invoke("write_file_bytes", { worktreeId, path, contents });
+}
+
 /** Sends user feedback from a scratchpad to one attached agent tab. */
 export function scratchpadPromptAgent(
   worktreeId: string,
@@ -812,8 +817,7 @@ export function renameFile(worktreeId: string, fromPath: string, toPath: string)
 }
 
 /**
- * Deletes a worktree-relative file or empty directory. The backend refuses to
- * recurse into non-empty directories.
+ * Deletes a worktree-relative file or directory tree.
  */
 export function deleteFile(worktreeId: string, path: string): Promise<void> {
   return invoke("delete_file", { worktreeId, path });
