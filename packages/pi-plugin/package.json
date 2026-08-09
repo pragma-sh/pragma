@@ -11,10 +11,18 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./pragma-plugin": "./dist/pragma-plugin.mjs"
+    "./extension-factory": {
+      "types": "./src/extension-factory.ts",
+      "default": "./dist/extension-factory.mjs"
+    },
+    "./pragma-plugin": "./dist/pragma-plugin.mjs",
+    "./pragma-plugin-factory": {
+      "types": "./src/pragma-plugin-factory.ts",
+      "default": "./dist/pragma-plugin-factory.mjs"
+    }
   },
   "scripts": {
-    "build": "bun build src/index.ts src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "build": "bun build src/index.ts src/extension-factory.ts src/pragma-plugin.ts src/pragma-plugin-factory.ts --outdir dist --format esm --target node --packages bundle && for file in dist/*.js; do mv \"$file\" \"${file%.js}.mjs\"; done",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."

@@ -123,6 +123,7 @@ than no guide.
 │   ├── cursor-plugin/           # Cursor Agent CLI integration → see packages/cursor-plugin/AGENTS.md
 │   ├── codex-plugin/            # OpenAI Codex CLI integration → see packages/codex-plugin/AGENTS.md
 │   ├── pi-plugin/               # Pi CLI integration → see packages/pi-plugin/AGENTS.md
+│   ├── prime-agent-plugin/      # Prime Agent integration → see packages/prime-agent-plugin/AGENTS.md
 │   ├── grok-plugin/             # xAI Grok Build CLI integration → see packages/grok-plugin/AGENTS.md
 │   ├── kimi-plugin/             # Kimi Code CLI integration → see packages/kimi-plugin/AGENTS.md
 │   ├── junie-plugin/            # JetBrains Junie CLI integration → see packages/junie-plugin/AGENTS.md
