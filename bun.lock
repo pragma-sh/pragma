@@ -455,6 +455,18 @@
         "vitest": "^4.1.8",
       },
     },
+    "packages/prime-agent-plugin": {
+      "name": "@pragma/prime-agent-plugin",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pragma/pi-plugin": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.12.3",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/scratchpad": {
       "name": "@pragma/scratchpad",
       "version": "0.1.0",
@@ -1523,6 +1535,8 @@
     "@pragma/plugin": ["@pragma/plugin@workspace:packages/plugin"],
 
     "@pragma/plugins-host": ["@pragma/plugins-host@workspace:packages/plugins-host"],
+
+    "@pragma/prime-agent-plugin": ["@pragma/prime-agent-plugin@workspace:packages/prime-agent-plugin"],
 
     "@pragma/scratchpad": ["@pragma/scratchpad@workspace:packages/scratchpad"],
 
