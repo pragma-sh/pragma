@@ -28,6 +28,15 @@ packages/plugin/
 - `definePlugin` is the only place the baked `PLUGIN_API_VERSION` is stamped. Server-side
   `onInstall` / `onPragmaLoad` execution belongs to `@pragma/plugins-host`.
 - Runtime shims must fail loudly when `globalThis.__PRAGMA__` is absent.
+- **A plugin's `pragma.main` bundle must be browser-safe too.** The desktop webview
+  imports it through a blob URL to list launchable agents, so a **static** `node:` import
+  never resolves and a module-scope `process.*` read throws — either drops the plugin to
+  `status: "failed"` and its agents vanish from the launcher, while the Bun sidecars keep
+  loading the same bundle and reporting a healthy catalog. That split brain is what hid
+  OpenCode from the launcher. Keep node-only work inside the function that needs it
+  (`globalThis.process?.…`, `await import("node:…")`), or off the entry's import graph
+  entirely. `stage-bundled-plugins.sh` fails the build on a static `node:` import in a
+  bundled plugin's entry.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
   `react/jsx-runtime` to `@pragma/plugin` subpaths.
 - Add exported API with JSDoc and tests. Breaking API changes require a major version bump;

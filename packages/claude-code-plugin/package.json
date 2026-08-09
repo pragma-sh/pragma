@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Claude Code plugin that reports agent status to Pragma automatically via shell hooks.",
+  "license": "AGPL-3.0-only",
   "files": [
     ".claude-plugin",
     "assets",

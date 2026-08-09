@@ -229,6 +229,12 @@ Build agent-side TypeScript and Pragma-side bundle with Bunup. Keep icons and he
 plugin package. **The Pragma-side `dist/pragma-plugin.mjs` must stay browser-safe:** the
 desktop webview loads it through a blob-URL `import()`, so a bare `node:fs` / `node:os`
 / `node:path` import fails the whole plugin with "Importing a module script failed".
+A module-scope `process.platform` / `process.env` read fails the same way. Symptom is
+one-sided and easy to misread: the Bun sidecars load the same bundle fine, so
+`/v1/agents/catalog` still lists the agent while it is **missing from the launcher** and
+Settings → Plugins shows the entry as failed. Keep node-only work lazy
+(`globalThis.process?.…`, `await import("node:…")` inside the function). For bundled
+plugins `stage-bundled-plugins.sh` enforces this at build time.
 Host I/O (caches, credential probes, model lists) goes through `ctx.sdk.exec.run` so it
 also hits the correct machine for a remote project. Register development bundle through
 project/global `.pragma/config.json` `plugins[]`. Install runtime reporting through

@@ -8,6 +8,7 @@ import {
 } from "@pragma/plugin/catalog";
 import { createTuiWatcher } from "@pragma/watcher-kit";
 
+import { pluginCwd } from "./cwd";
 import { loadOpenCodeGoUsageLimits } from "./usage-limits";
 
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
@@ -61,12 +62,8 @@ export const opencodeAgentPlugin: PluginDefinition = definePlugin({
 export default opencodeAgentPlugin;
 
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
-  const [result] = await ctx.sdk.exec.run({ cwd: projectPath(ctx), commands: [command] });
+  const [result] = await ctx.sdk.exec.run({ cwd: pluginCwd(ctx), commands: [command] });
   return result?.stdout ?? "";
-}
-
-function projectPath(ctx: PluginContext): string {
-  return ctx.project?.path ?? "/tmp";
 }
 
 /** Parses OpenCode's `models` output (JSON or table form) into model entries. */

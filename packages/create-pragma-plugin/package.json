@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Scaffolder CLI for pure TypeScript Pragma plugins.",
+  "license": "AGPL-3.0-only",
   "bin": {
     "create-pragma-plugin": "./dist/cli.js"
   },

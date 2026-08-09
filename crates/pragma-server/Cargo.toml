@@ -2,6 +2,7 @@
 name = "pragma-server"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Persistent host-side server for Pragma terminal sessions and workspace state."
 
