@@ -8,8 +8,10 @@ export interface WorktreeNode {
 
 /**
  * Build a nested tree from flat worktree rows. Roots are worktrees with no
- * (resolvable) parent; children hang off `parentId`. Sorted main-first, then
- * by label. Kept in lockstep with `apps/pragma/src/lib/worktree-tree.ts`.
+ * (resolvable) parent; children hang off `parentId`. The main worktree is never
+ * a parent — its children are promoted to roots and main itself sorts to the
+ * very top as a plain row. Remaining siblings sort by label.
+ * Kept in lockstep with `apps/pragma/src/lib/worktree-tree.ts`.
  */
 export function buildWorktreeTree(worktrees: Worktree[]): WorktreeNode[] {
   const nodes = new Map<string, WorktreeNode>();
@@ -27,7 +29,8 @@ function linkRoots(nodes: Map<string, WorktreeNode>): WorktreeNode[] {
   const roots: WorktreeNode[] = [];
   for (const node of nodes.values()) {
     const parent = node.worktree.parentId ? nodes.get(node.worktree.parentId) : undefined;
-    if (parent) {
+    // Main is a flat entry, never a parent, so its children become roots.
+    if (parent && !parent.worktree.isMain) {
       parent.children.push(node);
     } else {
       roots.push(node);

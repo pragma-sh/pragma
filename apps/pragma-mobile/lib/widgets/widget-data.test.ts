@@ -210,14 +210,38 @@ describe("buildWidgetSnapshot", () => {
       projects: [project("p1", "pragma")],
       worktrees: [
         worktree("w1", "p1", { isMain: true, branch: "main" }),
-        worktree("w2", "p1", { parentId: "w1", title: "child" }),
+        worktree("w2", "p1", { parentId: "w1", title: "parent" }),
+        worktree("w3", "p1", { parentId: "w2", title: "child" }),
       ],
-      agentTabs: { w2: [tab("t1", "w2", "attention")] },
+      agentTabs: { w3: [tab("t1", "w3", "attention")] },
     });
 
     expect(snapshot.projects[0]?.worktrees).toEqual([
-      { id: "w1", name: "main", color: "red", depth: 0, agents: 0, url: "pragma:///worktree/w1" },
-      { id: "w2", name: "child", color: "red", depth: 1, agents: 1, url: "pragma:///worktree/w2" },
+      { id: "w2", name: "parent", color: "red", depth: 0, agents: 0, url: "pragma:///worktree/w2" },
+      { id: "w3", name: "child", color: "red", depth: 1, agents: 1, url: "pragma:///worktree/w3" },
+    ]);
+  });
+
+  it("lists main as a flat row, never a parent of its worktrees", () => {
+    const snapshot = snapshotOf({
+      projects: [project("p1", "pragma")],
+      worktrees: [
+        worktree("w1", "p1", { isMain: true, branch: "main" }),
+        worktree("w2", "p1", { parentId: "w1", title: "child" }),
+      ],
+      agentTabs: { w1: [tab("t0", "w1", "running")], w2: [tab("t1", "w2", "attention")] },
+    });
+
+    expect(snapshot.projects[0]?.worktrees).toEqual([
+      {
+        id: "w1",
+        name: "main",
+        color: "orange",
+        depth: 0,
+        agents: 1,
+        url: "pragma:///worktree/w1",
+      },
+      { id: "w2", name: "child", color: "red", depth: 0, agents: 1, url: "pragma:///worktree/w2" },
     ]);
   });
 
