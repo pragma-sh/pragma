@@ -318,10 +318,12 @@ Server-owned state holds child + status (`idle | starting | active(url) | error(
 `tunnel_start` / `tunnel_stop` / `tunnel_status` are thin RPC adapters (+ typed wrappers
 in `src/lib/tauri.ts`), so desktop exit does not kill mobile forwarding.
 
-The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns mobile
-pairing; the project sidebar has no phone shortcut. `PairDeviceSettings` toggles the
-tunnel and renders a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers
-live in `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
+The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns Pragma Go
+pairing; the project sidebar has no phone shortcut. `PragmaGoSettings` toggles the tunnel
+and renders a `PairingPayload` QR (via `uqr`, offline). Its separate browser-pairing card
+persists `gateway.webEnabled` in global `.pragma/config.json`; the gateway serves `/web`
+only while this explicit setting is true. Encode/validate helpers live in
+`src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 "Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
 `gateway-devices.json`, which the gateway updates from authenticated mobile identity
@@ -449,6 +451,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`tauri:dev` also runs `web:stage` before Tauri starts so the gateway receives the latest
+Pragma Go browser bundle in its copied debug resources. Staging after startup is too late
+because the gateway loads that manifest once.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using

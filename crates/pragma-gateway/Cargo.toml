@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 base64 = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
+flate2 = "1"
 pragma-client = { path = "../pragma-client", default-features = false }
 pragma-constants = { path = "../../packages/constants" }
 pragma-platform = { version = "0.0.0", path = "../pragma-platform" }

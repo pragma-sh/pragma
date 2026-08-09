@@ -15,6 +15,7 @@ use crate::error::{GatewayError, GatewayResult};
 use crate::http::response::error_response;
 use crate::push::{DesktopPresence, PushWorker};
 use crate::routes;
+use crate::web::WebBundle;
 
 use self::router::gateway_router;
 
@@ -38,6 +39,19 @@ pub struct AppState {
     pub push: Option<PushWorker>,
     /// Last reported desktop window focus, which gates phone pushes.
     pub presence: DesktopPresence,
+    /// The staged Pragma Go web bundle, absent when none is installed.
+    pub web: Option<Arc<WebBundle>>,
+}
+
+/// Routes served without a bearer token.
+///
+/// `health` is the liveness probe a client calls before it has credentials.
+/// The web routes serve the browser client's own HTML and JavaScript, which a
+/// browser cannot authenticate: a `<script src>` carries no `authorization`
+/// header. Both are public code and public status; every route that touches a
+/// project stays behind the token.
+fn is_public(route_id: &str) -> bool {
+    matches!(route_id, "health" | "web.asset")
 }
 
 /// Runs the blocking `tiny_http` accept loop.
@@ -101,13 +115,13 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
         .match_route(&method, &url)
         .ok_or(GatewayError::NotFound)?;
 
-    if matched.id != "health" && !authorized(&request, &state.token) {
+    if !is_public(matched.id) && !authorized(&request, &state.token) {
         request.respond(with_cors(
             error_response(&GatewayError::Unauthorized).boxed(),
         ))?;
         return Ok(());
     }
-    if matched.id != "health" {
+    if !is_public(matched.id) {
         if let Ok(devices) = state.devices.lock() {
             if let Err(error) = devices.record(&request) {
                 eprintln!("gateway device registry error: {error}");
@@ -184,6 +198,7 @@ fn dispatch(request: Request, state: &AppState) -> GatewayResult<()> {
             respond_json(req, result)
         }
         "agents.seen" => respond_json(request, routes::agents::mark_seen(state, &matched)),
+        "web.asset" => routes::web::get(state, &matched, request),
         "subscriptions.events" => routes::subscriptions::events(request, state, &matched),
         id if id.starts_with("push.") => routes::push::dispatch(request, state, id),
         _ => Ok(request.respond(with_cors(error_response(&GatewayError::NotFound).boxed()))?),

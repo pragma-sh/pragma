@@ -25,7 +25,7 @@ import {
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
-import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
+import { PragmaGoSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
@@ -105,6 +105,10 @@ interface PragmaConfig {
     urlPattern?: string;
     [key: string]: unknown;
   };
+  gateway?: {
+    webEnabled?: boolean;
+    [key: string]: unknown;
+  };
   agentStatus?: AgentStatusSettings;
   terminal?: TerminalSettings;
   [key: string]: unknown;
@@ -124,9 +128,18 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   const config = value as PragmaConfig;
   validatePlugins(config.plugins);
   validateTunnel(config.tunnel);
+  validateGateway(config.gateway);
   validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
   return config;
+}
+
+function validateGateway(gateway: PragmaConfig["gateway"]): void {
+  if (gateway === undefined) return;
+  if (!gateway || typeof gateway !== "object" || Array.isArray(gateway)) {
+    throw new Error("gateway must be an object");
+  }
+  validateOptionalField(gateway.webEnabled, "gateway.webEnabled", "boolean");
 }
 
 function validateTerminal(terminal: PragmaConfig["terminal"]): void {
@@ -408,7 +421,7 @@ function GlobalSettingsNavigation({
         icon={<Smartphone />}
         onClick={() => setSection("mobile")}
       >
-        Mobile & Gateway
+        Pragma Go
       </SettingsNavItem>
       <SettingsNavItem
         active={section === "automations"}
@@ -889,12 +902,15 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
 
   return (
     <div className="space-y-5">
-      <SettingsCard
-        title="Pair mobile device"
-        description="Expose this host through configured tunnel and scan from Pragma Mobile."
-      >
-        <PairDeviceSettings />
-      </SettingsCard>
+      <PragmaGoSettings
+        webEnabled={config.gateway?.webEnabled ?? constants.gateway.web.enabled}
+        onWebEnabledChange={(webEnabled) => {
+          void persist((current) => ({
+            ...current,
+            gateway: { ...current.gateway, webEnabled },
+          })).catch(() => undefined);
+        }}
+      />
       <GatewayDevices />
       <SettingsCard title="Tunnel" description="Advanced command used to expose local gateway.">
         <label className="text-sm font-medium" htmlFor="tunnel-command">

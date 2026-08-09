@@ -8,6 +8,7 @@ pub mod scratchpads;
 pub mod sessions;
 pub mod subscriptions;
 pub mod theme;
+pub mod web;
 
 use crate::error::{GatewayError, GatewayResult};
 use crate::http::router::RouteMatch;

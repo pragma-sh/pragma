@@ -21,6 +21,12 @@
       "batchSize": 100,
       "presenceTtlMs": 90000,
       "tokenPrefixes": ["ExponentPushToken[", "ExpoPushToken["]
+    },
+    "web": {
+      "enabled": false,
+      "basePath": "/web",
+      "manifestFile": "manifest.json",
+      "resourceDir": "web"
     }
   },
   "platform": {

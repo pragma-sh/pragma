@@ -31,7 +31,7 @@
       }
     },
     {
-      "files": ["apps/pragma-mobile/**"],
+      "files": ["apps/pragma-go/**"],
       "rules": {
         "react/style-prop-object": "off",
         "import/namespace": "off",
