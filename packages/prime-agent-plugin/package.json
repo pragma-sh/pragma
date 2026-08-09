@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Prime Agent extension and Pragma launcher built on the shared Pi integration.",
+  "license": "AGPL-3.0-only",
   "files": [
     "assets",
     "dist",

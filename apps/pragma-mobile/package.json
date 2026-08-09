@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Pragma Mobile — Expo native client for Pragma worktrees",
+  "license": "AGPL-3.0-only",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Typed TypeScript wrapper SDK for the Pragma CLI.",
+  "license": "AGPL-3.0-only",
   "files": [
     "dist"
   ],

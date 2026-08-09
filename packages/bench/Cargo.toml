@@ -2,6 +2,7 @@
 name = "pragma-bench"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Terminal lag benchmark for Pragma: drives a real dev instance and measures keystroke and scroll render latency."
 
