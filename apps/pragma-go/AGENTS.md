@@ -147,7 +147,7 @@ app/
   scratchpad/[scratchpadId].tsx   # read-only scratchpad web view + touch comments
   (tabs)/inbox/                   # Stack: swipeable event cards
 components/
-  AppShell(.web)                  # web-only contextual wide sidebar around root screens
+  AppShell.web                    # web-only contextual wide sidebar around root screens
   ui/*                            # React Native Reusables primitives
   scratchpad/                     # ScratchpadWebView, ScratchpadLoading, CommentComposerSheet, AttachAgentDrawer
   chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill

@@ -7,7 +7,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ConnectionProvider, useConnection } from "@/lib/connection-context";
-import { AppShell } from "@/components/AppShell";
 import { DataProvider } from "@/lib/data/data-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { usePushNotifications } from "@/lib/use-push-notifications";
@@ -68,20 +67,18 @@ function ConnectionGate() {
 
   return (
     <>
-      <AppShell>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.foreground,
-            headerTitleStyle: { color: colors.foreground },
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
-          <Stack.Screen name="scratchpad/[scratchpadId]" options={{ headerShown: true }} />
-        </Stack>
-      </AppShell>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.foreground,
+          headerTitleStyle: { color: colors.foreground },
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
+        <Stack.Screen name="scratchpad/[scratchpadId]" options={{ headerShown: true }} />
+      </Stack>
       <PortalHost />
     </>
   );

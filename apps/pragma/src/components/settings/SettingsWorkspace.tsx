@@ -136,17 +136,13 @@ function parsePragmaConfig(contents: string): PragmaConfig {
 
 function validateGateway(gateway: PragmaConfig["gateway"]): void {
   if (gateway === undefined) return;
-  if (!gateway || typeof gateway !== "object" || Array.isArray(gateway)) {
-    throw new Error("gateway must be an object");
-  }
+  validateConfigObject(gateway, "gateway");
   validateOptionalField(gateway.webEnabled, "gateway.webEnabled", "boolean");
 }
 
 function validateTerminal(terminal: PragmaConfig["terminal"]): void {
   if (terminal === undefined) return;
-  if (!terminal || typeof terminal !== "object" || Array.isArray(terminal)) {
-    throw new Error("terminal must be an object");
-  }
+  validateConfigObject(terminal, "terminal");
   validateBackend(terminal.backend);
   validateDistro(terminal.distro);
   validateOptionalField(terminal.shell, "terminal.shell", "string");
@@ -193,12 +189,15 @@ function validatePlugin(plugin: PluginConfig, index: number): void {
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
   if (tunnel === undefined) return;
-  if (!tunnel || typeof tunnel !== "object" || Array.isArray(tunnel)) {
-    throw new Error("tunnel must be an object");
-  }
+  validateConfigObject(tunnel, "tunnel");
   validateOptionalField(tunnel.enabled, "tunnel.enabled", "boolean");
   validateOptionalField(tunnel.command, "tunnel.command", "string");
   validateOptionalField(tunnel.urlPattern, "tunnel.urlPattern", "string");
+}
+
+/** Rejects config sections that are not ordinary objects. */
+function validateConfigObject(value: object | null, name: string): void {
+  if (!value || Array.isArray(value)) throw new Error(`${name} must be an object`);
 }
 
 /**

@@ -1,3 +1,5 @@
+// Expo resolves this browser-only module through platform extensions; fallow cannot trace it.
+// fallow-ignore-file unused-file
 import { usePathname } from "expo-router";
 import type { ReactNode } from "react";
 import { View } from "react-native";

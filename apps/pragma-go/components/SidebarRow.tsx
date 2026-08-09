@@ -1,3 +1,5 @@
+// Expo resolves this browser-only module through platform extensions; fallow cannot trace it.
+// fallow-ignore-file unused-file
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
@@ -33,6 +35,7 @@ interface SidebarRowProps {
  * something that stays in view beside it, so it reads as a persistent selection
  * instead.
  */
+// fallow-ignore-next-line unused-export -- Expo resolves .web imports at runtime.
 export function SidebarRow({
   title,
   icon,

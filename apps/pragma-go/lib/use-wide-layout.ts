@@ -1,3 +1,5 @@
+// Expo resolves this browser-only module through platform extensions; fallow cannot trace it.
+// fallow-ignore-file unused-file
 import { useWindowDimensions } from "react-native";
 
 /**
@@ -14,6 +16,7 @@ const WIDE_LAYOUT_BREAKPOINT = 768;
  * size rather than device class so a resized browser window, a slid-over iPad
  * app, and a phone in landscape all get the layout that actually fits.
  */
+// fallow-ignore-next-line unused-export -- Expo resolves .web imports at runtime.
 export function useWideLayout(): boolean {
   return useWindowDimensions().width >= WIDE_LAYOUT_BREAKPOINT;
 }

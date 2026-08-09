@@ -1,3 +1,5 @@
+// Expo resolves this browser-only module through platform extensions; fallow cannot trace it.
+// fallow-ignore-file unused-file
 import { router, usePathname } from "expo-router";
 import { ScrollView, View } from "react-native";
 
@@ -28,6 +30,7 @@ import type { Project } from "@/lib/types";
 const SIDEBAR_WIDTH = 280;
 
 /** The wide-layout navigation column. */
+// fallow-ignore-next-line unused-export -- Expo resolves .web imports at runtime.
 export function AppSidebar() {
   const projects = useProjects();
   const { items } = useInbox();
