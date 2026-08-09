@@ -58,6 +58,9 @@ bun run --filter @pragma/scratchpad typecheck
 bun run --filter @pragma/scratchpad test
 ```
 
-Root `turbo` runs this package's `build` before `test`/`typecheck` (same-package
+Root `turbo` runs this package's `build` before `test` (same-package
 `dependsOn: ["build"]`). Do not reintroduce a `pretest` rebuild — concurrent
 turbo `build` + `pretest` races bunup on `dist/` (ENOENT on `primitives.cjs`).
+`typecheck` stays on `^build` only so a package like `pragma` that re-runs
+workspace builds inside its own `build` script cannot clobber `dist/*.d.ts`
+while dependents typecheck.
