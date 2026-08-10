@@ -16,6 +16,8 @@ commands on stdin, and emits NDJSON events on stdout:
 - **Events** (stdout): `ready`, `catalog` (the `AgentCatalog` + hash → asset map),
   correlated `usageLimits`, `error`, `log`.
 
+Supervisor stdin is the ownership boundary: EOF must terminate the Bun process so imported plugin timers cannot outlive `pragma-server`.
+
 On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
 resource directory, global `~/.pragma/config.json`, plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust

@@ -20,4 +20,30 @@ describe("readStdinLines", () => {
       Object.defineProperty(process, "stdin", { value: originalStdin, configurable: true });
     }
   });
+
+  it("notifies the sidecar exactly once when supervisor stdin closes", async () => {
+    const stdin = new PassThrough();
+    const originalStdin = process.stdin;
+    Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+    try {
+      let ends = 0;
+      const ended = new Promise<void>((resolve) => {
+        readStdinLines(
+          () => undefined,
+          () => {
+            ends += 1;
+            resolve();
+          },
+        );
+      });
+
+      stdin.end();
+      await ended;
+      stdin.emit("close");
+
+      expect(ends).toBe(1);
+    } finally {
+      Object.defineProperty(process, "stdin", { value: originalStdin, configurable: true });
+    }
+  });
 });
