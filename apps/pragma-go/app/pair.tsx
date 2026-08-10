@@ -1,15 +1,15 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 import { useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { RememberBrowserToggle } from "@/components/RememberBrowserToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { probeConnection, useConnection } from "@/lib/connection-context";
 import { hapticSuccess, hapticWarning } from "@/lib/haptics";
-import { isPersistent, setPersistent } from "@/lib/secret-store";
 import { defaultGatewayUrl } from "@/lib/web-handoff";
 import {
   parsePairingPayload,
@@ -114,43 +114,6 @@ function validateScan(
   if (!payload) return { ok: false, reason: "That QR code isn't a Pragma pairing code." };
   const result = validatePairingPayload(payload);
   return result.ok ? { ok: true, config: result.config, hostName: payload.hostName } : result;
-}
-
-/**
- * Browser-only opt-in to durable token storage.
- *
- * A phone keeps its token in the OS keychain, which is private to the app. A
- * browser has no such place: the token can only live in Web Storage, and on a
- * shared or public machine that should not outlive the tab. So the default is
- * session-scoped and staying signed in is an explicit choice.
- */
-function RememberBrowserToggle() {
-  const [remember, setRemember] = useState(isPersistent);
-  if (Platform.OS !== "web") return null;
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: remember }}
-      className="flex-row items-center gap-3"
-      onPress={() => {
-        const next = !remember;
-        setPersistent(next);
-        setRemember(next);
-      }}
-    >
-      <View
-        className={`h-5 w-5 items-center justify-center rounded border ${
-          remember ? "border-primary bg-primary" : "border-input"
-        }`}
-      >
-        {remember ? <Text className="text-xs text-primary-foreground">✓</Text> : null}
-      </View>
-      <Text className="flex-1 text-sm text-muted-foreground">
-        Stay signed in on this browser. Leave off on a shared computer — the token is then forgotten
-        when you close the tab.
-      </Text>
-    </Pressable>
-  );
 }
 
 function PairingStatus({ busy, error }: { busy: boolean; error: string | null }) {

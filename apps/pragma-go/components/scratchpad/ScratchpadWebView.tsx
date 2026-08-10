@@ -25,7 +25,7 @@ export interface ScratchpadWebViewProps {
   /** A long press is hovering a block — where the comment would land. */
   onPreview: (block: ScratchpadBlock | null) => void;
   /** A rendered component asked to prompt the attached agent. */
-  onPromptAgent: (text: string) => Promise<"sent" | "missing-agent">;
+  onPromptAgent: (text: string) => Promise<"sent" | "missing-agent" | "cancelled">;
   /** A rendered component asked the host to attach an agent tab. */
   onRequestAttachment: () => Promise<boolean>;
   /** The document failed to render, or a component threw. */

@@ -8,9 +8,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, useColorScheme } from "react-native";
 
 import { ScratchpadLoading } from "@/components/scratchpad/ScratchpadLoading";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Text } from "@/components/ui/text";
 import { useHostThemeOverrides } from "@/lib/theme-context";
 
 import type { ScratchpadWebViewProps } from "./ScratchpadWebView";
+
+type PromptAgentMessage = Extract<ScratchpadViewerMessage, { type: "promptAgent" }>;
 
 // Web counterpart of `ScratchpadWebView.tsx`. Same generated document, same
 // message protocol — a sandboxed <iframe> stands in for the native web view.
@@ -33,6 +38,12 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     [scheme, source, themeCss],
   );
   const [ready, setReady] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState<PromptAgentMessage | null>(null);
+  const [sendingPrompt, setSendingPrompt] = useState(false);
+  const pendingPromptRef = useRef<PromptAgentMessage | null>(null);
+  const sendingPromptRef = useRef(false);
+  const promptAgentRef = useRef(props.onPromptAgent);
+  promptAgentRef.current = props.onPromptAgent;
   useEffect(() => setReady(false), [html]);
 
   const send = useCallback((command: ScratchpadViewerCommand): void => {
@@ -47,7 +58,45 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     if (ready) send({ type: "commentMode", active: commentMode });
   }, [commentMode, ready, send]);
 
-  useViewerMessages(frame, props, send, setReady);
+  const requestPromptAgent = useCallback((message: PromptAgentMessage): boolean => {
+    // One modal is enough: an untrusted document must not stack confirmations.
+    if (pendingPromptRef.current) return false;
+    pendingPromptRef.current = message;
+    setPendingPrompt(message);
+    return true;
+  }, []);
+
+  const dismissPrompt = useCallback((): void => {
+    const request = pendingPromptRef.current;
+    if (!request || sendingPromptRef.current) return;
+    pendingPromptRef.current = null;
+    setPendingPrompt(null);
+    send({ type: "response", requestId: request.requestId, value: "cancelled" });
+  }, [send]);
+
+  const sendPrompt = useCallback(async (): Promise<void> => {
+    const request = pendingPromptRef.current;
+    if (!request || sendingPromptRef.current) return;
+    sendingPromptRef.current = true;
+    setSendingPrompt(true);
+    try {
+      const result = await promptAgentRef.current(request.text);
+      send({ type: "response", requestId: request.requestId, value: result });
+    } catch (cause) {
+      send({
+        type: "response",
+        requestId: request.requestId,
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    } finally {
+      pendingPromptRef.current = null;
+      sendingPromptRef.current = false;
+      setPendingPrompt(null);
+      setSendingPrompt(false);
+    }
+  }, [send]);
+
+  useViewerMessages(frame, props, requestPromptAgent, send, setReady);
 
   return (
     <View className="flex-1 bg-background">
@@ -61,7 +110,43 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
         title="Scratchpad"
       />
       {!ready ? <ScratchpadLoading label="Loading scratchpad…" overlay /> : null}
+      <PromptAgentSheet
+        onCancel={dismissPrompt}
+        onSend={() => void sendPrompt()}
+        request={pendingPrompt}
+        sending={sendingPrompt}
+      />
     </View>
+  );
+}
+
+/** Requires reader consent before agent-authored MDX can message an attached agent. */
+function PromptAgentSheet({
+  onCancel,
+  onSend,
+  request,
+  sending,
+}: {
+  onCancel: () => void;
+  onSend: () => void;
+  request: PromptAgentMessage | null;
+  sending: boolean;
+}) {
+  return (
+    <BottomSheet onOpenChange={(open) => !open && onCancel()} open={request !== null}>
+      <Text className="text-lg font-semibold text-foreground">Send message to agent?</Text>
+      <Text className="mt-1 text-sm text-muted-foreground" numberOfLines={6}>
+        {request?.text}
+      </Text>
+      <View className="mt-4 flex-row gap-3">
+        <Button className="flex-1" disabled={sending} onPress={onCancel} variant="secondary">
+          <Text>Cancel</Text>
+        </Button>
+        <Button className="flex-1" disabled={sending} onPress={onSend}>
+          <Text>{sending ? "Sending…" : "Send"}</Text>
+        </Button>
+      </View>
+    </BottomSheet>
   );
 }
 
@@ -87,6 +172,7 @@ function parseViewerMessage(data: unknown): ScratchpadViewerMessage | null {
 function useViewerMessages(
   frame: React.RefObject<HTMLIFrameElement | null>,
   props: ScratchpadWebViewProps,
+  requestPromptAgent: (message: PromptAgentMessage) => boolean,
   send: (command: ScratchpadViewerCommand) => void,
   setReady: (ready: boolean) => void,
 ): void {
@@ -108,9 +194,7 @@ function useViewerMessages(
       preview: (message) => latest.current.onPreview(message.block),
       error: (message) => latest.current.onError(message.message),
       promptAgent: (message) => {
-        void latest.current
-          .onPromptAgent(message.text)
-          .then((result) => respond(message.requestId, result));
+        if (!requestPromptAgent(message)) respond(message.requestId, "cancelled");
       },
       requestAgentAttachment: (message) => {
         void latest.current.onRequestAttachment().then((ok) => respond(message.requestId, ok));
@@ -133,5 +217,5 @@ function useViewerMessages(
 
     globalThis.addEventListener("message", onMessage);
     return () => globalThis.removeEventListener("message", onMessage);
-  }, [frame, send, setReady]);
+  }, [frame, requestPromptAgent, send, setReady]);
 }
