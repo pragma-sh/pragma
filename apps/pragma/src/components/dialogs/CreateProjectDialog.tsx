@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { AnimatePresence } from "motion/react";
+
 import { errorMessage } from "@/lib/errors";
 
 import { Button } from "@/components/ui/button";
@@ -30,10 +32,6 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
   const workspace = useWorkspace();
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
-  if (!isOpen) {
-    return null;
-  }
-
   async function adopt(load: () => Promise<{ id: string } | null>) {
     try {
       setError(null);
@@ -64,62 +62,66 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange }: CreateProjec
   }
 
   return (
-    <ModalShell>
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Add project</h2>
-        <p className="text-sm text-muted-foreground">
-          Open a local checkout, clone a repo, or connect to one over SSH.
-        </p>
-      </div>
-      <Tabs defaultValue="local" className="mt-5">
-        <TabsList className="w-full">
-          <TabsTrigger value="local" className="flex-1">
-            Local
-          </TabsTrigger>
-          <TabsTrigger value="remote" className="flex-1">
-            Remote
-          </TabsTrigger>
-        </TabsList>
+    <AnimatePresence>
+      {isOpen ? (
+        <ModalShell>
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Add project</h2>
+            <p className="text-sm text-muted-foreground">
+              Open a local checkout, clone a repo, or connect to one over SSH.
+            </p>
+          </div>
+          <Tabs defaultValue="local" className="mt-5">
+            <TabsList className="w-full">
+              <TabsTrigger value="local" className="flex-1">
+                Local
+              </TabsTrigger>
+              <TabsTrigger value="remote" className="flex-1">
+                Remote
+              </TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="local" className="mt-4 space-y-4">
-          <Button className="w-full" onClick={() => void openExisting()}>
-            Open existing git checkout
-          </Button>
-          <div className="space-y-2">
-            <Label htmlFor="remote-url">Remote URL</Label>
-            <Input
-              id="remote-url"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck="false"
-              placeholder="git@github.com:owner/repo.git"
-              value={remoteUrl}
-              onChange={(event) => setRemoteUrl(event.target.value)}
-            />
-            <Button
-              className="w-full"
-              disabled={!remoteUrl.trim()}
-              variant="outline"
-              onClick={() => void cloneRemote()}
-            >
-              Clone remote
+            <TabsContent value="local" className="mt-4 space-y-4">
+              <Button className="w-full" onClick={() => void openExisting()}>
+                Open existing git checkout
+              </Button>
+              <div className="space-y-2">
+                <Label htmlFor="remote-url">Remote URL</Label>
+                <Input
+                  id="remote-url"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck="false"
+                  placeholder="git@github.com:owner/repo.git"
+                  value={remoteUrl}
+                  onChange={(event) => setRemoteUrl(event.target.value)}
+                />
+                <Button
+                  className="w-full"
+                  disabled={!remoteUrl.trim()}
+                  variant="outline"
+                  onClick={() => void cloneRemote()}
+                >
+                  Clone remote
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="remote" className="mt-4">
+              <RemoteProjectForm onConnect={adopt} onError={setError} />
+            </TabsContent>
+          </Tabs>
+
+          {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
+          <div className="mt-5 flex justify-end">
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </div>
-        </TabsContent>
-
-        <TabsContent value="remote" className="mt-4">
-          <RemoteProjectForm onConnect={adopt} onError={setError} />
-        </TabsContent>
-      </Tabs>
-
-      {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
-      <div className="mt-5 flex justify-end">
-        <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
-      </div>
-    </ModalShell>
+        </ModalShell>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

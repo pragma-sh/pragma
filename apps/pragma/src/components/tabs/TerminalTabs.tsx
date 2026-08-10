@@ -1,4 +1,5 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 import { Icon } from "@iconify/react";
 import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma/constants";
@@ -11,7 +12,6 @@ import {
   Pencil,
   Hammer,
   Play,
-  Plus,
   Rows2,
   Square,
   SquareTerminal,
@@ -40,6 +40,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfirmClose } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
@@ -58,6 +59,7 @@ import {
   wslProfile,
 } from "@/lib/shell-profile";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
+import { motionTransition, tabItemVariants } from "@/lib/motion";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { startWindowDrag } from "@/lib/window-drag";
@@ -407,6 +409,32 @@ function useTabRename(workspace: Workspace): {
 
 type TabRenameApi = ReturnType<typeof useTabRename>;
 
+/**
+ * The single highlight that marks the active tab. It is one element shared
+ * across the whole strip via `layoutId`, so activating another tab slides it
+ * there instead of blinking the fill from one box to the next.
+ */
+const ACTIVE_TAB_LAYOUT_ID = "terminal-tab-active";
+
+function ActiveTabHighlight() {
+  return (
+    <motion.span
+      aria-hidden
+      className="absolute inset-0 rounded-md border border-border bg-elevated"
+      layoutId={ACTIVE_TAB_LAYOUT_ID}
+      transition={motionTransition.indicator}
+    />
+  );
+}
+
+/** Shared chrome for a top-bar entry: fixed metrics plus the active/idle colouring. */
+function tabEntryClassName(active: boolean): string {
+  return cn(
+    "group relative mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border border-transparent px-2 text-sm",
+    active ? "text-foreground" : "text-muted-foreground hover:bg-muted",
+  );
+}
+
 /** The "parent" entry shown in the top bar for a collapsed split. */
 function SplitParentTab({
   tab,
@@ -422,24 +450,25 @@ function SplitParentTab({
   const displayTitle = tabTitle(tab);
   const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
   return (
-    <button
-      className={cn(
-        "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border px-2 text-sm",
-        splitIsActive
-          ? "border-border bg-elevated text-foreground"
-          : "text-muted-foreground border-transparent bg-transparent hover:bg-muted",
-      )}
+    <motion.button
+      animate="visible"
+      className={tabEntryClassName(splitIsActive)}
+      exit="exit"
+      initial="hidden"
       key="split-parent"
       onClick={() => {
         setActiveTab(tab.id);
         if (tab.kind === "terminal") terminalManager.focus(tab.id);
       }}
       title={`Split: ${displayTitle}`}
+      transition={motionTransition.fast}
+      variants={tabItemVariants}
     >
-      <ParentIcon className="text-primary size-3.5 shrink-0" />
+      {splitIsActive ? <ActiveTabHighlight /> : null}
+      <ParentIcon className="text-primary relative size-3.5 shrink-0" />
       <TabAgentDot tabId={tab.id} />
-      <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
-    </button>
+      <span className="relative min-w-0 flex-1 truncate text-left">{displayTitle}</span>
+    </motion.button>
   );
 }
 
@@ -475,49 +504,52 @@ function TerminalTabItem({
   return (
     <ContextMenu key={tab.id}>
       <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            "group mr-1 flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border px-2 text-sm",
-            active
-              ? "border-border bg-elevated text-foreground"
-              : "text-muted-foreground border-transparent bg-transparent hover:bg-muted",
-          )}
-          draggable
-          onDragStart={handleDragStart}
-          onDragEnd={endTabDrag}
-        >
-          {isRenaming ? (
-            <input
-              ref={rename.inputRef}
-              aria-label="Rename tab"
-              className="text-foreground ring-ring w-0 min-w-0 flex-1 rounded bg-muted px-1 text-left text-sm outline-none ring-1"
-              value={rename.renameValue}
-              onChange={(e) => rename.setRenameValue(e.target.value)}
-              onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
-              onBlur={rename.commitRename}
-            />
-          ) : (
-            <button
-              className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
-              onClick={() => {
-                setActiveTab(tab.id);
-                if (tab.kind === "terminal") terminalManager.focus(tab.id);
-              }}
-              onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
-            >
-              <TabIcon tab={tab} />
-              <TabAgentDot tabId={tab.id} />
-              <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
-            </button>
-          )}
-          <TabDirtyDot tabId={tab.id} />
-          <button
-            aria-label="Close tab"
-            className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
-            onClick={() => requestClose(tab)}
+        {/* The HTML5 drag handlers stay on a plain wrapper: a motion component
+            replaces `onDragStart`/`onDragEnd` with its own pan-gesture
+            signatures, which are not the native DragEvent this uses. */}
+        <div className="shrink-0" draggable onDragStart={handleDragStart} onDragEnd={endTabDrag}>
+          <motion.div
+            animate="visible"
+            className={tabEntryClassName(active)}
+            exit="exit"
+            initial="hidden"
+            transition={motionTransition.fast}
+            variants={tabItemVariants}
           >
-            <X className="size-3" />
-          </button>
+            {active ? <ActiveTabHighlight /> : null}
+            {isRenaming ? (
+              <input
+                ref={rename.inputRef}
+                aria-label="Rename tab"
+                className="text-foreground ring-ring relative w-0 min-w-0 flex-1 rounded bg-muted px-1 text-left text-sm outline-none ring-1"
+                value={rename.renameValue}
+                onChange={(e) => rename.setRenameValue(e.target.value)}
+                onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
+                onBlur={rename.commitRename}
+              />
+            ) : (
+              <button
+                className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.kind === "terminal") terminalManager.focus(tab.id);
+                }}
+                onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
+              >
+                <TabIcon tab={tab} />
+                <TabAgentDot tabId={tab.id} />
+                <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+              </button>
+            )}
+            <TabDirtyDot tabId={tab.id} />
+            <button
+              aria-label="Close tab"
+              className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
+              onClick={() => requestClose(tab)}
+            >
+              <X className="size-3" />
+            </button>
+          </motion.div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -686,6 +718,7 @@ function NewTabMenu({
   onCreateTerminal: (shell?: ShellProfile | null) => void;
   onCreateBrowser: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const wsl = useWslDistros(worktreeId);
   // "Default" here means the shell Settings → Terminal selected — the one a
   // plain ⌘T opens — not the distribution WSL itself marks as its default.
@@ -697,7 +730,7 @@ function NewTabMenu({
       <DropdownMenuShortcut>Default</DropdownMenuShortcut>
     ) : null;
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           className="mr-2"
@@ -706,7 +739,7 @@ function NewTabMenu({
           variant="ghost"
           aria-label="New tab"
         >
-          <Plus />
+          <PlusCloseIcon open={open} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -802,22 +835,26 @@ export function TerminalTabs() {
         </div>
         <div className="bg-canvas flex h-11 items-center">
           <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
-            {topTabs.map((tab) => (
-              <TerminalTabEntry
-                key={tab.id}
-                active={tab.id === workspace.activeTabId}
-                beginTabDrag={beginTabDrag}
-                endTabDrag={endTabDrag}
-                parentTabId={parentTabId}
-                rename={rename}
-                requestClose={requestClose}
-                setActiveTab={workspace.setActiveTab}
-                split={split}
-                splitDirection={splitDirection}
-                splitIsActive={splitIsActive}
-                tab={tab}
-              />
-            ))}
+            {/* `initial={false}` so the strip does not replay every tab's
+                entrance on mount — only tabs opened afterwards animate in. */}
+            <AnimatePresence initial={false}>
+              {topTabs.map((tab) => (
+                <TerminalTabEntry
+                  key={tab.id}
+                  active={tab.id === workspace.activeTabId}
+                  beginTabDrag={beginTabDrag}
+                  endTabDrag={endTabDrag}
+                  parentTabId={parentTabId}
+                  rename={rename}
+                  requestClose={requestClose}
+                  setActiveTab={workspace.setActiveTab}
+                  split={split}
+                  splitDirection={splitDirection}
+                  splitIsActive={splitIsActive}
+                  tab={tab}
+                />
+              ))}
+            </AnimatePresence>
           </div>
           <div className="mr-1 flex shrink-0 items-center gap-1">
             {splitControls.map((control) => (
@@ -844,5 +881,6 @@ export function TerminalTabs() {
 }
 
 function TabAgentDot({ tabId }: { tabId: string }) {
-  return <AgentStatusDot status={useTabAgentStatus(tabId)} />;
+  // `relative` keeps the dot above the absolutely-positioned active highlight.
+  return <AgentStatusDot className="relative" status={useTabAgentStatus(tabId)} />;
 }

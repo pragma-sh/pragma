@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { motion } from "motion/react";
 
 import type { Tab } from "@pragma/constants";
 import { Icon } from "@iconify/react";
@@ -15,6 +16,7 @@ import {
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { fileIconId } from "@/lib/file-icons";
+import { motionTransition } from "@/lib/motion";
 import { basename } from "@/lib/path";
 import { defaultTabTitle } from "@/lib/tab-title";
 import { useTabDirty } from "@/state/editor-dirty-store";
@@ -100,9 +102,13 @@ export function TabDirtyDot({ tabId }: { tabId: string }) {
     return null;
   }
   return (
-    <output
+    // `relative` keeps it above the tab's absolutely-positioned active highlight.
+    <motion.output
+      animate={{ scale: 1, opacity: 1 }}
       aria-label="Unsaved changes"
-      className="block size-2 shrink-0 rounded-full bg-primary"
+      className="relative block size-2 shrink-0 rounded-full bg-primary"
+      initial={{ scale: 0, opacity: 0 }}
+      transition={motionTransition.pop}
     />
   );
 }

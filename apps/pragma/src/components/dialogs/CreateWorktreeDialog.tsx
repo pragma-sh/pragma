@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence } from "motion/react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
@@ -133,24 +134,14 @@ export function CreateWorktreeDialog({
 }: CreateWorktreeDialogProps) {
   const workspace = useWorkspace();
   const { startCreation } = useWorktreeCreation();
-  const {
-    agents,
-    modelsByAgent,
-    agentId,
-    modelSelection,
-    selectedAgent,
-    loadModels,
-    handleAgentChange,
-  } = useAgentSelection(isOpen);
-  const { branch, setBranch, title, setTitle, message, setMessage } = useWorktreeFormFields();
+  const agent = useAgentSelection(isOpen);
+  const { selectedAgent, modelSelection } = agent;
+  const fields = useWorktreeFormFields();
+  const { branch, title, message, setBranch, setTitle, setMessage } = fields;
   const { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId } =
     useWorktreeSubmission();
   const submitShortcut = isMacPlatform() ? "⌘↵" : "Ctrl+↵";
   useEscapeToClose(isOpen, () => onOpenChange(false));
-
-  if (!isOpen) {
-    return null;
-  }
 
   const canSubmit = branch.trim().length > 0;
   const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
@@ -242,7 +233,60 @@ export function CreateWorktreeDialog({
   }
 
   return (
-    <ModalShell className="max-w-2xl">
+    <AnimatePresence>
+      {isOpen ? (
+        <ModalShell className="max-w-2xl">
+          <CreateWorktreeForm
+            agent={agent}
+            busy={busy}
+            canSubmit={canSubmit}
+            error={error}
+            fields={fields}
+            onCancel={() => onOpenChange(false)}
+            onKeyDown={handleKeyDown}
+            onSubmit={() => void submit()}
+            parentLabel={parentLabel}
+            submitShortcut={submitShortcut}
+          />
+          <MainBehindAlert
+            behind={behind}
+            mainWorktreeId={mainWorktreeId}
+            onCancel={() => setMainWorktreeId(null)}
+            onConfirm={confirmCreate}
+          />
+        </ModalShell>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+/** The dialog's heading and form. Split out so the dialog holds only its logic. */
+function CreateWorktreeForm({
+  agent,
+  busy,
+  canSubmit,
+  error,
+  fields,
+  parentLabel,
+  submitShortcut,
+  onCancel,
+  onKeyDown,
+  onSubmit,
+}: {
+  agent: ReturnType<typeof useAgentSelection>;
+  busy: boolean;
+  canSubmit: boolean;
+  error: string | null;
+  fields: ReturnType<typeof useWorktreeFormFields>;
+  parentLabel: string | null;
+  submitShortcut: string;
+  onCancel: () => void;
+  onKeyDown: (event: SubmitKeyEvent) => void;
+  onSubmit: () => void;
+}) {
+  const { branch, setBranch, title, setTitle, message, setMessage } = fields;
+  return (
+    <>
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">
           {parentLabel ? `New worktree at ${parentLabel}` : "New worktree"}
@@ -256,7 +300,7 @@ export function CreateWorktreeDialog({
         className="mt-5 space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
-          void submit();
+          onSubmit();
         }}
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -269,7 +313,7 @@ export function CreateWorktreeDialog({
               autoCapitalize="off"
               value={branch}
               onChange={(event) => setBranch(event.target.value.replace(/\s+/g, "-"))}
-              onKeyDown={handleKeyDown}
+              onKeyDown={onKeyDown}
             />
           </div>
           <div className="space-y-2">
@@ -281,17 +325,17 @@ export function CreateWorktreeDialog({
               autoCapitalize="off"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={onKeyDown}
             />
           </div>
           <div className="space-y-2">
             <Label>Agent</Label>
             <AgentModelSelector
-              agents={agents}
-              modelsByAgent={modelsByAgent}
-              value={{ agentId, selection: modelSelection }}
-              onChange={handleAgentChange}
-              onLoadModels={loadModels}
+              agents={agent.agents}
+              modelsByAgent={agent.modelsByAgent}
+              value={{ agentId: agent.agentId, selection: agent.modelSelection }}
+              onChange={agent.handleAgentChange}
+              onLoadModels={agent.loadModels}
             />
           </div>
         </div>
@@ -300,14 +344,14 @@ export function CreateWorktreeDialog({
           <MarkdownEditor
             value={message}
             onChange={setMessage}
-            onKeyDown={handleKeyDown}
+            onKeyDown={onKeyDown}
             placeholder="Describe what you want the agent to do… (leave empty to skip the session)"
             className="min-h-40"
           />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Button disabled={busy} type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button disabled={busy} type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
           <Button type="submit" disabled={!canSubmit || busy}>
@@ -316,12 +360,6 @@ export function CreateWorktreeDialog({
           </Button>
         </div>
       </form>
-      <MainBehindAlert
-        behind={behind}
-        mainWorktreeId={mainWorktreeId}
-        onCancel={() => setMainWorktreeId(null)}
-        onConfirm={confirmCreate}
-      />
-    </ModalShell>
+    </>
   );
 }

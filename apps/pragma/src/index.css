@@ -237,6 +237,26 @@
   animation: agent-running 1.6s ease-in-out infinite;
 }
 
+/* OS-level "reduce motion" for everything CSS drives (Tailwind transitions,
+   tw-animate-css enter/exit, Radix presence animations). Motion-driven UI is
+   handled separately by `<MotionConfig reducedMotion="user">` in App.tsx and by
+   `useMotionTransition` in src/lib/motion.ts.
+
+   Spinners and the agent status pulses are exempt on purpose: they report live
+   state, so freezing them mid-cycle would misinform rather than calm. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin, [class*="animate-agent"]),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html {
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Reserves the custom-titlebar strip so content clears the inset macOS traffic
    lights. `--titlebar-height` is only set on macOS (see main.tsx); elsewhere it
    falls back to 0 and the rule is inert. */
