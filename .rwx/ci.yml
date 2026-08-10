@@ -11,6 +11,7 @@ on:
       commit-sha: ${{ event.git.sha }}
       branch: ${{ event.git.branch }}
       base-ref: main
+      github-token: ""
       lint-commits: false
   github:
     push:
@@ -19,12 +20,14 @@ on:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
+        github-token: ${{ github.token }}
         lint-commits: false
     pull_request:
       init:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
+        github-token: ${{ github.token }}
         lint-commits: true
 
 # Supersede in-flight runs for the same ref, matching the GitHub Actions
@@ -44,7 +47,7 @@ tasks:
     with:
       repository: https://github.com/pragma-sh/pragma.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github.token }}
+      github-token: ${{ init.github-token }}
 
   # commitlint and the fallow audit both need real history to walk a range
   # against the base ref, so they share a clone with the `.git` directory
@@ -55,7 +58,7 @@ tasks:
     with:
       repository: https://github.com/pragma-sh/pragma.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github.token }}
+      github-token: ${{ init.github-token }}
       preserve-git-dir: true
       fetch-full-depth: true
 
@@ -122,7 +125,7 @@ tasks:
       # git/clone doesn't leave usable credentials behind, and this fetch needs
       # its own. Excluded from the cache key because the token is ephemeral.
       GITHUB_TOKEN:
-        value: ${{ github.token }}
+        value: ${{ init.github-token }}
         cache-key: excluded
     run: |
       git fetch --quiet \
@@ -170,9 +173,10 @@ tasks:
       # git/clone doesn't leave usable credentials behind, so the fetch needs
       # its own. Excluded from the cache key because the token is ephemeral.
       CLONE_TOKEN:
-        value: ${{ github.token }}
+        value: ${{ init.github-token }}
         cache-key: excluded
-      # The RWX GitHub App's installation token (`${{ github.token }}`) is
+      # The GitHub-triggered run's installation token is passed through init so
+      # CLI runs never resolve the unavailable `github` context. It is still
       # scoped to reading repository contents — it has no `pull_requests` or
       # `issues` access, so every `gh` call below 403s with `Resource not
       # accessible by integration`. Posting the sticky report therefore needs a
