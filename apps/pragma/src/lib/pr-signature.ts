@@ -124,12 +124,14 @@ export async function appendPrSignature(body: string, worktreeId: string | null)
  */
 export function stripPrSignature(body: string): string {
   let result = body;
+  let removedSignature = false;
   for (;;) {
     const start = result.indexOf(prSignature.startMarker);
     if (start === -1) break;
+    removedSignature = true;
     const endIndex = result.indexOf(prSignature.endMarker, start);
     const end = endIndex === -1 ? result.length : endIndex + prSignature.endMarker.length;
     result = `${result.slice(0, start)}${result.slice(end)}`;
   }
-  return result.trimEnd();
+  return removedSignature ? result.trimEnd() : body;
 }

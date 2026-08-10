@@ -73,8 +73,9 @@ describe("stripPrSignature", () => {
     expect(stripPrSignature(body)).toBe("Fixes the thing.");
   });
 
-  it("leaves a body that has no footer alone", () => {
-    expect(stripPrSignature("Just a description.")).toBe("Just a description.");
+  it("leaves a body that has no footer byte-for-byte unchanged", () => {
+    const body = "Just a description.  \n\n";
+    expect(stripPrSignature(body)).toBe(body);
   });
 
   it("removes every footer when a body somehow carries more than one", () => {
