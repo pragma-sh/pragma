@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Pragma desktop app"
 authors = ["Pragma"]
 edition = "2021"
+license = "AGPL-3.0-only"
 rust-version = "1.77.2"
 publish = false
 

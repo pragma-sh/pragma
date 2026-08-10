@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Lightweight dev/test Pragma plugin: random sidebar tab, sidebar card, and an SDK event hook.",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {

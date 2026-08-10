@@ -490,8 +490,8 @@ Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
   jsdom (`src/test/setup.ts`); mock the Tauri API rather than the native shell.
 - **Rust:** `#[cfg(test)] mod tests` next to the code; `cargo test --workspace`.
 - Add a test with every behavior change. Keep tests fast and deterministic.
-- **Never build a package from a `pretest` hook.** `test` depends on `^build` **and**
-  `build` in `turbo.json`, so a package's own bundle is already there. A `pretest` that
+- **Never build a package from a `pretest` hook.** `test` depends on `build` in
+  `turbo.json`, so a package's own bundle is already there. A `pretest` that
   runs `bun run build` races the turbo `build` task for the same package — two bundlers
   writing one `dist/`, and the loser reads a half-written file
   (`ENOENT: … dist/index.cjs`). It only fires when both land in the same wave, so it

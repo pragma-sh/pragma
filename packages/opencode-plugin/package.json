@@ -2,6 +2,7 @@
   "name": "@pragma/opencode-plugin",
   "version": "0.0.0",
   "description": "opencode plugin that reports agent status to Pragma automatically.",
+  "license": "AGPL-3.0-only",
   "files": [
     "assets",
     "dist",
