@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="196" height="40" viewBox="0 0 196 40" role="img" aria-label="Open worktree in Pragma">
+  <title>Open worktree in Pragma</title>
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <filter id="lift" x="-20%" y="-40%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#0069c1" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- shadcn `Button` default variant: h-9, rounded-md, primary fill, subtle top sheen. -->
+  <g filter="url(#lift)">
+    <rect x="2" y="2" width="192" height="36" rx="6" fill="#0069c1" />
+    <rect x="2" y="2" width="192" height="36" rx="6" fill="url(#face)" />
+    <rect
+      x="2.5"
+      y="2.5"
+      width="191"
+      height="35"
+      rx="5.5"
+      fill="none"
+      stroke="#ffffff"
+      stroke-opacity="0.18"
+    />
+  </g>
+
+  <!-- lucide `git-branch`, 16px, matching the icon size shadcn buttons use. -->
+  <g
+    transform="translate(18 12)"
+    fill="none"
+    stroke="#fcfcfc"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <line x1="3" y1="6" x2="3" y2="14" />
+    <circle cx="3" cy="3" r="2.25" />
+    <circle cx="3" cy="16" r="2.25" />
+    <circle cx="13" cy="6" r="2.25" />
+    <path d="M13 8.25v1.25a3 3 0 0 1-3 3H6" />
+  </g>
+
+  <text
+    x="44"
+    y="20"
+    fill="#fcfcfc"
+    font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="14"
+    font-weight="500"
+    letter-spacing="-0.1"
+    dominant-baseline="central"
+  >Open worktree</text>
+
+  <!-- lucide `arrow-up-right`, hinting the deep link leaves GitHub. -->
+  <g
+    transform="translate(160 12)"
+    fill="none"
+    stroke="#fcfcfc"
+    stroke-opacity="0.85"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <line x1="3" y1="13" x2="13" y2="3" />
+    <polyline points="5,3 13,3 13,11" />
+  </g>
+</svg>

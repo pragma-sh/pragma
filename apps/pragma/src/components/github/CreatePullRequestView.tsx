@@ -248,7 +248,7 @@ function usePrSubmit({
         const pr = await createPullRequest(
           repo,
           { owner: baseRepo.owner, repo: baseRepo.repo, branch: baseBranch },
-          { title: title.trim(), body, draft },
+          { title: title.trim(), body, draft, worktreeId },
         );
         toast.success(`Opened pull request #${pr.number}`);
         clearPullRequestDraft(worktreeId);
@@ -335,6 +335,15 @@ function usePrGenerateDraft(
   return { generating, handleGenerateShortcut };
 }
 
+/** What the view needs to open a PR — the same inputs its form hook takes. */
+interface CreatePullRequestProps {
+  initialDraft?: AiPullRequestDraft | null;
+  initialDraftKey?: number;
+  repo: GitHubRepoRef;
+  worktreeId: string;
+  onCreated: (pr: PullRequestSummary) => void;
+}
+
 /** Owns the create-PR form state and handlers. */
 function useCreatePullRequestForm({
   initialDraft,
@@ -342,13 +351,7 @@ function useCreatePullRequestForm({
   repo,
   worktreeId,
   onCreated,
-}: {
-  initialDraft?: AiPullRequestDraft | null;
-  initialDraftKey?: number;
-  repo: GitHubRepoRef;
-  worktreeId: string;
-  onCreated: (pr: PullRequestSummary) => void;
-}) {
+}: CreatePullRequestProps) {
   const { available: aiAvailable } = useAi();
   const [title, setTitle] = useState(() => readPullRequestDraft(worktreeId).title);
   const [body, setBody] = useState(() => readPullRequestDraft(worktreeId).body);
@@ -579,13 +582,7 @@ export function CreatePullRequestView({
   repo,
   worktreeId,
   onCreated,
-}: {
-  initialDraft?: AiPullRequestDraft | null;
-  initialDraftKey?: number;
-  repo: GitHubRepoRef;
-  worktreeId: string;
-  onCreated: (pr: PullRequestSummary) => void;
-}) {
+}: CreatePullRequestProps) {
   const form = useCreatePullRequestForm({
     initialDraft,
     initialDraftKey,

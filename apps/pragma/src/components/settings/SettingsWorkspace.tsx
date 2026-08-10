@@ -20,6 +20,7 @@ import {
   constants,
   type AgentStatusSettings,
   type GitHubAuthMethod,
+  type GitHubSettings,
   type TerminalSettings,
 } from "@pragma/constants";
 
@@ -34,9 +35,11 @@ import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { TERMINAL_SETTINGS_CHANGED_EVENT } from "@/hooks/use-terminal-settings";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
+import { resetPrSignatureCache, validateGitHubSettings } from "@/lib/pr-signature";
 import {
   aiAuthMethods,
   aiLogout,
@@ -106,6 +109,7 @@ interface PragmaConfig {
     [key: string]: unknown;
   };
   agentStatus?: AgentStatusSettings;
+  github?: GitHubSettings;
   terminal?: TerminalSettings;
   [key: string]: unknown;
 }
@@ -126,6 +130,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateTunnel(config.tunnel);
   validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
+  validateGitHubSettings(config.github);
   return config;
 }
 
@@ -511,7 +516,14 @@ function SettingsContent({
             settings={loaded.value.agentStatus ?? {}}
           />
         ) : null}
-        {section === "github" && scope === "global" ? <GitHubSection /> : null}
+        {loaded && section === "github" && scope === "global" ? (
+          <GitHubSection
+            persist={(patch) =>
+              persist((current) => ({ ...current, github: { ...current.github, ...patch } }))
+            }
+            settings={loaded.value.github ?? {}}
+          />
+        ) : null}
         {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
         {loaded && section === "mobile" && scope === "global" ? (
           <MobileSection config={loaded.value} persist={persist} />
@@ -696,7 +708,13 @@ const GITHUB_AUTH_METHOD_LABELS: Record<GitHubAuthMethod, string> = {
   cli: "GitHub CLI token",
 };
 
-function GitHubSection() {
+function GitHubSection({
+  settings,
+  persist,
+}: {
+  settings: GitHubSettings;
+  persist: (patch: GitHubSettings) => Promise<void>;
+}) {
   const { status, authenticated, loading, signOut } = useGitHub();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -713,8 +731,63 @@ function GitHubSection() {
   }, [signOut]);
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading GitHub status…</p>;
-  if (!authenticated) return <GitHubSignIn />;
-  return <GitHubAccount status={status} signingOut={signingOut} onSignOut={onSignOut} />;
+  return (
+    <div className="space-y-5">
+      {authenticated ? (
+        <GitHubAccount status={status} signingOut={signingOut} onSignOut={onSignOut} />
+      ) : (
+        <GitHubSignIn />
+      )}
+      <PullRequestFooterCard persist={persist} settings={settings} />
+    </div>
+  );
+}
+
+/**
+ * The opt-out for the "Created with Pragma" footer Pragma appends to pull
+ * requests it opens. Global-only: the footer is about this install, not about
+ * one project's contributors.
+ */
+function PullRequestFooterCard({
+  settings,
+  persist,
+}: {
+  settings: GitHubSettings;
+  persist: (patch: GitHubSettings) => Promise<void>;
+}) {
+  const enabled = settings.prSignature ?? constants.github.prSignature.enabled;
+  const save = useCallback(
+    async (checked: boolean) => {
+      try {
+        await persist({ prSignature: checked });
+        resetPrSignatureCache();
+      } catch {
+        // `persist` already surfaced the failure and reloaded the config.
+      }
+    },
+    [persist],
+  );
+  return (
+    <SettingsCard
+      title="Pull requests"
+      description="What Pragma adds to pull requests you open from a worktree."
+    >
+      <div className="flex items-center justify-between gap-4">
+        <label className="text-sm" htmlFor="github-pr-signature">
+          “Created with Pragma” pull-request footer
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Adds a credit line and an “Open worktree” button to the bottom of the description.
+            Pragma hides the footer when it shows a pull request.
+          </span>
+        </label>
+        <Switch
+          checked={enabled}
+          id="github-pr-signature"
+          onCheckedChange={(checked) => void save(checked)}
+        />
+      </div>
+    </SettingsCard>
+  );
 }
 
 function GitHubSignIn() {

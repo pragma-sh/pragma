@@ -87,6 +87,8 @@ export type {
   GitHubUser,
   GitHubAuthMethod,
   GitHubAuthStatus,
+  GitHubSettings,
+  PrSignature,
   BranchSyncStatus,
   GitHubRepoRef,
   KeybindingChord,

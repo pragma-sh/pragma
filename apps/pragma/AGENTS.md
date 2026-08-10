@@ -14,6 +14,7 @@ apps/pragma/
 │   ├── lib/
 │   │   ├── tauri.ts             # Typed bridge to Rust — the ONLY place invoke() is called
 │   │   ├── github.ts            # GitHub client — the ONLY place new Octokit() happens
+│   │   ├── pr-signature.ts      # "Created with Pragma" PR footer: build, strip, opt-out
 │   │   ├── terminal-manager.ts  # Non-React xterm registry; output bypasses React state
 │   │   ├── native-editing.ts    # OS text-editing chords → readline sequences
 │   │   ├── agent-alert.ts       # Alert latch (chime + notification, fires at most once)
@@ -137,6 +138,31 @@ revalidate so the next tick / subscriber sees fresher data without blocking pain
 `mergePullRequest`) seed or invalidate the relevant keys. The Pull Request tab, the
 PR review tab (metadata + local file diffs), and the worktree-sidebar PR lifecycle
 poll all ride this cache at a 10s cadence.
+
+**"Created with Pragma" footer.** `lib/pr-signature.ts` owns the marketing block Pragma
+appends to every PR it opens: a heading linking to `github.homepageUrl`, an "Open
+worktree" button, and the opt-out line. `createPullRequest` appends it and `toSummary`
+strips it, so the block exists only on GitHub — inside Pragma every consumer of
+`PullRequestSummary.body` sees what the author wrote. Three constraints drove the shape,
+and each is easy to undo by accident:
+
+- **The badge has to be hosted.** GitHub's markdown sanitizer drops `data:` URIs, so the
+  button is `assets/pr/open-worktree.svg`, fetched from `raw.githubusercontent.com` on
+  `main`. That URL is baked into PR bodies that already exist elsewhere — treat
+  `assets/pr/` as append-only. It is one fixed color (the shipped `--primary`), not the
+  user's theme: a file on `main` looks the same to everyone reading the PR.
+- **The href must be `https`.** The sanitizer keeps only `http`/`https`/`mailto`, so a
+  raw `pragma://open?worktree=…` would render as inert text. The button points at
+  `github.prSignature.openUrl` (`https://pragma-app.sh/open`), which forwards its query
+  string to the deep link. The worktree id resolves only on the machine that owns it;
+  elsewhere the deep link falls back to the current selection.
+- **The block is delimited by markers,** so `stripPrSignature` is idempotent, tolerates a
+  body GitHub truncated before the end marker, and never stacks two footers when a draft
+  is regenerated.
+
+The opt-out is `github.prSignature` in the **global** `.pragma/config.json` only (Settings
+→ GitHub → Pull requests); there is no project layer, matching the rest of the GitHub
+section. The setting is cached until a Settings save fires `pragma:config-changed`.
 
 **Review threads.** `listReviewThreads` paginates GraphQL, requests `originalLine` as a
 fallback when `line` is null (outdated anchors), and reads author avatars via
