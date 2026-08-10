@@ -50,6 +50,17 @@ for plugin_spec in \
   cp "$source_dir/package.json" "$target_dir/package.json"
   cp -R "$source_dir/dist" "$target_dir/dist"
   cp -R "$source_dir/assets" "$target_dir/assets"
+
+  # The desktop webview imports each `pragma.main` bundle through a blob URL to
+  # list launchable agents. A *static* `node:` import fails to resolve there, so
+  # the plugin loads as `failed` and its agents vanish from the launcher while
+  # the Bun sidecars keep working — a split-brain failure the catalog hides.
+  # Keep node-only code behind a lazy `await import(...)`.
+  main="$(bun -e 'const pkg = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(pkg.pragma?.main ?? pkg.main ?? "")' "$target_dir/package.json")"
+  if [[ -n "$main" ]] && grep -Eq '(^|[[:space:]])from[[:space:]]*"node:' "$target_dir/$main"; then
+    echo "error: $package_name's plugin entry ($main) has a static node: import; the webview cannot load it" >&2
+    exit 1
+  fi
 done
 
 echo "staged bundled plugins -> src-tauri/resources/$plugins_dir_name"

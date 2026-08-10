@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Pi CLI extension that reports agent status to Pragma.",
+  "license": "AGPL-3.0-only",
   "files": [
     "assets",
     "dist",

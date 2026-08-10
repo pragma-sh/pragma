@@ -1,6 +1,6 @@
-import os from "node:os";
-
 import type { PluginContext, UsageLimit, UsageLimitsResult } from "@pragma/plugin/catalog";
+
+import { pluginCwd } from "./cwd";
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const GO_LIMITS = {
@@ -40,20 +40,28 @@ SELECT
 FROM usage
 `.trim();
 
-// `exec.run` interprets each command through the host's default shell:
-// PowerShell on Windows, a POSIX shell everywhere else. Neither the
-// existence check nor the query quoting is portable between the two.
-const USAGE_COMMAND =
-  process.platform === "win32"
+/**
+ * Builds the usage query command. `exec.run` interprets each command through
+ * the host's default shell: PowerShell on Windows, a POSIX shell everywhere
+ * else. Neither the existence check nor the query quoting is portable between
+ * the two.
+ *
+ * Resolved lazily, never at module scope: the desktop webview imports this
+ * bundle to list launchable agents, and `process` does not exist there — a
+ * module-scope read threw before any agent could be registered.
+ */
+function usageCommand(): string {
+  return globalThis.process?.platform === "win32"
     ? `if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) { exit 20 }; opencode db ${powershellQuote(USAGE_QUERY)} --format json`
     : "command -v opencode >/dev/null 2>&1 || exit 20; " +
-      `opencode db ${shellQuote(USAGE_QUERY)} --format json`;
+        `opencode db ${shellQuote(USAGE_QUERY)} --format json`;
+}
 
 /** Loads device-local OpenCode Go usage from OpenCode's supported database command. */
 export async function loadOpenCodeGoUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
   const [result] = await ctx.sdk.exec.run({
-    cwd: ctx.project?.path ?? os.tmpdir(),
-    commands: [USAGE_COMMAND],
+    cwd: pluginCwd(ctx),
+    commands: [usageCommand()],
   });
   if (result?.status === 20) {
     return {

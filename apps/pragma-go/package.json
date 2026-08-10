@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Pragma Go — Expo client for Pragma worktrees on phone, tablet, and web",
+  "license": "AGPL-3.0-only",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",

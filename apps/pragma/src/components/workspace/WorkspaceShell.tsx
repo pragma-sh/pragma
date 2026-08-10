@@ -13,6 +13,7 @@ import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { TabDragProvider } from "@/components/tabs/tab-drag-context";
 import { TerminalTabs } from "@/components/tabs/TerminalTabs";
 import { SplitHost } from "@/components/workspace/SplitHost";
+import { WelcomeScreen } from "@/components/workspace/WelcomeScreen";
 import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
 import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
@@ -182,31 +183,10 @@ function NoProjectsState() {
   return (
     <div className="bg-canvas text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
       <div className="max-w-md space-y-3">
-        <h1 className="text-foreground text-2xl font-semibold">No projects yet</h1>
-        <p className="text-muted-foreground text-sm">
-          Open an existing git checkout or clone a repository to start juggling terminals across
-          worktrees.
-        </p>
+        <h1 className="text-foreground text-2xl font-semibold">What will you build with Pragma?</h1>
+        <p className="text-muted-foreground text-sm">Open a project to get started.</p>
         <Button onClick={() => window.dispatchEvent(new Event("pragma:create-project"))}>
           Add project
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Empty state shown when a project is loaded but has no tabs yet. */
-function NoTabsState({ workspace }: { workspace: Workspace }) {
-  return (
-    <div className="bg-canvas text-muted-foreground flex flex-1 items-center justify-center p-8 text-center">
-      <div className="max-w-md space-y-3">
-        <h1 className="text-foreground text-2xl font-semibold">Create a terminal tab</h1>
-        <p className="text-muted-foreground text-sm">New tabs start in the selected worktree.</p>
-        <Button
-          disabled={!workspace.selectedWorktree}
-          onClick={() => void workspace.createTerminalTab()}
-        >
-          New terminal
         </Button>
       </div>
     </div>
@@ -230,7 +210,7 @@ function WorkspaceContent({
         {workspace.projects.length === 0 && !workspace.loading ? (
           <NoProjectsState />
         ) : workspace.tabs.length === 0 ? (
-          <NoTabsState workspace={workspace} />
+          <WelcomeScreen />
         ) : (
           <SplitHost />
         )}
