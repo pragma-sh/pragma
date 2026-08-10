@@ -38,12 +38,6 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     [scheme, source, themeCss],
   );
   const [ready, setReady] = useState(false);
-  const [pendingPrompt, setPendingPrompt] = useState<PromptAgentMessage | null>(null);
-  const [sendingPrompt, setSendingPrompt] = useState(false);
-  const pendingPromptRef = useRef<PromptAgentMessage | null>(null);
-  const sendingPromptRef = useRef(false);
-  const promptAgentRef = useRef(props.onPromptAgent);
-  promptAgentRef.current = props.onPromptAgent;
   useEffect(() => setReady(false), [html]);
 
   const send = useCallback((command: ScratchpadViewerCommand): void => {
@@ -58,45 +52,9 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     if (ready) send({ type: "commentMode", active: commentMode });
   }, [commentMode, ready, send]);
 
-  const requestPromptAgent = useCallback((message: PromptAgentMessage): boolean => {
-    // One modal is enough: an untrusted document must not stack confirmations.
-    if (pendingPromptRef.current) return false;
-    pendingPromptRef.current = message;
-    setPendingPrompt(message);
-    return true;
-  }, []);
+  const promptConfirmation = usePromptAgentConfirmation(props.onPromptAgent, send);
 
-  const dismissPrompt = useCallback((): void => {
-    const request = pendingPromptRef.current;
-    if (!request || sendingPromptRef.current) return;
-    pendingPromptRef.current = null;
-    setPendingPrompt(null);
-    send({ type: "response", requestId: request.requestId, value: "cancelled" });
-  }, [send]);
-
-  const sendPrompt = useCallback(async (): Promise<void> => {
-    const request = pendingPromptRef.current;
-    if (!request || sendingPromptRef.current) return;
-    sendingPromptRef.current = true;
-    setSendingPrompt(true);
-    try {
-      const result = await promptAgentRef.current(request.text);
-      send({ type: "response", requestId: request.requestId, value: result });
-    } catch (cause) {
-      send({
-        type: "response",
-        requestId: request.requestId,
-        error: cause instanceof Error ? cause.message : String(cause),
-      });
-    } finally {
-      pendingPromptRef.current = null;
-      sendingPromptRef.current = false;
-      setPendingPrompt(null);
-      setSendingPrompt(false);
-    }
-  }, [send]);
-
-  useViewerMessages(frame, props, requestPromptAgent, send, setReady);
+  useViewerMessages(frame, props, promptConfirmation.requestPromptAgent, send, setReady);
 
   return (
     <View className="flex-1 bg-background">
@@ -110,14 +68,77 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
         title="Scratchpad"
       />
       {!ready ? <ScratchpadLoading label="Loading scratchpad…" overlay /> : null}
-      <PromptAgentSheet
-        onCancel={dismissPrompt}
-        onSend={() => void sendPrompt()}
-        request={pendingPrompt}
-        sending={sendingPrompt}
-      />
+      <PromptAgentSheet {...promptConfirmation} />
     </View>
   );
+}
+
+/** Holds one untrusted prompt until a reader explicitly sends or cancels it. */
+function usePromptAgentConfirmation(
+  onPromptAgent: ScratchpadWebViewProps["onPromptAgent"],
+  send: (command: ScratchpadViewerCommand) => void,
+) {
+  const [request, setRequest] = useState<PromptAgentMessage | null>(null);
+  const [sending, setSending] = useState(false);
+  const requestRef = useRef<PromptAgentMessage | null>(null);
+  const sendingRef = useRef(false);
+  const promptAgentRef = useRef(onPromptAgent);
+  promptAgentRef.current = onPromptAgent;
+
+  const clear = useCallback((): void => {
+    requestRef.current = null;
+    sendingRef.current = false;
+    setRequest(null);
+    setSending(false);
+  }, []);
+
+  const requestPromptAgent = useCallback((message: PromptAgentMessage): boolean => {
+    // One modal is enough: an untrusted document must not stack confirmations.
+    if (requestRef.current) return false;
+    requestRef.current = message;
+    setRequest(message);
+    return true;
+  }, []);
+
+  const onCancel = useCallback((): void => {
+    const pending = requestRef.current;
+    if (!pending || sendingRef.current) return;
+    send({ type: "response", requestId: pending.requestId, value: "cancelled" });
+    clear();
+  }, [clear, send]);
+
+  const onSend = useCallback((): void => {
+    const pending = requestRef.current;
+    if (!pending || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    void promptResponse(pending, promptAgentRef.current).then((response) => {
+      send(response);
+      clear();
+      return undefined;
+    });
+  }, [clear, send]);
+
+  return { onCancel, onSend, request, requestPromptAgent, sending };
+}
+
+async function promptResponse(
+  request: PromptAgentMessage,
+  onPromptAgent: ScratchpadWebViewProps["onPromptAgent"],
+): Promise<Extract<ScratchpadViewerCommand, { type: "response" }>> {
+  try {
+    return {
+      type: "response",
+      requestId: request.requestId,
+      value: await onPromptAgent(request.text),
+    };
+  } catch (cause) {
+    return {
+      type: "response",
+      requestId: request.requestId,
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
+  }
 }
 
 /** Requires reader consent before agent-authored MDX can message an attached agent. */

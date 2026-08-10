@@ -40,6 +40,7 @@
     // the native original looks unreachable even though it is exactly what an
     // iOS/Android build loads. Both halves are live code; only one of them is
     // visible to a single-platform module graph.
+    "apps/pragma-go/components/RememberBrowserToggle.tsx",
     "apps/pragma-go/components/IconSymbol.tsx",
     "apps/pragma-go/components/scratchpad/ScratchpadWebView.tsx",
     "apps/pragma-go/components/ui/menu-view.tsx",
