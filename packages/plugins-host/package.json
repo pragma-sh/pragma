@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Pragma plugin catalog host sidecar: resolves plugin agent contributions and their icon assets, emitting a catalog for pragma-server.",
+  "license": "AGPL-3.0-only",
   "bin": {
     "pragma-plugins": "./src/cli.ts"
   },

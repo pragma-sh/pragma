@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Terminal lag benchmark: launches a Pragma dev instance, runs the pragma-bench ratatui payload in a real terminal tab, and measures keystroke and scroll render latency.",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",

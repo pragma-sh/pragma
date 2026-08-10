@@ -867,9 +867,11 @@ or matching remote branch for main/parentless worktrees.
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
 lifecycle actions: committed changes show compact remote sync with ahead/behind counts;
 a no-change child shows `WorktreeDeleteDialog`. Sync pulls first, auto-aborts conflicts,
-then pushes. The left sidebar polls `worktrees_merged_status` for the merge glyph while
-visible. It deliberately does not open an eager recursive watcher for every worktree; file
-watches are lazy, shared, and exist only while a mounted feature consumes file changes.
+then pushes. The left sidebar loads `worktrees_merged_status` for the merge glyph, then uses a
+30-second visible-only fallback poll for ref-only/external git changes. Standard child
+file changes are parsed from the existing ref-counted main-root watch
+(`.pragma/worktrees/<id>/…`) and refresh only the affected child, with burst debounce and
+no overlapping request; never open one recursive watcher per worktree.
 
 **Editor/diff tabs** — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and
 `diff` (read-only `@codemirror/merge`) as `TabKind`s, opened via `openFileTab` /

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Pragma automation authoring API and host sidecar runtime.",
+  "license": "AGPL-3.0-only",
   "bin": {
     "pragma-automations": "./src/cli.ts"
   },

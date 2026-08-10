@@ -84,7 +84,9 @@ describe("App", () => {
 
   it("renders the terminal workspace empty state", async () => {
     render(<App />);
-    expect(await screen.findByRole("heading", { name: /no projects yet/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /what will you build with pragma/i }),
+    ).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("list_projects");
   });
 });
