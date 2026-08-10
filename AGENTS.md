@@ -97,7 +97,8 @@ than no guide.
 .
 ├── apps/
 │   ├── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
-│   └── pragma-mobile/           # Expo (SDK 57) native client → see apps/pragma-mobile/AGENTS.md
+│   ├── pragma-mobile/           # Expo (SDK 57) native client → see apps/pragma-mobile/AGENTS.md
+│   └── www/                     # Next.js marketing + docs site → see apps/www/AGENTS.md
 ├── crates/
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
@@ -212,6 +213,8 @@ bun install                # Install all workspace deps
 
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
+bun run dev:pragma         # Same as `bun run dev`, named explicitly
+bun run dev:www            # Run the marketing + docs site (Next.js, http://localhost:3000)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
