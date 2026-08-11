@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import {
   ChevronDown,
   FolderPlus,
   GitBranchPlus,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
@@ -29,13 +30,23 @@ import { RenderPluginContribution, usePluginSidebarCards } from "@/plugins/rende
 import { useLeftSidebar } from "@/state/left-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { cn } from "@/lib/utils";
+import { instantTransition, motionTransition, useMotionTransition } from "@/lib/motion";
+
+/** Width of the collapsed rail, in px — matches the `w-9` the strip used to hard-code. */
+const COLLAPSED_WIDTH = 36;
 
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
   const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
+  // Dragging the handle must track the pointer exactly, so the spring is
+  // suppressed for the duration of the drag rather than chasing it a frame behind.
+  const panelTransition = useMotionTransition(
+    resizing ? instantTransition : motionTransition.panel,
+  );
 
   const projectId = workspace.selectedProjectId;
   const mainWorktreeId = projectId
@@ -50,65 +61,77 @@ export function ProjectSidebar() {
     return () => window.removeEventListener("pragma:create-project", openDialog);
   }, []);
 
-  if (collapsed) {
-    return <CollapsedProjectSidebar onExpand={toggleCollapsed} />;
-  }
-
   return (
-    <aside
-      className="bg-sidebar relative flex shrink-0 touch-pan-y flex-col border-r border-sidebar-border"
-      style={{ width }}
+    // One element whose width animates, rather than two components swapped at
+    // the collapse boundary: swapping would make the rail jump to its new size
+    // in a single frame, and the centre pane (with the terminal's
+    // ResizeObserver behind it) would jump with it.
+    <motion.aside
+      animate={{ width: collapsed ? COLLAPSED_WIDTH : width }}
+      className="bg-sidebar relative flex shrink-0 touch-pan-y flex-col overflow-hidden border-r border-sidebar-border"
+      initial={false}
       onWheel={cycle.onWheel}
       onTouchStart={cycle.onTouchStart}
       onTouchEnd={cycle.onTouchEnd}
+      transition={panelTransition}
     >
-      <SidebarResizeHandle onResize={setWidth} />
-      {/* Draggable titlebar strip: clears the inset macOS traffic lights and
-          gives the frameless window a drag handle. The project row itself is
-          the drag handle so content sits right under the reserved titlebar. */}
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
-      <div
-        className="titlebar-pad flex items-center justify-between px-3 pt-2 pb-1"
-        onMouseDown={startWindowDrag}
-      >
-        <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
-          {workspace.activeProject?.name ?? "Pragma"}
-        </h2>
-        <Button
-          aria-label="Collapse project sidebar"
-          size="icon-sm"
-          variant="ghost"
-          onClick={toggleCollapsed}
-        >
-          <PanelLeftClose />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-        <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
-      </div>
-      <div className="p-3">
-        <OpenPortsCard />
-        <ScratchpadsCard />
-        <PluginSidebarCards />
-        <Separator className="my-3" />
-        <div className="flex items-center gap-1.5">
-          <div className="min-w-0 flex-1">
-            <ProjectSwitcher />
-          </div>
-          <AddMenu
-            worktreeDisabled={!mainWorktreeId}
-            onAddProject={() => setProjectDialogOpen(true)}
-            onNewWorktree={() => setWorktreeDialogOpen(true)}
+      {collapsed ? (
+        <CollapsedProjectSidebar onExpand={toggleCollapsed} />
+      ) : (
+        <>
+          <SidebarResizeHandle
+            onResize={setWidth}
+            onResizeEnd={() => setResizing(false)}
+            onResizeStart={() => setResizing(true)}
           />
-        </div>
-      </div>
+          {/* Draggable titlebar strip: clears the inset macOS traffic lights and
+              gives the frameless window a drag handle. The project row itself is
+              the drag handle so content sits right under the reserved titlebar. */}
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
+          <div
+            className="titlebar-pad flex items-center justify-between px-3 pt-2 pb-1"
+            onMouseDown={startWindowDrag}
+          >
+            <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
+              {workspace.activeProject?.name ?? "Pragma"}
+            </h2>
+            <Button
+              aria-label="Collapse project sidebar"
+              size="icon-sm"
+              variant="ghost"
+              onClick={toggleCollapsed}
+            >
+              <PanelLeftClose />
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+            <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
+          </div>
+          <div className="p-3">
+            <OpenPortsCard />
+            <ScratchpadsCard />
+            <PluginSidebarCards />
+            <Separator className="my-3" />
+            <div className="flex items-center gap-1.5">
+              <div className="min-w-0 flex-1">
+                <ProjectSwitcher />
+              </div>
+              <AddMenu
+                worktreeDisabled={!mainWorktreeId}
+                onAddProject={() => setProjectDialogOpen(true)}
+                onNewWorktree={() => setWorktreeDialogOpen(true)}
+              />
+            </div>
+          </div>
+        </>
+      )}
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog
         open={worktreeDialogOpen}
         onOpenChange={setWorktreeDialogOpen}
         parentWorktreeId={mainWorktreeId ?? undefined}
       />
-    </aside>
+    </motion.aside>
   );
 }
 
@@ -122,11 +145,12 @@ function AddMenu({
   onAddProject: () => void;
   onNewWorktree: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button aria-label="Add project or worktree" size="icon-sm" variant="ghost">
-          <Plus />
+          <PlusCloseIcon open={open} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top">
@@ -146,37 +170,46 @@ function AddMenu({
 /** The collapsed strip: a single expand button, mirroring the right sidebar. */
 function CollapsedProjectSidebar({ onExpand }: { onExpand: () => void }) {
   return (
-    <div className="bg-sidebar flex w-9 shrink-0 flex-col border-r border-sidebar-border">
-      {/* On macOS the collapsed strip sits under the inset traffic lights (their
-          x-inset overlaps a 36px rail), so the strip itself is the drag handle
-          and the expand button drops below the lights. */}
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
-      <div
-        className="titlebar-pad flex flex-1 flex-col items-center pb-2"
-        onMouseDown={startWindowDrag}
+    // On macOS the collapsed strip sits under the inset traffic lights (their
+    // x-inset overlaps a 36px rail), so the strip itself is the drag handle
+    // and the expand button drops below the lights.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent
+    <motion.div
+      animate={{ opacity: 1 }}
+      className="titlebar-pad flex flex-1 flex-col items-center pb-2"
+      initial={{ opacity: 0 }}
+      onMouseDown={startWindowDrag}
+      transition={motionTransition.fast}
+    >
+      <Button
+        aria-label="Expand project sidebar"
+        className="mt-2"
+        onClick={onExpand}
+        size="icon-sm"
+        variant="ghost"
       >
-        <Button
-          aria-label="Expand project sidebar"
-          className="mt-2"
-          onClick={onExpand}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <PanelLeftOpen />
-        </Button>
-      </div>
-    </div>
+        <PanelLeftOpen />
+      </Button>
+    </motion.div>
   );
 }
 
 /** Right-edge drag handle that resizes the (left-anchored) sidebar. */
-function SidebarResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+function SidebarResizeHandle({
+  onResize,
+  onResizeStart,
+  onResizeEnd,
+}: {
+  onResize: (width: number) => void;
+  onResizeStart: () => void;
+  onResizeEnd: () => void;
+}) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   return (
     <div
       aria-hidden
-      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/40"
+      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/40"
       onPointerDown={(event) => {
         const parent = event.currentTarget.parentElement;
         if (!parent) {
@@ -186,6 +219,7 @@ function SidebarResizeHandle({ onResize }: { onResize: (width: number) => void }
           startX: event.clientX,
           startWidth: parent.getBoundingClientRect().width,
         };
+        onResizeStart();
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
@@ -197,6 +231,7 @@ function SidebarResizeHandle({ onResize }: { onResize: (width: number) => void }
       }}
       onPointerUp={(event) => {
         dragRef.current = null;
+        onResizeEnd();
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
     />

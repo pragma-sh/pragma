@@ -94,6 +94,57 @@ apps/pragma/
   in `src/index.css` (`@theme`/CSS variables) — use semantic tokens (`bg-background`,
   `text-muted-foreground`), not raw colors.
 
+### Motion (`src/lib/motion.ts`)
+
+Animation uses **Motion** (`motion/react`). Timings, easings, and the shared
+variant sets live in `src/lib/motion.ts` — never inline a raw `{ duration }`; add a
+named entry there instead, the same rule as colors and shared constants.
+
+- **Animate at the component level.** The sliding tab indicator lives in
+  `components/ui/tabs.tsx`, the modal shrink in `components/ui/dialog.tsx` /
+  `alert-dialog.tsx` / `modal-shell.tsx`, the +→× rotation in
+  `components/ui/plus-close-icon.tsx`. Feature code gets the animation by using
+  the primitive, not by re-implementing it.
+- **OS "reduce motion" is honoured in three places, and all three are needed.**
+  `<MotionConfig reducedMotion="user">` in `App.tsx` covers transform and layout
+  animations; `useMotionTransition` covers what MotionConfig deliberately leaves
+  alone (`width` on the sidebars); the `prefers-reduced-motion` block in
+  `index.css` covers everything CSS drives. Spinners and the agent status pulses
+  are exempt there on purpose — they report live state.
+- **Enter and exit need opposite easing, and the exit needs longer.** `standard`
+  decelerates hard — about 80% of the change lands in the first quarter of the
+  duration. On the way out that drops opacity to nearly nothing before a shrink
+  has visibly started, so the dialog reads as blinking rather than receding. Exits
+  use `motionEase.exit` (accelerating) over a longer duration. Each modal variant
+  carries its own `transition` for this reason, and a variant's transition beats
+  the component's `transition` prop — do not set both.
+- **Disclosure animates `height`, so Radix has to force-mount.** `ui/collapsible.tsx`
+  mirrors the root's open state, force-mounts the content, and animates its height;
+  the caller's `className` lands on an inner element, because padding on the
+  animated box would keep it taller than zero when collapsed. `ui/accordion.tsx`
+  gets the same effect from tw-animate-css keyframes and the Radix height var.
+- **Motion owns `transform`, so Tailwind `-translate-*` centring cannot survive
+  a `scale` animation.** Both dialog families centre with a click-through
+  `fixed inset-0 flex items-center justify-center` wrapper instead. Anything
+  positioned relative to that (the command palette rides above centre) uses
+  `self-start` + a margin, not `top-*`.
+- **Radix + `AnimatePresence`:** Radix unmounts content synchronously, which
+  leaves no frames for an exit. `Dialog`/`AlertDialog` therefore mirror the root's
+  open state in a context and drive presence themselves with `forceMount`.
+  Consequence for tests: while a modal animates out, Radix still `aria-hidden`s
+  the page behind it, so assert on what's underneath with `findBy*`, not `getBy*`.
+- **Bespoke `ModalShell` dialogs** must be toggled with a conditional child inside
+  `<AnimatePresence>`, never an early `return null` — the early return is what
+  eats the close animation.
+- **HTML5 drag and Motion don't mix on one element:** a motion component replaces
+  `onDragStart`/`onDragEnd` with its own pan-gesture signatures. Keep native drag
+  handlers on a plain wrapper (see `TerminalTabItem`).
+- **Sidebar width animates on a single element**, with the collapsed rail rendered
+  inside it, rather than swapping in a separate collapsed component — a swap makes
+  the centre pane (and the terminal's `ResizeObserver`) jump in one frame. The
+  spring is suppressed while the resize handle is being dragged so the edge tracks
+  the pointer exactly.
+
 ### User themes (`.pragma/theme.json`)
 
 `src/index.css` stays the **single source of truth for the shipped defaults**. The
