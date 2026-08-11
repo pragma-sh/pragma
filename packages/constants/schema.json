@@ -780,7 +780,8 @@
         "devicesFile",
         "tokenHeader",
         "deviceHeaders",
-        "push"
+        "push",
+        "web"
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
@@ -814,6 +815,34 @@
         },
         "push": {
           "$ref": "#/definitions/GatewayPush"
+        },
+        "web": {
+          "$ref": "#/definitions/GatewayWeb"
+        }
+      }
+    },
+    "GatewayWeb": {
+      "title": "GatewayWeb",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "basePath", "manifestFile", "resourceDir"],
+      "description": "Where the gateway serves the Pragma Go web bundle from, and how that bundle is staged. Shared so the Expo export, the staging script, the Rust static-file routes, and the desktop's shareable link all agree on one path.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Default access state for the public Pragma Go browser bundle. Users override it with gateway.webEnabled in the global config file."
+        },
+        "basePath": {
+          "type": "string",
+          "description": "URL prefix the exported web bundle is deployed and served under. Passed to Expo as `EXPO_BASE_URL` at export time so the asset URLs baked into `index.html` match the routes the gateway answers."
+        },
+        "manifestFile": {
+          "type": "string",
+          "description": "Filename inside the staged bundle listing every servable asset with its URL path, content type, and encoding. The gateway serves only what this manifest names, so a request path is looked up as a map key and never joined onto a filesystem path."
+        },
+        "resourceDir": {
+          "type": "string",
+          "description": "Directory name under the desktop app's Tauri resources holding the staged bundle."
         }
       }
     },

@@ -1,11 +1,40 @@
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { modalVariants, scrimVariants } from "@/lib/motion";
 
-function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+/** Mirrors the Radix root's open state so the content can animate on the way out. */
+const AlertDialogOpenContext = React.createContext(false);
+
+function AlertDialog({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolledOpen;
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+
+  return (
+    <AlertDialogOpenContext.Provider value={isOpen}>
+      <AlertDialogPrimitive.Root
+        data-slot="alert-dialog"
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </AlertDialogOpenContext.Provider>
+  );
 }
 
 function AlertDialogTrigger({
@@ -23,37 +52,63 @@ function AlertDialogOverlay({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
   return (
-    <AlertDialogPrimitive.Overlay
-      data-slot="alert-dialog-overlay"
-      className={cn(
-        "fixed inset-0 z-50 bg-black/20 duration-100 supports-backdrop-filter:backdrop-blur-md data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className,
-      )}
-      {...props}
-    />
+    <AlertDialogPrimitive.Overlay data-slot="alert-dialog-overlay" forceMount asChild {...props}>
+      <motion.div
+        animate="visible"
+        className={cn(
+          "fixed inset-0 z-50 bg-black/20 supports-backdrop-filter:backdrop-blur-md",
+          className,
+        )}
+        exit="exit"
+        initial="hidden"
+        variants={scrimVariants}
+      />
+    </AlertDialogPrimitive.Overlay>
   );
 }
 
 function AlertDialogContent({
   className,
+  children,
   size = "default",
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   size?: "default" | "sm";
 }) {
+  const open = React.useContext(AlertDialogOpenContext);
   return (
-    <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        data-slot="alert-dialog-content"
-        data-size={size}
-        className={cn(
-          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className,
-        )}
-        {...props}
-      />
-    </AlertDialogPortal>
+    <AnimatePresence>
+      {open ? (
+        <AlertDialogPortal forceMount>
+          <AlertDialogOverlay />
+          {/* Flex centring on a click-through wrapper: Motion owns `transform`
+              for the shrink, so a `-translate-1/2` content box would be
+              re-centred out from under it. */}
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
+            <AlertDialogPrimitive.Content
+              data-slot="alert-dialog-content"
+              data-size={size}
+              forceMount
+              asChild
+              {...props}
+            >
+              <motion.div
+                animate="visible"
+                className={cn(
+                  "group/alert-dialog-content pointer-events-auto grid w-full gap-4 rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm",
+                  className,
+                )}
+                exit="exit"
+                initial="hidden"
+                variants={modalVariants}
+              >
+                {children}
+              </motion.div>
+            </AlertDialogPrimitive.Content>
+          </div>
+        </AlertDialogPortal>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

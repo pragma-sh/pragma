@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+
 import { errorMessage } from "@/lib/errors";
 
 import { Icon } from "@iconify/react";
@@ -16,6 +18,12 @@ import {
   type AiPullRequestDraft,
   worktreeChanges,
 } from "@/lib/tauri";
+import {
+  instantTransition,
+  motionTransition,
+  tabPanelVariants,
+  useMotionTransition,
+} from "@/lib/motion";
 import { useAi } from "@/state/ai-context";
 import { type RightSidebarSubtab, useRightSidebar } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -27,6 +35,9 @@ import {
 import type { SidebarTabDefinition } from "@pragma/plugin";
 
 const COMMIT_PR_REFRESH_INTERVAL_MS = 2000;
+
+/** Width of the collapsed rail, in px — matches the `w-9` the strip used to hard-code. */
+const COLLAPSED_WIDTH = 36;
 
 /**
  * Secondary sidebar on the right edge of the workspace, mirroring the left
@@ -140,11 +151,16 @@ function useCommitAndPrRun(
 /** The collapsed strip: a single expand button. */
 function CollapsedRightSidebar({ onExpand }: { onExpand: () => void }) {
   return (
-    <div className="bg-elevated flex w-9 shrink-0 flex-col items-center border-l border-border py-2">
+    <motion.div
+      animate={{ opacity: 1 }}
+      className="bg-elevated flex flex-1 flex-col items-center py-2"
+      initial={{ opacity: 0 }}
+      transition={motionTransition.fast}
+    >
       <Button aria-label="Expand files sidebar" onClick={onExpand} size="icon-sm" variant="ghost">
         <PanelRightOpen />
       </Button>
-    </div>
+    </motion.div>
   );
 }
 
@@ -272,9 +288,25 @@ function pluginTabValue(tab: VisiblePluginContribution<SidebarTabDefinition>): R
   return `plugin:${tab.pluginId}:${tab.contribution.id}`;
 }
 
+/**
+ * Which way the body should slide: +1 when moving right along the tab strip,
+ * -1 when moving left, so the panel travels with the user's intent rather than
+ * always entering from the same edge.
+ */
+function useSubtabDirection(order: readonly RightSidebarSubtab[], active: RightSidebarSubtab) {
+  const previousIndex = useRef(order.indexOf(active));
+  const index = order.indexOf(active);
+  const direction = index < previousIndex.current ? -1 : 1;
+  useEffect(() => {
+    previousIndex.current = index;
+  }, [index]);
+  return direction;
+}
+
 export function RightSidebar() {
   const { collapsed, activeSubtab, width, toggleCollapsed, setActiveSubtab, setWidth } =
     useRightSidebar();
+  const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
   const { available: aiAvailable } = useAi();
   const pluginTabs = usePluginSidebarTabs(workspace.selectedProjectId);
@@ -299,46 +331,90 @@ export function RightSidebar() {
     }
   }, [activeSubtab, pluginTabs, setActiveSubtab]);
 
-  if (collapsed) {
-    return <CollapsedRightSidebar onExpand={toggleCollapsed} />;
-  }
+  const subtabOrder: RightSidebarSubtab[] = [
+    "files",
+    "changes",
+    "pullRequest",
+    ...pluginTabs.map(pluginTabValue),
+  ];
+  const direction = useSubtabDirection(subtabOrder, activeSubtab);
+  const panelTransition = useMotionTransition(
+    resizing ? instantTransition : motionTransition.panel,
+  );
 
   return (
-    <div
-      className="app-content bg-canvas relative flex shrink-0 flex-col border-l border-sidebar-border"
-      style={{ width }}
+    // Width animates on one element rather than swapping in a separate collapsed
+    // strip, so the centre pane (and the terminal resizing behind it) reflows
+    // smoothly instead of in a single jump. Mirrors `ProjectSidebar`.
+    <motion.div
+      animate={{ width: collapsed ? COLLAPSED_WIDTH : width }}
+      className="app-content bg-canvas relative flex shrink-0 flex-col overflow-hidden border-l border-sidebar-border"
+      initial={false}
+      transition={panelTransition}
     >
-      <ResizeHandle onResize={setWidth} />
-      <RightSidebarHeader
-        activeSubtab={activeSubtab}
-        aiAvailable={aiAvailable}
-        commitPrRunning={commitPrRunning}
-        hasUncommittedChanges={hasUncommittedChanges}
-        onCollapse={toggleCollapsed}
-        onCommitPr={() => void runCommitAndPr()}
-        pluginTabs={pluginTabs}
-        setActiveSubtab={setActiveSubtab}
-        worktreeId={worktreeId}
-      />
-      <div className="bg-canvas min-h-0 flex-1 overflow-hidden">
-        <RightSidebarBody
-          activeSubtab={activeSubtab}
-          generatedPrDraft={generatedPrDraft}
-          pluginTabs={pluginTabs}
-        />
-      </div>
-    </div>
+      {collapsed ? (
+        <CollapsedRightSidebar onExpand={toggleCollapsed} />
+      ) : (
+        <>
+          <ResizeHandle
+            onResize={setWidth}
+            onResizeEnd={() => setResizing(false)}
+            onResizeStart={() => setResizing(true)}
+          />
+          <RightSidebarHeader
+            activeSubtab={activeSubtab}
+            aiAvailable={aiAvailable}
+            commitPrRunning={commitPrRunning}
+            hasUncommittedChanges={hasUncommittedChanges}
+            onCollapse={toggleCollapsed}
+            onCommitPr={() => void runCommitAndPr()}
+            pluginTabs={pluginTabs}
+            setActiveSubtab={setActiveSubtab}
+            worktreeId={worktreeId}
+          />
+          <div className="bg-canvas min-h-0 flex-1 overflow-hidden">
+            {/* `mode="wait"` because these panels already remount on every
+                subtab change; overlapping them would double-mount the file tree. */}
+            <AnimatePresence initial={false} mode="wait">
+              <motion.div
+                animate="visible"
+                className="h-full"
+                exit="exit"
+                initial="hidden"
+                key={activeSubtab}
+                transition={motionTransition.fast}
+                variants={tabPanelVariants(direction)}
+              >
+                <RightSidebarBody
+                  activeSubtab={activeSubtab}
+                  generatedPrDraft={generatedPrDraft}
+                  pluginTabs={pluginTabs}
+                />
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </>
+      )}
+    </motion.div>
   );
 }
 
 /** Left-edge drag handle that resizes the (right-anchored) sidebar. */
-function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+function ResizeHandle({
+  onResize,
+  onResizeStart,
+  onResizeEnd,
+}: {
+  onResize: (width: number) => void;
+  onResizeStart: () => void;
+  onResizeEnd: () => void;
+}) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   return (
     <div
       aria-hidden
-      className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-primary/40"
+      className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/40"
       onPointerDown={(event) => {
         const parent = event.currentTarget.parentElement;
         if (!parent) {
@@ -348,6 +424,7 @@ function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
           startX: event.clientX,
           startWidth: parent.getBoundingClientRect().width,
         };
+        onResizeStart();
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
@@ -359,6 +436,7 @@ function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
       }}
       onPointerUp={(event) => {
         dragRef.current = null;
+        onResizeEnd();
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
     />

@@ -1,14 +1,47 @@
 "use client";
 
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { modalVariants, scrimVariants } from "@/lib/motion";
 import { XIcon } from "lucide-react";
 
-function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+/**
+ * Mirrors the Radix root's open state so `DialogContent` can hand presence to
+ * `AnimatePresence` — Radix alone unmounts the content synchronously, which
+ * leaves no frames for a close animation to play in.
+ */
+const DialogOpenContext = React.createContext(false);
+
+function Dialog({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolledOpen;
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+
+  return (
+    <DialogOpenContext.Provider value={isOpen}>
+      <DialogPrimitive.Root
+        data-slot="dialog"
+        open={isOpen}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </DialogOpenContext.Provider>
+  );
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
@@ -28,14 +61,18 @@ function DialogOverlay({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
-    <DialogPrimitive.Overlay
-      data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 isolate z-50 bg-black/20 duration-100 supports-backdrop-filter:backdrop-blur-md data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className,
-      )}
-      {...props}
-    />
+    <DialogPrimitive.Overlay data-slot="dialog-overlay" forceMount asChild {...props}>
+      <motion.div
+        animate="visible"
+        className={cn(
+          "fixed inset-0 isolate z-50 bg-black/20 supports-backdrop-filter:backdrop-blur-md",
+          className,
+        )}
+        exit="exit"
+        initial="hidden"
+        variants={scrimVariants}
+      />
+    </DialogPrimitive.Overlay>
   );
 }
 
@@ -47,28 +84,43 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
 }) {
+  const open = React.useContext(DialogOpenContext);
   return (
-    <DialogPortal>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        data-slot="dialog-content"
-        className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close data-slot="dialog-close" asChild>
-            <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </Button>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
-    </DialogPortal>
+    <AnimatePresence>
+      {open ? (
+        <DialogPortal forceMount>
+          <DialogOverlay />
+          {/* Centering lives on this wrapper rather than on a `-translate-1/2`
+              content box: Motion writes `transform` inline for the scale, which
+              would clobber a Tailwind translate and knock the dialog off centre.
+              The wrapper is click-through so the overlay still catches dismissals. */}
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
+            <DialogPrimitive.Content data-slot="dialog-content" forceMount asChild {...props}>
+              <motion.div
+                animate="visible"
+                className={cn(
+                  "pointer-events-auto relative grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm",
+                  className,
+                )}
+                exit="exit"
+                initial="hidden"
+                variants={modalVariants}
+              >
+                {children}
+                {showCloseButton && (
+                  <DialogPrimitive.Close data-slot="dialog-close" asChild>
+                    <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
+                      <XIcon />
+                      <span className="sr-only">Close</span>
+                    </Button>
+                  </DialogPrimitive.Close>
+                )}
+              </motion.div>
+            </DialogPrimitive.Content>
+          </div>
+        </DialogPortal>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

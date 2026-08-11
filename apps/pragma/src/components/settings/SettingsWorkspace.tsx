@@ -26,7 +26,7 @@ import {
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
 import { AutomationsWorkspace } from "@/components/automations/AutomationsWorkspace";
-import { PairDeviceSettings } from "@/components/dialogs/PairDeviceDialog";
+import { PragmaGoSettings } from "@/components/dialogs/PairDeviceDialog";
 import { GitHubAuthOptions } from "@/components/github/GitHubAuthOptions";
 import { AgentStatusSection } from "@/components/settings/AgentStatusSection";
 import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
@@ -108,6 +108,10 @@ interface PragmaConfig {
     urlPattern?: string;
     [key: string]: unknown;
   };
+  gateway?: {
+    webEnabled?: boolean;
+    [key: string]: unknown;
+  };
   agentStatus?: AgentStatusSettings;
   github?: GitHubSettings;
   terminal?: TerminalSettings;
@@ -128,17 +132,22 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   const config = value as PragmaConfig;
   validatePlugins(config.plugins);
   validateTunnel(config.tunnel);
+  validateGateway(config.gateway);
   validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
   validateGitHubSettings(config.github);
   return config;
 }
 
+function validateGateway(gateway: PragmaConfig["gateway"]): void {
+  if (gateway === undefined) return;
+  validateConfigObject(gateway, "gateway");
+  validateOptionalField(gateway.webEnabled, "gateway.webEnabled", "boolean");
+}
+
 function validateTerminal(terminal: PragmaConfig["terminal"]): void {
   if (terminal === undefined) return;
-  if (!terminal || typeof terminal !== "object" || Array.isArray(terminal)) {
-    throw new Error("terminal must be an object");
-  }
+  validateConfigObject(terminal, "terminal");
   validateBackend(terminal.backend);
   validateDistro(terminal.distro);
   validateOptionalField(terminal.shell, "terminal.shell", "string");
@@ -185,12 +194,15 @@ function validatePlugin(plugin: PluginConfig, index: number): void {
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
   if (tunnel === undefined) return;
-  if (!tunnel || typeof tunnel !== "object" || Array.isArray(tunnel)) {
-    throw new Error("tunnel must be an object");
-  }
+  validateConfigObject(tunnel, "tunnel");
   validateOptionalField(tunnel.enabled, "tunnel.enabled", "boolean");
   validateOptionalField(tunnel.command, "tunnel.command", "string");
   validateOptionalField(tunnel.urlPattern, "tunnel.urlPattern", "string");
+}
+
+/** Rejects config sections that are not ordinary objects. */
+function validateConfigObject(value: object | null, name: string): void {
+  if (!value || Array.isArray(value)) throw new Error(`${name} must be an object`);
 }
 
 /**
@@ -413,7 +425,7 @@ function GlobalSettingsNavigation({
         icon={<Smartphone />}
         onClick={() => setSection("mobile")}
       >
-        Mobile & Gateway
+        Pragma Go
       </SettingsNavItem>
       <SettingsNavItem
         active={section === "automations"}
@@ -962,12 +974,15 @@ function MobileSection({ config, persist }: { config: PragmaConfig; persist: Per
 
   return (
     <div className="space-y-5">
-      <SettingsCard
-        title="Pair mobile device"
-        description="Expose this host through configured tunnel and scan from Pragma Mobile."
-      >
-        <PairDeviceSettings />
-      </SettingsCard>
+      <PragmaGoSettings
+        webEnabled={config.gateway?.webEnabled ?? constants.gateway.web.enabled}
+        onWebEnabledChange={(webEnabled) => {
+          void persist((current) => ({
+            ...current,
+            gateway: { ...current.gateway, webEnabled },
+          })).catch(() => undefined);
+        }}
+      />
       <GatewayDevices />
       <SettingsCard title="Tunnel" description="Advanced command used to expose local gateway.">
         <label className="text-sm font-medium" htmlFor="tunnel-command">

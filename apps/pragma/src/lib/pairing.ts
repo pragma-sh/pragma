@@ -1,6 +1,19 @@
-import type { PairingPayload } from "@pragma/constants";
+import { constants, type PairingPayload } from "@pragma/constants";
 
 export type { PairingPayload };
+
+/**
+ * Builds the one-click link that opens Pragma Go in a browser, already paired.
+ *
+ * The token travels in the URL **fragment**, which browsers never send to the
+ * server: it stays out of the tunnel's access log, out of any proxy in between,
+ * and out of `Referer` headers. The web app consumes it on load and erases it
+ * from the address bar, so a link that is copied afterwards carries no token.
+ */
+export function buildWebAppUrl(tunnelUrl: string, token: string): string {
+  const base = tunnelUrl.replace(/\/$/, "");
+  return `${base}${constants.gateway.web.basePath}#t=${encodeURIComponent(token)}`;
+}
 
 /** Builds a {@link PairingPayload} from the parts shown in the pair modal. */
 export function buildPairingPayload(parts: {
