@@ -9,7 +9,7 @@ existing `@pragma/scratchpad-viewer` import of `parseScratchpadDocument`,
 `attachScratchpadAgent`, or the comment helpers keeps working.
 
 `buildScratchpadViewerHtml({ source, comments, mode, themeCss })` returns one
-self-contained HTML string. Today its consumer is `apps/pragma-mobile`
+self-contained HTML string. Today its consumer is `apps/pragma-go`
 (`react-native-webview`); the desktop keeps its own editor and only imports the
 contract helpers.
 

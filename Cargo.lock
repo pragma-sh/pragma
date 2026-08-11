@@ -5450,6 +5450,7 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "flate2",
  "pragma-client",
  "pragma-constants",
  "pragma-platform",

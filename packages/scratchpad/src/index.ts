@@ -13,7 +13,8 @@ export interface ScratchpadAgentProgress {
 
 /** Host bridge installed only inside a rendered Pragma scratchpad. */
 export interface ScratchpadBridge {
-  promptAgent(text: string): Promise<"sent" | "missing-agent">;
+  /** Delivers text, or reports a missing attachment or reader cancellation. */
+  promptAgent(text: string): Promise<"sent" | "missing-agent" | "cancelled">;
   requestAgentAttachment(): Promise<boolean>;
   subscribeAgentProgress(
     tabIds: readonly string[],
@@ -52,7 +53,7 @@ export function scratchpadBridge(): ScratchpadBridge {
 /**
  * Sends text to attached agent tab. Missing attachment opens host picker by default;
  * `onMissingAgent` can replace that behavior for one call. Returns false when
- * user cancels attachment without sending.
+ * user cancels sending or attachment without delivering a message.
  */
 export async function promptAgent(
   text: string,
@@ -61,14 +62,16 @@ export async function promptAgent(
   const value = text.trim();
   if (!value) return false;
   const host = bridge();
-  if ((await host.promptAgent(value)) === "sent") return true;
+  const firstResult = await host.promptAgent(value);
+  if (firstResult === "sent") return true;
+  if (firstResult === "cancelled") return false;
 
   const attach = () => host.requestAgentAttachment();
   const customResult = await options.onMissingAgent?.({ text: value, attach });
   const attached = options.onMissingAgent ? customResult === true : await attach();
   if (!attached) return false;
-  if (attached && (await host.promptAgent(value)) !== "sent") {
-    throw new Error("Selected agent tab is no longer available");
-  }
-  return true;
+  const retryResult = await host.promptAgent(value);
+  if (retryResult === "sent") return true;
+  if (retryResult === "cancelled") return false;
+  throw new Error("Selected agent tab is no longer available");
 }

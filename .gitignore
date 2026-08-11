@@ -5,6 +5,7 @@ node_modules/
 # Build output
 dist/
 apps/pragma/src-tauri/resources/plugins/
+apps/pragma/src-tauri/resources/web/
 build/
 out/
 .turbo/

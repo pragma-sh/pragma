@@ -1,0 +1,88 @@
+{
+  "expo": {
+    "name": "Pragma Go",
+    "slug": "pragma-go",
+    "scheme": "pragma",
+    "version": "0.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "sh.pragma.go",
+      "infoPlist": {
+        "CFBundleDisplayName": "Pragma Go"
+      }
+    },
+    "android": {
+      "package": "sh.pragma.go",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#0b0b0c"
+          }
+        }
+      ],
+      [
+        "expo-widgets",
+        {
+          "widgets": [
+            {
+              "name": "PragmaAttention",
+              "displayName": "Needs Attention",
+              "description": "How many agents are waiting on you.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "accessoryCircular",
+                  "accessoryRectangular",
+                  "accessoryInline"
+                ]
+              }
+            },
+            {
+              "name": "PragmaAgents",
+              "displayName": "Agent Status",
+              "description": "Agents working, needing attention, and done.",
+              "ios": { "supportedFamilies": ["systemMedium"] }
+            },
+            {
+              "name": "PragmaInbox",
+              "displayName": "Inbox",
+              "description": "The approvals and questions waiting for a decision.",
+              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+            },
+            {
+              "name": "PragmaProjects",
+              "displayName": "Projects",
+              "description": "Agent status rolled up per project.",
+              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+            }
+          ]
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c581900c-5a9e-4c9c-abba-e7b9981f5062"
+      }
+    },
+    "owner": "ekrich"
+  }
+}
