@@ -537,7 +537,8 @@ Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
   - **Shell output is not portable.** `pwd` under Git Bash prints an MSYS path
     (`/c/Users/…`) that never equals the Win32 path `canonicalize` returns. Assert on
     something the shell cannot reformat — e.g. `cat` a marker file that only resolves from
-    the intended cwd.
+    the intended cwd. Likewise, `stty` is unavailable in the Windows PowerShell shell;
+    query `$Host.UI.RawUI.WindowSize` when a test needs the active PTY dimensions.
   - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when

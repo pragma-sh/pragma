@@ -2279,7 +2279,12 @@ mod tests {
             .expect("interactive client resize");
 
         let (_scrollback, rx) = registry.attach(&id, None, None).expect("observer attach");
-        registry.write(&id, "stty size\r").expect("write");
+        let size_query = if cfg!(windows) {
+            "Write-Output \"$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)\"\r"
+        } else {
+            "stty size\r"
+        };
+        registry.write(&id, size_query).expect("write");
 
         let mut output = String::new();
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
