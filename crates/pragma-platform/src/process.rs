@@ -7,16 +7,20 @@
 //! belongs to the program it claims to (pids get recycled, and killing a
 //! recycled pid kills an unrelated program).
 //!
-//! Unix does this with `kill`/`pkill`/`ps`; Windows with `taskkill`/`tasklist`.
-//! Both are wrapped here so no caller has to know which it is running on.
+//! Process-table snapshots use `sysinfo`; termination and one-pid liveness
+//! checks use `kill`/`pkill`/`ps` on Unix and `taskkill`/`tasklist` on Windows.
+//! They are wrapped here so no caller has to know which it is running on.
 //!
-//! Every one of those helpers is a *console* program, which is why this module
-//! also owns [`command`]/[`hide_console`]: on Windows a console program spawned
-//! from a GUI process gets its own console window unless told otherwise.
+//! The platform helpers are *console* programs, which is why this module also
+//! owns [`command`]/[`hide_console`]: on Windows a console program spawned from
+//! a GUI process gets its own console window unless told otherwise.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// Creates a child-process command that never flashes a console window.
 ///
@@ -32,11 +36,10 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 /// Suppresses the console window Windows gives a console program spawned from
 /// a GUI process. No-op on Unix.
 ///
-/// Pragma's UI process shells out constantly — `git` on every status refresh,
-/// `powershell` on every process-table poll for port attribution, `wsl.exe`
-/// when enumerating distributions. Without `CREATE_NO_WINDOW` each of those is
-/// a console window that pops up, steals focus, and vanishes: not one stray
-/// window but a stream of them, on a timer.
+/// Pragma's UI process shells out frequently — `git` on status refresh and
+/// `wsl.exe` when enumerating distributions. Without `CREATE_NO_WINDOW` each
+/// invocation is a console window that pops up, steals focus, and vanishes.
+/// Process-table polling does not shell out; [`list_processes`] uses `sysinfo`.
 ///
 /// This is deliberately separate from the detach flags in `pragma-client`'s
 /// server spawn: those additionally cut the child loose from this process's
@@ -75,93 +78,52 @@ pub struct ProcessEntry {
 ///
 /// Used to attribute a listening TCP port to the terminal session that
 /// ultimately spawned the process holding it, which needs the whole
-/// parent/child chain rather than one process at a time.
+/// parent/child chain rather than one process at a time. The `System` is kept
+/// between calls so the two-second port poll refreshes a native snapshot
+/// instead of spawning and parsing a new `ps` or PowerShell process.
 pub fn list_processes() -> Result<HashMap<u32, ProcessEntry>, String> {
-    #[cfg(unix)]
-    {
-        let output = command("ps")
-            .args(["-axo", "pid=,ppid=,comm="])
-            .output()
-            .map_err(|error| format!("failed to inspect processes: {error}"))?;
-        if !output.status.success() {
-            return Err(format!("process inspection exited with {}", output.status));
-        }
-        let mut processes = parse_ps(&String::from_utf8_lossy(&output.stdout));
-        enrich_truncated_names(&mut processes);
-        Ok(processes)
-    }
-    #[cfg(windows)]
-    {
-        // `tasklist` does not report a parent pid, and `wmic` is deprecated and
-        // absent from recent Windows builds. CIM through PowerShell is the
-        // supported way to read the parent/child chain.
-        let output = command("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | \
-                 ConvertTo-Csv -NoTypeInformation",
-            ])
-            .output()
-            .map_err(|error| format!("failed to inspect processes: {error}"))?;
-        if !output.status.success() {
-            return Err(format!("process inspection exited with {}", output.status));
-        }
-        Ok(parse_win32_process_csv(&String::from_utf8_lossy(
-            &output.stdout,
-        )))
-    }
+    static PROCESS_SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
+
+    let mut system = PROCESS_SYSTEM
+        .get_or_init(|| Mutex::new(System::new()))
+        .lock()
+        .map_err(|error| format!("failed to inspect processes: {error}"))?;
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, process_refresh_kind());
+
+    Ok(system
+        .processes()
+        .iter()
+        .map(|(&pid, process)| {
+            (
+                pid.as_u32(),
+                ProcessEntry {
+                    parent_pid: process.parent().map_or(0, sysinfo::Pid::as_u32),
+                    name: process_entry_name(process),
+                },
+            )
+        })
+        .collect())
 }
 
-/// Parses `ps -axo pid=,ppid=,comm=` output.
-#[cfg_attr(not(unix), allow(dead_code))]
-fn parse_ps(output: &str) -> HashMap<u32, ProcessEntry> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse().ok()?;
-            let parent_pid = fields.next()?.parse().ok()?;
-            let command = fields.next()?;
-            Some((
-                pid,
-                ProcessEntry {
-                    parent_pid,
-                    name: base_name(command),
-                },
-            ))
-        })
-        .collect()
+/// Linux's kernel process name is capped at 15 bytes, so load `argv[0]` once
+/// when a process first appears. This preserves the full names the old `/proc`
+/// enrichment returned without rereading every command line on every poll.
+fn process_refresh_kind() -> ProcessRefreshKind {
+    let refresh_kind = ProcessRefreshKind::nothing();
+    #[cfg(target_os = "linux")]
+    let refresh_kind = refresh_kind.with_cmd(sysinfo::UpdateKind::OnlyIfNotSet);
+    refresh_kind
 }
 
-/// Parses `Win32_Process` rows converted to CSV.
-///
-/// The header row is skipped, and rows whose pid or parent pid do not parse are
-/// dropped rather than defaulted — a process attributed to the wrong parent
-/// would show its ports under an unrelated terminal session.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn parse_win32_process_csv(output: &str) -> HashMap<u32, ProcessEntry> {
-    output
-        .lines()
-        .skip_while(|line| !line.starts_with('"'))
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split("\",\"").collect();
-            let [pid, parent_pid, name] = fields.as_slice() else {
-                return None;
-            };
-            let pid = pid.trim_start_matches('"').parse().ok()?;
-            let parent_pid = parent_pid.parse().ok()?;
-            let name = name.trim_end_matches('"');
-            Some((
-                pid,
-                ProcessEntry {
-                    parent_pid,
-                    name: base_name(name),
-                },
-            ))
-        })
-        .collect()
+fn process_entry_name(process: &sysinfo::Process) -> String {
+    #[cfg(target_os = "linux")]
+    let name = process
+        .cmd()
+        .first()
+        .map_or(process.name(), std::ffi::OsString::as_os_str);
+    #[cfg(not(target_os = "linux"))]
+    let name = process.name();
+    base_name(&name.to_string_lossy())
 }
 
 /// Strips any directory part from a program path.
@@ -171,34 +133,6 @@ fn base_name(command: &str) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or(command)
         .to_string()
-}
-
-/// `ps comm=` is sourced from the kernel's `TASK_COMM_LEN` field, which Linux
-/// caps at 15 characters — longer names (`vite-dev-server`, `python3-watchdog`)
-/// arrive already truncated. `/proc/<pid>/cmdline` carries the untruncated
-/// `argv[0]`, so on Linux it is preferred when available, falling back to the
-/// `ps`-derived name for processes that exit before it can be read (or when
-/// `/proc` is unavailable, e.g. inside some sandboxes). macOS's `ps comm=` is
-/// not subject to this cap, so no enrichment is needed there.
-#[cfg(target_os = "linux")]
-fn enrich_truncated_names(processes: &mut HashMap<u32, ProcessEntry>) {
-    for (pid, entry) in processes.iter_mut() {
-        if let Some(name) = linux_cmdline_name(*pid) {
-            entry.name = name;
-        }
-    }
-}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn enrich_truncated_names(_processes: &mut HashMap<u32, ProcessEntry>) {}
-
-#[cfg(target_os = "linux")]
-fn linux_cmdline_name(pid: u32) -> Option<String> {
-    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let arg0 = bytes
-        .split(|&byte| byte == 0)
-        .find(|segment| !segment.is_empty())?;
-    Some(base_name(std::str::from_utf8(arg0).ok()?))
 }
 
 /// Ends a single process immediately.
@@ -265,7 +199,7 @@ pub fn kill_tree(pid: u32) -> bool {
 #[must_use]
 pub fn kill_process_tree(pid: u32) -> bool {
     let Ok(processes) = list_processes() else {
-        return kill(pid);
+        return kill_tree(pid);
     };
     let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
     for (&child_pid, entry) in &processes {
@@ -275,11 +209,14 @@ pub fn kill_process_tree(pid: u32) -> bool {
             .push(child_pid);
     }
     let mut descendants = vec![pid];
+    let mut visited = std::collections::HashSet::from([pid]);
     let mut frontier = vec![pid];
     while let Some(next) = frontier.pop() {
         for &child in children_by_parent.get(&next).into_iter().flatten() {
-            descendants.push(child);
-            frontier.push(child);
+            if visited.insert(child) {
+                descendants.push(child);
+                frontier.push(child);
+            }
         }
     }
     // The whole tree was captured from one snapshot before any signal went
@@ -294,12 +231,20 @@ pub fn kill_process_tree(pid: u32) -> bool {
     root_killed
 }
 
-/// Ends every process whose command line mentions `pattern`.
+/// Ends every matching process together with everything it spawned.
 ///
-/// This is the blunt fallback used when a recorded pid is unusable. On Windows
-/// the match is against the image name, so `pattern` is resolved to
-/// `pattern.exe` when it carries no extension.
+/// This is the blunt fallback used when a recorded pid is unusable. Matching
+/// only roots first is important: killing a parent before discovering its
+/// children reparents them and loses the ancestry needed for cleanup. When the
+/// process table cannot be read, the platform command remains a best-effort
+/// last resort (`taskkill /T` still handles the full tree on Windows).
 pub fn kill_matching(pattern: &str) {
+    if let Ok(processes) = list_processes() {
+        for pid in matching_process_roots(&processes, pattern) {
+            let _ = kill_process_tree(pid);
+        }
+        return;
+    }
     #[cfg(unix)]
     {
         let _ = command("pkill").args(["-KILL", "-f", pattern]).status();
@@ -314,8 +259,44 @@ pub fn kill_matching(pattern: &str) {
         } else {
             format!("{pattern}.exe")
         };
-        let _ = command("taskkill").args(["/F", "/IM", &image]).output();
+        let _ = command("taskkill")
+            .args(["/F", "/T", "/IM", &image])
+            .output();
     }
+}
+
+/// Finds matching process roots, excluding a match descended from another
+/// match so each tree is snapshotted and killed exactly once.
+fn matching_process_roots(processes: &HashMap<u32, ProcessEntry>, pattern: &str) -> Vec<u32> {
+    let pattern = pattern.to_ascii_lowercase();
+    let matching: std::collections::HashSet<u32> = processes
+        .iter()
+        .filter_map(|(&pid, entry)| {
+            entry
+                .name
+                .to_ascii_lowercase()
+                .contains(&pattern)
+                .then_some(pid)
+        })
+        .collect();
+    matching
+        .iter()
+        .copied()
+        .filter(|pid| {
+            let mut visited = std::collections::HashSet::new();
+            let mut parent = processes.get(pid).map(|entry| entry.parent_pid);
+            while let Some(parent_pid) = parent {
+                if matching.contains(&parent_pid) {
+                    return false;
+                }
+                if !visited.insert(parent_pid) {
+                    break;
+                }
+                parent = processes.get(&parent_pid).map(|entry| entry.parent_pid);
+            }
+            true
+        })
+        .collect()
 }
 
 /// Reads the executable name a pid currently belongs to.
@@ -373,77 +354,68 @@ fn parse_tasklist_image_name(output: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{
-        is_running, list_processes, parse_ps, parse_tasklist_image_name, parse_win32_process_csv,
+        is_running, list_processes, matching_process_roots, parse_tasklist_image_name,
         process_name, ProcessEntry,
     };
 
     #[test]
     fn the_host_process_table_includes_this_process() {
         let processes = list_processes().expect("the process table is listable");
-        assert!(
-            processes.contains_key(&std::process::id()),
-            "the running test process must appear in the process table"
+        let current = processes
+            .get(&std::process::id())
+            .expect("the running test process must appear in the process table");
+        assert!(!current.name.is_empty(), "the process name must be present");
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            current.name,
+            std::env::current_exe()
+                .expect("the test executable path is available")
+                .file_name()
+                .expect("the test executable has a file name")
+                .to_string_lossy(),
+            "Linux process names must not be truncated to TASK_COMM_LEN",
         );
     }
 
     #[test]
-    fn ps_rows_yield_pid_parent_and_name() {
-        let parsed = parse_ps("  501   1 /bin/zsh\n  502 501 node\n");
-        assert_eq!(
-            parsed.get(&501),
-            Some(&ProcessEntry {
-                parent_pid: 1,
-                name: "zsh".to_string()
-            })
-        );
-        assert_eq!(
-            parsed.get(&502),
-            Some(&ProcessEntry {
-                parent_pid: 501,
-                name: "node".to_string()
-            })
-        );
-    }
+    fn matching_processes_nested_under_a_match_share_one_root() {
+        let processes = HashMap::from([
+            (
+                10,
+                ProcessEntry {
+                    parent_pid: 1,
+                    name: "pragma-server".to_string(),
+                },
+            ),
+            (
+                11,
+                ProcessEntry {
+                    parent_pid: 10,
+                    name: "pragma-server-helper".to_string(),
+                },
+            ),
+            (
+                12,
+                ProcessEntry {
+                    parent_pid: 11,
+                    name: "bun".to_string(),
+                },
+            ),
+            (
+                20,
+                ProcessEntry {
+                    parent_pid: 1,
+                    name: "PRAGMA-SERVER.EXE".to_string(),
+                },
+            ),
+        ]);
 
-    #[test]
-    fn win32_process_rows_yield_pid_parent_and_name() {
-        let output = "\"ProcessId\",\"ParentProcessId\",\"Name\"\r\n\
-                      \"4242\",\"1200\",\"node.exe\"\r\n\
-                      \"1200\",\"800\",\"pwsh.exe\"\r\n";
-        let parsed = parse_win32_process_csv(output);
-        assert_eq!(
-            parsed.get(&4242),
-            Some(&ProcessEntry {
-                parent_pid: 1200,
-                name: "node.exe".to_string()
-            })
-        );
-        assert_eq!(
-            parsed.get(&1200),
-            Some(&ProcessEntry {
-                parent_pid: 800,
-                name: "pwsh.exe".to_string()
-            })
-        );
-    }
-
-    /// A row that cannot be parsed must be dropped, not defaulted: a process
-    /// recorded with parent pid 0 would be attributed to the wrong terminal
-    /// session and leak another session's ports into this one's port list.
-    #[test]
-    fn unparsable_process_rows_are_dropped() {
-        let output = "\"ProcessId\",\"ParentProcessId\",\"Name\"\r\n\
-                      \"notapid\",\"1200\",\"node.exe\"\r\n\
-                      \"4242\",\"alsonotapid\",\"node.exe\"\r\n";
-        assert!(parse_win32_process_csv(output).is_empty());
-    }
-
-    #[test]
-    fn a_header_only_process_listing_is_empty() {
-        assert!(
-            parse_win32_process_csv("\"ProcessId\",\"ParentProcessId\",\"Name\"\r\n").is_empty()
-        );
+        let mut roots = matching_process_roots(&processes, "pragma-server");
+        roots.sort_unstable();
+        assert_eq!(roots, [10, 20]);
     }
 
     #[test]

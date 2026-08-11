@@ -20,6 +20,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 regex = "1"
 netstat2 = "0.11"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 reqwest = { version = "0.12", default-features = false, features = [
   "blocking",
   "json",

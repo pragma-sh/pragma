@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 pragma-constants = { path = "../../packages/constants" }
+sysinfo = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

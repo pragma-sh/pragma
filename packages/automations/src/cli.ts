@@ -324,7 +324,26 @@ async function handle(command: Command): Promise<void> {
 
 class StdinLines {
   constructor() {
-    readStdinLines((line) => void this.dispatch(line));
+    readStdinLines(
+      (line) => void this.dispatch(line),
+      () => this.shutdown(),
+    );
+  }
+
+  private shutdown(): void {
+    // The server owns this sidecar through its stdin pipe. Parent death closes
+    // the pipe even after SIGKILL, so release automation-created listeners and
+    // timers before forcing the Bun process to leave no orphan behind.
+    for (const automation of loaded.values()) {
+      try {
+        automation.dispose?.();
+      } catch {
+        // stdout commonly closes with stdin; cleanup remains best-effort and
+        // must not turn parent death into another uncaught-error write.
+      }
+    }
+    loaded.clear();
+    process.exit(0);
   }
 
   private async dispatch(line: string): Promise<void> {
