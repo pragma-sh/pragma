@@ -21,7 +21,9 @@
     "**/target/**",
     "**/.turbo/**",
     "**/src/generated/**",
-    "**/src-tauri/gen/**"
+    "**/src-tauri/gen/**",
+    "**/.next/**",
+    "**/.source/**"
   ],
   "overrides": [
     {
