@@ -139,6 +139,33 @@ converting it to a `serde_json::Value` and encoding that with
 `cleared` is distinct from `stopped`: use it when an agent exits without a
 meaningful result to show.
 
+## Fanout
+
+`pragma-cli fanout` talks **directly to `pragma-server`**, never through the
+desktop broker: a fanout started from an agent's own terminal behaves the same
+whether Pragma is running or not.
+
+```sh
+pragma-cli fanout create "Implement token refresh and tests" \
+  --reasoning high --agent opencode --agent claude-code
+pragma-cli fanout show [<id>] [--watch]
+pragma-cli fanout read [<id>] --all --lines 100
+pragma-cli fanout send [<id>] --all --message "Also include migration docs"
+pragma-cli fanout retry [<id>] --member <member-id>
+pragma-cli fanout cancel [<id>]
+pragma-cli fanout pick [<id>] --member <member-id>   # destructive; --yes to skip the prompt
+```
+
+There is deliberately **no `fanout list`**: a parent owns at most one active
+fanout, so an omitted id resolves from `$PRAGMA_FANOUT_ID`, then from the
+current worktree (as a parent or as an attempt). `--member` defaults to
+`$PRAGMA_FANOUT_MEMBER_ID`, which every attempt session exports.
+
+The CLI only supplies defaults — the request that leaves is the same one
+`@pragma/sdk` sends. `create` exits non-zero on a partial provisioning while
+still printing the persisted members, and `pick` requires a typed `yes` (or
+`--yes`) after printing every worktree, branch, and session it will delete.
+
 ## How It Works
 
 The CLI reads `PRAGMA_SERVER_SOCKET` first, falling back to the legacy

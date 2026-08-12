@@ -36,6 +36,40 @@ await reportAttention({ agent: "opencode", kind: "question" });
 await reportCleared({ agent: "opencode" });
 ```
 
+## Fanouts
+
+`client.fanouts` mirrors `pragma-cli fanout` over the same host RPC:
+
+```ts
+const { fanout, partial, failures } = await client.fanouts.create({
+  projectId,
+  parent: { kind: "existing", worktreeId: parentWorktreeId },
+  prompt: "Implement token refresh and tests",
+  defaultReasoningId: "high",
+  members: [{ selector: "pragma.opencode" }, { selector: "pragma.claude-code" }],
+});
+
+const output = await client.fanouts.read({ fanoutId: fanout.id, all: true, lines: 200 });
+output.targets[0].raw; // Uint8Array — base64 never reaches callers
+
+await client.fanouts.send({
+  fanoutId: fanout.id,
+  target: { kind: "all" },
+  message: "Also include migration docs",
+});
+
+for await (const event of client.fanouts.subscribe({ fanoutId: fanout.id })) {
+  // "snapshot" first, then full-replacement "delta"s
+}
+
+// Destructive: merges the winner into the parent and deletes every attempt.
+await client.fanouts.pick({ fanoutId: fanout.id, memberId });
+```
+
+Every method takes `{ signal }`, and `get`/`read`/mutations accept either a
+`fanoutId` or any `worktreeId` that belongs to the fanout. Domain failures
+arrive as `PragmaGatewayError` with the host's `FanoutFailure` in `.details`.
+
 ## Rules
 
 - Never shell out or hand-build gateway routes in a plugin; import from `@pragma/sdk`.

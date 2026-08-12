@@ -187,6 +187,14 @@ than no guide.
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
+- Fanout orchestration (one prompt into several isolated attempts, then keeping
+  one) lives on the host: the durable record and the state machine in
+  `crates/pragma-server/src/fanouts.rs`, the side effects behind its
+  `FanoutHost` seam in `crates/pragma-server/src/fanout_host.rs`, and the pure
+  rules (selector resolution, branch naming, status roll-up, scratchpad
+  promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
+  (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
+  callers of the same `fanouts` RPC — never a second implementation.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
@@ -237,6 +245,7 @@ bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
 cargo run -p pragma-gateway -- --socket /path/to/daemon.sock # Run the localhost HTTP gateway
 cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
+cargo run -p pragma-cli -- fanout create "Add token refresh" --agent opencode --agent claude-code # Fan one prompt into two isolated attempts
 ```
 
 ## Code standards (consistent across TypeScript & Rust)
