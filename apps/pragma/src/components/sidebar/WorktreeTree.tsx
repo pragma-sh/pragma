@@ -54,6 +54,14 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
+import {
+  FanoutIndicator,
+  FanoutMembersSlot,
+  useFanoutForParent,
+} from "@/components/sidebar/FanoutGroup";
+import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
+import { attemptWorktreeIds } from "@/lib/fanout";
+import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
 
 const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
@@ -279,14 +287,18 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const hidden = worktrees.filter((w) => w.hidden);
   const mergedByWorktreeId = useWorktreeMergedStatus(worktrees);
   const prLifecycleByWorktreeId = useWorktreePrLifecycles(worktrees, authenticated);
+  const { fanouts } = useFanouts();
+  // Attempts are rendered under their fanout group, not as ordinary children:
+  // a nested worktree and an attempt look identical from `parentId` alone.
+  const attempts = useMemo(() => attemptWorktreeIds(fanouts), [fanouts]);
   const tree = useMemo(
     () =>
       buildWorktreeTree(worktrees, {
-        predicate: (w) => !w.hidden,
+        predicate: (w) => !w.hidden && !attempts.has(w.id),
         pinTimes,
         prLifecycles: prLifecycleByWorktreeId,
       }),
-    [worktrees, pinTimes, prLifecycleByWorktreeId],
+    [worktrees, attempts, pinTimes, prLifecycleByWorktreeId],
   );
 
   if (tree.length === 0 && hidden.length === 0) {
@@ -397,6 +409,7 @@ interface WorktreeRowLabelState {
   selected: boolean;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
+  worktreeId: string;
 }
 
 interface WorktreeRowLabelActions {
@@ -412,13 +425,6 @@ interface WorktreeRowLabelProps extends ComponentPropsWithoutRef<"div"> {
   row: WorktreeRowLabelState;
   actions: WorktreeRowLabelActions;
   rename: RenameApi;
-}
-
-/** Class for a worktree row's container, highlighting the selected one. */
-function worktreeRowClass(selected: boolean): string {
-  return selected
-    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-    : "text-sidebar-foreground hover:bg-sidebar-accent/70";
 }
 
 /** The expand/collapse caret for a worktree row (or a spacer for childless rows). */
@@ -460,43 +466,6 @@ function WorktreeNameField({ rename, label }: { rename: RenameApi; label: string
       onClick={(event) => event.stopPropagation()}
       onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
     />
-  );
-}
-
-/** The clickable primary area: branch icon, name/rename field, agent status dot. */
-function WorktreeRowPrimaryButton({
-  isMain,
-  merged,
-  prLifecycle,
-  WorktreeIcon,
-  agentStatus,
-  handleSelect,
-  startRename,
-  rename,
-  label,
-}: {
-  isMain: boolean;
-  merged: boolean;
-  prLifecycle: GitHubPrLifecycle | undefined;
-  WorktreeIcon: typeof GitBranch;
-  agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
-  handleSelect: () => void;
-  startRename: () => void;
-  rename: RenameApi;
-  label: string;
-}) {
-  // Prefer PR lifecycle color (open/merged/closed); fall back to local-merged green.
-  const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
-  return (
-    <button
-      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-      onClick={handleSelect}
-      onDoubleClick={isMain ? undefined : startRename}
-    >
-      <WorktreeIcon className={cn("size-3.5 shrink-0", iconClass)} />
-      <WorktreeNameField label={label} rename={rename} />
-      <AgentStatusDot status={agentStatus} />
-    </button>
   );
 }
 
@@ -595,6 +564,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       selected,
       WorktreeIcon,
       agentStatus,
+      worktreeId,
     } = row;
     const {
       startRename,
@@ -604,44 +574,43 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       handleTogglePin,
       openDelete,
     } = actions;
+    const iconClass = prLifecycleIconClass(prLifecycle) ?? (merged ? "text-success" : undefined);
     return (
-      <div
+      <WorktreeRowFrame
         ref={ref}
-        className={cn(
-          "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
-          worktreeRowClass(selected),
-          className,
-        )}
-        style={{ ...style, paddingLeft: 8 + depth * 14 }}
+        className={className}
+        style={style}
+        depth={depth}
+        selected={selected}
+        caret={
+          <WorktreeExpandCaret
+            expanded={expanded}
+            hasChildren={hasChildren}
+            label={label}
+            toggleExpanded={toggleExpanded}
+          />
+        }
+        onActivate={handleSelect}
+        onDoubleActivate={isMain ? undefined : startRename}
+        icon={<WorktreeIcon className={cn("size-3.5 shrink-0", iconClass)} />}
+        label={<WorktreeNameField label={label} rename={rename} />}
+        status={<AgentStatusDot status={agentStatus} />}
+        trailing={
+          <>
+            <FanoutIndicator label={label} worktreeId={worktreeId} />
+            {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
+            <WorktreeRowActions
+              handleCreateChild={handleCreateChild}
+              handleTogglePin={handleTogglePin}
+              isMain={isMain}
+              label={label}
+              openDelete={openDelete}
+              pinned={pinned}
+            />
+          </>
+        }
         {...props}
-      >
-        <WorktreeExpandCaret
-          expanded={expanded}
-          hasChildren={hasChildren}
-          label={label}
-          toggleExpanded={toggleExpanded}
-        />
-        <WorktreeRowPrimaryButton
-          agentStatus={agentStatus}
-          handleSelect={handleSelect}
-          isMain={isMain}
-          label={label}
-          merged={merged}
-          prLifecycle={prLifecycle}
-          rename={rename}
-          startRename={startRename}
-          WorktreeIcon={WorktreeIcon}
-        />
-        {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
-        <WorktreeRowActions
-          handleCreateChild={handleCreateChild}
-          handleTogglePin={handleTogglePin}
-          isMain={isMain}
-          label={label}
-          openDelete={openDelete}
-          pinned={pinned}
-        />{" "}
-      </div>
+      />
     );
   },
 );
@@ -766,7 +735,10 @@ function WorktreeRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const selected = workspace.selectedWorktreeId === node.worktree.id;
   const label = worktreeLabel(node.worktree);
-  const hasChildren = node.children.length > 0;
+  // Fanout attempts hang under the row like children do, so the caret has to
+  // account for them — otherwise a parent with only attempts can't be collapsed.
+  const fanout = useFanoutForParent(node.worktree.id);
+  const hasChildren = node.children.length > 0 || fanout !== null;
   const isMain = node.worktree.isMain;
   const pinned = useWorktreePins().has(node.worktree.id);
   const merged = mergedByWorktreeId[node.worktree.id] === true;
@@ -816,6 +788,7 @@ function WorktreeRow({
               pinned,
               selected,
               WorktreeIcon,
+              worktreeId: node.worktree.id,
             }}
           />
         </ContextMenuTrigger>
@@ -837,18 +810,51 @@ function WorktreeRow({
           onOpenChange={setDeleteOpen}
         />
       ) : null}
-      {expanded &&
-        node.children.map((child) => (
-          <WorktreeRow
-            key={child.worktree.id}
-            depth={depth + 1}
-            node={child}
-            onCreateChild={onCreateChild}
-            mergedByWorktreeId={mergedByWorktreeId}
-            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-          />
-        ))}
+      {expanded ? (
+        <WorktreeChildren
+          depth={depth}
+          mergedByWorktreeId={mergedByWorktreeId}
+          node={node}
+          onCreateChild={onCreateChild}
+          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * What hangs under an expanded worktree row: its fanout attempts (when it has
+ * a fanout), then its ordinary child worktrees. The attempts are already
+ * filtered out of `node.children`, so nothing is rendered twice.
+ */
+function WorktreeChildren({
+  node,
+  depth,
+  onCreateChild,
+  mergedByWorktreeId,
+  prLifecycleByWorktreeId,
+}: {
+  node: WorktreeNode;
+  depth: number;
+  onCreateChild: () => void;
+  mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+}) {
+  return (
+    <>
+      <FanoutMembersSlot depth={depth + 1} worktreeId={node.worktree.id} />
+      {node.children.map((child) => (
+        <WorktreeRow
+          key={child.worktree.id}
+          depth={depth + 1}
+          node={child}
+          onCreateChild={onCreateChild}
+          mergedByWorktreeId={mergedByWorktreeId}
+          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+        />
+      ))}
+    </>
   );
 }
 

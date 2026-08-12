@@ -10,6 +10,7 @@ import { KanbanProvider } from "@/state/kanban-context";
 import { OpenPortsProvider } from "@/state/open-ports-context";
 import { ThemeProvider } from "@/state/theme-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
+import { FanoutsProvider } from "@/state/fanouts-context";
 import { WorktreeCreationProvider } from "@/state/worktree-creation-context";
 
 function App() {
@@ -24,9 +25,11 @@ function App() {
                   <AutomationsProvider>
                     <ConfirmCloseProvider>
                       <WorktreeCreationProvider>
-                        <WorkspaceShell />
-                        <GitHubSetupModal />
-                        <AiSetupModal />
+                        <FanoutsProvider>
+                          <WorkspaceShell />
+                          <GitHubSetupModal />
+                          <AiSetupModal />
+                        </FanoutsProvider>
                       </WorktreeCreationProvider>
                     </ConfirmCloseProvider>
                   </AutomationsProvider>

@@ -30,6 +30,8 @@ import { useKanban } from "@/state/kanban-context";
 import { LeftSidebarProvider } from "@/state/left-sidebar-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { FanoutComparison } from "@/components/fanout/FanoutComparison";
+import { useFanouts } from "@/state/fanouts-context";
 import { useWorktreeCreation } from "@/state/worktree-creation-context";
 
 type Workspace = ReturnType<typeof useWorkspace>;
@@ -221,6 +223,14 @@ function WorkspaceContent({
   kanban: ReturnType<typeof useKanban>;
   workspace: Workspace;
 }) {
+  const fanouts = useFanouts();
+  const comparing = fanouts.fanouts.find((fanout) => fanout.id === fanouts.comparingFanoutId);
+  // Comparison replaces the centre workspace and the right sidebar rather than
+  // overlaying them: native browser webviews float above HTML, so an overlay
+  // would be clipped by whatever is behind it.
+  if (comparing) {
+    return <FanoutComparison fanout={comparing} />;
+  }
   return (
     <>
       <section className="app-content bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

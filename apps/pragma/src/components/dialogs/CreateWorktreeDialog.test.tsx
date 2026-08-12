@@ -13,6 +13,23 @@ vi.mock("@/lib/tauri", () => ({
   githubFetchAndSync: (...args: unknown[]) => githubFetchAndSyncMock(...args),
 }));
 
+const createFanoutMock = vi.fn();
+const openComparisonMock = vi.fn();
+
+vi.mock("@/state/fanouts-context", () => ({
+  useFanouts: () => ({
+    fanouts: [],
+    comparingFanoutId: null,
+    openComparison: openComparisonMock,
+    closeComparison: vi.fn(),
+    create: createFanoutMock,
+    retry: vi.fn(),
+    cancel: vi.fn(),
+    send: vi.fn(),
+    pick: vi.fn(),
+  }),
+}));
+
 vi.mock("@/state/worktree-creation-context", () => ({
   useWorktreeCreation: () => ({
     creation: null,
@@ -58,7 +75,10 @@ const newWorktree: Worktree = {
   createdAt: "2026-01-02",
 };
 
+const selectWorktreeMock = vi.fn();
+
 const workspaceMock = {
+  selectWorktree: (...args: unknown[]) => selectWorktreeMock(...args),
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   selectedWorktree: { id: "main", isMain: true } as Partial<Worktree>,
@@ -223,5 +243,112 @@ describe("CreateWorktreeDialog", () => {
         expect.objectContaining({ syncWorktreeId: null }),
       ),
     );
+  });
+});
+
+describe("CreateWorktreeDialog fanout mode", () => {
+  beforeEach(() => {
+    listPluginAgentsMock.mockReturnValue([
+      { id: "claude", name: "Claude", iconDataUrl: null, start: ["claude"] },
+      { id: "opencode", name: "OpenCode", iconDataUrl: null, start: ["opencode"] },
+    ]);
+    resolvePluginAgentModelsMock.mockResolvedValue([
+      { id: "sonnet", name: "Sonnet", reasoning: [] },
+    ]);
+    createFanoutMock.mockResolvedValue({
+      fanout: { id: "f1", parentWorktreeId: "main", members: [] },
+      partial: false,
+      failures: [],
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("starts in single mode and only shows attempt rows after switching", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Single" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Attempts")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create worktree/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+
+    expect(screen.getByText("Attempts")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /Create & Fanout/ })).toBeInTheDocument();
+  });
+
+  it("preserves the prompt when switching modes", () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Implement token refresh" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Implement token refresh");
+  });
+
+  it("adds and removes attempt rows down to the minimum", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+    expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(4);
+
+    for (const remove of screen.getAllByRole("button", { name: "Remove attempt" }).slice(0, 2)) {
+      fireEvent.click(remove);
+    }
+    expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(2);
+    // The minimum is enforced by disabling removal, not by silently dropping to one.
+    for (const remove of screen.getAllByRole("button", { name: "Remove attempt" })) {
+      expect(remove).toBeDisabled();
+    }
+  });
+
+  it("always creates a new coordination parent without opening the comparison", async () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
+
+    // A branch name is required: the fanout always branches its own parent.
+    expect(screen.getByRole("button", { name: /Create & Fanout/ })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Branch name"), {
+      target: { value: "fanout/token-refresh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+    await waitFor(() => expect(createFanoutMock).toHaveBeenCalledTimes(1));
+    const request = createFanoutMock.mock.calls[0]![0] as {
+      parent: { kind: string; branch?: string; sourceWorktreeId?: string; title?: string | null };
+      prompt: string;
+      members: unknown[];
+    };
+    expect(request.parent).toEqual({
+      kind: "new",
+      sourceWorktreeId: "main",
+      branch: "fanout/token-refresh",
+      title: null,
+    });
+    expect(request.prompt).toBe("Do the thing");
+    expect(request.members).toHaveLength(2);
+    // Nothing has run yet, so the comparison would only show an empty state.
+    expect(openComparisonMock).not.toHaveBeenCalled();
+  });
+
+  it("has no ceiling on attempt rows", () => {
+    render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+
+    for (let index = 0; index < 10; index += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
+    }
+
+    expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(12);
+    expect(screen.getByRole("button", { name: "Add agent" })).toBeEnabled();
   });
 });
