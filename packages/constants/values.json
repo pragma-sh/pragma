@@ -158,7 +158,16 @@
     "deviceCodeUrl": "https://github.com/login/device/code",
     "deviceVerifyUrl": "https://github.com/login/device",
     "accessTokenUrl": "https://github.com/login/oauth/access_token",
-    "apiBaseUrl": "https://api.github.com"
+    "apiBaseUrl": "https://api.github.com",
+    "homepageUrl": "https://github.com/pragma-sh/pragma",
+    "prSignature": {
+      "enabled": true,
+      "startMarker": "<!-- pragma:pr-signature -->",
+      "endMarker": "<!-- /pragma:pr-signature -->",
+      "badgeUrl": "https://raw.githubusercontent.com/pragma-sh/pragma/main/assets/pr/open-worktree.svg",
+      "badgeAlt": "Open worktree in Pragma",
+      "openUrl": "https://pragma-app.sh/open"
+    }
   },
   "app": {
     "name": "Pragma",

@@ -138,6 +138,7 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
+├── assets/                       # Images referenced by URL from outside the app (see assets/pr/README.md)
 ├── skills/                       # Canonical first-party skill sources; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -154,7 +155,8 @@ than no guide.
 
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
-  `agentStatus` = `{ notificationsEnabled, soundName }`). Keyboard shortcuts are separate:
+  `agentStatus` = `{ notificationsEnabled, soundName }`, the "Created with Pragma"
+  pull-request footer under `github` = `{ prSignature }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
   belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`) so Rust and
   TS agree, never hard-coded in one language.
@@ -170,6 +172,10 @@ than no guide.
 - Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
   project root for project clips) and are read through the owning host, so a remote
   project's clips work the same as a local one's.
+- An image referenced by URL from **outside** the app (today: the pull-request footer's
+  "Open worktree" button) → `assets/`, at the repo root and outside every package. Its raw
+  URL on `main` is a published contract, so those paths are append-only —
+  see `assets/pr/README.md`.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
@@ -524,6 +530,12 @@ Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
   jsdom (`src/test/setup.ts`); mock the Tauri API rather than the native shell.
 - **Rust:** `#[cfg(test)] mod tests` next to the code; `cargo test --workspace`.
 - Add a test with every behavior change. Keep tests fast and deterministic.
+- **Never build a package from a `pretest` hook.** `test` depends on `build` in
+  `turbo.json`, so a package's own bundle is already there. A `pretest` that
+  runs `bun run build` races the turbo `build` task for the same package — two bundlers
+  writing one `dist/`, and the loser reads a half-written file
+  (`ENOENT: … dist/index.cjs`). It only fires when both land in the same wave, so it
+  passes locally and fails in CI.
 - **A test must pass on all three platforms, and CI only proves that for the ones it
   runs.** The `rust-windows` job runs the full suite, so a POSIX-only assumption is a red
   build, not a local curiosity. The recurring offenders:
