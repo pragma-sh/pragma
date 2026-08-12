@@ -101,7 +101,7 @@ async function parseJson<T>(response: Response): Promise<T> {
 }
 
 async function gatewayError(response: Response): Promise<PragmaGatewayError> {
-  let body: { code?: string; message?: string } = {};
+  let body: { code?: string; message?: string; details?: unknown } = {};
   try {
     body = (await response.json()) as typeof body;
   } catch (error) {
@@ -110,6 +110,7 @@ async function gatewayError(response: Response): Promise<PragmaGatewayError> {
   return new PragmaGatewayError(body.message ?? `gateway returned ${response.status}`, {
     code: body.code ?? "internal",
     httpStatus: response.status,
+    details: body.details,
   });
 }
 

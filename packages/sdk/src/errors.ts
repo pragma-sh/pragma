@@ -2,14 +2,24 @@
 export class PragmaGatewayError extends Error {
   readonly code: string;
   readonly httpStatus: number;
+  /**
+   * Domain error detail the gateway code cannot express — for a fanout, the
+   * `FanoutFailure` (its own failure code, the member it belongs to, and the
+   * finalize stage it stopped at). Present only when the host sent one.
+   */
+  readonly details?: unknown;
   override readonly cause?: unknown;
 
-  constructor(message: string, details: { code: string; httpStatus: number; cause?: unknown }) {
-    super(message, { cause: details.cause });
+  constructor(
+    message: string,
+    info: { code: string; httpStatus: number; details?: unknown; cause?: unknown },
+  ) {
+    super(message, { cause: info.cause });
     this.name = "PragmaGatewayError";
-    this.code = details.code;
-    this.httpStatus = details.httpStatus;
-    this.cause = details.cause;
+    this.code = info.code;
+    this.httpStatus = info.httpStatus;
+    this.details = info.details;
+    this.cause = info.cause;
   }
 }
 
