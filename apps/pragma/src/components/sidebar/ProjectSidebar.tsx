@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
   const { collapsed, width, toggleCollapsed, setWidth } = useLeftSidebar();
@@ -84,7 +85,12 @@ export function ProjectSidebar() {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-        <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
+        <WorktreeTree
+          onCreateChild={(parentWorktreeId) => {
+            setWorktreeParentId(parentWorktreeId);
+            setWorktreeDialogOpen(true);
+          }}
+        />
       </div>
       <div className="p-3">
         <OpenPortsCard />
@@ -98,15 +104,21 @@ export function ProjectSidebar() {
           <AddMenu
             worktreeDisabled={!mainWorktreeId}
             onAddProject={() => setProjectDialogOpen(true)}
-            onNewWorktree={() => setWorktreeDialogOpen(true)}
+            onNewWorktree={() => {
+              setWorktreeParentId(mainWorktreeId);
+              setWorktreeDialogOpen(true);
+            }}
           />
         </div>
       </div>
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog
         open={worktreeDialogOpen}
-        onOpenChange={setWorktreeDialogOpen}
-        parentWorktreeId={mainWorktreeId ?? undefined}
+        onOpenChange={(open) => {
+          setWorktreeDialogOpen(open);
+          if (!open) setWorktreeParentId(null);
+        }}
+        parentWorktreeId={worktreeParentId ?? mainWorktreeId ?? undefined}
       />
     </aside>
   );
