@@ -124,12 +124,13 @@ async function load(
     token: command.gatewayToken || UNAVAILABLE_GATEWAY_TOKEN,
   });
   const plugins = await resolvePlugins(roots, command.bundledDir);
-  // A single shared context (first root as project) resolves async model
-  // providers, which shell out through the SDK to the local gateway.
-  const ctx = contextFor(sdk, "pragma.catalog", roots[0]);
+  // Each plugin resolves its async model providers against its *own* project
+  // root; a global or bundled plugin falls back to the primary root. Sharing
+  // one context here let a project-scoped override answer for every project.
   const catalog = await assembleCatalog(
     plugins,
-    ctx,
+    (plugin) =>
+      contextFor(sdk, plugin.pluginId, plugin.scope === "project" ? plugin.root : roots[0]),
     (pluginId, agentId, error) =>
       emit({
         type: "log",
