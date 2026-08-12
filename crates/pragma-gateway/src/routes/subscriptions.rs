@@ -28,6 +28,7 @@ fn parse_event(event: &str) -> Option<ProtocolEventKind> {
         "automationPending" => ProtocolEventKind::AutomationPending,
         "automationsChanged" => ProtocolEventKind::AutomationsChanged,
         "workspace" => ProtocolEventKind::Workspace,
+        "fanouts" => ProtocolEventKind::Fanouts,
         _ => return None,
     })
 }

@@ -38,6 +38,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "plugins" => ProtocolRpcMethod::Plugins,
         "tunnel" => ProtocolRpcMethod::Tunnel,
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
+        "fanouts" => ProtocolRpcMethod::Fanouts,
         _ => return None,
     })
 }
@@ -57,6 +58,10 @@ mod tests {
         assert!(matches!(
             parse_method("plugins"),
             Some(ProtocolRpcMethod::Plugins)
+        ));
+        assert!(matches!(
+            parse_method("fanouts"),
+            Some(ProtocolRpcMethod::Fanouts)
         ));
         assert!(parse_method("missing").is_none());
     }

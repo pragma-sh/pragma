@@ -111,6 +111,17 @@ impl WatcherSupervisor {
         }
     }
 
+    /// True when a watcher process is currently attached to this session.
+    ///
+    /// A follow-up is typed into the agent's TUI by that watcher, so "is there
+    /// one" is the closest the host can get to "was this delivered" without a
+    /// harness-level acknowledgement.
+    pub fn is_watching(&self, tab_id: &str) -> bool {
+        self.children
+            .lock()
+            .is_ok_and(|children| children.contains_key(tab_id))
+    }
+
     /// Brings the running watcher set in line with `desired`: reaps exited
     /// children, stops watchers whose session ended or whose agent changed,
     /// replaces watchers holding stale gateway credentials, and starts the

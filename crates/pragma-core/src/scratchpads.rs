@@ -79,6 +79,47 @@ pub fn list(root: &str) -> CoreResult<Vec<ScratchpadFile>> {
     Ok(files)
 }
 
+/// Path of a scratchpad's sibling comment thread.
+///
+/// The name is part of the `@pragma/scratchpad-contract` file contract; keep
+/// it in step with `scratchpadCommentsPath` there.
+#[must_use]
+pub fn comments_path(file_path: &str) -> String {
+    format!("{file_path}.comments.json")
+}
+
+/// Clears the attached-agent fields from a scratchpad's managed frontmatter.
+///
+/// Used when a scratchpad is promoted out of a worktree that is about to be
+/// deleted: the tab it pointed at will not exist, and a dangling attachment
+/// silently swallows every prompt sent to it. Everything else about the file —
+/// id, title, creation time, body — is preserved byte for byte.
+#[must_use]
+pub fn detach_agent(source: &str) -> String {
+    let prefix = format!("{}: ", CONSTANTS.scratchpads.frontmatter_key);
+    source
+        .split_inclusive('\n')
+        .map(|line| {
+            let Some(json) = line.trim_end_matches(['\n', '\r']).strip_prefix(&prefix) else {
+                return line.to_string();
+            };
+            let Ok(Value::Object(mut metadata)) = serde_json::from_str::<Value>(json) else {
+                return line.to_string();
+            };
+            metadata.insert("agentTabId".to_string(), Value::Null);
+            metadata.insert("agentId".to_string(), Value::Null);
+            let ending = line
+                .strip_prefix(line.trim_end_matches(['\n', '\r']))
+                .unwrap_or("");
+            let mut line = String::with_capacity(json.len() + prefix.len() + ending.len());
+            line.push_str(&prefix);
+            line.push_str(&Value::Object(metadata).to_string());
+            line.push_str(ending);
+            line
+        })
+        .collect()
+}
+
 /// Reads the managed metadata line, rejecting unsupported contract versions.
 fn parse_frontmatter(source: &str) -> Option<ScratchpadMetadata> {
     let prefix = format!("{}: ", CONSTANTS.scratchpads.frontmatter_key);
@@ -139,6 +180,29 @@ mod tests {
         assert_eq!(files[0].id, "abc");
         assert_eq!(files[0].agent_id.as_deref(), Some("claude"));
         assert!(files[0].contents.contains("# Plan"));
+    }
+
+    #[test]
+    fn detaches_the_agent_without_touching_anything_else() {
+        let source = scratchpad(
+            "abc",
+            ",\"agentTabId\":\"tab-1\",\"agentId\":\"pragma.opencode\",\"createdAt\":42",
+        );
+        let detached = super::detach_agent(&source);
+        let parsed = parse_frontmatter(&detached).expect("still managed");
+        assert_eq!(parsed.id, "abc");
+        assert_eq!(parsed.title, "Plan abc");
+        assert!(parsed.agent_tab_id.is_none());
+        assert!(parsed.agent_id.is_none());
+        assert!(detached.contains("# Plan"));
+    }
+
+    #[test]
+    fn comments_path_matches_the_shared_contract() {
+        assert_eq!(
+            super::comments_path(".pragma/scratchpads/plan.mdx"),
+            ".pragma/scratchpads/plan.mdx.comments.json"
+        );
     }
 
     #[test]
