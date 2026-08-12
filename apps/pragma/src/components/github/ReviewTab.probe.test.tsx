@@ -59,6 +59,9 @@ vi.mock("@/components/github/ViewPullRequestView", () => ({
 vi.mock("@/components/github/GitHubMarkdown", () => ({
   GitHubMarkdown: ({ children }: { children: string }) => <div>{children}</div>,
 }));
+vi.mock("@/components/github/PullRequestStackCard", () => ({
+  PullRequestStackCard: () => null,
+}));
 
 // The fix dialogs mount only when open; workspace context is still needed for the open case.
 vi.mock("@/state/workspace-context", () => ({

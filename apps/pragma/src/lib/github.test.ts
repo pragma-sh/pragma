@@ -11,6 +11,7 @@ const { octokit, githubToken } = vi.hoisted(() => ({
     },
     graphql: vi.fn(),
     paginate: vi.fn(),
+    request: vi.fn(),
   },
   githubToken: vi.fn(),
 }));
@@ -32,6 +33,10 @@ import {
   listBaseRepoOptions,
   listPullRequestCommits,
   listReviewThreads,
+  mergePullRequestStack,
+  getPullRequestStack,
+  createPullRequestStack,
+  addPullRequestsToStack,
   pullRequestLifecycle,
   resetGitHubClient,
 } from "./github";
@@ -66,6 +71,83 @@ describe("client auth", () => {
   it("throws GitHubAuthError when no token is stored", async () => {
     githubToken.mockResolvedValue(null);
     await expect(findPullRequestForBranch(repo)).rejects.toBeInstanceOf(GitHubAuthError);
+  });
+});
+
+describe("pull request stacks", () => {
+  const wireStack = {
+    number: 7,
+    base: { ref: "main" },
+    open: true,
+    pull_requests: [
+      {
+        number: 41,
+        state: "open",
+        draft: false,
+        merged_at: null,
+        head: { ref: "feature-one", sha: "abc" },
+      },
+      {
+        number: 42,
+        state: "open",
+        draft: true,
+        merged_at: null,
+        head: { ref: "feature-two", sha: "def" },
+      },
+    ],
+  };
+
+  it("reads explicit stack membership for a pull request", async () => {
+    octokit.request.mockResolvedValue({ data: [wireStack] });
+    await expect(getPullRequestStack(repo, 42)).resolves.toEqual({
+      number: 7,
+      baseRef: "main",
+      open: true,
+      entries: [
+        expect.objectContaining({ number: 41, headRef: "feature-one", merged: false }),
+        expect.objectContaining({ number: 42, headRef: "feature-two", draft: true }),
+      ],
+    });
+  });
+
+  it("creates a stack in bottom-to-top order", async () => {
+    octokit.request.mockResolvedValue({ data: wireStack });
+    await createPullRequestStack(repo, [41, 42]);
+    expect(octokit.request).toHaveBeenCalledWith(
+      "POST /repos/{owner}/{repo}/stacks",
+      expect.objectContaining({ pull_requests: [41, 42] }),
+    );
+  });
+
+  it("appends pull requests to an existing stack", async () => {
+    octokit.request.mockResolvedValue({ data: wireStack });
+    await addPullRequestsToStack(repo, 7, [42]);
+    expect(octokit.request).toHaveBeenCalledWith(
+      "POST /repos/{owner}/{repo}/stacks/{stack_number}/add",
+      expect.objectContaining({ stack_number: 7, pull_requests: [42] }),
+    );
+  });
+
+  it("merges the complete stack through its top PR using the async endpoint", async () => {
+    octokit.request.mockResolvedValue({
+      data: { status: "merged", details: { message: "Stack merged", sha: "abc" } },
+    });
+
+    await mergePullRequestStack(repo, {
+      number: 7,
+      baseRef: "main",
+      open: true,
+      entries: [
+        { number: 41, state: "open", draft: false, merged: false, headRef: "one", headSha: "a" },
+        { number: 42, state: "open", draft: false, merged: false, headRef: "two", headSha: "b" },
+      ],
+    });
+
+    expect(octokit.request).toHaveBeenCalledWith(
+      "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async",
+      expect.objectContaining({ pull_number: 42, merge_method: "merge", merge_action: "default" }),
+    );
+    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
   });
 });
 

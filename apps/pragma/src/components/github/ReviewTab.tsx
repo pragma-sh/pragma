@@ -18,6 +18,7 @@ import { type DiffComment, type MergeDiffHandle, MergeDiff } from "@/components/
 import { FixCommentDialog } from "@/components/github/FixCommentDialog";
 import { FixItListDialog } from "@/components/github/FixItListDialog";
 import { GitHubMarkdown } from "@/components/github/GitHubMarkdown";
+import { PullRequestStackCard } from "@/components/github/PullRequestStackCard";
 import { ActorAvatar } from "@/components/github/ViewPullRequestView";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
@@ -381,6 +382,7 @@ export function ReviewTab({ tab }: { tab: Tab }) {
           </p>
         </div>
       </div>
+      <PullRequestStackCard compact pr={data.pr} repo={data.repo} worktreeId={worktreeId} />
       <ReviewToolbar
         commentKeys={commentKeys}
         commentReveal={commentReveal}

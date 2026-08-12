@@ -410,6 +410,7 @@ fn worktree_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<ser
         args.parent_worktree_id,
         args.branch,
         args.title,
+        None,
     )?;
     emit_worktree_changed(
         app,
@@ -1281,6 +1282,7 @@ fn agent_session_launch(
                 spec.parent_worktree_id,
                 spec.branch,
                 spec.title,
+                None,
             )?;
             emit_worktree_changed(
                 app,

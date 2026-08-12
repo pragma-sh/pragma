@@ -122,6 +122,7 @@ export function githubCacheKeys(repo: { owner: string; repo: string }) {
   return {
     pr: (n: number) => `pr:${base}#${n}`,
     prForBranch: (branch: string) => `pr-branch:${base}:${branch}`,
+    stackForPr: (n: number) => `stack-pr:${base}#${n}`,
     comments: (n: number) => `comments:${base}#${n}`,
     commits: (n: number) => `commits:${base}#${n}`,
     files: (n: number) => `files:${base}#${n}`,

@@ -54,12 +54,18 @@ pub fn create_worktree(
     parent_worktree_id: String,
     branch: String,
     title: Option<String>,
+    source_branch: Option<String>,
 ) -> AppResult<Worktree> {
     if branch.trim().is_empty() {
         return Err(AppError::InvalidInput("branch is required".to_string()));
     }
     let project = db.project(&project_id)?;
     let parent = db.worktree(&parent_worktree_id)?;
+    if parent.project_id != project_id {
+        return Err(AppError::InvalidInput(
+            "parent worktree belongs to another project".to_string(),
+        ));
+    }
     let lock = locks.lock_for(&project_id)?;
     let _guard = lock.lock()?;
     let pty = hosts.for_project(&db, &project_id)?;
@@ -84,6 +90,7 @@ pub fn create_worktree(
             parent_root: parent.path.clone(),
             branch: branch.trim().to_string(),
             path: path.clone(),
+            source_branch,
         },
     )?;
     let worktree = db.insert_worktree(

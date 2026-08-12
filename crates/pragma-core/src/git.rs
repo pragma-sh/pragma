@@ -169,6 +169,9 @@ pub enum GitRequest {
         parent_root: String,
         branch: String,
         path: String,
+        /// Existing branch on `origin` to check out instead of forking a new branch.
+        #[serde(default)]
+        source_branch: Option<String>,
     },
     /// Removes the worktree at `worktree_path` from the repo at `repo_root`.
     RemoveWorktree {
@@ -331,10 +334,12 @@ fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
             parent_root,
             branch,
             path,
+            source_branch,
         } => to_value(create_worktree(
             Path::new(parent_root),
             branch,
             Path::new(path),
+            source_branch.as_deref(),
         )?)?,
         GitRequest::RemoveWorktree {
             repo_root,
@@ -1188,22 +1193,56 @@ fn ensure_pragma_excluded(project_path: &Path) -> CoreResult<()> {
     Ok(())
 }
 
-/// Creates a worktree at `path` on a new `branch`, forked from `parent_root`.
-fn create_worktree(parent_root: &Path, branch: &str, path: &Path) -> CoreResult<()> {
+/// Creates a worktree on a new branch, or checks out an existing branch from `origin`.
+fn create_worktree(
+    parent_root: &Path,
+    branch: &str,
+    path: &Path,
+    source_branch: Option<&str>,
+) -> CoreResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let output = process_env::git()
-        .args([
-            "-C",
-            &path_string(parent_root),
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            &path_string(path),
-        ])
-        .output()?;
+    let root = path_string(parent_root);
+    let checkout = path_string(path);
+    let mut args = vec!["-C", root.as_str(), "worktree", "add"];
+    let remote_ref;
+    if let Some(source_branch) = source_branch {
+        let fetch_refspec =
+            format!("refs/heads/{source_branch}:refs/remotes/origin/{source_branch}");
+        let fetch = process_env::git()
+            .args(["-C", root.as_str(), "fetch", "origin", &fetch_refspec])
+            .output()?;
+        if !fetch.status.success() {
+            return Err(CoreError::Operation(stderr(&fetch.stderr)));
+        }
+        let local_exists = process_env::git()
+            .args([
+                "-C",
+                root.as_str(),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .status()?
+            .success();
+        if local_exists {
+            args.extend([checkout.as_str(), branch]);
+        } else {
+            remote_ref = format!("origin/{source_branch}");
+            args.extend([
+                "--track",
+                "-b",
+                branch,
+                checkout.as_str(),
+                remote_ref.as_str(),
+            ]);
+        }
+    } else {
+        args.extend(["-b", branch, checkout.as_str()]);
+    }
+    let output = process_env::git().args(args).output()?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1639,12 +1678,13 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file,
-        ensure_pragma_excluded, file_diff, github_abort_merge, github_fetch_and_sync,
-        github_merge_base_branch, github_merge_in_progress, github_pull_branch, github_sync_branch,
-        has_unmerged_paths, list_headless_worktrees, merge_worktree_to_parent, merged_status,
-        stage_file, unstage_file, worktree_changes, worktree_commits, worktree_is_dirty,
-        MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
+        commit_file_diff, commit_staged, create_worktree, discard_all_unstaged,
+        discard_unstaged_file, ensure_pragma_excluded, file_diff, github_abort_merge,
+        github_fetch_and_sync, github_merge_base_branch, github_merge_in_progress,
+        github_pull_branch, github_sync_branch, has_unmerged_paths, list_headless_worktrees,
+        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
+        worktree_commits, worktree_is_dirty, MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE,
+        PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -2044,6 +2084,35 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(local.path().join("remote.txt")).expect("read remote"),
             "remote\n"
+        );
+    }
+
+    #[test]
+    fn creates_tracking_worktree_from_existing_remote_branch() {
+        let (_remote, local, peer) = project_with_remote();
+        run(peer.path(), &["checkout", "-b", "stack-layer"]);
+        std::fs::write(peer.path().join("layer.txt"), "layer\n").expect("write layer");
+        commit_all(peer.path(), "stack layer");
+        run(peer.path(), &["push", "-u", "origin", "stack-layer"]);
+        let checkout = local.path().join("stack-layer-checkout");
+
+        create_worktree(local.path(), "stack-layer", &checkout, Some("stack-layer"))
+            .expect("create tracking worktree");
+
+        assert_eq!(
+            std::fs::read_to_string(checkout.join("layer.txt")).expect("read layer"),
+            "layer\n"
+        );
+        let upstream = Command::new("git")
+            .arg("-C")
+            .arg(&checkout)
+            .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
+            .output()
+            .expect("read upstream");
+        assert!(upstream.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&upstream.stdout).trim(),
+            "origin/stack-layer"
         );
     }
 

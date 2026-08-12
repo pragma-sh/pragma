@@ -525,8 +525,15 @@ export function createWorktree(
   parentWorktreeId: string,
   branch: string,
   title?: string,
+  sourceBranch?: string,
 ): Promise<Worktree> {
-  return invoke<Worktree>("create_worktree", { projectId, parentWorktreeId, branch, title });
+  return invoke<Worktree>("create_worktree", {
+    projectId,
+    parentWorktreeId,
+    branch,
+    title,
+    sourceBranch,
+  });
 }
 
 /** A create-worktree progress update emitted from inside `create_worktree`. */
