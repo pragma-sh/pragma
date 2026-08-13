@@ -314,7 +314,7 @@ describe("WorktreeTree", () => {
     fireEvent.click(button);
 
     expect(selectWorktreeMock).toHaveBeenCalledWith("main");
-    expect(onCreateChild).toHaveBeenCalledOnce();
+    expect(onCreateChild).toHaveBeenCalledWith("main");
   });
 
   it("exposes pin in the context menu and unpins via the pin glyph", async () => {

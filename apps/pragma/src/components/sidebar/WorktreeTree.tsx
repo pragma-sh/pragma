@@ -406,7 +406,7 @@ function useWorktreeMergedStatus(worktrees: Worktree[]): Record<string, boolean>
 }
 
 interface WorktreeTreeProps {
-  onCreateChild: () => void;
+  onCreateChild: (parentWorktreeId: string) => void;
 }
 
 /** Collapsible list of hidden worktrees under the main tree. */
@@ -895,7 +895,7 @@ function WorktreeRow({
 }: {
   node: WorktreeNode;
   depth: number;
-  onCreateChild: () => void;
+  onCreateChild: (parentWorktreeId: string) => void;
   mergedByWorktreeId: Record<string, boolean>;
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {
@@ -985,7 +985,7 @@ function WorktreeRow({
  * body so the component stays a small, flat return. */
 function useWorktreeRow(
   node: WorktreeNode,
-  onCreateChild: () => void,
+  onCreateChild: (parentWorktreeId: string) => void,
   mergedByWorktreeId: Record<string, boolean>,
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
 ) {
@@ -1015,7 +1015,7 @@ function useWorktreeRow(
   }, [workspace, kanban, node.worktree.id]);
   const handleCreateChild = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
-    onCreateChild();
+    onCreateChild(node.worktree.id);
   }, [workspace, node.worktree.id, onCreateChild]);
   const handleTogglePin = useCallback(() => {
     toggleWorktreePin(node.worktree.id);
@@ -1059,7 +1059,7 @@ function WorktreeChildren({
 }: {
   node: WorktreeNode;
   depth: number;
-  onCreateChild: () => void;
+  onCreateChild: (parentWorktreeId: string) => void;
   mergedByWorktreeId: Record<string, boolean>;
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {

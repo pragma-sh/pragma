@@ -869,6 +869,7 @@ impl Registry {
             parent_root: parent.path,
             branch: branch.to_string(),
             path: path.clone(),
+            source_branch: None,
         })?;
         let worktree = Worktree {
             id: worktree_id.clone(),

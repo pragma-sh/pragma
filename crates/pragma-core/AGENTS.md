@@ -44,6 +44,9 @@ Tauri or client presentation code.
   two-search concurrency, and cancellation; responses contain only worktree-relative paths.
 - All `git` subprocess calls go through `process_env::command` so a GUI-launched
   host still finds `git` on `PATH`.
+- `GitRequest::CreateWorktree.sourceBranch` materializes an existing `origin` branch
+  as a tracking worktree (used by stacked PR layers); without it, creation retains the
+  original new-branch-from-parent behavior.
 - `git::merged_status` preserves a per-item result (errors become `false`) but runs
   at most four worktree checks concurrently. Each clean check can launch three git
   subprocesses, so never restore the old one-thread-per-worktree fan-out.

@@ -150,6 +150,114 @@ export interface PullRequestSummary {
   user: GitHubActor | null;
 }
 
+/** One pull request layer in a GitHub stack, ordered bottom to top. */
+export interface PullRequestStackEntry {
+  number: number;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+  headRef: string;
+  headSha: string;
+}
+
+/** GitHub's explicit stacked-pull-request object. */
+export interface PullRequestStack {
+  number: number;
+  baseRef: string;
+  open: boolean;
+  entries: PullRequestStackEntry[];
+}
+
+interface PullRequestStackWire {
+  number: number;
+  base: { ref: string };
+  open: boolean;
+  pull_requests: Array<{
+    number: number;
+    state: string;
+    draft: boolean;
+    merged_at: string | null;
+    head: { ref: string; sha: string };
+  }>;
+}
+
+function toPullRequestStack(stack: PullRequestStackWire): PullRequestStack {
+  return {
+    number: stack.number,
+    baseRef: stack.base.ref,
+    open: stack.open,
+    entries: stack.pull_requests.map((entry) => ({
+      number: entry.number,
+      state: entry.state,
+      draft: entry.draft,
+      merged: entry.merged_at !== null,
+      headRef: entry.head.ref,
+      headSha: entry.head.sha,
+    })),
+  };
+}
+
+const STACK_API_HEADERS = {
+  accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2026-03-10",
+};
+
+/** Returns explicit GitHub stack membership for a PR, or null when unstacked. */
+export const getPullRequestStack = defineCachedRepoRead(
+  (keys, pullNumber: number) => keys.stackForPr(pullNumber),
+  async (octokit, repo, pullNumber): Promise<PullRequestStack | null> => {
+    const response = await octokit.request("GET /repos/{owner}/{repo}/stacks", {
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_request: pullNumber,
+      per_page: 1,
+      headers: STACK_API_HEADERS,
+    });
+    const stack = (response.data as PullRequestStackWire[])[0];
+    return stack ? toPullRequestStack(stack) : null;
+  },
+);
+
+/** Links existing PRs into a GitHub stack in bottom-to-top order. */
+export async function createPullRequestStack(
+  repo: GitHubRepoRef,
+  pullNumbers: number[],
+): Promise<PullRequestStack> {
+  if (pullNumbers.length < 2) {
+    throw new Error("A stack requires at least two pull requests");
+  }
+  const octokit = await client();
+  const response = await octokit.request("POST /repos/{owner}/{repo}/stacks", {
+    owner: repo.owner,
+    repo: repo.repo,
+    pull_requests: pullNumbers,
+    headers: STACK_API_HEADERS,
+  });
+  invalidateGitHubCache();
+  return toPullRequestStack(response.data as PullRequestStackWire);
+}
+
+/** Appends pull requests to an existing GitHub stack in bottom-to-top order. */
+export async function addPullRequestsToStack(
+  repo: GitHubRepoRef,
+  stackNumber: number,
+  pullNumbers: number[],
+): Promise<PullRequestStack> {
+  if (pullNumbers.length === 0) {
+    throw new Error("At least one pull request is required");
+  }
+  const octokit = await client();
+  const response = await octokit.request("POST /repos/{owner}/{repo}/stacks/{stack_number}/add", {
+    owner: repo.owner,
+    repo: repo.repo,
+    stack_number: stackNumber,
+    pull_requests: pullNumbers,
+    headers: STACK_API_HEADERS,
+  });
+  invalidateGitHubCache();
+  return toPullRequestStack(response.data as PullRequestStackWire);
+}
+
 /** A comment author / PR author. */
 export interface GitHubActor {
   login: string;
@@ -968,4 +1076,76 @@ export async function mergePullRequest(
   invalidateGitHubCache(keys.prForBranch(""));
   // Also wipe branch-keyed entries for this repo (head branch unknown here).
   invalidateGitHubCache(`pr-branch:${repo.owner}/${repo.repo}:`);
+}
+
+interface AsyncMergeResult {
+  status: "pending" | "merged" | "enqueued" | "failed";
+  details: { message: string; uuid?: string };
+}
+
+const ASYNC_MERGE_POLL_MS = 1000;
+const ASYNC_MERGE_MAX_POLLS = 120;
+
+function invalidateMergedStack(repo: GitHubRepoRef, stack: PullRequestStack): void {
+  const keys = githubCacheKeys(repo);
+  for (const entry of stack.entries) {
+    invalidateGitHubCache(keys.pr(entry.number));
+    invalidateGitHubCache(keys.stackForPr(entry.number));
+  }
+  invalidateGitHubCache(keys.prForBranch(""));
+  invalidateGitHubCache(`pr-branch:${repo.owner}/${repo.repo}:`);
+}
+
+/** Requests GitHub's required asynchronous merge for the complete stack and awaits completion. */
+export async function mergePullRequestStack(
+  repo: GitHubRepoRef,
+  stack: PullRequestStack,
+): Promise<void> {
+  const top = stack.entries.at(-1);
+  if (!top) throw new Error("Cannot merge an empty pull request stack");
+  const octokit = await client();
+  const request = {
+    owner: repo.owner,
+    repo: repo.repo,
+    pull_number: top.number,
+    merge_method: "merge",
+    merge_action: "default",
+    headers: STACK_API_HEADERS,
+  } as const;
+  let result: AsyncMergeResult;
+  try {
+    const response = await octokit.request(
+      "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async",
+      request,
+    );
+    result = response.data as AsyncMergeResult;
+  } catch (cause) {
+    const response = (cause as { status?: number; response?: { data?: unknown } }).response;
+    if ((cause as { status?: number }).status !== 409 || !response?.data) throw cause;
+    result = response.data as AsyncMergeResult;
+  }
+
+  for (let poll = 0; result.status === "pending" || result.status === "enqueued"; poll += 1) {
+    if (poll >= ASYNC_MERGE_MAX_POLLS) {
+      throw new Error("Timed out waiting for GitHub to merge the stack");
+    }
+    const uuid = result.details.uuid;
+    if (!uuid) throw new Error(result.details.message || "GitHub omitted async merge request id");
+    // eslint-disable-next-line no-await-in-loop -- each status request follows its poll delay.
+    await new Promise((resolve) => setTimeout(resolve, ASYNC_MERGE_POLL_MS));
+    // eslint-disable-next-line no-await-in-loop -- asynchronous merge status is inherently sequential.
+    const response = await octokit.request(
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}/merge-async/{uuid}",
+      {
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: top.number,
+        uuid,
+        headers: STACK_API_HEADERS,
+      },
+    );
+    result = response.data as AsyncMergeResult;
+  }
+  if (result.status === "failed") throw new Error(result.details.message);
+  invalidateMergedStack(repo, stack);
 }

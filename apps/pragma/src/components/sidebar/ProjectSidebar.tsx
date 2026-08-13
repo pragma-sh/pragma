@@ -38,6 +38,7 @@ const COLLAPSED_WIDTH = 36;
 export function ProjectSidebar() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeParentId, setWorktreeParentId] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
   const workspace = useWorkspace();
   const cycle = useProjectCycle();
@@ -78,60 +79,104 @@ export function ProjectSidebar() {
       {collapsed ? (
         <CollapsedProjectSidebar onExpand={toggleCollapsed} />
       ) : (
-        <>
-          <SidebarResizeHandle
-            onResize={setWidth}
-            onResizeEnd={() => setResizing(false)}
-            onResizeStart={() => setResizing(true)}
-          />
-          {/* Draggable titlebar strip: clears the inset macOS traffic lights and
-              gives the frameless window a drag handle. The project row itself is
-              the drag handle so content sits right under the reserved titlebar. */}
-          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
-          <div
-            className="titlebar-pad flex items-center justify-between px-3 pt-2 pb-1"
-            onMouseDown={startWindowDrag}
-          >
-            <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
-              {workspace.activeProject?.name ?? "Pragma"}
-            </h2>
-            <Button
-              aria-label="Collapse project sidebar"
-              size="icon-sm"
-              variant="ghost"
-              onClick={toggleCollapsed}
-            >
-              <PanelLeftClose />
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-            <WorktreeTree onCreateChild={() => setWorktreeDialogOpen(true)} />
-          </div>
-          <div className="p-3">
-            <OpenPortsCard />
-            <ScratchpadsCard />
-            <PluginSidebarCards />
-            <Separator className="my-3" />
-            <div className="flex items-center gap-1.5">
-              <div className="min-w-0 flex-1">
-                <ProjectSwitcher />
-              </div>
-              <AddMenu
-                worktreeDisabled={!mainWorktreeId}
-                onAddProject={() => setProjectDialogOpen(true)}
-                onNewWorktree={() => setWorktreeDialogOpen(true)}
-              />
-            </div>
-          </div>
-        </>
+        <ExpandedProjectSidebar
+          mainWorktreeId={mainWorktreeId}
+          onAddProject={() => setProjectDialogOpen(true)}
+          onCreateChild={(parentId) => {
+            setWorktreeParentId(parentId);
+            setWorktreeDialogOpen(true);
+          }}
+          onNewWorktree={() => {
+            setWorktreeParentId(mainWorktreeId);
+            setWorktreeDialogOpen(true);
+          }}
+          onResize={setWidth}
+          onResizeEnd={() => setResizing(false)}
+          onResizeStart={() => setResizing(true)}
+          onToggleCollapsed={toggleCollapsed}
+        />
       )}
       <CreateProjectDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
       <CreateWorktreeDialog
         open={worktreeDialogOpen}
-        onOpenChange={setWorktreeDialogOpen}
-        parentWorktreeId={mainWorktreeId ?? undefined}
+        onOpenChange={(open) => {
+          setWorktreeDialogOpen(open);
+          if (!open) setWorktreeParentId(null);
+        }}
+        parentWorktreeId={worktreeParentId ?? mainWorktreeId ?? undefined}
       />
     </motion.aside>
+  );
+}
+
+/** The expanded sidebar body: resize handle, titlebar, worktree tree, and cards. */
+function ExpandedProjectSidebar({
+  mainWorktreeId,
+  onAddProject,
+  onCreateChild,
+  onNewWorktree,
+  onResize,
+  onResizeEnd,
+  onResizeStart,
+  onToggleCollapsed,
+}: {
+  mainWorktreeId: string | null;
+  onAddProject: () => void;
+  onCreateChild: (parentWorktreeId: string) => void;
+  onNewWorktree: () => void;
+  onResize: (width: number) => void;
+  onResizeEnd: () => void;
+  onResizeStart: () => void;
+  onToggleCollapsed: () => void;
+}) {
+  const workspace = useWorkspace();
+  return (
+    <>
+      <SidebarResizeHandle
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+        onResizeStart={onResizeStart}
+      />
+      {/* Draggable titlebar strip: clears the inset macOS traffic lights and
+          gives the frameless window a drag handle. The project row itself is
+          the drag handle so content sits right under the reserved titlebar. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
+      <div
+        className="titlebar-pad flex items-center justify-between px-3 pt-2 pb-1"
+        onMouseDown={startWindowDrag}
+      >
+        <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
+          {workspace.activeProject?.name ?? "Pragma"}
+        </h2>
+        <Button
+          aria-label="Collapse project sidebar"
+          size="icon-sm"
+          variant="ghost"
+          onClick={onToggleCollapsed}
+        >
+          <PanelLeftClose />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+        <WorktreeTree onCreateChild={onCreateChild} />
+      </div>
+      <div className="p-3">
+        <OpenPortsCard />
+        <ScratchpadsCard />
+        <PluginSidebarCards />
+        <Separator className="my-3" />
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <ProjectSwitcher />
+          </div>
+          <AddMenu
+            worktreeDisabled={!mainWorktreeId}
+            onAddProject={onAddProject}
+            onNewWorktree={onNewWorktree}
+          />
+        </div>
+      </div>
+    </>
   );
 }
 

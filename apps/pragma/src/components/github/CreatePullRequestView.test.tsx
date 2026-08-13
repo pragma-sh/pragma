@@ -12,6 +12,10 @@ const aiGeneratePullRequestDraft = vi.fn();
 const createPullRequest = vi.fn();
 const listBaseRepoOptions = vi.fn();
 const listBranches = vi.fn();
+const findPullRequestForBranch = vi.fn();
+const getPullRequestStack = vi.fn();
+const createPullRequestStack = vi.fn();
+const addPullRequestsToStack = vi.fn();
 let aiAvailableMock = false;
 
 vi.mock("@/lib/tauri", () => ({
@@ -26,6 +30,10 @@ vi.mock("@/state/ai-context", () => ({
 }));
 vi.mock("@/lib/github", () => ({
   createPullRequest: (...a: unknown[]) => createPullRequest(...a),
+  createPullRequestStack: (...a: unknown[]) => createPullRequestStack(...a),
+  addPullRequestsToStack: (...a: unknown[]) => addPullRequestsToStack(...a),
+  findPullRequestForBranch: (...a: unknown[]) => findPullRequestForBranch(...a),
+  getPullRequestStack: (...a: unknown[]) => getPullRequestStack(...a),
   listBaseRepoOptions: (...a: unknown[]) => listBaseRepoOptions(...a),
   listBranches: (...a: unknown[]) => listBranches(...a),
 }));
@@ -77,7 +85,9 @@ async function renderReady() {
     expect(screen.getByLabelText("Pull request title")).toHaveValue("Seed title"),
   );
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Create pull request" })).toBeEnabled(),
+    expect(
+      screen.getByRole("button", { name: /Create pull request|Open stacked PR/ }),
+    ).toBeEnabled(),
   );
   return onCreated;
 }
@@ -96,6 +106,10 @@ describe("CreatePullRequestView pre-flight", () => {
       body: "Generated PR body",
     });
     createPullRequest.mockResolvedValue({ number: 7 });
+    findPullRequestForBranch.mockResolvedValue(null);
+    getPullRequestStack.mockResolvedValue(null);
+    createPullRequestStack.mockResolvedValue({ number: 1 });
+    addPullRequestsToStack.mockResolvedValue({ number: 1 });
     listBaseRepoOptions.mockResolvedValue([
       { owner: "acme", repo: "widget", defaultBranch: "main", isUpstream: false },
     ]);
@@ -164,6 +178,32 @@ describe("CreatePullRequestView pre-flight", () => {
       { owner: "acme", repo: "widget", branch: "develop" },
       expect.objectContaining({ draft: false }),
     );
+  });
+
+  it("defaults to a stack when the base branch has an open PR", async () => {
+    githubFetchAndSync.mockResolvedValue(sync());
+    worktreeChanges.mockResolvedValue(changes());
+    findPullRequestForBranch.mockResolvedValue({ number: 6, headRef: "develop" });
+    await renderReady();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open stacked PR" }));
+
+    await waitFor(() => expect(createPullRequestStack).toHaveBeenCalledWith(repo, [6, 7]));
+  });
+
+  it("extends the base PR stack when base is its top layer", async () => {
+    githubFetchAndSync.mockResolvedValue(sync());
+    worktreeChanges.mockResolvedValue(changes());
+    findPullRequestForBranch.mockResolvedValue({ number: 6, headRef: "develop" });
+    getPullRequestStack.mockResolvedValue({
+      number: 3,
+      entries: [{ number: 5 }, { number: 6 }],
+    });
+    await renderReady();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open stacked PR" }));
+
+    await waitFor(() => expect(addPullRequestsToStack).toHaveBeenCalledWith(repo, 3, [7]));
   });
 
   it("generates a PR title and body from Shift+Tab in the title field", async () => {

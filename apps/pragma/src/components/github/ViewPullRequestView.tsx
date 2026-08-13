@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 
-import type { ChangedFile, GitHubRepoRef } from "@pragma/constants";
+import type { ChangedFile, GitHubRepoRef, Worktree } from "@pragma/constants";
 import { Icon } from "@iconify/react";
 import {
   Check,
@@ -54,6 +54,7 @@ import {
   type PullFile,
   type PullRequestSummary,
   type PullRequestCommit,
+  type PullRequestStack,
   type ReviewThread,
   createIssueComment,
   getChecksStatus,
@@ -61,7 +62,9 @@ import {
   listPullRequestCommits,
   listPullFiles,
   listReviewThreads,
+  getPullRequestStack,
   mergePullRequest,
+  mergePullRequestStack,
 } from "@/lib/github";
 import {
   browserOpenExternal,
@@ -650,6 +653,28 @@ export function ActorAvatar({ actor }: { actor: GitHubActor | null }) {
   );
 }
 
+/** Loads GitHub's stack membership for a PR (undefined while the request is in flight). */
+function useStackMembership(repo: GitHubRepoRef, pr: PullRequestSummary) {
+  const [stack, setStack] = useState<PullRequestStack | null | undefined>(undefined);
+
+  useEffect(() => {
+    let active = true;
+    void getPullRequestStack(repo, pr.number)
+      .then((loadedStack) => {
+        if (active) setStack(loadedStack);
+        return loadedStack;
+      })
+      .catch(() => {
+        if (active) setStack(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pr.number, repo]);
+
+  return stack;
+}
+
 /** Checks summary + Merge button → confirm → branch-cleanup dialog. */
 function MergeCard({
   checks,
@@ -669,14 +694,25 @@ function MergeCard({
   const [confirming, setConfirming] = useState(false);
   const [merging, setMerging] = useState(false);
   const [cleanup, setCleanup] = useState(false);
+  const stack = useStackMembership(repo, pr);
+  const workspace = useWorkspace();
 
   const merge = useCallback(async () => {
+    if (stack === undefined) {
+      toast.error("Stack membership is still loading.");
+      return;
+    }
     setConfirming(false);
     setMerging(true);
     onMergingChange?.(true);
     try {
-      await mergePullRequest(repo, pr.number);
-      toast.success(`Merged pull request #${pr.number}`);
+      if (stack) {
+        await mergePullRequestStack(repo, stack);
+        toast.success(`Merged stack #${stack.number}`);
+      } else {
+        await mergePullRequest(repo, pr.number);
+        toast.success(`Merged pull request #${pr.number}`);
+      }
       setCleanup(true);
       onChanged();
     } catch (cause) {
@@ -685,51 +721,145 @@ function MergeCard({
       setMerging(false);
       onMergingChange?.(false);
     }
-  }, [repo, pr.number, onChanged, onMergingChange]);
+  }, [repo, pr.number, onChanged, onMergingChange, stack]);
+
+  const cleanupTargets = useMemo(
+    () => stackCleanupTargets(stack ?? null, pr, worktreeId, workspace.worktrees),
+    [pr, stack, workspace.worktrees, worktreeId],
+  );
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
       {pr.mergeable === false ? (
         <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
       ) : (
-        <>
-          <ChecksSummary checks={checks} />
-          <Button
-            className="w-full"
-            disabled={merging}
-            onClick={() => setConfirming(true)}
-            size="sm"
-          >
-            {merging ? <Loader2 className="animate-spin" /> : null}
-            Merge pull request
-          </Button>
-        </>
+        <MergeAction
+          checks={checks}
+          merging={merging}
+          onConfirm={() => setConfirming(true)}
+          stack={stack}
+        />
       )}
 
-      <AlertDialog onOpenChange={setConfirming} open={confirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Merge pull request?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pr.headRef} will be merged into {pr.baseRef} with a merge commit.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void merge()}>Merge</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MergeConfirmDialog
+        onMerge={() => void merge()}
+        onOpenChange={setConfirming}
+        open={confirming}
+        pr={pr}
+        stack={stack}
+      />
 
       <BranchCleanupDialog
         onChanged={onChanged}
         onOpenChange={setCleanup}
         open={cleanup}
-        pr={pr}
-        worktreeId={worktreeId}
+        targets={cleanupTargets}
       />
     </div>
   );
+}
+
+/** The merge button and check summary shown while the PR is mergeable. */
+function MergeAction({
+  checks,
+  merging,
+  onConfirm,
+  stack,
+}: {
+  checks: ChecksStatus | null;
+  merging: boolean;
+  onConfirm: () => void;
+  stack: PullRequestStack | null | undefined;
+}) {
+  const label =
+    stack === undefined
+      ? "Checking stack membership…"
+      : stack
+        ? "Merge stack"
+        : "Merge pull request";
+  return (
+    <>
+      <ChecksSummary checks={checks} />
+      <Button
+        className="w-full"
+        disabled={merging || stack === undefined}
+        onClick={onConfirm}
+        size="sm"
+      >
+        {merging ? <Loader2 className="animate-spin" /> : null}
+        {label}
+      </Button>
+      {stack === undefined ? (
+        <p className="text-xs text-muted-foreground">
+          Merge stays disabled until GitHub confirms stack membership.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** The merge confirmation dialog, wording depending on stack vs single-PR merge. */
+function MergeConfirmDialog({
+  open,
+  onOpenChange,
+  onMerge,
+  pr,
+  stack,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onMerge: () => void;
+  pr: PullRequestSummary;
+  stack: PullRequestStack | null | undefined;
+}) {
+  const entriesCount = stack ? stack.entries.length : null;
+  return (
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{stack ? "Merge stack?" : "Merge pull request?"}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {entriesCount === null
+              ? `${pr.headRef} will be merged into ${pr.baseRef} with a merge commit.`
+              : `${entriesCount} pull requests will be merged from top to bottom.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onMerge}>{stack ? "Merge stack" : "Merge"}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+interface BranchCleanupTarget {
+  prNumber: number;
+  headRef: string;
+  worktreeId: string;
+}
+
+/** Resolves stack branches to unique worktrees in the current project, top first. */
+function stackCleanupTargets(
+  stack: Awaited<ReturnType<typeof getPullRequestStack>>,
+  pr: PullRequestSummary,
+  worktreeId: string,
+  worktreesByProject: Record<string, Worktree[]>,
+): BranchCleanupTarget[] {
+  if (!stack) return [{ prNumber: pr.number, headRef: pr.headRef, worktreeId }];
+  const current = Object.values(worktreesByProject)
+    .flat()
+    .find((worktree) => worktree.id === worktreeId);
+  const project = current ? (worktreesByProject[current.projectId] ?? []) : [];
+  return stack.entries.toReversed().flatMap((entry) => {
+    if (entry.number === pr.number) {
+      return [{ prNumber: entry.number, headRef: entry.headRef, worktreeId }];
+    }
+    const matches = project.filter((worktree) => worktree.branch === entry.headRef);
+    return matches.length === 1
+      ? [{ prNumber: entry.number, headRef: entry.headRef, worktreeId: matches[0]!.id }]
+      : [];
+  });
 }
 
 function MergeConflictControls({
@@ -925,14 +1055,12 @@ export function ChecksSummary({ checks }: { checks: ChecksStatus | null }) {
 function BranchCleanupDialog({
   open,
   onOpenChange,
-  pr,
-  worktreeId,
+  targets,
   onChanged,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  pr: PullRequestSummary;
-  worktreeId: string;
+  targets: BranchCleanupTarget[];
   onChanged: () => void;
 }) {
   const workspace = useWorkspace();
@@ -943,10 +1071,18 @@ function BranchCleanupDialog({
     setWorking(true);
     try {
       if (deleteRemote) {
-        await githubDeleteRemoteBranch(worktreeId);
+        for (const target of targets) {
+          // eslint-disable-next-line no-await-in-loop -- parent worktrees must survive child cleanup.
+          await githubDeleteRemoteBranch(target.worktreeId);
+        }
       }
-      await workspace.deleteWorktree(worktreeId, { deleteBranch: true, force: true });
-      toast.success("Cleaned up merged branch");
+      for (const target of targets) {
+        // eslint-disable-next-line no-await-in-loop -- delete stack children before their parents.
+        await workspace.deleteWorktree(target.worktreeId, { deleteBranch: true, force: true });
+      }
+      toast.success(
+        `Cleaned up ${targets.length} merged branch${targets.length === 1 ? "" : "es"}`,
+      );
       onOpenChange(false);
       onChanged();
     } catch (cause) {
@@ -954,15 +1090,19 @@ function BranchCleanupDialog({
     } finally {
       setWorking(false);
     }
-  }, [deleteRemote, worktreeId, workspace, onOpenChange, onChanged]);
+  }, [deleteRemote, targets, workspace, onOpenChange, onChanged]);
+
+  const branchNames = targets.map((target) => target.headRef).join(", ");
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Clean up branch</DialogTitle>
+          <DialogTitle>Clean up {targets.length === 1 ? "branch" : "stack branches"}</DialogTitle>
           <DialogDescription>
-            #{pr.number} is merged. Delete the worktree and its local branch
+            {targets.length === 1
+              ? `#${targets[0]?.prNumber ?? ""} is merged. Delete its worktree and local branch`
+              : `${targets.length} pull requests are merged. Delete their worktrees and local branches`}
             {deleteRemote ? ", and the remote branch" : ""}?
           </DialogDescription>
         </DialogHeader>
@@ -971,7 +1111,7 @@ function BranchCleanupDialog({
             checked={deleteRemote}
             onCheckedChange={(value) => setDeleteRemote(value === true)}
           />
-          Also delete the remote branch ({pr.headRef})
+          Also delete remote {targets.length === 1 ? "branch" : "branches"} ({branchNames})
         </label>
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)} size="sm" variant="outline">
@@ -979,7 +1119,7 @@ function BranchCleanupDialog({
           </Button>
           <Button disabled={working} onClick={() => void cleanup()} size="sm" variant="destructive">
             {working ? <Loader2 className="animate-spin" /> : null}
-            Delete branch
+            Delete {targets.length === 1 ? "branch" : "branches"}
           </Button>
         </DialogFooter>
       </DialogContent>

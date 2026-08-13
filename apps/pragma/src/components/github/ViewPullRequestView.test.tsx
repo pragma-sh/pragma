@@ -19,11 +19,42 @@ const {
     listPullRequestCommits: vi.fn(),
     listReviewThreads: vi.fn(),
     mergePullRequest: vi.fn(),
+    mergePullRequestStack: vi.fn(),
+    getPullRequestStack: vi.fn(),
   },
   githubAbortMerge: vi.fn(),
   githubMergeBaseBranch: vi.fn(),
   githubMergeInProgress: vi.fn(),
-  workspace: { deleteWorktree: vi.fn(), openReviewTab: vi.fn() },
+  workspace: {
+    deleteWorktree: vi.fn(),
+    openReviewTab: vi.fn(),
+    worktrees: {
+      project: [
+        {
+          id: "worktree-1",
+          projectId: "project",
+          parentId: "main",
+          branch: "feature-one",
+          title: null,
+          path: "/repo/one",
+          isMain: false,
+          hidden: false,
+          createdAt: "2026-01-01",
+        },
+        {
+          id: "worktree-2",
+          projectId: "project",
+          parentId: "worktree-1",
+          branch: "feature-two",
+          title: null,
+          path: "/repo/two",
+          isMain: false,
+          hidden: false,
+          createdAt: "2026-01-02",
+        },
+      ],
+    },
+  },
 }));
 
 vi.mock("@/components/github/GitHubMarkdown", () => ({
@@ -31,6 +62,9 @@ vi.mock("@/components/github/GitHubMarkdown", () => ({
 }));
 vi.mock("@/components/github/MarkdownEditor", () => ({
   MarkdownEditor: () => <textarea aria-label="Comment" />,
+}));
+vi.mock("@/components/github/PullRequestStackCard", () => ({
+  PullRequestStackCard: () => null,
 }));
 vi.mock("@/components/right-sidebar/ChangeGroup", () => ({
   ChangeGroup: () => null,
@@ -58,6 +92,7 @@ const repo: GitHubRepoRef = {
 beforeEach(() => {
   vi.clearAllMocks();
   github.getChecksStatus.mockResolvedValue({ state: "none", total: 0, passed: 0, failed: 0 });
+  github.getPullRequestStack.mockResolvedValue(null);
   github.listIssueComments.mockResolvedValue([
     {
       id: 1,
@@ -191,6 +226,77 @@ describe("ViewPullRequestView", () => {
     expect(
       await screen.findByRole("button", { name: "Sync with Base Branch" }),
     ).toBeInTheDocument();
+  });
+
+  it("merges a stack and cleans up both worktrees", async () => {
+    const stack = {
+      number: 7,
+      baseRef: "main",
+      open: true,
+      entries: [
+        {
+          number: 41,
+          state: "open",
+          draft: false,
+          merged: false,
+          headRef: "feature-one",
+          headSha: "a",
+        },
+        {
+          number: 42,
+          state: "open",
+          draft: false,
+          merged: false,
+          headRef: "feature-two",
+          headSha: "b",
+        },
+      ],
+    };
+    github.getPullRequestStack.mockResolvedValue(stack);
+    github.mergePullRequestStack.mockResolvedValue(undefined);
+
+    render(
+      <ViewPullRequestView
+        onChanged={vi.fn()}
+        pr={{
+          number: 41,
+          title: "Stack base",
+          body: "",
+          state: "open",
+          htmlUrl: "https://github.com/acme/widget/pull/41",
+          headRef: "feature-one",
+          headSha: "a",
+          baseRef: "main",
+          draft: false,
+          merged: false,
+          mergeable: true,
+          user: null,
+        }}
+        repo={repo}
+        worktreeId="worktree-1"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Merge stack" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "2 pull requests will be merged from top to bottom.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge stack" }));
+
+    await waitFor(() => expect(github.mergePullRequestStack).toHaveBeenCalledWith(repo, stack));
+    expect(await screen.findByText("Clean up stack branches")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete branches" }));
+
+    await waitFor(() => {
+      expect(workspace.deleteWorktree).toHaveBeenNthCalledWith(1, "worktree-2", {
+        deleteBranch: true,
+        force: true,
+      });
+      expect(workspace.deleteWorktree).toHaveBeenNthCalledWith(2, "worktree-1", {
+        deleteBranch: true,
+        force: true,
+      });
+    });
   });
 });
 

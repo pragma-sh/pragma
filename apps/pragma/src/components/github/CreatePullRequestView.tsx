@@ -32,7 +32,11 @@ import {
 } from "@/components/ui/select";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import {
+  addPullRequestsToStack,
+  createPullRequestStack,
   createPullRequest,
+  findPullRequestForBranch,
+  getPullRequestStack,
   listBaseRepoOptions,
   listBranches,
   type PullRequestSummary,
@@ -97,7 +101,7 @@ function clearPullRequestDraft(worktreeId: string): void {
  */
 type Preflight =
   | { kind: "behind"; behind: number }
-  | { kind: "dirty"; draft: boolean; sync: BranchSyncStatus }
+  | { kind: "dirty"; draft: boolean; sync: BranchSyncStatus; addToStack: boolean }
   | null;
 
 /** The head ref, qualified with the origin owner for a cross-fork PR. */
@@ -221,6 +225,8 @@ function usePrSubmit({
   onCreated,
   baseRepo,
   baseBranch,
+  stackBasePr,
+  addToStack,
 }: {
   repo: GitHubRepoRef;
   worktreeId: string;
@@ -229,18 +235,20 @@ function usePrSubmit({
   onCreated: (pr: PullRequestSummary) => void;
   baseRepo: RepoTarget | null;
   baseBranch: string | null;
+  stackBasePr: PullRequestSummary | null;
+  addToStack: boolean;
 }): {
   submitting: boolean;
   preflight: Preflight;
   setPreflight: (preflight: Preflight) => void;
-  open: (draft: boolean, sync: BranchSyncStatus) => Promise<void>;
-  submit: (draft: boolean) => Promise<void>;
+  open: (draft: boolean, sync: BranchSyncStatus, stack?: boolean) => Promise<void>;
+  submit: (draft: boolean, stack?: boolean) => Promise<void>;
 } {
   const [submitting, setSubmitting] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>(null);
 
   const open = useCallback(
-    async (draft: boolean, sync: BranchSyncStatus) => {
+    async (draft: boolean, sync: BranchSyncStatus, stack = addToStack) => {
       if (!baseRepo || !baseBranch) return;
       setSubmitting(true);
       try {
@@ -250,7 +258,25 @@ function usePrSubmit({
           { owner: baseRepo.owner, repo: baseRepo.repo, branch: baseBranch },
           { title: title.trim(), body, draft, worktreeId },
         );
-        toast.success(`Opened pull request #${pr.number}`);
+        if (stack && stackBasePr) {
+          try {
+            const existingStack = await getPullRequestStack(repo, stackBasePr.number, {
+              force: true,
+            });
+            if (existingStack) {
+              await addPullRequestsToStack(repo, existingStack.number, [pr.number]);
+            } else {
+              await createPullRequestStack(repo, [stackBasePr.number, pr.number]);
+            }
+            toast.success(`Opened pull request #${pr.number} and added it to the stack`);
+          } catch (cause) {
+            toast.error(
+              `Opened pull request #${pr.number}, but adding it to the stack failed: ${errorMessage(cause)}`,
+            );
+          }
+        } else {
+          toast.success(`Opened pull request #${pr.number}`);
+        }
         clearPullRequestDraft(worktreeId);
         onCreated(pr);
       } catch (cause) {
@@ -259,11 +285,11 @@ function usePrSubmit({
         setSubmitting(false);
       }
     },
-    [repo, worktreeId, title, body, onCreated, baseRepo, baseBranch],
+    [repo, worktreeId, title, body, onCreated, baseRepo, baseBranch, stackBasePr, addToStack],
   );
 
   const submit = useCallback(
-    async (draft: boolean) => {
+    async (draft: boolean, stack = addToStack) => {
       if (submitting || !title.trim()) return;
       setSubmitting(true);
       let sync: BranchSyncStatus;
@@ -278,7 +304,7 @@ function usePrSubmit({
           return;
         }
         if (changes.staged.length > 0 || changes.unstaged.length > 0) {
-          setPreflight({ kind: "dirty", draft, sync });
+          setPreflight({ kind: "dirty", draft, sync, addToStack: stack });
           return;
         }
       } catch (cause) {
@@ -287,9 +313,9 @@ function usePrSubmit({
       } finally {
         setSubmitting(false);
       }
-      await open(draft, sync);
+      await open(draft, sync, stack);
     },
-    [submitting, title, worktreeId, open],
+    [submitting, title, worktreeId, open, addToStack],
   );
 
   return { submitting, preflight, setPreflight, open, submit };
@@ -355,6 +381,7 @@ function useCreatePullRequestForm({
   const { available: aiAvailable } = useAi();
   const [title, setTitle] = useState(() => readPullRequestDraft(worktreeId).title);
   const [body, setBody] = useState(() => readPullRequestDraft(worktreeId).body);
+  const [stackBasePr, setStackBasePr] = useState<PullRequestSummary | null>(null);
   const { baseRepos, baseRepo, branches, baseBranch, setBaseBranch, selectBaseRepo } =
     useBaseRepoSelection(repo);
   const { submitting, preflight, setPreflight, open, submit } = usePrSubmit({
@@ -365,6 +392,8 @@ function useCreatePullRequestForm({
     onCreated,
     baseRepo,
     baseBranch,
+    stackBasePr,
+    addToStack: stackBasePr !== null,
   });
   const { generating, handleGenerateShortcut } = usePrGenerateDraft(
     aiAvailable,
@@ -375,6 +404,40 @@ function useCreatePullRequestForm({
 
   usePrInitialDraft(initialDraft, initialDraftKey, setTitle, setBody);
   usePrTitleDefault(worktreeId, setTitle);
+
+  useEffect(() => {
+    let active = true;
+    setStackBasePr(null);
+    if (
+      !baseRepo ||
+      !baseBranch ||
+      baseRepo.owner !== repo.owner ||
+      baseRepo.repo !== repo.repo ||
+      baseBranch === repo.defaultBranch
+    ) {
+      return () => {
+        active = false;
+      };
+    }
+    const baseRepoRef = { ...repo, headBranch: baseBranch };
+    void findPullRequestForBranch(baseRepoRef)
+      .then(async (basePr) => {
+        if (!basePr) return null;
+        const stack = await getPullRequestStack(repo, basePr.number);
+        const top = stack?.entries.at(-1);
+        return !stack || top?.number === basePr.number ? basePr : null;
+      })
+      .then((basePr) => {
+        if (active) setStackBasePr(basePr);
+        return basePr;
+      })
+      .catch(() => {
+        if (active) setStackBasePr(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [baseBranch, baseRepo, repo]);
 
   useEffect(() => {
     savePullRequestDraft(worktreeId, { title, body });
@@ -414,6 +477,8 @@ function useCreatePullRequestForm({
     canSubmit,
     multipleRepos,
     headLabel,
+    stackBasePr,
+    onCreateRegularPr: useCallback(() => void submit(false, false), [submit]),
   };
 }
 
@@ -513,7 +578,7 @@ function PreflightDialog({
   preflight: Preflight;
   repo: GitHubRepoRef;
   onClose: () => void;
-  onConfirmDirty: (draft: boolean, sync: BranchSyncStatus) => void;
+  onConfirmDirty: (draft: boolean, sync: BranchSyncStatus, addToStack: boolean) => void;
 }) {
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -523,7 +588,7 @@ function PreflightDialog({
   );
   const handleConfirm = useCallback(() => {
     if (preflight?.kind === "dirty") {
-      onConfirmDirty(preflight.draft, preflight.sync);
+      onConfirmDirty(preflight.draft, preflight.sync, preflight.addToStack);
     }
   }, [preflight, onConfirmDirty]);
   if (preflight?.kind === "behind") {
@@ -592,7 +657,8 @@ export function CreatePullRequestView({
   });
   const closePreflight = useCallback(() => form.setPreflight(null), [form]);
   const confirmDirty = useCallback(
-    (draft: boolean, sync: BranchSyncStatus) => void form.open(draft, sync),
+    (draft: boolean, sync: BranchSyncStatus, addToStack: boolean) =>
+      void form.open(draft, sync, addToStack),
     [form],
   );
 
@@ -643,7 +709,7 @@ export function CreatePullRequestView({
           size="sm"
         >
           {form.submitting ? <Loader2 className="animate-spin" /> : <GitPullRequestCreate />}
-          Create pull request
+          {form.stackBasePr ? "Open stacked PR" : "Create pull request"}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -657,7 +723,13 @@ export function CreatePullRequestView({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={form.onCreatePr}>Create pull request</DropdownMenuItem>
+            {form.stackBasePr ? (
+              <DropdownMenuItem onClick={form.onCreateRegularPr}>
+                Create regular pull request
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={form.onCreatePr}>Create pull request</DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={form.onCreateDraft}>Create draft</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

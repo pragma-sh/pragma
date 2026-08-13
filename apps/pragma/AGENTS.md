@@ -264,6 +264,16 @@ dialogs share `hooks/use-fix-launcher.ts` (agent pick via `hooks/use-agent-selec
 an optional new-worktree to fix on, then `startSession`) and build prompts with
 `lib/fix-it-prompt.ts`.
 
+**Stacked pull requests.** `PullRequestStackCard` reads GitHub's explicit stack object
+through the versioned `2026-03-10` REST stack API; never infer membership only from
+base/head branch relationships. It appears in both PR surfaces, maps stack branches to
+exact project-worktree branches, links eligible local ancestor chains, and creates
+missing tracking worktrees bottom-to-top. GitHub exposes no public cascading-rebase
+mutation, so **Sync stack** runs the official `gh stack sync` in a terminal; do not call
+private web endpoints. **Merge stack** requests GitHub's public asynchronous merge endpoint
+for the top PR, polls through completion, then offers to delete every uniquely matched local
+stack worktree and branch.
+
 The resolve/unresolve toggle is **optimistic**: `ReviewThreadCard` flips the thread in
 place and fires the GraphQL mutation in the background, reverting + toasting **only on
 failure** — it never refetches the whole tab. `MergeDiff` gives both panes a
