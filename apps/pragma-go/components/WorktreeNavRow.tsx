@@ -20,8 +20,8 @@ export function WorktreeNavRow({ worktree }: { worktree: Worktree }) {
       leading={
         <IconSymbol
           color={colors.mutedForeground}
-          fallback={worktree.isMain ? "★" : "⎇"}
-          name={worktree.isMain ? "circle.fill" : "arrow.triangle.branch"}
+          fallback="⎇"
+          name="arrow.triangle.branch"
           size={18}
         />
       }
