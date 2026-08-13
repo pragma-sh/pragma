@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod limits;
+pub mod scrollback;
 
 pub use pragma_constants::{
     AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
@@ -261,6 +262,12 @@ pub struct RpcResponseFrame {
 pub struct RpcError {
     pub code: ProtocolErrorCode,
     pub message: String,
+    /// Domain-specific error detail the protocol code cannot express — the
+    /// fanout failure code, the member it belongs to, the finalize stage it
+    /// stopped at. Carried verbatim to the gateway and on to SDK callers so
+    /// they branch on a code instead of parsing a message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

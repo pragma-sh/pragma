@@ -194,6 +194,14 @@ than no guide.
 - Plugin templates/scaffolding → `packages/create-pragma-plugin`.
 - A pure-TS sample/exercise plugin (sidebar tab, sidebar card, web view, SDK event hook) →
   `packages/dev-test-plugin` (`@pragma/dev-test-plugin`).
+- Fanout orchestration (one prompt into several isolated attempts, then keeping
+  one) lives on the host: the durable record and the state machine in
+  `crates/pragma-server/src/fanouts.rs`, the side effects behind its
+  `FanoutHost` seam in `crates/pragma-server/src/fanout_host.rs`, and the pure
+  rules (selector resolution, branch naming, status roll-up, scratchpad
+  promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
+  (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
+  callers of the same `fanouts` RPC — never a second implementation.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
@@ -248,6 +256,7 @@ bun run generate           # Regenerate shared-constant types from schema/values
 cargo run -p pragma-server # Run the persistent server directly for debugging
 cargo run -p pragma-gateway -- --socket /path/to/daemon.sock # Run the localhost HTTP gateway
 cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
+cargo run -p pragma-cli -- fanout create "Add token refresh" --agent opencode --agent claude-code # Fan one prompt into two isolated attempts
 ```
 
 ## Pragma Go on the web
@@ -368,13 +377,16 @@ comment. The task needs `code-with-history` (fallow diffs against a real base) _
 `generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
 modules must exist first).
 
-**Public clones and fetches must not depend on `${{ github.token }}`.** That context only
-exists while the RWX GitHub App installation supplies a token, and this repository needs no
-credential for reads. Clone and fetch from public `origin` directly so an app installation
-problem cannot stop every task before CI starts. Anything that writes to GitHub still needs
-its own credential from the RWX default vault: fallow reads
-`${{ secrets.fallow-comment-token }}` into `GH_TOKEN` (a fine-grained token with **Pull
-requests: read and write** on `pragma-sh/pragma`). Set or rotate it with
+**CI clones and fetches with no token — `pragma-sh/pragma` is public.** RWX's
+`${{ github.token }}` context is not to be relied on: it can vanish mid-run with
+`The context key "github" is not available in this expression`, and it could never write
+to a PR anyway — the GitHub App installation token is scoped to reading repository
+contents, with no `pull_requests` or `issues` permission, so any `gh` call against them
+dies with `Resource not accessible by integration (HTTP 403)` — which is how the fallow
+comment silently stopped appearing while the task still exited 0. Anything that writes to
+GitHub needs its own credential from the RWX default vault: fallow reads
+`${{ secrets.fallow-comment-token }}` into `GH_TOKEN` (a fine-grained token with
+**Pull requests: read and write** on `pragma-sh/pragma`). Set or rotate it with
 `rwx vaults secrets set --vault default fallow-comment-token=<token>`; a run started before
 the secret exists fails to resolve the expression, so add the secret before merging a change
 that references a new one.

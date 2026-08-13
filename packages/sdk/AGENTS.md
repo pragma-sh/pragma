@@ -87,6 +87,23 @@ to layer that project's file over the global one; omit it for the global theme a
 Only overrides are returned — a client keeps its own shipped defaults for every token
 the user has not themed.
 
+## Fanouts
+
+`client.fanouts` is full parity with `pragma-cli fanout` over the same `fanouts`
+RPC: `create`, `get`, `read`, `send`, `retry`, `cancel`, `pick`, and a
+`subscribe` snapshot-then-delta generator. Two shapes differ from the wire on
+purpose:
+
+- `read` decodes each target's base64 `data` into `raw: Uint8Array`; callers
+  never see the wire encoding.
+- `pick` takes no confirmation flag. Confirming is the UI's and the CLI's job;
+  the SDK call is the destructive API itself, and a conflict or a partial
+  cleanup resolves with a `stage` to resume from rather than throwing.
+
+Domain failures survive the gateway: `PragmaGatewayError.details` carries the
+host's `FanoutFailure` (its own code, the member, the finalize stage), so
+callers branch on a code instead of parsing a message.
+
 ## Rules
 
 - **`build` bundles `@pragma/scratchpad-contract` normally.** It used to need

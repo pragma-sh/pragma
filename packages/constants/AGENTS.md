@@ -61,6 +61,12 @@ The Rust side parses `values.json` against the schema-generated types at startup
   `maxBinaryBytes` in the webview's heap.
 - `scratchpads.*` — managed local MDX directory, extension, frontmatter key, and metadata
   version shared by CLI, Rust host, and desktop editor.
+- `fanout.*` — the durable fanout state file, attempt branch prefix, the member
+  floor (there is no ceiling), launch concurrency, follow-up delivery timeout, and the
+  `PRAGMA_FANOUT_ID` / `PRAGMA_FANOUT_MEMBER_ID` environment variables every
+  attempt session exports. The whole fanout wire contract (`Fanout`,
+  `FanoutMember`, statuses, finalize stages, request/result types) lives in
+  `schema.json` so the host, the CLI, the SDK, and the desktop share one shape.
 - `brandIcon` entries — when you add one to `values.json`, add the icon body to
   `apps/pragma/src/lib/brand-icons.json` too (the app never fetches icons over the
   network).

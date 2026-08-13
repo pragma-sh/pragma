@@ -130,6 +130,20 @@ const mockWorkspace: WorkspaceContextValue = {
   stopScript: vi.fn(),
 };
 
+vi.mock("@/state/fanouts-context", () => ({
+  useFanouts: () => ({
+    fanouts: [],
+    comparingFanoutId: null,
+    openComparison: vi.fn(),
+    closeComparison: vi.fn(),
+    create: vi.fn(),
+    retry: vi.fn(),
+    cancel: vi.fn(),
+    send: vi.fn(),
+    pick: vi.fn(),
+  }),
+}));
+
 vi.mock("@/state/workspace-context", () => ({
   useWorkspace: (): WorkspaceContextValue => mockWorkspace,
 }));

@@ -16,6 +16,7 @@ mod broker;
 mod cli;
 mod commands;
 mod direct;
+mod fanout;
 mod output;
 mod scrollback;
 mod server;
@@ -70,6 +71,7 @@ fn run(cli: &Cli, out: &output::Output) -> Result<(), CliError> {
             AgentCommand::Input(args) => direct::agent_input(args, out),
             AgentCommand::Verify(args) => agent_verify::run(args, out),
         },
+        TopCommand::Fanout { fanout } => fanout::run(fanout, out),
         TopCommand::Scratchpad { scratchpad } => match scratchpad {
             ScratchpadCommand::Create(args) => commands::scratchpad_create(args, out),
         },

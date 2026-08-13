@@ -77,6 +77,147 @@ pub enum TopCommand {
         #[command(subcommand)]
         scratchpad: ScratchpadCommand,
     },
+    /// Fan one prompt out into several isolated agent attempts, then pick one.
+    Fanout {
+        #[command(subcommand)]
+        fanout: FanoutCommand,
+    },
+}
+
+// -------------------------- fanout --------------------------
+
+/// Fanout commands talk directly to `pragma-server`, never through the desktop
+/// broker: a fanout runs the same whether the app is open or closed.
+#[derive(Debug, Subcommand)]
+pub enum FanoutCommand {
+    /// Launch one prompt into two or more isolated attempts under one parent.
+    Create(FanoutCreateArgs),
+    /// Show a fanout's members, statuses, and raw worktree/tab ids.
+    Show(FanoutShowArgs),
+    /// Read one member's terminal output, or every member's.
+    Read(FanoutReadArgs),
+    /// Send a follow-up to one member or to all of them.
+    Send(FanoutSendArgs),
+    /// Relaunch one member's agent in its existing worktree.
+    Retry(FanoutMemberArgs),
+    /// Stop every attempt and release the parent. Checkouts are kept.
+    Cancel(FanoutRefArgs),
+    /// Merge one attempt into the parent and delete every attempt. Destructive.
+    Pick(FanoutPickArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutCreateArgs {
+    /// The shared prompt. Conflicts with `--prompt-file`.
+    #[arg(value_name = "PROMPT")]
+    pub prompt: Option<String>,
+    /// Read the shared prompt from a file, or `-` for stdin.
+    #[arg(long, value_name = "PATH|-", conflicts_with = "prompt")]
+    pub prompt_file: Option<String>,
+    /// Existing parent worktree. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID", conflicts_with = "new_parent")]
+    pub parent: Option<String>,
+    /// Create a coordination parent on this branch first.
+    #[arg(long, value_name = "BRANCH")]
+    pub new_parent: Option<String>,
+    /// Display title for a newly created parent.
+    #[arg(long, requires = "new_parent")]
+    pub parent_title: Option<String>,
+    /// Source worktree a new parent branches from. Defaults to `$PRAGMA_WORKTREE_ID`.
+    #[arg(long, value_name = "ID", requires = "new_parent")]
+    pub from: Option<String>,
+    /// One attempt, as `agent[.model[.reasoning]]`. Repeat for each attempt
+    /// (at least two). Duplicates are allowed — sampling one model twice is a
+    /// supported use.
+    #[arg(long = "agent", value_name = "SELECTOR")]
+    pub agents: Vec<String>,
+    /// Reasoning effort for every attempt that does not name its own.
+    #[arg(long, value_name = "ID")]
+    pub reasoning: Option<String>,
+    /// Bound on concurrently launching attempts.
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<u32>,
+    /// Repeating a create with the same key returns the existing fanout
+    /// instead of provisioning a second one.
+    #[arg(long, value_name = "KEY")]
+    pub idempotency_key: Option<String>,
+}
+
+/// Addresses a fanout: by id, or by the current worktree. Every fanout command
+/// accepts the same pair.
+#[derive(Debug, Args)]
+pub struct FanoutRefArgs {
+    /// Fanout id. Defaults to `$PRAGMA_FANOUT_ID`, then to the fanout owning
+    /// `$PRAGMA_WORKTREE_ID` (as a parent or as an attempt).
+    #[arg(value_name = "FANOUT_ID")]
+    pub fanout: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutShowArgs {
+    #[command(flatten)]
+    pub reference: FanoutRefArgs,
+    /// Print the current state, then stream every update until Ctrl-C.
+    #[arg(long)]
+    pub watch: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutReadArgs {
+    #[command(flatten)]
+    pub reference: FanoutRefArgs,
+    /// Member to read. Defaults to `$PRAGMA_FANOUT_MEMBER_ID`.
+    #[arg(long, value_name = "ID", conflicts_with = "all")]
+    pub member: Option<String>,
+    /// Read every member.
+    #[arg(long)]
+    pub all: bool,
+    /// Tail the last N lines of each target.
+    #[arg(long, default_value_t = 200)]
+    pub lines: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutSendArgs {
+    #[command(flatten)]
+    pub reference: FanoutRefArgs,
+    /// Member to send to.
+    #[arg(long, value_name = "ID", conflicts_with = "all")]
+    pub member: Option<String>,
+    /// Send to every member.
+    #[arg(long)]
+    pub all: bool,
+    /// The follow-up text. Conflicts with `--message-file`.
+    #[arg(long)]
+    pub message: Option<String>,
+    /// Read the follow-up from a file, or `-` for stdin.
+    #[arg(long, value_name = "PATH|-", conflicts_with = "message")]
+    pub message_file: Option<String>,
+    /// Reuse a message id so a retry cannot deliver the same follow-up twice.
+    #[arg(long, value_name = "ID")]
+    pub message_id: Option<String>,
+    /// Return as soon as the message is enqueued instead of waiting for
+    /// per-member delivery receipts.
+    #[arg(long)]
+    pub no_wait: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutMemberArgs {
+    #[command(flatten)]
+    pub reference: FanoutRefArgs,
+    /// Member to act on. Defaults to `$PRAGMA_FANOUT_MEMBER_ID`.
+    #[arg(long, value_name = "ID")]
+    pub member: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct FanoutPickArgs {
+    #[command(flatten)]
+    pub member: FanoutMemberArgs,
+    /// Skip the interactive confirmation. Required for automation.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 // -------------------------- scratchpad --------------------------

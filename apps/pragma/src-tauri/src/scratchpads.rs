@@ -38,6 +38,28 @@ fn agent_id_from_metadata(tab_id: &str, metadata: &[TabAgentMetadata]) -> AppRes
         })
 }
 
+/// Lists a worktree's managed scratchpads with their full MDX source.
+///
+/// The comparison view renders whole documents side by side, which the summary
+/// listing cannot feed. Parsing stays on the host, so every client reads the
+/// same contract.
+#[tauri::command(async)]
+pub async fn list_scratchpad_files(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+) -> AppResult<Vec<ScratchpadFile>> {
+    let worktree = db.worktree(&worktree_id)?;
+    let client = hosts.for_worktree(&db, &worktree_id)?;
+    let value = client.rpc(
+        ProtocolRpcMethod::Scratchpads,
+        serde_json::to_value(ScratchpadsRequest::List {
+            root: worktree.path,
+        })?,
+    )?;
+    Ok(serde_json::from_value(value)?)
+}
+
 /// Sends one scratchpad prompt to its attached agent tab.
 #[tauri::command]
 pub async fn scratchpad_prompt_agent(

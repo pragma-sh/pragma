@@ -103,10 +103,15 @@ export async function resolveModels(
  */
 export async function assembleCatalog(
   plugins: ResolvedPlugin[],
-  ctx: PluginContext,
+  ctx: PluginContext | ((plugin: ResolvedPlugin) => PluginContext),
   onError: (pluginId: string, agentId: string, error: unknown) => void = () => {},
   previous?: CatalogResult,
 ): Promise<CatalogResult> {
+  // A project-scoped plugin's model provider must resolve against the project
+  // it was contributed by, not against whichever root happens to be first in
+  // the registered list — that is how one project's `.pragma/config.json`
+  // override leaked into another's launcher.
+  const contextFor = typeof ctx === "function" ? ctx : () => ctx;
   const assets: Record<string, IconAsset> = {};
   const entries = plugins.flatMap((plugin) =>
     (plugin.definition.agents ?? []).map((agent) => ({ agent, plugin })),
@@ -115,7 +120,7 @@ export async function assembleCatalog(
     entries.map(async ({ agent, plugin }) => {
       const fallback = lastGoodAgent(previous, qualifiedAgentId(plugin.pluginId, agent.id));
       try {
-        const resolved = await catalogAgent(agent, plugin, ctx, assets);
+        const resolved = await catalogAgent(agent, plugin, contextFor(plugin), assets);
         if (resolved.models.length === 0 && fallback && fallback.models.length > 0) {
           onError(
             plugin.pluginId,
@@ -181,10 +186,16 @@ async function catalogAgent(
   const icon = catalogIcon(agent, plugin.dir, assets);
   const commands = launchCommands(agent, models);
   const launch = catalogLaunch(agent, commands);
+  const runtimeAgentId = (plugin.definition.watchers ?? []).find(
+    (watcher) => watcher.agent === agent.id,
+  )?.agent;
   return {
     id: qualifiedAgentId(plugin.pluginId, agent.id),
     name: agent.name,
     pluginId: plugin.pluginId,
+    scope: plugin.scope,
+    root: plugin.root,
+    ...(runtimeAgentId ? { runtimeAgentId } : {}),
     models,
     launch,
     ...(agent.excludeFeatures ? { excludeFeatures: agent.excludeFeatures } : {}),

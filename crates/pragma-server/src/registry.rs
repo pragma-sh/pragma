@@ -64,6 +64,11 @@ const AGENT_MESSAGE_REPLAY_LIMIT: usize = 200;
 /// File deltas are advisory invalidations. Bound each subscriber so a build
 /// cannot enqueue millions of path events behind a slow client.
 const FILE_EVENT_CHANNEL_CAPACITY: usize = 64;
+/// Grid a server-owned agent session starts on. No client has attached yet, so
+/// this is what the TUI first lays itself out for; an attaching desktop resizes
+/// it to the real viewport.
+const AGENT_SESSION_COLS: u16 = 120;
+const AGENT_SESSION_ROWS: u16 = 40;
 pub struct Registry {
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     socket_path: PathBuf,
@@ -104,9 +109,42 @@ pub struct Registry {
     /// that types a phone's interjections, answers, and verdicts into the
     /// agent's TUI. See `crate::watchers`.
     watchers: WatcherSupervisor,
+    /// Durable fanout record: the parent/attempt relation, the captured base
+    /// commit, and the finalize stage. Host-owned so a fanout survives the
+    /// desktop being closed or the server restarting.
+    fanouts: Arc<crate::fanouts::FanoutStore>,
 }
 
 type AgentKey = (String, String, String);
+
+/// One server-owned agent launch. Shared by the controller-free
+/// `agentSessionLaunch` and by every fanout attempt so both build the command,
+/// tag the tab, and start the watcher identically.
+#[derive(Debug, Clone)]
+pub struct AgentLaunch {
+    pub project_id: String,
+    pub worktree_id: String,
+    /// Trusted absolute checkout path the session opens in.
+    pub cwd: String,
+    /// Fully qualified plugin catalog id.
+    pub agent_id: String,
+    pub model_id: Option<String>,
+    pub reasoning_id: Option<String>,
+    /// Raw model snippet that bypasses catalog model/reasoning args.
+    pub model_cmd: Option<String>,
+    pub prompt: Option<String>,
+    /// Set when this session is one attempt of a fanout.
+    pub fanout: Option<FanoutMembership>,
+}
+
+/// The fanout identity a session carries: recorded on the mirrored tab and
+/// exported into the session's environment so an agent (or `pragma-cli`
+/// running inside it) can address its own fanout without being told.
+#[derive(Debug, Clone)]
+pub struct FanoutMembership {
+    pub fanout_id: String,
+    pub member_id: String,
+}
 
 fn optional_str(value: &Value) -> Option<&str> {
     if value.is_null() {
@@ -150,16 +188,17 @@ fn now_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-fn shell_quote(value: &str) -> String {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"_./:=@+-".contains(&byte))
-    {
-        value.to_string()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
+/// Renders an agent's launch command for the shell the session actually runs.
+///
+/// The command is *typed into* a live interactive shell, so it must be quoted
+/// the way that shell parses it — POSIX quoting typed into PowerShell mangles
+/// every Windows path with a space in it.
+fn agent_command_line(parts: &[String], shell: Option<&ShellProfile>) -> String {
+    let launch = shell.map_or_else(
+        || pragma_platform::shell::resolve_launch(None),
+        |profile| pragma_platform::shell::resolve_profile_launch(profile, None),
+    );
+    pragma_platform::shell::interactive_command_line(&launch.program, parts)
 }
 
 /// Alternate-screen enter sequences a TUI emits once it takes the terminal.
@@ -281,6 +320,13 @@ impl Registry {
             plugins: PluginsRegistry::new(server_dir.clone()),
             tunnel: TunnelRegistry::new(server_dir.clone()),
             watchers: WatcherSupervisor::new(server_dir.clone()),
+            fanouts: {
+                let store = Arc::new(crate::fanouts::FanoutStore::load(&server_dir));
+                // Anything that was live when this host last stopped is
+                // interrupted, never silently re-prompted.
+                store.reconcile_after_restart();
+                store
+            },
             server_dir,
         }
     }
@@ -551,17 +597,45 @@ impl Registry {
             }
             (None, Some(spec)) => self.create_worktree_headless(&args.project_id, &spec)?,
         };
-        let (_plugin_id, launch, command, agent_name) = self.resolve_agent_launch(
-            &args.agent_id,
-            args.model_id.as_deref(),
-            args.reasoning_id.as_deref(),
-            args.model_cmd.as_deref(),
+        let tab_id = self.launch_agent_session(&AgentLaunch {
+            project_id: args.project_id.clone(),
+            worktree_id: worktree_id.clone(),
+            cwd,
+            agent_id: args.agent_id.clone(),
+            model_id: args.model_id.clone(),
+            reasoning_id: args.reasoning_id.clone(),
+            model_cmd: args.model_cmd.clone(),
+            prompt: args.prompt.clone(),
+            fanout: None,
+        })?;
+        Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
+    }
+
+    /// Opens one agent-owned terminal tab: resolves the launch command from the
+    /// catalog, spawns the PTY, schedules the startup/prefill input, mirrors the
+    /// tab, and starts its watcher.
+    ///
+    /// This is the single server-owned launch path. Both the controller-free
+    /// `agentSessionLaunch` and every fanout attempt go through it, so the two
+    /// cannot drift in command construction, tagging, or watcher supervision.
+    pub fn launch_agent_session(&self, launch: &AgentLaunch) -> Result<String, String> {
+        let (_plugin_id, spec, command, agent_name) = self.resolve_agent_launch(
+            &launch.agent_id,
+            launch.model_id.as_deref(),
+            launch.reasoning_id.as_deref(),
+            launch.model_cmd.as_deref(),
+            None,
         )?;
         let tab_id = Uuid::new_v4().to_string();
-        // A headless launch has no shell picker behind it, so the project's own
-        // configured shell decides.
+        // A server-owned launch has no shell picker behind it, so the project's
+        // own configured shell decides.
         let _events = self
-            .spawn(tab_id.clone(), worktree_id.clone(), cwd, 120, 40, None)
+            .spawn_agent_session(
+                &tab_id,
+                &launch.worktree_id,
+                &launch.cwd,
+                launch.fanout.as_ref(),
+            )
             .map_err(|error| error.to_string())?;
         let session = self
             .sessions
@@ -570,22 +644,138 @@ impl Registry {
             .get(&tab_id)
             .cloned()
             .ok_or_else(|| "spawned session disappeared".to_string())?;
-        let prompt = args.prompt;
+        let prompt = launch.prompt.clone();
         thread::spawn(move || {
-            schedule_agent_launch(&session, &launch, &command, prompt.as_deref());
+            schedule_agent_launch(&session, &spec, &command, prompt.as_deref());
         });
         self.append_mirrored_tab(
-            &args.project_id,
-            &worktree_id,
+            &launch.project_id,
+            &launch.worktree_id,
             &tab_id,
-            &args.agent_id,
+            &launch.agent_id,
             &agent_name,
+            launch.fanout.as_ref(),
         );
         // The tab is only now in the mirrored snapshot, which is where the
-        // watcher set is derived from — without this the phone that launched
+        // watcher set is derived from — without this the client that launched
         // the agent would wait out a reconcile tick before it could reply.
         self.reconcile_watchers();
-        Ok(json!({ "worktreeId": worktree_id, "tabId": tab_id }))
+        Ok(tab_id)
+    }
+
+    /// The durable fanout record this host owns.
+    pub fn fanouts(&self) -> &Arc<crate::fanouts::FanoutStore> {
+        &self.fanouts
+    }
+
+    /// Absolute project root from the mirrored workspace.
+    pub fn project_root(&self, project_id: &str) -> Result<String, String> {
+        self.mirrored_project_path(project_id)
+    }
+
+    /// Every worktree the mirrored workspace knows about.
+    pub fn mirrored_worktrees(&self) -> Vec<Worktree> {
+        self.workspace
+            .lock()
+            .ok()
+            .and_then(|workspace| {
+                workspace
+                    .as_ref()
+                    .map(|snapshot| snapshot.worktrees.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Adds a server-created worktree to the mirrored snapshot.
+    pub fn insert_mirrored_worktree(&self, worktree: Worktree) -> Result<(), String> {
+        self.mutate_workspace(|snapshot| {
+            snapshot
+                .worktrees
+                .retain(|existing| existing.id != worktree.id);
+            snapshot.worktrees.push(worktree);
+            Ok(())
+        })
+    }
+
+    /// Drops a worktree (and its tabs) from the mirrored snapshot after the
+    /// checkout itself is gone.
+    pub fn remove_mirrored_worktree(&self, worktree_id: &str) {
+        let _ = self.mutate_workspace(|snapshot| {
+            snapshot
+                .worktrees
+                .retain(|existing| existing.id != worktree_id);
+            snapshot.tabs.retain(|tab| tab.worktree_id != worktree_id);
+            Ok(())
+        });
+    }
+
+    /// The plugin catalog, with `root` registered first so a project's own
+    /// plugins are resolved before it is read.
+    pub fn project_catalog(&self, project_root: &str) -> Result<Value, String> {
+        self.plugins
+            .ensure_root(project_root)
+            .map_err(|error| error.to_string())?;
+        self.plugins
+            .handle_rpc(&json!({ "action": "catalog" }))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Bounded tail of a live session's output: `(raw bytes, plain text)`.
+    pub fn session_output(&self, tab_id: &str, lines: usize) -> Result<(Vec<u8>, String), String> {
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| "sessions lock poisoned".to_string())?
+            .get(tab_id)
+            .cloned()
+            .ok_or_else(|| format!("no live session for tab {tab_id}"))?;
+        let raw = session.scrollback_bytes();
+        let text = pragma_protocol::scrollback::plain_text(&raw, lines);
+        Ok((raw, text))
+    }
+
+    /// True when a watcher is attached to this session.
+    pub fn has_watcher(&self, tab_id: &str) -> bool {
+        self.watchers.is_watching(tab_id)
+    }
+
+    /// True when a session is still live.
+    pub fn has_live_session(&self, tab_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .is_ok_and(|sessions| sessions.contains_key(tab_id))
+    }
+
+    /// Spawns an agent session's PTY, exporting the fanout identity when the
+    /// session is one attempt of a fanout.
+    fn spawn_agent_session(
+        &self,
+        tab_id: &str,
+        worktree_id: &str,
+        cwd: &str,
+        fanout: Option<&FanoutMembership>,
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        let env = fanout.map_or_else(Vec::new, |fanout| {
+            vec![
+                (
+                    pragma_constants::CONSTANTS.fanout.env_fanout_id.clone(),
+                    fanout.fanout_id.clone(),
+                ),
+                (
+                    pragma_constants::CONSTANTS.fanout.env_member_id.clone(),
+                    fanout.member_id.clone(),
+                ),
+            ]
+        });
+        self.spawn_with_env(
+            tab_id.to_string(),
+            worktree_id.to_string(),
+            cwd.to_string(),
+            AGENT_SESSION_COLS,
+            AGENT_SESSION_ROWS,
+            None,
+            &env,
+        )
     }
 
     fn mirrored_project_path(&self, project_id: &str) -> Result<String, String> {
@@ -713,6 +903,7 @@ impl Registry {
         tab_id: &str,
         agent_id: &str,
         agent_title: &str,
+        fanout: Option<&FanoutMembership>,
     ) {
         let tab = Tab {
             id: tab_id.to_string(),
@@ -730,6 +921,8 @@ impl Registry {
             plugin_payload: None,
             plugin_dedupe_key: None,
             agent_id: Some(agent_id.to_string()),
+            fanout_id: fanout.map(|fanout| fanout.fanout_id.clone()),
+            fanout_member_id: fanout.map(|fanout| fanout.member_id.clone()),
             user_renamed: false,
             shell: None,
             order_index: 0,
@@ -744,6 +937,8 @@ impl Registry {
                 .max()
                 .map_or(0, |max| max + 1);
             snapshot.tabs.push(Tab {
+                fanout_id: None,
+                fanout_member_id: None,
                 order_index: next_index,
                 ..tab
             });
@@ -764,6 +959,7 @@ impl Registry {
         model_id: Option<&str>,
         reasoning_id: Option<&str>,
         model_cmd: Option<&str>,
+        shell: Option<&ShellProfile>,
     ) -> Result<(String, Value, String, String), String> {
         let catalog = self
             .plugins
@@ -792,11 +988,11 @@ impl Registry {
             .iter()
             .map(|part| {
                 part.as_str()
-                    .map(shell_quote)
+                    .map(str::to_string)
                     .ok_or_else(|| "agent launch command contains non-string".to_string())
             })
-            .collect::<Result<Vec<_>, _>>()?
-            .join(" ");
+            .collect::<Result<Vec<_>, _>>()?;
+        let command = agent_command_line(&command, shell);
         let command = match model_cmd.map(str::trim).filter(|cmd| !cmd.is_empty()) {
             Some(model_cmd) => format!("{command} {model_cmd}"),
             None => command,
@@ -868,6 +1064,23 @@ impl Registry {
         rows: u16,
         shell: Option<ShellProfile>,
     ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
+        self.spawn_with_env(session_id, worktree_id, cwd, cols, rows, shell, &[])
+    }
+
+    /// Spawns a session with extra environment variables exported into it.
+    // Session setup already carries identity, geometry, and the shell; the
+    // environment is one more independent axis.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_with_env(
+        &self,
+        session_id: String,
+        worktree_id: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+        shell: Option<ShellProfile>,
+        extra_env: &[(String, String)],
+    ) -> Result<(Vec<EventFrame>, Receiver<EventFrame>), RegistryError> {
         // Reject duplicates before the expensive PTY open, but spawn the shell
         // outside the registry lock so concurrent writes/resizes/attaches to other
         // sessions are not serialized behind a blocking openpty + fork.
@@ -892,6 +1105,7 @@ impl Registry {
             rows,
             &socket_path,
             shell,
+            extra_env,
             move |exited_session| {
                 let mut removed = false;
                 if let Some(sessions) = weak_sessions.upgrade() {
@@ -1073,8 +1287,16 @@ impl Registry {
         // broadcast `cleared` event as "remove the indicator". Entries are
         // removed when the hosting tab's session exits
         // ([`Self::clear_agents_for_tab`]).
+        let member_status = payload.status.and_then(fanout_member_status);
+        let tab_id = payload.tab_id.clone();
         statuses.insert(key, payload);
         drop(statuses);
+        // A fanout attempt's member status follows its agent, but is a separate
+        // vocabulary: the attempt can be `done` while the fanout is still only
+        // `partial` because a sibling failed.
+        if let Some(status) = member_status {
+            self.fanouts.apply_agent_status(&tab_id, status);
+        }
         self.broadcast_agent(&event);
         self.broadcast_agent_status()?;
         Ok(())
@@ -1537,6 +1759,19 @@ fn preserve_daemon_tab_metadata(current: &WorkspaceSnapshot, incoming: &mut Work
     }
 }
 
+/// Maps an agent's runtime status onto the fanout member status it implies.
+/// `cleared` means idle-but-live, which says nothing about the attempt's
+/// progress, so it moves nothing.
+fn fanout_member_status(status: AgentStatus) -> Option<pragma_constants::FanoutMemberStatus> {
+    use pragma_constants::FanoutMemberStatus;
+    match status {
+        AgentStatus::Running => Some(FanoutMemberStatus::Running),
+        AgentStatus::Attention => Some(FanoutMemberStatus::Attention),
+        AgentStatus::Done => Some(FanoutMemberStatus::Done),
+        AgentStatus::Cleared => None,
+    }
+}
+
 fn agent_event(payload: &AgentReportPayload) -> EventFrame {
     EventFrame::Agent {
         worktree_id: payload.worktree_id.clone(),
@@ -1623,6 +1858,8 @@ mod tests {
     fn snapshot_with_agent_tab(project_path: &str) -> WorkspaceSnapshot {
         let mut snapshot = snapshot_with_project(project_path);
         snapshot.tabs.push(Tab {
+            fanout_id: None,
+            fanout_member_id: None,
             id: "tab-1".to_string(),
             project_id: "project-1".to_string(),
             worktree_id: "worktree-main".to_string(),

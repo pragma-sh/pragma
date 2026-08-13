@@ -25,7 +25,8 @@
     "tabs",
     "bench",
     "files",
-    "scratchpads"
+    "scratchpads",
+    "fanout"
   ],
   "properties": {
     "app": {
@@ -90,6 +91,9 @@
     },
     "scratchpads": {
       "$ref": "#/definitions/Scratchpads"
+    },
+    "fanout": {
+      "$ref": "#/definitions/FanoutDefaults"
     }
   },
   "definitions": {
@@ -114,7 +118,8 @@
         "tunnel",
         "ports",
         "scratchpads",
-        "wsl"
+        "wsl",
+        "fanouts"
       ]
     },
     "ProtocolEventKind": {
@@ -130,7 +135,8 @@
         "echoMode",
         "automationPending",
         "automationsChanged",
-        "workspace"
+        "workspace",
+        "fanouts"
       ]
     },
     "ProtocolErrorCode": {
@@ -145,6 +151,727 @@
         "permissionDenied",
         "internal"
       ]
+    },
+    "FanoutDefaults": {
+      "title": "FanoutDefaults",
+      "description": "Shipped defaults for fanout orchestration: the host state file, attempt branch naming, the member floor, and follow-up delivery timeouts. Both `pragma-server` and the desktop read these instead of hard-coding either side.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stateFile",
+        "branchPrefix",
+        "minMembers",
+        "defaultJobs",
+        "deliveryTimeoutMs",
+        "envFanoutId",
+        "envMemberId"
+      ],
+      "properties": {
+        "stateFile": {
+          "type": "string",
+          "description": "Owner-only durable fanout record, written beside the server socket."
+        },
+        "branchPrefix": {
+          "type": "string",
+          "description": "Leading segment of every generated attempt branch (`<prefix>/<fanout>/<member>`)."
+        },
+        "minMembers": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "Fewest attempts a fanout may have. A single attempt is an ordinary agent launch."
+        },
+        "defaultJobs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default bound on concurrently launching attempts."
+        },
+        "deliveryTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a waiting follow-up send waits for each member's delivery receipt."
+        },
+        "envFanoutId": {
+          "type": "string",
+          "description": "Environment variable exported into every attempt session with the owning fanout id."
+        },
+        "envMemberId": {
+          "type": "string",
+          "description": "Environment variable exported into every attempt session with its member id."
+        }
+      }
+    },
+    "FanoutStatus": {
+      "title": "FanoutStatus",
+      "description": "Lifecycle of one fanout. Deliberately separate from agent runtime status: an attempt's agent may be idle while the fanout is still `active`.",
+      "type": "string",
+      "enum": [
+        "provisioning",
+        "active",
+        "attention",
+        "partial",
+        "ready",
+        "failed",
+        "interrupted",
+        "cancelled",
+        "finalizing",
+        "needsResolution",
+        "cleanupFailed",
+        "completed"
+      ]
+    },
+    "FanoutMemberStatus": {
+      "title": "FanoutMemberStatus",
+      "description": "Lifecycle of one fanout attempt. `interrupted` means the host restarted while the attempt was live; its prompt is never replayed automatically.",
+      "type": "string",
+      "enum": [
+        "pending",
+        "provisioning",
+        "running",
+        "attention",
+        "done",
+        "failed",
+        "interrupted",
+        "cancelled",
+        "selected"
+      ]
+    },
+    "FanoutFinalizeStage": {
+      "title": "FanoutFinalizeStage",
+      "description": "Durable progress marker for the destructive pick transaction. Persisted after every successful step so a retry resumes at the first incomplete stage instead of repeating a destructive one.",
+      "type": "string",
+      "enum": [
+        "validating",
+        "committingWinner",
+        "merging",
+        "promotingScratchpads",
+        "stoppingSessions",
+        "cleaningUp",
+        "completed"
+      ]
+    },
+    "FanoutFailureCode": {
+      "title": "FanoutFailureCode",
+      "description": "Machine-readable reason a fanout operation failed, preserved through the CLI, the gateway, and the SDK so callers branch on a code rather than on message text.",
+      "type": "string",
+      "enum": [
+        "invalidSelector",
+        "unknownAgent",
+        "unknownModel",
+        "unknownReasoning",
+        "activeFanoutExists",
+        "dirtyParent",
+        "worktreeCreateFailed",
+        "setupFailed",
+        "launchFailed",
+        "notFound",
+        "conflict",
+        "descendantWorktree",
+        "commitMessageFailed",
+        "mergeConflict",
+        "promotionFailed",
+        "cleanupFailed",
+        "internal"
+      ]
+    },
+    "FanoutFailure": {
+      "title": "FanoutFailure",
+      "description": "One failure attached to a fanout or a single member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/FanoutFailureCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "memberId": {
+          "type": ["string", "null"],
+          "description": "Member the failure belongs to, or null for a fanout-wide failure."
+        },
+        "stage": {
+          "description": "Finalize stage the failure happened in, when it happened during a pick.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FanoutFinalizeStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "FanoutMemberSelector": {
+      "title": "FanoutMemberSelector",
+      "description": "One requested attempt before resolution. `selector` is the raw `agent[.model[.reasoning]]` text a CLI caller typed; a structured caller may instead set the fields directly. Duplicate selectors are valid — sampling one model twice is a supported use.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector"],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "description": "Raw selector text: a catalog agent id optionally followed by `.<modelId>` and `.<reasoningId>`."
+        },
+        "modelId": {
+          "type": ["string", "null"],
+          "description": "Explicit model id, overriding anything parsed out of `selector`."
+        },
+        "reasoningId": {
+          "type": ["string", "null"],
+          "description": "Explicit reasoning id, overriding both `selector` and the request-wide default."
+        }
+      }
+    },
+    "FanoutMember": {
+      "title": "FanoutMember",
+      "description": "One durable fanout attempt: a worktree branched from the fanout's captured base commit, plus the agent-owned terminal tab running in it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ordinal",
+        "selector",
+        "catalogAgentId",
+        "runtimeAgentId",
+        "modelId",
+        "reasoningId",
+        "branch",
+        "worktreeId",
+        "tabId",
+        "priorTabIds",
+        "status",
+        "failure"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Stable creation order, so the comparison grid column order never shuffles."
+        },
+        "selector": {
+          "type": "string",
+          "description": "The selector text this member was created from, retained for retry and display."
+        },
+        "catalogAgentId": {
+          "type": "string",
+          "description": "Fully qualified plugin catalog id (`plugin.agent`) used to resolve launch metadata."
+        },
+        "runtimeAgentId": {
+          "type": "string",
+          "description": "Runtime reporter/watcher id the agent event stream is keyed by. Never derive this at a call site — the host resolves it from the plugin's watcher metadata."
+        },
+        "modelId": {
+          "type": ["string", "null"]
+        },
+        "reasoningId": {
+          "type": ["string", "null"]
+        },
+        "branch": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        },
+        "tabId": {
+          "type": ["string", "null"]
+        },
+        "priorTabIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tabs this member previously ran in. A retry moves the current tab id here."
+        },
+        "status": {
+          "$ref": "#/definitions/FanoutMemberStatus"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FanoutFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Fanout": {
+      "title": "Fanout",
+      "description": "One durable fanout: a single parent worktree, an immutable base commit, one shared prompt, and N isolated attempts. A parent may own at most one fanout that is not in a terminal state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "projectId",
+        "parentWorktreeId",
+        "sourceWorktreeId",
+        "ownsParent",
+        "baseCommit",
+        "title",
+        "prompt",
+        "status",
+        "winningMemberId",
+        "finalizeStage",
+        "members",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "parentWorktreeId": {
+          "type": "string"
+        },
+        "sourceWorktreeId": {
+          "type": ["string", "null"],
+          "description": "Worktree a newly-created coordination parent was branched from; null when an existing parent was used."
+        },
+        "ownsParent": {
+          "type": "boolean",
+          "description": "True when this fanout created its own parent worktree."
+        },
+        "baseCommit": {
+          "type": "string",
+          "description": "Exact parent HEAD captured at creation. Every attempt branches from it and every comparison diffs against it, even after the parent moves on."
+        },
+        "title": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/FanoutStatus"
+        },
+        "winningMemberId": {
+          "type": ["string", "null"]
+        },
+        "finalizeStage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FanoutFinalizeStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FanoutFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutMember"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "FanoutExistingParent": {
+      "title": "FanoutExistingParent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "worktreeId"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["existing"]
+        },
+        "worktreeId": {
+          "type": "string"
+        }
+      }
+    },
+    "FanoutNewParent": {
+      "title": "FanoutNewParent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourceWorktreeId", "branch"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["new"]
+        },
+        "sourceWorktreeId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "title": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "FanoutParentSpec": {
+      "title": "FanoutParentSpec",
+      "description": "Where a fanout's single parent comes from: an existing worktree, or a fresh coordination worktree created from a source worktree.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FanoutExistingParent"
+        },
+        {
+          "$ref": "#/definitions/FanoutNewParent"
+        }
+      ]
+    },
+    "FanoutCreateRequest": {
+      "title": "FanoutCreateRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "parent", "prompt", "members"],
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/definitions/FanoutParentSpec"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Display title. Derived from the prompt's first line when omitted."
+        },
+        "defaultReasoningId": {
+          "type": ["string", "null"],
+          "description": "Reasoning effort applied to every member that does not name its own."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutMemberSelector"
+          }
+        },
+        "jobs": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Bound on concurrently launching attempts. Git worktree mutations are serialized regardless."
+        },
+        "idempotencyKey": {
+          "type": ["string", "null"],
+          "description": "Repeating a create with the same key returns the existing fanout instead of provisioning a second one."
+        }
+      }
+    },
+    "FanoutRef": {
+      "title": "FanoutRef",
+      "description": "Addresses one fanout by exactly one of its id or any worktree that belongs to it (its parent, or any attempt).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fanoutId": {
+          "type": ["string", "null"]
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "FanoutReadRequest": {
+      "title": "FanoutReadRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fanoutId": {
+          "type": ["string", "null"]
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        },
+        "memberId": {
+          "type": ["string", "null"]
+        },
+        "all": {
+          "type": ["boolean", "null"]
+        },
+        "lines": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        }
+      }
+    },
+    "FanoutReadTarget": {
+      "title": "FanoutReadTarget",
+      "description": "One member's terminal output. `text` is the escape-stripped rendering; `data` is the same bounded window as base64 raw bytes, which the SDK decodes to a Uint8Array.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memberId", "worktreeId", "tabId", "runtimeAgentId", "bytes", "text", "data"],
+      "properties": {
+        "memberId": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "runtimeAgentId": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      }
+    },
+    "FanoutReadResult": {
+      "title": "FanoutReadResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fanoutId", "targets"],
+      "properties": {
+        "fanoutId": {
+          "type": "string"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutReadTarget"
+          }
+        }
+      }
+    },
+    "FanoutSendTarget": {
+      "title": "FanoutSendTarget",
+      "description": "Who a follow-up goes to: every live member, or one stable member id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["all", "member"]
+        },
+        "memberId": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "FanoutSendRequest": {
+      "title": "FanoutSendRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "message"],
+      "properties": {
+        "fanoutId": {
+          "type": ["string", "null"]
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        },
+        "target": {
+          "$ref": "#/definitions/FanoutSendTarget"
+        },
+        "message": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": ["string", "null"],
+          "description": "Caller-supplied id making a retry idempotent: a message already delivered under this id is not typed twice."
+        },
+        "waitForDelivery": {
+          "type": ["boolean", "null"],
+          "description": "Wait for bounded per-member receipts (the default) instead of returning after durable enqueue."
+        }
+      }
+    },
+    "FanoutDeliveryState": {
+      "title": "FanoutDeliveryState",
+      "description": "Follow-up delivery outcome per member: `accepted` is the fire-and-forget terminal state, the rest are only observable when waiting.",
+      "type": "string",
+      "enum": ["accepted", "delivered", "failed", "timedOut"]
+    },
+    "FanoutDeliveryReceipt": {
+      "title": "FanoutDeliveryReceipt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memberId", "worktreeId", "tabId", "runtimeAgentId", "messageId", "state"],
+      "properties": {
+        "memberId": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "runtimeAgentId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/FanoutDeliveryState"
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "FanoutSendResult": {
+      "title": "FanoutSendResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fanoutId", "messageId", "receipts"],
+      "properties": {
+        "fanoutId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutDeliveryReceipt"
+          }
+        }
+      }
+    },
+    "FanoutMemberRequest": {
+      "title": "FanoutMemberRequest",
+      "description": "Addresses one member of one fanout — used by retry and pick.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memberId"],
+      "properties": {
+        "fanoutId": {
+          "type": ["string", "null"]
+        },
+        "worktreeId": {
+          "type": ["string", "null"]
+        },
+        "memberId": {
+          "type": "string"
+        }
+      }
+    },
+    "FanoutResult": {
+      "title": "FanoutResult",
+      "description": "The durable fanout after a mutation, plus any failures that did not abort it. `partial` is true when at least one member failed while others stayed healthy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fanout", "partial", "failures"],
+      "properties": {
+        "fanout": {
+          "$ref": "#/definitions/Fanout"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutFailure"
+          }
+        }
+      }
+    },
+    "FanoutPickResult": {
+      "title": "FanoutPickResult",
+      "description": "Outcome of the destructive pick transaction. A conflicted or partly-cleaned pick still returns the durable fanout so a caller can resume from `stage`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fanout",
+        "stage",
+        "winningMemberId",
+        "promotedScratchpads",
+        "deletedWorktreeIds",
+        "survivingWorktreeIds",
+        "failures"
+      ],
+      "properties": {
+        "fanout": {
+          "$ref": "#/definitions/Fanout"
+        },
+        "stage": {
+          "$ref": "#/definitions/FanoutFinalizeStage"
+        },
+        "winningMemberId": {
+          "type": "string"
+        },
+        "commit": {
+          "type": ["string", "null"],
+          "description": "Commit created from the winner's uncommitted changes, when there were any."
+        },
+        "promotedScratchpads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Parent-relative paths the winner's scratchpads were promoted to."
+        },
+        "deletedWorktreeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "survivingWorktreeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attempt worktrees cleanup could not remove. Non-empty means `cleanupFailed`, never `completed`."
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FanoutFailure"
+          }
+        }
+      }
+    },
+    "FanoutSubscriptionPayload": {
+      "title": "FanoutSubscriptionPayload",
+      "description": "Snapshot and delta payload of the `fanouts` subscription. v1 keeps deltas trivial: every delta is a full replacement of the host's fanout set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fanouts"],
+      "properties": {
+        "fanouts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Fanout"
+          }
+        }
+      }
     },
     "ControlMethod": {
       "title": "ControlMethod",
@@ -1277,6 +2004,19 @@
         "pluginId": {
           "type": "string",
           "description": "Id of the plugin that contributed this agent."
+        },
+        "scope": {
+          "type": ["string", "null"],
+          "enum": ["bundled", "global", "project", null],
+          "description": "Where the contributing plugin was resolved from. A `project` agent belongs to exactly one project root and must not be offered to another one."
+        },
+        "root": {
+          "type": ["string", "null"],
+          "description": "Absolute root the contributing plugin was resolved from: the project root for `project` scope, the home directory for `global`, the bundle directory for `bundled`."
+        },
+        "runtimeAgentId": {
+          "type": ["string", "null"],
+          "description": "Runtime reporter/watcher id the agent event stream is keyed by, when the plugin declares a watcher. Callers must use this rather than re-deriving an id from the dotted catalog id."
         },
         "icon": {
           "anyOf": [
@@ -2454,6 +3194,14 @@
         "userRenamed": {
           "type": "boolean",
           "description": "True once the user has manually renamed a terminal tab via double-click/context menu. Shell-emitted title updates (OSC 0/2) and agent session-name renames are ignored while this is true. Always false for non-terminal tabs."
+        },
+        "fanoutId": {
+          "type": ["string", "null"],
+          "description": "Fanout this terminal tab is an attempt of. Optional rather than nullable: absent on every tab that is not a fanout attempt."
+        },
+        "fanoutMemberId": {
+          "type": ["string", "null"],
+          "description": "Fanout member this terminal tab runs. Always set together with `fanoutId`."
         },
         "shell": {
           "description": "Shell profile this terminal tab was opened with, so a session respawned after a daemon restart returns to the same shell instead of the current default. Optional rather than nullable: absent on every tab created before shell selection existed, and on non-terminal tabs.",

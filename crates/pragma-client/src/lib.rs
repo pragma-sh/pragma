@@ -84,10 +84,15 @@ pub enum ClientError {
     #[error("server error: {0}")]
     Server(String),
     /// The server rejected an RPC request with a protocol-level code.
+    ///
+    /// `details` carries whatever domain error the protocol code cannot
+    /// express (a fanout failure code and the member it belongs to, say), so a
+    /// caller past the gateway can still branch on it.
     #[error("rpc error {code:?}: {message}")]
     Rpc {
         code: ProtocolErrorCode,
         message: String,
+        details: Option<serde_json::Value>,
     },
     /// A mutex protecting shared client state was poisoned.
     #[error("lock poisoned")]
@@ -1423,6 +1428,7 @@ fn rpc_error(error: RpcError) -> ClientError {
     ClientError::Rpc {
         code: error.code,
         message: error.message,
+        details: error.details,
     }
 }
 

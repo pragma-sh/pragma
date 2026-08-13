@@ -49,6 +49,7 @@ import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
 import { useWslDistros } from "@/hooks/use-wsl-distros";
+import { FanoutToolbarAction } from "@/components/fanout/FanoutToolbarAction";
 import { editorLaunchers } from "@/lib/editor-launchers";
 import { isMacPlatform } from "@/lib/platform";
 import {
@@ -826,6 +827,7 @@ export function TerminalTabs() {
             <PluginTopperItems items={rightTopperItems} />
             <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
             <KanbanToggle />
+            <FanoutToolbarAction />
             <EditorLauncherMenu
               disabled={editorDisabled}
               onSelect={openEditor}

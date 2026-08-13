@@ -1,4 +1,6 @@
 mod automations;
+mod fanout_host;
+mod fanouts;
 mod plugins_host;
 mod ports;
 mod registry;
@@ -529,6 +531,7 @@ fn handle_ports_rpc(
             error: Some(RpcError {
                 code: pragma_constants::ProtocolErrorCode::Internal,
                 message: error.to_string(),
+                details: None,
             }),
         },
     })
@@ -559,6 +562,36 @@ fn handle_wsl_rpc(request_id: String) -> Result<RpcResponseFrame, HandledRequest
         ),
         error: None,
     })
+}
+
+/// Runs one `fanouts` RPC against this host's durable fanout record.
+///
+/// The typed failure is preserved: its machine-readable code, the member it
+/// belongs to, and the finalize stage it stopped at ride in the error details
+/// so the CLI, the desktop, and the SDK all branch on the same value.
+fn handle_fanout_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> RpcResponseFrame {
+    match crate::fanouts::handle_rpc(registry.fanouts(), registry, payload) {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(failure) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: crate::fanouts::protocol_code(failure.code),
+                message: failure.message.clone(),
+                details: serde_json::to_value(&failure).ok(),
+            }),
+        },
+    }
 }
 
 fn handle_tabs_rpc(
@@ -597,6 +630,7 @@ fn handle_tabs_rpc(
             error: Some(RpcError {
                 code: pragma_constants::ProtocolErrorCode::Internal,
                 message,
+                details: None,
             }),
         },
     })
@@ -628,6 +662,7 @@ fn handle_rpc_request(
                 error: Some(RpcError {
                     code: pragma_constants::ProtocolErrorCode::Internal,
                     message: error.to_string(),
+                    details: None,
                 }),
             },
         });
@@ -647,6 +682,7 @@ fn handle_rpc_request(
                 error: Some(RpcError {
                     code: pragma_constants::ProtocolErrorCode::Internal,
                     message: error.to_string(),
+                    details: None,
                 }),
             },
         });
@@ -666,6 +702,7 @@ fn handle_rpc_request(
                 error: Some(RpcError {
                     code: pragma_constants::ProtocolErrorCode::Internal,
                     message: error.to_string(),
+                    details: None,
                 }),
             },
         });
@@ -678,6 +715,9 @@ fn handle_rpc_request(
     }
     if matches!(rpc.method, ProtocolRpcMethod::Tabs) {
         return handle_tabs_rpc(request_id, rpc.payload, registry);
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Fanouts) {
+        return Ok(handle_fanout_rpc(request_id, rpc.payload, registry));
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {
@@ -693,6 +733,7 @@ fn handle_rpc_request(
             error: Some(RpcError {
                 code: protocol_error_code(&error),
                 message: error.to_string(),
+                details: None,
             }),
         },
     })
@@ -850,6 +891,10 @@ fn subscription_snapshot(
         let (scrollback, rx) = registry
             .subscribe_workspace()
             .map_err(|err| HandledRequestError::Request(err.to_string()))?;
+        return Ok(EventStream { scrollback, rx });
+    }
+    if matches!(subscription.event, ProtocolEventKind::Fanouts) {
+        let (scrollback, rx) = registry.fanouts().subscribe();
         return Ok(EventStream { scrollback, rx });
     }
     if matches!(subscription.event, ProtocolEventKind::AgentStatus) {

@@ -1,6 +1,40 @@
 export { PragmaClient } from "./client";
 export { AssetsClient, type FetchedAsset } from "./assets-client";
 export { WorkspaceClient, type WorkspaceSubscriptionEvent } from "./workspace-client";
+export {
+  FanoutsClient,
+  type FanoutReadResultBytes,
+  type FanoutReadTargetBytes,
+  type FanoutRequestOptions,
+  type FanoutSubscriptionEvent,
+} from "./fanouts-client";
+export type {
+  Fanout,
+  FanoutCreateRequest,
+  FanoutDeliveryReceipt,
+  FanoutDeliveryState,
+  FanoutExistingParent,
+  FanoutFailure,
+  FanoutFailureCode,
+  FanoutFinalizeStage,
+  FanoutMember,
+  FanoutMemberRequest,
+  FanoutMemberSelector,
+  FanoutMemberStatus,
+  FanoutNewParent,
+  FanoutParentSpec,
+  FanoutPickResult,
+  FanoutReadRequest,
+  FanoutReadResult,
+  FanoutReadTarget,
+  FanoutRef,
+  FanoutResult,
+  FanoutSendRequest,
+  FanoutSendResult,
+  FanoutSendTarget,
+  FanoutStatus,
+  FanoutSubscriptionPayload,
+} from "@pragma/constants";
 export { PushClient, type PushRegistration } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";

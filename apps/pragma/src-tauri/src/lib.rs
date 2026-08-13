@@ -15,6 +15,7 @@ mod db;
 mod dev_bridge;
 mod editors;
 mod error;
+mod fanouts;
 mod fs;
 mod git;
 mod github;
@@ -1096,6 +1097,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     install_deep_links(app);
     ensure_gateway_in_background(pty.clone());
     agent_events::start_for(app.handle().clone(), pty.clone());
+    fanouts::start_for(app.handle().clone(), pty.clone());
     automations::start(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty, LOCAL_HOST.to_string());
     ssh_host::reconnect_remote_hosts(app.handle().clone());
@@ -1269,6 +1271,12 @@ pub fn run() {
             ai::ai_setup_dismissed,
             ai::set_ai_setup_dismissed,
             ai::ai_generate_commit_message,
+            git::worktree_changes_since,
+            git::base_file_diff,
+            scratchpads::list_scratchpad_files,
+            fanouts::fanout_rpc,
+            fanouts::list_fanouts,
+            fanouts::pick_fanout_member,
             ai::ai_generate_pull_request_draft,
             ai::ai_commit_all_and_generate_pull_request_draft,
             ai::ai_inline_edit,

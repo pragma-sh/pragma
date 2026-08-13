@@ -113,6 +113,8 @@ mod tests {
                 id: "tab-1".to_string(),
                 project_id: "project-1".to_string(),
                 worktree_id: "worktree-1".to_string(),
+                fanout_id: None,
+                fanout_member_id: None,
                 kind: TabKind::Terminal,
                 title: Some("dev".to_string()),
                 url: None,
