@@ -365,8 +365,9 @@ function runWorkspaceSubscription(
   onSnapshot: (snapshot: LiveSnapshot) => void,
   onUnauthorized: () => void,
 ): void {
-  void subscriptionLoop(signal, onUnauthorized, async () => {
+  void subscriptionLoop(signal, onUnauthorized, async (onDelivered) => {
     for await (const event of client.workspace.subscribe({ signal })) {
+      onDelivered();
       onSnapshot({
         projects: event.payload.projects,
         worktrees: event.payload.worktrees,
@@ -383,8 +384,9 @@ function runAgentStatusSubscription(
   onStatuses: (statuses: AgentReportPayload[]) => void,
   onUnauthorized: () => void,
 ): void {
-  void subscriptionLoop(signal, onUnauthorized, async () => {
+  void subscriptionLoop(signal, onUnauthorized, async (onDelivered) => {
     for await (const event of client.events.subscribe("agentStatus", { signal })) {
+      onDelivered();
       onStatuses(parseAgentStatuses(event.payload));
     }
   });
@@ -398,8 +400,9 @@ function runSessionTitleSubscription(
   onTitle: Dispatch<SetStateAction<Record<string, string>>>,
   onUnauthorized: () => void,
 ): void {
-  void subscriptionLoop(signal, onUnauthorized, async () => {
+  void subscriptionLoop(signal, onUnauthorized, async (onDelivered) => {
     for await (const event of client.sessions.attach(tabId, { signal })) {
+      onDelivered();
       if (event.type !== "title") continue;
       onTitle((previous) =>
         previous[tabId] === event.title ? previous : { ...previous, [tabId]: event.title },
@@ -412,7 +415,7 @@ function runSessionTitleSubscription(
 async function subscriptionLoop(
   signal: AbortSignal,
   onUnauthorized: () => void,
-  body: () => Promise<void>,
+  body: (onDelivered: () => void) => Promise<void>,
 ): Promise<void> {
   let backoff = RECONNECT_INITIAL_MS;
   while (!signal.aborted) {
@@ -422,7 +425,7 @@ async function subscriptionLoop(
       return;
     }
     if (signal.aborted) return;
-    backoff = reconnectDelay(backoff, result.startedAt);
+    backoff = reconnectDelay(backoff, result);
     // oxlint-disable-next-line no-await-in-loop -- backoff between reconnects.
     await delay(backoff, signal);
     backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
@@ -430,22 +433,32 @@ async function subscriptionLoop(
 }
 
 async function runSubscription(
-  body: () => Promise<void>,
-): Promise<{ startedAt: number } | "unauthorized"> {
+  body: (onDelivered: () => void) => Promise<void>,
+): Promise<{ startedAt: number; delivered: boolean } | "unauthorized"> {
   const startedAt = Date.now();
+  let delivered = false;
   try {
     // oxlint-disable-next-line no-await-in-loop -- sequential reconnect attempts.
-    await body();
+    await body(() => {
+      delivered = true;
+    });
   } catch (error) {
     if (isUnauthorized(error)) return "unauthorized";
   }
-  return { startedAt };
+  return { startedAt, delivered };
 }
 
-function reconnectDelay(backoff: number, startedAt: number): number {
-  // Streams routinely die after tunnel idle. A long-lived connection is healthy,
-  // so reconnect promptly instead of carrying a large backoff across its lifetime.
-  return Date.now() - startedAt >= RECONNECT_HEALTHY_MS ? RECONNECT_INITIAL_MS : backoff;
+function reconnectDelay(
+  backoff: number,
+  result: { startedAt: number; delivered: boolean },
+): number {
+  // Streams routinely die after tunnel idle. A connection that delivered data —
+  // or simply lived a long time — is healthy, so reconnect promptly instead of
+  // carrying a large backoff across its lifetime.
+  if (result.delivered || Date.now() - result.startedAt >= RECONNECT_HEALTHY_MS) {
+    return RECONNECT_INITIAL_MS;
+  }
+  return backoff;
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
