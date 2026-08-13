@@ -728,39 +728,26 @@ function WorktreeRow({
   mergedByWorktreeId: Record<string, boolean>;
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {
-  const workspace = useWorkspace();
-  const kanban = useKanban();
-  const rename = useWorktreeRename(node.worktree);
-  const [expanded, setExpanded] = useState(true);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const selected = workspace.selectedWorktreeId === node.worktree.id;
-  const label = worktreeLabel(node.worktree);
-  // Fanout attempts hang under the row like children do, so the caret has to
-  // account for them — otherwise a parent with only attempts can't be collapsed.
-  const fanout = useFanoutForParent(node.worktree.id);
-  const hasChildren = node.children.length > 0 || fanout !== null;
-  const isMain = node.worktree.isMain;
-  const pinned = useWorktreePins().has(node.worktree.id);
-  const merged = mergedByWorktreeId[node.worktree.id] === true;
-  const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
-  const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
-  const agentStatus = useWorktreeAgentStatus(node.worktree.id);
-
-  const handleSelect = useCallback(() => {
-    workspace.selectWorktree(node.worktree.id);
-    // Selecting a worktree always returns to the terminal view, even when the
-    // prompt board is the visible surface.
-    kanban.exitBoard();
-  }, [workspace, kanban, node.worktree.id]);
-  const handleCreateChild = useCallback(() => {
-    workspace.selectWorktree(node.worktree.id);
-    onCreateChild();
-  }, [workspace, node.worktree.id, onCreateChild]);
-  const handleTogglePin = useCallback(() => {
-    toggleWorktreePin(node.worktree.id);
-  }, [node.worktree.id]);
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
-  const openDelete = useCallback(() => setDeleteOpen(true), []);
+  const {
+    agentStatus,
+    deleteOpen,
+    expanded,
+    handleCreateChild,
+    handleSelect,
+    handleTogglePin,
+    hasChildren,
+    isMain,
+    label,
+    merged,
+    openDelete,
+    pinned,
+    prLifecycle,
+    rename,
+    selected,
+    setDeleteOpen,
+    toggleExpanded,
+    WorktreeIcon,
+  } = useWorktreeRow(node, onCreateChild, mergedByWorktreeId, prLifecycleByWorktreeId);
 
   return (
     <div>
@@ -821,6 +808,70 @@ function WorktreeRow({
       ) : null}
     </div>
   );
+}
+
+/** Derived state and handlers for one worktree row, hoisted out of the render
+ * body so the component stays a small, flat return. */
+function useWorktreeRow(
+  node: WorktreeNode,
+  onCreateChild: () => void,
+  mergedByWorktreeId: Record<string, boolean>,
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
+) {
+  const workspace = useWorkspace();
+  const kanban = useKanban();
+  const rename = useWorktreeRename(node.worktree);
+  const [expanded, setExpanded] = useState(true);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const selected = workspace.selectedWorktreeId === node.worktree.id;
+  const label = worktreeLabel(node.worktree);
+  // Fanout attempts hang under the row like children do, so the caret has to
+  // account for them — otherwise a parent with only attempts can't be collapsed.
+  const fanout = useFanoutForParent(node.worktree.id);
+  const hasChildren = node.children.length > 0 || fanout !== null;
+  const isMain = node.worktree.isMain;
+  const pinned = useWorktreePins().has(node.worktree.id);
+  const merged = mergedByWorktreeId[node.worktree.id] === true;
+  const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
+  const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
+  const agentStatus = useWorktreeAgentStatus(node.worktree.id);
+
+  const handleSelect = useCallback(() => {
+    workspace.selectWorktree(node.worktree.id);
+    // Selecting a worktree always returns to the terminal view, even when the
+    // prompt board is the visible surface.
+    kanban.exitBoard();
+  }, [workspace, kanban, node.worktree.id]);
+  const handleCreateChild = useCallback(() => {
+    workspace.selectWorktree(node.worktree.id);
+    onCreateChild();
+  }, [workspace, node.worktree.id, onCreateChild]);
+  const handleTogglePin = useCallback(() => {
+    toggleWorktreePin(node.worktree.id);
+  }, [node.worktree.id]);
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const openDelete = useCallback(() => setDeleteOpen(true), []);
+
+  return {
+    agentStatus,
+    deleteOpen,
+    expanded,
+    handleCreateChild,
+    handleSelect,
+    handleTogglePin,
+    hasChildren,
+    isMain,
+    label,
+    merged,
+    openDelete,
+    pinned,
+    prLifecycle,
+    rename,
+    selected,
+    setDeleteOpen,
+    toggleExpanded,
+    WorktreeIcon,
+  };
 }
 
 /**

@@ -3,7 +3,7 @@ import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react
 import { cn } from "@/lib/utils";
 
 /** Class for a worktree row's container, highlighting the selected one. */
-export function worktreeRowClass(selected: boolean): string {
+function worktreeRowClass(selected: boolean): string {
   return selected
     ? "bg-sidebar-accent text-sidebar-accent-foreground"
     : "text-sidebar-foreground hover:bg-sidebar-accent/70";
