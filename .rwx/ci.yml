@@ -39,12 +39,15 @@ base:
   config: rwx/base 1.1.1
 
 tasks:
+  # pragma-sh/pragma is public, so the clone needs no token. RWX's
+  # `${{ github.token }}` context proved unreliable — it can vanish mid-run with
+  # `The context key "github" is not available in this expression` — and a
+  # public checkout never needed it.
   - key: code
     call: git/clone 2.0.8
     with:
       repository: https://github.com/pragma-sh/pragma.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github.token }}
 
   # commitlint and the fallow audit both need real history to walk a range
   # against the base ref, so they share a clone with the `.git` directory
@@ -55,7 +58,6 @@ tasks:
     with:
       repository: https://github.com/pragma-sh/pragma.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github.token }}
       preserve-git-dir: true
       fetch-full-depth: true
 
@@ -119,14 +121,10 @@ tasks:
     env:
       BASE_REF: ${{ init.base-ref }}
       HUSKY: "0"
-      # git/clone doesn't leave usable credentials behind, and this fetch needs
-      # its own. Excluded from the cache key because the token is ephemeral.
-      GITHUB_TOKEN:
-        value: ${{ github.token }}
-        cache-key: excluded
     run: |
+      # pragma-sh/pragma is public, so the fetch needs no credentials.
       git fetch --quiet \
-        "https://x-access-token:$GITHUB_TOKEN@github.com/pragma-sh/pragma.git" "$BASE_REF"
+        "https://github.com/pragma-sh/pragma.git" "$BASE_REF"
       bunx commitlint --from "$(git merge-base FETCH_HEAD HEAD)" --to HEAD --verbose
 
   # Shared by every TypeScript check: the generated shared-constant types are an
@@ -167,17 +165,9 @@ tasks:
       BASE_REF: ${{ init.base-ref }}
       BRANCH: ${{ init.branch }}
       GH_REPO: pragma-sh/pragma
-      # git/clone doesn't leave usable credentials behind, so the fetch needs
-      # its own. Excluded from the cache key because the token is ephemeral.
-      CLONE_TOKEN:
-        value: ${{ github.token }}
-        cache-key: excluded
-      # The RWX GitHub App's installation token (`${{ github.token }}`) is
-      # scoped to reading repository contents — it has no `pull_requests` or
-      # `issues` access, so every `gh` call below 403s with `Resource not
-      # accessible by integration`. Posting the sticky report therefore needs a
-      # separate credential: a fine-grained GitHub token with `Pull requests:
-      # read and write` on this repo, stored in the RWX default vault as
+      # Posting the sticky report needs a credential with `pull_requests` and
+      # `issues` write access — a fine-grained GitHub token with **Pull requests:
+      # read and write** on this repo, stored in the RWX default vault as
       # `fallow-comment-token`. `gh` picks `GH_TOKEN` up implicitly.
       GH_TOKEN:
         value: ${{ secrets.fallow-comment-token }}
@@ -186,8 +176,9 @@ tasks:
       # `--base` needs a resolvable ref. Fetch into the remote-tracking name
       # rather than `refs/heads/$BASE_REF`: on a push to main that branch is
       # checked out and git refuses to fetch into it.
+      # pragma-sh/pragma is public, so the fetch needs no credentials.
       git fetch --quiet \
-        "https://x-access-token:$CLONE_TOKEN@github.com/pragma-sh/pragma.git" \
+        "https://github.com/pragma-sh/pragma.git" \
         "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
       status=0

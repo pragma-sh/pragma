@@ -330,14 +330,16 @@ comment. The task needs `code-with-history` (fallow diffs against a real base) _
 `generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
 modules must exist first).
 
-**`${{ github.token }}` cannot write to a PR.** The RWX GitHub App's installation token is
-scoped to reading repository contents; it has no `pull_requests` or `issues` permission, so
-any `gh` call against them dies with `Resource not accessible by integration (HTTP 403)` —
-which is how the fallow comment silently stopped appearing while the task still exited 0.
-Use it for cloning and fetching only. Anything that writes to GitHub needs its own
-credential from the RWX default vault: fallow reads `${{ secrets.fallow-comment-token }}`
-into `GH_TOKEN` (a fine-grained token with **Pull requests: read and write** on
-`pragma-sh/pragma`). Set or rotate it with
+**CI clones and fetches with no token — `pragma-sh/pragma` is public.** RWX's
+`${{ github.token }}` context is not to be relied on: it can vanish mid-run with
+`The context key "github" is not available in this expression`, and it could never write
+to a PR anyway — the GitHub App installation token is scoped to reading repository
+contents, with no `pull_requests` or `issues` permission, so any `gh` call against them
+dies with `Resource not accessible by integration (HTTP 403)` — which is how the fallow
+comment silently stopped appearing while the task still exited 0. Anything that writes to
+GitHub needs its own credential from the RWX default vault: fallow reads
+`${{ secrets.fallow-comment-token }}` into `GH_TOKEN` (a fine-grained token with
+**Pull requests: read and write** on `pragma-sh/pragma`). Set or rotate it with
 `rwx vaults secrets set --vault default fallow-comment-token=<token>`; a run started before
 the secret exists fails to resolve the expression, so add the secret before merging a change
 that references a new one.
