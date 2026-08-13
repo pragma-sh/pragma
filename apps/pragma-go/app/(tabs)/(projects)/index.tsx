@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { Monogram, NavGroup, NavRow } from "@/components/NavRow";
+import { Text } from "@/components/ui/text";
 import { useProjects, useProjectStatus } from "@/lib/data/data-context";
 import type { Project } from "@/lib/types";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
@@ -17,12 +18,13 @@ export default function ProjectsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: "Projects" }} />
+      <Stack.Screen options={{ headerShown: false }} />
       <ScrollView
         className="flex-1 bg-background"
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         contentInsetAdjustmentBehavior="automatic"
       >
+        <Text className="mb-4 text-4xl font-bold text-foreground">Projects</Text>
         <NavGroup footer={`${projects.length} projects`}>
           {projects.map((project) => (
             <ProjectRow key={project.id} project={project} />
