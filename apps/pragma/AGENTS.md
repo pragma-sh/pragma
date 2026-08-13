@@ -1116,7 +1116,7 @@ them — native browser webviews float above HTML, so an overlay would be clippe
   through `TerminalManager` and releases its renderer — it never kills the PTY.
 - **Diffs are lazy, pinned to the base commit, and expanded by default.** A file
   row mounts its cells on mount; every diff is `fanout.baseCommit → attempt
-  working tree` (`base_file_diff`), so uncommitted attempt work shows and the
+working tree` (`base_file_diff`), so uncommitted attempt work shows and the
   comparison survives the parent advancing. Each cell renders a
   `UnifiedDiff` — a single-column, changed-lines-only view (deletions red,
   insertions green, no unchanged context) rather than a side-by-side old/new

@@ -421,7 +421,7 @@ fn a_bad_selector_creates_nothing_at_all() {
         .expect_err("rejects");
     assert_eq!(error.code, FanoutFailureCode::UnknownAgent);
     assert!(store.all().is_empty());
-    assert!(host.state().worktrees.len() == 1);
+    assert_eq!(host.state().worktrees.len(), 1);
     assert!(host.state().launches.is_empty());
 }
 
