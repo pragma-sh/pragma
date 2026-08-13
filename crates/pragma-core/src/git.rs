@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pragma_constants::{
     BranchSyncStatus, ChangeStatus, ChangedFile, DiffSide, FileDiff, WorktreeChanges,
@@ -676,26 +677,77 @@ fn unstaged_changes(root: &Path) -> CoreResult<Vec<ChangedFile>> {
     Ok(unstaged)
 }
 
-/// Batch merged-status: returns `id -> merged` for each item. A worktree that
-/// errors is reported as not-merged so one bad checkout never fails the batch.
-fn merged_status(items: &[MergedStatusItem]) -> HashMap<String, bool> {
-    // Each item targets its own worktree (own index, own checkout), and each
-    // check runs up to three git subprocesses. The sidebar polls this batch, so
-    // check the worktrees concurrently: the batch costs one worktree's latency
-    // instead of the sum across all of them.
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = items
-            .iter()
-            .map(|item| {
-                scope.spawn(move || (item.id.clone(), worktree_is_merged(item).unwrap_or(false)))
+/// Maximum worktrees checked at once by [`merged_status`].
+///
+/// Each clean worktree can launch three git subprocesses. Keeping a small,
+/// fixed worker pool prevents a large project from turning one sidebar refresh
+/// into an unbounded thread and process burst.
+const MERGED_STATUS_MAX_CONCURRENCY: usize = 4;
+
+/// Applies `operation` with at most `max_concurrency` scoped workers.
+///
+/// Results retain input order. If a worker panics, any results it did not
+/// finish are absent so the caller can apply its normal per-item fallback.
+fn bounded_map<T, R, F>(items: &[T], max_concurrency: usize, operation: F) -> Vec<Option<R>>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let next = AtomicUsize::new(0);
+    let worker_count = items.len().min(max_concurrency.max(1));
+    let completed = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..worker_count)
+            .map(|_| {
+                let operation = &operation;
+                let next = &next;
+                scope.spawn(move || {
+                    let mut results = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(index) else {
+                            break;
+                        };
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            operation(item)
+                        }))
+                        .ok();
+                        results.push((index, result));
+                    }
+                    results
+                })
             })
             .collect();
         handles
             .into_iter()
-            .zip(items)
-            .map(|(handle, item)| handle.join().unwrap_or_else(|_| (item.id.clone(), false)))
-            .collect()
-    })
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect::<Vec<_>>()
+    });
+
+    let mut results: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    for (index, result) in completed {
+        results[index] = result;
+    }
+    results
+}
+
+/// Batch merged-status: returns `id -> merged` for each item. A worktree that
+/// errors is reported as not-merged so one bad checkout never fails the batch.
+fn merged_status(items: &[MergedStatusItem]) -> HashMap<String, bool> {
+    let statuses = bounded_map(items, MERGED_STATUS_MAX_CONCURRENCY, |item| {
+        worktree_is_merged(item).unwrap_or(false)
+    });
+    // Insert in request order so duplicate caller-chosen ids retain the old
+    // collect semantics: the last item wins.
+    items
+        .iter()
+        .zip(statuses)
+        .map(|(item, status)| (item.id.clone(), status.unwrap_or(false)))
+        .collect()
 }
 
 /// True when a worktree's work is in its parent branch and its tree is clean.
@@ -1808,12 +1860,14 @@ fn parse_ahead_behind(output: &str) -> (u64, u64) {
 mod tests {
     use std::path::Path;
     use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use pragma_constants::{ChangeStatus, DiffSide};
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file,
+        bounded_map, commit_file_diff, commit_staged, discard_all_unstaged, discard_unstaged_file,
         ensure_pragma_excluded, file_diff, github_abort_merge, github_fetch_and_sync,
         github_merge_base_branch, github_merge_in_progress, github_pull_branch, github_sync_branch,
         has_unmerged_paths, list_headless_worktrees, merge_worktree_to_parent, merged_status,
@@ -2336,6 +2390,61 @@ mod tests {
             "feature\n"
         );
         assert!(!worktree_is_dirty(local.path()));
+    }
+
+    #[test]
+    fn bounded_map_caps_concurrency_and_retains_input_order() {
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let items: Vec<usize> = (0..12).collect();
+        let results = bounded_map(&items, 3, |item| {
+            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(current, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(5));
+            active.fetch_sub(1, Ordering::SeqCst);
+            item * 2
+        });
+
+        assert!(peak.load(Ordering::SeqCst) <= 3);
+        assert_eq!(
+            results,
+            items.iter().map(|item| Some(item * 2)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn bounded_map_contains_a_panicking_item() {
+        let items: Vec<usize> = (0..6).collect();
+        let results = bounded_map(&items, 2, |item| {
+            assert_ne!(*item, 2, "synthetic item failure");
+            item * 2
+        });
+
+        assert_eq!(
+            results,
+            vec![Some(0), Some(2), None, Some(6), Some(8), Some(10)]
+        );
+    }
+
+    #[test]
+    fn merged_status_preserves_fresh_clean_and_dirty_semantics() {
+        let (child_path, main_path) = project_with_child();
+        let item = MergedStatusItem {
+            id: "child".to_string(),
+            root: child_path.to_string_lossy().into_owned(),
+            branch: "feature".to_string(),
+            parent_branch: Some("main".to_string()),
+        };
+
+        assert!(!merged_status(std::slice::from_ref(&item))["child"]);
+
+        std::fs::write(child_path.join("feature.txt"), "feature\n").expect("write feature");
+        commit_all(&child_path, "feature commit");
+        run(&main_path, &["merge", "--no-ff", "feature"]);
+        assert!(merged_status(std::slice::from_ref(&item))["child"]);
+
+        std::fs::write(child_path.join("draft.txt"), "draft\n").expect("write draft");
+        assert!(!merged_status(&[item])["child"]);
     }
 
     #[test]

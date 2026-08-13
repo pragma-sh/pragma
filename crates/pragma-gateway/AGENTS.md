@@ -61,6 +61,38 @@
   listing and frontmatter parsing belong to `pragma_core::scratchpads`, so this
   route only validates and forwards.
 
+- `GET /web/{*path}` - no auth, the staged Pragma Go web bundle. See _Web app_ below.
+
+## Web app
+
+The gateway doubles as the static host for the browser build of `apps/pragma-go`,
+so a user with the tunnel URL can open the client with nothing installed.
+
+- **Off unless enabled and staged.** Global `.pragma/config.json` must set
+  `gateway.webEnabled` to `true`; `--web-root` (or `PRAGMA_WEB_ROOT`) must point at a
+  directory written by `scripts/stage-web-bundle.ts`. Without the setting, `/web`
+  answers 404; without a bundle it answers 503. Every other route is unaffected. A
+  malformed bundle logs and disables the app rather than refusing to start — phone
+  clients must keep working on a host with no web bundle.
+- **Manifest, not directory walk.** `web.rs` loads `manifest.json` into a map keyed by
+  URL path. A request path is a **map key**, never a path join, so traversal is not
+  expressible — the same property `routes/assets.rs` gets from content hashes. Do not
+  "improve" this by resolving paths against the root.
+- **Unauthenticated on purpose.** A browser cannot put a bearer token on a
+  `<script src>`. The bundle is public client code; every `/v1` route stays behind the
+  token. `is_public` in `http/mod.rs` is the whole allowlist — keep it that short.
+- **SPA fallback.** An unmatched path that has no file extension gets `index.html`, so
+  deep links like `/web/worktree/wt-1` survive a reload. A path that _looks_ like a
+  file still 404s, so a mistyped asset URL fails loudly rather than returning HTML a
+  browser cannot parse as JavaScript.
+- **Compression and caching.** Text assets are stored gzip-only and served that way;
+  the rare client that refuses gzip gets an in-memory decompress. Content-hashed files
+  are `immutable`, `index.html` is `no-cache` — it names the hashed bundles, so
+  caching it would pin an old app forever.
+- **CSP allows `'unsafe-eval'`,** because the scratchpad viewer compiles MDX in the
+  browser. That content is confined to a sandboxed, opaque-origin `<iframe>`; the
+  isolation is the sandbox, not the CSP.
+
 ## Theme
 
 `routes/theme.rs` serves the same layering the desktop applies: global

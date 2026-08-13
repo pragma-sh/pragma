@@ -2,6 +2,7 @@
 name = "pragma-core"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Pure Rust host-side business logic for Pragma."
 

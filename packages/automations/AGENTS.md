@@ -13,6 +13,7 @@ Author-facing automation API plus the `pragma-automations` Bun sidecar.
 - Keep the NDJSON command/event contract in `src/cli.ts` in sync with `crates/pragma-server/src/automations.rs`.
 - Automations are arbitrary host code. Do not weaken local approval semantics when changing load behavior.
 - The sidecar may execute automation code only after the server has decided it is trusted/approved.
+- Supervisor stdin EOF must dispose every loaded event listener and exit, even if automation code left timers running.
 
 ## Commands
 

@@ -1,5 +1,6 @@
 import type { FanoutParentSpec, Worktree } from "@pragma/constants";
 import { useState, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
@@ -243,10 +244,6 @@ export function CreateWorktreeDialog({
     useWorktreeSubmission();
   useEscapeToClose(isOpen, () => onOpenChange(false));
 
-  if (!isOpen) {
-    return null;
-  }
-
   const isFanout = fanoutMode.isFanout;
   const canSubmit = isFanout ? fanoutMode.ready(message, branch) : branch.trim().length > 0;
   const parentId = parentWorktreeId ?? workspace.selectedWorktreeId;
@@ -287,53 +284,57 @@ export function CreateWorktreeDialog({
   const handleKeyDown = submitOnModEnter(canSubmit, () => void submit());
 
   return (
-    <ModalShell className="max-w-2xl">
-      <DialogHeading
-        isFanout={isFanout}
-        mode={fanoutMode.mode}
-        parentLabel={parentLabel}
-        onSwitch={(next) => fanoutMode.switchMode(next, newFanoutRow(agentId, modelSelection))}
-      />
-      <CreateWorktreeForm
-        agentPicker={
-          <AgentModelSelector
-            agents={agents}
-            modelsByAgent={modelsByAgent}
-            value={{ agentId, selection: modelSelection }}
-            onChange={handleAgentChange}
-            onLoadModels={loadModels}
+    <AnimatePresence>
+      {isOpen ? (
+        <ModalShell className="max-w-2xl">
+          <DialogHeading
+            isFanout={isFanout}
+            mode={fanoutMode.mode}
+            parentLabel={parentLabel}
+            onSwitch={(next) => fanoutMode.switchMode(next, newFanoutRow(agentId, modelSelection))}
           />
-        }
-        agentSelection={{
-          agents,
-          modelsByAgent,
-          agentId,
-          modelSelection,
-          selectedAgent,
-          loadModels,
-          handleAgentChange,
-        }}
-        branch={branch}
-        busy={busy}
-        error={error}
-        fanout={fanoutMode}
-        message={message}
-        ready={canSubmit}
-        title={title}
-        onBranchChange={setBranch}
-        onCancel={() => onOpenChange(false)}
-        onKeyDown={handleKeyDown}
-        onMessageChange={setMessage}
-        onSubmit={submit}
-        onTitleChange={setTitle}
-      />
-      <MainBehindAlert
-        behind={behind}
-        mainWorktreeId={mainWorktreeId}
-        onCancel={() => setMainWorktreeId(null)}
-        onConfirm={confirmCreate}
-      />
-    </ModalShell>
+          <CreateWorktreeForm
+            agentPicker={
+              <AgentModelSelector
+                agents={agents}
+                modelsByAgent={modelsByAgent}
+                value={{ agentId, selection: modelSelection }}
+                onChange={handleAgentChange}
+                onLoadModels={loadModels}
+              />
+            }
+            agentSelection={{
+              agents,
+              modelsByAgent,
+              agentId,
+              modelSelection,
+              selectedAgent,
+              loadModels,
+              handleAgentChange,
+            }}
+            branch={branch}
+            busy={busy}
+            error={error}
+            fanout={fanoutMode}
+            message={message}
+            ready={canSubmit}
+            title={title}
+            onBranchChange={setBranch}
+            onCancel={() => onOpenChange(false)}
+            onKeyDown={handleKeyDown}
+            onMessageChange={setMessage}
+            onSubmit={submit}
+            onTitleChange={setTitle}
+          />
+          <MainBehindAlert
+            behind={behind}
+            mainWorktreeId={mainWorktreeId}
+            onCancel={() => setMainWorktreeId(null)}
+            onConfirm={confirmCreate}
+          />
+        </ModalShell>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

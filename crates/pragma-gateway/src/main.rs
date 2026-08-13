@@ -6,6 +6,7 @@ mod error;
 mod http;
 mod push;
 mod routes;
+mod web;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,10 @@ struct Args {
     /// Bearer token. A random token is generated when omitted.
     #[arg(long)]
     token: Option<String>,
+    /// Directory holding the staged Pragma Go web bundle. Omitted in a `cargo
+    /// run`; the desktop passes its bundled resource directory.
+    #[arg(long, env = "PRAGMA_WEB_ROOT")]
+    web_root: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -97,6 +102,20 @@ fn run(args: Args) -> GatewayResult<()> {
     } else {
         eprintln!("push notifications are disabled: no HTTPS client could be built");
     }
+    // A broken or missing bundle disables `/web` and nothing else: the phone
+    // clients and the desktop must keep working on a host where the web app was
+    // never staged, so this logs and continues rather than refusing to start.
+    let web = args
+        .web_root
+        .as_deref()
+        .and_then(|root| match web::WebBundle::load(root) {
+            Ok(bundle) => Some(Arc::new(bundle)),
+            Err(error) => {
+                eprintln!("the web app is disabled: {error}");
+                None
+            }
+        });
+
     let state = AppState {
         client,
         token: config.token,
@@ -105,6 +124,7 @@ fn run(args: Args) -> GatewayResult<()> {
         devices,
         push: push_worker,
         presence,
+        web,
     };
     // Model providers may invoke slow host tools. Keep catalog refresh off the
     // startup path so clients can use the newly advertised gateway immediately.

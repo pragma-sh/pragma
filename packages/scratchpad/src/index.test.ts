@@ -10,7 +10,9 @@ afterEach(() => {
   globalThis.pragmaScratchpad = undefined;
 });
 
-function installBridge(promptResults: Array<"sent" | "missing-agent">): ScratchpadBridge {
+function installBridge(
+  promptResults: Array<"sent" | "missing-agent" | "cancelled">,
+): ScratchpadBridge {
   const bridge: ScratchpadBridge = {
     promptAgent: vi.fn(async () => promptResults.shift() ?? "sent"),
     requestAgentAttachment: vi.fn(async () => true),
@@ -40,6 +42,18 @@ describe("promptAgent", () => {
     await expect(promptAgent("continue", { onMissingAgent })).resolves.toBe(false);
     expect(onMissingAgent).toHaveBeenCalledOnce();
     expect(bridge.requestAgentAttachment).not.toHaveBeenCalled();
+  });
+
+  it("does not open the attachment picker when reader cancels", async () => {
+    const bridge = installBridge(["cancelled"]);
+    await expect(promptAgent("continue")).resolves.toBe(false);
+    expect(bridge.requestAgentAttachment).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when reader cancels after attachment", async () => {
+    const bridge = installBridge(["missing-agent", "cancelled"]);
+    await expect(promptAgent("continue")).resolves.toBe(false);
+    expect(bridge.requestAgentAttachment).toHaveBeenCalledOnce();
   });
 });
 

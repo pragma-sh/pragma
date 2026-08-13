@@ -14,6 +14,11 @@
 # and forces a full rebuild of the app on every `bun run dev`.
 /resources/plugins/
 
+# Staged Pragma Go web bundle (built by scripts/stage-web-bundle.ts). Ignored
+# here for the same reason as /resources/plugins/: the `tauri dev` watcher is
+# rooted at src-tauri and reads only this file.
+/resources/web/
+
 # Stale bundled plugin/agent resources from older staging layouts.
 /resources/pragma/agents/
 /resources/pragma/plugins/

@@ -52,8 +52,27 @@ declare global {
   }
 }
 
+/**
+ * Sends one message to whichever host is embedding this document.
+ *
+ * A native client injects `ReactNativeWebView`. A browser client embeds the
+ * same HTML in a sandboxed `<iframe>` instead, where the channel is
+ * `postMessage` to the parent. The frame's origin is opaque (that is the point
+ * of the sandbox), so it cannot name a target origin more specific than `*`;
+ * the parent is responsible for checking `event.source` before trusting a
+ * message. Nothing sensitive travels this way in either direction.
+ */
 function post(message: ScratchpadViewerMessage): void {
-  window.ReactNativeWebView?.postMessage(JSON.stringify(message));
+  const payload = JSON.stringify(message);
+  if (window.ReactNativeWebView) {
+    // Not a `window.postMessage`: this is the web view's own injected bridge,
+    // which takes the message alone and has no target origin to name. The
+    // optional call is what tells `require-post-message-target-origin` apart
+    // from a real cross-window post.
+    window.ReactNativeWebView?.postMessage(payload);
+    return;
+  }
+  if (window.parent !== window) window.parent.postMessage(payload, "*");
 }
 
 /* ------------------------------------------------------------------ bridge */
@@ -148,6 +167,15 @@ window.pragmaScratchpadViewer = {
     }
   },
 };
+
+// The native host pushes commands by evaluating `pragmaScratchpadViewer.receive`
+// in the page. A browser host cannot reach into a sandboxed frame like that, so
+// it posts the same serialized command instead. Only the embedding window is
+// trusted as a source; anything else on the page is ignored.
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent || typeof event.data !== "string") return;
+  window.pragmaScratchpadViewer?.receive(event.data);
+});
 
 /* ------------------------------------------------------------- comment layer */
 

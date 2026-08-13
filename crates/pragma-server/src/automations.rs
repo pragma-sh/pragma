@@ -76,12 +76,20 @@ struct DiscoveredAutomation {
     root: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct AutomationRuntime {
     info: AutomationInfo,
     content_hash: String,
     schedule: Option<String>,
     root: String,
+}
+
+fn replace_if_changed<T: PartialEq>(current: &mut T, next: T) -> bool {
+    if *current == next {
+        return false;
+    }
+    *current = next;
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,10 +492,13 @@ impl AutomationsRegistry {
             }
         }
 
-        *self
-            .automations
-            .lock()
-            .map_err(|_| AutomationError::LockPoisoned)? = next;
+        let changed = replace_if_changed(
+            &mut *self
+                .automations
+                .lock()
+                .map_err(|_| AutomationError::LockPoisoned)?,
+            next,
+        );
         for id in unload_ids {
             let _ = self.send_sidecar(&json!({ "type": "unload", "id": id }));
         }
@@ -497,8 +508,10 @@ impl AutomationsRegistry {
         for automation in pending_to_emit {
             self.broadcast_pending(&automation);
         }
-        let _ = self.persist_state();
-        self.broadcast_changed();
+        if changed {
+            let _ = self.persist_state();
+            self.broadcast_changed();
+        }
         Ok(())
     }
 
@@ -1181,7 +1194,21 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{cron_matches, parse_metadata, SidecarEvent};
+    use super::{cron_matches, parse_metadata, replace_if_changed, SidecarEvent};
+
+    #[test]
+    fn unchanged_scan_state_is_retained() {
+        let mut current = vec!["automation-a".to_string()];
+        assert!(!replace_if_changed(
+            &mut current,
+            vec!["automation-a".to_string()]
+        ));
+        assert!(replace_if_changed(
+            &mut current,
+            vec!["automation-b".to_string()]
+        ));
+        assert_eq!(current, ["automation-b"]);
+    }
 
     #[test]
     fn parses_camel_case_sidecar_loaded_event() {

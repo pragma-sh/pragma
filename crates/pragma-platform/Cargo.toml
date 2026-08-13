@@ -2,6 +2,7 @@
 name = "pragma-platform"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Operating-system primitives shared by every Pragma crate: local IPC transport, owner-only file permissions, process termination, and shell resolution."
 
@@ -10,6 +11,7 @@ workspace = true
 
 [dependencies]
 pragma-constants = { path = "../../packages/constants" }
+sysinfo = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

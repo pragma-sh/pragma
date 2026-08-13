@@ -60,6 +60,10 @@ pub struct PtyClient {
     inner: PragmaClient,
     session_streams: SessionStreams,
     file_streams: FileStreams,
+    /// The app's bundled resource directory, where the staged Pragma Go web
+    /// bundle lives. Kept here because the gateway is spawned long after
+    /// startup and needs to be told where to serve `/web` from.
+    resource_dir: Option<PathBuf>,
 }
 
 /// Control events forwarded to the webview as JSON over the PTY channel.
@@ -98,10 +102,11 @@ impl PtyClient {
                 channel,
                 workspace_root(),
                 cfg!(debug_assertions),
-                resource_dir,
+                resource_dir.clone(),
             )),
             session_streams: Arc::new(Mutex::new(HashMap::new())),
             file_streams: Arc::new(Mutex::new(HashMap::new())),
+            resource_dir,
         }
     }
 
@@ -113,6 +118,10 @@ impl PtyClient {
             inner: PragmaClient::new_socket(socket_path),
             session_streams: Arc::new(Mutex::new(HashMap::new())),
             file_streams: Arc::new(Mutex::new(HashMap::new())),
+            // A bridged remote host runs its own gateway, served by that host's
+            // own install; this client never spawns one, so it has no bundle to
+            // point at.
+            resource_dir: None,
         }
     }
 
@@ -366,7 +375,7 @@ impl PtyClient {
         if gateway_discovery_healthy(&discovery_path) {
             return Ok(());
         }
-        Self::spawn_gateway(&socket_path)?;
+        Self::spawn_gateway(&socket_path, self.resource_dir.as_deref())?;
         wait_for_gateway_ready(&discovery_path)
     }
 
@@ -438,7 +447,7 @@ impl PtyClient {
         Ok(self.inner.connect_with_spawn()?)
     }
 
-    fn spawn_gateway(socket_path: &Path) -> AppResult<()> {
+    fn spawn_gateway(socket_path: &Path, resource_dir: Option<&Path>) -> AppResult<()> {
         let mut command = if cfg!(debug_assertions) {
             let mut command = Command::new(cargo_executable());
             command.args(["run", "-p", "pragma-gateway", "--", "--socket"]);
@@ -450,6 +459,14 @@ impl PtyClient {
             command.arg("--socket").arg(socket_path);
             command
         };
+        // Where the gateway serves the Pragma Go web app from. A dev build has
+        // no staged bundle, and a release install whose resources are missing
+        // simply serves no `/web` — neither case stops the gateway.
+        if let Some(web_root) = resource_dir.map(web_bundle_dir) {
+            if web_root.is_dir() {
+                command.arg("--web-root").arg(web_root);
+            }
+        }
         command.stdin(Stdio::null());
         pragma_platform::process::hide_console(&mut command);
         if let Ok(log_file) = std::fs::OpenOptions::new()
@@ -501,6 +518,22 @@ pub fn instance_channel(product_name: Option<&str>) -> String {
 /// Resolves the per-instance data directory for a channel.
 pub fn instance_data_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
     pragma_client::instance_data_dir(app_data_dir, channel)
+}
+
+/// Where the staged Pragma Go web bundle sits inside the resource directory.
+///
+/// Tauri lays resources out differently per bundle format — some put them at
+/// the resource root, others under a `resources/` sub-directory — so both are
+/// probed, exactly as bundled plugins are resolved in `plugins.rs`.
+fn web_bundle_dir(resource_dir: &Path) -> PathBuf {
+    let relative = Path::new(CONSTANTS.gateway.web.resource_dir.as_str());
+    [
+        resource_dir.join(relative),
+        resource_dir.join("resources").join(relative),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_dir())
+    .unwrap_or_else(|| resource_dir.join(relative))
 }
 
 pub(crate) fn sidecar_executable(name: &str) -> PathBuf {

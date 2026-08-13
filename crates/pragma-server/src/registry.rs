@@ -2516,7 +2516,14 @@ mod tests {
             .expect("interactive client resize");
 
         let (_scrollback, rx) = registry.attach(&id, None, None).expect("observer attach");
-        registry.write(&id, "stty size\r").expect("write");
+        // `stty` is POSIX-only; the platform default shell on Windows is
+        // PowerShell, which has no such command but prints an unassigned
+        // expression's result the same way a shell echoes a command's output.
+        #[cfg(unix)]
+        let query = "stty size\r";
+        #[cfg(windows)]
+        let query = "\"$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)\"\r";
+        registry.write(&id, query).expect("write");
 
         let mut output = String::new();
         let deadline = Instant::now() + std::time::Duration::from_secs(10);

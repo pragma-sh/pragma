@@ -23,6 +23,16 @@ export function toggleAgentPin(agentId: string): void {
   }
 }
 
+/** Returns agents with pinned ones first, preserving order within each group. */
+export function sortAgentsByPin<T extends { id: string }>(agents: T[], pinned: Set<string>): T[] {
+  const top: T[] = [];
+  const rest: T[] = [];
+  for (const agent of agents) {
+    (pinned.has(agent.id) ? top : rest).push(agent);
+  }
+  return [...top, ...rest];
+}
+
 /** React hook for the current pinned agent ids. */
 export function useAgentPins(): Set<string> {
   return useSyncExternalStore(

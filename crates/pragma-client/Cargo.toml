@@ -2,6 +2,7 @@
 name = "pragma-client"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Rust client transport and frame I/O library for Pragma native clients."
 

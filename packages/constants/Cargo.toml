@@ -2,6 +2,7 @@
 name = "pragma-constants"
 version = "0.0.0"
 edition = "2021"
+license = "AGPL-3.0-only"
 publish = false
 description = "Shared constants for Pragma, generated from schema.json + values.json."
 

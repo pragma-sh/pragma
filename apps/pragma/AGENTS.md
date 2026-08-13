@@ -14,6 +14,7 @@ apps/pragma/
 │   ├── lib/
 │   │   ├── tauri.ts             # Typed bridge to Rust — the ONLY place invoke() is called
 │   │   ├── github.ts            # GitHub client — the ONLY place new Octokit() happens
+│   │   ├── pr-signature.ts      # "Created with Pragma" PR footer: build, strip, opt-out
 │   │   ├── terminal-manager.ts  # Non-React xterm registry; output bypasses React state
 │   │   ├── native-editing.ts    # OS text-editing chords → readline sequences
 │   │   ├── agent-alert.ts       # Alert latch (chime + notification, fires at most once)
@@ -94,6 +95,57 @@ apps/pragma/
   in `src/index.css` (`@theme`/CSS variables) — use semantic tokens (`bg-background`,
   `text-muted-foreground`), not raw colors.
 
+### Motion (`src/lib/motion.ts`)
+
+Animation uses **Motion** (`motion/react`). Timings, easings, and the shared
+variant sets live in `src/lib/motion.ts` — never inline a raw `{ duration }`; add a
+named entry there instead, the same rule as colors and shared constants.
+
+- **Animate at the component level.** The sliding tab indicator lives in
+  `components/ui/tabs.tsx`, the modal shrink in `components/ui/dialog.tsx` /
+  `alert-dialog.tsx` / `modal-shell.tsx`, the +→× rotation in
+  `components/ui/plus-close-icon.tsx`. Feature code gets the animation by using
+  the primitive, not by re-implementing it.
+- **OS "reduce motion" is honoured in three places, and all three are needed.**
+  `<MotionConfig reducedMotion="user">` in `App.tsx` covers transform and layout
+  animations; `useMotionTransition` covers what MotionConfig deliberately leaves
+  alone (`width` on the sidebars); the `prefers-reduced-motion` block in
+  `index.css` covers everything CSS drives. Spinners and the agent status pulses
+  are exempt there on purpose — they report live state.
+- **Enter and exit need opposite easing, and the exit needs longer.** `standard`
+  decelerates hard — about 80% of the change lands in the first quarter of the
+  duration. On the way out that drops opacity to nearly nothing before a shrink
+  has visibly started, so the dialog reads as blinking rather than receding. Exits
+  use `motionEase.exit` (accelerating) over a longer duration. Each modal variant
+  carries its own `transition` for this reason, and a variant's transition beats
+  the component's `transition` prop — do not set both.
+- **Disclosure animates `height`, so Radix has to force-mount.** `ui/collapsible.tsx`
+  mirrors the root's open state, force-mounts the content, and animates its height;
+  the caller's `className` lands on an inner element, because padding on the
+  animated box would keep it taller than zero when collapsed. `ui/accordion.tsx`
+  gets the same effect from tw-animate-css keyframes and the Radix height var.
+- **Motion owns `transform`, so Tailwind `-translate-*` centring cannot survive
+  a `scale` animation.** Both dialog families centre with a click-through
+  `fixed inset-0 flex items-center justify-center` wrapper instead. Anything
+  positioned relative to that (the command palette rides above centre) uses
+  `self-start` + a margin, not `top-*`.
+- **Radix + `AnimatePresence`:** Radix unmounts content synchronously, which
+  leaves no frames for an exit. `Dialog`/`AlertDialog` therefore mirror the root's
+  open state in a context and drive presence themselves with `forceMount`.
+  Consequence for tests: while a modal animates out, Radix still `aria-hidden`s
+  the page behind it, so assert on what's underneath with `findBy*`, not `getBy*`.
+- **Bespoke `ModalShell` dialogs** must be toggled with a conditional child inside
+  `<AnimatePresence>`, never an early `return null` — the early return is what
+  eats the close animation.
+- **HTML5 drag and Motion don't mix on one element:** a motion component replaces
+  `onDragStart`/`onDragEnd` with its own pan-gesture signatures. Keep native drag
+  handlers on a plain wrapper (see `TerminalTabItem`).
+- **Sidebar width animates on a single element**, with the collapsed rail rendered
+  inside it, rather than swapping in a separate collapsed component — a swap makes
+  the centre pane (and the terminal's `ResizeObserver`) jump in one frame. The
+  spring is suppressed while the resize handle is being dragged so the edge tracks
+  the pointer exactly.
+
 ### User themes (`.pragma/theme.json`)
 
 `src/index.css` stays the **single source of truth for the shipped defaults**. The
@@ -137,6 +189,31 @@ revalidate so the next tick / subscriber sees fresher data without blocking pain
 `mergePullRequest`) seed or invalidate the relevant keys. The Pull Request tab, the
 PR review tab (metadata + local file diffs), and the worktree-sidebar PR lifecycle
 poll all ride this cache at a 10s cadence.
+
+**"Created with Pragma" footer.** `lib/pr-signature.ts` owns the marketing block Pragma
+appends to every PR it opens: a heading linking to `github.homepageUrl`, an "Open
+worktree" button, and the opt-out line. `createPullRequest` appends it and `toSummary`
+strips it, so the block exists only on GitHub — inside Pragma every consumer of
+`PullRequestSummary.body` sees what the author wrote. Three constraints drove the shape,
+and each is easy to undo by accident:
+
+- **The badge has to be hosted.** GitHub's markdown sanitizer drops `data:` URIs, so the
+  button is `assets/pr/open-worktree.svg`, fetched from `raw.githubusercontent.com` on
+  `main`. That URL is baked into PR bodies that already exist elsewhere — treat
+  `assets/pr/` as append-only. It is one fixed color (the shipped `--primary`), not the
+  user's theme: a file on `main` looks the same to everyone reading the PR.
+- **The href must be `https`.** The sanitizer keeps only `http`/`https`/`mailto`, so a
+  raw `pragma://open?worktree=…` would render as inert text. The button points at
+  `github.prSignature.openUrl` (`https://pragma-app.sh/open`), which forwards its query
+  string to the deep link. The worktree id resolves only on the machine that owns it;
+  elsewhere the deep link falls back to the current selection.
+- **The block is delimited by markers,** so `stripPrSignature` is idempotent, tolerates a
+  body GitHub truncated before the end marker, and never stacks two footers when a draft
+  is regenerated.
+
+The opt-out is `github.prSignature` in the **global** `.pragma/config.json` only (Settings
+→ GitHub → Pull requests); there is no project layer, matching the rest of the GitHub
+section. The setting is cached until a Settings save fires `pragma:config-changed`.
 
 **Review threads.** `listReviewThreads` paginates GraphQL, requests `originalLine` as a
 fallback when `line` is null (outdated anchors), and reads author avatars via
@@ -318,10 +395,12 @@ Server-owned state holds child + status (`idle | starting | active(url) | error(
 `tunnel_start` / `tunnel_stop` / `tunnel_status` are thin RPC adapters (+ typed wrappers
 in `src/lib/tauri.ts`), so desktop exit does not kill mobile forwarding.
 
-The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns mobile
-pairing; the project sidebar has no phone shortcut. `PairDeviceSettings` toggles the
-tunnel and renders a `PairingPayload` QR (via `uqr`, offline). Encode/validate helpers
-live in `src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
+The full-frame Settings workspace (native **Settings…**, `⌘,` on macOS) owns Pragma Go
+pairing; the project sidebar has no phone shortcut. `PragmaGoSettings` toggles the tunnel
+and renders a `PairingPayload` QR (via `uqr`, offline). Its separate browser-pairing card
+persists `gateway.webEnabled` in global `.pragma/config.json`; the gateway serves `/web`
+only while this explicit setting is true. Encode/validate helpers live in
+`src/lib/pairing.ts`. The tunnel deliberately survives leaving Settings.
 "Regenerate token" calls `regenerate_gateway_token` (kills gateway, deletes the
 `gateway-token` file, respawns) — paired devices must reconnect. Settings also reads
 `gateway-devices.json`, which the gateway updates from authenticated mobile identity
@@ -453,6 +532,9 @@ run `cargo run -p pragma-gateway -- --socket <daemon.sock>`, release builds run 
 triple), wired in three places: `tauri:build`'s `beforeBuildCommand` runs it
 `--release`, `tauri:dev` runs it (debug) before `tauri dev`, and the pre-push hook runs
 it before `cargo check` because Tauri validates `externalBin` paths during compilation.
+`tauri:dev` also runs `web:stage` before Tauri starts so the gateway receives the latest
+Pragma Go browser bundle in its copied debug resources. Staging after startup is too late
+because the gateway loads that manifest once.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
 by the same script. Shipped plugin packages are staged under `resources/plugins/` using
@@ -820,9 +902,11 @@ or matching remote branch for main/parentless worktrees.
 Once a child worktree has no staged/unstaged changes, commit controls are replaced by
 lifecycle actions: committed changes show compact remote sync with ahead/behind counts;
 a no-change child shows `WorktreeDeleteDialog`. Sync pulls first, auto-aborts conflicts,
-then pushes. The left sidebar polls `worktrees_merged_status` for the merge glyph while
-visible. It deliberately does not open an eager recursive watcher for every worktree; file
-watches are lazy, shared, and exist only while a mounted feature consumes file changes.
+then pushes. The left sidebar loads `worktrees_merged_status` for the merge glyph, then uses a
+30-second visible-only fallback poll for ref-only/external git changes. Standard child
+file changes are parsed from the existing ref-counted main-root watch
+(`.pragma/worktrees/<id>/…`) and refresh only the affected child, with burst debounce and
+no overlapping request; never open one recursive watcher per worktree.
 
 **Editor/diff tabs** — `editor` (CodeMirror 6, save on ⌘/Ctrl-S, **no autosave**) and
 `diff` (read-only `@codemirror/merge`) as `TabKind`s, opened via `openFileTab` /

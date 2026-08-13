@@ -154,7 +154,7 @@ async function applyCompletionAction(
     const pr = await createPullRequest(
       repo,
       { owner: repo.owner, repo: repo.repo, branch: repo.parentBranch ?? repo.defaultBranch },
-      { title: draft.title, body: draft.body, draft: false },
+      { title: draft.title, body: draft.body, draft: false, worktreeId },
     );
     return { pullRequestUrl: pr.htmlUrl, pullRequestNumber: pr.number };
   }

@@ -1,21 +1,59 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { motion } from "motion/react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { motionTransition } from "@/lib/motion";
+
+/**
+ * Mirrors the Radix root's value so triggers know, in JS, whether they're the
+ * active one — the sliding indicator is a real element that moves between
+ * triggers via a shared `layoutId`, which CSS `data-active:` styling can't do.
+ * `layoutIdPrefix` scopes that shared id per `Tabs` instance so two tab strips
+ * on screen never trade indicators with each other.
+ */
+interface TabsContextValue {
+  value: string | undefined;
+  layoutIdPrefix: string;
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
 
 function Tabs({
   className,
   orientation = "horizontal",
+  value,
+  defaultValue,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  const layoutIdPrefix = React.useId();
+  const [uncontrolledValue, setUncontrolledValue] = React.useState(defaultValue);
+  const activeValue = value ?? uncontrolledValue;
+  const handleValueChange = React.useCallback(
+    (next: string) => {
+      setUncontrolledValue(next);
+      onValueChange?.(next);
+    },
+    [onValueChange],
+  );
+  const context = React.useMemo<TabsContextValue>(
+    () => ({ value: activeValue, layoutIdPrefix }),
+    [activeValue, layoutIdPrefix],
+  );
+
   return (
-    <TabsPrimitive.Root
-      data-slot="tabs"
-      data-orientation={orientation}
-      className={cn("group/tabs flex gap-2 data-horizontal:flex-col", className)}
-      {...props}
-    />
+    <TabsContext.Provider value={context}>
+      <TabsPrimitive.Root
+        data-slot="tabs"
+        data-orientation={orientation}
+        className={cn("group/tabs flex gap-2 data-horizontal:flex-col", className)}
+        onValueChange={handleValueChange}
+        value={activeValue}
+        {...props}
+      />
+    </TabsContext.Provider>
   );
 }
 
@@ -34,34 +72,72 @@ const tabsListVariants = cva(
   },
 );
 
+const TabsListVariantContext = React.createContext<"default" | "line">("default");
+
 function TabsList({
   className,
   variant = "default",
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.List> & VariantProps<typeof tabsListVariants>) {
   return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      data-variant={variant}
-      className={cn(tabsListVariants({ variant }), className)}
-      {...props}
+    <TabsListVariantContext.Provider value={variant ?? "default"}>
+      <TabsPrimitive.List
+        data-slot="tabs-list"
+        data-variant={variant}
+        className={cn(tabsListVariants({ variant }), className)}
+        {...props}
+      />
+    </TabsListVariantContext.Provider>
+  );
+}
+
+/**
+ * The moving pill (or underline, in the `line` variant) that follows the active
+ * trigger. Rendered only inside the active trigger; Motion's shared-layout
+ * animation slides it from wherever it previously sat.
+ */
+function TabsIndicator({ layoutId }: { layoutId: string }) {
+  const variant = React.useContext(TabsListVariantContext);
+  return (
+    <motion.span
+      aria-hidden
+      className={cn(
+        "absolute",
+        variant === "line"
+          ? "group-data-horizontal/tabs:inset-x-0 group-data-horizontal/tabs:bottom-[-5px] group-data-horizontal/tabs:h-0.5 group-data-vertical/tabs:inset-y-0 group-data-vertical/tabs:-right-1 group-data-vertical/tabs:w-0.5 bg-foreground"
+          : "inset-0 rounded-md border border-transparent bg-background shadow-sm dark:border-input dark:bg-input/30",
+      )}
+      layoutId={layoutId}
+      transition={motionTransition.indicator}
     />
   );
 }
 
-function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+function TabsTrigger({
+  className,
+  children,
+  value,
+  ...props
+}: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+  const context = React.useContext(TabsContext);
+  const active = context?.value === value;
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
+      value={value}
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 dark:text-muted-foreground dark:hover:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
-        "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
-        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        // The active fill/underline moved to `TabsIndicator` so it can slide;
+        // what stays here is everything that doesn't travel between triggers.
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-colors group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "data-active:text-foreground dark:data-active:text-foreground",
         className,
       )}
       {...props}
-    />
+    >
+      {active && context ? <TabsIndicator layoutId={`${context.layoutIdPrefix}-tab`} /> : null}
+      {/* Above the indicator: it is absolutely positioned and comes first in DOM order. */}
+      <span className="relative inline-flex items-center gap-1.5">{children}</span>
+    </TabsPrimitive.Trigger>
   );
 }
 

@@ -155,9 +155,12 @@ class StdinLines {
   private lifecycleQueue = Promise.resolve();
 
   constructor() {
-    readStdinLines((line) => {
-      this.queue = this.queue.then(() => this.dispatch(line));
-    });
+    readStdinLines(
+      (line) => {
+        this.queue = this.queue.then(() => this.dispatch(line));
+      },
+      () => process.exit(0),
+    );
   }
 
   private async dispatch(line: string): Promise<void> {

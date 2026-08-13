@@ -13,7 +13,8 @@ scrollback, raw output, and agent-status strengths.
 - Serving `pragma-core` RPC and snapshot-then-delta event subscriptions over the
   existing length-prefixed frame codec.
 - Spawning host-side sidecars (`pragma-ai`, `pragma-github`, `pragma-automations`,
-  `pragma-plugins`).
+  `pragma-plugins`). Automation discovery still scans on its existing cadence, but
+  persists and broadcasts runtime state only when the full state changes.
 - Supervising persisted remote-access tunnels so mobile connectivity survives desktop
   client exits and restarts.
 
@@ -201,7 +202,11 @@ alive at once.
 
 Deliberate replacement still works because the app kills the old server before
 spawning a new one (`kill_stale_server` in `pragma-client`), so nothing answers the
-probe by then.
+probe by then. Replacement kills the server's complete descendant tree, not only its
+pid: Bun plugin/automation hosts, per-agent watchers, PTYs, and tunnel processes must
+not be reparented as orphans. As a second line of defense, long-lived Bun hosts treat
+supervisor stdin EOF as a cleanup-and-exit signal. The client never unlinks `server.lock`;
+the kernel releasing its advisory lock is what makes replacement safe.
 
 ## Wire Protocol
 
