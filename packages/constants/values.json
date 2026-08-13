@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 22,
+    "protocolVersion": 23,
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -98,6 +98,15 @@
     "chunkBytes": 4194304,
     "maxBinaryBytes": 268435456
   },
+  "fanout": {
+    "stateFile": "fanouts.json",
+    "branchPrefix": "fanout",
+    "minMembers": 2,
+    "defaultJobs": 4,
+    "deliveryTimeoutMs": 15000,
+    "envFanoutId": "PRAGMA_FANOUT_ID",
+    "envMemberId": "PRAGMA_FANOUT_MEMBER_ID"
+  },
   "scratchpads": {
     "directory": ".pragma/scratchpads",
     "extension": "mdx",
@@ -121,7 +130,8 @@
       "plugins",
       "tunnel",
       "scratchpads",
-      "wsl"
+      "wsl",
+      "fanouts"
     ],
     "events": [
       "agentStatus",
@@ -132,7 +142,8 @@
       "echoMode",
       "automationPending",
       "automationsChanged",
-      "workspace"
+      "workspace",
+      "fanouts"
     ],
     "errors": [
       "invalidPayload",

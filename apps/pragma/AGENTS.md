@@ -504,8 +504,12 @@ Before each publish the worker runs `adopt_headless_worktrees`: any git checkout
 `<project>/.pragma/worktrees/` the DB does not know (created by `pragma-server`'s
 headless `agentSessionLaunch` while the app was closed) is inserted as a worktree row
 parented to the project's main worktree, keeping the directory name as its id so remote
-clients' ids stay stable. Adoption is local-only (remote SSH project paths are skipped)
-and best-effort.
+clients' ids stay stable. The one exception is fanout worktrees: their hierarchy is
+host-owned and git carries no parentage, so adoption reads the durable fanout snapshot
+(`fanout_parentage`) and parents the coordination parent under its source and each
+attempt under that parent — otherwise the host's pick-time `validate_finalize` rejects
+the merge because an attempt is no longer a direct child of its fanout parent. Adoption
+is local-only (remote SSH project paths are skipped) and best-effort.
 
 ## Remote agent session launch
 
@@ -1104,6 +1108,38 @@ scrolls the active terminal to the live cursor row.
 **Escape closes any open modal:** radix `Dialog`/`AlertDialog` dismiss on Escape
 natively; hand-rolled dialogs use the `useEscapeToClose` hook.
 
+## Fanout comparison
+
+A fanout's attempts are shown in `components/fanout/FanoutComparison.tsx`, which
+**replaces** the centre workspace and the right sidebar rather than overlaying
+them — native browser webviews float above HTML, so an overlay would be clipped.
+
+- **One shared column model.** `widths` in the comparison drives the sticky
+  header and every section row. Independent `ResizablePanelGroup`s per row drift
+  apart the moment a row collapses, so there is deliberately only one. Columns
+  divide the viewport width evenly on mount (measured via a `ResizeObserver`),
+  so every section spans the full tab; manual drags are preserved across
+  resizes.
+- **Sessions are real terminals.** Each cell mounts the ordinary `TerminalView`
+  for the attempt's tab: input, scroll, resize, and status behave as anywhere
+  else. Collapsing the section unmounts the host, which parks the terminal
+  through `TerminalManager` and releases its renderer — it never kills the PTY.
+- **Diffs are lazy, pinned to the base commit, and expanded by default.** A file
+  row mounts its cells on mount; every diff is `fanout.baseCommit → attempt
+working tree` (`base_file_diff`), so uncommitted attempt work shows and the
+  comparison survives the parent advancing. Each cell renders a
+  `UnifiedDiff` — a single-column, changed-lines-only view (deletions red,
+  insertions green, no unchanged context) rather than a side-by-side old/new
+  `MergeDiff`.
+- **Scratchpads pair by exact path, then by normalized title** (`lib/fanout.ts`);
+  an unmatched document keeps its own row with empty cells.
+
+Fanout state itself is host-owned: `state/fanouts-context.tsx` reads
+`list_fanouts` once and then follows the `pragma:fanouts` bridge. The sidebar
+renders an explicit group row per fanout (`components/sidebar/FanoutGroup.tsx`)
+and hides its attempts from the ordinary tree — `parentId` alone cannot tell an
+attempt from a hand-made nested worktree.
+
 ## Toasts
 
 `sonner` (`@/components/ui/sonner.tsx` + `<Toaster />` mounted once in `main.tsx`).
@@ -1117,6 +1153,14 @@ errors via `toast.error(…)`.
 remote status before creation; when main is behind it offers cancel, create without
 pulling, or pull then create. As soon as the last question is answered it hands the run
 to `worktree-creation-context` and closes — creation never blocks the app behind a modal.
+
+Its **Fan out** mode is the same form with the single agent picker swapped for the
+repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display
+title, and prompt keep their meaning, and there is no attempt-count ceiling. A fanout
+**always** branches a fresh coordination parent (`parent.kind: "new"`) from the worktree
+the dialog was opened on — the desktop never fans out into a worktree the user is already
+working in, so the branch field is always required. The `existing` parent kind stays in
+the contract for `pragma-cli fanout create --parent`.
 
 `WorktreeCreationProvider` runs the flow (optional `githubPullBranch`, `createWorktree`,
 then the terminal tab or agent session) and exposes its step list. `WorkspaceShell`

@@ -122,7 +122,9 @@ tasks:
       BASE_REF: ${{ init.base-ref }}
       HUSKY: "0"
     run: |
-      git fetch --quiet origin "$BASE_REF"
+      # pragma-sh/pragma is public, so the fetch needs no credentials.
+      git fetch --quiet \
+        "https://github.com/pragma-sh/pragma.git" "$BASE_REF"
       bunx commitlint --from "$(git merge-base FETCH_HEAD HEAD)" --to HEAD --verbose
 
   # Shared by every TypeScript check: the generated shared-constant types are an
@@ -163,9 +165,10 @@ tasks:
       BASE_REF: ${{ init.base-ref }}
       BRANCH: ${{ init.branch }}
       GH_REPO: pragma-sh/pragma
-      # Posting the sticky report needs a fine-grained GitHub token with `Pull
-      # requests: read and write` on this repo, stored in the RWX default vault
-      # as `fallow-comment-token`. `gh` picks `GH_TOKEN` up implicitly.
+      # Posting the sticky report needs a credential with `pull_requests` and
+      # `issues` write access — a fine-grained GitHub token with **Pull requests:
+      # read and write** on this repo, stored in the RWX default vault as
+      # `fallow-comment-token`. `gh` picks `GH_TOKEN` up implicitly.
       GH_TOKEN:
         value: ${{ secrets.fallow-comment-token }}
         cache-key: excluded
@@ -173,7 +176,10 @@ tasks:
       # `--base` needs a resolvable ref. Fetch into the remote-tracking name
       # rather than `refs/heads/$BASE_REF`: on a push to main that branch is
       # checked out and git refuses to fetch into it.
-      git fetch --quiet origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
+      # pragma-sh/pragma is public, so the fetch needs no credentials.
+      git fetch --quiet \
+        "https://github.com/pragma-sh/pragma.git" \
+        "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
       status=0
       bunx fallow audit \

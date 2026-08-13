@@ -267,6 +267,7 @@ fn start_remote_bridges(app: AppHandle, client: PtyClient, host_id: String) {
         return;
     }
     agent_events::start_for(app.clone(), client.clone());
+    crate::fanouts::start_for(app.clone(), client.clone());
     crate::control::start(app, client, host_id);
 }
 

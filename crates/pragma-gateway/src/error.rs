@@ -44,6 +44,8 @@ pub enum GatewayError {
     Rpc {
         code: ProtocolErrorCode,
         message: String,
+        /// Domain error detail from the host, echoed to the caller verbatim.
+        details: Option<serde_json::Value>,
     },
     /// Server rejected a non-RPC request.
     #[error("server error: {0}")]
@@ -97,7 +99,15 @@ impl From<ClientError> for GatewayError {
                     Self::Server(message)
                 }
             }
-            ClientError::Rpc { code, message } => Self::Rpc { code, message },
+            ClientError::Rpc {
+                code,
+                message,
+                details,
+            } => Self::Rpc {
+                code,
+                message,
+                details,
+            },
             ClientError::LockPoisoned => Self::Server("client lock poisoned".to_string()),
             ClientError::NoBootstrap => {
                 Self::Transport("server socket is not reachable".to_string())
@@ -114,6 +124,9 @@ pub struct ErrorBody {
     pub code: &'static str,
     /// Human-readable message.
     pub message: String,
+    /// Domain error detail from the host, when the failure carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl From<&GatewayError> for ErrorBody {
@@ -121,6 +134,10 @@ impl From<&GatewayError> for ErrorBody {
         Self {
             code: error.code(),
             message: error.to_string(),
+            details: match error {
+                GatewayError::Rpc { details, .. } => details.clone(),
+                _ => None,
+            },
         }
     }
 }
@@ -167,6 +184,7 @@ mod tests {
             let error = GatewayError::Rpc {
                 code,
                 message: "failed".to_string(),
+                details: None,
             };
             assert_eq!(error.status(), status);
         }

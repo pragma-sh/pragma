@@ -174,6 +174,34 @@ pub enum GitRequest {
         #[serde(default)]
         source_branch: Option<String>,
     },
+    /// Creates a worktree at `path` on a new `branch` forked from an exact
+    /// `commit` rather than whatever `parent_root` has checked out now.
+    ///
+    /// Fanout needs this: every attempt must start from the commit captured
+    /// when the fanout was created, even if the parent moves on while the
+    /// attempts are still being provisioned.
+    CreateWorktreeAt {
+        parent_root: String,
+        branch: String,
+        path: String,
+        commit: String,
+    },
+    /// Resolves a worktree's current `HEAD` to a full commit hash.
+    HeadCommit { root: String },
+    /// Lists everything that changed between an exact `base` commit and the
+    /// worktree's current state: `base..HEAD` as committed, plus the staged and
+    /// unstaged sections. Unlike [`Self::WorktreeChanges`] there is no
+    /// merge-base step — the base is the immutable point the caller captured.
+    ChangesSinceCommit { root: String, base: String },
+    /// Old/new text for one file between an exact `base` commit and the
+    /// worktree's current on-disk content (not `HEAD`), so an attempt's
+    /// uncommitted work still shows up in a comparison.
+    BaseFileDiff {
+        root: String,
+        base: String,
+        path: String,
+        old_path: Option<String>,
+    },
     /// Removes the worktree at `worktree_path` from the repo at `repo_root`.
     RemoveWorktree {
         repo_root: String,
@@ -354,6 +382,32 @@ fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::DeleteBranch { repo_root, branch } => {
             to_value(delete_branch(Path::new(repo_root), branch)?)?
         }
+        GitRequest::CreateWorktreeAt {
+            parent_root,
+            branch,
+            path,
+            commit,
+        } => to_value(create_worktree_at(
+            Path::new(parent_root),
+            branch,
+            Path::new(path),
+            commit,
+        )?)?,
+        GitRequest::HeadCommit { root } => to_value(head_commit(Path::new(root))?)?,
+        GitRequest::ChangesSinceCommit { root, base } => {
+            to_value(changes_since_commit(Path::new(root), base)?)?
+        }
+        GitRequest::BaseFileDiff {
+            root,
+            base,
+            path,
+            old_path,
+        } => to_value(base_file_diff(
+            Path::new(root),
+            base,
+            path,
+            old_path.as_deref(),
+        )?)?,
         GitRequest::IsDirty { root } => to_value(worktree_is_dirty(Path::new(root)))?,
         GitRequest::ListHeadlessWorktrees { project_root } => {
             to_value(list_headless_worktrees(Path::new(project_root)))?
@@ -1300,6 +1354,126 @@ fn create_worktree(
     } else {
         Err(CoreError::Operation(stderr(&output.stderr)))
     }
+}
+
+/// Creates a worktree on a new branch forked from an exact commit.
+///
+/// `git worktree add -b <branch> <path> <commit>` — the trailing commit-ish is
+/// the whole point: two attempts created seconds apart must share a base even
+/// if the parent branch advanced between them.
+fn create_worktree_at(
+    parent_root: &Path,
+    branch: &str,
+    path: &Path,
+    commit: &str,
+) -> CoreResult<()> {
+    validate_commit(commit)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let output = process_env::git()
+        .args([
+            "-C",
+            &path_string(parent_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            &path_string(path),
+            commit,
+        ])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CoreError::Operation(stderr(&output.stderr)))
+    }
+}
+
+/// Resolves `HEAD` to a full commit hash.
+fn head_commit(root: &Path) -> CoreResult<String> {
+    let commit = git_stdout(root, &["rev-parse", "HEAD"])?;
+    if commit.is_empty() {
+        return Err(CoreError::Operation(
+            "worktree has no commits to fan out from".to_string(),
+        ));
+    }
+    Ok(commit)
+}
+
+/// Rejects anything that is not a plain hex commit hash before it reaches a
+/// git argument list, so a base commit can never smuggle in a flag or a ref
+/// expression.
+fn validate_commit(commit: &str) -> CoreResult<()> {
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(CoreError::InvalidPayload(format!(
+            "invalid commit hash: {commit}"
+        )));
+    }
+    Ok(())
+}
+
+/// Lists `base..HEAD` plus the staged and unstaged sections.
+fn changes_since_commit(root: &Path, base: &str) -> CoreResult<WorktreeChanges> {
+    validate_commit(base)?;
+    let (committed, staged, unstaged) = std::thread::scope(|scope| {
+        let committed = scope.spawn(|| committed_changes_since(root, base));
+        let staged = scope.spawn(|| staged_changes(root));
+        let unstaged = scope.spawn(|| unstaged_changes(root));
+        (
+            join_changes(committed),
+            join_changes(staged),
+            join_changes(unstaged),
+        )
+    });
+    Ok(WorktreeChanges {
+        committed: committed?,
+        staged: staged?,
+        unstaged: unstaged?,
+    })
+}
+
+/// Lists what `HEAD` changed relative to an exact commit.
+fn committed_changes_since(root: &Path, base: &str) -> CoreResult<Vec<ChangedFile>> {
+    let args = [
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames",
+        base,
+        "HEAD",
+    ];
+    let name_status = run_git(root, &args)?;
+    let mut changes = parse_name_status(&name_status, DiffSide::Committed);
+    let numstat = run_git(root, &numstat_args(&args))?;
+    attach_numstat(&mut changes, &parse_numstat(&numstat));
+    Ok(changes)
+}
+
+/// Old/new text for one file between an exact base commit and the worktree's
+/// current on-disk content.
+fn base_file_diff(
+    root: &Path,
+    base: &str,
+    path: &str,
+    old_path: Option<&str>,
+) -> CoreResult<FileDiff> {
+    validate_commit(base)?;
+    crate::fs::resolve_in_worktree(root, path)?;
+    if diff_is_binary(root, &[base], path) {
+        return Ok(binary_diff(path.to_string()));
+    }
+    let old_ref_path = old_path.unwrap_or(path);
+    let (old_text, new_text) = load_diff_sides(
+        || git_show(root, &format!("{base}:{old_ref_path}")).unwrap_or_default(),
+        || read_worktree_text(root, path),
+    );
+    Ok(FileDiff {
+        path: path.to_string(),
+        old_text,
+        new_text,
+        binary: false,
+    })
 }
 
 /// Removes a worktree, tolerating drifted admin state by pruning stale entries

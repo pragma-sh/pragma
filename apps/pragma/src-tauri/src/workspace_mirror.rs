@@ -19,6 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use pragma_core::git::{GitRequest, HeadlessWorktree};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::db::Db;
@@ -98,6 +99,7 @@ fn publish_once(app: &AppHandle) -> AppResult<()> {
     let db = app.state::<Db>();
     let hosts = app.state::<Hosts>();
     adopt_headless_worktrees(&db, &hosts);
+    adopt_fanout_tabs(&db, &hosts);
     let projects = db.list_projects()?;
     let worktrees = db.list_all_worktrees()?;
     let tabs = db.list_all_tabs()?;
@@ -178,6 +180,15 @@ fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
         let Ok(client) = hosts.for_project(db, &project.id) else {
             continue;
         };
+        // Fanout worktrees keep their host-owned hierarchy: the coordination
+        // parent hangs off its source worktree and every attempt off that
+        // parent. Git worktrees carry no parentage, so the durable fanout
+        // record is the only place that relationship survives — and the host's
+        // pick transaction refuses to merge attempts that are not direct
+        // children of their parent.
+        let parentage = crate::fanouts::first_snapshot(&client)
+            .map(|snapshot| fanout_parentage(&snapshot))
+            .unwrap_or_default();
         let request = GitRequest::ListHeadlessWorktrees {
             project_root: project.path.clone(),
         };
@@ -194,10 +205,156 @@ fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
                 // recreated checkout) — leave it for the user to resolve.
                 continue;
             }
-            match db.insert_worktree(&id, &project.id, &main_id, &branch, None, &path) {
+            let parent_id = parentage.get(&id).map_or(main_id.as_str(), String::as_str);
+            match db.insert_worktree(&id, &project.id, parent_id, &branch, None, &path) {
                 Ok(_) => log::info!("adopted headless worktree {id} ({branch}) at {path}"),
                 Err(error) => log::warn!("failed to adopt headless worktree {id}: {error}"),
             }
         }
+    }
+}
+
+/// Maps a fanout's worktrees to their host-owned parents.
+///
+/// `adopt_headless_worktrees` defaults an unaccounted-for checkout to the
+/// project's main worktree, but a fanout's hierarchy must survive adoption: the
+/// coordination parent belongs under its source worktree, and every attempt
+/// under that parent. Without this the host's `validate_finalize` rejects the
+/// pick because an attempt is no longer a direct child of its fanout parent.
+fn fanout_parentage(snapshot: &Value) -> HashMap<String, String> {
+    let mut parents = HashMap::new();
+    for fanout in snapshot["fanouts"].as_array().into_iter().flatten() {
+        let Some(parent) = fanout["parentWorktreeId"].as_str() else {
+            continue;
+        };
+        if let Some(source) = fanout["sourceWorktreeId"].as_str() {
+            parents.insert(parent.to_string(), source.to_string());
+        }
+        for member in fanout["members"].as_array().into_iter().flatten() {
+            if let Some(attempt) = member["worktreeId"].as_str() {
+                parents.insert(attempt.to_string(), parent.to_string());
+            }
+        }
+    }
+    parents
+}
+
+/// Adopts the terminal tabs `pragma-server` created for fanout attempts.
+///
+/// Each attempt is a real agent session with a live PTY the host keyed by *its*
+/// tab id, so the row has to be adopted under that same id: minting a new one
+/// would open a second terminal beside the running agent instead of attaching
+/// to it. That is also what makes a reopened desktop attach rather than
+/// relaunch. Tab ownership stays out of this beyond the row itself — the fanout
+/// relation lives in the host's durable record.
+fn adopt_fanout_tabs(db: &Db, hosts: &Hosts) {
+    let Ok(projects) = db.list_projects() else {
+        return;
+    };
+    for project in &projects {
+        let Ok(client) = hosts.for_project(db, &project.id) else {
+            continue;
+        };
+        let Ok(snapshot) = crate::fanouts::first_snapshot(&client) else {
+            continue;
+        };
+        for fanout in snapshot["fanouts"].as_array().into_iter().flatten() {
+            for member in fanout["members"].as_array().into_iter().flatten() {
+                let (Some(tab_id), Some(worktree_id)) =
+                    (member["tabId"].as_str(), member["worktreeId"].as_str())
+                else {
+                    continue;
+                };
+                if db.worktree(worktree_id).is_err() {
+                    // The attempt's worktree has not been adopted yet; its tab
+                    // arrives on the next publish.
+                    continue;
+                }
+                let agent_id = member["catalogAgentId"].as_str().unwrap_or_default();
+                if let Err(error) = db.adopt_agent_tab(
+                    tab_id,
+                    &project.id,
+                    worktree_id,
+                    Some(
+                        fanout["title"]
+                            .as_str()
+                            .unwrap_or("Fanout attempt")
+                            .to_string(),
+                    ),
+                    agent_id,
+                ) {
+                    log::warn!("failed to adopt fanout tab {tab_id}: {error}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fanout_parentage;
+    use serde_json::json;
+
+    #[test]
+    fn fanout_parentage_maps_attempts_to_their_parent_and_the_parent_to_its_source() {
+        let snapshot = json!({
+            "fanouts": [{
+                "parentWorktreeId": "parent-1",
+                "sourceWorktreeId": "source-1",
+                "members": [
+                    { "worktreeId": "attempt-a" },
+                    { "worktreeId": "attempt-b" }
+                ]
+            }, {
+                "parentWorktreeId": "existing-parent",
+                "sourceWorktreeId": null,
+                "members": [
+                    { "worktreeId": "attempt-c" }
+                ]
+            }]
+        });
+        let parents = fanout_parentage(&snapshot);
+        assert_eq!(
+            parents.get("parent-1").map(String::as_str),
+            Some("source-1")
+        );
+        assert_eq!(
+            parents.get("attempt-a").map(String::as_str),
+            Some("parent-1")
+        );
+        assert_eq!(
+            parents.get("attempt-b").map(String::as_str),
+            Some("parent-1")
+        );
+        assert_eq!(
+            parents.get("attempt-c").map(String::as_str),
+            Some("existing-parent")
+        );
+        // An existing parent is not headless, so nothing maps it to a source.
+        assert!(!parents.contains_key("existing-parent"));
+    }
+
+    #[test]
+    fn fanout_parentage_ignores_members_without_worktrees() {
+        let snapshot = json!({
+            "fanouts": [{
+                "parentWorktreeId": "parent-1",
+                "sourceWorktreeId": "source-1",
+                "members": [
+                    { "worktreeId": "attempt-a" },
+                    { "worktreeId": null }
+                ]
+            }]
+        });
+        let parents = fanout_parentage(&snapshot);
+        assert_eq!(parents.len(), 2);
+        assert_eq!(
+            parents.get("parent-1").map(String::as_str),
+            Some("source-1")
+        );
+        assert_eq!(
+            parents.get("attempt-a").map(String::as_str),
+            Some("parent-1")
+        );
     }
 }

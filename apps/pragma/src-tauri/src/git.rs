@@ -84,6 +84,54 @@ pub fn worktree_changes(
     )
 }
 
+/// Lists everything a worktree changed relative to an exact commit: `base..HEAD`
+/// plus its staged and unstaged sections.
+///
+/// Fanout comparison pins every attempt to the commit captured when the fanout
+/// started, so the columns stay comparable even after the parent moves on —
+/// which a merge-base against the parent branch would not.
+#[tauri::command(async)]
+pub fn worktree_changes_since(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    base: String,
+) -> AppResult<WorktreeChanges> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    host_rpc(
+        &pty,
+        &GitRequest::ChangesSinceCommit {
+            root: worktree.path,
+            base,
+        },
+    )
+}
+
+/// Old/new text for one file between an exact base commit and the worktree's
+/// current on-disk content, so an attempt's uncommitted work still shows.
+#[tauri::command(async)]
+pub fn base_file_diff(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    base: String,
+    path: String,
+    old_path: Option<String>,
+) -> AppResult<FileDiff> {
+    let worktree = db.worktree(&worktree_id)?;
+    let pty = hosts.for_worktree(&db, &worktree_id)?;
+    host_rpc(
+        &pty,
+        &GitRequest::BaseFileDiff {
+            root: worktree.path,
+            base,
+            path,
+            old_path,
+        },
+    )
+}
+
 /// Lists a worktree's commits since its fork point (newest first), with
 /// authors, co-authors, and per-commit changed files.
 #[tauri::command(async)]

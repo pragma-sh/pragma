@@ -294,3 +294,71 @@ describe("assembleWatchers", () => {
     ]);
   });
 });
+
+describe("assembleCatalog project scoping", () => {
+  it("resolves each plugin's models against its own root and records the scope", async () => {
+    const seen: Record<string, string | undefined> = {};
+    const projectPlugin: ResolvedPlugin = {
+      ...plugin("p.project", {
+        agents: [
+          {
+            id: "scoped",
+            name: "Scoped",
+            launch: { command: ["scoped"] },
+            models: (context: PluginContext) => {
+              seen["p.project"] = context.project?.path;
+              return [{ id: "m", name: "M" }];
+            },
+            args: { model: (id: string) => ["--model", id] },
+          },
+        ],
+        watchers: [{ agent: "scoped", start: () => ({ stop: () => {} }) }],
+      }),
+      scope: "project",
+      root: "/repos/beta",
+    };
+    const globalPlugin: ResolvedPlugin = {
+      ...plugin("p.global", {
+        agents: [
+          {
+            id: "shared",
+            name: "Shared",
+            launch: { command: ["shared"] },
+            models: (context: PluginContext) => {
+              seen["p.global"] = context.project?.path;
+              return [{ id: "m", name: "M" }];
+            },
+            args: { model: (id: string) => ["--model", id] },
+          },
+        ],
+      }),
+      scope: "global",
+      root: "/home/user",
+    };
+
+    const result = await assembleCatalog(
+      [projectPlugin, globalPlugin],
+      (resolved) =>
+        ({
+          pluginId: resolved.pluginId,
+          config: undefined,
+          project:
+            resolved.scope === "project"
+              ? { id: resolved.root, name: resolved.root, path: resolved.root }
+              : { id: "/repos/alpha", name: "alpha", path: "/repos/alpha" },
+          sdk: {},
+          notify: () => {},
+        }) as unknown as PluginContext,
+    );
+
+    expect(seen["p.project"]).toBe("/repos/beta");
+    expect(seen["p.global"]).toBe("/repos/alpha");
+    const scoped = result.catalog.agents.find((agent) => agent.id === "p.project.scoped");
+    expect(scoped?.scope).toBe("project");
+    expect(scoped?.root).toBe("/repos/beta");
+    expect(scoped?.runtimeAgentId).toBe("scoped");
+    const shared = result.catalog.agents.find((agent) => agent.id === "p.global.shared");
+    expect(shared?.scope).toBe("global");
+    expect(shared?.runtimeAgentId).toBeUndefined();
+  });
+});

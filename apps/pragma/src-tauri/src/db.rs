@@ -682,6 +682,47 @@ impl Db {
         self.tab(&id)
     }
 
+    /// Inserts a terminal tab under an id the host already minted.
+    ///
+    /// Server-created agent sessions (a headless launch, every fanout attempt)
+    /// already have a live PTY keyed by that id, so adopting the row under a
+    /// fresh id would open a second terminal instead of attaching to the one
+    /// that is running. Idempotent: an existing row is returned unchanged.
+    pub fn adopt_agent_tab(
+        &self,
+        id: &str,
+        project_id: &str,
+        worktree_id: &str,
+        title: Option<String>,
+        agent_id: &str,
+    ) -> AppResult<Tab> {
+        if let Ok(existing) = self.tab(id) {
+            return Ok(existing);
+        }
+        {
+            let conn = self.0.lock()?;
+            let order_index: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM tabs WHERE project_id = ?1",
+                [project_id],
+                |row| row.get(0),
+            )?;
+            conn.execute(
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, order_index, agent_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    id,
+                    project_id,
+                    worktree_id,
+                    kind_as_str(TabKind::Terminal),
+                    title,
+                    order_index,
+                    agent_id
+                ],
+            )?;
+        }
+        self.tab(id)
+    }
+
     /// Renames a tab on behalf of the user (terminal double-click/context menu).
     /// Flips `user_renamed` so subsequent shell-emitted OSC 0/2 title updates are
     /// ignored on this tab.
@@ -1058,6 +1099,11 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         plugin_payload: row.get(12)?,
         plugin_dedupe_key: row.get(13)?,
         agent_id: row.get(14)?,
+        // Fanout membership is host-owned metadata, not a SQLite column: the
+        // durable fanout record names the tab, and the desktop reads it from
+        // there rather than reintroducing tab ownership here.
+        fanout_id: None,
+        fanout_member_id: None,
         user_renamed: row.get::<_, i64>(15)? == 1,
         order_index: row.get::<_, i64>(16)?,
         created_at: row.get(17)?,

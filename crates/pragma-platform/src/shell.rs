@@ -165,6 +165,68 @@ pub fn command_args(program: &str, command: &str) -> Vec<String> {
     }
 }
 
+/// Renders one command as a line an interactive `program` will run when it is
+/// typed into that shell.
+///
+/// This is not the same problem as [`command_args`]: an agent launch is *typed*
+/// into a shell that is already running, so the parts have to be quoted the way
+/// that shell parses them. POSIX single quotes are not PowerShell quoting — a
+/// path with a space would split, and an embedded quote would end the string —
+/// so the two are built separately rather than sharing one escape.
+#[must_use]
+pub fn interactive_command_line(program: &str, parts: &[String]) -> String {
+    let quote: fn(&str) -> String = if is_powershell(program) {
+        quote_powershell
+    } else if is_cmd(program) {
+        quote_cmd
+    } else {
+        quote_posix
+    };
+    parts
+        .iter()
+        .map(|part| quote(part))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// POSIX single-quoting: everything is literal inside `'…'`, and an embedded
+/// quote is spelled `'\''`.
+fn quote_posix(value: &str) -> String {
+    if !value.is_empty() && value.bytes().all(is_bare_posix_byte) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// PowerShell single-quoting: everything is literal inside `'…'`, and an
+/// embedded quote is doubled (`''`). No backslash escapes — a Windows path is
+/// safe verbatim, which a POSIX escape would have mangled.
+fn quote_powershell(value: &str) -> String {
+    if !value.is_empty() && value.bytes().all(is_bare_powershell_byte) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// `cmd.exe` has no escape inside quotes at all; a literal double quote cannot
+/// be expressed, so it is dropped rather than allowed to break the line apart.
+fn quote_cmd(value: &str) -> String {
+    if !value.is_empty() && value.bytes().all(is_bare_powershell_byte) {
+        return value.to_string();
+    }
+    format!("\"{}\"", value.replace('"', ""))
+}
+
+fn is_bare_posix_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"_./:=@+-".contains(&byte)
+}
+
+/// Backslash is bare on Windows because it is the path separator; `'` is not,
+/// so a value containing one always takes the quoted branch.
+fn is_bare_powershell_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"_./:=@+-\\".contains(&byte)
+}
+
 /// Whether a program path names PowerShell, in either edition.
 fn is_powershell(program: &str) -> bool {
     matches!(
@@ -272,8 +334,8 @@ mod tests {
     use pragma_constants::TerminalBackend;
 
     use super::{
-        find_on_path, parse_profile, pick_windows_shell, profile_launch, resolve_profile_launch,
-        resolve_shell, ShellLaunch, ShellProfile,
+        find_on_path, interactive_command_line, parse_profile, pick_windows_shell, profile_launch,
+        resolve_profile_launch, resolve_shell, ShellLaunch, ShellProfile,
     };
 
     fn wsl(distro: Option<&str>) -> ShellProfile {
@@ -518,5 +580,39 @@ mod tests {
     #[test]
     fn a_missing_absolute_path_resolves_to_nothing() {
         assert_eq!(find_on_path("/definitely/not/here/pwsh.exe"), None);
+    }
+
+    #[test]
+    fn interactive_command_lines_are_quoted_for_the_shell_that_will_parse_them() {
+        let parts = vec![
+            "C:\\Program Files\\opencode\\opencode.exe".to_string(),
+            "--model".to_string(),
+            "it's".to_string(),
+        ];
+        // PowerShell: doubled quote, no backslash escaping.
+        let pwsh = interactive_command_line("pwsh.exe", &parts);
+        assert!(
+            pwsh.contains("'C:\\Program Files\\opencode\\opencode.exe'"),
+            "got: {pwsh}"
+        );
+        assert!(pwsh.contains("'it''s'"), "got: {pwsh}");
+        assert!(
+            !pwsh.contains("\\'"),
+            "PowerShell has no backslash escape: {pwsh}"
+        );
+
+        // POSIX: `'\''` for an embedded quote.
+        let posix = interactive_command_line("/bin/zsh", &["it's".to_string()]);
+        assert_eq!(posix, "'it'\\''s'");
+
+        // Bare words stay bare in both.
+        assert_eq!(
+            interactive_command_line("/bin/zsh", &["opencode".to_string()]),
+            "opencode"
+        );
+        assert_eq!(
+            interactive_command_line("pwsh", &["opencode".to_string()]),
+            "opencode"
+        );
     }
 }

@@ -1,4 +1,8 @@
 import type {
+  Fanout,
+  ScratchpadFile,
+  FanoutPickResult,
+  FanoutSubscriptionPayload,
   AppInfo,
   BranchSyncStatus,
   ChangeStatus,
@@ -1785,4 +1789,67 @@ export function pluginStorageGet(pluginId: string, key: string): Promise<string 
 /** Writes one plugin-owned durable storage value as an opaque JSON string. */
 export function pluginStorageSet(pluginId: string, key: string, value: string): Promise<void> {
   return invoke("plugin_storage_set", { pluginId, key, value });
+}
+
+// -------------------------------- fanouts ---------------------------------
+
+/**
+ * Sends one `fanouts` RPC to the host that owns the project.
+ *
+ * `payload` is the shared discriminated request (`{ action, … }`) `pragma-cli`
+ * and `@pragma/sdk` send, so the desktop stays one caller of one contract
+ * rather than a second implementation of it.
+ */
+export function fanoutRpc<T>(projectId: string, payload: Record<string, unknown>): Promise<T> {
+  return invoke<T>("fanout_rpc", { projectId, payload });
+}
+
+/** Reads a project's current fanouts once (for a window that just opened). */
+export async function listFanouts(projectId: string): Promise<Fanout[]> {
+  const payload = await invoke<FanoutSubscriptionPayload>("list_fanouts", { projectId });
+  return payload?.fanouts ?? [];
+}
+
+/**
+ * Runs the destructive finalize: commit the winner, merge it into the parent,
+ * promote its scratchpads, then delete every attempt.
+ */
+export function pickFanoutMember(
+  projectId: string,
+  fanoutId: string,
+  memberId: string,
+): Promise<FanoutPickResult> {
+  return invoke<FanoutPickResult>("pick_fanout_member", { projectId, fanoutId, memberId });
+}
+
+/** Subscribes to the host's fanout set; every event is a full replacement. */
+export function onFanouts(handler: (fanouts: Fanout[]) => void): Promise<UnlistenFn> {
+  return listen<FanoutSubscriptionPayload>("pragma:fanouts", (event) => {
+    handler(event.payload?.fanouts ?? []);
+  });
+}
+
+/**
+ * Lists everything a worktree changed since an exact commit.
+ *
+ * Fanout comparison pins every column to the commit the fanout captured, so
+ * the attempts stay comparable even after the parent moves on.
+ */
+export function worktreeChangesSince(worktreeId: string, base: string): Promise<WorktreeChanges> {
+  return invoke<WorktreeChanges>("worktree_changes_since", { worktreeId, base });
+}
+
+/** Old/new text for one file between a base commit and the worktree on disk. */
+export function baseFileDiff(
+  worktreeId: string,
+  base: string,
+  path: string,
+  oldPath?: string | null,
+): Promise<FileDiff> {
+  return invoke<FileDiff>("base_file_diff", { worktreeId, base, path, oldPath });
+}
+
+/** Lists a worktree's managed scratchpads with their full MDX source. */
+export function listScratchpadFiles(worktreeId: string): Promise<ScratchpadFile[]> {
+  return invoke<ScratchpadFile[]>("list_scratchpad_files", { worktreeId });
 }

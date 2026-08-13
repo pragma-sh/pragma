@@ -181,6 +181,7 @@ impl Session {
         rows: u16,
         server_socket: &str,
         requested_shell: Option<ShellProfile>,
+        extra_env: &[(String, String)],
         on_exit: impl FnOnce(&Arc<Session>) + Send + 'static,
     ) -> Result<Arc<Self>, SessionError> {
         let pair = native_pty_system().openpty(PtySize {
@@ -212,6 +213,11 @@ impl Session {
         if let Some(cli_path) = pragma_cli_path() {
             command.env("PRAGMA_CLI", &cli_path);
             command.env("PATH", path_with_cli_dir(&cli_path));
+        }
+        // Caller-supplied identity (today: the fanout a session is an attempt
+        // of) so a CLI running inside the session can address itself.
+        for (key, value) in extra_env {
+            command.env(key, value);
         }
         let child = pair.slave.spawn_command(command)?;
         let root_pid = child.process_id();
@@ -274,6 +280,23 @@ impl Session {
 
     /// True when the PTY output observed so far contains `needle` (for example
     /// the alternate-screen escape a TUI emits once it takes the terminal).
+    /// The raw output bytes still held in this session's scrollback.
+    ///
+    /// The buffer is capped by frame count and total bytes, so this is a
+    /// bounded recent window rather than full history.
+    pub fn scrollback_bytes(&self) -> Vec<u8> {
+        let Ok(scrollback) = self.scrollback.lock() else {
+            return Vec::new();
+        };
+        let mut bytes = Vec::new();
+        for frame in scrollback.frames_since(&self.id, None) {
+            if let EventFrame::Output { data, .. } = frame {
+                bytes.extend_from_slice(&data);
+            }
+        }
+        bytes
+    }
+
     pub fn output_contains(&self, needle: &[u8]) -> bool {
         self.scrollback
             .lock()
@@ -1209,6 +1232,7 @@ mod tests {
             24,
             "unused-socket",
             None,
+            &[],
             |_| {},
         )
         .expect("a shell spawns on a pseudo-terminal");
@@ -1267,6 +1291,7 @@ mod tests {
             24,
             "unused-socket",
             None,
+            &[],
             |_| {},
         )
         .expect("a shell spawns on a pseudo-terminal");

@@ -105,6 +105,57 @@ records the agent id and default title in the host snapshot; `listAgents` lets t
 desktop overlay that durable metadata over legacy local tab rows after restart. Do
 not add tab persistence back to the Tauri SQLite shell.
 
+## Fanout orchestration (`fanouts.rs`, `fanout_host.rs`)
+
+A fanout runs one prompt in N isolated attempt worktrees under a single parent,
+then merges one of them back. The record is **host-owned and persisted**, so it
+behaves identically whether the desktop is open, closed, or restarting — the
+desktop subscribes and controls, it never owns the process.
+
+The module is split so the rules can be tested without git or PTYs:
+
+- `fanouts.rs` holds `FanoutStore` (durable record, state machine,
+  subscriptions, ordering, and the destructive pick transaction), generic over
+  the `FanoutHost` seam. `fanouts/tests.rs` exercises every rule against an
+  in-memory fake host.
+- `fanout_host.rs` implements `FanoutHost` for `Registry`: git through
+  `pragma-core`, sessions through the shared launch primitive, the plugin
+  catalog, and the `pragma-ai` commit-message sidecar.
+
+Invariants worth keeping:
+
+- **One parent, at most one active fanout.** A completed, cancelled, or failed
+  fanout releases its parent; anything else — including one parked mid-finalize
+  — still owns it.
+- **Every attempt branches from one captured commit.** `baseCommit` is read at
+  creation and used by `CreateWorktreeAt` for every attempt and by every
+  comparison diff, so the columns stay comparable after the parent moves on.
+  A dirty parent is refused: git worktrees inherit commits, not uncommitted
+  bytes.
+- **Preflight before side effects.** Selectors, models, and reasoning ids all
+  resolve against the _target project's_ catalog before a single worktree
+  exists. A partly-provisioned fanout keeps its healthy attempts, goes
+  `partial`, and exposes per-member `retry`.
+- **The state file is owner-only and atomic.** `fanouts.json` beside the socket:
+  temp file via `pragma_platform::perms::create_private_file`, flush, rename,
+  restrict. Prompts can carry sensitive context and are never logged.
+- **A restart never replays a prompt.** Live members become `interrupted`; the
+  attempt worktree may already hold work, so only an explicit `retry` relaunches
+  it (into the same worktree, with the old tab id moved into history).
+- **Pick is ordered so nothing is destroyed before the work is safe:** commit
+  the winner (AI message, never a fabricated fallback) → merge → promote
+  scratchpads → stop sessions → delete every attempt, winner included. Each
+  completed step is persisted as a `FanoutFinalizeStage`, so a retry resumes at
+  the first incomplete one instead of repeating a destructive step. A merge
+  conflict parks at `needsResolution` with everything intact; a partial cleanup
+  reports `cleanupFailed` and the exact survivors, never `completed`.
+
+**Follow-up delivery has no harness-level acknowledgement yet.** `deliver_message`
+reports `delivered` when the input reached the live watcher for that exact
+`(worktreeId, tabId, agent)` triple — not that the TUI typed and submitted it.
+Message ids make a retry idempotent on this side. A real ACK needs the watcher
+protocol to report back.
+
 ## Socket And Access Control
 
 - The socket filename comes from `@pragma/constants` (`daemon.socketFile`, still

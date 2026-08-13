@@ -3,6 +3,7 @@ import { AgentsClient } from "./agents-client";
 import { AssetsClient } from "./assets-client";
 import { EventsClient } from "./events-client";
 import { ExecClient } from "./exec-client";
+import { FanoutsClient } from "./fanouts-client";
 import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
 import { PushClient } from "./push-client";
@@ -24,6 +25,7 @@ export class PragmaClient {
   readonly assets: AssetsClient;
   readonly events: EventsClient;
   readonly workspace: WorkspaceClient;
+  readonly fanouts: FanoutsClient;
   readonly push: PushClient;
   readonly theme: ThemeClient;
   readonly scratchpads: ScratchpadsClient;
@@ -40,6 +42,7 @@ export class PragmaClient {
     this.assets = new AssetsClient(this.transport);
     this.events = new EventsClient(this.transport);
     this.workspace = new WorkspaceClient(this.events);
+    this.fanouts = new FanoutsClient(this.transport, this.events);
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);

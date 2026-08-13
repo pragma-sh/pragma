@@ -50,6 +50,57 @@ and should only follow a `started`.
 - `--worktree-id <id>` _(optional, `report stopped` / `report cleared`)_ — overrides
   `PRAGMA_WORKTREE_ID`, useful when reporting final status from a parent process.
 
+## Fanout
+
+`pragma-cli fanout` runs one prompt in several isolated attempt worktrees under
+one parent, then keeps one of them. It talks straight to `pragma-server`, so it
+works with the desktop app closed.
+
+```sh
+# The current worktree is the parent; at least two --agent selectors are required.
+pragma-cli fanout create "Implement token refresh and tests" \
+  --reasoning high \
+  --agent opencode \
+  --agent claude-code
+
+# Explicit parent, per-selector model and reasoning effort.
+pragma-cli fanout create --parent "$PRAGMA_WORKTREE_ID" "Implement token refresh" \
+  --agent 'opencode.openai/gpt-5.6.high' \
+  --agent 'claude-code.claude-opus-4-1.max'
+
+# Create a coordination parent first, prompt from a file (`-` reads stdin).
+pragma-cli fanout create --new-parent fanout/token-refresh \
+  --parent-title "Token refresh candidates" --from "$PRAGMA_WORKTREE_ID" \
+  --prompt-file task.md --agent opencode --agent claude-code
+
+pragma-cli fanout show [<id>] [--watch]
+pragma-cli fanout read [<id>] --member <member-id> --lines 500
+pragma-cli fanout read [<id>] --all --lines 100
+pragma-cli fanout send [<id>] --all --message "Also include migration docs"
+pragma-cli fanout retry [<id>] --member <member-id>
+pragma-cli fanout cancel [<id>]
+pragma-cli fanout pick [<id>] --member <member-id>
+```
+
+A selector is `agent[.model[.reasoning]]`, resolved as the longest catalog agent
+prefix, then the remainder as an **exact** model id, and only then the final
+segment as a reasoning effort — so a dotted model id like `openai/gpt-5.6` is
+never mangled. Duplicate selectors are allowed: sampling one model twice is a
+supported use. `--reasoning` sets a fanout-wide default that any selector can
+override; a default no selected model offers rejects the whole create before
+anything is provisioned.
+
+There is no `fanout list`. A parent owns at most one active fanout, so an
+omitted id resolves from `$PRAGMA_FANOUT_ID`, then from the current worktree —
+as its parent, or as one of its attempts. `--member` defaults to
+`$PRAGMA_FANOUT_MEMBER_ID`, which every attempt session exports, so an agent can
+address its own attempt without being told which one it is.
+
+`fanout pick` is destructive: it commits the winner's uncommitted work under an
+AI-generated message, merges it into the parent, promotes its scratchpads, then
+deletes **every** attempt worktree and branch, the winner included. It prints
+that list and requires a typed `yes` unless `--yes` is passed.
+
 ## How it works
 
 The CLI reads `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`, and `PRAGMA_SERVER_SOCKET` (falling
