@@ -11,7 +11,6 @@ on:
       commit-sha: ${{ event.git.sha }}
       branch: ${{ event.git.branch }}
       base-ref: main
-      github-token: ""
       lint-commits: false
   github:
     push:
@@ -20,14 +19,12 @@ on:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
-        github-token: ${{ github.token }}
         lint-commits: false
     pull_request:
       init:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
-        github-token: ${{ github.token }}
         lint-commits: true
 
 # Supersede in-flight runs for the same ref, matching the GitHub Actions
@@ -42,6 +39,10 @@ base:
   config: rwx/base 1.1.1
 
 tasks:
+  # pragma-sh/pragma is public, so the clone needs no token. RWX's
+  # `${{ github.token }}` context proved unreliable — it can vanish mid-run with
+  # `The context key "github" is not available in this expression` — and a
+  # public checkout never needed it.
   - key: code
     call: git/clone 2.0.8
     with:
