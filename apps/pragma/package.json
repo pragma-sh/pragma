@@ -2,6 +2,7 @@
   "name": "pragma",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +17,8 @@
     "sidecar:server": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-daemon-sidecar.sh",
     "sidecar:server:release": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-daemon-sidecar.sh --release",
     "plugins:refresh": "bun ../../scripts/run-shell-script.ts src-tauri/scripts/stage-bundled-plugins.sh",
-    "tauri:dev": "bunx turbo run build --filter @pragma/dev-test-plugin && bun run sidecar:server && tauri dev --config src-tauri/tauri.dev.conf.json",
+    "web:stage": "bun ../../scripts/stage-web-bundle.ts",
+    "tauri:dev": "bunx turbo run build --filter @pragma/dev-test-plugin && bun run sidecar:server && bun run web:stage && tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build"
   },
   "dependencies": {

@@ -10,6 +10,7 @@ import {
   writeGitHubCache,
   type GitHubPrLifecycle,
 } from "@/lib/github-cache";
+import { appendPrSignature, stripPrSignature } from "@/lib/pr-signature";
 import { githubToken } from "@/lib/tauri";
 
 export type { GitHubPrLifecycle } from "@/lib/github-cache";
@@ -379,7 +380,9 @@ function toSummary(pr: PullLike): PullRequestSummary {
   return {
     number: pr.number,
     title: pr.title,
-    body: pr.body ?? "",
+    // The "Created with Pragma" footer is for readers on GitHub; inside Pragma
+    // every consumer of a PR body sees only what the author wrote.
+    body: stripPrSignature(pr.body ?? ""),
     state: pr.state,
     htmlUrl: pr.html_url,
     headRef: pr.head.ref,
@@ -566,19 +569,23 @@ export async function listBranches(target: { owner: string; repo: string }): Pro
  * merge-into target chosen in the UI); `head` is the worktree branch, qualified
  * with the origin owner (`owner:branch`) when the base repo differs — GitHub's
  * cross-fork head syntax.
+ *
+ * `worktreeId` only targets the "Open worktree" button of the appended
+ * {@link appendPrSignature} footer; the footer is still appended without one.
  */
 export async function createPullRequest(
   repo: GitHubRepoRef,
   base: { owner: string; repo: string; branch: string },
-  input: { title: string; body: string; draft: boolean },
+  input: { title: string; body: string; draft: boolean; worktreeId?: string | null },
 ): Promise<PullRequestSummary> {
   const octokit = await client();
   const head = base.owner === repo.owner ? repo.headBranch : `${repo.owner}:${repo.headBranch}`;
+  const body = await appendPrSignature(input.body, input.worktreeId ?? null);
   const { data } = await octokit.rest.pulls.create({
     owner: base.owner,
     repo: base.repo,
     title: input.title,
-    body: input.body,
+    body,
     head,
     base: base.branch,
     draft: input.draft,

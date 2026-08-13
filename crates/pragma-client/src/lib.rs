@@ -731,17 +731,29 @@ impl PragmaClient {
         if !matches!(self.endpoint, ClientEndpoint::ManagedLocal(_)) {
             return;
         }
-        let killed_by_pid = std::fs::read_to_string(self.lock_path())
+        // The server owns long-lived Bun sidecars, per-session watchers, PTYs,
+        // and the configured tunnel. Killing only its root pid reparents those
+        // children and leaves them running without a supervisor. Capture and
+        // terminate the complete descendant tree while the parent links still
+        // exist; the process-table implementation is shared across platforms.
+        let stale_pid = std::fs::read_to_string(self.lock_path())
             .ok()
             .and_then(|contents| contents.trim().parse::<u32>().ok())
-            .is_some_and(process::kill);
-        if !killed_by_pid {
+            .filter(|pid| {
+                process::is_running(*pid, "pragma-server")
+                    || process::is_running(*pid, "pragma-daemon")
+            });
+        if let Some(pid) = stale_pid {
+            let _ = process::kill_process_tree(pid);
+        } else {
             process::kill_matching("pragma-server");
             process::kill_matching("pragma-daemon");
         }
+        // Do not unlink either path here. The killed process releases its
+        // advisory lock, and the replacement server removes an unresponsive
+        // socket only after acquiring that same lock. Deleting the lock file
+        // would let concurrent starters lock different inodes.
         thread::sleep(Duration::from_millis(200));
-        let _ = std::fs::remove_file(self.socket_path());
-        let _ = std::fs::remove_file(self.lock_path());
     }
 
     fn spawn_server(&self) -> ClientResult<()> {

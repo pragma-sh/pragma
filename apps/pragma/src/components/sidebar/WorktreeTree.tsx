@@ -46,6 +46,7 @@ import {
   pullRequestLifecycle,
   type GitHubPrLifecycle,
 } from "@/lib/github";
+import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { githubRepoRef, worktreesMergedStatus } from "@/lib/tauri";
 import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
@@ -56,7 +57,12 @@ import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
-const MERGED_STATUS_REFRESH_INTERVAL_MS = 2000;
+/** Low-frequency safety net for ref-only git changes that file watches cannot see. */
+const MERGED_STATUS_FALLBACK_INTERVAL_MS = 30_000;
+/** Caps refreshes during formatter/save bursts at the old polling frequency. */
+const MERGED_STATUS_MIN_REFRESH_INTERVAL_MS = 2000;
+/** Coalesces the filesystem events emitted by one logical save. */
+const MERGED_STATUS_INVALIDATION_DEBOUNCE_MS = 250;
 /** PR lifecycle poll — matches the Pull Request tab so both stay in lockstep. */
 const PR_STATUS_REFRESH_INTERVAL_MS = 10_000;
 
@@ -65,6 +71,37 @@ function sameMergedStatus(a: Record<string, boolean>, b: Record<string, boolean>
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
   return aKeys.length === bKeys.length && aKeys.every((key) => a[key] === b[key]);
+}
+
+/** Applies an authoritative full or partial merged-status response. */
+function applyMergedStatusResponse(
+  previous: Record<string, boolean>,
+  requestedWorktreeIds: string[],
+  response: Record<string, boolean>,
+  fullRefresh: boolean,
+): Record<string, boolean> {
+  if (fullRefresh) return sameMergedStatus(previous, response) ? previous : response;
+
+  const next = { ...previous };
+  // A successful partial response is authoritative for exactly the requested
+  // ids. Drop stale entries if an unexpected old daemon omits one, matching
+  // the full-response behavior.
+  for (const worktreeId of requestedWorktreeIds) delete next[worktreeId];
+  Object.assign(next, response);
+  return sameMergedStatus(previous, next) ? previous : next;
+}
+
+/** Removes statuses whose refresh failed, matching the historical full-poll behavior. */
+function applyMergedStatusFailure(
+  previous: Record<string, boolean>,
+  requestedWorktreeIds: string[],
+  fullRefresh: boolean,
+): Record<string, boolean> {
+  if (fullRefresh) return Object.keys(previous).length === 0 ? previous : {};
+
+  const next = { ...previous };
+  for (const worktreeId of requestedWorktreeIds) delete next[worktreeId];
+  return sameMergedStatus(previous, next) ? previous : next;
 }
 
 /** True when both maps hold the same worktree-id → PR lifecycle entries. */
@@ -176,50 +213,184 @@ function useWorktreePrLifecycles(
   return prLifecycleByWorktreeId;
 }
 
-/** Poll local merged-into-parent status for child worktrees. */
+/** Tracks local merged-into-parent status for child worktrees.
+ *
+ * The shared main-root filesystem watch identifies changed standard child
+ * checkouts and invalidates only those rows (subject to a short burst
+ * debounce). A low-frequency full poll remains necessary for ref-only changes,
+ * such as a merge performed in an external terminal, because the watcher
+ * deliberately filters `.git` metadata.
+ */
 function useWorktreeMergedStatus(worktrees: Worktree[]): Record<string, boolean> {
   const [mergedByWorktreeId, setMergedByWorktreeId] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const childWorktrees = worktrees.filter((worktree) => !worktree.isMain && worktree.parentId);
-    let cancelled = false;
-    let refreshInFlight = false;
-
-    async function refreshMergedStatus() {
-      if (refreshInFlight) return;
-      refreshInFlight = true;
-      try {
-        const merged = await worktreesMergedStatus(childWorktrees.map((w) => w.id));
-        if (!cancelled) {
-          // Keep the previous object when nothing changed so the steady-state
-          // poll doesn't re-render the whole tree every tick.
-          setMergedByWorktreeId((previous) =>
-            sameMergedStatus(previous, merged) ? previous : merged,
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
-        }
-      } finally {
-        refreshInFlight = false;
-      }
-    }
-
+    const mainWorktree = worktrees.find((worktree) => worktree.isMain);
     if (childWorktrees.length === 0) {
       setMergedByWorktreeId((previous) => (Object.keys(previous).length === 0 ? previous : {}));
       return;
     }
 
-    void refreshMergedStatus();
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        void refreshMergedStatus();
+    const allWorktreeIds = childWorktrees.map((worktree) => worktree.id);
+    const knownWorktreeIds = new Set(allWorktreeIds);
+    let cancelled = false;
+    let refreshInFlight = false;
+    let fullRefreshQueued = false;
+    const queuedWorktreeIds = new Set<string>();
+    let pendingFullRefresh = false;
+    const pendingWorktreeIds = new Set<string>();
+    let lastRefreshStartedAt = Number.NEGATIVE_INFINITY;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let scheduledFullRefresh = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function clearRefreshTimer() {
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
       }
-    }, MERGED_STATUS_REFRESH_INTERVAL_MS);
+      scheduledFullRefresh = false;
+    }
+
+    function clearFallbackTimer() {
+      if (fallbackTimer !== null) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+    }
+
+    function scheduleFallback() {
+      clearFallbackTimer();
+      fallbackTimer = setTimeout(() => {
+        fallbackTimer = null;
+        if (document.hidden) {
+          scheduleFallback();
+        } else {
+          void refreshMergedStatus(allWorktreeIds, true);
+        }
+      }, MERGED_STATUS_FALLBACK_INTERVAL_MS);
+    }
+
+    function queueRefreshDuringRequest(worktreeIds: string[], fullRefresh: boolean) {
+      if (fullRefresh) {
+        fullRefreshQueued = true;
+        queuedWorktreeIds.clear();
+      } else if (!fullRefreshQueued) {
+        for (const worktreeId of worktreeIds) queuedWorktreeIds.add(worktreeId);
+      }
+    }
+
+    function scheduleRefreshQueuedDuringRequest(completedFullRefresh: boolean) {
+      if (cancelled) return;
+      if (completedFullRefresh) scheduleFallback();
+
+      const runFullRefresh = fullRefreshQueued;
+      const nextWorktreeIds = runFullRefresh ? allWorktreeIds : Array.from(queuedWorktreeIds);
+      fullRefreshQueued = false;
+      queuedWorktreeIds.clear();
+      if (nextWorktreeIds.length === 0) return;
+
+      const elapsed = Date.now() - lastRefreshStartedAt;
+      const delay = Math.max(0, MERGED_STATUS_MIN_REFRESH_INTERVAL_MS - elapsed);
+      scheduledFullRefresh = runFullRefresh;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        scheduledFullRefresh = false;
+        void refreshMergedStatus(nextWorktreeIds, runFullRefresh);
+      }, delay);
+    }
+
+    async function refreshMergedStatus(worktreeIds: string[], fullRefresh: boolean) {
+      if (cancelled) return;
+      if (refreshInFlight) {
+        queueRefreshDuringRequest(worktreeIds, fullRefresh);
+        return;
+      }
+      refreshInFlight = true;
+      clearRefreshTimer();
+      if (fullRefresh) {
+        clearFallbackTimer();
+        pendingFullRefresh = false;
+        pendingWorktreeIds.clear();
+      }
+      lastRefreshStartedAt = Date.now();
+      try {
+        const merged = await worktreesMergedStatus(worktreeIds);
+        if (!cancelled) {
+          setMergedByWorktreeId((previous) =>
+            applyMergedStatusResponse(previous, worktreeIds, merged, fullRefresh),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setMergedByWorktreeId((previous) =>
+            applyMergedStatusFailure(previous, worktreeIds, fullRefresh),
+          );
+        }
+      } finally {
+        refreshInFlight = false;
+        scheduleRefreshQueuedDuringRequest(fullRefresh);
+      }
+    }
+
+    function invalidateMergedStatus(worktreeIds?: string[]) {
+      if (cancelled) return;
+      if (worktreeIds === undefined || scheduledFullRefresh) {
+        if (worktreeIds === undefined) clearFallbackTimer();
+        pendingFullRefresh = true;
+        pendingWorktreeIds.clear();
+      } else if (!pendingFullRefresh) {
+        for (const worktreeId of worktreeIds) pendingWorktreeIds.add(worktreeId);
+      }
+      clearRefreshTimer();
+      const elapsed = Date.now() - lastRefreshStartedAt;
+      const delay = Math.max(
+        MERGED_STATUS_INVALIDATION_DEBOUNCE_MS,
+        MERGED_STATUS_MIN_REFRESH_INTERVAL_MS - elapsed,
+      );
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        const runFullRefresh = pendingFullRefresh;
+        const worktreeIdsToRefresh = runFullRefresh
+          ? allWorktreeIds
+          : Array.from(pendingWorktreeIds);
+        pendingFullRefresh = false;
+        pendingWorktreeIds.clear();
+        if (worktreeIdsToRefresh.length > 0) {
+          void refreshMergedStatus(worktreeIdsToRefresh, runFullRefresh);
+        }
+      }, delay);
+    }
+
+    // Standard child checkouts live below `<main>/.pragma/worktrees`, so the
+    // existing ref-counted main-root watch observes all of them without opening
+    // one recursive OS watcher per row. Nonstandard locations still converge
+    // via the fallback poll.
+    const unsubscribe = mainWorktree
+      ? subscribeToWorktreeFiles(mainWorktree.id, (change) => {
+          const pathParts = change.path.split("/");
+          const changedWorktreeId =
+            pathParts[0] === ".pragma" && pathParts[1] === "worktrees" ? pathParts[2] : undefined;
+          if (changedWorktreeId && knownWorktreeIds.has(changedWorktreeId)) {
+            invalidateMergedStatus([changedWorktreeId]);
+          }
+        })
+      : undefined;
+    const refreshWhenVisible = () => {
+      if (!document.hidden) invalidateMergedStatus();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    void refreshMergedStatus(allWorktreeIds, true);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearRefreshTimer();
+      clearFallbackTimer();
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      unsubscribe?.();
     };
   }, [worktrees]);
 

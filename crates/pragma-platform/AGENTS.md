@@ -16,14 +16,14 @@ target, return an `Err` that says so. Do not no-op.
 
 ## The six seams
 
-| Module    | Unix                                 | Windows                                                 |
-| --------- | ------------------------------------ | ------------------------------------------------------- |
-| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 1803+)             |
-| `path`    | `std::fs::canonicalize`              | …then strip the `\\?\` verbatim prefix                  |
-| `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)`             |
-| `process` | `kill`, `pkill`, `ps`                | `taskkill`, `tasklist`, `Get-CimInstance Win32_Process` |
-| `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`                  |
-| `wsl`     | no distributions, ever               | parse `wsl.exe --list --verbose`                        |
+| Module    | Unix                                 | Windows                                     |
+| --------- | ------------------------------------ | ------------------------------------------- |
+| `ipc`     | `std::os::unix::net`                 | `uds_windows` (`AF_UNIX`, Windows 10 1803+) |
+| `path`    | `std::fs::canonicalize`              | …then strip the `\\?\` verbatim prefix      |
+| `perms`   | `chmod` `0600`/`0700`                | `icacls /inheritance:r /grant:r <user>:(F)` |
+| `process` | `sysinfo`, `kill`, `pkill`, `ps`     | `sysinfo`, `taskkill`, `tasklist`           |
+| `shell`   | `$SHELL`, else the constants default | probe `pwsh.exe` then `powershell.exe`      |
+| `wsl`     | no distributions, ever               | parse `wsl.exe --list --verbose`            |
 
 ### `path` — a canonical path git can read back
 
@@ -44,13 +44,14 @@ Two consequences that bite if you forget:
 
 ### `process` — also the console-window seam
 
-On Windows a _console_ program spawned from a GUI process gets its own console window. All
-four helpers here are console programs, and so is nearly everything Pragma shells out to
-(`git`, `wsl.exe`, sidecars). Without `CREATE_NO_WINDOW` the user sees windows popping up
-and vanishing on a timer — the process-table poll for port attribution alone is one per
-tick. Spawn through `process::command`, or apply `process::hide_console` to a command you
-built yourself; `CREATE_NO_WINDOW` is exported for spawners that cannot take a
-`std::process::Command` (tokio's has its own `creation_flags`).
+On Windows a _console_ program spawned from a GUI process gets its own console window. The
+termination and liveness helpers here are console programs, and so is nearly everything
+Pragma shells out to (`git`, `wsl.exe`, sidecars). Spawn through `process::command`, or
+apply `process::hide_console` to a command you built yourself; `CREATE_NO_WINDOW` is
+exported for spawners that cannot take a `std::process::Command` (tokio's has its own
+`creation_flags`). The frequently-polled whole process table is the exception: it uses a
+persistent `sysinfo::System` and refreshes only process identity metadata, so the two-second
+open-port cadence does not spawn `ps` or PowerShell.
 
 This is _not_ the same as the detach flags in `pragma-client`'s server spawn
 (`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`), which additionally cut
@@ -132,7 +133,7 @@ plain string handling and the module compiles everywhere, reporting nothing wher
 1. Add the module here with a real implementation for every target.
 2. Put any tunable default in `@pragma/constants` under `platform`, not in Rust.
 3. Test the platform-independent core on every platform. Parsers for foreign-OS output
-   (`parse_tasklist_image_name`, `parse_win32_process_csv`, `parse_distros`) are plain
+   (`parse_tasklist_image_name`, `parse_distros`) are plain
    string handling — write them so they compile and run everywhere, or CI on Linux and
    macOS will never exercise them.
 4. Verify with `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`.

@@ -7,7 +7,13 @@ const hideWorktreeMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const renameWorktreeMock = vi.fn();
 const openWorktreeInEditorMock = vi.fn();
-const subscribeToWorktreeFilesMock = vi.fn((_worktreeId: string, _listener: unknown) => vi.fn());
+const worktreeFileListeners = new Map<string, (change: { path: string }) => void>();
+const subscribeToWorktreeFilesMock = vi.fn(
+  (worktreeId: string, listener: (change: { path: string }) => void) => {
+    worktreeFileListeners.set(worktreeId, listener);
+    return vi.fn(() => worktreeFileListeners.delete(worktreeId));
+  },
+);
 
 const mainWorktree: Worktree = {
   id: "main",
@@ -31,6 +37,13 @@ const childWorktree: Worktree = {
   hidden: false,
   createdAt: "2026-01-02",
 };
+const siblingWorktree: Worktree = {
+  ...childWorktree,
+  id: "sibling",
+  branch: "other-feature",
+  path: "/repo/.pragma/worktrees/sibling",
+  createdAt: "2026-01-03",
+};
 
 let workspaceMock = {
   selectedProjectId: "p",
@@ -49,7 +62,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@/lib/file-watch", () => ({
-  subscribeToWorktreeFiles: (worktreeId: string, listener: unknown) =>
+  subscribeToWorktreeFiles: (worktreeId: string, listener: (change: { path: string }) => void) =>
     subscribeToWorktreeFilesMock(worktreeId, listener),
 }));
 
@@ -81,6 +94,7 @@ afterEach(() => {
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
   subscribeToWorktreeFilesMock.mockClear();
+  worktreeFileListeners.clear();
   workspaceMock = {
     selectedProjectId: "p",
     selectedWorktreeId: "main",
@@ -114,7 +128,7 @@ describe("WorktreeTree", () => {
     expect(container.querySelector(".lucide-git-merge")).toBeNull();
   });
 
-  it("does not overlap merged-status interval requests", async () => {
+  it("coalesces file invalidations and never overlaps merged-status requests", async () => {
     vi.useFakeTimers();
     let finishRefresh: ((value: Record<string, boolean>) => void) | undefined;
     const pendingRefresh = new Promise<Record<string, boolean>>((resolve) => {
@@ -126,13 +140,124 @@ describe("WorktreeTree", () => {
 
     render(<WorktreeTree onCreateChild={vi.fn()} />);
     expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+    expect(subscribeToWorktreeFilesMock).toHaveBeenCalledWith("main", expect.any(Function));
 
-    act(() => vi.advanceTimersByTime(6000));
+    act(() => {
+      const change = { path: ".pragma/worktrees/child/src/file.ts" };
+      worktreeFileListeners.get("main")?.(change);
+      worktreeFileListeners.get("main")?.(change);
+      vi.advanceTimersByTime(2000);
+    });
     expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
 
     await act(async () => finishRefresh?.({ child: false }));
-    act(() => vi.advanceTimersByTime(2000));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("refreshes only the child identified by a main-root file event", async () => {
+    vi.useFakeTimers();
+    workspaceMock.worktrees = { p: [mainWorktree, childWorktree, siblingWorktree] };
+    worktreesMergedStatusMock
+      .mockResolvedValueOnce({ child: false, sibling: false })
+      .mockResolvedValueOnce({ child: true });
+
+    const { container } = render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(worktreesMergedStatusMock).toHaveBeenLastCalledWith(["child", "sibling"]);
+
+    act(() => {
+      worktreeFileListeners.get("main")?.({ path: ".pragma/worktrees/child/src/file.ts" });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+
+    expect(worktreesMergedStatusMock).toHaveBeenLastCalledWith(["child"]);
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+    expect(container.querySelectorAll(".lucide-git-merge")).toHaveLength(1);
+  });
+
+  it("ignores unrelated changes from the shared main-root watch", async () => {
+    vi.useFakeTimers();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    worktreeFileListeners.get("main")?.({ path: "src/main.ts" });
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a low-frequency fallback for ref-only changes", async () => {
+    vi.useFakeTimers();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not postpone the ref-only fallback during file activity", async () => {
+    vi.useFakeTimers();
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+
+    act(() => {
+      worktreeFileListeners.get("main")?.({ path: ".pragma/worktrees/child/src/file.ts" });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => vi.advanceTimersByTimeAsync(27_999));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(3);
+    expect(worktreesMergedStatusMock).toHaveBeenLastCalledWith(["child"]);
+  });
+
+  it("keeps a queued full fallback authoritative over later file invalidations", async () => {
+    vi.useFakeTimers();
+    workspaceMock.worktrees = { p: [mainWorktree, childWorktree, siblingWorktree] };
+    let finishPartial: ((value: Record<string, boolean>) => void) | undefined;
+    const partialRefresh = new Promise<Record<string, boolean>>((resolve) => {
+      finishPartial = resolve;
+    });
+    worktreesMergedStatusMock
+      .mockResolvedValueOnce({ child: false, sibling: false })
+      .mockReturnValueOnce(partialRefresh)
+      .mockResolvedValue({ child: false, sibling: true });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(28_000));
+    act(() => {
+      worktreeFileListeners.get("main")?.({ path: ".pragma/worktrees/child/src/file.ts" });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(worktreesMergedStatusMock).toHaveBeenLastCalledWith(["child"]);
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_750));
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(2);
+    await act(async () => finishPartial?.({ child: true }));
+    act(() => {
+      worktreeFileListeners.get("main")?.({ path: ".pragma/worktrees/sibling/src/file.ts" });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    expect(worktreesMergedStatusMock).toHaveBeenCalledTimes(3);
+    expect(worktreesMergedStatusMock).toHaveBeenLastCalledWith(["child", "sibling"]);
   });
 
   it("opens the row context menu on right click", async () => {

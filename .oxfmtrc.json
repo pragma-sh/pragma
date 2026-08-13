@@ -1,3 +1,9 @@
 {
-  "ignorePatterns": ["**/src/generated/**", "**/src-tauri/gen/**", "CLAUDE.md"]
+  "ignorePatterns": [
+    "**/src/generated/**",
+    "**/src-tauri/gen/**",
+    "**/.next/**",
+    "**/.source/**",
+    "CLAUDE.md"
+  ]
 }

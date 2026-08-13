@@ -220,7 +220,12 @@ describe("ViewPullRequestView", () => {
     await waitFor(() => {
       expect(githubAbortMerge).toHaveBeenCalledWith("worktree-1");
     });
-    expect(screen.getByRole("button", { name: "Sync with Base Branch" })).toBeInTheDocument();
+    // The confirm dialog animates out, and Radix keeps the page behind it
+    // aria-hidden until it unmounts — so the button underneath only becomes
+    // queryable once the close animation has finished.
+    expect(
+      await screen.findByRole("button", { name: "Sync with Base Branch" }),
+    ).toBeInTheDocument();
   });
 
   it("merges a stack and cleans up both worktrees", async () => {

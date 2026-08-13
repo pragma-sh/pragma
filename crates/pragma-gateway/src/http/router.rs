@@ -90,6 +90,14 @@ pub fn gateway_router() -> Router {
         .route("GET", "/v1/push/tokens", "push.list")
         .route("POST", "/v1/push/test", "push.test")
         .route("POST", "/v1/push/presence", "push.presence")
+        // The Pragma Go web bundle. A catch-all because the app is a
+        // single-page bundle: every unknown sub-path under it is a client
+        // route that resolves to `index.html`, not a missing file. The
+        // wildcard also matches the bare base path with an empty remainder,
+        // so `/web` needs no route of its own. The literal must match
+        // `CONSTANTS.gateway.web.base_path` — a route pattern has to be a
+        // `&'static str`, so `base_path_matches_constant` guards the pair.
+        .route("GET", "/web/{*path}", "web.asset")
 }
 
 fn split_url(url: &str) -> (&str, &str) {
@@ -100,21 +108,49 @@ fn split_url(url: &str) -> (&str, &str) {
 fn match_pattern(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
     let pattern_parts: Vec<&str> = pattern.trim_matches('/').split('/').collect();
     let path_parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-    if pattern_parts.len() != path_parts.len() {
-        return None;
+    // A trailing `{*name}` swallows the rest of the path, so it matches any
+    // length at or beyond its own position. Static routes stay exact-length.
+    let wildcard = pattern_parts
+        .last()
+        .and_then(|part| wildcard_name(part))
+        .map(|name| (pattern_parts.len() - 1, name));
+    match wildcard {
+        Some((prefix_len, _)) if path_parts.len() < prefix_len => return None,
+        None if pattern_parts.len() != path_parts.len() => return None,
+        _ => {}
     }
+
     let mut params = HashMap::new();
-    for (pattern, actual) in pattern_parts.iter().zip(path_parts) {
+    let fixed_len = wildcard.map_or(pattern_parts.len(), |(prefix_len, _)| prefix_len);
+    for (pattern, actual) in pattern_parts.iter().zip(path_parts.iter()).take(fixed_len) {
         if let Some(name) = pattern
             .strip_prefix('{')
             .and_then(|part| part.strip_suffix('}'))
         {
             params.insert(name.to_string(), percent_decode(actual));
-        } else if *pattern != actual {
+        } else if pattern != actual {
             return None;
         }
     }
+    if let Some((prefix_len, name)) = wildcard {
+        // Segments are decoded then rejoined, so an encoded `/` does become a
+        // separator here. That is safe only because the value is used as a
+        // lookup key into a manifest of real assets, never joined onto a
+        // filesystem path — see `routes::web`.
+        let rest = path_parts[prefix_len..]
+            .iter()
+            .map(|part| percent_decode(part))
+            .collect::<Vec<_>>()
+            .join("/");
+        params.insert(name.to_string(), rest);
+    }
     Some(params)
+}
+
+/// The parameter name of a `{*name}` catch-all segment, if this is one.
+fn wildcard_name(part: &str) -> Option<&str> {
+    part.strip_prefix("{*")
+        .and_then(|rest| rest.strip_suffix('}'))
 }
 
 fn parse_query(query: &str) -> HashMap<String, String> {
@@ -176,5 +212,47 @@ mod tests {
     #[test]
     fn rejects_unknown_routes() {
         assert!(gateway_router().match_route("GET", "/missing").is_none());
+    }
+
+    #[test]
+    fn base_path_matches_constant() {
+        // The router patterns spell the base path literally because they must be
+        // `&'static str`. If the constant ever moves, these must move with it.
+        assert_eq!(pragma_constants::CONSTANTS.gateway.web.base_path, "/web");
+    }
+
+    #[test]
+    fn catch_all_collects_the_remaining_path() {
+        let router = gateway_router();
+        let matched = router
+            .match_route("GET", "/web/_expo/static/js/web/entry-abc.js")
+            .expect("route");
+        assert_eq!(matched.id, "web.asset");
+        assert_eq!(
+            matched.params.get("path").map(String::as_str),
+            Some("_expo/static/js/web/entry-abc.js")
+        );
+    }
+
+    #[test]
+    fn catch_all_matches_its_own_prefix() {
+        // `/web` itself is the app's entry point, not a miss.
+        let matched = gateway_router().match_route("GET", "/web").expect("route");
+        assert_eq!(matched.id, "web.asset");
+        assert_eq!(matched.params.get("path").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn catch_all_decodes_each_segment_separately() {
+        // Documents the decode-then-join behaviour: `%2F` reaches the handler as
+        // a separator, which is harmless because the value only ever indexes the
+        // asset manifest.
+        let matched = gateway_router()
+            .match_route("GET", "/web/a%2Fb/c")
+            .expect("route");
+        assert_eq!(
+            matched.params.get("path").map(String::as_str),
+            Some("a/b/c")
+        );
     }
 }

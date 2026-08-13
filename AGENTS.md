@@ -97,7 +97,8 @@ than no guide.
 .
 ├── apps/
 │   ├── pragma/                  # Tauri desktop app → see apps/pragma/AGENTS.md
-│   └── pragma-mobile/           # Expo (SDK 57) native client → see apps/pragma-mobile/AGENTS.md
+│   ├── pragma-go/               # Expo (SDK 57) client: iOS, Android, and web → see apps/pragma-go/AGENTS.md
+│   └── www/                     # Next.js marketing + docs site → see apps/www/AGENTS.md
 ├── crates/
 │   ├── pragma-cli/              # `pragma-cli` CLI → see crates/pragma-cli/AGENTS.md
 │   ├── pragma-client/           # Native client frame I/O + SSH bridge → see crates/pragma-client/AGENTS.md
@@ -137,6 +138,7 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
+├── assets/                       # Images referenced by URL from outside the app (see assets/pr/README.md)
 ├── skills/                       # Canonical first-party skill sources; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -153,7 +155,8 @@ than no guide.
 
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
-  `agentStatus` = `{ notificationsEnabled, soundName }`). Keyboard shortcuts are separate:
+  `agentStatus` = `{ notificationsEnabled, soundName }`, the "Created with Pragma"
+  pull-request footer under `github` = `{ prSignature }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
   belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`) so Rust and
   TS agree, never hard-coded in one language.
@@ -169,6 +172,10 @@ than no guide.
 - Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
   project root for project clips) and are read through the owning host, so a remote
   project's clips work the same as a local one's.
+- An image referenced by URL from **outside** the app (today: the pull-request footer's
+  "Open worktree" button) → `assets/`, at the repo root and outside every package. Its raw
+  URL on `main` is a published contract, so those paths are append-only —
+  see `assets/pr/README.md`.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
@@ -212,14 +219,18 @@ bun install                # Install all workspace deps
 
 # App
 bun run dev                # Run the desktop app (Tauri dev, "Pragma Dev" branding)
+bun run dev:pragma         # Same as `bun run dev`, named explicitly
+bun run dev:www            # Run the marketing + docs site (Next.js, http://localhost:3000)
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
 
-# Mobile app (Expo, apps/pragma-mobile) — see apps/pragma-mobile/AGENTS.md
-bun run dev:mobile:ios     # First run: build dev client + boot iOS simulator
-bun run dev:mobile:android # First run: build dev client + boot Android emulator
-bun run dev:mobile         # Metro dev server (after the dev client is installed once)
+# Pragma Go (Expo, apps/pragma-go) — see apps/pragma-go/AGENTS.md
+bun run dev:go:ios         # First run: build dev client + boot iOS simulator
+bun run dev:go:android     # First run: build dev client + boot Android emulator
+bun run dev:go             # Metro dev server (after the dev client is installed once)
+bun run --filter pragma-go web           # Metro dev server for the browser build
+bun run --filter pragma web:stage        # Export + stage the web bundle into the desktop resources
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo
@@ -238,6 +249,42 @@ cargo run -p pragma-server # Run the persistent server directly for debugging
 cargo run -p pragma-gateway -- --socket /path/to/daemon.sock # Run the localhost HTTP gateway
 cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
 ```
+
+## Pragma Go on the web
+
+`apps/pragma-go` builds for iOS, Android, **and** the browser from one source
+tree. The browser build is served by `pragma-gateway` under
+`constants.gateway.web.basePath` (`/web`), so a user who has the tunnel URL can
+open the client without installing anything.
+
+- **One app, platform extensions.** Anything a browser cannot do lives behind a
+  `*.web.ts(x)` twin, never a `Platform.OS === "web"` branch scattered through a
+  screen: `secret-store` (keychain vs Web Storage), `gateway-fetch`
+  (`expo/fetch` vs the platform `fetch`), `GlassSurface`, `IconSymbol`
+  (SF Symbols vs Lucide), `ui/menu-view`, `ScratchpadWebView` (native web view
+  vs sandboxed `<iframe>`), and `use-widget-sync`. A `.web` twin also keeps
+  native-only module graphs — `@expo/ui/swift-ui`, `react-native-webview` — out
+  of the web bundle entirely.
+- **The bundle is a Tauri resource, not bytes in a binary.** `web:stage` runs
+  the Expo export and writes `apps/pragma/src-tauri/resources/web/`. Keeping it
+  out of `pragma-gateway` means a web-only change never triggers a Rust
+  rebuild. Set `PRAGMA_SKIP_WEB=1` to skip the export in a build that does not
+  need it.
+- **The gateway serves a manifest, never a directory.** `stage-web-bundle.ts`
+  emits `manifest.json`; the gateway loads it into a map and answers each
+  request by **key lookup**. A request path is never joined onto a filesystem
+  path, so traversal is not expressible rather than merely blocked. Text assets
+  are stored gzip-only and served that way; the entry point answers any
+  unmatched non-file path so client-side routes work on reload.
+- **`/web` is deliberately unauthenticated**, because a browser cannot attach a
+  bearer token to a `<script src>`. The bundle is public code; every `/v1`
+  route stays behind the token. The desktop's pairing panel offers a link with
+  the token in the URL **fragment**, which is never sent to a server — the app
+  consumes it on load and strips it from the address bar.
+- **Wide layouts.** iPadOS gets the system sidebar for free via
+  `NativeTabs sidebarAdaptable`. Web and Android tablets use the shared
+  `AppSidebar`, swapped in for the tab bar above `WIDE_LAYOUT_BREAKPOINT`. Only
+  the bar is exchanged, not the navigator, so resizing never resets navigation.
 
 ## Code standards (consistent across TypeScript & Rust)
 
@@ -321,14 +368,13 @@ comment. The task needs `code-with-history` (fallow diffs against a real base) _
 `generate` (fallow resolves imports statically, so the gitignored `src/generated/**`
 modules must exist first).
 
-**`${{ github.token }}` cannot write to a PR.** The RWX GitHub App's installation token is
-scoped to reading repository contents; it has no `pull_requests` or `issues` permission, so
-any `gh` call against them dies with `Resource not accessible by integration (HTTP 403)` —
-which is how the fallow comment silently stopped appearing while the task still exited 0.
-Use it for cloning and fetching only. Anything that writes to GitHub needs its own
-credential from the RWX default vault: fallow reads `${{ secrets.fallow-comment-token }}`
-into `GH_TOKEN` (a fine-grained token with **Pull requests: read and write** on
-`pragma-sh/pragma`). Set or rotate it with
+**Public clones and fetches must not depend on `${{ github.token }}`.** That context only
+exists while the RWX GitHub App installation supplies a token, and this repository needs no
+credential for reads. Clone and fetch from public `origin` directly so an app installation
+problem cannot stop every task before CI starts. Anything that writes to GitHub still needs
+its own credential from the RWX default vault: fallow reads
+`${{ secrets.fallow-comment-token }}` into `GH_TOKEN` (a fine-grained token with **Pull
+requests: read and write** on `pragma-sh/pragma`). Set or rotate it with
 `rwx vaults secrets set --vault default fallow-comment-token=<token>`; a run started before
 the secret exists fails to resolve the expression, so add the secret before merging a change
 that references a new one.
@@ -484,6 +530,12 @@ Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
   jsdom (`src/test/setup.ts`); mock the Tauri API rather than the native shell.
 - **Rust:** `#[cfg(test)] mod tests` next to the code; `cargo test --workspace`.
 - Add a test with every behavior change. Keep tests fast and deterministic.
+- **Never build a package from a `pretest` hook.** `test` depends on `build` in
+  `turbo.json`, so a package's own bundle is already there. A `pretest` that
+  runs `bun run build` races the turbo `build` task for the same package — two bundlers
+  writing one `dist/`, and the loser reads a half-written file
+  (`ENOENT: … dist/index.cjs`). It only fires when both land in the same wave, so it
+  passes locally and fails in CI.
 - **A test must pass on all three platforms, and CI only proves that for the ones it
   runs.** The `rust-windows` job runs the full suite, so a POSIX-only assumption is a red
   build, not a local curiosity. The recurring offenders:
@@ -499,7 +551,8 @@ Defaults live in `@pragma/constants` under `platform` and `terminalDefaults`.
   - **Shell output is not portable.** `pwd` under Git Bash prints an MSYS path
     (`/c/Users/…`) that never equals the Win32 path `canonicalize` returns. Assert on
     something the shell cannot reformat — e.g. `cat` a marker file that only resolves from
-    the intended cwd.
+    the intended cwd. Likewise, `stty` is unavailable in the Windows PowerShell shell;
+    query `$Host.UI.RawUI.WindowSize` when a test needs the active PTY dimensions.
   - **A `#[cfg(unix)]`-only setup step leaves a vacuous test.** `fs::rejects_symlink_escape`
     created its symlink only on Unix, so on Windows it asserted against a link that was
     never there. Windows symlinks also need Developer Mode or admin — skip explicitly when

@@ -1,7 +1,7 @@
 import type { GitHubRepoRef } from "@pragma/constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { octokit, githubToken } = vi.hoisted(() => ({
+const { octokit, githubToken, readConfig } = vi.hoisted(() => ({
   octokit: {
     rest: {
       pulls: { list: vi.fn(), create: vi.fn(), get: vi.fn(), merge: vi.fn() },
@@ -14,6 +14,7 @@ const { octokit, githubToken } = vi.hoisted(() => ({
     request: vi.fn(),
   },
   githubToken: vi.fn(),
+  readConfig: vi.fn(),
 }));
 
 // A constructor function so `new Octokit()` is constructable; returning `octokit`
@@ -22,7 +23,10 @@ function MockOctokit() {
   return octokit;
 }
 vi.mock("octokit", () => ({ Octokit: MockOctokit }));
-vi.mock("@/lib/tauri", () => ({ githubToken: (...args: unknown[]) => githubToken(...args) }));
+vi.mock("@/lib/tauri", () => ({
+  githubToken: (...args: unknown[]) => githubToken(...args),
+  readConfig: (...args: unknown[]) => readConfig(...args),
+}));
 
 import {
   GitHubAuthError,
@@ -41,6 +45,7 @@ import {
   resetGitHubClient,
 } from "./github";
 import { resetGitHubCacheForTests } from "./github-cache";
+import { buildPrSignature, resetPrSignatureCache } from "./pr-signature";
 
 const repo: GitHubRepoRef = {
   owner: "acme",
@@ -54,7 +59,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetGitHubClient();
   resetGitHubCacheForTests();
+  resetPrSignatureCache();
   githubToken.mockResolvedValue("token-123");
+  readConfig.mockResolvedValue({ contents: "{}" });
 });
 
 describe("pullRequestLifecycle", () => {
@@ -450,6 +457,49 @@ describe("createPullRequest", () => {
         draft: true,
       }),
     );
+  });
+
+  it("appends the Created with Pragma footer, targeting the worktree", async () => {
+    await createPullRequest(
+      repo,
+      { owner: "acme", repo: "widget", branch: "release" },
+      { title: "t", body: "b", draft: false, worktreeId: "wt-1" },
+    );
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ body: `b\n\n${buildPrSignature("wt-1")}\n` }),
+    );
+  });
+
+  it("omits the footer when the user turned it off", async () => {
+    readConfig.mockResolvedValue({ contents: JSON.stringify({ github: { prSignature: false } }) });
+    await createPullRequest(
+      repo,
+      { owner: "acme", repo: "widget", branch: "release" },
+      { title: "t", body: "b", draft: false, worktreeId: "wt-1" },
+    );
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ body: "b" }));
+  });
+
+  // The footer is written for readers on GitHub; Pragma renders the body without it.
+  it("strips the footer from the summary it returns", async () => {
+    octokit.rest.pulls.create.mockResolvedValue({
+      data: {
+        number: 12,
+        title: "t",
+        body: `b\n\n${buildPrSignature("wt-1")}\n`,
+        state: "open",
+        html_url: "https://github.com/acme/widget/pull/12",
+        head: { ref: "feature", sha: "abc" },
+        base: { ref: "release" },
+        user: null,
+      },
+    });
+    const summary = await createPullRequest(
+      repo,
+      { owner: "acme", repo: "widget", branch: "release" },
+      { title: "t", body: "b", draft: false, worktreeId: "wt-1" },
+    );
+    expect(summary.body).toBe("b");
   });
 });
 

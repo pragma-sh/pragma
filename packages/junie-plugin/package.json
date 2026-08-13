@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "JetBrains Junie CLI plugin that reports agent status to Pragma via native hooks.",
+  "license": "AGPL-3.0-only",
   "files": [
     ".junie-plugin",
     "assets",

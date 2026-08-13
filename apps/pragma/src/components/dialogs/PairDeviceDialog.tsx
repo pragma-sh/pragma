@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { SettingsCard } from "@/components/settings/SettingsCard";
 import { errorMessage } from "@/lib/errors";
-import { encodePairingPayload } from "@/lib/pairing";
+import { buildWebAppUrl, encodePairingPayload } from "@/lib/pairing";
 import {
   gatewayConnectionInfo,
   getAppInfo,
@@ -118,41 +119,85 @@ function usePairingTunnel(open: boolean): PairingTunnel {
     }
   }
 
-  return { status, token, hostName, busy, error, refreshStatus, toggleRemote, regenerateToken };
+  return {
+    status,
+    token,
+    hostName,
+    busy,
+    error,
+    refreshStatus,
+    toggleRemote,
+    regenerateToken,
+  };
 }
 
-/** Inline pairing controls used by full-frame Settings. */
-export function PairDeviceSettings() {
+/** Mobile and browser pairing cards used by the full-frame Settings workspace. */
+export function PragmaGoSettings({
+  webEnabled,
+  onWebEnabledChange,
+}: {
+  webEnabled: boolean;
+  onWebEnabledChange: (enabled: boolean) => void;
+}) {
   const { status, token, hostName, busy, error, toggleRemote, regenerateToken } =
     usePairingTunnel(true);
   const enabled = status.state === "active" || status.state === "starting";
   const url = status.state === "active" ? status.value : "";
 
   return (
-    <div>
-      <div className="flex items-center justify-between rounded-lg border p-3">
-        <div className="space-y-0.5">
-          <Label htmlFor="settings-remote-access">Remote access</Label>
-          <p className="text-xs text-muted-foreground">{tunnelHint(status)}</p>
+    <div className="space-y-5">
+      <SettingsCard
+        title="Pair mobile device"
+        description="Expose this host through the configured tunnel and scan from Pragma Go."
+      >
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-remote-access">Remote access</Label>
+            <p className="text-xs text-muted-foreground">{tunnelHint(status)}</p>
+          </div>
+          <Switch
+            id="settings-remote-access"
+            checked={enabled}
+            disabled={busy}
+            onCheckedChange={(next) => void toggleRemote(next)}
+          />
         </div>
-        <Switch
-          id="settings-remote-access"
-          checked={enabled}
-          disabled={busy}
-          onCheckedChange={(next) => void toggleRemote(next)}
-        />
-      </div>
-      {status.state === "error" ? (
-        <p className="mt-3 text-sm text-destructive">{status.value}</p>
-      ) : null}
-      {url ? <PairingQr url={url} token={token} hostName={hostName} /> : null}
-      {status.state === "starting" ? (
-        <p className="mt-4 text-center text-sm text-muted-foreground">Starting tunnel…</p>
-      ) : null}
-      {url ? (
-        <ManualSection url={url} token={token} onRegenerate={regenerateToken} busy={busy} />
-      ) : null}
-      {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
+        {status.state === "error" ? (
+          <p className="mt-3 text-sm text-destructive">{status.value}</p>
+        ) : null}
+        {url ? <PairingQr url={url} token={token} hostName={hostName} /> : null}
+        {status.state === "starting" ? (
+          <p className="mt-4 text-center text-sm text-muted-foreground">Starting tunnel…</p>
+        ) : null}
+        {url ? (
+          <ManualSection url={url} token={token} onRegenerate={regenerateToken} busy={busy} />
+        ) : null}
+      </SettingsCard>
+      <SettingsCard
+        title="Pair Pragma Go on web"
+        description="Open Pragma Go in a browser on another computer."
+      >
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-web-access">Enable web access</Label>
+            <p className="text-xs text-muted-foreground">
+              Serve Pragma Go from this host's gateway.
+            </p>
+          </div>
+          <Switch
+            id="settings-web-access"
+            checked={webEnabled}
+            onCheckedChange={onWebEnabledChange}
+          />
+        </div>
+        {webEnabled && url ? <WebAppSection url={url} token={token} /> : null}
+        {webEnabled && !url ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Turn on remote access to create a web pairing link.
+          </p>
+        ) : null}
+      </SettingsCard>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }
@@ -194,6 +239,23 @@ function PairingQr({ url, token, hostName }: PairingQrProps) {
         // eslint-disable-next-line react/no-danger -- offline-generated QR SVG, no user HTML
         dangerouslySetInnerHTML={{ __html: svg }}
       />
+    </div>
+  );
+}
+
+/**
+ * The browser route into the same host: Pragma Go, served by the gateway over
+ * the tunnel. Shown as a copyable link rather than a second QR — this one is
+ * meant to be pasted into a browser on another computer, not scanned.
+ */
+function WebAppSection({ url, token }: { url: string; token: string }) {
+  return (
+    <div className="mt-4 space-y-1">
+      <CopyRow label="Web app link" value={buildWebAppUrl(url, token)} />
+      <p className="text-xs text-muted-foreground">
+        Opens Pragma Go in a browser, already signed in. The link contains the token — treat it like
+        a password, and regenerate the token above if it leaks.
+      </p>
     </div>
   );
 }

@@ -46,7 +46,10 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent
-        className={cn("top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0", className)}
+        // `DialogContent` is flex-centred by its wrapper, so the palette rides
+        // above centre with a self-alignment + top margin rather than the
+        // `top-1/3` it used while the content box positioned itself.
+        className={cn("mt-[12vh] self-start overflow-hidden rounded-xl! p-0", className)}
         onEscapeKeyDown={onEscapeKeyDown}
         showCloseButton={showCloseButton}
       >

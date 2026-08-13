@@ -18,7 +18,17 @@ const closeSettings = vi.fn();
 const signOut = vi.fn();
 
 vi.mock("@/components/dialogs/PairDeviceDialog", () => ({
-  PairDeviceSettings: () => <div>Pairing controls</div>,
+  PragmaGoSettings: ({
+    webEnabled,
+    onWebEnabledChange,
+  }: {
+    webEnabled: boolean;
+    onWebEnabledChange: (enabled: boolean) => void;
+  }) => (
+    <button type="button" onClick={() => onWebEnabledChange(!webEnabled)}>
+      Web access {webEnabled ? "enabled" : "disabled"}
+    </button>
+  ),
 }));
 
 vi.mock("@/components/github/GitHubAuthOptions", () => ({
@@ -149,11 +159,38 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "Mobile & Gateway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
 
-    expect(screen.getByText("Pairing controls")).toBeInTheDocument();
+    expect(screen.getByText("Web access disabled")).toBeInTheDocument();
     expect(screen.getByLabelText("Command")).toBeInTheDocument();
     expect(screen.getByLabelText("URL pattern")).toBeInTheDocument();
+  });
+
+  it("persists the web access setting", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Web access disabled" }));
+
+    await waitFor(() =>
+      expect(writeConfig).toHaveBeenCalledWith(
+        "global",
+        `${JSON.stringify(
+          {
+            plugins: [
+              { path: "./plugins/one", config: { enabled: true } },
+              { path: "./plugins/two" },
+            ],
+            customSetting: true,
+            gateway: { webEnabled: true },
+          },
+          null,
+          2,
+        )}\n`,
+        "project-1",
+      ),
+    );
   });
 
   it("resyncs tunnel inputs after a failed save reloads config", async () => {
@@ -176,7 +213,7 @@ describe("SettingsWorkspace", () => {
     render(<SettingsWorkspace />);
 
     await screen.findByText("Loaded plugins");
-    fireEvent.click(screen.getByRole("button", { name: "Mobile & Gateway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pragma Go" }));
     const command = screen.getByLabelText("Command");
     const urlPattern = screen.getByLabelText("URL pattern");
     expect(command).toHaveValue("stale-command");

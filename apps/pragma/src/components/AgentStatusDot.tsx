@@ -1,5 +1,8 @@
+import { motion } from "motion/react";
+
 import type { AgentStatus } from "@pragma/constants";
 
+import { motionTransition } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 interface AgentStatusDotProps {
@@ -13,7 +16,12 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
     return null;
   }
   return (
-    <span
+    // Pops in when an agent starts reporting, so status arriving in a quiet tab
+    // strip catches the eye. The pulse itself stays in CSS (`index.css`).
+    <motion.span
+      animate={{ scale: 1, opacity: 1 }}
+      initial={{ scale: 0, opacity: 0 }}
+      transition={motionTransition.pop}
       className={cn(
         "inline-block size-2 shrink-0 rounded-full ring-1 ring-black/30",
         status === "done" && "bg-success shadow-[0_0_6px_var(--color-success)]",

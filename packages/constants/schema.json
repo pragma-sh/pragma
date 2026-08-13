@@ -392,7 +392,9 @@
         "deviceCodeUrl",
         "deviceVerifyUrl",
         "accessTokenUrl",
-        "apiBaseUrl"
+        "apiBaseUrl",
+        "homepageUrl",
+        "prSignature"
       ],
       "properties": {
         "oauthClientId": {
@@ -425,6 +427,61 @@
           "type": "string",
           "format": "uri",
           "description": "Base URL for the GitHub REST/GraphQL API (Octokit `baseUrl`)."
+        },
+        "homepageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Pragma's public GitHub home page, linked from the pull-request signature footer."
+        },
+        "prSignature": {
+          "$ref": "#/definitions/PrSignature"
+        }
+      }
+    },
+    "PrSignature": {
+      "title": "PrSignature",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The \"Created with Pragma\" footer appended to pull requests Pragma opens. The markers delimit the block so Pragma can strip it again when it renders a PR body, and so a body written by an older Pragma is still recognised.",
+      "required": ["enabled", "startMarker", "endMarker", "badgeUrl", "badgeAlt", "openUrl"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the footer is appended when the user has not configured `github.prSignature`."
+        },
+        "startMarker": {
+          "type": "string",
+          "description": "HTML comment opening the footer block. Everything from here to `endMarker` is Pragma-owned and is stripped before the body is shown in Pragma."
+        },
+        "endMarker": {
+          "type": "string",
+          "description": "HTML comment closing the footer block."
+        },
+        "badgeUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Raw URL of the committed \"Open worktree\" button image (`assets/pr/` on Pragma's default branch). GitHub strips `data:` URIs, so the badge has to be hosted."
+        },
+        "badgeAlt": {
+          "type": "string",
+          "description": "Alt text for the badge image, and the text a viewer sees when the badge cannot be fetched."
+        },
+        "openUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Web redirector the badge links to, which forwards its query string to the `pragma://open` deep link. GitHub's markdown sanitizer keeps only `http`/`https`/`mailto` hrefs, so a `pragma://` URL would render as inert text."
+        }
+      }
+    },
+    "GitHubSettings": {
+      "title": "GitHubSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `github` block of the global `.pragma/config.json`. Global-only: there is no project layer, matching the rest of the GitHub settings. Every field is optional; a missing one means the shipped default.",
+      "properties": {
+        "prSignature": {
+          "type": "boolean",
+          "description": "Whether Pragma appends the \"Created with Pragma\" footer to pull requests it opens."
         }
       }
     },
@@ -723,7 +780,8 @@
         "devicesFile",
         "tokenHeader",
         "deviceHeaders",
-        "push"
+        "push",
+        "web"
       ],
       "description": "Local HTTP gateway discovery and authentication constants shared by Rust gateway code and TypeScript clients.",
       "properties": {
@@ -757,6 +815,34 @@
         },
         "push": {
           "$ref": "#/definitions/GatewayPush"
+        },
+        "web": {
+          "$ref": "#/definitions/GatewayWeb"
+        }
+      }
+    },
+    "GatewayWeb": {
+      "title": "GatewayWeb",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "basePath", "manifestFile", "resourceDir"],
+      "description": "Where the gateway serves the Pragma Go web bundle from, and how that bundle is staged. Shared so the Expo export, the staging script, the Rust static-file routes, and the desktop's shareable link all agree on one path.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Default access state for the public Pragma Go browser bundle. Users override it with gateway.webEnabled in the global config file."
+        },
+        "basePath": {
+          "type": "string",
+          "description": "URL prefix the exported web bundle is deployed and served under. Passed to Expo as `EXPO_BASE_URL` at export time so the asset URLs baked into `index.html` match the routes the gateway answers."
+        },
+        "manifestFile": {
+          "type": "string",
+          "description": "Filename inside the staged bundle listing every servable asset with its URL path, content type, and encoding. The gateway serves only what this manifest names, so a request path is looked up as a map key and never joined onto a filesystem path."
+        },
+        "resourceDir": {
+          "type": "string",
+          "description": "Directory name under the desktop app's Tauri resources holding the staged bundle."
         }
       }
     },
