@@ -259,15 +259,21 @@ function usePrSubmit({
           { title: title.trim(), body, draft, worktreeId },
         );
         if (stack && stackBasePr) {
-          const existingStack = await getPullRequestStack(repo, stackBasePr.number, {
-            force: true,
-          });
-          if (existingStack) {
-            await addPullRequestsToStack(repo, existingStack.number, [pr.number]);
-          } else {
-            await createPullRequestStack(repo, [stackBasePr.number, pr.number]);
+          try {
+            const existingStack = await getPullRequestStack(repo, stackBasePr.number, {
+              force: true,
+            });
+            if (existingStack) {
+              await addPullRequestsToStack(repo, existingStack.number, [pr.number]);
+            } else {
+              await createPullRequestStack(repo, [stackBasePr.number, pr.number]);
+            }
+            toast.success(`Opened pull request #${pr.number} and added it to the stack`);
+          } catch (cause) {
+            toast.error(
+              `Opened pull request #${pr.number}, but adding it to the stack failed: ${errorMessage(cause)}`,
+            );
           }
-          toast.success(`Opened pull request #${pr.number} and added it to the stack`);
         } else {
           toast.success(`Opened pull request #${pr.number}`);
         }

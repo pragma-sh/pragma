@@ -665,7 +665,7 @@ function useStackMembership(repo: GitHubRepoRef, pr: PullRequestSummary) {
         return loadedStack;
       })
       .catch(() => {
-        if (active) setStack(undefined);
+        if (active) setStack(null);
       });
     return () => {
       active = false;

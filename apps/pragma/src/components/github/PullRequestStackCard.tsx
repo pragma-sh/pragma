@@ -106,8 +106,12 @@ function resolveMissingParent(
   project: Worktree[],
 ): Worktree {
   const lowerEntries = stack.entries.slice(0, index).toReversed();
+  const matches = lowerEntries.flatMap((entry) => localByBranch.get(entry.headRef) ?? []);
+  if (matches.length > 1) {
+    throw new Error(`Multiple local worktrees found for branch "${matches[0]?.branch}"`);
+  }
   const parent =
-    lowerEntries.flatMap((entry) => localByBranch.get(entry.headRef) ?? []).at(0) ??
+    matches.at(0) ??
     project.find((worktree) => worktree.branch === stack.baseRef || worktree.isMain);
   if (!parent) throw new Error("No local trunk or lower stack worktree found");
   return parent;
@@ -144,7 +148,11 @@ async function createAllMissingWorktrees(
   if (!parent) throw new Error("No local trunk worktree found");
   let createdCount = 0;
   for (const entry of stack.entries) {
-    const local = (localByBranch.get(entry.headRef) ?? [])[0];
+    const locals = localByBranch.get(entry.headRef) ?? [];
+    if (locals.length > 1) {
+      throw new Error(`Multiple local worktrees found for branch "${entry.headRef}"`);
+    }
+    const local = locals[0];
     if (local) {
       parent = local;
       continue;
