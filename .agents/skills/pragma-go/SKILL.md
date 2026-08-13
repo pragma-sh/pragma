@@ -53,9 +53,10 @@ unresolvable native import that a native build never sees.
 - Per-screen header/title/headerLeft: render `<Stack.Screen options={...} />` inside the
   screen (typed routes are on, so `router.push({ pathname, params })` is type-checked).
 - Header-**right** uses module-level renderers so hook-owning buttons remain stable.
-  Project root and chat use `NewWorktreeButton` "+" for the New Worktree sheet; worktree
-  screens use `LaunchAgentButton` "+" for the Launch Agent sheet. The all-projects list
-  has no header button; the stack's native back button handles escaping the drill-down.
+  Project root and worktree screens use `LaunchAgentButton` "+" for the Launch Agent sheet
+  (a fresh branch is the sheet's "New branch" tab); chat uses `NewWorktreeButton` "+" for
+  the New Worktree sheet. The all-projects list has no header button; the stack's native
+  back button handles escaping the drill-down.
 
 ## Styling (NativeWind v4 + React Native Reusables)
 
