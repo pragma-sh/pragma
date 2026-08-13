@@ -54,6 +54,7 @@ import {
   type PullFile,
   type PullRequestSummary,
   type PullRequestCommit,
+  type PullRequestStack,
   type ReviewThread,
   createIssueComment,
   getChecksStatus,
@@ -652,6 +653,28 @@ export function ActorAvatar({ actor }: { actor: GitHubActor | null }) {
   );
 }
 
+/** Loads GitHub's stack membership for a PR (undefined while the request is in flight). */
+function useStackMembership(repo: GitHubRepoRef, pr: PullRequestSummary) {
+  const [stack, setStack] = useState<PullRequestStack | null | undefined>(undefined);
+
+  useEffect(() => {
+    let active = true;
+    void getPullRequestStack(repo, pr.number)
+      .then((loadedStack) => {
+        if (active) setStack(loadedStack);
+        return loadedStack;
+      })
+      .catch(() => {
+        if (active) setStack(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pr.number, repo]);
+
+  return stack;
+}
+
 /** Checks summary + Merge button → confirm → branch-cleanup dialog. */
 function MergeCard({
   checks,
@@ -671,25 +694,8 @@ function MergeCard({
   const [confirming, setConfirming] = useState(false);
   const [merging, setMerging] = useState(false);
   const [cleanup, setCleanup] = useState(false);
-  const [stack, setStack] = useState<Awaited<ReturnType<typeof getPullRequestStack>> | undefined>(
-    undefined,
-  );
+  const stack = useStackMembership(repo, pr);
   const workspace = useWorkspace();
-
-  useEffect(() => {
-    let active = true;
-    void getPullRequestStack(repo, pr.number)
-      .then((loadedStack) => {
-        if (active) setStack(loadedStack);
-        return loadedStack;
-      })
-      .catch(() => {
-        if (active) setStack(undefined);
-      });
-    return () => {
-      active = false;
-    };
-  }, [pr.number, repo]);
 
   const merge = useCallback(async () => {
     if (stack === undefined) {
@@ -727,47 +733,21 @@ function MergeCard({
       {pr.mergeable === false ? (
         <MergeConflictControls onChanged={onChanged} pr={pr} repo={repo} worktreeId={worktreeId} />
       ) : (
-        <>
-          <ChecksSummary checks={checks} />
-          <Button
-            className="w-full"
-            disabled={merging || stack === undefined}
-            onClick={() => setConfirming(true)}
-            size="sm"
-          >
-            {merging ? <Loader2 className="animate-spin" /> : null}
-            {stack === undefined
-              ? "Checking stack membership…"
-              : stack
-                ? "Merge stack"
-                : "Merge pull request"}
-          </Button>
-          {stack === undefined ? (
-            <p className="text-xs text-muted-foreground">
-              Merge stays disabled until GitHub confirms stack membership.
-            </p>
-          ) : null}
-        </>
+        <MergeAction
+          checks={checks}
+          merging={merging}
+          onConfirm={() => setConfirming(true)}
+          stack={stack}
+        />
       )}
 
-      <AlertDialog onOpenChange={setConfirming} open={confirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{stack ? "Merge stack?" : "Merge pull request?"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {stack
-                ? `${stack.entries.length} pull requests will be merged from top to bottom.`
-                : `${pr.headRef} will be merged into ${pr.baseRef} with a merge commit.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void merge()}>
-              {stack ? "Merge stack" : "Merge"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MergeConfirmDialog
+        onMerge={() => void merge()}
+        onOpenChange={setConfirming}
+        open={confirming}
+        pr={pr}
+        stack={stack}
+      />
 
       <BranchCleanupDialog
         onChanged={onChanged}
@@ -776,6 +756,80 @@ function MergeCard({
         targets={cleanupTargets}
       />
     </div>
+  );
+}
+
+/** The merge button and check summary shown while the PR is mergeable. */
+function MergeAction({
+  checks,
+  merging,
+  onConfirm,
+  stack,
+}: {
+  checks: ChecksStatus | null;
+  merging: boolean;
+  onConfirm: () => void;
+  stack: PullRequestStack | null | undefined;
+}) {
+  const label =
+    stack === undefined
+      ? "Checking stack membership…"
+      : stack
+        ? "Merge stack"
+        : "Merge pull request";
+  return (
+    <>
+      <ChecksSummary checks={checks} />
+      <Button
+        className="w-full"
+        disabled={merging || stack === undefined}
+        onClick={onConfirm}
+        size="sm"
+      >
+        {merging ? <Loader2 className="animate-spin" /> : null}
+        {label}
+      </Button>
+      {stack === undefined ? (
+        <p className="text-xs text-muted-foreground">
+          Merge stays disabled until GitHub confirms stack membership.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** The merge confirmation dialog, wording depending on stack vs single-PR merge. */
+function MergeConfirmDialog({
+  open,
+  onOpenChange,
+  onMerge,
+  pr,
+  stack,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onMerge: () => void;
+  pr: PullRequestSummary;
+  stack: PullRequestStack | null | undefined;
+}) {
+  const entriesCount = stack ? stack.entries.length : null;
+  return (
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{stack ? "Merge stack?" : "Merge pull request?"}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {entriesCount === null
+              ? `${pr.headRef} will be merged into ${pr.baseRef} with a merge commit.`
+              : `${entriesCount} pull requests will be merged from top to bottom.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onMerge}>{stack ? "Merge stack" : "Merge"}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
