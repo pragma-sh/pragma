@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -713,14 +714,15 @@ export function CreatePullRequestView({
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
+            <IconButton
               aria-label="More create options"
               className="rounded-l-none border-l border-l-primary-foreground/20 px-1.5"
               disabled={!form.canSubmit}
+              label="More options"
               size="sm"
             >
               <ChevronDown />
-            </Button>
+            </IconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {form.stackBasePr ? (

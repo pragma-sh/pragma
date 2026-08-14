@@ -4,6 +4,7 @@ import type { ChangedFile, ChangeStatus } from "@pragma/constants";
 import { Icon } from "@iconify/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
+import { IconTooltip } from "@/components/ui/icon-button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { fileIconId } from "@/lib/file-icons";
 import { basename, dirname } from "@/lib/path";
@@ -102,16 +103,16 @@ export function ChangeGroup({
         </CollapsibleTrigger>
         {files.length > 0 &&
           headerActions.map((action) => (
-            <button
-              aria-label={action.label}
-              className="mr-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/header:opacity-100"
-              key={action.label}
-              onClick={() => action.onClick()}
-              title={action.title}
-              type="button"
-            >
-              <action.icon className="size-3.5" />
-            </button>
+            <IconTooltip key={action.label} label={action.title}>
+              <button
+                aria-label={action.label}
+                className="mr-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/header:opacity-100"
+                type="button"
+                onClick={() => action.onClick()}
+              >
+                <action.icon className="size-3.5" />
+              </button>
+            </IconTooltip>
           ))}
         <span className="mr-2 shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
           {files.length}
@@ -180,16 +181,16 @@ export function ChangeFileList({
               <span className="min-w-0 flex-1 truncate text-foreground">{basename(file.path)}</span>
             </button>
             {fileActions.map((action) => (
-              <button
-                aria-label={action.label(file)}
-                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
-                key={action.title}
-                onClick={() => action.onClick(file)}
-                title={action.title}
-                type="button"
-              >
-                <action.icon className="size-3.5" />
-              </button>
+              <IconTooltip key={action.title} label={action.title}>
+                <button
+                  aria-label={action.label(file)}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+                  type="button"
+                  onClick={() => action.onClick(file)}
+                >
+                  <action.icon className="size-3.5" />
+                </button>
+              </IconTooltip>
             ))}
             {fileBadge?.(file)}
             <span

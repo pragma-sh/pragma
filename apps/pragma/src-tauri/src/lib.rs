@@ -55,6 +55,9 @@ use crate::pty::PtyClient;
 
 /// Menu item id for "Restart Server" in the Troubleshooting submenu.
 const MENU_RESTART_DAEMON: &str = "troubleshooting.restart-daemon";
+/// Menu item id for "Reload" in the Troubleshooting submenu: reloads the UI
+/// webview only, leaving the server and its sessions running.
+const MENU_RELOAD_WEBVIEW: &str = "troubleshooting.reload";
 /// Menu item id for "Open Server Logs" in the Troubleshooting submenu.
 const MENU_OPEN_DAEMON_LOGS: &str = "troubleshooting.open-daemon-logs";
 /// Menu item id for creating a terminal tab from the native menu.
@@ -185,6 +188,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
+    let reload_webview = MenuItem::with_id(app, MENU_RELOAD_WEBVIEW, "Reload", true, None::<&str>)?;
     let open_logs = MenuItem::with_id(
         app,
         MENU_OPEN_DAEMON_LOGS,
@@ -192,8 +196,12 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let troubleshooting =
-        Submenu::with_items(app, "Troubleshooting", true, &[&restart_daemon, &open_logs])?;
+    let troubleshooting = Submenu::with_items(
+        app,
+        "Troubleshooting",
+        true,
+        &[&restart_daemon, &reload_webview, &open_logs],
+    )?;
     menu.append(&troubleshooting)?;
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
@@ -201,6 +209,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         if matches!(
             action,
             MENU_RESTART_DAEMON
+                | MENU_RELOAD_WEBVIEW
                 | MENU_OPEN_DAEMON_LOGS
                 | MENU_NEW_TERMINAL_TAB
                 | MENU_CLOSE_ACTIVE_TAB
@@ -1179,6 +1188,7 @@ pub fn run() {
             read_daemon_log,
             projects::list_projects,
             projects::add_project,
+            projects::remove_project,
             projects::clone_project,
             projects::get_projects_directory,
             ssh_host::connect_remote_project,

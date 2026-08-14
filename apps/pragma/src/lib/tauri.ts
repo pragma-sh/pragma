@@ -436,6 +436,11 @@ export function addProject(path: string): Promise<Project> {
   return invoke<Project>("add_project", { path });
 }
 
+/** Removes a project from Pragma without deleting its checkout. */
+export function removeProject(projectId: string): Promise<void> {
+  return invoke("remove_project", { projectId });
+}
+
 /** Clones a remote repository and persists it as a project. */
 export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<Project> {
   return invoke<Project>("clone_project", { remoteUrl, intoDirectory });
@@ -1331,6 +1336,7 @@ export type MenuAction =
   | "workspace.open-command-palette"
   | "workspace.open-command-mode"
   | "troubleshooting.restart-daemon"
+  | "troubleshooting.reload"
   | "troubleshooting.open-daemon-logs"
   | "settings.open";
 

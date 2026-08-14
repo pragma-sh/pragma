@@ -82,6 +82,23 @@ export function releaseAlertLatchForTab(tabId: string): void {
   }
 }
 
+/**
+ * Dismisses every active alert toast for a tab. Called when the user manually
+ * visits the tab that raised the notification — the answer is "go look", so the
+ * toast that was drawing them there has served its purpose.
+ */
+export function dismissAlertToastsForTab(tabId: string): void {
+  for (const key of activeToastByKey.keys()) {
+    if (key.split("\u0000")[1] === tabId) {
+      const id = activeToastByKey.get(key);
+      if (id !== undefined) {
+        activeToastByKey.delete(key);
+        toast.dismiss(id);
+      }
+    }
+  }
+}
+
 export interface AgentAlertOptions {
   projectId?: string;
   /** Names of the project/worktree/tab the report came from, for the alert body. */

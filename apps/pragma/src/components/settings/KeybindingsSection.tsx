@@ -6,6 +6,7 @@ import type { KeybindingChord, KeybindingsConfig } from "@pragma/constants";
 
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Kbd } from "@/components/ui/kbd";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -196,15 +197,16 @@ function KeybindingRow({
       </td>
       <td className="py-2 text-right whitespace-nowrap">
         {changed ? (
-          <Button
+          <IconButton
             aria-label={`Reset ${label} to default`}
             disabled={saving}
+            label="Reset"
             size="icon-sm"
             variant="ghost"
             onClick={onReset}
           >
             <RotateCcw />
-          </Button>
+          </IconButton>
         ) : null}
         {recording ? (
           <Button size="sm" variant="secondary" onClick={onStop}>

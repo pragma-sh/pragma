@@ -1,5 +1,5 @@
 import type { Tab } from "@pragma/constants";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -80,6 +80,7 @@ const { mockWorkspace, focusPaneMock, splitTabAtPaneMock, moveTabToPaneMock, cre
       },
       focusedPaneId: "pane-left",
       reload: vi.fn(),
+      clearError: vi.fn(),
       refreshProject: vi.fn(),
       selectProject: vi.fn(),
       selectWorktree: vi.fn(),
@@ -154,8 +155,11 @@ vi.mock("@/lib/terminal-manager", () => ({
   },
 }));
 
+const requestCloseTabsMock = vi.fn();
+
 vi.mock("@/components/editor/confirm-close", () => ({
   useConfirmClose: () => vi.fn(),
+  useConfirmCloseTabs: () => requestCloseTabsMock,
 }));
 
 /** Minimal DataTransfer carrying a single tab id, sufficient for the drag handlers. */
@@ -170,6 +174,53 @@ function tabDataTransfer(tabId: string) {
     dropEffect: "none",
     effectAllowed: "all",
   };
+}
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+/**
+ * jsdom measures everything as 0x0, and the drop resolves purely by geometry, so
+ * lay the panes out by hand: two 200x400 panes side by side, each with a 32px bar.
+ */
+function stubPaneRects() {
+  const panes = Array.from(document.querySelectorAll<HTMLElement>("[data-pane-id]"));
+  panes.forEach((pane, index) => {
+    const left = index * 200;
+    vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(rect(left, 0, 200, 400));
+    const bar = pane.querySelector<HTMLElement>("[data-pane-bar]");
+    if (bar) {
+      vi.spyOn(bar, "getBoundingClientRect").mockReturnValue(rect(left, 0, 200, 32));
+    }
+  });
+}
+
+/**
+ * Dispatch a window-level drag event carrying real coordinates. `fireEvent.dragOver`
+ * cannot: jsdom has no `DragEvent`, so testing-library falls back to a plain `Event`
+ * and the `clientX`/`clientY` init is dropped.
+ */
+function fireWindowDrag(
+  type: "dragenter" | "dragover" | "drop" | "dragend",
+  clientX: number,
+  clientY: number,
+) {
+  act(() => {
+    window.dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY }),
+    );
+  });
 }
 
 function renderHost() {
@@ -331,27 +382,84 @@ describe("SplitHost", () => {
 
   it("splits the target pane when a tab is dragged onto its content", () => {
     renderHost();
+    stubPaneRects();
 
     const sourceTab = screen.getByText("one").closest("[draggable]")!;
     const dataTransfer = tabDataTransfer("one");
     fireEvent.dragStart(sourceTab, { dataTransfer });
 
-    // The drop overlay only exists while a drag is in flight.
-    const rightPane = screen.getByText("two").closest("section")!;
-    const dropZone = rightPane.querySelector(".z-20")!;
-    expect(dropZone).toBeTruthy();
-
-    fireEvent.dragOver(dropZone, { dataTransfer, clientX: 5, clientY: 50 });
-    fireEvent.drop(dropZone, { dataTransfer, clientX: 5, clientY: 50 });
+    // Resolution is window-level, not per-pane: the pane is picked by geometry.
+    fireWindowDrag("dragover", 205, 50);
+    fireWindowDrag("drop", 205, 50);
 
     // Exact direction/placement geometry is covered by dropTargetAt's unit tests;
-    // here we assert the overlay routes the drop into a split of the target pane.
+    // here we assert the window drop routes into a split of the pane under it.
     expect(splitTabAtPaneMock).toHaveBeenCalledWith(
       "one",
       "pane-right",
       expect.any(String),
       expect.any(String),
     );
+  });
+
+  it("previews the split inside the pane under the pointer only", () => {
+    renderHost();
+    stubPaneRects();
+
+    fireEvent.dragStart(screen.getByText("one").closest("[draggable]")!, {
+      dataTransfer: tabDataTransfer("one"),
+    });
+    fireWindowDrag("dragover", 205, 50);
+
+    const rightPane = screen.getByText("two").closest("section")!;
+    const leftPane = screen.getByText("one").closest("section")!;
+    // The preview belongs to the section, not the content box: a split divides the
+    // whole pane, its bar included.
+    expect(rightPane.querySelector(".z-20")?.parentElement).toBe(rightPane);
+    expect(leftPane.querySelector(".z-20")).toBeNull();
+  });
+
+  it("splits from dragend when WebKit fires no drop event", () => {
+    renderHost();
+    stubPaneRects();
+
+    fireEvent.dragStart(screen.getByText("one").closest("[draggable]")!, {
+      dataTransfer: tabDataTransfer("one"),
+    });
+    fireWindowDrag("dragover", 300, 380);
+    fireWindowDrag("dragend", 300, 380);
+
+    // Bottom of the right pane: released there, so the tab lands below.
+    expect(splitTabAtPaneMock).toHaveBeenCalledWith("one", "pane-right", "vertical", "after");
+  });
+
+  it("commits nothing when the drag is cancelled with Escape", () => {
+    renderHost();
+    stubPaneRects();
+
+    fireEvent.dragStart(screen.getByText("one").closest("[draggable]")!, {
+      dataTransfer: tabDataTransfer("one"),
+    });
+    fireWindowDrag("dragover", 205, 380);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    fireWindowDrag("dragend", 0, 0);
+
+    expect(splitTabAtPaneMock).not.toHaveBeenCalled();
+    expect(moveTabToPaneMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores a drop outside every pane", () => {
+    renderHost();
+    stubPaneRects();
+
+    const dataTransfer = tabDataTransfer("one");
+    fireEvent.dragStart(screen.getByText("one").closest("[draggable]")!, { dataTransfer });
+    fireWindowDrag("drop", 900, 900);
+
+    expect(splitTabAtPaneMock).not.toHaveBeenCalled();
+    expect(moveTabToPaneMock).not.toHaveBeenCalled();
   });
 
   it("creates a new tab inside the pane from its + button", async () => {
@@ -368,17 +476,28 @@ describe("SplitHost", () => {
     expect(createTabInPaneMock).toHaveBeenCalledWith("pane-right", "browser");
   });
 
+  it("closes every tab in a pane from the pane bar's X", async () => {
+    renderHost();
+
+    const closeButtons = screen.getAllByRole("button", { name: "Close pane" });
+    await userEvent.click(closeButtons[1]!);
+
+    expect(requestCloseTabsMock).toHaveBeenCalledWith([expect.objectContaining({ id: "two" })]);
+  });
+
   it("merges a tab into the pane bar when dropped there", () => {
     renderHost();
+    stubPaneRects();
 
     const sourceTab = screen.getByText("one").closest("[draggable]")!;
     const dataTransfer = tabDataTransfer("one");
     fireEvent.dragStart(sourceTab, { dataTransfer });
 
-    const bar = screen.getByText("two").closest("[draggable]")!.parentElement!;
-    fireEvent.dragOver(bar, { dataTransfer });
-    fireEvent.drop(bar, { dataTransfer });
+    // Inside the right pane's bar band (y < 32) — a merge, not a split.
+    fireWindowDrag("dragover", 205, 10);
+    fireWindowDrag("drop", 205, 10);
 
     expect(moveTabToPaneMock).toHaveBeenCalledWith("one", "pane-right");
+    expect(splitTabAtPaneMock).not.toHaveBeenCalled();
   });
 });

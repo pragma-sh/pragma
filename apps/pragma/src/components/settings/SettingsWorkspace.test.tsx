@@ -7,6 +7,7 @@ import {
   aiAuthMethods,
   aiLogout,
   gatewayDevices,
+  listWslDistros,
   readConfig,
   readPluginManifests,
   writeConfig,
@@ -62,6 +63,7 @@ vi.mock("@/lib/tauri", () => ({
   aiAuthMethods: vi.fn(),
   aiLogout: vi.fn(),
   gatewayDevices: vi.fn(),
+  listWslDistros: vi.fn(),
   readConfig: vi.fn(),
   readPluginManifests: vi.fn(),
   writeConfig: vi.fn(),
@@ -97,6 +99,7 @@ describe("SettingsWorkspace", () => {
     });
     vi.mocked(writeConfig).mockResolvedValue();
     vi.mocked(gatewayDevices).mockResolvedValue([]);
+    vi.mocked(listWslDistros).mockResolvedValue({ isWindows: false, distros: [] });
     vi.mocked(aiAuthMethods).mockResolvedValue([
       { provider: "anthropic", label: "Anthropic", kind: "oauth", featured: true },
     ]);
@@ -153,6 +156,49 @@ describe("SettingsWorkspace", () => {
       ),
     );
     expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
+  });
+
+  it("hides the WSL section off Windows", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    expect(screen.queryByRole("button", { name: "WSL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("shows the WSL section on Windows with a distribution installed", async () => {
+    vi.mocked(listWslDistros).mockResolvedValue({
+      isWindows: true,
+      distros: [{ name: "Ubuntu", version: 2, default: true, running: false }],
+    });
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(await screen.findByRole("button", { name: "WSL" }));
+
+    expect(await screen.findByText("Default shell")).toBeInTheDocument();
+  });
+
+  it("closes on Escape", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(closeSettings).toHaveBeenCalled();
+  });
+
+  it("leaves Escape to an open overlay", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    fireEvent.keyDown(window, { key: "Escape" });
+    dialog.remove();
+
+    expect(closeSettings).not.toHaveBeenCalled();
   });
 
   it("keeps supported non-plugin settings in UI controls", async () => {

@@ -9,6 +9,7 @@ import { KanbanCard } from "@/components/kanban/KanbanCard";
 import { KanbanCompletionDialog } from "@/components/kanban/KanbanCompletionDialog";
 import { KanbanDeleteDialog } from "@/components/kanban/KanbanDeleteDialog";
 import { KanbanDraftDialog } from "@/components/kanban/KanbanDraftDialog";
+import { IconTooltip } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Kanban,
@@ -202,12 +203,14 @@ export function ProjectKanbanWorkspace() {
                             value={card.id}
                             className="group/item flex items-stretch gap-1"
                           >
-                            <KanbanItemHandle
-                              aria-label="Drag card"
-                              className="flex w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100"
-                            >
-                              <GripVertical className="size-4" />
-                            </KanbanItemHandle>
+                            <IconTooltip label="Drag card">
+                              <KanbanItemHandle
+                                aria-label="Drag card"
+                                className="flex w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100"
+                              >
+                                <GripVertical className="size-4" />
+                              </KanbanItemHandle>
+                            </IconTooltip>
                             <div className="min-w-0 flex-1">
                               <KanbanCard
                                 card={card}

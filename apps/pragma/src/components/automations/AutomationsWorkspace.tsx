@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { loadLanguageExtension } from "@/components/editor/codemirror-language";
 import { pragmaEditorTheme, pragmaSyntaxHighlighting } from "@/components/editor/codemirror-theme";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { errorMessage } from "@/lib/errors";
 import { readAutomationSource, writeAutomationSource } from "@/lib/tauri";
 import { startWindowDrag } from "@/lib/window-drag";
@@ -64,14 +65,14 @@ export function AutomationsWorkspace({ embedded = false }: { embedded?: boolean 
         </p>
       </div>
       {embedded ? null : (
-        <Button
-          aria-label="Exit automations"
+        <IconButton
+          label="Exit automations"
           size="icon-sm"
           variant="ghost"
           onClick={() => kanban.exitBoard()}
         >
           <X />
-        </Button>
+        </IconButton>
       )}
     </header>
   );

@@ -36,7 +36,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Separator } from "@/components/ui/separator";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeDeleteDialog } from "@/components/dialogs/WorktreeDeleteDialog";
@@ -625,7 +625,7 @@ function WorktreeExpandCaret({
 
 /** The worktree name: an inline rename input when renaming, otherwise the label. */
 function WorktreeNameField({ rename, label }: { rename: RenameApi; label: string }) {
-  if (!rename.renaming) return <span className="truncate">{label}</span>;
+  if (!rename.renaming) return <span className="min-w-0 flex-1 truncate">{label}</span>;
   return (
     <input
       ref={rename.inputRef}
@@ -643,14 +643,28 @@ function WorktreeNameField({ rename, label }: { rename: RenameApi; label: string
 /** Always-visible pin glyph on pinned rows; click unpins. */
 function WorktreePinnedIndicator({ label, onUnpin }: { label: string; onUnpin: () => void }) {
   return (
-    <Button aria-label={`Unpin ${label}`} size="icon-xs" variant="ghost" onClick={onUnpin}>
+    <IconButton
+      aria-label={`Unpin ${label}`}
+      label="Unpin"
+      size="icon-xs"
+      variant="ghost"
+      onClick={onUnpin}
+    >
       <Pin className="fill-current" />
-    </Button>
+    </IconButton>
   );
 }
 
-/** Row actions: pin toggle, plus an always-visible new-worktree button on
- *  main / hover-revealed create-child and delete on nested worktrees. */
+/**
+ * A row action that is out of the layout until the row is hovered or focused,
+ * rather than merely transparent: reserving its width on every row would eat
+ * space the worktree name could otherwise use before truncating.
+ */
+const HOVER_ACTION_CLASS = "hidden group-hover:inline-flex group-focus-within:inline-flex";
+
+/** Row actions: pin toggle, plus hover-revealed create-child and delete on
+ *  nested worktrees. The main row only carries its pin toggle — creating a
+ *  worktree off main lives in the sidebar titlebar. */
 // fallow-ignore-next-line code-duplication -- param-destructuring shape shared with unrelated components (ReviewThreadActions, WorktreeContextMenu); not extractable logic.
 function WorktreeRowActions({
   isMain,
@@ -668,54 +682,43 @@ function WorktreeRowActions({
   openDelete: () => void;
 }) {
   const pinButton = pinned ? null : (
-    <Button
+    <IconButton
       aria-label={`Pin ${label}`}
-      className="opacity-0 group-hover:opacity-100"
+      className={HOVER_ACTION_CLASS}
+      label="Pin"
       size="icon-xs"
       variant="ghost"
       onClick={handleTogglePin}
     >
       <Pin />
-    </Button>
+    </IconButton>
   );
   if (isMain) {
-    return (
-      <>
-        {pinButton}
-        <Button
-          aria-label={`New worktree from ${label}`}
-          className="ml-1 h-6 px-1.5 text-xs"
-          size="xs"
-          variant="secondary"
-          onClick={handleCreateChild}
-        >
-          <GitBranchPlus />
-          New
-        </Button>
-      </>
-    );
+    return <>{pinButton}</>;
   }
   return (
     <>
       {pinButton}
-      <Button
+      <IconButton
         aria-label={`Create child worktree from ${label}`}
-        className="opacity-0 group-hover:opacity-100"
+        className={HOVER_ACTION_CLASS}
+        label="New child"
         size="icon-xs"
         variant="ghost"
         onClick={handleCreateChild}
       >
         <GitBranchPlus />
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         aria-label={`Delete worktree ${label}`}
-        className="opacity-0 group-hover:opacity-100"
+        className={HOVER_ACTION_CLASS}
+        label="Delete worktree"
         size="icon-xs"
         variant="ghost"
         onClick={openDelete}
       >
         <Trash2 className="text-destructive" />
-      </Button>
+      </IconButton>
     </>
   );
 }
@@ -1099,9 +1102,15 @@ function HiddenWorktreeRow({
         <WorktreeIcon className={cn("size-3 shrink-0", iconClass)} />
         <span className="truncate">{label}</span>
       </div>
-      <Button aria-label={`Show ${label}`} size="icon-xs" variant="ghost" onClick={onUnhide}>
+      <IconButton
+        aria-label={`Show ${label}`}
+        label="Show worktree"
+        size="icon-xs"
+        variant="ghost"
+        onClick={onUnhide}
+      >
         <EyeOff />
-      </Button>
+      </IconButton>
     </div>
   );
 }

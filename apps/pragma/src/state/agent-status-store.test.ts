@@ -6,6 +6,7 @@ import {
   applyAgentReport,
   clearAllAgentStatuses,
   clearDoneStatusForTab,
+  projectAgentStatus,
   removeAgentStatusForTab,
   tabStatus,
   worktreeAgentStatus,
@@ -84,6 +85,15 @@ describe("agent status store", () => {
 
     expect(tabStatus("tab-a")).toBe("running");
     expect(tabStatus("tab-b")).toBe("attention");
+  });
+
+  it("aggregates project worktrees with status precedence", () => {
+    applyAgentReport(report("wt-1", "tab-a", "claude", "running"));
+    applyAgentReport(report("wt-2", "tab-b", "codex", "attention"));
+
+    expect(projectAgentStatus(["wt-1", "wt-2"])).toBe("attention");
+    expect(projectAgentStatus(["wt-1"])).toBe("running");
+    expect(projectAgentStatus(["wt-3"])).toBeNull();
   });
 
   it("drops worktree green only once every finished tab is viewed", () => {

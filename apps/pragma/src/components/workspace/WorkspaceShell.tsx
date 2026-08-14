@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useEffectEvent, useState, type MouseEvent } from "react";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirmClose } from "@/components/editor/confirm-close";
@@ -8,6 +8,7 @@ import type { Tab } from "@pragma/constants";
 import { ProjectKanbanWorkspace } from "@/components/kanban/ProjectKanbanWorkspace";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RightSidebar } from "@/components/right-sidebar/RightSidebar";
+import { IconTooltip } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import { ProjectSidebar } from "@/components/sidebar/ProjectSidebar";
 import { TabDragProvider } from "@/components/tabs/tab-drag-context";
@@ -18,15 +19,10 @@ import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
 import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { useShortcuts } from "@/hooks/use-shortcuts";
-import {
-  browserDevtools,
-  browserReload,
-  onMenuAction,
-  restartDaemon,
-  type MenuAction,
-} from "@/lib/tauri";
+import { browserDevtools, browserReload, onMenuAction, type MenuAction } from "@/lib/tauri";
 import { errorMessage } from "@/lib/errors";
 import { terminalManager } from "@/lib/terminal-manager";
+import { reloadWebview, restartServer } from "@/lib/troubleshooting";
 import { useKanban } from "@/state/kanban-context";
 import { LeftSidebarProvider } from "@/state/left-sidebar-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
@@ -97,6 +93,16 @@ function useWorkspaceShortcuts(
 }
 
 /** Routes native menu shortcuts through the same tab lifecycle as UI controls. */
+async function restartDaemonWithToast(workspace: Workspace): Promise<void> {
+  const pending = toast.loading("Restarting daemon…");
+  try {
+    await restartServer(workspace);
+    toast.success("Daemon restarted", { id: pending });
+  } catch (cause) {
+    toast.error(errorMessage(cause), { id: pending });
+  }
+}
+
 function useNativeMenuActions(
   workspace: Workspace,
   requestClose: (tab: Tab) => void,
@@ -105,37 +111,19 @@ function useNativeMenuActions(
 ) {
   const shell = useKanban();
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
-    if (action === "settings.open") {
-      shell.openSettings();
-      return;
-    }
-    if (action === "tabs.new-terminal") {
-      await workspace.createTerminalTab();
-      return;
-    }
-    if (action === "tabs.close-active") {
-      if (workspace.activeTab) requestClose(workspace.activeTab);
-      return;
-    }
-    if (action === "workspace.open-command-palette") {
-      onOpenCommandPalette();
-      return;
-    }
-    if (action === "workspace.open-command-mode") {
-      onOpenCommandMode();
-      return;
-    }
-    if (action === "troubleshooting.open-daemon-logs") {
-      await workspace.openDaemonLogTab();
-      return;
-    }
-    const pending = toast.loading("Restarting daemon…");
-    try {
-      await restartDaemon();
-      toast.success("Daemon restarted", { id: pending });
-    } catch (cause) {
-      toast.error(errorMessage(cause), { id: pending });
-    }
+    const actions = {
+      "settings.open": shell.openSettings,
+      "tabs.new-terminal": () => void workspace.createTerminalTab(),
+      "tabs.close-active": () => {
+        if (workspace.activeTab) requestClose(workspace.activeTab);
+      },
+      "workspace.open-command-palette": onOpenCommandPalette,
+      "workspace.open-command-mode": onOpenCommandMode,
+      "troubleshooting.open-daemon-logs": () => void workspace.openDaemonLogTab(),
+      "troubleshooting.reload": reloadWebview,
+      "troubleshooting.restart-daemon": () => restartDaemonWithToast(workspace),
+    } satisfies Record<MenuAction, () => void | Promise<void>>;
+    await actions[action]();
   });
 
   useEffect(() => {
@@ -162,18 +150,35 @@ function BackToKanbanBar({ onReturn }: { onReturn: () => void }) {
   );
 }
 
-/** Transient workspace error toast. */
-function WorkspaceErrorToast({ error }: { error: string | null }) {
+/** Transient workspace error toast, dismissible with its close button. */
+function WorkspaceErrorToast({
+  error,
+  onDismiss,
+}: {
+  error: string | null;
+  onDismiss: () => void;
+}) {
   return (
     <AnimatePresence>
       {error ? (
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          className="text-destructive border-destructive/30 bg-destructive/10 mx-4 mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
           exit={{ opacity: 0, y: -6 }}
           initial={{ opacity: 0, y: -6 }}
+          role="alert"
         >
-          {error}
+          <span className="min-w-0 flex-1 break-words">{error}</span>
+          <IconTooltip label="Dismiss">
+            <button
+              aria-label="Dismiss error"
+              className="text-destructive/70 hover:text-destructive hover:bg-destructive/10 -mr-1 rounded p-0.5 transition-colors"
+              onClick={onDismiss}
+              type="button"
+            >
+              <X className="size-3.5" />
+            </button>
+          </IconTooltip>
         </motion.div>
       ) : null}
     </AnimatePresence>
@@ -216,7 +221,7 @@ function WorkspaceContent({
       <section className="app-content bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {kanban.backToKanbanAvailable ? <BackToKanbanBar onReturn={kanban.returnToKanban} /> : null}
         <TerminalTabs />
-        <WorkspaceErrorToast error={workspace.error} />
+        <WorkspaceErrorToast error={workspace.error} onDismiss={workspace.clearError} />
         {workspace.projects.length === 0 && !workspace.loading ? (
           <NoProjectsState />
         ) : workspace.tabs.length === 0 ? (

@@ -36,6 +36,12 @@ describe("dropTargetAt", () => {
     expect(highlight.top).toBe("50%");
   });
 
+  it("still resolves a split for a zero-size rect", () => {
+    const empty = { left: 0, top: 0, width: 0, height: 0 } as DOMRect;
+    const { direction, placement } = dropTargetAt(empty, 0, 0);
+    expect({ direction, placement }).toEqual({ direction: "horizontal", placement: "before" });
+  });
+
   it("clamps positions outside the pane to the nearest edge", () => {
     const { direction, placement } = dropTargetAt(rect, -40, 50);
     expect({ direction, placement }).toEqual({ direction: "horizontal", placement: "before" });

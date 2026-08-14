@@ -41,6 +41,7 @@ vi.mock("sonner", () => ({
 
 import {
   alertAgent,
+  dismissAlertToastsForTab,
   latchAlertedStatus,
   releaseAlertLatch,
   releaseAlertLatchForTab,
@@ -411,5 +412,23 @@ describe("alert latch", () => {
 
     releaseAlertLatchForTab(done.tabId);
     expect(shouldAlertForStatus(done)).toBe(true);
+  });
+});
+
+describe("dismissAlertToastsForTab", () => {
+  it("dismisses the active toast for a tab the user visits", async () => {
+    isFocusedMock.mockResolvedValue(true);
+    const { toast } = await import("sonner");
+    const customMock = toast.custom as unknown as ReturnType<typeof vi.fn>;
+    const dismissMock = toast.dismiss as unknown as ReturnType<typeof vi.fn>;
+    customMock.mockClear();
+    dismissMock.mockClear();
+    customMock.mockReturnValue("toast-dismiss-1");
+
+    await alertAgent(report({ tabId: "tab-dismiss", status: "done", attentionKind: undefined }));
+
+    dismissAlertToastsForTab("tab-dismiss");
+
+    expect(dismissMock).toHaveBeenCalledWith("toast-dismiss-1");
   });
 });

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import type { StagedDesignChange } from "@/components/browser/use-design-mode";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
   PopoverContent,
@@ -142,15 +143,16 @@ export function DesignModePopover({
                   {change.route} · {change.selector}
                 </span>
               </span>
-              <Button
+              <IconButton
                 aria-label={`Remove staged change ${index + 1}`}
                 className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+                label="Remove change"
                 size="icon-sm"
                 variant="ghost"
                 onClick={() => onRemove(change.id)}
               >
                 <X />
-              </Button>
+              </IconButton>
             </li>
           ))}
         </ol>

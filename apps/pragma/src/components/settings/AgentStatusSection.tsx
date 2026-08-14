@@ -6,6 +6,7 @@ import { constants, type AgentSound, type AgentStatusSettings } from "@pragma/co
 
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Switch } from "@/components/ui/switch";
 import { errorMessage } from "@/lib/errors";
 import { playAgentAlertSound, resetAgentStatusSettingsCache } from "@/lib/agent-status-settings";
@@ -132,9 +133,15 @@ function SoundRow({
         {label}
       </button>
       {onPreview ? (
-        <Button aria-label={`Play ${label}`} size="icon-sm" variant="ghost" onClick={onPreview}>
+        <IconButton
+          aria-label={`Play ${label}`}
+          label="Play sound"
+          size="icon-sm"
+          variant="ghost"
+          onClick={onPreview}
+        >
           <Play />
-        </Button>
+        </IconButton>
       ) : null}
     </div>
   );

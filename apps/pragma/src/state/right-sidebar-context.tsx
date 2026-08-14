@@ -1,33 +1,29 @@
 import { createContext, useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRequiredContext } from "@/lib/context";
+import { useCollapsiblePanel, type CollapsiblePanelState } from "@/hooks/use-collapsible-panel";
+import { layoutBreakpoints } from "@/lib/responsive";
 
 export type BuiltinRightSidebarSubtab = "files" | "changes" | "pullRequest";
 export type PluginRightSidebarSubtab = `plugin:${string}:${string}`;
 export type RightSidebarSubtab = BuiltinRightSidebarSubtab | PluginRightSidebarSubtab;
 
-interface RightSidebarContextValue {
-  collapsed: boolean;
+interface RightSidebarContextValue extends CollapsiblePanelState {
   activeSubtab: RightSidebarSubtab;
-  width: number;
-  setCollapsed: (collapsed: boolean) => void;
-  toggleCollapsed: () => void;
   setActiveSubtab: (subtab: RightSidebarSubtab) => void;
-  setWidth: (width: number) => void;
 }
 
 const RightSidebarContext = createContext<RightSidebarContextValue | null>(null);
 
-const COLLAPSED_KEY = "pragma.rightSidebar.collapsed";
 const SUBTAB_KEY = "pragma.rightSidebar.subtab";
-const WIDTH_KEY = "pragma.rightSidebar.width";
 
-const DEFAULT_WIDTH = 360;
-const MIN_WIDTH = 360;
-const MAX_WIDTH = 560;
-
-function clampWidth(width: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(width)));
-}
+const panelOptions = {
+  collapsedKey: "pragma.rightSidebar.collapsed",
+  widthKey: "pragma.rightSidebar.width",
+  defaultWidth: 360,
+  minWidth: 360,
+  maxWidth: 560,
+  autoCollapseBelow: layoutBreakpoints.rightSidebar,
+} as const;
 
 /** Narrows a stored string to a known subtab, or null for the default fallback. */
 function parseSubtab(raw: string): RightSidebarSubtab | null {
@@ -37,86 +33,36 @@ function parseSubtab(raw: string): RightSidebarSubtab | null {
   return raw.startsWith("plugin:") ? (raw as PluginRightSidebarSubtab) : null;
 }
 
-function readStored<T>(key: string, parse: (raw: string) => T | null, fallback: T): T {
+function readSubtab(): RightSidebarSubtab {
   try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) {
-      return fallback;
-    }
-    return parse(raw) ?? fallback;
+    const raw = localStorage.getItem(SUBTAB_KEY);
+    return (raw === null ? null : parseSubtab(raw)) ?? "files";
   } catch {
-    return fallback;
-  }
-}
-
-function writeStored(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Cosmetic state only; ignore storage failures.
+    return "files";
   }
 }
 
 /**
- * Cosmetic state for the right sidebar (collapsed, active subtab, width).
- * Persisted to `localStorage` rather than the backend — it's per-device UI
- * preference, not workspace data, so it never touches SQLite or the reducer.
+ * Cosmetic state for the right sidebar (collapsed, active subtab, width),
+ * persisted per device and auto-collapsed on a narrow window. The collapse and
+ * width halves are shared with the left sidebar through `useCollapsiblePanel`.
  */
 export function RightSidebarProvider({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsedState] = useState(() =>
-    readStored(COLLAPSED_KEY, (raw) => raw === "true", false),
-  );
-  const [activeSubtab, setActiveSubtabState] = useState<RightSidebarSubtab>(() =>
-    readStored(SUBTAB_KEY, parseSubtab, "files"),
-  );
-  const [width, setWidthState] = useState(() =>
-    clampWidth(
-      readStored(
-        WIDTH_KEY,
-        (raw) => {
-          const parsed = Number(raw);
-          return Number.isFinite(parsed) ? parsed : null;
-        },
-        DEFAULT_WIDTH,
-      ),
-    ),
-  );
-
-  const setCollapsed = useCallback((next: boolean) => {
-    setCollapsedState(next);
-    writeStored(COLLAPSED_KEY, String(next));
-  }, []);
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsedState((previous) => {
-      const next = !previous;
-      writeStored(COLLAPSED_KEY, String(next));
-      return next;
-    });
-  }, []);
+  const panel = useCollapsiblePanel(panelOptions);
+  const [activeSubtab, setActiveSubtabState] = useState<RightSidebarSubtab>(readSubtab);
 
   const setActiveSubtab = useCallback((subtab: RightSidebarSubtab) => {
     setActiveSubtabState(subtab);
-    writeStored(SUBTAB_KEY, subtab);
-  }, []);
-
-  const setWidth = useCallback((next: number) => {
-    const clamped = clampWidth(next);
-    setWidthState(clamped);
-    writeStored(WIDTH_KEY, String(clamped));
+    try {
+      localStorage.setItem(SUBTAB_KEY, subtab);
+    } catch {
+      // Cosmetic state only; ignore storage failures.
+    }
   }, []);
 
   const value = useMemo<RightSidebarContextValue>(
-    () => ({
-      collapsed,
-      activeSubtab,
-      width,
-      setCollapsed,
-      toggleCollapsed,
-      setActiveSubtab,
-      setWidth,
-    }),
-    [collapsed, activeSubtab, width, setCollapsed, toggleCollapsed, setActiveSubtab, setWidth],
+    () => ({ ...panel, activeSubtab, setActiveSubtab }),
+    [panel, activeSubtab, setActiveSubtab],
   );
 
   return <RightSidebarContext.Provider value={value}>{children}</RightSidebarContext.Provider>;

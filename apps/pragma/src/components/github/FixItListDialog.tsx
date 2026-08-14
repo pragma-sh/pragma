@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { FixAgentControls } from "@/components/github/FixAgentControls";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -109,16 +110,16 @@ function FixItRow({ comment, prNumber }: { comment: FixItComment; prNumber: numb
         <p className="font-mono text-[10px] text-muted-foreground">{commentLocation(comment)}</p>
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{comment.body}</p>
       </div>
-      <Button
+      <IconButton
         aria-label="Remove from fix it list"
         className="shrink-0 text-muted-foreground hover:text-foreground"
+        label="Remove"
         onClick={() => removeFixItComment(prNumber, comment.threadId)}
         size="icon-sm"
-        title="Remove from fix it list"
         variant="ghost"
       >
         <X />
-      </Button>
+      </IconButton>
     </li>
   );
 }

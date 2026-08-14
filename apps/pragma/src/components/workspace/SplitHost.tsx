@@ -14,7 +14,7 @@ import { isPdfPath } from "@/components/pdf/pdf-path";
 import { PdfView } from "@/components/pdf/PdfView";
 import { ReviewTab } from "@/components/github/ReviewTab";
 import { PluginWebViewTab } from "@/plugins/PluginWebViewTab";
-import { Button } from "@/components/ui/button";
+import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import {
   DropdownMenu,
@@ -24,9 +24,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { TerminalView } from "@/components/terminal/TerminalView";
-import { useConfirmClose } from "@/components/editor/confirm-close";
+import { useConfirmClose, useConfirmCloseTabs } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
-import { type DropTarget, dropTargetAt, TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
+import {
+  type DropTarget,
+  type PaneDropIntent,
+  PANE_BAR_ATTR,
+  PANE_ID_ATTR,
+  readPaneGeometry,
+  resolvePaneDropIntent,
+  TAB_DRAG_TYPE,
+} from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { browserFocus } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
@@ -42,6 +50,7 @@ const ScratchpadView = lazy(() =>
 
 export function SplitHost() {
   const workspace = useWorkspace();
+  const dropIntent = useTabDropIntent();
   const tabsById = useMemo(
     () => new Map(workspace.tabs.map((tab) => [tab.id, tab])),
     [workspace.tabs],
@@ -61,6 +70,7 @@ export function SplitHost() {
   return (
     <div className="min-h-0 flex-1 bg-canvas">
       <SplitNode
+        dropIntent={dropIntent}
         node={workspace.splitRoot}
         showPaneBars={workspace.splitRoot.kind === "split"}
         tabsById={tabsById}
@@ -71,11 +81,13 @@ export function SplitHost() {
 }
 
 function SplitNode({
+  dropIntent,
   node,
   showPaneBars,
   tabsById,
   worktreePathById,
 }: {
+  dropIntent: PaneDropIntent | null;
   node: SplitLayoutNode;
   showPaneBars: boolean;
   tabsById: Map<string, Tab>;
@@ -84,6 +96,7 @@ function SplitNode({
   if (node.kind === "pane") {
     return (
       <SplitPane
+        dropIntent={dropIntent?.paneId === node.id ? dropIntent : null}
         pane={node}
         showPaneBars={showPaneBars}
         tabsById={tabsById}
@@ -96,6 +109,7 @@ function SplitNode({
     <ResizablePanelGroup className="min-h-0" orientation={node.direction}>
       <ResizablePanel minSize={15}>
         <SplitNode
+          dropIntent={dropIntent}
           node={node.children[0]}
           showPaneBars={showPaneBars}
           tabsById={tabsById}
@@ -105,6 +119,7 @@ function SplitNode({
       <ResizableHandle className="bg-border" withHandle />
       <ResizablePanel minSize={15}>
         <SplitNode
+          dropIntent={dropIntent}
           node={node.children[1]}
           showPaneBars={showPaneBars}
           tabsById={tabsById}
@@ -113,6 +128,111 @@ function SplitNode({
       </ResizablePanel>
     </ResizablePanelGroup>
   );
+}
+
+/**
+ * Resolves the pane under the pointer, and performs the drop, from `window` while a
+ * tab drag is in flight.
+ *
+ * Deliberately not per-pane drag handlers: the drop zones only exist during the
+ * drag, and WebKit does not reliably register an element inserted mid-drag as a drop
+ * target — the preview appeared once near where the drag entered the pane and then
+ * stopped updating. Window-level `dragover` always fires (it bubbles from whatever
+ * is under the pointer), so resolution is pure geometry against the panes' rects and
+ * never depends on hit-testing an overlay.
+ */
+function useTabDropIntent(): PaneDropIntent | null {
+  const workspace = useWorkspace();
+  const { isDragging, draggingTabId } = useTabDrag();
+  const [intent, setIntent] = useState<PaneDropIntent | null>(null);
+
+  useEffect(() => {
+    if (!isDragging || !draggingTabId) {
+      setIntent(null);
+      return;
+    }
+    // The intent the release will act on. Kept in a ref as well as state because
+    // `dragend` has to read it synchronously, before React re-renders.
+    let current: PaneDropIntent | null = null;
+    let dropped = false;
+
+    const track = (event: DragEvent): PaneDropIntent | null => {
+      current = resolvePaneDropIntent(readPaneGeometry(), event.clientX, event.clientY);
+      setIntent(current);
+      if (current) {
+        // Claiming the drop only where it means something leaves the rest of the
+        // window (sidebars, tab strip) showing a "no drop" cursor.
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
+      }
+      return current;
+    };
+    const commit = (intentToApply: PaneDropIntent | null) => {
+      dropped = true;
+      current = null;
+      setIntent(null);
+      if (!intentToApply) {
+        return;
+      }
+      if (intentToApply.split) {
+        workspace.splitTabAtPane(
+          draggingTabId,
+          intentToApply.paneId,
+          intentToApply.split.direction,
+          intentToApply.split.placement,
+        );
+        return;
+      }
+      workspace.moveTabToPane(draggingTabId, intentToApply.paneId);
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      const next = track(event);
+      event.preventDefault();
+      commit(next);
+    };
+    // WebKit can end a drag with `dragend` alone and no `drop` — the drop only
+    // landed where the drag happened to enter a pane, and was silently swallowed
+    // anywhere else. Releasing over a pane means the same thing either way, so
+    // finish the move from whichever event arrives first.
+    const handleDragEnd = (event: DragEvent) => {
+      if (dropped) {
+        return;
+      }
+      // Prefer the release position; a cancelled drag reports (0, 0), which lands
+      // outside every pane and so commits nothing.
+      const atRelease =
+        event.clientX || event.clientY
+          ? resolvePaneDropIntent(readPaneGeometry(), event.clientX, event.clientY)
+          : current;
+      commit(atRelease);
+    };
+    const handleCancel = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        current = null;
+        setIntent(null);
+      }
+    };
+
+    // `dragenter` must be cancelled too, not just `dragover`, or WebKit never
+    // treats the position as a valid drop.
+    window.addEventListener("dragenter", track);
+    window.addEventListener("dragover", track);
+    window.addEventListener("drop", handleDrop);
+    window.addEventListener("dragend", handleDragEnd);
+    window.addEventListener("keydown", handleCancel);
+    return () => {
+      window.removeEventListener("dragenter", track);
+      window.removeEventListener("dragover", track);
+      window.removeEventListener("drop", handleDrop);
+      window.removeEventListener("dragend", handleDragEnd);
+      window.removeEventListener("keydown", handleCancel);
+    };
+  }, [draggingTabId, isDragging, workspace]);
+
+  return intent;
 }
 
 /** Pick the surface an `editor` tab opens in, keyed by the file's extension. */
@@ -190,18 +310,20 @@ function paneBorderClass(showBar: boolean, focused: boolean): string {
 
 // fallow-ignore-next-line complexity -- pane focus, drag drop zones, and terminal retention share one React surface; extracting would reintroduce prop drilling across the split tree.
 function SplitPane({
+  dropIntent,
   pane,
   showPaneBars,
   tabsById,
   worktreePathById,
 }: {
+  /** Non-null only while a dragged tab is hovering this pane. */
+  dropIntent: PaneDropIntent | null;
   pane: SplitPaneNode;
   showPaneBars: boolean;
   tabsById: Map<string, Tab>;
   worktreePathById: Map<string, string>;
 }) {
   const workspace = useWorkspace();
-  const { isDragging, draggingTabId } = useTabDrag();
   const tabs = useMemo(() => resolvePaneTabs(pane, tabsById), [pane, tabsById]);
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === pane.activeTabId) ?? tabs[0] ?? null,
@@ -223,11 +345,6 @@ function SplitPane({
       terminalManager.focus(activeTab.id, true);
     }
   }, [activeTab, workspace, pane.id]);
-  const handleSplitDrop = useCallback(
-    (tabId: string, target: DropTarget) =>
-      workspace.splitTabAtPane(tabId, pane.id, target.direction, target.placement),
-    [workspace, pane.id],
-  );
 
   useEffect(() => {
     if (!focused || !activeTab) return;
@@ -251,12 +368,20 @@ function SplitPane({
   return (
     <section
       className={cn(
-        "flex h-full min-h-0 flex-col border bg-canvas",
+        "relative flex h-full min-h-0 flex-col border bg-canvas",
         paneBorderClass(showBar, focused),
       )}
       onPointerDown={handlePointerDown}
+      {...{ [PANE_ID_ATTR]: pane.id }}
     >
-      {showBar && <PaneBar activeTabId={activeTab?.id ?? null} pane={pane} tabs={tabs} />}
+      {showBar && (
+        <PaneBar
+          activeTabId={activeTab?.id ?? null}
+          mergeTargeted={dropIntent?.split === null}
+          pane={pane}
+          tabs={tabs}
+        />
+      )}
       <div className="relative min-h-0 flex-1">
         {retainedTerminals.map((tab) => {
           const active = tab.id === activeTab?.id;
@@ -276,55 +401,41 @@ function SplitPane({
           );
         })}
         {activeTab && activeTab.kind !== "terminal" ? renderActiveTab(activeTab, cwd) : null}
-        {isDragging && <PaneDropZone draggingTabId={draggingTabId} onDrop={handleSplitDrop} />}
       </div>
+      {/* Section-level, not content-level: a split divides the whole pane (its bar
+          included), so a preview measured against the content box alone would be
+          offset by the bar's height and halve the wrong rectangle. */}
+      <PaneDropPreview target={dropIntent?.split ?? null} />
     </section>
   );
 }
 
 function PaneBar({
   activeTabId,
+  mergeTargeted,
   pane,
   tabs,
 }: {
   activeTabId: string | null;
+  /** A dragged tab is over this bar, so dropping merges it into the pane. */
+  mergeTargeted: boolean;
   pane: SplitPaneNode;
   tabs: Tab[];
 }) {
   const workspace = useWorkspace();
   const requestClose = useConfirmClose();
-  const { isDragging, draggingTabId, beginTabDrag, endTabDrag } = useTabDrag();
-  const [dropActive, setDropActive] = useState(false);
+  const requestCloseTabs = useConfirmCloseTabs();
+  const { beginTabDrag, endTabDrag } = useTabDrag();
 
+  // The drop itself is resolved from the window (see `useTabDropIntent`); the bar
+  // only reports that a drop here would merge rather than split.
   return (
     <div
       className={cn(
-        "flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b bg-elevated px-1.5",
-        dropActive ? "border-primary/60 bg-primary/10" : "border-border",
+        "relative z-30 flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b bg-elevated px-1.5",
+        mergeTargeted ? "border-primary/60 bg-primary/10" : "border-border",
       )}
-      onDragOver={(event) => {
-        if (!isDragging) {
-          return;
-        }
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        setDropActive(true);
-      }}
-      onDragLeave={(event) => {
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          return;
-        }
-        setDropActive(false);
-      }}
-      onDrop={(event) => {
-        setDropActive(false);
-        if (!draggingTabId) {
-          return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        workspace.moveTabToPane(draggingTabId, pane.id);
-      }}
+      {...{ [PANE_BAR_ATTR]: "" }}
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
@@ -360,29 +471,32 @@ function PaneBar({
               <span className="min-w-0 flex-1 truncate">{tabTitle(tab)}</span>
             </button>
             <TabDirtyDot tabId={tab.id} />
-            <button
-              aria-label="Close tab"
-              className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
-              onClick={(event) => {
-                event.stopPropagation();
-                requestClose(tab);
-              }}
-            >
-              <X className="size-3" />
-            </button>
+            <IconTooltip label="Close tab">
+              <button
+                aria-label="Close tab"
+                className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestClose(tab);
+                }}
+              >
+                <X className="size-3" />
+              </button>
+            </IconTooltip>
           </div>
         );
       })}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
+          <IconButton
             aria-label="New tab in pane"
             className="size-6 shrink-0"
+            label="New tab"
             size="icon-sm"
             variant="ghost"
           >
             <Plus className="size-3.5" />
-          </Button>
+          </IconButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuItem onSelect={() => void workspace.createTabInPane(pane.id, "terminal")}>
@@ -395,6 +509,21 @@ function PaneBar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* Closing every tab in the pane collapses it, which is how a split is
+          dissolved from inside the split itself. */}
+      <IconButton
+        aria-label="Close pane"
+        className="ml-auto size-6 shrink-0"
+        label="Close pane"
+        onClick={(event) => {
+          event.stopPropagation();
+          requestCloseTabs(tabs);
+        }}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <X className="size-3.5" />
+      </IconButton>
     </div>
   );
 }
@@ -404,59 +533,26 @@ function TabAgentDot({ tabId }: { tabId: string }) {
 }
 
 /**
- * Transparent overlay shown over a pane's content while a tab is being dragged.
- * It receives the drag (native browser overlays are hidden during the drag, so
- * the drop reaches here) and previews where the tab will land. The dragged tab
- * id comes from shared drag state, since WebKit withholds `dataTransfer` data
- * until the drop fires.
+ * Previews the half of the pane a dropped tab will occupy. Purely presentational and
+ * never a drop target itself (`pointer-events-none`), so it can neither swallow the
+ * terminal's input nor depend on WebKit hit-testing an element that appeared
+ * mid-drag — the window resolves the drop instead (see `useTabDropIntent`).
  */
-function PaneDropZone({
-  draggingTabId,
-  onDrop,
-}: {
-  draggingTabId: string | null;
-  onDrop: (tabId: string, target: DropTarget) => void;
-}) {
-  const [target, setTarget] = useState<DropTarget | null>(null);
-
+function PaneDropPreview({ target }: { target: DropTarget | null }) {
+  if (!target) {
+    return null;
+  }
   return (
-    <div
-      aria-hidden
-      className="absolute inset-0 z-20"
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        const rect = event.currentTarget.getBoundingClientRect();
-        setTarget(dropTargetAt(rect, event.clientX, event.clientY));
-      }}
-      onDragLeave={(event) => {
-        // Ignore leave events bubbling from the highlight child.
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          return;
-        }
-        setTarget(null);
-      }}
-      onDrop={(event) => {
-        const current = target;
-        setTarget(null);
-        if (!draggingTabId || !current) {
-          return;
-        }
-        event.preventDefault();
-        onDrop(draggingTabId, current);
-      }}
-    >
-      {target ? (
-        <div
-          className="pointer-events-none absolute rounded-md border-2 border-primary/70 bg-primary/15 transition-all duration-75"
-          style={{
-            left: target.highlight.left,
-            top: target.highlight.top,
-            right: target.highlight.right,
-            bottom: target.highlight.bottom,
-          }}
-        />
-      ) : null}
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-20">
+      <div
+        className="absolute rounded-md border-2 border-primary/70 bg-primary/15 transition-all duration-75"
+        style={{
+          left: target.highlight.left,
+          top: target.highlight.top,
+          right: target.highlight.right,
+          bottom: target.highlight.bottom,
+        }}
+      />
     </div>
   );
 }

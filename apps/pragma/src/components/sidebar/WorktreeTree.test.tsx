@@ -304,19 +304,6 @@ describe("WorktreeTree", () => {
     );
   });
 
-  it("shows the new-worktree button on the main worktree row", async () => {
-    worktreesMergedStatusMock.mockResolvedValue({ child: false });
-    const onCreateChild = vi.fn();
-
-    render(<WorktreeTree onCreateChild={onCreateChild} />);
-
-    const button = await screen.findByRole("button", { name: "New worktree from main" });
-    fireEvent.click(button);
-
-    expect(selectWorktreeMock).toHaveBeenCalledWith("main");
-    expect(onCreateChild).toHaveBeenCalledWith("main");
-  });
-
   it("exposes pin in the context menu and unpins via the pin glyph", async () => {
     localStorage.clear();
     worktreesMergedStatusMock.mockResolvedValue({ child: false });

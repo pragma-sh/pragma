@@ -75,23 +75,23 @@ export function useAudioPlayer(src: string): AudioPlayerControls {
       setError(describeMediaError(audio));
     };
 
-    audio.addEventListener("error", onError);
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("loadedmetadata", onMeta);
-    audio.addEventListener("durationchange", onMeta);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("ended", onEnded);
-    audio.addEventListener("volumechange", onVolume);
+    const listeners = [
+      ["error", onError],
+      ["timeupdate", onTime],
+      ["loadedmetadata", onMeta],
+      ["durationchange", onMeta],
+      ["play", onPlay],
+      ["pause", onPause],
+      ["ended", onEnded],
+      ["volumechange", onVolume],
+    ] as const;
+    for (const [type, listener] of listeners) {
+      audio.addEventListener(type, listener);
+    }
     return () => {
-      audio.removeEventListener("error", onError);
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("loadedmetadata", onMeta);
-      audio.removeEventListener("durationchange", onMeta);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("volumechange", onVolume);
+      for (const [type, listener] of listeners) {
+        audio.removeEventListener(type, listener);
+      }
     };
   }, []);
 

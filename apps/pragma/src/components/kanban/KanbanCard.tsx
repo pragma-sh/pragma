@@ -6,7 +6,7 @@ import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma/constants"
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AgentIcon } from "@/components/agents/AgentIcon";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import type { AgentConfig } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useTabAgentStatus } from "@/state/agent-status-store";
@@ -99,15 +99,15 @@ function KanbanCardFooter({
           </span>
         ) : null}
       </div>
-      <Button
+      <IconButton
+        className="ml-auto shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100 focus-visible:opacity-100 hover:text-destructive"
+        label="Delete card"
         size="icon-sm"
         variant="ghost"
-        aria-label="Delete card"
-        className="ml-auto shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100 focus-visible:opacity-100 hover:text-destructive"
         onClick={onDelete}
       >
         <Trash2 />
-      </Button>
+      </IconButton>
     </div>
   );
 }

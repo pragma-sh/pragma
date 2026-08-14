@@ -1,6 +1,7 @@
 import { Check, ZoomIn, ZoomOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,15 +34,9 @@ export function MediaZoomControls({
 }) {
   return (
     <div className="flex items-center gap-0.5">
-      <Button
-        aria-label="Zoom out"
-        onClick={onZoomOut}
-        size="icon-sm"
-        title="Zoom out"
-        variant="ghost"
-      >
+      <IconButton label="Zoom out" size="icon-sm" variant="ghost" onClick={onZoomOut}>
         <ZoomOut />
-      </Button>
+      </IconButton>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -71,15 +66,9 @@ export function MediaZoomControls({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        aria-label="Zoom in"
-        onClick={onZoomIn}
-        size="icon-sm"
-        title="Zoom in"
-        variant="ghost"
-      >
+      <IconButton label="Zoom in" size="icon-sm" variant="ghost" onClick={onZoomIn}>
         <ZoomIn />
-      </Button>
+      </IconButton>
     </div>
   );
 }

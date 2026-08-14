@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useScroll } from "@embedpdf/plugin-scroll/react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 
 /**
@@ -29,26 +29,24 @@ export function PdfPageControls({ documentId }: { documentId: string }) {
 
   return (
     <div className="flex items-center gap-0.5">
-      <Button
-        aria-label="Previous page"
+      <IconButton
         disabled={!provides || currentPage <= 1}
-        onClick={() => provides?.scrollToPreviousPage()}
+        label="Previous page"
         size="icon-sm"
-        title="Previous page"
         variant="ghost"
+        onClick={() => provides?.scrollToPreviousPage()}
       >
         <ChevronUp />
-      </Button>
-      <Button
-        aria-label="Next page"
+      </IconButton>
+      <IconButton
         disabled={!provides || currentPage >= totalPages}
-        onClick={() => provides?.scrollToNextPage()}
+        label="Next page"
         size="icon-sm"
-        title="Next page"
         variant="ghost"
+        onClick={() => provides?.scrollToNextPage()}
       >
         <ChevronDown />
-      </Button>
+      </IconButton>
       <label className="ml-1 flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="sr-only">Page number</span>
         <Input

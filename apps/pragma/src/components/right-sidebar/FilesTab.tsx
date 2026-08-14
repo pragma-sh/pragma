@@ -4,7 +4,7 @@ import { FilePlus, FolderPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { FileTree, type FileTreeController } from "@/components/right-sidebar/FileTreeNode";
-import { Button } from "@/components/ui/button";
+import { IconButton, TOOLBAR_BUTTON_CLASS } from "@/components/ui/icon-button";
 import { errorMessage } from "@/lib/errors";
 import { endPathDrag, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
 import { useWorktreeFileChange } from "@/lib/file-watch";
@@ -461,30 +461,32 @@ export function FilesTab() {
           {state.selectedDir ? `selected: ${state.selectedDir}/` : "selected: /"}
         </span>
         <div className="flex shrink-0 gap-0.5">
-          <Button
+          <IconButton
             aria-label="New File"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
+            className={TOOLBAR_BUTTON_CLASS}
+            label="New file"
+            size="icon-sm"
+            variant="ghost"
             onClick={() => {
               ctrl.expand(state.selectedDir);
               ctrl.beginCreate(state.selectedDir, "file");
             }}
-            size="icon-sm"
-            variant="ghost"
           >
             <FilePlus />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             aria-label="New Folder"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
+            className={TOOLBAR_BUTTON_CLASS}
+            label="New folder"
+            size="icon-sm"
+            variant="ghost"
             onClick={() => {
               ctrl.expand(state.selectedDir);
               ctrl.beginCreate(state.selectedDir, "folder");
             }}
-            size="icon-sm"
-            variant="ghost"
           >
             <FolderPlus />
-          </Button>
+          </IconButton>
         </div>
       </div>
       <div

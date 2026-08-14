@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -123,15 +124,15 @@ export function FindReplaceBar({
     >
       <div className="flex items-center gap-1">
         {replace ? (
-          <Button
-            aria-label={replaceOpen ? "Hide replace" : "Show replace"}
+          <IconButton
             className="shrink-0"
+            label={replaceOpen ? "Hide replace" : "Show replace"}
             onClick={() => setReplaceOpen((value) => !value)}
             size="icon-sm"
             variant="ghost"
           >
             {replaceOpen ? <ChevronDown /> : <ChevronRight />}
-          </Button>
+          </IconButton>
         ) : null}
         <Input
           className="h-7"
@@ -144,35 +145,35 @@ export function FindReplaceBar({
         <span className="w-12 shrink-0 text-center text-xs text-muted-foreground tabular-nums">
           {matchCount > 0 ? `${currentMatch}/${matchCount}` : query ? "0/0" : ""}
         </span>
-        <Button
-          aria-label="Previous match"
+        <IconButton
           className="shrink-0"
           disabled={matchCount === 0}
+          label="Previous match"
           onClick={onPrevious}
           size="icon-sm"
           variant="ghost"
         >
           <ChevronUp />
-        </Button>
-        <Button
-          aria-label="Next match"
+        </IconButton>
+        <IconButton
           className="shrink-0"
           disabled={matchCount === 0}
+          label="Next match"
           onClick={onNext}
           size="icon-sm"
           variant="ghost"
         >
           <ChevronDown />
-        </Button>
-        <Button
-          aria-label="Close find"
+        </IconButton>
+        <IconButton
           className="shrink-0"
+          label="Close find"
           onClick={onClose}
           size="icon-sm"
           variant="ghost"
         >
           <X />
-        </Button>
+        </IconButton>
       </div>
       {replace ? (
         <Collapsible onOpenChange={setReplaceOpen} open={replaceOpen}>

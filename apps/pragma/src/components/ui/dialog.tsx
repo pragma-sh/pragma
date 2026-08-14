@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { modalVariants, scrimVariants } from "@/lib/motion";
 import { XIcon } from "lucide-react";
 
@@ -104,15 +105,20 @@ function DialogContent({
                 )}
                 exit="exit"
                 initial="hidden"
+                layout="size"
                 variants={modalVariants}
               >
                 {children}
                 {showCloseButton && (
                   <DialogPrimitive.Close data-slot="dialog-close" asChild>
-                    <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
+                    <IconButton
+                      className="absolute top-2 right-2"
+                      label="Close"
+                      size="icon-sm"
+                      variant="ghost"
+                    >
                       <XIcon />
-                      <span className="sr-only">Close</span>
-                    </Button>
+                    </IconButton>
                   </DialogPrimitive.Close>
                 )}
               </motion.div>

@@ -5,7 +5,7 @@ import { Slider } from "radix-ui";
 
 import { MediaErrorNotice } from "@/components/media/MediaErrorNotice";
 import { useAudioPlayer } from "@/components/media/use-audio-player";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
 /** Formats a media clock as `m:ss` (or `h:mm:ss` past an hour). */
@@ -84,16 +84,15 @@ function AudioTransport({ audio }: { audio: ReturnType<typeof useAudioPlayer> })
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
       <div className="flex items-center gap-3">
-        <Button
-          aria-label={audio.playing ? "Pause" : "Play"}
-          onClick={audio.togglePlay}
+        <IconButton
+          label={audio.playing ? "Pause" : "Play"}
           size="icon"
-          title={audio.playing ? "Pause" : "Play"}
           type="button"
           variant="default"
+          onClick={audio.togglePlay}
         >
           {audio.playing ? <Pause /> : <Play />}
-        </Button>
+        </IconButton>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <AudioSlider
@@ -112,16 +111,15 @@ function AudioTransport({ audio }: { audio: ReturnType<typeof useAudioPlayer> })
       </div>
 
       <div className="flex items-center gap-2 pl-1">
-        <Button
-          aria-label={audio.muted ? "Unmute" : "Mute"}
-          onClick={audio.toggleMute}
+        <IconButton
+          label={audio.muted ? "Unmute" : "Mute"}
           size="icon-sm"
-          title={audio.muted ? "Unmute" : "Mute"}
           type="button"
           variant="ghost"
+          onClick={audio.toggleMute}
         >
           {audio.muted ? <VolumeX /> : <Volume2 />}
-        </Button>
+        </IconButton>
         <AudioSlider
           ariaLabel="Volume"
           className="max-w-28"

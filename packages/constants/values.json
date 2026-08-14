@@ -175,8 +175,7 @@
       "enabled": true,
       "startMarker": "<!-- pragma:pr-signature -->",
       "endMarker": "<!-- /pragma:pr-signature -->",
-      "badgeUrl": "https://raw.githubusercontent.com/pragma-sh/pragma/main/assets/pr/open-worktree.svg",
-      "badgeAlt": "Open worktree in Pragma",
+      "linkLabel": "Open worktree in Pragma",
       "openUrl": "https://pragma-app.sh/open"
     }
   },

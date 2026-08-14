@@ -25,6 +25,17 @@ pub fn add_project(
     Ok(project)
 }
 
+#[tauri::command]
+pub fn remove_project(
+    db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
+    project_id: String,
+) -> AppResult<()> {
+    db.delete_project(&project_id)?;
+    publisher.trigger();
+    Ok(())
+}
+
 #[tauri::command(async)]
 pub fn clone_project(
     db: State<'_, Db>,

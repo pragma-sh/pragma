@@ -1,6 +1,7 @@
 import { Pin, PinOff } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
+import { IconTooltip } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -172,18 +173,20 @@ function ModelChoice({
 function ModelPinButton({ agent, model }: { agent: AgentConfig; model: AgentModel }) {
   const pinned = isModelPinned(agent.id, model.id);
   return (
-    <button
-      type="button"
-      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleModelPin(agent.id, model.id);
-      }}
-      aria-label={pinned ? `Unpin ${model.name}` : `Pin ${model.name}`}
-    >
-      {pinned ? <PinOff className="size-3" /> : <Pin className="size-3" />}
-    </button>
+    <IconTooltip label={pinned ? "Unpin" : "Pin"}>
+      <button
+        aria-label={pinned ? `Unpin ${model.name}` : `Pin ${model.name}`}
+        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        type="button"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleModelPin(agent.id, model.id);
+        }}
+      >
+        {pinned ? <PinOff className="size-3" /> : <Pin className="size-3" />}
+      </button>
+    </IconTooltip>
   );
 }

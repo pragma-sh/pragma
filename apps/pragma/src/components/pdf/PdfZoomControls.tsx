@@ -2,6 +2,7 @@ import { useZoom, ZoomMode, type ZoomLevel } from "@embedpdf/plugin-zoom/react";
 import { Check, ZoomIn, ZoomOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,16 +26,15 @@ export function PdfZoomControls({ documentId }: { documentId: string }) {
 
   return (
     <div className="flex items-center gap-0.5">
-      <Button
-        aria-label="Zoom out"
+      <IconButton
         disabled={!provides}
-        onClick={() => provides?.zoomOut()}
+        label="Zoom out"
         size="icon-sm"
-        title="Zoom out"
         variant="ghost"
+        onClick={() => provides?.zoomOut()}
       >
         <ZoomOut />
-      </Button>
+      </IconButton>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -63,16 +63,15 @@ export function PdfZoomControls({ documentId }: { documentId: string }) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        aria-label="Zoom in"
+      <IconButton
         disabled={!provides}
-        onClick={() => provides?.zoomIn()}
+        label="Zoom in"
         size="icon-sm"
-        title="Zoom in"
         variant="ghost"
+        onClick={() => provides?.zoomIn()}
       >
         <ZoomIn />
-      </Button>
+      </IconButton>
     </div>
   );
 }

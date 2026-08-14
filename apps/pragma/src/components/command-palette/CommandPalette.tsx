@@ -22,6 +22,7 @@ import {
 import type { AgentStatus, PaletteSearchMatch, Tab, Worktree } from "@pragma/constants";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
+import { paletteItemLabel, paletteItemMeta } from "@/components/command-palette/palette-item";
 import {
   Command,
   CommandDialog,
@@ -162,10 +163,8 @@ function ScopeResults({
         <CommandGroup heading="Scope">
           <CommandItem onSelect={goToScopedWorktree} value="go-to-scoped-worktree">
             <MonitorUp />
-            <span>Go to worktree</span>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {worktreeLabel(activeWorktrees[0]!)}
-            </span>
+            <span className={paletteItemLabel}>Go to worktree</span>
+            <span className={paletteItemMeta}>{worktreeLabel(activeWorktrees[0]!)}</span>
           </CommandItem>
         </CommandGroup>
       ) : null}
@@ -185,8 +184,8 @@ function ScopeResults({
               value={`running-script:${script.tabId}:${script.name}`}
             >
               <SquareTerminal />
-              <span className="truncate">{script.name}</span>
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              <span className={paletteItemLabel}>{script.name}</span>
+              <span className={paletteItemMeta}>
                 {worktreeLabel(worktreeById.get(script.worktreeId))}
               </span>
             </CommandItem>
@@ -202,8 +201,8 @@ function ScopeResults({
               value={`worktree:${worktree.id}`}
             >
               <FolderGit2 />
-              <span>{worktreeLabel(worktree)}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{worktree.branch}</span>
+              <span className={paletteItemLabel}>{worktreeLabel(worktree)}</span>
+              <span className={paletteItemMeta}>{worktree.branch}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -237,9 +236,9 @@ function PortResults({
             value={`port:${port.port}:${port.process}:${port.tabId}`}
           >
             <Network />
-            <span className="font-mono tabular-nums">{port.port}</span>
-            <span className="truncate">{port.process}</span>
-            <span className="ml-auto min-w-0 truncate pl-4 text-xs text-muted-foreground">
+            <span className="shrink-0 font-mono tabular-nums">{port.port}</span>
+            <span className={paletteItemLabel}>{port.process}</span>
+            <span className={paletteItemMeta}>
               {tabLabel(tab)} · {worktreeLabel(worktreeById.get(port.worktreeId))}
             </span>
           </CommandItem>
@@ -266,8 +265,8 @@ function PullRequestResults({
           value={`pr:${row.worktreeId}:${row.pullRequest.number}`}
         >
           <GitPullRequest />
-          <span>#{row.pullRequest.number}</span>
-          <span className="truncate">{row.pullRequest.title}</span>
+          <span className="shrink-0 tabular-nums">#{row.pullRequest.number}</span>
+          <span className={paletteItemLabel}>{row.pullRequest.title}</span>
         </CommandItem>
       ))}
     </CommandGroup>
@@ -316,8 +315,8 @@ function AgentResults({
                   value={`agent:${row.worktreeId}:${row.tabId}:${row.agent}`}
                 >
                   {agent ? <AgentIcon agent={agent} /> : <Bot />}
-                  <span>{row.agent}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
+                  <span className={paletteItemLabel}>{row.agent}</span>
+                  <span className={paletteItemMeta}>
                     {tabLabel(projectTabs.find((tab) => tab.id === row.tabId))}
                   </span>
                 </CommandItem>
@@ -354,7 +353,7 @@ function FileResults({
           {openFileRows.map((tab) => (
             <CommandItem key={tab.id} onSelect={() => activateTab(tab)} value={`open:${tab.id}`}>
               <FileText />
-              <span className="truncate">{tab.filePath}</span>
+              <span className={paletteItemLabel}>{tab.filePath}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -368,8 +367,8 @@ function FileResults({
               value={`file:${match.worktreeId}:${match.path}`}
             >
               <FileText />
-              <span className="truncate">{fileName(match.path)}</span>
-              <span className="ml-auto min-w-0 truncate pl-4 text-xs text-muted-foreground">
+              <span className={paletteItemLabel}>{fileName(match.path)}</span>
+              <span className={paletteItemMeta}>
                 {match.path} · {worktreeLabel(worktreeById.get(match.worktreeId))}
               </span>
             </CommandItem>
@@ -385,7 +384,7 @@ function FileResults({
               value={`terminal:${tab.id}`}
             >
               <Terminal />
-              <span>{tabLabel(tab)}</span>
+              <span className={paletteItemLabel}>{tabLabel(tab)}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -416,7 +415,7 @@ function CodeResults({
               value={`code:${match.worktreeId}:${match.path}:${match.line}`}
             >
               <Code2 />
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className="block truncate">
                   {match.path}:{match.line}
                 </span>

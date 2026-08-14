@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Globe, Pin, PinOff, TerminalSquare } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
+import { IconTooltip } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { type AgentConfig } from "@/lib/tauri";
@@ -126,14 +127,16 @@ function AgentRow({ agent, pinned }: { agent: AgentConfig; pinned: boolean }) {
       </button>
       {/* Hover- (or keyboard-focus-) only: `focus-visible` never sticks after a
         mouse click, so the glyph leaves with the pointer. */}
-      <button
-        className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-        onClick={() => toggleAgentPin(agent.id)}
-        aria-label={pinned ? `Unpin ${agent.name}` : `Pin ${agent.name}`}
-        type="button"
-      >
-        {pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
-      </button>
+      <IconTooltip label={pinned ? "Unpin" : "Pin"}>
+        <button
+          aria-label={pinned ? `Unpin ${agent.name}` : `Pin ${agent.name}`}
+          className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          type="button"
+          onClick={() => toggleAgentPin(agent.id)}
+        >
+          {pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+        </button>
+      </IconTooltip>
     </div>
   );
 }

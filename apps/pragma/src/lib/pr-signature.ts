@@ -71,7 +71,7 @@ function prSignatureEnabled(): Promise<boolean> {
 /**
  * Renders the footer block for one worktree.
  *
- * The button points at the `openUrl` web redirector rather than the deep link
+ * The link points at the `openUrl` web redirector rather than the deep link
  * itself, because GitHub's markdown sanitizer keeps only `http`/`https`/`mailto`
  * hrefs — a `pragma://` URL would render as inert text. The redirector forwards
  * `worktree` to `pragma://open`, which resolves only on the machine that owns
@@ -84,7 +84,7 @@ export function buildPrSignature(worktreeId: string | null): string {
   const target = worktreeId
     ? `${prSignature.openUrl}?worktree=${encodeURIComponent(worktreeId)}`
     : prSignature.openUrl;
-  const button = `[![${prSignature.badgeAlt}](${prSignature.badgeUrl})](${target})`;
+  const link = `<sub>[${prSignature.linkLabel}](${target})</sub>`;
   const optOut =
     "<sub>Turn this off in Pragma → Settings → GitHub → “Created with Pragma” pull-request footer.</sub>";
   return [
@@ -97,7 +97,7 @@ export function buildPrSignature(worktreeId: string | null): string {
     "",
     tagline,
     "",
-    button,
+    link,
     "",
     optOut,
     "",

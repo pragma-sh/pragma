@@ -3,6 +3,7 @@ import { Check, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   ColorPicker,
   ColorPickerAlpha,
@@ -335,16 +336,16 @@ function ThemeTokenRow({
       >
         {ORIGIN_LABEL[state.origin]}
       </span>
-      <Button
+      <IconButton
         aria-label={`Reset ${themeTokenLabel(token)}`}
         disabled={disabled || state.origin !== "custom"}
+        label="Reset color"
         size="icon-sm"
-        title="Reset to default"
         variant="ghost"
         onClick={() => void setToken(token, null)}
       >
         <RotateCcw />
-      </Button>
+      </IconButton>
       <ThemeColorPopover
         disabled={disabled}
         mode={mode}
@@ -395,15 +396,15 @@ function ThemeColorPopover({
       }}
     >
       <PopoverTrigger asChild>
-        <Button
+        <IconButton
           aria-label={`Edit ${themeTokenLabel(token)}`}
           disabled={disabled}
+          label="Edit color"
           size="icon-sm"
-          title="Edit color"
           variant="ghost"
         >
           <Pencil />
-        </Button>
+        </IconButton>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-3">
         <p className="font-mono text-xs text-muted-foreground">

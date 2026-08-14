@@ -270,11 +270,11 @@ describe("CreateWorktreeDialog fanout mode", () => {
   it("starts in single mode and only shows attempt rows after switching", async () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Single" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("tab", { name: "Standard" })).toHaveAttribute("data-state", "active");
     expect(screen.queryByText("Attempts")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create worktree/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
 
     expect(screen.getByText("Attempts")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Remove attempt" })).toHaveLength(2);
@@ -287,14 +287,14 @@ describe("CreateWorktreeDialog fanout mode", () => {
       target: { value: "Implement token refresh" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
 
     expect(screen.getByLabelText("Prompt")).toHaveValue("Implement token refresh");
   });
 
   it("adds and removes attempt rows down to the minimum", async () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
     fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
@@ -312,7 +312,7 @@ describe("CreateWorktreeDialog fanout mode", () => {
 
   it("always creates a new coordination parent without opening the comparison", async () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
 
     // A branch name is required: the fanout always branches its own parent.
@@ -342,7 +342,7 @@ describe("CreateWorktreeDialog fanout mode", () => {
 
   it("has no ceiling on attempt rows", () => {
     render(<CreateWorktreeDialog open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Fan out" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
 
     for (let index = 0; index < 10; index += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Add agent" }));

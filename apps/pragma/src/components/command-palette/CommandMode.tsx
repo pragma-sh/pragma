@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   PanelRight,
   RefreshCw,
+  RotateCw,
   Server,
   Sparkles,
   Terminal,
@@ -17,15 +18,11 @@ import { toast } from "sonner";
 
 import { constants, type Worktree } from "@pragma/constants";
 
+import { paletteItemLabel, paletteItemMeta } from "@/components/command-palette/palette-item";
 import { CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { errorMessage } from "@/lib/errors";
-import {
-  restartDaemon,
-  tunnelStart,
-  tunnelStatus,
-  tunnelStop,
-  type TunnelStatus,
-} from "@/lib/tauri";
+import { tunnelStart, tunnelStatus, tunnelStop, type TunnelStatus } from "@/lib/tauri";
+import { reloadWebview, restartServer } from "@/lib/troubleshooting";
 import { useAi } from "@/state/ai-context";
 import { useKanban } from "@/state/kanban-context";
 import { useRightSidebar } from "@/state/right-sidebar-context";
@@ -147,8 +144,8 @@ function CommandModeList({
                 value={`editor-worktree:${worktree.id}`}
               >
                 <FolderGit2 />
-                <span>{worktreeLabel(worktree)}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
+                <span className={paletteItemLabel}>{worktreeLabel(worktree)}</span>
+                <span className={paletteItemMeta}>
                   {remote ? "Unavailable for remote worktrees" : worktree.branch}
                 </span>
               </CommandItem>
@@ -178,7 +175,7 @@ function CommandModeList({
         <CommandGroup heading="AI">
           <CommandItem onSelect={() => onAskAi(trimmedQuery)} value={`ask-ai:${trimmedQuery}`}>
             <Sparkles />
-            <span className="truncate">Ask AI {trimmedQuery}</span>
+            <span className={paletteItemLabel}>Ask AI {trimmedQuery}</span>
           </CommandItem>
         </CommandGroup>
       ) : null}
@@ -198,7 +195,7 @@ function CommandModeList({
                 icon={option.brandIcon}
                 style={{ color: option.brandColor }}
               />
-              <span>Open in {option.name}</span>
+              <span className={paletteItemLabel}>Open in {option.name}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -213,7 +210,7 @@ function CommandModeList({
               value={`command:${command.id}`}
             >
               <command.icon />
-              <span>{command.label}</span>
+              <span className={paletteItemLabel}>{command.label}</span>
             </CommandItem>
           ))}
         </CommandGroup>
@@ -270,7 +267,17 @@ export function CommandMode({
       label: "Restart server",
       keywords: "daemon app host troubleshooting",
       icon: RefreshCw,
-      run: () => runAsync(restartDaemon(), "Server restarted", "Restarting server..."),
+      run: () => runAsync(restartServer(workspace), "Server restarted", "Restarting server..."),
+    },
+    {
+      id: "reload-ui",
+      label: "Reload",
+      keywords: "reload refresh ui webview window troubleshooting",
+      icon: RotateCw,
+      run: () => {
+        close();
+        reloadWebview();
+      },
     },
     {
       id: "server-logs",
