@@ -8,9 +8,11 @@ import { pragmaWidgets } from "./widgets";
 
 /**
  * WidgetKit budgets reloads, and agent status can change many times a second
- * while a session streams. Coalesce bursts into at most one push per interval.
+ * while a session streams. Coalesce bursts into at most one push per interval —
+ * short enough that a status change shows up promptly, long enough to fold a
+ * streaming burst into a single reload.
  */
-const MIN_PUSH_INTERVAL_MS = 15_000;
+const MIN_PUSH_INTERVAL_MS = 3_000;
 
 /**
  * Mirrors the live workspace into the iOS home-screen widgets. A widget cannot

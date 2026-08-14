@@ -88,8 +88,14 @@ function AgentIconContent({
   if (resolved.kind === "svg")
     return (
       <View style={{ width: size, height: size }}>
-        <SvgXml height={size} width={size} xml={resolved.xml} />
+        <SvgXml height={size} preserveAspectRatio="xMidYMid meet" width={size} xml={resolved.xml} />
       </View>
     );
-  return <Image source={{ uri: resolved.uri }} style={{ width: size, height: size }} />;
+  return (
+    <Image
+      resizeMode="contain"
+      source={{ uri: resolved.uri }}
+      style={{ width: size, height: size }}
+    />
+  );
 }

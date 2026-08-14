@@ -153,11 +153,11 @@ components/
   chat/                           # ChatScreen parts: MessageList, MessageRow, Composer, AttentionDock, ScratchpadPill
   AgentIcon                       # plugin agent icon fetched by hash (SVG/raster, cached)
   LaunchSheet                     # launch a new agent session (catalog-fed picker)
-  LaunchAgentButton               # worktree header-right "+" → Launch sheet
+  LaunchAgentButton               # project/worktree header-right "+" → Launch sheet
   NavRow / WorktreeNavRow         # iOS Settings-style rows
   AgentStatusDot                  # running/attention/done rollup dot
   InboxCard                       # swipe-right = approve/submit, swipe-left = deny
-  NewWorktreeButton               # project/chat header-right "+" → New Worktree sheet
+  NewWorktreeButton               # chat header-right "+" → New Worktree sheet
   AgentModelSelector              # native nested menu: agent → model → reasoning
   GlassSurface / IconSymbol
 lib/
@@ -219,12 +219,12 @@ implemented in `lib/widgets/`:
   project rollups, pre-built deep links) and is Vitest-covered; the layouts only render it.
 - **The widget cannot reach the host.** The extension renders the last snapshot the app
   pushed, so `lib/widgets/use-widget-sync.ts` (mounted in `app/_layout.tsx`) re-pushes on
-  content change, coalesced to at most one push per 15s because WidgetKit budgets reloads.
+  content change, coalesced to at most one push per 3s because WidgetKit budgets reloads.
   A widget therefore shows the state as of the last time the app ran; `updatedAt` rides
   along in every snapshot for layouts that want to surface that. It pushes nothing while
   the connection status is `loading` — that status is the restore probe still running,
   and collapsing it to `paired: false` would blank a paired user's widgets on every
-  launch until the throttled correction landed up to 15s later.
+  launch until the throttled correction landed up to 3s later.
 - **Colors are SwiftUI named colors, not the app's tokens.** A widget has no NativeWind
   theme, and `red`/`orange`/`green`/`gray` already adapt to light, dark, and tinted
   rendering modes. `statusColor()` maps agent status onto them in the same

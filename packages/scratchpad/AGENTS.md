@@ -58,9 +58,12 @@ bun run --filter @pragma/scratchpad typecheck
 bun run --filter @pragma/scratchpad test
 ```
 
-Root `turbo` runs this package's `build` before `test` (same-package
-`dependsOn: ["build"]`). Do not reintroduce a `pretest` rebuild — concurrent
-turbo `build` + `pretest` races bunup on `dist/` (ENOENT on `primitives.cjs`).
-`typecheck` stays on `^build` only so a package like `pragma` that re-runs
-workspace builds inside its own `build` script cannot clobber `dist/*.d.ts`
-while dependents typecheck.
+`test`/`typecheck`/`lint` depend on `^build` (dependency builds only, never this
+package's own `build`), so a package like `pragma` that re-runs workspace builds
+inside its own `build` script cannot clobber `dist/*.d.ts` while dependents
+typecheck. Do not reintroduce a `pretest` that runs the full `build` — a
+concurrent turbo `build` + `pretest` races bunup on `dist/` (ENOENT on
+`primitives.cjs`). A `pretest` that only emits a gitignored `src/generated/**`
+file without touching `dist/` is fine: `@pragma/scratchpad-viewer` generates its
+runtime string this way (`build.ts --runtime-only`, mirroring its
+`pretypecheck`).

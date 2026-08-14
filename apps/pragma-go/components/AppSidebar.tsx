@@ -100,13 +100,7 @@ function WorktreeBranch({
     <>
       <SidebarRow
         depth={depth}
-        icon={
-          <IconSymbol
-            fallback={worktree.isMain ? "★" : "⎇"}
-            name={worktree.isMain ? "circle.fill" : "arrow.triangle.branch"}
-            size={14}
-          />
-        }
+        icon={<IconSymbol fallback="⎇" name="arrow.triangle.branch" size={14} />}
         onPress={() =>
           router.navigate({
             pathname: "/worktree/[worktreeId]",

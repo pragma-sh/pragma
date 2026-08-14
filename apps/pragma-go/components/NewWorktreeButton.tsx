@@ -6,11 +6,10 @@ import { hapticImpact } from "@/lib/haptics";
 import { IconSymbol } from "./IconSymbol";
 
 /**
- * Header-right button shown on the in-project screens (project root, nested
- * worktrees, chat) that opens the New Worktree bottom sheet. It owns the sheet's
- * open state so screens just drop it into `headerRight`. It replaced the former
- * top-level/home navigation shortcut — the stack's native back button handles
- * escaping the drill-down.
+ * Header-right button shown on the chat screen that opens the New Worktree
+ * bottom sheet. It owns the sheet's open state so screens just drop it into
+ * `headerRight`. (The project and worktree screens open the Launch Agent sheet
+ * instead — the launch sheet's "New branch" tab covers worktree creation.)
  */
 function NewWorktreeButton({ color }: { color: ColorValue }) {
   const [open, setOpen] = useState(false);

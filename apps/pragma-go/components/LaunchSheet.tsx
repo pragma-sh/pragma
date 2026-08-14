@@ -1,13 +1,15 @@
 import { PragmaGatewayError } from "@pragma/sdk";
 import { router } from "expo-router";
 import { type ReactNode, useMemo, useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 
 import { AgentIcon } from "@/components/AgentIcon";
 import { AgentModelSelector } from "@/components/AgentModelSelector";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Text } from "@/components/ui/text";
 import { useConnection } from "@/lib/connection-context";
 import { catalogToSelectorAgents } from "@/lib/catalog";
@@ -223,36 +225,43 @@ function LaunchForm({
       </Field>
 
       <Field label="Run in">
-        <View className="flex-row gap-2">
-          <Choice
-            active={target.kind === "existing"}
-            label="This worktree"
-            onPress={() => onTargetChange({ kind: "existing" })}
-          />
-          <Choice
-            active={target.kind === "new"}
-            label="New branch"
-            onPress={() => onTargetChange({ kind: "new", branch: "", title: "" })}
-          />
-        </View>
+        <Tabs
+          value={target.kind}
+          onValueChange={(next) =>
+            onTargetChange(
+              next === "existing" ? { kind: "existing" } : { kind: "new", branch: "", title: "" },
+            )
+          }
+        >
+          <TabsList className="w-full">
+            <TabsTrigger value="existing">
+              <Text>This worktree</Text>
+            </TabsTrigger>
+            <TabsTrigger value="new">
+              <Text>New branch</Text>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </Field>
 
       {target.kind === "new" ? (
-        <Field label="Branch name">
-          <Input
-            autoCapitalize="none"
-            autoCorrect={false}
-            onChangeText={(text) =>
-              onTargetChange({
-                kind: "new",
-                branch: text.replace(/\s+/g, "-"),
-                title: target.title,
-              })
-            }
-            placeholder="feature-branch"
-            value={target.branch}
-          />
-        </Field>
+        <Animated.View entering={FadeInDown.duration(200)}>
+          <Field label="Branch name">
+            <Input
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={(text) =>
+                onTargetChange({
+                  kind: "new",
+                  branch: text.replace(/\s+/g, "-"),
+                  title: target.title,
+                })
+              }
+              placeholder="feature-branch"
+              value={target.branch}
+            />
+          </Field>
+        </Animated.View>
       ) : null}
 
       <Field label="Prompt">
@@ -293,25 +302,6 @@ function LaunchSheetActions({
         <Text>{busy ? "Launching…" : "Launch"}</Text>
       </Button>
     </View>
-  );
-}
-
-function Choice({
-  active,
-  label,
-  onPress,
-}: {
-  active: boolean;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      className={`flex-1 items-center rounded-lg border px-3 py-2.5 ${active ? "border-primary bg-primary/10" : "border-input bg-background"}`}
-      onPress={onPress}
-    >
-      <Text className={active ? "text-primary" : "text-foreground"}>{label}</Text>
-    </Pressable>
   );
 }
 
