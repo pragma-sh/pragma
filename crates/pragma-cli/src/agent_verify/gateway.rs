@@ -56,6 +56,8 @@ pub trait VerifyApi: Send + Sync {
         approved: bool,
     ) -> Result<(), String>;
     fn interrupt(&self, agent: &str, worktree_id: &str, tab_id: &str) -> Result<(), String>;
+    fn input(&self, agent: &str, worktree_id: &str, tab_id: &str, text: &str)
+        -> Result<(), String>;
     fn write_input(&self, session_id: &str, bytes: &[u8]) -> Result<(), String>;
     fn kill_session(&self, session_id: &str) -> Result<(), String>;
     fn usage_limits(&self, plugin_id: &str) -> Result<Value, String>;
@@ -232,6 +234,24 @@ impl VerifyApi for HttpVerifyApi {
         self.post_empty(
             "/v1/agents/interrupts",
             &json!({ "agent": agent, "worktreeId": worktree_id, "tabId": tab_id }),
+        )
+    }
+
+    fn input(
+        &self,
+        agent: &str,
+        worktree_id: &str,
+        tab_id: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        self.post_empty(
+            "/v1/agents/inputs",
+            &json!({
+                "agent": agent,
+                "worktreeId": worktree_id,
+                "tabId": tab_id,
+                "text": text,
+            }),
         )
     }
 

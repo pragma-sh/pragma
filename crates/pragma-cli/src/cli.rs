@@ -796,6 +796,13 @@ pub enum AgentReportCommand {
         /// optional). Pair with `--kind question`; omit for free-text.
         #[arg(long)]
         options: Option<String>,
+        /// Multiple questions for a `question` attention, as a JSON array of
+        /// `{"question": "...", "options": [...]}` objects. When present,
+        /// clients render a back/next wizard and submit every answer together;
+        /// the legacy `--question`/`--options` fields still cover a single
+        /// question.
+        #[arg(long)]
+        questions: Option<String>,
         /// Correlation id for the command-approval or question round-trip. Set
         /// this and then call `agent await-decision`/`await-answer
         /// --request-id <id>` to block for the verdict/reply.

@@ -95,6 +95,12 @@ function testHooks() {
       reports.push("attention:question");
       questions.push({ question, options, requestId });
     },
+    async attentionQuestions(entries, requestId) {
+      reports.push("attention:question");
+      for (const entry of entries) {
+        questions.push({ question: entry.question, options: entry.options ?? [], requestId });
+      }
+    },
     async sessionName(name) {
       sessionNames.push(name);
     },
@@ -234,6 +240,7 @@ describe("Pragma opencode plugin", () => {
       },
       async attentionCommand() {},
       async attentionQuestion() {},
+      async attentionQuestions() {},
       async message() {},
       async cleared() {
         reports.push("cleared");
@@ -838,6 +845,43 @@ describe("Pragma opencode plugin", () => {
       name: "question",
       summary: "Which database?",
     });
+  });
+
+  it("reports multiple questions without collapsing them", async () => {
+    const { hooks, reports, questions } = testHooks();
+
+    await hooks["tool.execute.before"]?.(
+      { tool: "question", sessionID: "s1", callID: "c1" },
+      {
+        args: {
+          questions: [
+            {
+              question: "Choose Red or Blue?",
+              options: [{ label: "Red" }, { label: "Blue" }],
+            },
+            {
+              question: "Choose Circle or Square?",
+              options: [{ label: "Circle" }, { label: "Square" }],
+            },
+          ],
+        },
+      },
+    );
+    await flushLegacyQuestion();
+
+    expect(reports).toEqual(["attention:question"]);
+    expect(questions).toEqual([
+      {
+        question: "Choose Red or Blue?",
+        options: [{ label: "Red" }, { label: "Blue" }],
+        requestId: "opencode-question-c1",
+      },
+      {
+        question: "Choose Circle or Square?",
+        options: [{ label: "Circle" }, { label: "Square" }],
+        requestId: "opencode-question-c1",
+      },
+    ]);
   });
 
   it("uses canonical question events from OpenCode 1.18", async () => {

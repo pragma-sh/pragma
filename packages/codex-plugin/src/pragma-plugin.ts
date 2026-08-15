@@ -17,9 +17,6 @@ const baseWatcher = createTuiWatcher({
   agent: "codex",
   handleDecisions: false,
   handleQuestionAnswers: true,
-  // Codex's question TUI has no free-text editor; its generated last row is
-  // "None of the above". Select it, abort, and interject the real answer.
-  questionFreeTextMode: "interject",
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 

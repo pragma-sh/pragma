@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::{
     AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
-    AgentStatus, ProtocolEventKind, QuestionOption,
+    AgentQuestion, AgentStatus, ProtocolEventKind, QuestionOption,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -30,6 +30,7 @@ pub enum VerifyEvent {
         command: Option<String>,
         question: Option<String>,
         options: Option<Vec<QuestionOption>>,
+        questions: Option<Vec<AgentQuestion>>,
         request_id: Option<String>,
     },
     AgentMessage {

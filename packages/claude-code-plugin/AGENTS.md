@@ -149,10 +149,14 @@ so Claude's native UI collects those. Same story when `python3` is unavailable (
 parse helpers are python3-based, like the transcript helpers above).
 
 **Interjections** (`AgentInput`, e.g. the SDK's `client.agents.connect(...).send(text)`) are
-**not** handled by these hooks. They are delivered by the shared built-in-agent watcher
-(`@pragma/opencode-plugin`'s `claudeCodeInterjectWatcher`, registered in
-`apps/pragma/src/plugins/builtin-agents.ts`), which writes the text into the live terminal
-followed by a submit key. These hooks stay status/approval-only.
+**not** handled by these hooks. They are delivered by this plugin's shared
+`@pragma/watcher-kit` watcher, which writes the text into the live terminal followed by a
+submit key. These hooks stay status/approval-only.
+
+Claude Code is paste-aware: bracketed-paste text and Enter must be separate PTY writes,
+with a short delay between them. Sending both in one write leaves the reply staged in the
+composer instead of submitting it. Keep `interjectSubmitDelayMs` on the Claude watcher and
+the separate paste/submit writes in `@pragma/watcher-kit`.
 
 `Elicitation` stays observe-only (`attention` dot, no decision).
 
@@ -338,6 +342,16 @@ the agent catalog, and `apps/pragma/src/plugins/builtin-agents.ts` re-exports it
 (overriding `iconPath` with a browser URL and attaching the built-in watcher) so the
 webview path shares the same definition. Its icon asset stays in this package under
 `assets/`, not in Pragma core.
+Because the built-in launcher runs `--permission-mode auto`, shell commands are
+auto-approved and **never raise a command-approval attention** — `pragma-cli agent
+verify`'s `command-allow`/`command-deny` (and `decision-timeout`/`abort-mid-approval`)
+cannot pass for a launched session, so the agent declares
+`excludeFeatures: ["commandApproval"]`. `AskUserQuestion` still routes through the
+blocking `PermissionRequest` hook in auto mode, so `questions` stays enabled and the
+question scenarios keep verifying. If a future launch drops auto mode, remove the
+exclusion (and the `command-no-permission` scenario must be re-checked against the
+default allowlist).
+
 Claude Code supports `--model` and `--effort` but does not expose a supported model-list
 command, so the built-in agent uses static model metadata. Reasoning efforts are listed
 per model and are appended as `--effort {reasoning}` when selected; choosing a model with

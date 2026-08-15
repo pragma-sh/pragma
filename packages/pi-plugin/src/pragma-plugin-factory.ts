@@ -9,6 +9,9 @@ import {
 } from "@pragma/plugin/catalog";
 import { createTuiWatcher } from "@pragma/watcher-kit";
 
+const KITTY_ENTER = "\x1b[13u";
+const KITTY_ALT_ENTER = "\x1b[13;3u";
+const CLEAR_INPUT = "\x15";
 const PI_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(
   (id) => ({ id, name: id === "xhigh" ? "Extra High" : `${id[0]?.toUpperCase()}${id.slice(1)}` }),
 );
@@ -33,7 +36,13 @@ export interface PiPragmaPluginOptions {
 /** Creates a branded Pragma launcher for a Pi-compatible coding agent. */
 export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefinition {
   const { agent } = options;
-  const baseWatcher = createTuiWatcher({ agent: agent.id, handleDecisions: false });
+  const baseWatcher = createTuiWatcher({
+    agent: agent.id,
+    handleDecisions: false,
+    // Pi queues a mid-turn follow-up with Alt+Enter. Plain Enter inserts a
+    // newline while a response is streaming.
+    interjectSubmitKeys: KITTY_ALT_ENTER,
+  });
 
   return definePlugin({
     name: options.plugin.name,
@@ -69,9 +78,13 @@ export function createPiPragmaPlugin(options: PiPragmaPluginOptions): PluginDefi
         iconPath: agent.iconPath,
         launch: { command: agent.command },
         excludeFeatures: agent.excludeFeatures,
+        // Pi's 100ms OSC 11 theme probe can expire before Pragma relays the
+        // terminal response, leaving the late response in the composer. Clear
+        // it immediately before prompt prefill.
+        startupInput: [{ delayMs: 1800, data: CLEAR_INPUT }],
         prefillDelayMs: 2000,
         prefillMode: "plain",
-        prefillSubmit: "\r",
+        prefillSubmit: KITTY_ENTER,
         models: async (ctx) => parsePiModels(await execFirst(ctx, agent.modelListCommand)),
         permissionModes: [],
         args: {

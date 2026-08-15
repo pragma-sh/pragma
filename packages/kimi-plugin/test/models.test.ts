@@ -120,7 +120,34 @@ describe("loadKimiModels", () => {
     ]);
     expect(run).toHaveBeenCalledWith({
       cwd: "/project",
-      commands: ["kimi provider list --json", "kimi provider list"],
+      commands: [
+        'kimi provider list --json || "$HOME/.kimi-code/bin/kimi" provider list --json',
+        'kimi provider list || "$HOME/.kimi-code/bin/kimi" provider list',
+      ],
+    });
+  });
+
+  it("falls back to the Kimi install dir when the host PATH lacks kimi", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValue([
+        { stdout: WITH_MODELS },
+        { stdout: "opencode  type=openai  models=3\n\nDefault model: opencode/glm-5\n" },
+      ]);
+
+    await expect(
+      loadKimiModels({ sdk: { exec: { run } }, project: null } as never),
+    ).resolves.toEqual([
+      { id: "opencode/glm-5", name: "glm-5" },
+      { id: "opencode/gpt-5.5-pro", name: "GPT 5.5 Pro (Opencode)" },
+      { id: "opencode/claude-sonnet-4-6", name: "claude-sonnet-4-6" },
+    ]);
+    expect(run).toHaveBeenCalledWith({
+      cwd: "/tmp",
+      commands: [
+        'kimi provider list --json || "$HOME/.kimi-code/bin/kimi" provider list --json',
+        'kimi provider list || "$HOME/.kimi-code/bin/kimi" provider list',
+      ],
     });
   });
 

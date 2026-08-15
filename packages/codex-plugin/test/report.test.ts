@@ -31,7 +31,7 @@ beforeEach(() => {
   mkdirSync(tmpEnvDir, { recursive: true });
   writeFileSync(
     join(binDir, "pragma-cli"),
-    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${TMPDIR:-}" ] && [ -n "\${PRAGMA_TAB_ID:-}" ] && [ -f "$TMPDIR/pragma-cli-codex-$PRAGMA_TAB_ID.watcher" ]; then printf 'watcher-running\\n' >> "$PRAGMA_TEST_LOG"; fi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -412,7 +412,7 @@ describe("report.sh", () => {
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
-  itWithPython3("does not flatten unsupported multi-question requests", async () => {
+  itWithPython3("reports multi-question requests as one attention with --questions", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -432,11 +432,10 @@ describe("report.sh", () => {
         },
       })}\n`,
     );
-    await sleep(500);
-    expect(reports()).toEqual([
-      "agent report --agent codex started",
-      "agent report --agent codex session-name --name Fix auth",
-    ]);
+    await waitFor(() => reports().at(-1)?.includes(" attention ") ?? false);
+    expect(reports().at(-1)).toBe(
+      'agent report --agent codex attention --kind question --questions [{"question":"First?","options":[{"label":"A"}]},{"question":"Second?","options":[{"label":"B"}]}] --request-id call-multi',
+    );
   });
 
   itWithPython3("abort watcher clears current turn", async () => {
@@ -464,5 +463,18 @@ describe("report.sh", () => {
       "agent report --agent codex session-name --name Fix auth",
     ]);
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  itWithPython3("starts the abort watcher before reporting running", () => {
+    const current = transcript();
+    run("started", { stdin: current.input });
+    const log = calls();
+    // The watcher must be spawned before the slow pragma-cli reports: Codex
+    // kills the in-flight UserPromptSubmit hook when a turn is aborted, so a
+    // watcher started only at the end of the handler never runs for a fast
+    // abort and the `turn_aborted` marker is never scanned.
+    const firstReport = log.indexOf("agent report --agent codex started");
+    expect(firstReport).toBeGreaterThanOrEqual(0);
+    expect(log[firstReport + 1]).toBe("watcher-running");
   });
 });

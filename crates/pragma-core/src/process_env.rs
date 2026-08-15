@@ -69,6 +69,7 @@ fn user_path_from(current: &OsStr, home: Option<&Path>) -> OsString {
         push_path(&mut entries, home.join(".local/bin"));
         push_path(&mut entries, home.join(".cargo/bin"));
         push_path(&mut entries, home.join(".volta/bin"));
+        push_path(&mut entries, home.join(".kimi-code/bin"));
         push_path(&mut entries, home.join(".mise/shims"));
         push_path(&mut entries, home.join(".local/share/mise/shims"));
         push_path(&mut entries, home.join(".asdf/shims"));
@@ -111,6 +112,7 @@ mod tests {
         assert!(entries.contains(&PathBuf::from("/Users/dev/.local/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.cargo/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.volta/bin")));
+        assert!(entries.contains(&PathBuf::from("/Users/dev/.kimi-code/bin")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.mise/shims")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.local/share/mise/shims")));
         assert!(entries.contains(&PathBuf::from("/Users/dev/.asdf/shims")));

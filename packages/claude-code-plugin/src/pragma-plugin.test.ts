@@ -2,6 +2,14 @@ import { expect, it, vi } from "vitest";
 
 import { claudeCodeAgentPlugin, loadClaudeUsageLimits, parseClaudeUsage } from "./pragma-plugin";
 
+it("declares command approvals unsupported but questions supported", () => {
+  const agent = claudeCodeAgentPlugin.agents?.[0];
+  expect(agent?.excludeFeatures).toContain("commandApproval");
+  // AskUserQuestion round-trips through the blocking PermissionRequest hook
+  // even in `--permission-mode auto`, so question verification stays enabled.
+  expect(agent?.excludeFeatures).not.toContain("questions");
+});
+
 it("links to Claude's usage dashboard", () => {
   expect(claudeCodeAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
     "https://claude.ai/new#settings/usage",

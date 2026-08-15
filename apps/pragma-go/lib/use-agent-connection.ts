@@ -75,6 +75,8 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
 
   const connectionRef = useRef<AgentConnection | null>(null);
   const attentionIdRef = useRef<string | null>(null);
+  /** Actions queued while the duplex connection is (re)connecting. */
+  const pendingRef = useRef<Array<(connection: AgentConnection) => void>>([]);
 
   const { agent, initialMessage, initialMessageTs, tabId, worktreeId } = target;
 
@@ -83,6 +85,7 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
     { agent, initialMessage, initialMessageTs, tabId, worktreeId },
     connectionRef,
     attentionIdRef,
+    pendingRef,
     dispatch,
     setConnected,
     setErrored,
@@ -93,28 +96,46 @@ export function useAgentConnection(target: AgentTarget): AgentConversation {
   const incomingId = state.attention?.requestId ?? null;
   notifyNewAttention(attentionIdRef, incomingId);
 
-  const send = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    dispatch({ type: "localInput", text: trimmed, ts: Date.now() });
-    void connectionRef.current?.send(trimmed);
+  const withConnection = useCallback((action: (connection: AgentConnection) => void) => {
+    const connection = connectionRef.current;
+    if (connection) {
+      action(connection);
+      return;
+    }
+    pendingRef.current.push(action);
   }, []);
+
+  const send = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      dispatch({ type: "localInput", text: trimmed, ts: Date.now() });
+      withConnection((connection) => void connection.send(trimmed));
+    },
+    [withConnection],
+  );
 
   const interrupt = useCallback(() => {
-    void connectionRef.current?.interrupt();
-  }, []);
+    withConnection((connection) => void connection.interrupt());
+  }, [withConnection]);
 
-  const decide = useCallback((requestId: string, approved: boolean) => {
-    if (approved) hapticSuccess();
-    else hapticWarning();
-    void connectionRef.current?.decide(requestId, approved);
-  }, []);
+  const decide = useCallback(
+    (requestId: string, approved: boolean) => {
+      if (approved) hapticSuccess();
+      else hapticWarning();
+      withConnection((connection) => void connection.decide(requestId, approved));
+    },
+    [withConnection],
+  );
 
-  const answer = useCallback((requestId: string, reply: string | null) => {
-    if (reply === null) hapticWarning();
-    else hapticSuccess();
-    void connectionRef.current?.answer(requestId, reply);
-  }, []);
+  const answer = useCallback(
+    (requestId: string, reply: string | null) => {
+      if (reply === null) hapticWarning();
+      else hapticSuccess();
+      withConnection((connection) => void connection.answer(requestId, reply));
+    },
+    [withConnection],
+  );
 
   const rows = transcriptRows(state);
   const phase = chatPhase(errored, connected, rows);
@@ -130,6 +151,7 @@ function useFocusedConnection(
   target: AgentTarget,
   connectionRef: RefObject<AgentConnection | null>,
   attentionIdRef: RefObject<string | null>,
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
   dispatch: DispatchAction,
   setConnected: (connected: boolean) => void,
   setErrored: (errored: boolean) => void,
@@ -144,6 +166,7 @@ function useFocusedConnection(
           { agent, initialMessage, initialMessageTs, tabId, worktreeId },
           connectionRef,
           attentionIdRef,
+          pendingRef,
           dispatch,
           setConnected,
           setErrored,
@@ -158,6 +181,7 @@ function useFocusedConnection(
         initialMessage,
         initialMessageTs,
         onUnauthorized,
+        pendingRef,
         setConnected,
         setErrored,
         tabId,
@@ -172,6 +196,7 @@ function focusedConnectionEffect(
   target: AgentTarget,
   connectionRef: RefObject<AgentConnection | null>,
   attentionIdRef: RefObject<string | null>,
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
   dispatch: DispatchAction,
   setConnected: (connected: boolean) => void,
   setErrored: (errored: boolean) => void,
@@ -183,6 +208,7 @@ function focusedConnectionEffect(
     target,
     connectionRef,
     attentionIdRef,
+    pendingRef,
     dispatch,
     setConnected,
     setErrored,
@@ -199,6 +225,7 @@ function startConnection(
   target: AgentTarget,
   connectionRef: RefObject<AgentConnection | null>,
   attentionIdRef: RefObject<string | null>,
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
   dispatch: DispatchAction,
   setConnected: (connected: boolean) => void,
   setErrored: (errored: boolean) => void,
@@ -224,6 +251,7 @@ function startConnection(
       client,
       target,
       connectionRef,
+      pendingRef,
       dispatch,
       () => cancelled,
       () => {
@@ -234,6 +262,7 @@ function startConnection(
     );
     if (cancelled) return;
     if (handleStreamResult(result, onUnauthorized, setErrored)) return;
+    connectionRef.current = null;
     setConnected(false);
     retry();
   };
@@ -264,13 +293,21 @@ async function streamConnection(
   client: ConnectionClient,
   target: AgentTarget,
   connectionRef: RefObject<AgentConnection | null>,
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
   dispatch: DispatchAction,
   isCancelled: () => boolean,
   onConnected: () => void,
 ): Promise<"closed" | "error" | "unauthorized"> {
   const connection = await openConnection(client, target);
   if (typeof connection === "string") return connection;
-  return consumeConnection(connection, connectionRef, dispatch, isCancelled, onConnected);
+  return consumeConnection(
+    connection,
+    connectionRef,
+    pendingRef,
+    dispatch,
+    isCancelled,
+    onConnected,
+  );
 }
 
 async function openConnection(
@@ -291,6 +328,7 @@ function connectionFailure(error: unknown): "error" | "unauthorized" {
 async function consumeConnection(
   connection: AgentConnection,
   connectionRef: RefObject<AgentConnection | null>,
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
   dispatch: DispatchAction,
   isCancelled: () => boolean,
   onConnected: () => void,
@@ -301,11 +339,23 @@ async function consumeConnection(
   }
   connectionRef.current = connection;
   onConnected();
+  flushPending(pendingRef, connection);
   for await (const event of connection) {
     if (isCancelled()) break;
     dispatch({ type: "event", event });
   }
   return "closed";
+}
+
+/** Delivers queued talk-back actions once the connection is ready. */
+function flushPending(
+  pendingRef: RefObject<Array<(connection: AgentConnection) => void>>,
+  connection: AgentConnection,
+): void {
+  const pending = pendingRef.current.splice(0);
+  for (const action of pending) {
+    action(connection);
+  }
 }
 
 function notifyNewAttention(ref: RefObject<string | null>, incomingId: string | null): void {

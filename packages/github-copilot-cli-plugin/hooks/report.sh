@@ -12,6 +12,7 @@ state_prefix="${TMPDIR:-/tmp}/pragma-cli-${agent}-${tab}"
 marker="${state_prefix}.active"
 session_name_marker="${state_prefix}.named"
 subagent_dir="${state_prefix}.subagents"
+subagent_count_file="${subagent_dir}/count"
 watcher_file="${state_prefix}.watcher"
 messages_file="${state_prefix}.messages"
 questions_file="${state_prefix}.questions"
@@ -34,12 +35,20 @@ message_ts_ms() {
 
 active_subagent_count() {
   count=0
-  if [ -d "$subagent_dir" ]; then
-    for child in "$subagent_dir"/*; do
-      [ -f "$child" ] && count=$((count + 1))
-    done
+  if [ -f "$subagent_count_file" ]; then
+    count="$(cat "$subagent_count_file" 2>/dev/null || echo 0)"
+    case "$count" in ''|*[!0-9]*) count=0 ;; esac
   fi
   printf '%s' "$count"
+}
+
+change_subagent_count() {
+  delta="$1"
+  count="$(active_subagent_count)"
+  count=$((count + delta))
+  [ "$count" -lt 0 ] && count=0
+  mkdir -p "$subagent_dir"
+  printf '%s' "$count" >"$subagent_count_file"
 }
 
 content_message() {
@@ -189,13 +198,6 @@ watch_transcript() {
   done
 }
 
-subagent_key() {
-  input="$1"
-  path="$(json_string '.transcriptPath' "$input")"
-  name="$(json_string '.agentName' "$input")"
-  safe_id "${path:-$name}"
-}
-
 extract_command() {
   input="$1"
   if command -v jq >/dev/null 2>&1; then
@@ -252,10 +254,16 @@ case "${1:-}" in
     rm -f "$messages_file"
     initialize_question_cursor "$transcript"
     printf '%s' "$token" >"$marker"
+    # Start the transcript watcher before the slow report/message calls below:
+    # the hook runs under Copilot's per-hook timeout (10s) and can be killed
+    # mid-handler when the machine is loaded, and the watcher is the only path
+    # that keeps reporting assistant messages and questions while the turn is
+    # running. If it never starts, a message that lands just before agentStop
+    # races Copilot's async transcript flush and is lost entirely.
+    [ -n "$session_id" ] && start_transcript_watcher "$transcript" "$token"
     report started
     session_name_once "$prompt"
     content_message user "$prompt" "github-copilot-${token}-user"
-    [ -n "$session_id" ] && start_transcript_watcher "$transcript" "$token"
     ;;
   stopped)
     [ -f "$marker" ] || exit 0
@@ -270,25 +278,51 @@ case "${1:-}" in
       session_id="$(marker_session)"
       transcript="${HOME:-}/.copilot/session-state/${session_id}/events.jsonl"
     fi
-    stop_watcher
-    sync_messages "$transcript" "$token"
-    rm -f "$marker" "$messages_file"
+    # Copilot appends transcript events asynchronously: the final assistant
+    # reply can land in the file a beat after agentStop fires (the events are
+    # timestamped in memory first). Retry briefly so a fast reply is not lost
+    # to the flush race; stop once the file stops growing.
+    last_count=0
+    retries=0
+    while [ "$retries" -lt 6 ]; do
+      sync_messages "$transcript" "$token"
+      count="$(cat "$messages_file" 2>/dev/null || echo 0)"
+      case "$count" in ''|*[!0-9]*) count=0 ;; esac
+      if [ "$retries" -gt 0 ] && [ "$count" -eq "$last_count" ]; then
+        break
+      fi
+      last_count="$count"
+      sleep 0.4
+      retries=$((retries + 1))
+    done
+    # Hooks run concurrently: a follow-up turn's userPromptSubmitted can
+    # replace the marker (and start a new transcript watcher) while this stop
+    # is still in flight. Only tear down state that still belongs to this
+    # turn — killing the newer watcher or clearing the newer marker would
+    # lose the next turn's assistant messages entirely.
+    if [ "$(cat "$marker" 2>/dev/null || true)" = "$token" ]; then
+      stop_watcher
+      rm -f "$marker" "$messages_file"
+    fi
     report stopped
     ;;
   subagent-start)
     [ -f "$marker" ] || exit 0
     input=$(cat)
-    mkdir -p "$subagent_dir"
-    : >"$subagent_dir/$(subagent_key "$input")"
     name="$(json_string '.agentDisplayName' "$input")"
-    content_message system "GitHub Copilot started ${name:-a subagent}" "github-copilot-subagent-$(subagent_key "$input")"
+    timestamp="$(printf '%s' "$input" | jq -r '.timestamp // empty' 2>/dev/null || true)"
+    change_subagent_count 1
+    # Copilot can spawn several sub-agents of the same agent type in one turn
+    # (same transcriptPath and agentName), so the marker must be a per-hook
+    # count rather than a per-key file; the hook process pid keeps message ids
+    # unique for concurrent children.
+    content_message system "GitHub Copilot started ${name:-a subagent}" "github-copilot-subagent-$(safe_id "${name:-subagent}-${timestamp}-$$")"
     report started
     ;;
   subagent-stop)
-    input=$(cat)
-    rm -f "$subagent_dir/$(subagent_key "$input")"
-    rmdir "$subagent_dir" 2>/dev/null || true
-    [ -f "$marker" ] && report started
+    [ -f "$marker" ] || exit 0
+    change_subagent_count -1
+    report started
     ;;
   running)
     [ -f "$marker" ] && report started

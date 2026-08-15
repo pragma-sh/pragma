@@ -1,6 +1,7 @@
 import type {
   AgentAttentionKind,
   AgentMessageRole,
+  AgentQuestion,
   AgentStatus,
   Project,
   QuestionOption,
@@ -40,6 +41,8 @@ export interface AttentionRequest {
   prompt: string;
   /** Answer choices for a `question`; empty for a `command`. */
   options?: QuestionOption[];
+  /** Multiple questions for a `question`; renders the back/next wizard. */
+  questions?: AgentQuestion[];
 }
 
 /** Normalizes question choices from current and pre-description host payloads. */
@@ -47,6 +50,33 @@ export function normalizeQuestionOptions(value: unknown): QuestionOption[] | und
   if (!Array.isArray(value)) return undefined;
   const options = value.flatMap(normalizeQuestionOption);
   return options.length > 0 ? options : undefined;
+}
+
+/** Normalizes multi-question attention entries from the wire payload. */
+export function normalizeQuestions(value: unknown): AgentQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const questions = value.flatMap(normalizeQuestion);
+  return questions.length > 0 ? questions : undefined;
+}
+
+function normalizeQuestion(question: unknown): AgentQuestion[] {
+  if (typeof question === "string") {
+    return question.trim() ? [{ question: question.trim(), options: [] }] : [];
+  }
+  if (!isQuestionObject(question)) return [];
+  const text = question.question.trim();
+  if (!text) return [];
+  const options = normalizeQuestionOptions(question.options) ?? [];
+  return [{ question: text, options }];
+}
+
+function isQuestionObject(question: unknown): question is { question: string; options?: unknown } {
+  return (
+    typeof question === "object" &&
+    question !== null &&
+    "question" in question &&
+    typeof (question as { question?: unknown }).question === "string"
+  );
 }
 
 function normalizeQuestionOption(option: unknown): QuestionOption[] {

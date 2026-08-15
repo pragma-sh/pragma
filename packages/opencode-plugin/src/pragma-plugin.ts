@@ -23,7 +23,13 @@ const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-
 export const opencodeAgentPlugin: PluginDefinition = definePlugin({
   name: "OpenCode",
   description: "Launch OpenCode from Pragma.",
-  watchers: [createTuiWatcher({ agent: "opencode", handleDecisions: true })],
+  watchers: [
+    createTuiWatcher({
+      agent: "opencode",
+      handleDecisions: true,
+      questionFinalizeKeys: "\r",
+    }),
+  ],
   usageLimits: [
     defineUsageLimitProvider({
       id: "opencode-go",

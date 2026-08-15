@@ -2,7 +2,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pragma_constants::{AgentAttentionKind, AgentMessage, AgentStatus, QuestionOption};
+use pragma_constants::{
+    AgentAttentionKind, AgentMessage, AgentQuestion, AgentStatus, QuestionOption,
+};
 
 use super::events::{EventMatch, Ledger, VerifyEvent};
 use super::gateway::{LaunchResult, LaunchSpec, VerifyApi};
@@ -11,6 +13,14 @@ use super::gateway::{LaunchResult, LaunchSpec, VerifyApi};
 /// ride behind it (stop-hook reporters emit the assistant reply after `done`).
 /// A new `running` status re-opens the full window for follow-up turns.
 const SETTLE_GRACE: Duration = Duration::from_secs(10);
+
+/// Spacing between prefill retries in [`ScenarioSession::await_running`]:
+/// long enough that a landed prompt's status report (which normally arrives
+/// within seconds) stops the retries before a second turn is typed, short
+/// enough that a slow TUI boot (a cold agent start that mounts its prompt
+/// late and swallows the first recovery write) still recovers within the
+/// attempt budget.
+const PREFILL_RETRY_CADENCE: Duration = Duration::from_secs(25);
 
 /// Shared immutable inputs for scenario execution.
 pub struct ScenarioCtx<'a> {
@@ -73,6 +83,7 @@ impl<'a> ScenarioCtx<'a> {
             agent_id: self.runtime_agent_id,
             deadline: Instant::now() + self.attempt_timeout,
             settle_grace: SETTLE_GRACE,
+            retry_cadence: PREFILL_RETRY_CADENCE,
             launch,
             start_cursor: cursor,
             cursor,
@@ -91,6 +102,7 @@ pub struct Attention {
     pub command: Option<String>,
     pub question: Option<String>,
     pub options: Vec<QuestionOption>,
+    pub questions: Vec<AgentQuestion>,
     pub request_id: String,
 }
 
@@ -103,6 +115,9 @@ pub struct ScenarioSession<'a> {
     /// Settle fail-fast window (see [`SETTLE_GRACE`]); a field so tests can
     /// shrink it.
     settle_grace: Duration,
+    /// Spacing between prefill retries in [`Self::await_running`]; a field so
+    /// tests can shrink it.
+    retry_cadence: Duration,
     launch: LaunchResult,
     start_cursor: usize,
     cursor: usize,
@@ -128,9 +143,8 @@ impl ScenarioSession<'_> {
     }
 
     pub fn await_running(&mut self) -> Result<(), String> {
-        // Give parallel cold starts at most 20 seconds before one recovery
-        // write. Repeating the prompt again could create duplicate turns when
-        // the TUI accepted it but status reporting is merely delayed.
+        // Give parallel cold starts at most 20 seconds before the first
+        // recovery write.
         let first = (self.remaining_timeout()? / 2).min(Duration::from_secs(20));
         if self
             .await_status_within(first, |status| status == AgentStatus::Running)
@@ -138,11 +152,34 @@ impl ScenarioSession<'_> {
         {
             return Ok(());
         }
-        self.retype_prompt()?;
-        let remaining = self.remaining_timeout()?;
-        self.await_status_within(remaining, |status| status == AgentStatus::Running)
-            .map(|_| ())
-            .map_err(|error| format!("no running status even after a prefill retry: {error}"))
+        // A slow TUI boot (e.g. a cold agent start that mounts its prompt
+        // late) can swallow the first recovery write too, staging the text
+        // without submitting it. Keep retyping on a fixed cadence until the
+        // session reports running or the attempt budget runs out. A
+        // landed-but-delayed report still stops the retries before a second
+        // turn is typed, because a status report arrives within seconds while
+        // the cadence is tens of seconds.
+        loop {
+            self.retype_prompt()?;
+            let remaining = match self.remaining_timeout() {
+                Ok(remaining) => remaining,
+                // The retype itself consumed the last of the budget.
+                Err(_) => break,
+            };
+            if self
+                .await_status_within(remaining.min(self.retry_cadence), |status| {
+                    status == AgentStatus::Running
+                })
+                .is_ok()
+            {
+                return Ok(());
+            }
+            match self.remaining_timeout() {
+                Ok(remaining) if remaining > self.retry_cadence => {}
+                _ => break,
+            }
+        }
+        Err("no running status even after prefill retries".to_string())
     }
 
     /// Retypes the launch prompt into the session (mirroring the host's
@@ -204,6 +241,7 @@ impl ScenarioSession<'_> {
             command,
             question,
             options,
+            questions,
             request_id: Some(request_id),
             ..
         } = found.event
@@ -215,6 +253,7 @@ impl ScenarioSession<'_> {
             command,
             question,
             options: options.unwrap_or_default(),
+            questions: questions.unwrap_or_default(),
             request_id,
         })
     }
@@ -251,10 +290,7 @@ impl ScenarioSession<'_> {
     }
 
     /// Waits for an assistant message containing `needle`, without advancing
-    /// the cursor (see [`Self::await_assistant_message`] for why). Covers both
-    /// free-text delivery paths: an in-turn reply, or the reply of the
-    /// follow-up turn a fallback-interjecting watcher starts after aborting
-    /// the response (Codex's "None of the above" secondary path).
+    /// the cursor (see [`Self::await_assistant_message`] for why).
     pub fn await_assistant_message_containing(&mut self, needle: &str) -> Result<(), String> {
         self.wait_peek_until_settled("an assistant message with the marker", |event| {
             matches!(event, VerifyEvent::AgentMessage { message }
@@ -553,6 +589,15 @@ mod tests {
         fn interrupt(&self, _agent: &str, _worktree_id: &str, _tab_id: &str) -> Result<(), String> {
             Ok(())
         }
+        fn input(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+            _text: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
         fn write_input(&self, _session_id: &str, _bytes: &[u8]) -> Result<(), String> {
             Ok(())
         }
@@ -578,6 +623,7 @@ mod tests {
             agent_id,
             deadline: Instant::now() + Duration::from_millis(500),
             settle_grace: Duration::from_millis(100),
+            retry_cadence: Duration::from_millis(100),
             launch: LaunchResult {
                 worktree_id: "w".to_string(),
                 tab_id: "t".to_string(),
@@ -619,9 +665,8 @@ mod tests {
         assert_eq!(session.await_settled().expect("settled"), AgentStatus::Done);
     }
 
-    /// Fallback-interject free-text delivery (Codex "None of the above"):
-    /// the abort settles the first turn before the follow-up turn carries the
-    /// marker. Awaiting the marker message must not consume that first settle.
+    /// A new turn can carry a requested marker after the prior turn settles.
+    /// Awaiting the marker message must not consume that first settle.
     #[test]
     fn marker_in_follow_up_turn_still_settles() {
         let ledger = Ledger::default();
@@ -703,6 +748,15 @@ mod tests {
         fn interrupt(&self, _agent: &str, _worktree_id: &str, _tab_id: &str) -> Result<(), String> {
             Ok(())
         }
+        fn input(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+            _text: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
         fn write_input(&self, _session_id: &str, bytes: &[u8]) -> Result<(), String> {
             if let Some(error) = &self.write_error {
                 return Err(error.clone());
@@ -745,6 +799,55 @@ mod tests {
         assert_eq!(writes.len(), 2, "expected prompt body + submit writes");
         assert_eq!(writes[0], b"\x1b[200~prompt\x1b[201~".to_vec());
         assert_eq!(writes[1], b"\r".to_vec());
+    }
+
+    /// A TUI that mounts its prompt late swallows the first recovery write
+    /// too (the text is staged without being submitted); `await_running` must
+    /// keep retyping on its cadence until the session reports running.
+    #[test]
+    fn await_running_retypes_until_a_late_running_report() {
+        let ledger = Ledger::default();
+        let api = RecordingApi {
+            writes: std::sync::Mutex::new(Vec::new()),
+            write_error: None,
+        };
+        let mut session = session(&api, &ledger, "a");
+        session.deadline = Instant::now() + Duration::from_millis(1500);
+        session.retry_cadence = Duration::from_millis(100);
+        let feeder = ledger.clone();
+        thread::spawn(move || {
+            // Land running well after the first window (750ms of the 1500ms
+            // budget) and after the first recovery retype's cadence window,
+            // so more than one retype is required.
+            thread::sleep(Duration::from_millis(1150));
+            feeder.ingest_line(&agent_status_line("running"));
+        });
+        session.await_running().expect("running after retries");
+        let writes = api.writes.lock().expect("writes lock");
+        assert!(
+            writes.len() >= 4 && writes.len() % 2 == 0,
+            "expected at least two prompt body + submit retypes, got {writes:?}"
+        );
+    }
+
+    /// A session that never reports running must stop retyping once the
+    /// attempt budget is exhausted instead of spinning until timeout.
+    #[test]
+    fn await_running_stops_retyping_when_the_budget_runs_out() {
+        let ledger = Ledger::default();
+        let api = RecordingApi {
+            writes: std::sync::Mutex::new(Vec::new()),
+            write_error: None,
+        };
+        let mut session = session(&api, &ledger, "a");
+        session.retry_cadence = Duration::from_millis(100);
+        let error = session.await_running().expect_err("never running");
+        assert_eq!(error, "no running status even after prefill retries");
+        let writes = api.writes.lock().expect("writes lock");
+        assert!(
+            writes.len() >= 2 && writes.len() % 2 == 0,
+            "expected at least one full prompt + submit retype, got {writes:?}"
+        );
     }
 
     /// A prompt running report inside the first window must not trigger the

@@ -41,13 +41,9 @@ Approval keys depend on tested TUI layout. OpenCode currently approves with Ente
 rejects with two Right arrows then Enter. Question answers select listed rows by digit;
 free text selects custom-answer row, types text, then submits. Dismiss sends Escape.
 
-Free-text delivery depends on what the TUI's virtual last row is. OpenCode offers a real
-custom-answer editor (default `questionFreeTextMode: "editor"`). Codex generates only a
-plain "None of the above" fallback answer with no editor; set
-`questionFreeTextMode: "interject"` so the watcher selects that row, waits, sends abort
-keys (default Escape) to cancel the response the fallback answer starts, waits again, and
-submits `Answer to question "<question>": <answer>` as a follow-up prompt. The message is
-one line (whitespace flattened) because these TUIs submit on Enter.
+Free-text delivery uses the TUI's native custom-answer editor. Multi-question replies
+select or type each answer into its corresponding prompt in order. Never abort a turn and
+inject a synthetic follow-up chat message as an answer fallback.
 
 When blocking hooks handle commands, set `handleDecisions: false`; this avoids duplicate
 verdict keystrokes racing hook return. Add `handleQuestionAnswers: true` only when questions

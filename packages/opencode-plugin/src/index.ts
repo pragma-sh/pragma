@@ -9,6 +9,7 @@ import {
   reportStopped,
   type AgentAttentionKind,
   type AgentMessage,
+  type AgentQuestion,
   type QuestionOption,
 } from "@pragma/sdk";
 
@@ -69,6 +70,16 @@ function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter
           kind: "question",
           question,
           ...(questionOptions.length > 0 ? { options: questionOptions } : {}),
+          requestId,
+        }),
+      ),
+    attentionQuestions: (questions: AgentQuestion[], requestId: string) =>
+      report(() =>
+        reportAttention({
+          agent,
+          env,
+          kind: "question",
+          ...(questions.length > 0 ? { questions } : {}),
           requestId,
         }),
       ),

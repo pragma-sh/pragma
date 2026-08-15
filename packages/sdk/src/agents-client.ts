@@ -500,6 +500,7 @@ function reportPayload(
     ...(options.command ? { command: options.command } : {}),
     ...(options.question ? { question: options.question } : {}),
     ...(options.options && options.options.length > 0 ? { options: options.options } : {}),
+    ...(options.questions && options.questions.length > 0 ? { questions: options.questions } : {}),
     ...(options.requestId ? { requestId: options.requestId } : {}),
   };
 }

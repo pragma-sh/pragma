@@ -201,6 +201,39 @@ process.stdout.write(JSON.stringify({
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
 
+# Prints the newest assistant text part from the session's wire transcript —
+# the reply the turn that just stopped produced. Kimi's `Stop` payload carries
+# no reply text, so the transcript (written as the turn streams) is the only
+# channel for the actual answer. Empty output when unavailable (no node, a
+# changed session layout, or a turn that ended without text), letting callers
+# fall back to a coarse completion message.
+last_assistant_text() {
+  session_id="$1"
+  [ -n "$node_bin" ] && [ -n "$session_id" ] || return 0
+  transcript="$(printf '%s' "$HOME/.kimi-code/sessions"/*/"$session_id"/agents/main/wire.jsonl 2>/dev/null | head -n 1)"
+  [ -n "$transcript" ] && [ -f "$transcript" ] || return 0
+  MSG_TRANSCRIPT="$transcript" "$node_bin" -e '
+let fs = require("fs");
+let last = "";
+for (const line of fs.readFileSync(process.env.MSG_TRANSCRIPT, "utf8").split("\n")) {
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    continue;
+  }
+  if (!value || value.type !== "context.append_loop_event") continue;
+  const event = value.event || {};
+  if (event.type !== "content.part") continue;
+  const part = event.part || {};
+  if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+    last = part.text;
+  }
+}
+if (last) process.stdout.write(last);
+' 2>/dev/null
+}
+
 # Prints the question text from a PreToolUse `AskUserQuestion` payload ($1)
 # when it carries exactly one question. Empty for multi-question payloads
 # (those fall back to a generic attention + Kimi's native question UI) or
@@ -232,6 +265,64 @@ process.stdin.on("end", () => {
   }
 });
 ' 2>/dev/null
+}
+
+# Prints the first question's options as pragma-cli QuestionOption JSON.
+question_options() {
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const input = (JSON.parse(data) || {}).tool_input || {};
+    const question = Array.isArray(input.questions) ? input.questions[0] : null;
+    const options = Array.isArray(question?.options)
+      ? question.options.flatMap((option) => typeof option?.label === "string" && option.label
+          ? [{ label: option.label, ...(typeof option.description === "string" && option.description ? { description: option.description } : {}) }]
+          : [])
+      : [];
+    if (options.length) process.stdout.write(JSON.stringify(options));
+  } catch {}
+});
+' 2>/dev/null
+}
+
+# Prints all questions for a multi-question attention, or nothing for one.
+question_json() {
+  [ -n "$node_bin" ] || return 0
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const input = (JSON.parse(data) || {}).tool_input || {};
+    if (input.background === true || !Array.isArray(input.questions) || input.questions.length < 2) return;
+    const questions = input.questions.flatMap((question) => {
+      if (!question || typeof question.question !== "string" || !question.question) return [];
+      const options = Array.isArray(question.options)
+        ? question.options.flatMap((option) => typeof option?.label === "string" && option.label
+            ? [{ label: option.label, ...(typeof option.description === "string" && option.description ? { description: option.description } : {}) }]
+            : [])
+        : [];
+      return [{ question: question.question, options }];
+    });
+    if (questions.length > 1) process.stdout.write(JSON.stringify(questions));
+  } catch {}
+});
+' 2>/dev/null
+}
+
+question_is_background() {
+  [ -n "$node_bin" ] || return 1
+  printf '%s' "$1" | "$node_bin" -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  try { process.exit((JSON.parse(data) || {}).tool_input?.background === true ? 0 : 1); }
+  catch { process.exit(1); }
+});
+' >/dev/null 2>&1
 }
 
 # Extracts a human-readable command string from a PermissionRequest stdin JSON
@@ -409,7 +500,13 @@ case "${1:-}" in
     fi
     clear_turn
     report stopped
-    message assistant "Kimi turn completed"
+    reply_session_id="${hook_session_id:-$(cat "$session_file" 2>/dev/null)}"
+    reply="$(last_assistant_text "$reply_session_id")"
+    if [ -n "$reply" ]; then
+      content_message assistant "$reply"
+    else
+      message assistant "Kimi turn completed"
+    fi
     ;;
   failed)
     # StopFailure: the turn ended on an API error, so it never completed. Clear
@@ -498,9 +595,18 @@ case "${1:-}" in
     # attention for the user to look at the terminal. Like command attention it
     # must carry both a question text and a request-id for stream-integrity.
     if [ -f "$marker" ]; then
+      question_is_background "$input" && exit 0
       qtext="$(question_text "$input")"
+      qopts="$(question_options "$input")"
+      qjson="$(question_json "$input")"
       request_id="${agent}-${tab}-$(date +%s)-$$"
-      if [ -n "$qtext" ]; then
+      if [ -n "$qjson" ]; then
+        report attention --kind question --questions "$qjson" --request-id "$request_id"
+        message system "Kimi is asking questions"
+      elif [ -n "$qtext" ] && [ -n "$qopts" ]; then
+        report attention --kind question --question "$qtext" --options "$qopts" --request-id "$request_id"
+        content_message system "$qtext"
+      elif [ -n "$qtext" ]; then
         report attention --kind question --question "$qtext" --request-id "$request_id"
         content_message system "$qtext"
       else

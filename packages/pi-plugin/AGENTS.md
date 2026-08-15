@@ -15,6 +15,13 @@ Pi-derived products import the two factory subpaths rather than symlinking this 
 re-exporting Pi's upstream API. Product packages own their agent id, command, branding,
 feature exclusions, and any provider-specific usage-limit implementation.
 
+Pi-family interjections use Kitty-protocol Alt+Enter (`ESC [13;3u`), not carriage
+return: while a turn streams, Enter inserts a newline and Alt+Enter queues the
+follow-up. Launch prefills use Kitty Enter (`ESC [13u`). The shared launcher also
+clears the composer shortly before prefill because Pi's 100ms OSC 11 theme-query
+timeout is shorter than a relayed terminal roundtrip; otherwise the late
+`]11;rgb:…` response can remain in the input.
+
 ## Lifecycle mapping
 
 | Pi event                                                 | Pragma report                                 |

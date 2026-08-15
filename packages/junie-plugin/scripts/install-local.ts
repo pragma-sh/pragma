@@ -41,6 +41,13 @@ interface JunieConfig {
 /** Where Junie reads its global configuration from. */
 const JUNIE_HOME = process.env.JUNIE_HOME ?? join(homedir(), ".junie");
 const CONFIG_PATH = join(JUNIE_HOME, "config.json");
+/**
+ * Path fragment that identifies this package's hook script in an installed
+ * command. The absolute plugin root changes per checkout (worktrees), so this
+ * marker lets a reinstall from a different checkout replace the previous
+ * install instead of stacking a second set of hooks.
+ */
+const HOOK_SCRIPT_MARKER = join("packages", "junie-plugin", "hooks", "report.sh");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const template = readFileSync(join(root, "hooks", "hooks.json"), "utf8");
@@ -105,7 +112,13 @@ function dropOwnEntries(
 
 /** True when every command in an entry comes from this package. */
 function isOwnEntry(entry: JunieHookEntry, pluginRoot: string): boolean {
-  return (entry.hooks ?? []).some((hook) => hook.command?.includes(pluginRoot));
+  return (entry.hooks ?? []).some((hook) => {
+    const command = hook.command ?? "";
+    // The absolute root changes per checkout (worktrees), so also match the
+    // package's hook-script path: reinstalling from a different worktree must
+    // replace the previous install instead of stacking a second set of hooks.
+    return command.includes(pluginRoot) || command.includes(HOOK_SCRIPT_MARKER);
+  });
 }
 
 /** Narrows an unknown to a plain object (not an array). */

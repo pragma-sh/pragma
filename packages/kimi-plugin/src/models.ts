@@ -1,7 +1,12 @@
 import type { AgentModelEntry, PluginContext } from "@pragma/plugin/catalog";
 
-const KIMI_MODELS_COMMAND = "kimi provider list --json";
-const KIMI_DEFAULT_MODEL_COMMAND = "kimi provider list";
+// The official Kimi Code installer puts the CLI in `~/.kimi-code/bin`, which
+// GUI-launched Pragma hosts do not put on the subprocess PATH (see
+// `process_env` in pragma-core). The `||` fallback keeps the loader working on
+// such a host while still preferring a `kimi` the user installed on PATH.
+const KIMI_BIN_DIR = "$HOME/.kimi-code/bin";
+const KIMI_MODELS_COMMAND = `kimi provider list --json || "${KIMI_BIN_DIR}/kimi" provider list --json`;
+const KIMI_DEFAULT_MODEL_COMMAND = `kimi provider list || "${KIMI_BIN_DIR}/kimi" provider list`;
 
 interface KimiConfigModel {
   provider: string;

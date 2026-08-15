@@ -52,6 +52,7 @@ export type {
   AgentFileChange,
   AgentMessage,
   QuestionOption,
+  AgentQuestion,
   AgentReportPayload,
   AgentDecision,
   AgentAnswer,

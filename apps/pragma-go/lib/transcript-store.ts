@@ -1,7 +1,12 @@
 import type { AgentFileChange, AgentMessage } from "@pragma/constants";
 import type { AgentStreamEvent } from "@pragma/sdk";
 
-import { normalizeQuestionOptions, type AttentionRequest, type TranscriptRow } from "./types";
+import {
+  normalizeQuestionOptions,
+  normalizeQuestions,
+  type AttentionRequest,
+  type TranscriptRow,
+} from "./types";
 
 const OPTIMISTIC_MESSAGE_MATCH_WINDOW_MS = 60_000;
 
@@ -110,11 +115,13 @@ function attentionForEvent(
   if (event.status !== "attention" || !event.attentionKind || !event.requestId) return null;
   const preferredPrompt = event.attentionKind === "command" ? event.command : event.question;
   const options = normalizeQuestionOptions(event.options);
+  const questions = normalizeQuestions(event.questions);
   return {
     kind: event.attentionKind,
     requestId: event.requestId,
     prompt: preferredPrompt ?? event.command ?? event.question ?? "",
     ...(options ? { options } : {}),
+    ...(questions ? { questions } : {}),
   };
 }
 

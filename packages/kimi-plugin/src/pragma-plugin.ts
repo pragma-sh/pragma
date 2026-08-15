@@ -10,12 +10,11 @@ const PREFILL_DELAY_MS = 2500;
 
 const baseWatcher = createTuiWatcher({
   agent: "kimi",
-  // Kimi's `PermissionRequest` hook is fire-and-forget (the verdict comes from
-  // the TUI's `requestApproval` RPC, never from a hook result) and
-  // `AskUserQuestion` is auto-approved and owned by Kimi's own question UI, so
-  // command approvals and questions are not brokered through Pragma and there
-  // is nothing for the watcher to decide. It exists for mid-turn interjections.
+  // Kimi command approvals cannot be brokered, but AskUserQuestion is reported
+  // by the hook and answered through Kimi's native question dialog.
   handleDecisions: false,
+  handleQuestionAnswers: true,
+  questionFinalizeKeys: "1",
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 
@@ -83,9 +82,7 @@ export const kimiAgentPlugin: PluginDefinition = definePlugin({
       ],
       // `commandApproval`: Kimi's permission-request hook is fire-and-forget,
       // so Pragma cannot approve on the agent's behalf.
-      // `questions`: `AskUserQuestion` is owned by Kimi's own TUI and no hook
-      // can return an answer to it, so Pragma raises attention but cannot reply.
-      excludeFeatures: ["commandApproval", "questions"],
+      excludeFeatures: ["commandApproval"],
       args: {
         model: (modelId: string) => ["-m", modelId],
         reasoning: () => [],

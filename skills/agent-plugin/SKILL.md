@@ -165,12 +165,10 @@ plugins install the published package normally.
 - `handleDecisions: false` when blocking hooks return decisions (Claude Code, Cursor).
 - Add `handleQuestionAnswers: true` when command approvals use blocking hooks but
   questions must be answered through TUI keys (Codex). Never handle unmatched request ids.
-- Set `questionFreeTextMode: "interject"` when the host's question prompt has no
-  free-text editor and its generated last row is a plain fallback answer (Codex's
-  "None of the above"). The watcher then selects that fallback row, aborts the
-  response the agent starts from it, and submits the real answer as a follow-up
-  prompt: `Answer to question "<question>": <answer>`. Keep the default `"editor"`
-  when the TUI has a real custom-answer row (OpenCode).
+- Question replies must use the host's native TUI controls. Listed answers select
+  their matching row; free-text answers open the native custom-answer editor; batches
+  answer each prompt in order. Never abort a response and inject the answer as a
+  synthetic follow-up chat message.
 - Set `questionSelectMode: "arrow-space"` when the question list does not bind digit
   shortcuts and instead navigates with Down, marks with Space, and submits with Enter
   (Junie). Keep the default `"digit"` for TUIs whose rows are select-and-submit digits
@@ -294,10 +292,8 @@ pragma-cli agent verify --agent <catalog-id> --pick-model-cmd "--model moonshot/
 `--model`; check the host's own model list (for example `opencode models`) for the
 cheapest subagent-capable id before running the full suite.
 
-`question-free-text` requires the agent to echo the exact marker back, and accepts two
-delivery paths: the marker arriving in the same turn (custom-answer editor), or the
-`questionFreeTextMode: "interject"` secondary path — fallback row selected, response
-aborted, marker delivered by the `Answer to question ...` follow-up turn.
+`question-free-text` requires the agent to echo the exact marker returned through the
+native custom-answer editor in the same turn.
 
 Question attention can reach the event stream immediately before a host mounts its TUI
 prompt. Keep a short prompt-mount delay before watcher answer keys and verifier abort

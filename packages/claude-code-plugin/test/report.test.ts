@@ -38,7 +38,9 @@ beforeEach(() => {
   // without a real server.
   writeFileSync(
     fake,
-    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "$1 $2" = "agent await-answer" ]; then printf '%s' "\${PRAGMA_TEST_ANSWER:-}"; fi\n`,
+    // PRAGMA_TEST_REJECT_QUESTIONS emulates an installed CLI older than the
+    // hook: clap exits nonzero on the unknown `--questions` flag.
+    `#!/usr/bin/env sh\necho "$*" >> "$PRAGMA_TEST_LOG"\nif [ -n "\${PRAGMA_TEST_REJECT_QUESTIONS:-}" ]; then\n  case " $* " in *" --questions "*) exit 2;; esac\nfi\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "$1 $2" = "agent await-answer" ]; then printf '%s' "\${PRAGMA_TEST_ANSWER:-}"; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -776,19 +778,73 @@ describe("report.sh", () => {
     expect(reportCalls()[1]).toContain("--kind question");
   });
 
-  itWithPython3("falls back to a generic attention for multi-question payloads", () => {
+  itWithPython3("reports a multi-question attention with --questions", () => {
     run("started");
     const stdin = JSON.stringify({
       hook_event_name: "PermissionRequest",
       tool_name: "AskUserQuestion",
       tool_input: { questions: [QUESTION, { ...QUESTION, question: "And the DB?" }] },
     });
-    const output = runRaw("permission", { stdin });
+    runRaw("permission", { stdin });
+    const reports = reportCalls();
+    expect(reports[0]).toBe("agent report --agent claude-code started");
+    expect(reports[1]).toContain("attention --kind question");
+    expect(reports[1]).toContain("--questions ");
+    expect(reports[1]).toContain("Which auth method should we use?");
+    expect(reports[1]).toContain("And the DB?");
+    expect(reports[1]).not.toContain("--question ");
+  });
+
+  itWithPython3("feeds a combined reply back into a multi-question AskUserQuestion", () => {
+    run("started");
+    const stdin = JSON.stringify({
+      hook_event_name: "PermissionRequest",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [QUESTION, { ...QUESTION, question: "And the DB?" }] },
+    });
+    const output = runRaw("permission", {
+      stdin,
+      env: { PRAGMA_TEST_ANSWER: "OAuth | API key" },
+    });
+    expect(JSON.parse(output)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "allow",
+          updatedInput: {
+            questions: [QUESTION, { ...QUESTION, question: "And the DB?" }],
+            answers: {
+              "Which auth method should we use?": "OAuth",
+              "And the DB?": "API key",
+            },
+          },
+        },
+      },
+    });
+    expect(reportCalls().at(-1)).toBe("agent report --agent claude-code started");
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "system", text: "Questions answered" }),
+    );
+  });
+
+  itWithPython3("falls back to a generic attention when the CLI rejects --questions", () => {
+    run("started");
+    const stdin = JSON.stringify({
+      hook_event_name: "PermissionRequest",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [QUESTION, { ...QUESTION, question: "And the DB?" }] },
+    });
+    // An installed pragma-cli older than the hook exits nonzero on the unknown
+    // flag; without the fallback the attention vanishes and the hook blocks on
+    // an answer no client can send.
+    const output = runRaw("permission", {
+      stdin,
+      env: { PRAGMA_TEST_REJECT_QUESTIONS: "1", PRAGMA_TEST_ANSWER: "OAuth | API key" },
+    });
     expect(output.trim()).toBe("");
-    expect(reportCalls()).toEqual([
-      "agent report --agent claude-code started",
-      "agent report --agent claude-code attention",
-    ]);
+    const reports = reportCalls();
+    expect(reports.at(-1)).toBe("agent report --agent claude-code attention");
+    expect(reports.some((call) => call.includes("await-answer"))).toBe(false);
   });
 
   it("ignores an AskUserQuestion request once the turn has ended", () => {

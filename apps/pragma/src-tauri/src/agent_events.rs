@@ -55,6 +55,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                     command,
                     question,
                     options,
+                    questions,
                     request_id,
                 })) => {
                     let payload = AgentReportPayload {
@@ -68,6 +69,7 @@ fn subscribe_once(app: &AppHandle, pty: &PtyClient) -> Result<(), String> {
                         question,
                         // Wire event keeps Option; typify models the payload field as Vec.
                         options: options.unwrap_or_default(),
+                        questions: questions.unwrap_or_default(),
                         request_id,
                     };
                     let _ = app.emit(AGENT_REPORT_EVENT, payload);

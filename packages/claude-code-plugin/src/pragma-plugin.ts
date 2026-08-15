@@ -70,6 +70,14 @@ export const claudeCodeAgentPlugin: PluginDefinition = definePlugin({
         { id: "haiku", name: "Haiku", reasoning: reasoningStandard },
       ],
       permissionModes: [],
+      // `--permission-mode auto` auto-approves every shell command, so a
+      // command-approval attention can never be raised for a launched
+      // session (`pragma-cli agent verify` `command-allow`/`command-deny`):
+      // the model runs the tool and the turn settles. The blocking
+      // `PermissionRequest` hook still round-trips `AskUserQuestion`
+      // (`questions` stays enabled), but approvals are only exercisable when
+      // a permission prompt actually fires, which the auto launch prevents.
+      excludeFeatures: ["commandApproval"],
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: (reasoningId: string) => ["--effort", reasoningId],

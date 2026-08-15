@@ -37,7 +37,7 @@ beforeEach(() => {
   // on stdout (empty by default, i.e. the timeout path).
   writeFileSync(
     join(binDir, "pragma-cli"),
-    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\n`,
+    `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"\nif [ "$1 $2" = "agent await-decision" ]; then printf '%s' "\${PRAGMA_TEST_DECISION:-}"; fi\nif [ "\${PRAGMA_TEST_FAIL_QUESTIONS:-}" = "1" ] && printf '%s' "$*" | grep -q -- '--questions'; then exit 1; fi\n`,
     { mode: 0o755 },
   );
 });
@@ -364,6 +364,205 @@ describe("report.sh", () => {
     expect(attention).toContain("--request-id junie-tab-test-req-1");
   });
 
+  itWithPython3("raises one multi-question attention for a pending batch", async () => {
+    writeEvents([]);
+    run("started", { stdin: startPayload("hi") });
+    appendEvents([
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-red",
+        title: "Choose Red or Blue?",
+        request: {
+          id: "req-red",
+          name: "color",
+          question: "Choose Red or Blue?",
+          options: [
+            { id: "Red", title: "Red" },
+            { id: "Blue", title: "Blue" },
+          ],
+          isRequired: false,
+        },
+        status: "IN_PROGRESS",
+      }),
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-circle",
+        title: "Choose Circle or Square?",
+        request: {
+          id: "req-circle",
+          name: "shape",
+          question: "Choose Circle or Square?",
+          options: [
+            { id: "Circle", title: "Circle" },
+            { id: "Square", title: "Square" },
+          ],
+          isRequired: false,
+        },
+        status: "IN_PROGRESS",
+      }),
+    ]);
+    await waitFor(() => reports().some((call) => call.includes("--questions")));
+    const attention = reports().find((call) => call.includes("--questions"));
+    expect(attention).toContain("--request-id junie-tab-test-req-red");
+    const multi = attention?.slice(attention.indexOf("["), attention.lastIndexOf("]") + 1);
+    expect(multi).toBeTruthy();
+    const parsed = JSON.parse(multi as string);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].question).toBe("Choose Red or Blue?");
+    expect(parsed[0].options.map((option: { label: string }) => option.label)).toEqual([
+      "Red",
+      "Blue",
+    ]);
+    expect(parsed[1].question).toBe("Choose Circle or Square?");
+    expect(parsed[1].options.map((option: { label: string }) => option.label)).toEqual([
+      "Circle",
+      "Square",
+    ]);
+    // The batch is one attention, not one per question.
+    expect(
+      reports().filter((call) => call.includes("--kind question") && !call.includes("--questions")),
+    ).toHaveLength(0);
+  });
+
+  itWithPython3(
+    "falls back to a single-question attention when --questions is unsupported",
+    async () => {
+      // Older pragma-cli/server builds reject the `questions` wire field, which
+      // would otherwise drop the attention entirely; the hook must degrade to a
+      // plain single-question report for the first pending question.
+      writeEvents([]);
+      run("started", {
+        env: { PRAGMA_TEST_FAIL_QUESTIONS: "1" },
+        stdin: startPayload("hi"),
+      });
+      appendEvents([
+        agentEvent({
+          kind: "AskAsyncRequestUpdatedEvent",
+          stepId: "step-red",
+          title: "Choose Red or Blue?",
+          request: {
+            id: "req-red",
+            name: "color",
+            question: "Choose Red or Blue?",
+            options: [
+              { id: "Red", title: "Red" },
+              { id: "Blue", title: "Blue" },
+            ],
+            isRequired: false,
+          },
+          status: "IN_PROGRESS",
+        }),
+        agentEvent({
+          kind: "AskAsyncRequestUpdatedEvent",
+          stepId: "step-circle",
+          title: "Choose Circle or Square?",
+          request: {
+            id: "req-circle",
+            name: "shape",
+            question: "Choose Circle or Square?",
+            options: [
+              { id: "Circle", title: "Circle" },
+              { id: "Square", title: "Square" },
+            ],
+            isRequired: false,
+          },
+          status: "IN_PROGRESS",
+        }),
+      ]);
+      await waitFor(() =>
+        reports().some((call) => call.includes("--kind question") && !call.includes("--questions")),
+      );
+      const attention = reports().find(
+        (call) => call.includes("--kind question") && !call.includes("--questions"),
+      );
+      expect(attention).toContain("--question Choose Red or Blue?");
+      expect(attention).toContain("--request-id junie-tab-test-req-red");
+      // The failed --questions attempt is logged too; only the fallback report
+      // must carry the plain single-question attention.
+      expect(
+        reports().filter(
+          (call) => call.includes("--kind question") && !call.includes("--questions"),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  itWithPython3("drops a multi-question attention back to running once resolved", async () => {
+    writeEvents([]);
+    run("started", { stdin: startPayload("hi") });
+    appendEvents([
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-red",
+        title: "Choose Red or Blue?",
+        request: {
+          id: "req-red",
+          name: "color",
+          question: "Choose Red or Blue?",
+          options: [
+            { id: "Red", title: "Red" },
+            { id: "Blue", title: "Blue" },
+          ],
+          isRequired: false,
+        },
+        status: "IN_PROGRESS",
+      }),
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-circle",
+        title: "Choose Circle or Square?",
+        request: {
+          id: "req-circle",
+          name: "shape",
+          question: "Choose Circle or Square?",
+          options: [
+            { id: "Circle", title: "Circle" },
+            { id: "Square", title: "Square" },
+          ],
+          isRequired: false,
+        },
+        status: "IN_PROGRESS",
+      }),
+    ]);
+    await waitFor(() => reports().some((call) => call.includes("--questions")));
+    appendEvents([
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-red",
+        title: "Choose Red or Blue?",
+        request: {
+          id: "req-red",
+          name: "color",
+          question: "Choose Red or Blue?",
+          options: [
+            { id: "Red", title: "Red" },
+            { id: "Blue", title: "Blue" },
+          ],
+          isRequired: false,
+        },
+        status: "COMPLETED",
+      }),
+      agentEvent({
+        kind: "AskAsyncRequestUpdatedEvent",
+        stepId: "step-circle",
+        title: "Choose Circle or Square?",
+        request: {
+          id: "req-circle",
+          name: "shape",
+          question: "Choose Circle or Square?",
+          options: [
+            { id: "Circle", title: "Circle" },
+            { id: "Square", title: "Square" },
+          ],
+          isRequired: false,
+        },
+        status: "COMPLETED",
+      }),
+    ]);
+    await waitFor(() => reports().filter((call) => call.endsWith("started")).length > 1);
+    expect(reports().filter((call) => call.includes("--questions"))).toHaveLength(1);
+  });
+
   itWithPython3("drops back to running once Junie's question resolves", async () => {
     writeEvents([]);
     run("started", { stdin: startPayload("hi") });
@@ -423,6 +622,18 @@ describe("report.sh", () => {
     writeEvents([agentEvent({ kind: "AgentTaskNameUpdatedEvent", name: "T" })]);
     run("started", { stdin: startPayload("hi") });
     appendEvents([agentEvent({ kind: "ResultBlockUpdatedEvent", cancelled: true, result: "" })]);
+    await waitFor(() => reports().some((call) => call.endsWith("cleared")));
+    expect(reports()).toContain("agent report --agent junie cleared");
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
+  itWithPython3("clears a turn cancelled before any result block exists", async () => {
+    // Junie 26.8.10 writes only a top-level `CancelAgentEvent` when Escape
+    // lands before the turn produced any output; the abort watcher must
+    // still report cleared instead of leaving the tab running forever.
+    writeEvents([agentEvent({ kind: "AgentTaskNameUpdatedEvent", name: "T" })]);
+    run("started", { stdin: startPayload("hi") });
+    appendEvents([agentEvent({ kind: "CancelAgentEvent" })]);
     await waitFor(() => reports().some((call) => call.endsWith("cleared")));
     expect(reports()).toContain("agent report --agent junie cleared");
     expect(existsSync(markerPath())).toBe(false);
