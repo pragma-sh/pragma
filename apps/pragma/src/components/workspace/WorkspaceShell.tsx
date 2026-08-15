@@ -113,7 +113,9 @@ function useNativeMenuActions(
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
     const actions = {
       "settings.open": shell.openSettings,
-      "tabs.new-terminal": () => workspace.createTerminalTab(),
+      "tabs.new-terminal": async () => {
+        await workspace.createTerminalTab();
+      },
       "tabs.close-active": () => {
         if (workspace.activeTab) requestClose(workspace.activeTab);
       },
