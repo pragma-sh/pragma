@@ -13,6 +13,7 @@ import { hapticImpact } from "@/lib/haptics";
 import type { Project, Worktree } from "@/lib/types";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import type { WorktreeNode } from "@/lib/worktree-tree";
+import { useThemeColors } from "@/lib/theme";
 
 /** A project's top-level view: its root worktree(s) as navigation rows. The
  *  header "+" launches an agent in the main worktree — the project's primary
@@ -26,6 +27,7 @@ export default function ProjectScreen() {
   const insets = useSafeAreaInsets();
   useViewedProjectRoot(useProjectRootPath(projectId));
   const [launchOpen, setLaunchOpen] = useState(false);
+  const { foreground } = useThemeColors();
 
   const openLaunchSheet = useCallback(() => {
     hapticImpact();
@@ -33,9 +35,9 @@ export default function ProjectScreen() {
   }, []);
   const renderLaunchAgentButton = useCallback(
     ({ tintColor }: { tintColor?: ColorValue }) => (
-      <LaunchAgentButton color={tintColor ?? "black"} onPress={openLaunchSheet} />
+      <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
     ),
-    [openLaunchSheet],
+    [foreground, openLaunchSheet],
   );
 
   return (

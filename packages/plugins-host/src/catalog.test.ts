@@ -38,6 +38,8 @@ describe("hashIcon", () => {
     const asset = hashIcon(path);
     expect(asset.mime).toBe("image/svg+xml");
     expect(asset.hash).toMatch(/^[0-9a-f]{64}$/);
+    // The bytes ride along so serving never re-reads a path that may be gone.
+    expect(Buffer.from(asset.base64, "base64").toString()).toBe("<svg/>");
     // Same content, same hash.
     expect(hashIcon(tempIcon("other.svg", "<svg/>")).hash).toBe(asset.hash);
   });

@@ -58,9 +58,9 @@ function ComposerInput({
   value: string;
 }) {
   return (
-    <View className="min-h-11 flex-1 rounded-2xl border border-input bg-background px-3">
+    <View className="min-h-14 flex-1 rounded-2xl border border-input bg-background px-3">
       <TextInput
-        className="max-h-28 flex-1 py-2 text-base text-foreground"
+        className="max-h-44 flex-1 py-3 text-base text-foreground"
         multiline
         onChangeText={onChangeText}
         placeholder="Message the agent…"

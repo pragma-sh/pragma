@@ -9,6 +9,27 @@ const CATALOG_RETRY_MS = 500;
 const CATALOG_RETRY_MAX_MS = 10_000;
 
 /**
+ * One in-flight load and one result per client, shared by every hook instance.
+ * Agent icons are resolved per row (a worktree lists many sessions), and a
+ * catalog fetch — with its retry loop — must not be repeated once per row.
+ */
+const catalogState: {
+  client: unknown;
+  catalog: AgentCatalog | null;
+  /** A load loop is running; further mounts subscribe instead of starting one. */
+  loading: boolean;
+  listeners: Set<(catalog: AgentCatalog) => void>;
+} = { client: null, catalog: null, loading: false, listeners: new Set() };
+
+/** Drops any cached catalog when the paired host changes. */
+function resetCatalogState(client: unknown): void {
+  if (catalogState.client === client) return;
+  catalogState.client = client;
+  catalogState.catalog = null;
+  catalogState.loading = false;
+}
+
+/**
  * The launchable-agent catalog for the paired host, or `null` until loaded.
  * Retries with capped backoff until agents arrive: the host starts its plugin
  * catalog lazily (first responses can be empty) and a transient tunnel error
@@ -20,18 +41,33 @@ export function useCatalog(): AgentCatalog | null {
   const [catalog, setCatalog] = useState<AgentCatalog | null>(null);
 
   useEffect(() => {
+    resetCatalogState(client);
     if (!client) {
       setCatalog(null);
       return undefined;
     }
-    let cancelled = false;
-    void loadCatalog(client, setCatalog, handleUnauthorized, () => cancelled);
+    // Subscribe even when a catalog is already cached: the first load publishes
+    // every attempt, and an early empty catalog is followed by the real one.
+    if (catalogState.catalog) setCatalog(catalogState.catalog);
+    catalogState.listeners.add(setCatalog);
+    if (!catalogState.loading) {
+      catalogState.loading = true;
+      void loadCatalog(client, publishCatalog, handleUnauthorized, () => {
+        return client !== catalogState.client;
+      });
+    }
     return () => {
-      cancelled = true;
+      catalogState.listeners.delete(setCatalog);
     };
   }, [client, handleUnauthorized]);
 
   return catalog;
+}
+
+/** Stores a loaded catalog and hands it to every mounted subscriber. */
+function publishCatalog(catalog: AgentCatalog): void {
+  catalogState.catalog = catalog;
+  for (const listener of catalogState.listeners) listener(catalog);
 }
 
 async function loadCatalog(
@@ -101,7 +137,17 @@ function delay(ms: number): Promise<void> {
  * how the rest of the app names an agent, and icons must resolve either way.
  */
 export function useCatalogAgent(agentId: string | undefined): CatalogAgent | undefined {
-  const catalog = useCatalog();
+  return catalogAgentById(useCatalog(), agentId);
+}
+
+/**
+ * Pure lookup behind [`useCatalogAgent`], for callers that already hold the
+ * catalog — a list resolves one catalog for all of its rows.
+ */
+export function catalogAgentById(
+  catalog: AgentCatalog | null,
+  agentId: string | undefined,
+): CatalogAgent | undefined {
   if (!agentId || !catalog) return undefined;
   return (
     catalog.agents.find((agent) => agent.id === agentId) ??

@@ -10,6 +10,8 @@ export interface ThemeColors {
   foreground: string;
   mutedForeground: string;
   primaryForeground: string;
+  destructiveForeground: string;
+  successForeground: string;
 }
 
 const LIGHT_COLORS: ThemeColors = {
@@ -17,6 +19,8 @@ const LIGHT_COLORS: ThemeColors = {
   foreground: "hsl(240 10% 4%)",
   mutedForeground: "hsl(240 4% 46%)",
   primaryForeground: "hsl(0 0% 98%)",
+  destructiveForeground: "hsl(0 0% 98%)",
+  successForeground: "hsl(0 0% 98%)",
 };
 
 const DARK_COLORS: ThemeColors = {
@@ -24,6 +28,8 @@ const DARK_COLORS: ThemeColors = {
   foreground: "hsl(0 0% 98%)",
   mutedForeground: "hsl(240 5% 65%)",
   primaryForeground: "hsl(240 6% 10%)",
+  destructiveForeground: "hsl(0 0% 98%)",
+  successForeground: "hsl(0 0% 98%)",
 };
 
 /** Which desktop theme token backs each native-prop color. */
@@ -32,6 +38,8 @@ const TOKEN_FOR_COLOR: Record<keyof ThemeColors, string> = {
   foreground: "foreground",
   mutedForeground: "muted-foreground",
   primaryForeground: "primary-foreground",
+  destructiveForeground: "destructive-foreground",
+  successForeground: "success-foreground",
 };
 
 /**

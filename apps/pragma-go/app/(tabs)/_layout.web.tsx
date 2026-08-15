@@ -41,6 +41,13 @@ export default function TabsWebLayout() {
           tabBarIcon: renderInboxIcon,
         }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: renderSettingsIcon,
+        }}
+      />
     </Tabs>
   );
 }
@@ -54,4 +61,8 @@ function renderProjectsIcon({ color }: { color: ColorValue }) {
 
 function renderInboxIcon({ color }: { color: ColorValue }) {
   return <IconSymbol color={color} fallback="✉" name="tray.full.fill" size={22} />;
+}
+
+function renderSettingsIcon({ color }: { color: ColorValue }) {
+  return <IconSymbol color={color} fallback="⚙" name="gearshape.fill" size={22} />;
 }

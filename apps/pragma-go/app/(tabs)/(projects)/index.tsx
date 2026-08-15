@@ -18,7 +18,10 @@ export default function ProjectsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: false }} />
+      {/* The header is hidden here, but the title still names this screen in the
+          back control of everything pushed on top of it — without it the stack
+          falls back to the route name, "index". */}
+      <Stack.Screen options={{ headerShown: false, title: "Home" }} />
       <ScrollView
         className="flex-1 bg-background"
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}

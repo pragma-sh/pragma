@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Text } from "@/components/ui/text";
 import { hapticSelection } from "@/lib/haptics";
+import { useThemeColors } from "@/lib/theme";
 import type { AttentionRequest } from "@/lib/types";
 import type { QuestionOption } from "@pragma/constants";
 
@@ -47,7 +48,7 @@ interface QuestionActionsProps {
  * Docked action card for a live agent request, using the Inbox card's visual
  * language. A `command` shows Approve/Deny; a `question` shows its options (plus
  * a free-text "Other") and Submit/Dismiss. Multi-question requests render a
- * back/next wizard with a final submit-all summary line.
+ * stepped wizard whose footer advances to a final submit-all summary line.
  */
 export function AttentionDock({ request, onDecide, onAnswer }: AttentionDockProps) {
   const isQuestion = request.kind === "question";
@@ -79,6 +80,7 @@ function CommandActions({
   request: AttentionRequest;
   onDecide: (requestId: string, approved: boolean) => void;
 }) {
+  const { destructiveForeground, successForeground } = useThemeColors();
   return (
     <View className="flex-row gap-3">
       <Button
@@ -86,7 +88,13 @@ function CommandActions({
         variant="success"
         onPress={() => onDecide(request.requestId, true)}
       >
-        <IconSymbol color="white" fallback="✓" name="checkmark" size={16} tintColor="white" />
+        <IconSymbol
+          color={successForeground}
+          fallback="✓"
+          name="checkmark"
+          size={16}
+          tintColor={successForeground}
+        />
         <Text>Approve</Text>
       </Button>
       <Button
@@ -94,7 +102,13 @@ function CommandActions({
         variant="destructive"
         onPress={() => onDecide(request.requestId, false)}
       >
-        <IconSymbol color="white" fallback="✕" name="xmark" size={16} tintColor="white" />
+        <IconSymbol
+          color={destructiveForeground}
+          fallback="✕"
+          name="xmark"
+          size={16}
+          tintColor={destructiveForeground}
+        />
         <Text>Deny</Text>
       </Button>
     </View>
@@ -137,13 +151,7 @@ function QuestionWizard({
   return (
     <>
       <CardHeader className="gap-2">
-        <QuestionWizardHeader
-          current={current}
-          disabled={!answerForDraft(draft)}
-          last={last}
-          onBack={() => setCurrent(Math.max(0, current - 1))}
-          onNext={() => setCurrent(Math.min(last, current + 1))}
-        />
+        <QuestionWizardHeader current={current} last={last} />
         <RequestTypeBadge kind={request.kind} />
         <Text className="text-base font-semibold text-card-foreground">{active.question}</Text>
       </CardHeader>
@@ -232,37 +240,15 @@ function SingleQuestionActions({
   );
 }
 
-function QuestionWizardHeader({
-  current,
-  disabled,
-  last,
-  onBack,
-  onNext,
-}: {
-  current: number;
-  disabled: boolean;
-  last: number;
-  onBack: () => void;
-  onNext: () => void;
-}) {
+/**
+ * The wizard's progress line. Navigation lives in the footer only: the header's
+ * chevron buttons duplicated it and crowded a phone-width card.
+ */
+function QuestionWizardHeader({ current, last }: { current: number; last: number }) {
   return (
-    <View className="flex-row items-center justify-between">
-      <Button disabled={current === 0} onPress={onBack} variant="ghost">
-        <IconSymbol color="black" fallback="‹" name="chevron.left" size={16} />
-        <Text>Back</Text>
-      </Button>
-      <Text className="text-xs text-muted-foreground">
-        Question {current + 1} of {last + 1}
-      </Text>
-      {current < last ? (
-        <Button disabled={disabled} onPress={onNext} variant="ghost">
-          <Text>Next</Text>
-          <IconSymbol color="black" fallback="›" name="chevron.right" size={16} />
-        </Button>
-      ) : (
-        <View className="w-16" />
-      )}
-    </View>
+    <Text className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      Question {current + 1} of {last + 1}
+    </Text>
   );
 }
 

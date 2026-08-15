@@ -72,13 +72,22 @@ const TabsList = forwardRef<
 
   return (
     <TabsIndicatorContext.Provider value={context}>
+      {/* The track is `bg-background` + a border, not `bg-muted`: inside a card
+          surface (the bottom sheet) the muted track and the `bg-card` selection
+          pill read as one flat block, so the track — not the pill — is what
+          moves off the surface colour. The pill keeps the default `bg-card`. */}
       <TabsPrimitive.List
         ref={ref}
-        className={cn("relative flex-row items-center rounded-lg bg-muted", className)}
+        className={cn(
+          "relative flex-row items-center rounded-lg border border-border bg-background",
+          className,
+        )}
         {...props}
       >
         <Animated.View
-          className="absolute bottom-0 left-0 top-0 rounded-md bg-card"
+          // The border carries the pill in light mode, where `--card` and
+          // `--background` are both white and the fill alone would vanish.
+          className="absolute bottom-0.5 left-0 top-0.5 rounded-md border border-border bg-card"
           style={indicatorStyle}
         />
         {children}

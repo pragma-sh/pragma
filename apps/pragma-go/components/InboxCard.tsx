@@ -8,6 +8,7 @@ import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reani
 import type { InboxResolution } from "@/lib/data/data-context";
 import { hapticImpact, hapticSelection, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import type { InboxItem } from "@/lib/types";
+import { useThemeColors } from "@/lib/theme";
 import { useCatalogAgent } from "@/lib/use-catalog";
 import type { QuestionOption } from "@pragma/constants";
 import { AgentIcon } from "./AgentIcon";
@@ -35,6 +36,7 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
   const swipeRef = useRef<SwipeableMethods>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [otherText, setOtherText] = useState("");
+  const { destructiveForeground, successForeground } = useThemeColors();
   const { accept, acceptLabel, deny, denyLabel, handleSwipeOpen, isQuestion } = useInboxActions({
     item,
     onResolve,
@@ -54,6 +56,8 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
           align="left"
           color="bg-success"
           fallback="✓"
+          foreground={successForeground}
+          foregroundClass="text-success-foreground"
           label={acceptLabel}
           sf="checkmark.circle.fill"
           translation={translation}
@@ -64,6 +68,8 @@ export function InboxCard({ item, onResolve }: InboxCardProps) {
           align="right"
           color="bg-destructive"
           fallback="✕"
+          foreground={destructiveForeground}
+          foregroundClass="text-destructive-foreground"
           label="Deny"
           sf="xmark.circle.fill"
           translation={translation}
@@ -213,6 +219,7 @@ function InboxCardButtons({
   onAccept: () => void;
   onDeny: () => void;
 }) {
+  const { destructiveForeground, successForeground } = useThemeColors();
   return (
     <View className="flex-row justify-end gap-2">
       <Button
@@ -223,7 +230,13 @@ function InboxCardButtons({
         size="icon"
         variant="destructive"
       >
-        <IconSymbol color="white" fallback="✕" name="xmark" size={20} tintColor="white" />
+        <IconSymbol
+          color={destructiveForeground}
+          fallback="✕"
+          name="xmark"
+          size={20}
+          tintColor={destructiveForeground}
+        />
       </Button>
       <Button
         accessibilityLabel={acceptLabel}
@@ -233,7 +246,13 @@ function InboxCardButtons({
         size="icon"
         variant="success"
       >
-        <IconSymbol color="white" fallback="✓" name="checkmark" size={20} tintColor="white" />
+        <IconSymbol
+          color={successForeground}
+          fallback="✓"
+          name="checkmark"
+          size={20}
+          tintColor={successForeground}
+        />
       </Button>
     </View>
   );
@@ -344,6 +363,8 @@ function OptionRow({
 function SwipeAction({
   align,
   color,
+  foreground,
+  foregroundClass,
   label,
   sf,
   fallback,
@@ -351,6 +372,10 @@ function SwipeAction({
 }: {
   align: "left" | "right";
   color: string;
+  /** Literal colour for the SF Symbol, which takes no class. */
+  foreground: string;
+  /** The matching `*-foreground` class for the label. */
+  foregroundClass: string;
   label: string;
   sf: string;
   fallback: string;
@@ -366,13 +391,13 @@ function SwipeAction({
     >
       <Animated.View className="flex-row items-center gap-2" style={animatedStyle}>
         <IconSymbol
-          color="white"
+          color={foreground}
           fallback={fallback}
           name={sf as never}
           size={22}
-          tintColor="white"
+          tintColor={foreground}
         />
-        <Text className="font-semibold text-white">{label}</Text>
+        <Text className={`font-semibold ${foregroundClass}`}>{label}</Text>
       </Animated.View>
     </View>
   );

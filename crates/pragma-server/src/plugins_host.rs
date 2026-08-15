@@ -60,11 +60,16 @@ pub enum PluginsError {
     LockPoisoned,
 }
 
-/// One hashed icon asset the sidecar reported: where it lives + its MIME type.
+/// One hashed icon asset the sidecar reported: its bytes, its MIME type, and
+/// the file they came from.
 #[derive(Clone, Debug, Deserialize)]
 struct AssetEntry {
     path: String,
     mime: String,
+    /// The icon's bytes, base64, as read when the sidecar hashed it. Absent
+    /// only from an older sidecar, which the path read below still covers.
+    #[serde(default)]
+    base64: Option<String>,
 }
 
 /// One watcher a plugin attaches to an agent, as reported by the sidecar.
@@ -459,6 +464,12 @@ impl PluginsRegistry {
             .get(hash)
             .cloned()
             .ok_or_else(|| PluginsError::NotFound(hash.to_string()))?;
+        // Serve the bytes the sidecar carried with the catalog. Re-reading the
+        // file here made every icon fail once its plugin directory moved or was
+        // removed, even though the catalog still advertised the hash.
+        if let Some(base64) = entry.base64 {
+            return Ok(json!({ "base64": base64, "mime": entry.mime }));
+        }
         let metadata = fs::metadata(&entry.path)
             .map_err(|err| PluginsError::Operation(format!("stat asset: {err}")))?;
         if metadata.len() > ASSET_MAX_BYTES {
@@ -711,7 +722,11 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_lowercase_hex_sha256, PluginsRegistry, SidecarEvent, PLUGIN_ROOTS_FILE};
+    use serde_json::json;
+
+    use super::{
+        is_lowercase_hex_sha256, AssetEntry, PluginsRegistry, SidecarEvent, PLUGIN_ROOTS_FILE,
+    };
 
     #[test]
     fn validates_lowercase_hex_sha256() {
@@ -736,6 +751,35 @@ mod tests {
         )
         .expect("catalog event must parse");
         assert!(matches!(event, SidecarEvent::Catalog { .. }));
+    }
+
+    #[test]
+    fn serves_asset_bytes_without_reading_the_file() {
+        let dir =
+            std::env::temp_dir().join(format!("pragma-plugins-asset-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let registry = PluginsRegistry::new(dir);
+        let hash = "a".repeat(64);
+        registry.assets.lock().expect("assets lock").insert(
+            hash.clone(),
+            AssetEntry {
+                // A path that never existed: an icon must still serve.
+                path: "/gone/icon.svg".to_string(),
+                mime: "image/svg+xml".to_string(),
+                base64: Some("PHN2Zy8+".to_string()),
+            },
+        );
+        let value = registry
+            .read_asset(&json!({ "hash": hash }))
+            .expect("asset must serve from carried bytes");
+        assert_eq!(
+            value.get("base64").and_then(|v| v.as_str()),
+            Some("PHN2Zy8+")
+        );
+        assert_eq!(
+            value.get("mime").and_then(|v| v.as_str()),
+            Some("image/svg+xml")
+        );
     }
 
     #[test]
