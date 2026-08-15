@@ -116,26 +116,44 @@ function AgentIconContent({
       backdrop={resolved.kind === "raster" && needsIconBackdrop(null, backgroundLuminance)}
       size={size}
     >
-      {resolved.kind === "svg" ? (
-        // SvgCss, not SvgXml: brand marks that declare their fills in a
-        // `<style>` block (Cursor) render unpainted — a black silhouette — with
-        // the plain XML renderer. `color` resolves any `currentColor` paint to
-        // the theme foreground instead of the default black.
-        <SvgCss
-          color={foreground}
-          height={size}
-          preserveAspectRatio="xMidYMid meet"
-          width={size}
-          xml={xml ?? resolved.xml}
-        />
-      ) : (
-        <Image
-          resizeMode="contain"
-          source={{ uri: resolved.uri }}
-          style={{ width: size, height: size }}
-        />
-      )}
+      <IconMark foreground={foreground} resolved={resolved} size={size} xml={xml} />
     </IconSurface>
+  );
+}
+
+/** The mark itself: repainted vector, or the raster bytes as they came. */
+function IconMark({
+  foreground,
+  resolved,
+  size,
+  xml,
+}: {
+  foreground: string;
+  resolved: ResolvedIcon;
+  size: number;
+  xml: string | null;
+}) {
+  if (resolved.kind !== "svg") {
+    return (
+      <Image
+        resizeMode="contain"
+        source={{ uri: resolved.uri }}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  // SvgCss, not SvgXml: brand marks that declare their fills in a `<style>`
+  // block (Cursor) render unpainted — a black silhouette — with the plain XML
+  // renderer. `color` resolves any `currentColor` paint to the theme foreground
+  // instead of the default black.
+  return (
+    <SvgCss
+      color={foreground}
+      height={size}
+      preserveAspectRatio="xMidYMid meet"
+      width={size}
+      xml={xml ?? resolved.xml}
+    />
   );
 }
 

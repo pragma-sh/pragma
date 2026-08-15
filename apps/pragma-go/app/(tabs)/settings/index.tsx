@@ -32,15 +32,7 @@ export default function SettingsScreen() {
 
 /** Round-trips `/v1/health` and shows what came back. */
 function HeartbeatCard() {
-  const { client } = useConnection();
-  const [state, setState] = useState<HeartbeatState>({ kind: "idle" });
-  const summary = heartbeatSummary(state);
-
-  const run = () => {
-    if (!client) return;
-    setState({ kind: "checking" });
-    void checkHeartbeat(client).then(setState);
-  };
+  const { busy, run, state } = useHeartbeat();
 
   return (
     <Card>
@@ -52,24 +44,45 @@ function HeartbeatCard() {
       </CardHeader>
       <CardContent className="gap-3">
         <Button
-          className={!client || state.kind === "checking" ? "opacity-50" : undefined}
-          disabled={!client || state.kind === "checking"}
+          className={busy ? "opacity-50" : undefined}
+          disabled={busy}
           onPress={run}
           variant="secondary"
         >
           <Text>Check heartbeat</Text>
         </Button>
-        {summary ? (
-          <Text
-            className={
-              state.kind === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"
-            }
-          >
-            {summary}
-          </Text>
-        ) : null}
+        <HeartbeatSummary state={state} />
       </CardContent>
     </Card>
+  );
+}
+
+/** The heartbeat's state plus the action that refreshes it. */
+function useHeartbeat() {
+  const { client } = useConnection();
+  const [state, setState] = useState<HeartbeatState>({ kind: "idle" });
+
+  const run = () => {
+    if (!client) return;
+    setState({ kind: "checking" });
+    void checkHeartbeat(client).then(setState);
+  };
+
+  return { busy: !client || state.kind === "checking", run, state };
+}
+
+/** The heartbeat's one-line result, in the destructive tone when it failed. */
+function HeartbeatSummary({ state }: { state: HeartbeatState }) {
+  const summary = heartbeatSummary(state);
+  if (!summary) return null;
+  return (
+    <Text
+      className={
+        state.kind === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+      }
+    >
+      {summary}
+    </Text>
   );
 }
 

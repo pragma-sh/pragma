@@ -71,22 +71,31 @@ function reportsByTab(statuses: AgentReportPayload[]): Map<string, MergedReport>
   const result = new Map<string, MergedReport>();
   for (const report of statuses) {
     const existing = result.get(report.tabId);
-    if (!existing) {
-      result.set(report.tabId, {
-        agent: report.agent,
-        status: report.status ?? null,
-        attentionKind: report.attentionKind ?? null,
-        sessionName: report.sessionName ?? null,
-      });
-      continue;
-    }
-    existing.sessionName = report.sessionName ?? existing.sessionName;
-    if (statusRank(report.status ?? null) > statusRank(existing.status)) {
-      existing.status = report.status ?? null;
-      existing.attentionKind = report.attentionKind ?? null;
+    if (existing) {
+      mergeReport(existing, report);
+    } else {
+      result.set(report.tabId, firstReport(report));
     }
   }
   return result;
+}
+
+/** The merged report a tab starts with, from its first report. */
+function firstReport(report: AgentReportPayload): MergedReport {
+  return {
+    agent: report.agent,
+    status: report.status ?? null,
+    attentionKind: report.attentionKind ?? null,
+    sessionName: report.sessionName ?? null,
+  };
+}
+
+/** Folds a further report for the same tab into the merged one, in place. */
+function mergeReport(merged: MergedReport, report: AgentReportPayload): void {
+  merged.sessionName = report.sessionName ?? merged.sessionName;
+  if (statusRank(report.status ?? null) <= statusRank(merged.status)) return;
+  merged.status = report.status ?? null;
+  merged.attentionKind = report.attentionKind ?? null;
 }
 
 /** Orders tabs newest-first so the freshest session leads each group. */

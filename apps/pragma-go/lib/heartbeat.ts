@@ -6,7 +6,7 @@ import type { GatewayHealth, PragmaClient } from "@pragma/sdk";
 // only wiring.
 
 /** How long a heartbeat may take before it counts as unreachable. */
-export const HEARTBEAT_TIMEOUT_MS = 8_000;
+const HEARTBEAT_TIMEOUT_MS = 8_000;
 
 /** State of the most recent heartbeat check. */
 export type HeartbeatState =
