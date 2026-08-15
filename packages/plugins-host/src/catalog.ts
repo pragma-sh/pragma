@@ -45,6 +45,14 @@ export interface IconAsset {
   hash: string;
   mime: string;
   path: string;
+  /**
+   * The icon's bytes, base64. Carried with the catalog so serving an icon never
+   * re-reads the file: a plugin directory that moves or disappears between
+   * catalog assembly and the request (a rebuilt dev worktree, a reinstalled npm
+   * plugin) would otherwise fail *every* icon with `stat asset: No such file`
+   * while the catalog still advertises the hashes.
+   */
+  base64: string;
 }
 
 /** The assembled catalog plus the hash → asset map the sidecar reports. */
@@ -79,7 +87,7 @@ export function hashIcon(path: string): IconAsset {
   }
   const bytes = readFileSync(path);
   const hash = createHash("sha256").update(bytes).digest("hex");
-  return { hash, mime: mimeForIcon(path), path };
+  return { hash, mime: mimeForIcon(path), path, base64: bytes.toString("base64") };
 }
 
 /** Resolves an agent's models, awaiting an async provider. */
