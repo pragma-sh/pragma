@@ -6,6 +6,7 @@ import { ExecClient } from "./exec-client";
 import { FanoutsClient } from "./fanouts-client";
 import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
+import { HealthClient } from "./health-client";
 import { PushClient } from "./push-client";
 import { routes } from "./routes";
 import { ScratchpadsClient } from "./scratchpads-client";
@@ -28,6 +29,7 @@ export class PragmaClient {
   readonly fanouts: FanoutsClient;
   readonly push: PushClient;
   readonly theme: ThemeClient;
+  readonly health: HealthClient;
   readonly scratchpads: ScratchpadsClient;
 
   private readonly transport: Transport;
@@ -45,6 +47,7 @@ export class PragmaClient {
     this.fanouts = new FanoutsClient(this.transport, this.events);
     this.push = new PushClient(this.transport);
     this.theme = new ThemeClient(this.transport);
+    this.health = new HealthClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
   }
 

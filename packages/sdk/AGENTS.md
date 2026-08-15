@@ -7,7 +7,7 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, `push`, `theme`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 
 Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL` and
@@ -86,6 +86,10 @@ overrides (`HostTheme`: `colors[mode][token]` plus `sources`). Pass an absolute 
 to layer that project's file over the global one; omit it for the global theme alone.
 Only overrides are returned — a client keeps its own shipped defaults for every token
 the user has not themed.
+
+`client.health.check()` round-trips `GET /v1/health` (`status`, `protocolVersion`,
+`gatewayVersion`). That route is unauthenticated, so it distinguishes an unreachable
+host from a rejected token — which is what the mobile client's Settings heartbeat uses.
 
 ## Fanouts
 

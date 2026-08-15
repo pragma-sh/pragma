@@ -37,6 +37,7 @@ export type {
 } from "@pragma/constants";
 export { PushClient, type PushRegistration } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export { HealthClient, type GatewayHealth } from "./health-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
 export { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "./env";
