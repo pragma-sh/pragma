@@ -12,6 +12,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 import { useShortcuts } from "./use-shortcuts";
+import { defaultKeybindingsConfig } from "@/lib/keybindings";
 
 import {
   clearActivePluginCommandKeybindings,
@@ -22,6 +23,7 @@ function config(): KeybindingsConfig {
   return {
     version: 1,
     bindings: {
+      ...defaultKeybindingsConfig.bindings,
       nextTab: {
         mac: { modifiers: ["ctrl"], key: "tab" },
         linux: { modifiers: ["alt"], key: "tab" },
@@ -134,6 +136,10 @@ function options(overrides: Partial<Parameters<typeof useShortcuts>[0]> = {}) {
     projectId: null,
     projectCount: 1,
     onProject: vi.fn(),
+    worktreeCount: 1,
+    onWorktree: vi.fn(),
+    tabCount: 1,
+    onTab: vi.fn(),
     onNextTab: vi.fn(),
     onPreviousTab: vi.fn(),
     onCloseTopTab: vi.fn(),
@@ -540,5 +546,61 @@ describe("useShortcuts", () => {
 
     expect(onScrollTerminalBottom).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("switches to a numbered worktree with cmd+number on mac", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onWorktree = vi.fn();
+    renderHook(() => useShortcuts(options({ worktreeCount: 3, onWorktree })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ metaKey: true, key: "3" });
+
+    expect(onWorktree).toHaveBeenCalledWith(2);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("switches to a numbered tab with alt+shift+number", async () => {
+    getPlatformMock.mockResolvedValue("linux");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const onTab = vi.fn();
+    renderHook(() => useShortcuts(options({ tabCount: 2, onTab })));
+    await flushLoad();
+
+    const event = dispatchKeydown({ altKey: true, shiftKey: true, key: "€", code: "Digit2" });
+
+    expect(onTab).toHaveBeenCalledWith(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("reveals configured keys only while navigation modifiers are held", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    const customConfig = config();
+    customConfig.bindings.switchToWorktree1.mac = { modifiers: ["cmd"], key: "g" };
+    loadKeybindingsMock.mockResolvedValue(customConfig);
+    const { result } = renderHook(() => useShortcuts(options()));
+    await flushLoad();
+
+    act(() => dispatchKeydown({ metaKey: true, key: "Meta" }));
+    expect(result.current.worktrees[1]).toBe("G");
+    expect(result.current.projects).toEqual({});
+    expect(result.current.tabs).toEqual({});
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keyup", { cancelable: true, key: "Meta" })));
+    expect(result.current).toEqual({ projects: {}, worktrees: {}, tabs: {} });
+  });
+
+  it("reveals project keys while their configured modifiers are held", async () => {
+    getPlatformMock.mockResolvedValue("mac");
+    loadKeybindingsMock.mockResolvedValue(config());
+    const { result } = renderHook(() => useShortcuts(options()));
+    await flushLoad();
+
+    act(() => dispatchKeydown({ ctrlKey: true, key: "Control" }));
+
+    expect(result.current.projects[1]).toBe("1");
+    expect(result.current.projects[9]).toBe("9");
+    expect(result.current.worktrees).toEqual({});
   });
 });

@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { Icon } from "@iconify/react";
-import type { Worktree } from "@pragma/constants";
+import type { Fanout, Worktree } from "@pragma/constants";
 import {
   ChevronRight,
   Copy,
@@ -61,9 +61,16 @@ import {
   useFanoutForParent,
 } from "@/components/sidebar/FanoutGroup";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
-import { attemptWorktreeIds } from "@/lib/fanout";
+import { ShortcutHint } from "@/components/ShortcutHint";
+import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
+import {
+  setWorktreeShortcutOrder,
+  useShortcutHint,
+  useWorktreeShortcutIndex,
+  WorktreeShortcutOrderProvider,
+} from "@/lib/shortcut-hints";
 
 /** Low-frequency safety net for ref-only git changes that file watches cannot see. */
 const MERGED_STATUS_FALLBACK_INTERVAL_MS = 30_000;
@@ -409,6 +416,23 @@ interface WorktreeTreeProps {
   onCreateChild: (parentWorktreeId: string) => void;
 }
 
+/** Worktree ids in exact sidebar render order, including fanout attempts. */
+function sidebarWorktreeOrder(tree: WorktreeNode[], fanouts: Fanout[]): string[] {
+  const order: string[] = [];
+  function visit(node: WorktreeNode) {
+    order.push(node.worktree.id);
+    const fanout = fanoutForParent(fanouts, node.worktree.id);
+    if (fanout) {
+      for (const member of orderedMembers(fanout)) {
+        if (member.worktreeId) order.push(member.worktreeId);
+      }
+    }
+    for (const child of node.children) visit(child);
+  }
+  for (const node of tree) visit(node);
+  return order;
+}
+
 /** Collapsible list of hidden worktrees under the main tree. */
 function HiddenWorktreesSection({
   hidden,
@@ -471,6 +495,11 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       }),
     [worktrees, attempts, pinTimes, prLifecycleByWorktreeId],
   );
+  const shortcutOrder = useMemo(() => sidebarWorktreeOrder(tree, fanouts), [tree, fanouts]);
+  useEffect(() => {
+    setWorktreeShortcutOrder(shortcutOrder);
+    return () => setWorktreeShortcutOrder([]);
+  }, [shortcutOrder]);
 
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
@@ -483,28 +512,30 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
     pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
 
   return (
-    <div className="space-y-1">
-      {tree.map((node, index) => (
-        <Fragment key={node.worktree.id}>
-          {index === separatorIndex ? <Separator className="my-2" /> : null}
-          <WorktreeRow
-            depth={0}
+    <WorktreeShortcutOrderProvider worktreeIds={shortcutOrder}>
+      <div className="space-y-1">
+        {tree.map((node, index) => (
+          <Fragment key={node.worktree.id}>
+            {index === separatorIndex ? <Separator className="my-2" /> : null}
+            <WorktreeRow
+              depth={0}
+              mergedByWorktreeId={mergedByWorktreeId}
+              node={node}
+              onCreateChild={onCreateChild}
+              prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+            />
+          </Fragment>
+        ))}
+        {hidden.length > 0 ? (
+          <HiddenWorktreesSection
+            hidden={hidden}
             mergedByWorktreeId={mergedByWorktreeId}
-            node={node}
-            onCreateChild={onCreateChild}
+            onUnhide={(id) => void workspace.hideWorktree(id, false)}
             prLifecycleByWorktreeId={prLifecycleByWorktreeId}
           />
-        </Fragment>
-      ))}
-      {hidden.length > 0 ? (
-        <HiddenWorktreesSection
-          hidden={hidden}
-          mergedByWorktreeId={mergedByWorktreeId}
-          onUnhide={(id) => void workspace.hideWorktree(id, false)}
-          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-        />
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </WorktreeShortcutOrderProvider>
   );
 }
 
@@ -580,6 +611,7 @@ interface WorktreeRowLabelState {
   selected: boolean;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
+  shortcutHint: string | null;
   worktreeId: string;
 }
 
@@ -738,6 +770,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       selected,
       WorktreeIcon,
       agentStatus,
+      shortcutHint,
       worktreeId,
     } = row;
     const {
@@ -771,6 +804,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
         status={<AgentStatusDot status={agentStatus} />}
         trailing={
           <>
+            <ShortcutHint value={shortcutHint} />
             <FanoutIndicator label={label} worktreeId={worktreeId} />
             {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
             <WorktreeRowActions
@@ -918,6 +952,7 @@ function WorktreeRow({
     prLifecycle,
     rename,
     selected,
+    shortcutHint,
     setDeleteOpen,
     toggleExpanded,
     WorktreeIcon,
@@ -948,6 +983,7 @@ function WorktreeRow({
               prLifecycle,
               pinned,
               selected,
+              shortcutHint,
               WorktreeIcon,
               worktreeId: node.worktree.id,
             }}
@@ -1009,11 +1045,13 @@ function useWorktreeRow(
   const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
   const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
+  const shortcutIndex = useWorktreeShortcutIndex(node.worktree.id);
+  const shortcutHint = useShortcutHint("worktree", shortcutIndex);
 
   const handleSelect = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
     // Selecting a worktree always returns to the terminal view, even when the
-    // prompt board is the visible surface.
+    // agent board is the visible surface.
     kanban.exitBoard();
   }, [workspace, kanban, node.worktree.id]);
   const handleCreateChild = useCallback(() => {
@@ -1042,6 +1080,7 @@ function useWorktreeRow(
     prLifecycle,
     rename,
     selected,
+    shortcutHint,
     setDeleteOpen,
     toggleExpanded,
     WorktreeIcon,

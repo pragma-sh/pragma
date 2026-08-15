@@ -4,6 +4,9 @@ import {
   actionForEvent,
   chordForPlatform,
   chordMatches,
+  defaultKeybindingsConfig,
+  tabIndexForAction,
+  worktreeIndexForAction,
   workspaceIndexForAction,
 } from "./keybindings";
 
@@ -13,6 +16,7 @@ function config(): KeybindingsConfig {
   return {
     version: 1,
     bindings: {
+      ...defaultKeybindingsConfig.bindings,
       nextTab: {
         mac: { modifiers: ["ctrl"], key: "tab" },
         linux: { modifiers: ["alt"], key: "tab" },
@@ -141,6 +145,21 @@ describe("chordMatches", () => {
     ).toBe(true);
   });
 
+  it("matches a physical digit when macOS modifiers transform event.key", () => {
+    const chord: KeybindingChord = { modifiers: ["alt", "shift"], key: "2" };
+    expect(
+      chordMatches(
+        new KeyboardEvent("keydown", {
+          altKey: true,
+          shiftKey: true,
+          key: "€",
+          code: "Digit2",
+        }),
+        chord,
+      ),
+    ).toBe(true);
+  });
+
   it("is case-insensitive for letter keys", () => {
     const chord: KeybindingChord = { modifiers: ["cmd"], key: "w" };
     expect(chordMatches(new KeyboardEvent("keydown", { metaKey: true, key: "w" }), chord)).toBe(
@@ -218,5 +237,16 @@ describe("workspaceIndexForAction", () => {
     expect(workspaceIndexForAction("switchToWorkspace1")).toBe(1);
     expect(workspaceIndexForAction("switchToWorkspace9")).toBe(9);
     expect(workspaceIndexForAction("nextTab")).toBeNull();
+  });
+});
+
+describe("number navigation actions", () => {
+  it("extracts worktree and tab indices", () => {
+    expect(worktreeIndexForAction("switchToWorktree1")).toBe(1);
+    expect(worktreeIndexForAction("switchToWorktree9")).toBe(9);
+    expect(worktreeIndexForAction("nextTab")).toBeNull();
+    expect(tabIndexForAction("switchToTab1")).toBe(1);
+    expect(tabIndexForAction("switchToTab9")).toBe(9);
+    expect(tabIndexForAction("nextTab")).toBeNull();
   });
 });

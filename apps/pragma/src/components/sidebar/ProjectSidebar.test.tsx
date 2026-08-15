@@ -92,6 +92,17 @@ describe("ProjectSidebar", () => {
     expect(screen.getByText("Add project")).toBeTruthy();
   });
 
+  it("creates a worktree off main from the titlebar plus button", () => {
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "New worktree off main" }));
+
+    expect(sidebarMocks.createWorktreeDialogProps).toMatchObject({
+      open: true,
+      parentWorktreeId: "main-1",
+    });
+  });
+
   it("passes clicked worktree as nested creation parent", () => {
     renderSidebar();
 

@@ -6,6 +6,7 @@ import {
   GitBranchPlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -148,14 +149,26 @@ function ExpandedProjectSidebar({
         <h2 className="truncate text-sm font-semibold text-sidebar-foreground">
           {workspace.activeProject?.name ?? "Pragma"}
         </h2>
-        <Button
-          aria-label="Collapse project sidebar"
-          size="icon-sm"
-          variant="ghost"
-          onClick={onToggleCollapsed}
-        >
-          <PanelLeftClose />
-        </Button>
+        <div className="flex shrink-0 items-center">
+          <Button
+            aria-label="New worktree off main"
+            disabled={!mainWorktreeId}
+            size="icon-sm"
+            title="New worktree off main"
+            variant="ghost"
+            onClick={onNewWorktree}
+          >
+            <Plus />
+          </Button>
+          <Button
+            aria-label="Collapse project sidebar"
+            size="icon-sm"
+            variant="ghost"
+            onClick={onToggleCollapsed}
+          >
+            <PanelLeftClose />
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         <WorktreeTree onCreateChild={onCreateChild} />

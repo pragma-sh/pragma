@@ -122,6 +122,24 @@ fn default_config() -> KeybindingsConfig {
             switch_to_workspace7: chord("ctrl", "7", "alt", "7"),
             switch_to_workspace8: chord("ctrl", "8", "alt", "8"),
             switch_to_workspace9: chord("ctrl", "9", "alt", "9"),
+            switch_to_worktree1: chord("cmd", "1", "ctrl", "1"),
+            switch_to_worktree2: chord("cmd", "2", "ctrl", "2"),
+            switch_to_worktree3: chord("cmd", "3", "ctrl", "3"),
+            switch_to_worktree4: chord("cmd", "4", "ctrl", "4"),
+            switch_to_worktree5: chord("cmd", "5", "ctrl", "5"),
+            switch_to_worktree6: chord("cmd", "6", "ctrl", "6"),
+            switch_to_worktree7: chord("cmd", "7", "ctrl", "7"),
+            switch_to_worktree8: chord("cmd", "8", "ctrl", "8"),
+            switch_to_worktree9: chord("cmd", "9", "ctrl", "9"),
+            switch_to_tab1: chord("alt+shift", "1", "alt+shift", "1"),
+            switch_to_tab2: chord("alt+shift", "2", "alt+shift", "2"),
+            switch_to_tab3: chord("alt+shift", "3", "alt+shift", "3"),
+            switch_to_tab4: chord("alt+shift", "4", "alt+shift", "4"),
+            switch_to_tab5: chord("alt+shift", "5", "alt+shift", "5"),
+            switch_to_tab6: chord("alt+shift", "6", "alt+shift", "6"),
+            switch_to_tab7: chord("alt+shift", "7", "alt+shift", "7"),
+            switch_to_tab8: chord("alt+shift", "8", "alt+shift", "8"),
+            switch_to_tab9: chord("alt+shift", "9", "alt+shift", "9"),
         },
     }
 }
@@ -169,6 +187,18 @@ mod tests {
         assert_eq!(parsed.bindings.delete_file.linux.key, "delete");
         assert_eq!(parsed.bindings.scroll_terminal_bottom.mac.key, "end");
         assert_eq!(parsed.bindings.scroll_terminal_bottom.linux.key, "end");
+        assert_eq!(parsed.bindings.switch_to_worktree1.mac.key, "1");
+        assert_eq!(
+            parsed.bindings.switch_to_worktree1.linux.modifiers,
+            [KeybindingChordModifiersItem::Ctrl]
+        );
+        assert_eq!(
+            parsed.bindings.switch_to_tab1.mac.modifiers,
+            [
+                KeybindingChordModifiersItem::Alt,
+                KeybindingChordModifiersItem::Shift
+            ]
+        );
     }
 
     #[test]

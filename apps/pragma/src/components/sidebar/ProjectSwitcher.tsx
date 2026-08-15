@@ -2,6 +2,7 @@ import { useEffect, useRef, type Ref } from "react";
 import { Trash2 } from "lucide-react";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { ShortcutHint } from "@/components/ShortcutHint";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -15,6 +16,7 @@ import { removeProject } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useProjectAgentStatus } from "@/state/agent-status-store";
 import { useWorkspace } from "@/state/workspace-context";
+import { useShortcutHint } from "@/lib/shortcut-hints";
 import { toast } from "sonner";
 
 /** First non-space character of `name`, uppercased; falls back to `?` for empty names. */
@@ -106,6 +108,7 @@ function ProjectButton({
   worktreeIds,
 }: ProjectButtonProps) {
   const status = useProjectAgentStatus(worktreeIds);
+  const shortcutHint = useShortcutHint("project", index < 9 ? index + 1 : null);
   return (
     <Tooltip>
       <ContextMenu>
@@ -143,7 +146,8 @@ function ProjectButton({
               ) : (
                 <span className="text-xs font-semibold">{leadingInitial(name)}</span>
               )}
-              <AgentStatusDot className="absolute -top-0.5 -right-0.5" status={status} />
+              <AgentStatusDot className="absolute top-0 right-0" status={status} />
+              <ShortcutHint className="absolute inset-1 z-10" value={shortcutHint} />
             </button>
           </TooltipTrigger>
         </ContextMenuTrigger>

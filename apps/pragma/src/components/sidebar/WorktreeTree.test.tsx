@@ -1,5 +1,5 @@
 import type { Worktree } from "@pragma/constants";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fanoutsMock = vi.fn(() => [] as unknown[]);
@@ -102,6 +102,7 @@ vi.mock("@/state/github-context", () => ({
 }));
 
 import { WorktreeTree } from "./WorktreeTree";
+import { useWorktreeShortcutOrder } from "@/lib/shortcut-hints";
 
 afterEach(() => {
   cleanup();
@@ -127,6 +128,19 @@ afterEach(() => {
 });
 
 describe("WorktreeTree", () => {
+  it("publishes shortcut targets in rendered sidebar order", async () => {
+    workspaceMock = {
+      ...workspaceMock,
+      worktrees: { p: [siblingWorktree, childWorktree, mainWorktree] },
+    };
+    worktreesMergedStatusMock.mockResolvedValue({ child: false, sibling: false });
+    const { result } = renderHook(() => useWorktreeShortcutOrder());
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    await vi.waitFor(() => expect(result.current).toEqual(["main", "child", "sibling"]));
+  });
+
   it("uses the merged icon for a child worktree with no remaining changes", async () => {
     worktreesMergedStatusMock.mockResolvedValue({ child: true });
 

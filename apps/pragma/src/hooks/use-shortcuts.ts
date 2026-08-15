@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
+import type { KeybindingsConfig } from "@pragma/constants";
+
 import type { KeybindingPlatform, KeybindingAction } from "@/lib/keybindings";
 import {
   actionForEvent,
+  chordForPlatform,
+  chordModifiersMatch,
   defaultKeybindingsConfig,
   isRecordingKeybinding,
   KEYBINDINGS_CHANGED_EVENT,
   setLoadedKeybindingsConfig,
+  tabIndexForAction,
+  worktreeIndexForAction,
   workspaceIndexForAction,
 } from "@/lib/keybindings";
+import { emptyShortcutHints, type ShortcutHints } from "@/lib/shortcut-hints";
 import { isTerminalEditingContext, isTextEditingContext } from "@/lib/native-editing";
 import { isMacPlatform } from "@/lib/platform";
 import { hasPluginCommandForEvent } from "@/plugins/command-keybindings";
@@ -19,6 +26,10 @@ interface UseShortcutsOptions {
   projectId: string | null;
   projectCount: number;
   onProject: (index: number) => void;
+  worktreeCount: number;
+  onWorktree: (index: number) => void;
+  tabCount: number;
+  onTab: (index: number) => void;
   onNextTab: () => void;
   onPreviousTab: () => void;
   onCloseTopTab: () => void;
@@ -43,6 +54,7 @@ interface UseShortcutsOptions {
 
 interface ShortcutState {
   platform: KeybindingPlatform;
+  config: KeybindingsConfig;
   actionForEvent: (event: KeyboardEvent) => KeybindingAction | null;
 }
 
@@ -81,7 +93,7 @@ const NATIVE_MENU_ACTIONS: ReadonlySet<KeybindingAction> = new Set([
  * project's `.pragma/keybindings.json`. Reloads when the project changes or
  * Settings saves a binding.
  */
-export function useShortcuts(options: UseShortcutsOptions): void {
+export function useShortcuts(options: UseShortcutsOptions): ShortcutHints {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const { projectId } = options;
@@ -90,9 +102,11 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     const platform = isMacPlatform() ? "mac" : "linux";
     return {
       platform,
+      config: defaultKeybindingsConfig,
       actionForEvent: (event) => actionForEvent(event, defaultKeybindingsConfig, platform),
     };
   });
+  const [hints, setHints] = useState<ShortcutHints>(emptyShortcutHints);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +119,7 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         setLoadedKeybindingsConfig(config);
         setShortcutState({
           platform,
+          config,
           actionForEvent: (event) => actionForEvent(event, config, platform),
         });
       } catch {
@@ -123,6 +138,9 @@ export function useShortcuts(options: UseShortcutsOptions): void {
     const state = shortcutState;
 
     function onKeyDown(event: KeyboardEvent) {
+      if (isModifierKey(event.key)) {
+        setHints(navigationHintsForEvent(event, state));
+      }
       // While Settings records a chord, every key belongs to the recorder.
       if (isRecordingKeybinding()) {
         return;
@@ -167,12 +185,63 @@ export function useShortcuts(options: UseShortcutsOptions): void {
         return;
       }
 
-      handleWorkspaceIndexAction(event, action, current);
+      handleNavigationIndexAction(event, action, current);
+    }
+
+    function onKeyUp(event: KeyboardEvent) {
+      if (isModifierKey(event.key)) {
+        setHints(navigationHintsForEvent(event, state));
+      }
+    }
+
+    function clearHints() {
+      setHints(emptyShortcutHints);
     }
 
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", clearHints);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", clearHints);
+    };
   }, [shortcutState]);
+
+  return hints;
+}
+
+function isModifierKey(key: string): boolean {
+  return ["Alt", "Control", "Meta", "Shift"].includes(key);
+}
+
+function hintKey(key: string): string {
+  const normalized = key.toLowerCase();
+  return normalized.length === 1 ? normalized.toUpperCase() : normalized;
+}
+
+/** Resolves only number-navigation actions whose configured modifiers are currently held. */
+function navigationHintsForEvent(event: KeyboardEvent, state: ShortcutState): ShortcutHints {
+  const hints: {
+    projects: Record<number, string>;
+    worktrees: Record<number, string>;
+    tabs: Record<number, string>;
+  } = {
+    projects: {},
+    worktrees: {},
+    tabs: {},
+  };
+  for (const action of Object.keys(state.config.bindings) as KeybindingAction[]) {
+    const chord = chordForPlatform(state.config.bindings[action], state.platform);
+    if (!chordModifiersMatch(event, chord)) continue;
+    const projectIndex = workspaceIndexForAction(action);
+    if (projectIndex !== null) hints.projects[projectIndex] = hintKey(chord.key);
+    const worktreeIndex = worktreeIndexForAction(action);
+    if (worktreeIndex !== null) hints.worktrees[worktreeIndex] = hintKey(chord.key);
+    const tabIndex = tabIndexForAction(action);
+    if (tabIndex !== null) hints.tabs[tabIndex] = hintKey(chord.key);
+  }
+  return hints;
 }
 
 /**
@@ -198,8 +267,8 @@ function handleDeleteFileAction(event: KeyboardEvent, current: UseShortcutsOptio
   current.onDeleteSelectedFile();
 }
 
-/** Workspace-index actions (Cmd/Ctrl+1..N) switch to the Nth project, in bounds. */
-function handleWorkspaceIndexAction(
+/** Numbered navigation actions switch to their in-bounds project, worktree, or tab. */
+function handleNavigationIndexAction(
   event: KeyboardEvent,
   action: KeybindingAction,
   current: UseShortcutsOptions,
@@ -208,5 +277,17 @@ function handleWorkspaceIndexAction(
   if (workspaceIndex !== null && workspaceIndex <= current.projectCount) {
     event.preventDefault();
     current.onProject(workspaceIndex - 1);
+    return;
+  }
+  const worktreeIndex = worktreeIndexForAction(action);
+  if (worktreeIndex !== null && worktreeIndex <= current.worktreeCount) {
+    event.preventDefault();
+    current.onWorktree(worktreeIndex - 1);
+    return;
+  }
+  const tabIndex = tabIndexForAction(action);
+  if (tabIndex !== null && tabIndex <= current.tabCount) {
+    event.preventDefault();
+    current.onTab(tabIndex - 1);
   }
 }
