@@ -51,16 +51,16 @@ from the desktop.
   session attach before the workspace snapshot catches up. Catalog-qualified
   launch ids are reduced to the plugin's runtime agent id for stream routing.
 - **Icons** (`components/AgentIcon.tsx`): plugin agent icons are fetched by
-  content hash through the authed `AssetsClient` (SVG → `SvgXml`, raster →
+  content hash through the authed `AssetsClient` (SVG → `SvgCss`, raster →
   data-URI `Image`), cached by hash. **Never** render an agent icon as a bare
   `Image` URL — the bearer token must ride the request header. Contrast is
   handled by `lib/icon-contrast.ts`: brand marks are monochrome at both ends
   (Grok near-black, opencode near-white) and the phone follows the host theme,
-  so an SVG is classified from the colours it paints with and an icon that
-  would fall below the 3:1 AA bar against the theme background is placed on a
-  neutral backdrop. The desktop samples pixels on a canvas and inverts; React
-  Native has no canvas, so a raster icon (unclassifiable) always gets the
-  backdrop.
+  so an SVG is classified from the colours it paints with and repainted when
+  it would fall below the 3:1 AA bar against the theme background; raster icons
+  (unclassifiable) always get a neutral backdrop instead. The desktop samples
+  pixels on a canvas and inverts; React Native has no canvas, so this module
+  classifies an SVG from its own bytes rather than rendered pixels.
 - **Session titles** (`lib/tab-title.ts`): an agent row shows the title the
   **desktop** shows on its agent tab — the tab's own name (a user rename, or
   the agent-reported session name the desktop persists), falling back to the
