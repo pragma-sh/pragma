@@ -479,9 +479,91 @@ fn finish(
 
 #[cfg(test)]
 mod tests {
-    use pragma_constants::AgentFeature;
+    use pragma_constants::{AgentCatalog, AgentFeature, CatalogAgent};
 
     use super::*;
+
+    struct StubVerifyApi;
+
+    impl VerifyApi for StubVerifyApi {
+        fn catalog(&self) -> Result<AgentCatalog, String> {
+            unreachable!("catalog is not called by this test")
+        }
+        fn asset_exists(&self, _hash: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn workspace_snapshot(&self) -> Result<pragma_constants::WorkspaceSnapshot, String> {
+            unreachable!("workspace snapshot is not called by this test")
+        }
+        fn launch(&self, _spec: &gateway::LaunchSpec<'_>) -> Result<gateway::LaunchResult, String> {
+            unreachable!("launch is not called by this test")
+        }
+        fn clear_status(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+        ) -> Result<(), String> {
+            unreachable!("clear status is not called by this test")
+        }
+        fn answer(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+            _request_id: &str,
+            _answer: Option<&str>,
+        ) -> Result<(), String> {
+            unreachable!("answer is not called by this test")
+        }
+        fn decide(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+            _request_id: &str,
+            _approved: bool,
+        ) -> Result<(), String> {
+            unreachable!("decide is not called by this test")
+        }
+        fn interrupt(&self, _agent: &str, _worktree_id: &str, _tab_id: &str) -> Result<(), String> {
+            unreachable!("interrupt is not called by this test")
+        }
+        fn input(
+            &self,
+            _agent: &str,
+            _worktree_id: &str,
+            _tab_id: &str,
+            _text: &str,
+        ) -> Result<(), String> {
+            unreachable!("input is not called by this test")
+        }
+        fn write_input(&self, _session_id: &str, _bytes: &[u8]) -> Result<(), String> {
+            unreachable!("write input is not called by this test")
+        }
+        fn kill_session(&self, _session_id: &str) -> Result<(), String> {
+            unreachable!("kill session is not called by this test")
+        }
+        fn usage_limits(&self, _plugin_id: &str) -> Result<serde_json::Value, String> {
+            unreachable!("usage limits are not called by this test")
+        }
+        fn event_reader(&self) -> Result<Box<dyn std::io::BufRead + Send>, String> {
+            unreachable!("event reader is not called by this test")
+        }
+    }
+
+    fn catalog_agent(models: &[serde_json::Value]) -> CatalogAgent {
+        serde_json::from_value(serde_json::json!({
+            "id": "agent",
+            "name": "Agent",
+            "pluginId": "plugin",
+            "models": models,
+            "launch": {
+                "commands": [{ "modelId": null, "reasoningId": null, "command": ["agent"] }]
+            }
+        }))
+        .expect("catalog agent fixture")
+    }
 
     #[test]
     fn validates_scenario_filters() {
@@ -494,6 +576,15 @@ mod tests {
         assert_eq!(runtime_agent_id("pragma.opencode"), "opencode");
         assert_eq!(runtime_agent_id("pragma.claude-code"), "claude-code");
         assert_eq!(runtime_agent_id("codex"), "codex");
+    }
+
+    #[test]
+    fn catalog_gate_requires_at_least_one_model() {
+        let api = StubVerifyApi;
+        assert_eq!(
+            validate_catalog_agent(&api, &catalog_agent(&[])).unwrap_err(),
+            "catalog agent has no models"
+        );
     }
 
     #[test]

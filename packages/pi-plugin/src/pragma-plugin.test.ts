@@ -44,7 +44,8 @@ describe("pi watcher", () => {
 
     await watcher?.watch(context as never);
 
-    expect(sendKeys).toHaveBeenCalledWith("\x1b[200~continue\x1b[201~\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[200~continue\x1b[201~");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b[13;3u");
     expect(report).toHaveBeenCalledWith({
       agent: "pi",
       tabId: "tab-1",
@@ -56,6 +57,13 @@ describe("pi watcher", () => {
 });
 
 describe("parsePiModels", () => {
+  it("clears late terminal-query text and submits prefills with Kitty Enter", () => {
+    expect(piAgentPlugin.agents?.[0]).toMatchObject({
+      startupInput: [{ delayMs: 1800, data: "\x15" }],
+      prefillSubmit: "\x1b[13u",
+    });
+  });
+
   it("checks Node managers when the plugin host PATH omits Pi", async () => {
     const run = vi.fn(async () => [{ stdout: "", stderr: "", status: 0 }]);
     const models = piAgentPlugin.agents?.[0]?.models;

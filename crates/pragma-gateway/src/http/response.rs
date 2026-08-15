@@ -205,6 +205,7 @@ pub fn event_json(event: EventFrame) -> Value {
             command,
             question,
             options,
+            questions,
             request_id,
         } => json!({
             "type": "agent",
@@ -217,6 +218,7 @@ pub fn event_json(event: EventFrame) -> Value {
             "command": command,
             "question": question,
             "options": options,
+            "questions": questions,
             "requestId": request_id,
         }),
         EventFrame::AgentMessage { message } => json!({
@@ -344,6 +346,7 @@ mod tests {
             command: None,
             question: Some("Which database?".to_string()),
             options: Some(vec![option]),
+            questions: None,
             request_id: Some("req-1".to_string()),
         });
         assert_eq!(

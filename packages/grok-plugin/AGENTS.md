@@ -67,7 +67,7 @@ report.
 | `StopFailure`          | `failed`         | Clears (an API-error turn never completed) and names the error     |
 | `SubagentStart`        | `subagent-start` | Tracks the child, reasserts running                                |
 | `SubagentStop`         | `subagent-stop`  | Removes only the matching child; the parent `Stop` owns done       |
-| `PreToolUse`           | `question`       | `ask_user_question` only: raises attention                         |
+| `PreToolUse`           | `question`       | `ask_user_question` only: raises structured question attention     |
 | `PostToolUse(Failure)` | `running`        | Reasserts running once a tool finishes mid-turn                    |
 | `SessionEnd`           | `cleared`        | Clears status and forgets the session/name state                   |
 | Transcript watcher     | -                | Streams assistant output; clears on a cancel no hook reports       |
@@ -218,10 +218,11 @@ bun run --filter @pragma/grok-plugin build
 pragma-cli agent verify --agent pragma.grok --abort-input '\x1b'
 ```
 
-`questions` and `commandApproval` scenarios are skipped by `excludeFeatures` — grok owns
-both prompts in its own TUI and exposes no hook that can answer them. Everything else
-(started/stopped/cleared, session name, subagents, abort, interrupt, usage limits, stream
-integrity) is in scope.
+Only `commandApproval` is skipped by `excludeFeatures` — grok owns that prompt in its own
+TUI and exposes no hook that can answer it. `ask_user_question` reports question text,
+options, and request id; the Pragma watcher answers Grok's native card with digit shortcuts
+plus Enter confirmation, `z` for free text, or `Shift+X` for dismissal. Everything else (started/stopped/cleared,
+session name, subagents, abort, interrupt, usage limits, stream integrity) is in scope.
 
 Verification burns real tokens against the signed-in account. A free-tier account hits
 grok's usage ceiling quickly, and a rate-limited turn is recorded as

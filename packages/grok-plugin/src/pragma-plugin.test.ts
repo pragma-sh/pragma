@@ -77,7 +77,7 @@ describe("grokAgentPlugin", () => {
   });
 
   it("declares only the capabilities grok's hook surface cannot serve", () => {
-    expect(agent?.excludeFeatures).toEqual(["commandApproval", "questions"]);
+    expect(agent?.excludeFeatures).toEqual(["commandApproval"]);
   });
 
   it("maps each permission mode to a real grok launch flag", () => {

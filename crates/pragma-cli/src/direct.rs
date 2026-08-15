@@ -345,10 +345,13 @@ pub fn agent_report(
         "question": fields.question,
         "requestId": fields.request_id,
     });
-    // `options` deserializes into a plain Vec server-side, so the key must be
-    // absent (not null) when no choices were passed.
+    // `options`/`questions` deserialize into plain Vecs server-side, so the
+    // keys must be absent (not null) when no choices were passed.
     if let Some(raw) = &fields.options {
         payload["options"] = parse_question_options(raw)?;
+    }
+    if let Some(raw) = &fields.questions {
+        payload["questions"] = parse_multi_questions(raw)?;
     }
     let frame = RequestFrame {
         request_id: format!("agent-{}", std::process::id()),
@@ -645,6 +648,7 @@ struct ReportFields {
     command: Option<String>,
     question: Option<String>,
     options: Option<String>,
+    questions: Option<String>,
     request_id: Option<String>,
     worktree_override: Option<String>,
 }
@@ -656,6 +660,13 @@ fn parse_question_options(raw: &str) -> Result<serde_json::Value, CliError> {
     serde_json::to_value(options).map_err(|err| CliError::config(err.to_string()))
 }
 
+/// Parses the `--questions` JSON into validated [`pragma_protocol::AgentQuestion`]s.
+fn parse_multi_questions(raw: &str) -> Result<serde_json::Value, CliError> {
+    let questions: Vec<pragma_protocol::AgentQuestion> = serde_json::from_str(raw)
+        .map_err(|err| CliError::config(format!("invalid --questions JSON: {err}")))?;
+    serde_json::to_value(questions).map_err(|err| CliError::config(err.to_string()))
+}
+
 fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
     match report {
         crate::cli::AgentReportCommand::Started => ReportFields {
@@ -665,6 +676,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command: None,
             question: None,
             options: None,
+            questions: None,
             request_id: None,
             worktree_override: None,
         },
@@ -675,6 +687,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command: None,
             question: None,
             options: None,
+            questions: None,
             request_id: None,
             worktree_override: worktree_id.clone(),
         },
@@ -683,6 +696,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command,
             question,
             options,
+            questions,
             request_id,
         } => ReportFields {
             status: Some("attention"),
@@ -694,6 +708,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command: command.clone(),
             question: question.clone(),
             options: options.clone(),
+            questions: questions.clone(),
             request_id: request_id.clone(),
             worktree_override: None,
         },
@@ -704,6 +719,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command: None,
             question: None,
             options: None,
+            questions: None,
             request_id: None,
             worktree_override: None,
         },
@@ -714,6 +730,7 @@ fn report_fields(report: &crate::cli::AgentReportCommand) -> ReportFields {
             command: None,
             question: None,
             options: None,
+            questions: None,
             request_id: None,
             worktree_override: worktree_id.clone(),
         },
@@ -735,7 +752,7 @@ pub(crate) fn watch_grace() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_question_options;
+    use super::{parse_multi_questions, parse_question_options};
 
     #[test]
     fn parses_valid_question_options() {
@@ -753,5 +770,25 @@ mod tests {
     fn rejects_malformed_question_options() {
         assert!(parse_question_options("not json").is_err());
         assert!(parse_question_options(r#"[{"description":"missing label"}]"#).is_err());
+    }
+
+    #[test]
+    fn parses_valid_multi_questions() {
+        let value = parse_multi_questions(
+            r#"[{"question":"Choose Red or Blue?","options":[{"label":"Red"},{"label":"Blue"}]},{"question":"Choose Circle or Square?","options":[{"label":"Circle"},{"label":"Square"}]}]"#,
+        )
+        .expect("valid questions JSON parses");
+        let questions = value.as_array().expect("questions serialize as an array");
+        assert_eq!(questions.len(), 2);
+        assert_eq!(questions[0]["question"], "Choose Red or Blue?");
+        assert_eq!(questions[0]["options"][0]["label"], "Red");
+        assert_eq!(questions[1]["question"], "Choose Circle or Square?");
+        assert_eq!(questions[1]["options"][1]["label"], "Square");
+    }
+
+    #[test]
+    fn rejects_malformed_multi_questions() {
+        assert!(parse_multi_questions("not json").is_err());
+        assert!(parse_multi_questions(r#"[{"options":[]}]"#).is_err());
     }
 }

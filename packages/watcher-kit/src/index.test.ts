@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createTuiWatcher, questionAnswerKeys, questionFallbackMessage } from "./index";
+import { createTuiWatcher, questionAnswerKeys } from "./index";
 
 /** Decision-handling watcher (opencode's shape). */
 const approvalWatcher = createTuiWatcher({ agent: "opencode", handleDecisions: true });
@@ -16,12 +16,24 @@ const questionWatcher = createTuiWatcher({
   handleDecisions: false,
   handleQuestionAnswers: true,
 });
-/** Question watcher for a TUI whose question prompt has no free-text editor (Codex). */
-const fallbackQuestionWatcher = createTuiWatcher({
-  agent: "codex",
+const reviewedQuestionWatcher = createTuiWatcher({
+  agent: "kimi",
   handleDecisions: false,
   handleQuestionAnswers: true,
-  questionFreeTextMode: "interject",
+  questionFinalizeKeys: "1",
+});
+const shortcutQuestionWatcher = createTuiWatcher({
+  agent: "grok",
+  handleDecisions: false,
+  handleQuestionAnswers: true,
+  questionOtherMode: "shortcut-z",
+  questionDismissKeys: "X",
+});
+const plainFollowUpWatcher = createTuiWatcher({
+  agent: "pi",
+  handleDecisions: false,
+  interjectMode: "plain",
+  interjectSubmitKeys: "\x1b[13;3u",
 });
 
 interface DecisionEvent {
@@ -57,6 +69,10 @@ interface AttentionEvent {
   requestId?: string | null;
   question?: string | null;
   options?: Array<{ label: string; description?: string }> | null;
+  questions?: Array<{
+    question: string;
+    options?: Array<{ label: string; description?: string }>;
+  }> | null;
 }
 
 interface InputEvent {
@@ -147,6 +163,25 @@ function questionAttention(
   };
 }
 
+function multiQuestionAttention(requestId = "req-multi"): AttentionEvent {
+  return {
+    type: "agent",
+    agent: "opencode",
+    worktreeId: "wt-1",
+    tabId: "tab-1",
+    status: "attention",
+    attentionKind: "question",
+    requestId,
+    questions: [
+      { question: "Choose Red or Blue?", options: [{ label: "Red" }, { label: "Blue" }] },
+      {
+        question: "Choose Circle or Square?",
+        options: [{ label: "Circle" }, { label: "Square" }],
+      },
+    ],
+  };
+}
+
 function commandAttention(requestId = "req-1"): AttentionEvent {
   return {
     type: "agent",
@@ -224,7 +259,9 @@ describe("createTuiWatcher with handleDecisions", () => {
   it("types an interjection's text and submits it", async () => {
     const { ctx, sendKeys } = context([input("focus on the tests")]);
     await approvalWatcher.watch(ctx as never);
-    expect(sendKeys).toHaveBeenCalledWith("\x1b[200~focus on the tests\x1b[201~\r");
+    expect(sendKeys).toHaveBeenCalledTimes(2);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[200~focus on the tests\x1b[201~");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
   });
 
   it("honors a configured submit key for interjections", async () => {
@@ -365,6 +402,53 @@ describe("createTuiWatcher with handleDecisions", () => {
     expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
   });
 
+  it("ignores a verdict whose request id does not match the outstanding command attention", async () => {
+    // The scenario sends a decision with a corrupted requestId before the real
+    // one. A stray verdict must not clear the pinned command attention, or the
+    // agent's permission prompt would be answered without the user ever
+    // approving this exact request.
+    const { ctx, sendKeys } = context([
+      commandAttention("req-1"),
+      decision(false, { requestId: "req-1-wrong" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("still applies the matching verdict after ignoring a stray one", async () => {
+    const { ctx, sendKeys } = context([
+      commandAttention("req-1"),
+      decision(false, { requestId: "req-1-wrong" }),
+      decision(false, { requestId: "req-1" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledTimes(1);
+    expect(sendKeys).toHaveBeenCalledWith("\x1b[C\x1b[C\r");
+  });
+
+  it("re-matches the next verdict once the attention cleared", async () => {
+    // A resolved attention (running) releases the outstanding id, so a later
+    // command attention with a fresh id is matched by its own verdict.
+    const { ctx, sendKeys } = context([
+      commandAttention("req-1"),
+      decision(true, { requestId: "req-1" }),
+      {
+        type: "agent",
+        agent: "opencode",
+        worktreeId: "wt-1",
+        tabId: "tab-1",
+        status: "running",
+        attentionKind: null,
+      },
+      commandAttention("req-2"),
+      decision(true, { requestId: "req-2" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledTimes(2);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
+  });
+
   it("answers a question with the digit for the matching option", async () => {
     const { ctx, sendKeys } = context([questionAttention("req-q", ["3", "4", "5"]), answer("4")]);
     await approvalWatcher.watch(ctx as never);
@@ -470,6 +554,13 @@ describe("createTuiWatcher without handleDecisions", () => {
     expect(sendKeys).toHaveBeenNthCalledWith(2, "\r");
   });
 
+  it("supports agent-owned plain input and submit keys", async () => {
+    const { ctx, sendKeys } = context([input("continue")]);
+    await plainFollowUpWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "continue");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b[13;3u");
+  });
+
   it("can answer questions without handling command decisions", async () => {
     const { ctx, sendKeys } = context([
       decision(true),
@@ -482,39 +573,77 @@ describe("createTuiWatcher without handleDecisions", () => {
   });
 });
 
-describe("questionFreeTextMode: interject", () => {
-  it("builds a single-line follow-up prompt from question and answer", () => {
-    expect(questionFallbackMessage("Which\n  marker?", "  alpha\nbeta ")).toBe(
-      'Answer to question "Which marker?": alpha beta',
-    );
+describe("multi-question answers", () => {
+  it("answers each native TUI prompt in order", async () => {
+    const { ctx, sendKeys } = context([
+      multiQuestionAttention("req-multi"),
+      answer("Red\x1fCircle", { requestId: "req-multi" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "1");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "1");
+    expect(sendKeys).toHaveBeenCalledTimes(2);
   });
 
-  it("selects the fallback row, aborts the response, then interjects the answer", async () => {
+  it("keeps the question mapping intact when a free-text reply contains ' | '", async () => {
     const { ctx, sendKeys } = context([
-      questionAttention("req-q", ["A", "B"]),
-      answer("forty-two"),
+      multiQuestionAttention("req-multi"),
+      answer("Red | ish\x1fCircle", { requestId: "req-multi" }),
     ]);
-    await fallbackQuestionWatcher.watch(ctx as never);
+    await approvalWatcher.watch(ctx as never);
+    // First reply is free-text ("Red | ish" is not a listed option), second is
+    // the listed "Circle" option -- neither answer bleeds into the other.
     expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");
-    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b");
-    expect(sendKeys).toHaveBeenNthCalledWith(
-      3,
-      '\x1b[200~Answer to question "Which?": forty-two\x1b[201~\r',
-    );
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "Red | ish\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, "1");
     expect(sendKeys).toHaveBeenCalledTimes(3);
   });
 
-  it("still answers listed options with digits and dismissals with Escape", async () => {
+  it("uses each native custom-answer editor for free-text replies", async () => {
+    const { ctx, sendKeys } = context([
+      multiQuestionAttention("req-multi"),
+      answer("Crimson\x1fTriangle", { requestId: "req-multi" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "Crimson\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, "\x1b[B\x1b[B\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(4, "Triangle\r");
+    expect(sendKeys).toHaveBeenCalledTimes(4);
+  });
+
+  it("dismisses the native question prompt with Escape", async () => {
+    const { ctx, sendKeys } = context([
+      multiQuestionAttention("req-multi"),
+      answer(null, { requestId: "req-multi" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenCalledWith("\x1b");
+  });
+});
+
+describe("host-specific native question controls", () => {
+  it("confirms a separate review screen after answering", async () => {
+    const { ctx, sendKeys } = context([
+      questionAttention("req-q", ["A", "B"]),
+      answer("B", { requestId: "req-q" }),
+    ]);
+    await reviewedQuestionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "2");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "1");
+  });
+
+  it("uses custom free-text and dismissal shortcuts", async () => {
     const { ctx, sendKeys } = context([
       questionAttention("req-1", ["A", "B"]),
-      answer("B", { requestId: "req-1" }),
+      answer("custom", { requestId: "req-1" }),
       questionAttention("req-2", ["A", "B"]),
       answer(null, { requestId: "req-2" }),
     ]);
-    await fallbackQuestionWatcher.watch(ctx as never);
-    expect(sendKeys).toHaveBeenNthCalledWith(1, "2");
-    expect(sendKeys).toHaveBeenNthCalledWith(2, "\x1b");
-    expect(sendKeys).toHaveBeenCalledTimes(2);
+    await shortcutQuestionWatcher.watch(ctx as never);
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "z");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "custom\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, "X");
   });
 });
 

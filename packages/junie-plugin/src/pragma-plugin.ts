@@ -30,6 +30,8 @@ const baseWatcher = createTuiWatcher({
   // Junie's question list ignores digit shortcuts: it navigates with Down,
   // marks the row with Space ("space to select"), and submits with Enter.
   questionSelectMode: "arrow-space",
+  // Selection opens Junie's answer summary; one more Enter submits it.
+  questionFinalizeKeys: "\r",
 });
 
 /**

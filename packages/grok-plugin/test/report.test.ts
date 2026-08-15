@@ -435,10 +435,23 @@ describe("report.sh", () => {
       stdin: JSON.stringify({
         hookEventName: "pre_tool_use",
         toolName: "ask_user_question",
-        toolInput: { questions: [{ question: "Which database?" }] },
+        toolInput: {
+          questions: [
+            {
+              question: "Which database?",
+              options: [{ label: "Postgres", description: "Relational" }],
+            },
+          ],
+        },
       }),
     });
-    expect(reports()).toContain("agent report --agent grok attention");
+    expect(
+      reports().some((call) =>
+        call.startsWith(
+          'agent report --agent grok attention --kind question --question Which database? --options [{"label":"Postgres","description":"Relational"}] --request-id ',
+        ),
+      ),
+    ).toBe(true);
     expect(messages()).toContainEqual(
       expect.objectContaining({ role: "system", text: "Which database?" }),
     );
@@ -473,6 +486,40 @@ describe("report.sh", () => {
     });
     expect(reports()).not.toContain("agent report --agent grok stopped");
     expect(existsSync(markerPath())).toBe(true);
+  });
+
+  itWithPython3("ignores a subagent's own lifecycle so the parent still reports done", () => {
+    // A subagent runs with its own session id but inherits the parent's
+    // PRAGMA_TAB_ID, so its own UserPromptSubmit / SessionEnd hooks hit the
+    // same state files. They must be dropped: the child's prompt must not
+    // become a user message or rename the tab, its session_end must not clear
+    // the parent's status, and the parent's final Stop must still report done.
+    run("started", {
+      stdin: JSON.stringify({
+        hookEventName: "user_prompt_submit",
+        sessionId: "parent",
+        prompt: "Spawn two sub-agents",
+      }),
+    });
+    run("started", {
+      stdin: JSON.stringify({
+        hookEventName: "user_prompt_submit",
+        sessionId: "child",
+        prompt: "Memoization tip",
+      }),
+    });
+    run("cleared", { stdin: JSON.stringify({ hookEventName: "session_end", sessionId: "child" }) });
+    run("stopped", {
+      stdin: JSON.stringify({ hookEventName: "stop", sessionId: "parent", reason: "end_turn" }),
+    });
+    expect(messages().map((message) => message.text)).not.toContain("Memoization tip");
+    expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
+      "agent report --agent grok session-name --name Spawn two sub-agents",
+    ]);
+    expect(reports().filter((call) => call.endsWith("started"))).toHaveLength(1);
+    expect(reports()).not.toContain("agent report --agent grok cleared");
+    expect(reports()).toContain("agent report --agent grok stopped");
+    expect(existsSync(markerPath())).toBe(false);
   });
 
   itWithPython3("keeps a turn that already started in the session being started", () => {

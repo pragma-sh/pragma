@@ -67,6 +67,15 @@ report() {
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
+# Same as `report` but propagates the exit status. Use it for a report whose
+# flags a older installed pragma-cli may not know (`--questions` landed after
+# the hook did): clap exits nonzero on an unknown flag, and because `report`
+# swallows that the attention silently never reaches any client while the
+# chat message still arrives. Callers fall back on a nonzero status.
+report_checked() {
+  "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1
+}
+
 # Reports a coarse rich message. Hook payloads are intentionally not parsed here
 # beyond existing transcript handling; this keeps hooks fail-open and portable.
 # AgentMessage.ts is milliseconds since Unix epoch (see @pragma/constants).
@@ -310,6 +319,40 @@ if options:
 ' 2>/dev/null
 }
 
+# Prints every AskUserQuestion question as a Question JSON array
+# (`[{"question": ..., "options": [...]}, ...]`) for `report attention
+# --questions`. Empty when the payload carries fewer than two questions (the
+# single-question path keeps the legacy `--question`/`--options` fields).
+question_json() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    questions = ((json.load(sys.stdin) or {}).get("tool_input") or {}).get("questions") or []
+except Exception:
+    questions = []
+entries = []
+for question in questions:
+    if not isinstance(question, dict):
+        continue
+    text = question.get("question")
+    if not isinstance(text, str) or not text:
+        continue
+    entry = {"question": text, "options": []}
+    for option in question.get("options") or []:
+        if not isinstance(option, dict) or not isinstance(option.get("label"), str) or not option["label"]:
+            continue
+        item = {"label": option["label"]}
+        description = option.get("description")
+        if isinstance(description, str) and description:
+            item["description"] = description
+        entry["options"].append(item)
+    entries.append(entry)
+if len(entries) > 1:
+    print(json.dumps(entries))
+' 2>/dev/null
+}
+
 # Prints the PermissionRequest allow decision that feeds a remote reply ($2)
 # back into AskUserQuestion: `updatedInput.answers` (keyed by question text) is
 # how the permission component supplies collected answers, so Claude continues
@@ -339,6 +382,42 @@ print(json.dumps({
 ' "$2" 2>/dev/null
 }
 
+# Prints the PermissionRequest allow decision for a multi-question
+# AskUserQuestion. The mobile wizard submits all answers on one line joined by
+# the ASCII unit separator (0x1f) -- not " | ", which an option label or
+# free-text answer could legitimately contain and which would then corrupt
+# the split below; split it back into answers keyed by question text so
+# Claude continues without ever showing its terminal question UI.
+question_multi_allow_decision() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    tool_input = (json.load(sys.stdin) or {}).get("tool_input") or {}
+except Exception:
+    sys.exit(0)
+questions = tool_input.get("questions") or []
+parts = [part.strip() for part in sys.argv[1].split("\x1f")]
+if len(questions) < 2:
+    sys.exit(0)
+updated = dict(tool_input)
+answers = {}
+for index, question in enumerate(questions):
+    if not isinstance(question, dict):
+        continue
+    text = question.get("question")
+    if isinstance(text, str) and text and index < len(parts):
+        answers[text] = parts[index]
+updated["answers"] = answers
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {"behavior": "allow", "updatedInput": updated},
+    }
+}))
+' "$2" 2>/dev/null
+}
+
 # AskUserQuestion arrives through the same blocking PermissionRequest hook as
 # command approvals. Report it as a `question` attention (text + choices +
 # requestId) so clients render an answer UI instead of a command toast showing
@@ -347,16 +426,52 @@ print(json.dumps({
 # native question closes; timeout emits nothing so Claude falls back to it.
 handle_question() {
   input="$1"
+  qjson="$(question_json "$input")"
+  request_id="${agent}-${tab}-$(date +%s)-$$"
+  if [ -n "$qjson" ]; then
+    # Multi-question: mobile/desktop render a back/next wizard and submit one
+    # unit-separator-joined line. Report the questions array and feed the
+    # collected answers back through updatedInput.answers.
+    if ! report_checked attention --kind question --questions "$qjson" --request-id "$request_id"; then
+      # Installed pragma-cli is older than this hook and rejects `--questions`.
+      # Raise a generic attention and let Claude's own UI collect the answers
+      # instead of blocking on a reply no client can ever send.
+      report attention
+      message system "Claude Code is asking questions"
+      return 0
+    fi
+    message system "Claude Code is asking questions"
+    answer="$("$pragma_cli" agent await-answer \
+      --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" \
+      --dismiss-output "$dismissed_answer" 2>/dev/null)"
+    [ -n "$answer" ] || return 0
+    if [ "$answer" = "$dismissed_answer" ]; then
+      if [ -f "$marker" ]; then
+        report started
+        message system "Questions dismissed"
+      fi
+      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
+      return 0
+    fi
+    decision="$(question_multi_allow_decision "$input" "$answer")"
+    [ -n "$decision" ] || return 0
+    if [ -f "$marker" ]; then
+      report started
+      message system "Questions answered"
+    fi
+    printf '%s\n' "$decision"
+    return 0
+  fi
+
   qtext="$(question_text "$input")"
   if [ -z "$qtext" ]; then
-    # Multi-question or unparseable payload: raise a generic attention and let
-    # Claude's own UI collect the answers.
+    # Unparseable payload: raise a generic attention and let Claude's own UI
+    # collect the answer.
     report attention
     message system "Claude Code is asking a question"
     return 0
   fi
   qopts="$(question_options "$input")"
-  request_id="${agent}-${tab}-$(date +%s)-$$"
   if [ -n "$qopts" ]; then
     report attention --kind question --question "$qtext" --options "$qopts" --request-id "$request_id"
   else

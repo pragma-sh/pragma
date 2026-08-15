@@ -180,8 +180,9 @@ split across two pieces:
    own answer" row (`options.length + 1`), types the text, and Enter-submits; dismiss /
    empty reply sends Escape. The shared watcher waits briefly after the attention report
    before writing any answer keys because OpenCode can emit `question.asked` just before
-   its TUI prompt mounts, especially during parallel verification. Helper:
-   `questionAnswerKeys`.
+   its TUI prompt mounts, especially during parallel verification. Current OpenCode
+   then shows a confirmation step, so the watcher sends a final Enter after the
+   answer. Helper: `questionAnswerKeys`.
 
 Each built-in plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
 reports matching bundle metadata to server, which starts `pragma-watch` for a headless

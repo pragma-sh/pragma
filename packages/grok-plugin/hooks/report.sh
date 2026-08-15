@@ -327,6 +327,56 @@ for key in ("question", "prompt", "text", "title"):
 ' 2>/dev/null
 }
 
+question_options() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    tool_input = (json.load(sys.stdin) or {}).get("toolInput") or {}
+except Exception:
+    sys.exit(0)
+questions = tool_input.get("questions")
+if isinstance(questions, list) and questions and isinstance(questions[0], dict):
+    tool_input = questions[0]
+options = []
+for option in tool_input.get("options") or []:
+    if not isinstance(option, dict) or not isinstance(option.get("label"), str) or not option["label"]:
+        continue
+    item = {"label": option["label"]}
+    if isinstance(option.get("description"), str) and option["description"]:
+        item["description"] = option["description"]
+    options.append(item)
+if options:
+    print(json.dumps(options, separators=(",", ":")))
+' 2>/dev/null
+}
+
+question_json() {
+  [ -n "$py3" ] || return 0
+  printf '%s' "$1" | "$py3" -c '
+import json, sys
+try:
+    questions = ((json.load(sys.stdin) or {}).get("toolInput") or {}).get("questions") or []
+except Exception:
+    sys.exit(0)
+entries = []
+for question in questions:
+    if not isinstance(question, dict) or not isinstance(question.get("question"), str) or not question["question"]:
+        continue
+    options = []
+    for option in question.get("options") or []:
+        if not isinstance(option, dict) or not isinstance(option.get("label"), str) or not option["label"]:
+            continue
+        item = {"label": option["label"]}
+        if isinstance(option.get("description"), str) and option["description"]:
+            item["description"] = option["description"]
+        options.append(item)
+    entries.append({"question": question["question"], "options": options})
+if len(entries) > 1:
+    print(json.dumps(entries, separators=(",", ":")))
+' 2>/dev/null
+}
+
 # Prints grok's cancellation counter for a session. `signals.json` sits next to
 # the transcript and is rewritten on every turn; the counter only ever grows, so
 # comparing it against the value captured at turn start detects an interrupt
@@ -482,11 +532,20 @@ fi
 
 # Pin this tab to the parent session established by SessionStart /
 # UserPromptSubmit and reject every event from a different session before it can
-# alter parent status. A subagent runs with its own session id, so its
-# PreToolUse / PostToolUse events are dropped here.
+# alter parent status. A subagent runs with its own session id while inheriting
+# this tab's PRAGMA_TAB_ID, so its own UserPromptSubmit / Stop / SessionEnd
+# hooks must never be allowed to overwrite the pin: once `session_file` is set,
+# only `session_start` (a genuinely new session, e.g. /new) rebinds the tab, and
+# every other event from a different session is dropped here before it can touch
+# the parent's marker, watcher, or status.
 case "$hook_event_name" in
-  session_start | user_prompt_submit)
+  session_start)
     [ -z "$hook_session_id" ] || printf '%s' "$hook_session_id" >"$session_file"
+    ;;
+  user_prompt_submit)
+    if [ ! -f "$session_file" ]; then
+      [ -z "$hook_session_id" ] || printf '%s' "$hook_session_id" >"$session_file"
+    fi
     ;;
 esac
 if [ -n "$hook_session_id" ] && [ -f "$session_file" ]; then
@@ -627,10 +686,20 @@ case "${1:-}" in
     # answers in the terminal.
     if [ -f "$marker" ]; then
       qtext="$(question_text "$input")"
-      report attention
-      if [ -n "$qtext" ]; then
+      qopts="$(question_options "$input")"
+      qjson="$(question_json "$input")"
+      request_id="${agent}-${tab}-$(date +%s)-$$"
+      if [ -n "$qjson" ]; then
+        report attention --kind question --questions "$qjson" --request-id "$request_id"
+        message system "Grok is asking questions"
+      elif [ -n "$qtext" ] && [ -n "$qopts" ]; then
+        report attention --kind question --question "$qtext" --options "$qopts" --request-id "$request_id"
+        content_message system "$qtext"
+      elif [ -n "$qtext" ]; then
+        report attention --kind question --question "$qtext" --request-id "$request_id"
         content_message system "$qtext"
       else
+        report attention
         message system "Grok is asking a question"
       fi
     fi

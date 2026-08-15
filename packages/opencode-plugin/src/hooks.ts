@@ -1,5 +1,10 @@
 import type { Hooks } from "@opencode-ai/plugin";
-import { type AgentAttentionKind, type AgentMessage, type QuestionOption } from "@pragma/sdk";
+import {
+  type AgentAttentionKind,
+  type AgentMessage,
+  type AgentQuestion,
+  type QuestionOption,
+} from "@pragma/sdk";
 
 type ReportKey = "started" | "stopped" | "cleared" | `attention:${AgentAttentionKind}`;
 type Environment = Record<string, string | undefined>;
@@ -75,6 +80,12 @@ export interface PragmaReporter {
    * correlation id so a non-terminal client can render radio options and reply.
    */
   attentionQuestion(question: string, options: QuestionOption[], requestId: string): Promise<void>;
+  /**
+   * Reports a `question` attention carrying several questions. The mobile
+   * answer UI renders them as a back/next wizard and submits one line with all
+   * answers.
+   */
+  attentionQuestions(questions: AgentQuestion[], requestId: string): Promise<void>;
 }
 
 /**
@@ -246,7 +257,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
         // Surface a short human line in the transcript — never the raw args JSON.
         const parsed = parseQuestionArgs(args);
         await queueReport(() =>
-          reporter.message(toolMessage("question", parsed?.prompt ?? "Waiting for an answer")),
+          reporter.message(
+            toolMessage("question", parsed?.[0]?.question ?? "Waiting for an answer"),
+          ),
         );
         return;
       }
@@ -496,15 +509,22 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     requestId: string | undefined,
   ): Promise<void> {
     const parsed = parseQuestionArgs(args);
-    if (!parsed) {
+    if (!parsed || parsed.length === 0) {
       return;
     }
     attention = true;
     attentionKind = "question";
     lastReported = "attention:question";
-    await queueReport(() =>
-      reporter.attentionQuestion(parsed.prompt, parsed.options, requestId ?? permissionRequestId()),
-    );
+    const requestIdResolved = requestId ?? permissionRequestId();
+    await queueReport(() => {
+      if (parsed.length === 1 && parsed[0]) {
+        return reporter.attentionQuestion(parsed[0].question, parsed[0].options, requestIdResolved);
+      }
+      return reporter.attentionQuestions(
+        parsed.map((item) => ({ question: item.question, options: item.options })),
+        requestIdResolved,
+      );
+    });
   }
 
   function applyPermissionRepliedEvent(): EventAction {
@@ -988,43 +1008,31 @@ function taskSummary(args: Record<string, unknown>): string | undefined {
  */
 function parseQuestionArgs(
   args: Record<string, unknown>,
-): { prompt: string; options: QuestionOption[] } | undefined {
+): { question: string; options: QuestionOption[] }[] | undefined {
   const questions = Array.isArray(args.questions) ? args.questions : undefined;
   if (!questions || questions.length === 0) {
     // Some builds may pass a single prompt at the top level.
     const single = questionPromptFrom(args);
-    return single;
+    return single ? [single] : undefined;
   }
-  const prompts = questions.flatMap((item) => {
-    const parsed = isRecord(item) ? questionPromptFrom(item) : undefined;
-    return parsed ? [parsed] : [];
+  const parsed = questions.flatMap((item) => {
+    const question = isRecord(item) ? questionPromptFrom(item) : undefined;
+    return question ? [question] : [];
   });
-  if (prompts.length === 0) {
-    return undefined;
-  }
-  // Multiple questions collapse into one attention card: join prompts, keep
-  // the first question's options (mobile UI is single-select today).
-  const first = prompts[0];
-  if (!first) {
-    return undefined;
-  }
-  return {
-    prompt: prompts.map((p) => p.prompt).join("\n\n"),
-    options: first.options,
-  };
+  return parsed.length > 0 ? parsed : undefined;
 }
 
 function questionPromptFrom(
   record: Record<string, unknown>,
-): { prompt: string; options: QuestionOption[] } | undefined {
-  const prompt =
+): { question: string; options: QuestionOption[] } | undefined {
+  const question =
     firstString(record.question, record.header, record.text, record.message, record.prompt) ??
     undefined;
-  if (!prompt) {
+  if (!question) {
     return undefined;
   }
   const options = questionOptions(record.options);
-  return { prompt, options };
+  return { question, options };
 }
 
 /** Extracts answer choices from OpenCode `{ label, description }` option objects. */

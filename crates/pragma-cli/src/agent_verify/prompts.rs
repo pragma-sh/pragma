@@ -84,15 +84,17 @@ fn defaults() -> HashMap<String, String> {
         ("command-no-permission", "Run this safe shell command exactly, then report its numeric output: date +%s. Do not ask for permission and do not substitute another command."),
         ("question-answer", "Use your interactive question tool now. Ask exactly: Choose Red or Blue? Offer exactly Red and Blue, then stop and wait for the answer."),
         ("question-dismiss", "Use your interactive question tool now. Ask exactly: Choose Circle or Square? Offer exactly Circle and Square, then wait for the answer."),
-        ("question-free-text", "Use your interactive question tool now. Ask exactly: What verification marker should I use? Offer exactly Alpha and Beta, then stop and wait. The verifier will answer with custom free text. The answer may arrive directly or as a follow-up message starting with: Answer to question. Either way, once you have it, reply with the exact marker text you received."),
-        ("command-allow", "Use the shell tool exactly once with command `ls /pragma-verify-approval` and workdir `/etc`, then report its output. Do not substitute another command or workdir."),
-        ("command-deny", "Use the shell tool exactly once with command `ls /pragma-verify-denied` and workdir `/etc`, then stop if permission is denied. Do not substitute another command or workdir."),
-        ("decision-timeout", "Use the shell tool exactly once with command `ls /pragma-verify-timeout` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
+        ("question-free-text", "Use your interactive question tool now. Ask exactly: What verification marker should I use? Offer exactly Alpha and Beta, then stop and wait. The verifier will answer with custom free text through your question UI. Once you have it, reply with the exact marker text you received."),
+        ("question-multi", "Use your interactive question tool now. Ask exactly two questions in one call. First: Choose Red or Blue? Offer exactly Red and Blue. Second: Choose Circle or Square? Offer exactly Circle and Square. Then wait for both answers through your question UI. Once you have both answers, reply with exactly: Red answer: <first answer>, Circle answer: <second answer>."),
+        ("message-submit", "Reply with exactly one line containing the word waiting. Do not use tools. Then wait for a follow-up message. When the follow-up arrives, reply with exactly the marker text it contains and nothing else."),
+        ("command-allow", "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-approval` and workdir `/etc`, then report its output. Do not substitute another command or workdir."),
+        ("command-deny", "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-denied` and workdir `/etc`, then stop if permission is denied. Do not substitute another command or workdir."),
+        ("decision-timeout", "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-timeout` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
         ("subagent", "Spawn two parallel sub-agents. Ask one for a memoization tip and one for a tail-recursion tip. Wait for both and summarize their answers."),
         ("abort-mid-run", "Write a detailed comparison of merge sort, quicksort, heapsort, and insertion sort, including tradeoffs and examples."),
         ("interrupt-event", "Draft an in-depth guide to diagnosing latency in a distributed service, with examples and a checklist."),
         ("abort-mid-question", "Use your interactive question tool now. Ask exactly: Choose Tea or Coffee? Offer Tea and Coffee, then wait."),
-        ("abort-mid-approval", "Use the shell tool exactly once with command `ls /pragma-verify-abort-approval` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
+        ("abort-mid-approval", "Use the shell tool exactly once with command `rm -f /tmp/pragma-verify-abort-approval` and workdir `/etc`, then wait for permission. Do not substitute another command or workdir."),
         ("crash-exit", "Reply with a detailed explanation of sorting algorithms long enough to remain busy for several seconds."),
     ]
     .into_iter()
@@ -130,6 +132,15 @@ mod tests {
             let prompt = prompts.get(id).expect("approval prompt");
             assert!(prompt.contains("workdir `/etc`"));
             assert!(!prompt.contains("$HOME"));
+            // Read-only commands are trusted by default in several agents
+            // (Codex's trusted set, Junie's `brave_mode: auto`), so the prompt
+            // must use a command that actually escalates to a permission
+            // request or the scenario fails with "agent settled without
+            // command attention" even though the approval path works.
+            assert!(
+                prompt.contains("rm -f /tmp/pragma-verify-"),
+                "{id}: {prompt}"
+            );
         }
     }
 

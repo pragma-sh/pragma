@@ -1,7 +1,12 @@
 import type { AgentFileChange, AgentMessage } from "@pragma/constants";
 import type { AgentStreamEvent } from "@pragma/sdk";
 
-import { normalizeQuestionOptions, type AttentionRequest, type TranscriptRow } from "./types";
+import {
+  normalizeQuestionOptions,
+  normalizeQuestions,
+  type AttentionRequest,
+  type TranscriptRow,
+} from "./types";
 
 const OPTIMISTIC_MESSAGE_MATCH_WINDOW_MS = 60_000;
 
@@ -107,15 +112,37 @@ function applyAgentStatus(
 function attentionForEvent(
   event: Extract<AgentStreamEvent, { type: "agent" }>,
 ): AttentionRequest | null {
-  if (event.status !== "attention" || !event.attentionKind || !event.requestId) return null;
+  if (!isAttentionEvent(event)) return null;
+  return attentionRequest(event);
+}
+
+function isAttentionEvent(event: Extract<AgentStreamEvent, { type: "agent" }>): event is Extract<
+  AgentStreamEvent,
+  { type: "agent" }
+> & {
+  attentionKind: NonNullable<Extract<AgentStreamEvent, { type: "agent" }>["attentionKind"]>;
+  requestId: string;
+} {
+  return event.status === "attention" && Boolean(event.attentionKind) && Boolean(event.requestId);
+}
+
+function attentionRequest(
+  event: Extract<AgentStreamEvent, { type: "agent" }> & {
+    attentionKind: NonNullable<Extract<AgentStreamEvent, { type: "agent" }>["attentionKind"]>;
+    requestId: string;
+  },
+): AttentionRequest {
   const preferredPrompt = event.attentionKind === "command" ? event.command : event.question;
   const options = normalizeQuestionOptions(event.options);
-  return {
+  const questions = normalizeQuestions(event.questions);
+  const attention: AttentionRequest = {
     kind: event.attentionKind,
     requestId: event.requestId,
     prompt: preferredPrompt ?? event.command ?? event.question ?? "",
-    ...(options ? { options } : {}),
   };
+  if (options) attention.options = options;
+  if (questions) attention.questions = questions;
+  return attention;
 }
 
 function clearIfMatches(state: TranscriptState, requestId: string): TranscriptState {

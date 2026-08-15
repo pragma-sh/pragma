@@ -14,7 +14,8 @@ it("defines GitHub Copilot launcher and usage UI", () => {
   const usage = githubCopilotCliPlugin.usageLimits?.[0];
   expect(agent?.id).toBe("github-copilot");
   expect(agent?.launch.command).toEqual(["copilot", "--no-auto-update"]);
-  expect(agent?.excludeFeatures).toEqual(["questions", "abort", "interrupt"]);
+  expect(agent?.excludeFeatures).toEqual(["abort", "interrupt"]);
+  expect(agent?.prefillDelayMs).toBe(25000);
   expect(agent?.args.modelReasoning?.("gpt-5.6-sol", "high")).toEqual([
     "--model",
     "gpt-5.6-sol",

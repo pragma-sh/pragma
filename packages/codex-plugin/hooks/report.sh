@@ -187,26 +187,35 @@ for line in lines:
         except Exception:
             continue
         questions = arguments.get("questions") if isinstance(arguments, dict) else None
-        if not isinstance(call_id, str) or not isinstance(questions, list) or len(questions) != 1:
+        if not isinstance(call_id, str) or not isinstance(questions, list) or not questions:
             continue
-        question = questions[0]
-        text = question.get("question") if isinstance(question, dict) else None
-        if not isinstance(text, str) or not text.strip():
-            continue
-        options = []
-        for option in question.get("options", []):
-            if not isinstance(option, dict) or not isinstance(option.get("label"), str):
+        parsed = []
+        for question in questions:
+            if not isinstance(question, dict):
                 continue
-            normalized = {"label": option["label"]}
-            if isinstance(option.get("description"), str):
-                normalized["description"] = option["description"]
-            options.append(normalized)
-        pending[call_id] = {
-            "state": "pending",
-            "requestId": call_id,
-            "question": text,
-            "options": options,
-        }
+            text = question.get("question")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            options = []
+            for option in question.get("options", []):
+                if not isinstance(option, dict) or not isinstance(option.get("label"), str):
+                    continue
+                normalized = {"label": option["label"]}
+                if isinstance(option.get("description"), str):
+                    normalized["description"] = option["description"]
+                options.append(normalized)
+            parsed.append({"question": text, "options": options})
+        if not parsed:
+            continue
+        entry = {"state": "pending", "requestId": call_id}
+        if len(parsed) == 1:
+            entry["question"] = parsed[0]["question"]
+            entry["options"] = parsed[0]["options"]
+        else:
+            # Multi-question requests ride on the `questions` field; the
+            # legacy single-question fields stay for exactly one question.
+            entry["questions"] = parsed
+        pending[call_id] = entry
     elif payload.get("type") == "function_call_output":
         call_id = payload.get("call_id")
         if isinstance(call_id, str):
@@ -226,9 +235,22 @@ sync_question() {
     request_id="$(json_field requestId "$snapshot")"
     [ -n "$request_id" ] || return 0
     [ "$request_id" = "$current" ] && return 0
+    multi="$(json_value questions "$snapshot")"
     question="$(json_field question "$snapshot")"
     options="$(json_value options "$snapshot")"
-    report attention --kind question --question "$question" --options "${options:-[]}" --request-id "$request_id"
+    reported=""
+    if [ "$multi" != "null" ] && [ -n "$multi" ]; then
+      # An installed pragma-cli older than this hook rejects `--questions`, and
+      # `report` swallows that — the attention would silently never reach any
+      # client. Fall back to the first question as a single-question attention.
+      if "$pragma_cli" agent report --agent "$agent" attention --kind question \
+        --questions "$multi" --request-id "$request_id" >/dev/null 2>&1; then
+        reported="yes"
+      fi
+    fi
+    if [ -z "$reported" ]; then
+      report attention --kind question --question "$question" --options "${options:-[]}" --request-id "$request_id"
+    fi
     printf '%s' "$request_id" >"$question_file"
   elif [ "$state" = "none" ] && [ -n "$current" ]; then
     rm -f "$question_file"
@@ -380,12 +402,19 @@ case "${1:-}" in
     rm -f "$question_file" "$messages_file"
     printf '%s' "$token" >"$marker"
     printf '%s' "$offset" >"$offset_file"
+    # Start the abort watcher BEFORE the slow pragma-cli reports below. Codex
+    # kills the in-flight UserPromptSubmit hook when the turn is aborted (ESC),
+    # and an abort can land within milliseconds of the prompt — if the watcher
+    # only started after `report started`/`session-name`/`content_message`
+    # (several pragma-cli round-trips), a fast abort killed the hook first and
+    # the transcript's `turn_aborted` marker was never scanned, so the status
+    # stayed `running` forever.
+    start_abort_watcher "$transcript" "$token" "$offset"
     report started
     if [ -n "$prompt" ]; then
       report_session_name_once "$prompt"
       content_message user "$prompt" "codex-${token}-user"
     fi
-    start_abort_watcher "$transcript" "$token" "$offset"
     ;;
   stopped)
     [ -f "$marker" ] || exit 0

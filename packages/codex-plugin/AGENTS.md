@@ -23,8 +23,8 @@ packages/codex-plugin/
 
 ## Host route and tested surface
 
-Tested against `codex-cli 0.144.4` on 2026-07-15; question flow (including the free-text
-interject fallback) re-verified against `codex-cli 0.144.5` on 2026-07-16. On 0.144.5 a
+Tested against `codex-cli 0.144.4` on 2026-07-15; question flow re-verified against
+`codex-cli 0.144.5` on 2026-07-16. On 0.144.5 a
 session launched with the feature flag can still occasionally reject the tool call with
 `request_user_input is unavailable in Default mode`; a fresh session succeeds, and
 `agent verify`'s per-scenario retry absorbs it. Codex has no in-process JS/TS plugin
@@ -99,20 +99,22 @@ feedback and does not necessarily end turn.
 Codex 0.144.4 has no `request_user_input` hook. The turn-scoped transcript does record a
 `response_item` function call before Codex shows its question UI, followed by a matching
 `function_call_output` after resolution. The same offset-scoped watcher used for aborts parses
-those records, reports one-question requests with the function `call_id` as `requestId`, and
-reasserts running after output appears. It deliberately ignores multi-question requests rather
-than flattening a payload that Pragma cannot answer faithfully. This transcript shape is not a
-stable Codex API and must be reverified on every tested-version bump.
+those records, reports question requests with the function `call_id` as `requestId`, and
+reasserts running after output appears. Single-question calls use the legacy
+`--question`/`--options` attention fields; multi-question calls (one `request_user_input` with
+several questions, which Codex 0.147+ emits) are reported once as `--questions` — the mobile
+wizard answers them on one line and the watcher applies each answer to its native TUI prompt
+in order. Both shapes require `pragma-cli` and the
+server to carry the `questions` attention field. This transcript shape is not a stable Codex
+API and must be reverified on every tested-version bump.
 
 Launcher passes `--enable default_mode_request_user_input`; without it, Codex 0.144.4 only
 offers the tool in Plan mode and verification prompts cannot create question reports. Watcher
 keeps `handleDecisions: false` for command decisions but enables question answers. Listed
 answers use Codex's digit shortcuts and dismissal sends Escape. Custom free-text answers
-have no editor in Codex's question UI: its generated last row is "None of the above", not a
-"type your own" option. The watcher runs `questionFreeTextMode: "interject"` — it selects
-"None of the above" to resolve the prompt, sends Escape to abort the response Codex starts
-from that non-answer, then submits the real answer as a follow-up prompt of the form
-`Answer to question "<question>": <answer>` (single line; Codex submits on Enter). Unmatched request ids are ignored.
+open the native final answer row, type into its editor, and submit with Enter. Answers never
+abort an active turn or inject a synthetic follow-up chat message. Unmatched request ids are
+ignored.
 
 ## Abort and exit handling
 
@@ -124,8 +126,12 @@ writes an unescaped rollout event immediately:
 ```
 
 On `UserPromptSubmit`, script records current transcript byte count and starts one detached,
-per-tab watcher. It scans only bytes after that offset for the unescaped
-`"type":"turn_aborted"` marker. Old aborts and escaped copies inside tool output cannot clear
+per-tab watcher **before** the slow `report started`/`session-name`/`content_message`
+pragma-cli round-trips. Codex kills the in-flight `UserPromptSubmit` hook when the turn is
+aborted, and an ESC can land within milliseconds of the prompt — starting the watcher at the
+end of the handler meant a fast abort killed the hook first and the `turn_aborted` marker was
+never scanned, leaving the status `running` forever. The watcher scans only bytes after that
+offset for the unescaped `"type":"turn_aborted"` marker. Old aborts and escaped copies inside tool output cannot clear
 new turns. Turn token ownership, watcher replacement, and a 24-hour backstop prevent stale
 processes from clearing later work.
 
@@ -204,11 +210,20 @@ process: `ps -o command= -p $(pgrep -x codex)` must show the `--enable` flag.
 bun run --filter @pragma/codex-plugin test
 bun run --filter @pragma/codex-plugin typecheck
 bun run --filter @pragma/codex-plugin build
+bun run --filter @pragma/codex-plugin install:local   # refresh ~/.codex hooks snapshot after report.sh edits
 pragma-cli agent verify --agent pragma.codex --abort-input '\x1b' --include-slow
 ```
 
 All question scenarios are required. They verify exact question text/options, request-id
 correlation, listed/custom answers, and dismissal. `question-free-text` requires the agent
-to echo the exact marker back and accepts the interject fallback as a secondary path:
-"None of the above" selected, response aborted, marker delivered in the `Answer to
-question ...` follow-up turn. Any scenario failure is actionable.
+to echo the exact marker returned through the native question editor. `question-multi`
+needs a server + `pragma-cli` that carry the
+`questions` attention field end to end (see the shared harness `agent_verify`). Any scenario
+failure is actionable.
+
+The shared approval scenarios (`command-allow`/`command-deny`/`decision-timeout`/
+`abort-mid-approval`) prompt for `rm -f /tmp/pragma-verify-*`, not `ls`: Codex's default
+`untrusted` approval policy runs read-only commands like `ls` inside the sandbox without a
+`PermissionRequest`, so an `ls`-based prompt fails with "agent settled without command
+attention" even though the blocking approval hook works. A write outside the workspace
+escalates and fires the hook.

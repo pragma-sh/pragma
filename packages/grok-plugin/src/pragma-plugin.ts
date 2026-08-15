@@ -22,11 +22,13 @@ const USAGE_REFRESH_INTERVAL_MS = 300_000;
 
 const baseWatcher = createTuiWatcher({
   agent: "grok",
-  // Grok has no permission-request hook at all (`PreToolUse` fires for *every*
-  // tool, before the permission system runs, and can only allow or deny), so
-  // command approvals are not brokered through Pragma and there is nothing for
-  // the watcher to decide. It exists for mid-turn interjections.
+  // Grok has no permission-request hook, but PreToolUse reports its native
+  // ask_user_question card so the watcher can answer that card directly.
   handleDecisions: false,
+  handleQuestionAnswers: true,
+  questionOtherMode: "shortcut-z",
+  questionDismissKeys: "X",
+  questionFinalizeKeys: "\r",
   interjectSubmitDelayMs: INTERJECT_SUBMIT_DELAY_MS,
 });
 
@@ -96,9 +98,7 @@ export const grokAgentPlugin: PluginDefinition = definePlugin({
         { id: "always-approve", name: "Auto-approve tools" },
       ],
       // `commandApproval`: grok has no permission-request hook to block on.
-      // `questions`: `ask_user_question` is owned by grok's own TUI and no hook
-      // can return an answer to it, so Pragma raises attention but cannot reply.
-      excludeFeatures: ["commandApproval", "questions"],
+      excludeFeatures: ["commandApproval"],
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: (reasoningId: string) => ["--reasoning-effort", reasoningId],

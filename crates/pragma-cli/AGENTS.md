@@ -91,17 +91,19 @@ Stream-integrity message and attention invariants are scoped to that runtime age
 unrelated agents reporting concurrently cannot fail the selected integration.
 Before exiting, verification explicitly reports `cleared` for every session it launched,
 including failed attempts, so timeout and attention scenarios leave no stale status dots.
+`crash-exit` kills the launched session and waits for its status to settle; the host
+server broadcasts `cleared` for a tab's agent statuses when its session is killed or
+exits on its own (a SIGKILLed agent's own hooks never run), so the scenario passes for
+every agent, not just those whose plugin can report its own death.
 Agent catalog `excludeFeatures` entries skip matching optional scenario groups with an
 explicit reason. `command-no-permission` verifies a safe shell command completes and
 raises no command-attention event; command approval remains a separate capability group.
 Approval scenarios request an explicit external `workdir` rather than putting `$HOME` in
 the command: OpenCode 1.18 treats command-argument external paths as advisory and cannot
 resolve shell environment expansion when deciding whether approval is required.
-`question-free-text` requires an assistant message echoing the exact marker and accepts
-two delivery paths: in-turn (a TUI custom-answer editor) or the watcher-kit
-`questionFreeTextMode: "interject"` secondary path, where the watcher selects the TUI's
-fallback row (Codex's "None of the above"), aborts the response, and resubmits the
-answer as an `Answer to question ...` follow-up prompt whose turn carries the marker.
+`question-free-text` requires an assistant message echoing the exact marker returned
+through the native TUI custom-answer editor. Watchers must not abort the response and
+resubmit the answer as a follow-up prompt.
 
 `--pick-model-cmd` (mutually exclusive with `--model`) sends the raw snippet as the
 launch payload's `modelCmd` instead of a catalog `modelId`: the headless server appends

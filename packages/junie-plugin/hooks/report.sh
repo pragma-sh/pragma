@@ -263,13 +263,20 @@ print(f"{name} {path}" if isinstance(path, str) and path else name)
 # Succeeds when the event log recorded a cancelled or failed turn after `off`
 # bytes -- i.e. this turn was interrupted or died. Scoped to this turn's tail so
 # an earlier turn's record can never clear a new turn.
+#
+# Junie 26.8.10 records an interruption in one of two shapes, depending on how
+# far the turn got: a cancel before any result block exists (Escape right after
+# submit) writes only a top-level `CancelAgentEvent`, while a cancel after
+# output started writes `ResultBlockUpdatedEvent` with `"cancelled":true` (and
+# a failed turn writes `AgentTaskFailedEvent`). The watcher must match all
+# three, or an early abort looks like the turn is still running.
 aborted_since() {
   events="$1"
   off="${2:-0}"
   [ -n "$events" ] && [ -f "$events" ] || return 1
   [ -n "$off" ] || off=0
   tail -c "+$((off + 1))" "$events" 2>/dev/null |
-    grep -q '"cancelled":true\|"kind":"AgentTaskFailedEvent"'
+    grep -q '"cancelled":true\|"kind":"AgentTaskFailedEvent"\|"kind":"CancelAgentEvent"'
 }
 
 # Streams the assistant text produced so far in this turn. Junie records its
@@ -344,16 +351,23 @@ sync_messages() {
   printf '%s' "$length" >"$sent_file"
 }
 
-# Scans this turn's event log for the question Junie is currently blocked on and
-# writes its parsed id / text / options to the scratch files. Junie's `ask_user`
-# and `ask_user_choice` tools do NOT fire `PreToolUse` -- they are recorded as
+# Scans this turn's event log for the question(s) Junie is currently blocked on
+# and writes the parsed data to the scratch files. Junie's `ask_user` and
+# `ask_user_choice` tools do NOT fire `PreToolUse` -- they are recorded as
 # `AskAsyncRequestUpdatedEvent` instead -- so the event log is the only place a
 # hook bridge can see a question at all. Each record replaces the previous state
 # of its `stepId`, so the newest record per step decides whether it is pending.
+#
+# When several questions are pending at once (one `ask_user_choice` call with
+# multiple questions), they are reported as ONE multi-question attention so a
+# remote client can answer them together: `.id` holds the first question's
+# identifier (the attention's request id), `.sig` the full pending set (the
+# report dedupe key), `.q` the first question's text, and `.multi` the
+# `questions` JSON array for `report attention --questions`.
 scan_question() {
   events="$1"
   off="${2:-0}"
-  rm -f "${question_scratch}.id" "${question_scratch}.q" "${question_scratch}.o"
+  rm -f "${question_scratch}.id" "${question_scratch}.sig" "${question_scratch}.q"     "${question_scratch}.o" "${question_scratch}.multi"
   [ -n "$py3" ] && [ -n "$events" ] && [ -f "$events" ] || return 0
   "$py3" -c '
 import json, sys
@@ -381,37 +395,52 @@ except Exception:
 pending = [blocks[key] for key in order if blocks[key].get("status") == "IN_PROGRESS"]
 if not pending:
     sys.exit(0)
-event = pending[-1]
-request = event.get("request") or {}
-question = request.get("question") or event.get("title")
-if not isinstance(question, str) or not question.strip():
+entries, ids = [], []
+for event in pending:
+    request = event.get("request") or {}
+    question = request.get("question") or event.get("title")
+    if not isinstance(question, str) or not question.strip():
+        continue
+    entry = {"question": question.strip()}
+    options = []
+    for option in request.get("options") or []:
+        if not isinstance(option, dict):
+            continue
+        label = option.get("title") or option.get("id")
+        if not isinstance(label, str) or not label.strip():
+            continue
+        choice = {"label": label.strip()}
+        description = option.get("description")
+        if isinstance(description, str) and description.strip():
+            choice["description"] = description.strip()
+        options.append(choice)
+    if options:
+        entry["options"] = options
+    identifier = request.get("id") or event.get("stepId") or question
+    entries.append(entry)
+    ids.append(str(identifier))
+if not entries:
     sys.exit(0)
-options = []
-for option in request.get("options") or []:
-    if not isinstance(option, dict):
-        continue
-    label = option.get("title") or option.get("id")
-    if not isinstance(label, str) or not label.strip():
-        continue
-    entry = {"label": label.strip()}
-    description = option.get("description")
-    if isinstance(description, str) and description.strip():
-        entry["description"] = description.strip()
-    options.append(entry)
-identifier = request.get("id") or event.get("stepId") or question
+first = entries[0]
 with open(out + ".id", "w", encoding="utf-8") as handle:
-    handle.write(str(identifier))
+    handle.write(ids[0])
+with open(out + ".sig", "w", encoding="utf-8") as handle:
+    handle.write(",".join(ids))
 with open(out + ".q", "w", encoding="utf-8") as handle:
-    handle.write(question.strip())
-if options:
+    handle.write(first["question"])
+if len(entries) > 1:
+    with open(out + ".multi", "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(entries))
+elif "options" in first:
     with open(out + ".o", "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(options))
+        handle.write(json.dumps(first["options"]))
 ' "$events" "$off" "$question_scratch" 2>/dev/null
 }
 
-# Raises a `question` attention the first time Junie blocks on one, and drops the
-# tab back to `started` once that question is resolved. The reply itself is typed
-# into the TUI by the plugin's watcher: Junie exposes no hook that can answer.
+# Raises a `question` attention the first time Junie blocks on one (or on a
+# batch of them), and drops the tab back to `started` once that question is
+# resolved. The reply itself is typed into the TUI by the plugin's watcher:
+# Junie exposes no hook that can answer.
 sync_questions() {
   events="$1"
   off="$2"
@@ -419,19 +448,33 @@ sync_questions() {
   pending_id="$(cat "${question_scratch}.id" 2>/dev/null)"
   reported_id="$(cat "$question_file" 2>/dev/null)"
   if [ -n "$pending_id" ]; then
-    [ "$pending_id" = "$reported_id" ] && return 0
+    # Dedupe on the whole pending set, so a batch that gains or loses a
+    # question re-reports instead of being hidden by an unchanged first id.
+    pending_sig="$(cat "${question_scratch}.sig" 2>/dev/null)"
+    [ -n "$pending_sig" ] || pending_sig="$pending_id"
+    [ "$pending_sig" = "$reported_id" ] && return 0
     qtext="$(cat "${question_scratch}.q" 2>/dev/null)"
     [ -n "$qtext" ] || return 0
     qopts="$(cat "${question_scratch}.o" 2>/dev/null)"
+    multi="$(cat "${question_scratch}.multi" 2>/dev/null)"
     request_id="${agent}-${tab}-${pending_id}"
-    if [ -n "$qopts" ]; then
+    if [ -n "$multi" ]; then
+      # Older pragma-cli/server builds reject the `questions` wire field (the
+      # report is dropped, which would hide the question entirely); fall back
+      # to the first pending question as a plain single-question attention.
+      if ! "$pragma_cli" agent report --agent "$agent" attention --kind question \
+        --questions "$multi" --request-id "$request_id" >/dev/null 2>&1; then
+        report attention --kind question --question "$qtext" \
+          --options "${qopts:-[]}" --request-id "$request_id"
+      fi
+    elif [ -n "$qopts" ]; then
       report attention --kind question --question "$qtext" --options "$qopts" \
         --request-id "$request_id"
     else
       report attention --kind question --question "$qtext" --request-id "$request_id"
     fi
     content_message system "$qtext"
-    printf '%s' "$pending_id" >"$question_file"
+    printf '%s' "$pending_sig" >"$question_file"
     return 0
   fi
   if [ -n "$reported_id" ]; then

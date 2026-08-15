@@ -53,6 +53,15 @@ function calls(): string[] {
     : [];
 }
 
+function parallelChild(timestamp: number): string {
+  return JSON.stringify({
+    transcriptPath: "/tmp/shared.jsonl",
+    agentName: "explore",
+    agentDisplayName: "Explore",
+    timestamp,
+  });
+}
+
 describe("report.sh", () => {
   it("no-ops outside Pragma", () => {
     run("started", JSON.stringify({ prompt: "Fix auth" }), "", false);
@@ -141,6 +150,20 @@ describe("report.sh", () => {
     run("stopped");
     expect(calls()).not.toContain("agent report --agent github-copilot stopped");
     run("subagent-stop", child);
+    run("stopped");
+    expect(calls().at(-1)).toBe("agent report --agent github-copilot stopped");
+  });
+
+  it("counts same-type parallel sub-agents separately", () => {
+    run("started", JSON.stringify({ sessionId: "s", timestamp: 1, prompt: "Delegate" }));
+    run("subagent-start", parallelChild(2));
+    run("subagent-start", parallelChild(3));
+    const messages = calls().filter((call) => call.includes("agent message"));
+    expect(messages.at(-1)).toContain('"subAgentsActive":2');
+    run("stopped");
+    expect(calls()).not.toContain("agent report --agent github-copilot stopped");
+    run("subagent-stop", parallelChild(4));
+    run("subagent-stop", parallelChild(5));
     run("stopped");
     expect(calls().at(-1)).toBe("agent report --agent github-copilot stopped");
   });

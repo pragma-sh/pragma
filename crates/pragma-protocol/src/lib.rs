@@ -10,8 +10,9 @@ pub mod scrollback;
 
 pub use pragma_constants::{
     AgentAnswer, AgentAttentionKind, AgentDecision, AgentInput, AgentInterrupt, AgentMessage,
-    AgentReportPayload, AgentSessionLaunchPayload, AgentStatus, ControlMethod, NewWorktreeSpec,
-    ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption, WorkspaceSnapshot,
+    AgentQuestion, AgentReportPayload, AgentSessionLaunchPayload, AgentStatus, ControlMethod,
+    NewWorktreeSpec, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
+    WorkspaceSnapshot,
 };
 
 /// Channel name shared by every production build. It is stable so an installed
@@ -328,6 +329,9 @@ pub enum EventFrame {
         /// Answer choices for a `question` attention, when present.
         #[serde(rename = "options", default, skip_serializing_if = "Option::is_none")]
         options: Option<Vec<QuestionOption>>,
+        /// Multiple questions for a `question` attention, when present.
+        #[serde(rename = "questions", default, skip_serializing_if = "Option::is_none")]
+        questions: Option<Vec<AgentQuestion>>,
         /// Correlation id for a command-approval or question round-trip, when present.
         #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
@@ -554,6 +558,7 @@ mod tests {
             command: Some("npm test".to_string()),
             question: None,
             options: None,
+            questions: None,
             request_id: Some("req-1".to_string()),
         });
         let mut bytes = Vec::new();

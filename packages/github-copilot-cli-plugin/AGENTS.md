@@ -38,17 +38,17 @@ agent before its first model response.
 
 ## Lifecycle mapping
 
-| Copilot hook          | Script event     | Pragma behavior                                                         |
-| --------------------- | ---------------- | ----------------------------------------------------------------------- |
-| `sessionStart`        | `session-start`  | Clears stale state unless same session's first turn already started     |
-| `sessionEnd`          | `session-end`    | Clears status and all state on normal exit, crash, or session abort     |
-| `userPromptSubmitted` | `started`        | Reports running, user message, and first-prompt-derived session name    |
-| `agentStop`           | `stopped`        | Reports done only after a start and when no tracked child remains       |
-| `subagentStart`       | `subagent-start` | Tracks transcript-scoped child, reports rich child count, stays running |
-| `subagentStop`        | `subagent-stop`  | Removes matching child; parent `agentStop` owns done                    |
-| `permissionRequest`   | `permission`     | Reports command attention and waits briefly for remote decision         |
-| `postToolUse*`        | `running`        | Reasserts running after success or failure                              |
-| `errorOccurred`       | `error`          | Keeps recoverable errors running; clears nonrecoverable failures        |
+| Copilot hook          | Script event     | Pragma behavior                                                                                                                                         |
+| --------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionStart`        | `session-start`  | Clears stale state unless same session's first turn already started                                                                                     |
+| `sessionEnd`          | `session-end`    | Clears status and all state on normal exit, crash, or session abort                                                                                     |
+| `userPromptSubmitted` | `started`        | Reports running, user message, and first-prompt-derived session name                                                                                    |
+| `agentStop`           | `stopped`        | Reports done only after a start and when no tracked child remains                                                                                       |
+| `subagentStart`       | `subagent-start` | Counts parallel children (same-type subagents share transcriptPath/agentName, so a per-key file would collide), reports rich child count, stays running |
+| `subagentStop`        | `subagent-stop`  | Removes matching child; parent `agentStop` owns done                                                                                                    |
+| `permissionRequest`   | `permission`     | Reports command attention and waits briefly for remote decision                                                                                         |
+| `postToolUse*`        | `running`        | Reasserts running after success or failure                                                                                                              |
+| `errorOccurred`       | `error`          | Keeps recoverable errors running; clears nonrecoverable failures                                                                                        |
 
 Hook reporter uses local agent id `github-copilot`, not catalog id
 `pragma.github-copilot`. It exits immediately outside Pragma and swallows every reporting
@@ -70,19 +70,24 @@ structured command attention, wait up to `PRAGMA_APPROVAL_TIMEOUT` (default 15 s
 and emit Copilot's native `{ "behavior": "allow" | "deny" }` response. Both decisions
 reassert started before returning. Timeout emits nothing, preserving native permission UI.
 
-Copilot 1.0.75 emits no hook for `ask_user`, despite listing it in hook tool names. The
+Copilot 1.0.80 emits no hook for `ask_user`, despite listing it in hook tool names. The
 turn-owned transcript watcher reports each `tool.execution_start` whose tool name is
 `ask_user` as question attention, including optionless free-form schemas and enum choices.
 It snapshots the existing question count when a turn starts and advances a session-level
-cursor, so resumed sessions and polling do not replay old questions. Remote answer delivery
-is not supported: Copilot's form requires arrow navigation while shared watcher kit's listed
-answers use digit shortcuts. Keep `questions` in `excludeFeatures`; native Copilot question
-UI remains unchanged.
+cursor, so resumed sessions and polling do not replay old questions. Remote answers go to
+Copilot's native form: matching enum choices use digit shortcuts, while custom answers move
+to Copilot's Other row and type into its inline editor. The watcher never aborts Copilot or
+injects a synthetic answer into chat.
 
 Same transcript watcher streams completed non-empty `assistant.message` content during turn,
 deduped by per-turn count. Transcript path is host-private and must be reverified on every
 tested-version bump. User-prompt hook provides stable session id but no transcript path;
 current Copilot location is derived from that id.
+
+Watcher interjections use plain text rather than bracketed-paste markers; Copilot
+does not reliably decode synthetic markers written by the watcher and can drop the
+whole message. Cold interactive startup receives a 25-second prefill window because
+skills, hooks, and extensions mount before the composer accepts input.
 
 ## Usage limits
 

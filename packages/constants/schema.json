@@ -2882,9 +2882,36 @@
           },
           "description": "Answer choices for a `question` attention. Empty/omitted when the question is free-text only or when attentionKind is `command`."
         },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentQuestion"
+          },
+          "description": "Multiple questions for a `question` attention. When present, clients render a back/next question wizard and submit every answer together; the legacy `question`/`options` fields are still used for a single question."
+        },
         "requestId": {
           "type": "string",
           "description": "Correlation id for a command-approval or question round-trip. The reporter sets it on a `command`/`question` attention report and waits for a matching AgentDecision/AgentAnswer before proceeding."
+        }
+      }
+    },
+    "AgentQuestion": {
+      "title": "AgentQuestion",
+      "description": "One question in a multi-question attention request. Each entry carries its own prompt and optional answer choices.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question"],
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The question the agent is asking."
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QuestionOption"
+          },
+          "description": "Answer choices for this question. Empty/omitted when the question is free-text only."
         }
       }
     },

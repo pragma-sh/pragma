@@ -36,19 +36,19 @@ root); running through `sh` means the script works regardless of its executable 
 
 ## Hook → status mapping
 
-| Hook                             | `report.sh` arg  | Reports                                                                                                                                           |
-| -------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SessionStart`                   | `cleared`        | `cleared` status (+ tears down stale state)                                                                                                       |
-| `SessionEnd`                     | `cleared`        | `cleared` status (+ forgets the session pin and name)                                                                                             |
-| `UserPromptSubmit`               | `started`        | `started` + user prompt message + `session-name` (once per `session_id`, from the first prompt)                                                   |
-| `Stop`                           | `stopped`        | `stopped` (only on genuine completion — Kimi skips Stop for cancels)                                                                              |
-| `StopFailure`                    | `failed`         | `cleared` (+ system note with the error)                                                                                                          |
-| `Interrupt`                      | `interrupted`    | `cleared` (+ system note) — Kimi's native user-cancel hook, so **no transcript watcher is needed**                                                |
-| `SubagentStart`                  | `subagent-start` | Increments the active-child count and re-asserts `started`                                                                                        |
-| `SubagentStop`                   | `subagent-stop`  | Decrements the active-child count; final status stays owned by the parent `Stop`                                                                  |
-| `PostToolUse`                    | `running`        | `started` **iff** a turn's marker exists; else nothing                                                                                            |
-| `PermissionRequest`              | `permission`     | `attention --kind command` (+ command text + request-id) **iff** a marker exists                                                                  |
-| `PreToolUse` (`AskUserQuestion`) | `question`       | `attention --kind question` (+ question text + request-id; generic fallback text when the payload has no single question) **iff** a marker exists |
+| Hook                             | `report.sh` arg  | Reports                                                                                                                                                                                                        |
+| -------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SessionStart`                   | `cleared`        | `cleared` status (+ tears down stale state)                                                                                                                                                                    |
+| `SessionEnd`                     | `cleared`        | `cleared` status (+ forgets the session pin and name)                                                                                                                                                          |
+| `UserPromptSubmit`               | `started`        | `started` + user prompt message + `session-name` (once per `session_id`, from the first prompt)                                                                                                                |
+| `Stop`                           | `stopped`        | `stopped` + the turn's reply text read from the session transcript (`agents/main/wire.jsonl`) when available; a coarse completion message otherwise (only on genuine completion — Kimi skips Stop for cancels) |
+| `StopFailure`                    | `failed`         | `cleared` (+ system note with the error)                                                                                                                                                                       |
+| `Interrupt`                      | `interrupted`    | `cleared` (+ system note) — Kimi's native user-cancel hook, so **no transcript watcher is needed**                                                                                                             |
+| `SubagentStart`                  | `subagent-start` | Increments the active-child count and re-asserts `started`                                                                                                                                                     |
+| `SubagentStop`                   | `subagent-stop`  | Decrements the active-child count; final status stays owned by the parent `Stop`                                                                                                                               |
+| `PostToolUse`                    | `running`        | `started` **iff** a turn's marker exists; else nothing                                                                                                                                                         |
+| `PermissionRequest`              | `permission`     | `attention --kind command` (+ command text + request-id) **iff** a marker exists                                                                                                                               |
+| `PreToolUse` (`AskUserQuestion`) | `question`       | `attention --kind question` (+ question text + request-id; generic fallback text when the payload has no single question) **iff** a marker exists                                                              |
 
 Statuses: `started` = yellow running dot, `stopped` = green done dot, `attention` = red
 needs-input dot, `cleared` = remove the dot. `cleared` is deliberately used for both
@@ -98,24 +98,30 @@ text), so the plugin reports status-only messages for completions rather than st
 the assistant's reply. Hooks exit 0 to allow; the blocking `PreToolUse` hook must always
 exit 0 so it never denies a tool.
 
-## Permissions and questions are not brokered
+## Permissions and questions
 
 Kimi's `PermissionRequest` hook is fire-and-forget: the approval answer comes from Kimi's
 own TUI (`requestApproval` RPC), never from a hook result, so there is no
 `await-decision` round-trip. `AskUserQuestion` is auto-approved and rendered by the TUI's
 own question UI, so a `question`/`command` attention is raised for the user to look at the
-terminal and answer there. Both attentions carry a generated `--request-id` and a non-empty
-text — `pragma-cli agent verify`'s `stream-integrity` scenario rejects an attention that
-omits command/requestId or question/requestId. `PostToolUse` (the `running` verb) re-asserts
-`started` the moment the turn continues, dropping the attention back to "in progress". The
-watcher is `handleDecisions: false` for the same reason — it exists for mid-turn
-interjections only.
+terminal and answer there. Question attention includes every option (or the complete
+multi-question array) and a generated request id. The Pragma watcher answers Kimi's native
+dialog directly: digits choose listed answers, Other uses arrow/Enter navigation, and `1`
+confirms Kimi's final review tab. It never aborts the turn or injects a synthetic chat
+message. Background questions are intentionally not reported because they do not block the
+TUI. `PostToolUse` (the `running` verb) re-asserts `started` the moment the turn continues,
+dropping the attention back to "in progress". The watcher keeps `handleDecisions: false`
+because permission requests still have no brokered round-trip.
 
 ## Model provider
 
 Kimi's model catalog is remote and user-configured. `src/models.ts` queries Kimi's
 supported `provider list --json` / `provider list` CLI through `ctx.sdk.exec.run`, maps
 aliases to launcher entries, and immediately drops provider data (including credentials).
+The queries fall back to `$HOME/.kimi-code/bin/kimi` (the official installer's location)
+when the CLI is not on the subprocess PATH — a GUI-launched host does not read `.zshrc`,
+so `~/.kimi-code/bin` is absent from its shell PATH unless the host adds it (see
+`process_env` in pragma-core, which includes it).
 Do not import `node:fs` or read `~/.kimi-code/config.toml` directly: the same bundle loads
 inside the production desktop webview, where Node built-ins make the whole plugin fail,
 and direct local reads target the wrong machine for remote projects. Aliases marked

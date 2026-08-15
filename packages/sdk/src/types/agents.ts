@@ -9,6 +9,7 @@ import type {
   AgentMessage,
   AgentModelEntry,
   QuestionOption,
+  AgentQuestion,
   AgentReasoning,
   AgentReportPayload,
   AgentSessionLaunchPayload,
@@ -28,6 +29,7 @@ export type {
   AgentMessage,
   AgentModelEntry,
   QuestionOption,
+  AgentQuestion,
   AgentReasoning,
   AgentReportPayload,
   AgentSessionLaunchPayload,
@@ -58,6 +60,8 @@ export interface AgentEvent {
   question?: string | null;
   /** Answer choices for a `question` attention, when present. */
   options?: QuestionOption[] | null;
+  /** Multiple questions for a `question` attention, when present. */
+  questions?: AgentQuestion[] | null;
   /** Correlation id for the command/question round-trip, when present. */
   requestId?: string | null;
 }
@@ -109,6 +113,8 @@ export interface ReportOptions {
   question?: string;
   /** Answer choices for a `question` attention report. */
   options?: QuestionOption[];
+  /** Multiple questions for a `question` attention report. */
+  questions?: AgentQuestion[];
   /** Correlation id so a waiting caller can match the resulting decision. */
   requestId?: string;
   client?: import("../client").PragmaClient;

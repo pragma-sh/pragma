@@ -93,6 +93,9 @@ function run(
   const before = reportCalls();
   const runEnv: Record<string, string> = {
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    // Isolate the kimi session-dir glob in `last_assistant_text` so transcript
+    // lookups never touch the real `~/.kimi-code` on the test machine.
+    HOME: workdir,
     TMPDIR: tmpEnvDir,
     PRAGMA_TAB_ID: TAB_ID,
     PRAGMA_TEST_LOG: logPath,
@@ -184,6 +187,55 @@ describe("report.sh", () => {
       }),
     ).toEqual(["agent report --agent kimi stopped"]);
     expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it("surfaces the turn's reply from the session transcript on Stop", () => {
+    const sessionId = "session-reply";
+    const transcriptDir = join(
+      workdir,
+      ".kimi-code",
+      "sessions",
+      "wd_test",
+      sessionId,
+      "agents",
+      "main",
+    );
+    mkdirSync(transcriptDir, { recursive: true });
+    writeFileSync(
+      join(transcriptDir, "wire.jsonl"),
+      [
+        JSON.stringify({
+          type: "turn.prompt",
+          input: [{ type: "text", text: "wait" }],
+          time: 1,
+        }),
+        JSON.stringify({
+          type: "context.append_loop_event",
+          event: {
+            type: "content.part",
+            part: { type: "think", think: "thinking..." },
+          },
+          time: 2,
+        }),
+        JSON.stringify({
+          type: "context.append_loop_event",
+          event: {
+            type: "content.part",
+            part: { type: "text", text: "waiting" },
+          },
+          time: 3,
+        }),
+      ].join("\n"),
+    );
+    run("started", { stdin: promptStdin("wait", sessionId) });
+    expect(
+      run("stopped", {
+        stdin: JSON.stringify({ hook_event_name: "Stop", stop_hook_active: false }),
+      }),
+    ).toEqual(["agent report --agent kimi stopped"]);
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "waiting" }),
+    );
   });
 
   it("does not report a phantom stopped dot without an in-flight turn", () => {
@@ -428,7 +480,14 @@ describe("report.sh", () => {
       stdin: JSON.stringify({
         hook_event_name: "PreToolUse",
         tool_name: "AskUserQuestion",
-        tool_input: { questions: [{ question: "Which approach?", options: [{ label: "A" }] }] },
+        tool_input: {
+          questions: [
+            {
+              question: "Which approach?",
+              options: [{ label: "A", description: "First approach" }],
+            },
+          ],
+        },
         tool_call_id: "call-1",
       }),
     });
@@ -436,10 +495,25 @@ describe("report.sh", () => {
     expect(
       raised.some((call) =>
         call.startsWith(
-          "agent report --agent kimi attention --kind question --question Which approach? --request-id ",
+          'agent report --agent kimi attention --kind question --question Which approach? --options [{"label":"A","description":"First approach"}] --request-id ',
         ),
       ),
     ).toBe(true);
+  });
+
+  itWithNode("does not send keys to a background question", () => {
+    run("started", { stdin: promptStdin("hi") });
+    const raised = run("question", {
+      stdin: JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "AskUserQuestion",
+        tool_input: {
+          background: true,
+          questions: [{ question: "Later?", options: [{ label: "A" }] }],
+        },
+      }),
+    });
+    expect(raised).toEqual([]);
   });
 
   itWithNode("raises a generic question attention with text and a request-id", () => {

@@ -95,8 +95,10 @@ Observed payloads (26.8.3):
 - **A cancelled turn fires no hook at all.** It is recorded in `events.jsonl` as a
   `ResultBlockUpdatedEvent` with `"cancelled":true` (a failed one as
   `AgentTaskFailedEvent`), which the per-turn watcher polls past the turn's starting byte
-  offset. Scoping to the offset is what stops an earlier turn's cancel from clearing a
-  new one.
+  offset. A cancel that lands before any result block exists (Escape right after
+  submit) writes only a top-level `CancelAgentEvent` — Junie 26.8.10 did not emit a
+  `ResultBlockUpdatedEvent` for it — and the watcher matches that shape too. Scoping to
+  the offset is what stops an earlier turn's cancel from clearing a new one.
 - **Event-log blocks are replacements, not deltas.** Each `*BlockUpdatedEvent` carries the
   whole current text of its `stepId`, so `assistant_text_since` keeps the newest record
   per `stepId` (in first-seen order) instead of concatenating every record — concatenating
@@ -110,12 +112,23 @@ Observed payloads (26.8.3):
   in progress. The `pre-tool` arm still matches the two tool names, but only so that a
   future build routing them through the tool pipeline cannot re-assert `started` over a
   live question.
+- **Several questions at once become one multi-question attention.** When multiple
+  `AskAsyncRequestUpdatedEvent`s are pending at the same time (one `ask_user_choice`
+  call with several questions), `scan_question` collects all of them into a single
+  `report attention --kind question --questions '[{"question":…,"options":[…]},…]'`
+  report whose `--request-id` is the first question's id, so a remote client renders
+  a back/next wizard and submits every answer together. The watcher (`watcher-kit`
+  multi-question delivery) applies those answers to Junie's native prompts in order.
+  The report dedupes on the whole pending set, so a batch
+  that gains or loses a question re-reports.
 - **The reply has to be typed, and Junie's list ignores digits.** No hook can answer a
   question, so `createTuiWatcher` (`handleQuestionAnswers: true`) sends keystrokes —
   with `questionSelectMode: "arrow-space"`, because Junie's prompt navigates with Down,
   marks the row with Space (`space to select`), and submits with Enter, and its
   custom-answer row is a plain input that must not be opened with Enter first. Command
   approvals are the reverse — a real blocking hook — hence `handleDecisions: false`.
+  After answers are selected, Junie opens a summary screen; the watcher sends one
+  final Enter to submit that summary.
 - **Subagents are invisible.** Junie runs them in-process and fires no per-agent hook
   (`PreToolUse` carries no agent id), so `subagents` is in `excludeFeatures`.
 

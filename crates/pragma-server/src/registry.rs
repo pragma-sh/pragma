@@ -1601,12 +1601,44 @@ impl Registry {
         }
     }
 
+    /// Drops every agent status and chat message recorded for `tab_id`, and
+    /// broadcasts a `cleared` event for each dropped status so live subscribers
+    /// (paired phones, `pragma-cli agent verify`) stop showing a stale
+    /// `running`/`done`/`attention` once the session is gone. Called when the
+    /// hosting session is killed ([`Self::kill`], [`Self::kill_for_cwd`]) or
+    /// exits on its own ([`Self::remove_exited`]): a killed agent's own hooks
+    /// cannot run (SIGKILL), so without the broadcast the status sticks
+    /// forever; a graceful exit that already reported `cleared`/`done` just
+    /// gets a harmless duplicate.
     pub fn clear_agents_for_tab(&self, tab_id: &str) {
+        let mut removed: Vec<(String, String, String)> = Vec::new();
         if let Ok(mut statuses) = self.agent_statuses.lock() {
-            statuses.retain(|(_, status_tab_id, _), _| status_tab_id != tab_id);
+            statuses.retain(|(worktree_id, status_tab_id, agent), _| {
+                if status_tab_id == tab_id {
+                    removed.push((worktree_id.clone(), status_tab_id.clone(), agent.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
         }
         if let Ok(mut messages) = self.recent_agent_messages.lock() {
             messages.retain(|(_, message_tab_id, _), _| message_tab_id != tab_id);
+        }
+        for (worktree_id, removed_tab_id, agent) in removed {
+            self.broadcast_agent(&agent_event(&AgentReportPayload {
+                agent,
+                worktree_id,
+                tab_id: removed_tab_id,
+                status: Some(AgentStatus::Cleared),
+                session_name: None,
+                attention_kind: None,
+                command: None,
+                question: None,
+                options: vec![],
+                questions: vec![],
+                request_id: None,
+            }));
         }
     }
 
@@ -1789,6 +1821,11 @@ fn agent_event(payload: &AgentReportPayload) -> EventFrame {
             None
         } else {
             Some(payload.options.clone())
+        },
+        questions: if payload.questions.is_empty() {
+            None
+        } else {
+            Some(payload.questions.clone())
         },
         request_id: payload.request_id.clone(),
     }
@@ -2087,6 +2124,7 @@ mod tests {
             command: None,
             question: None,
             options: vec![],
+            questions: vec![],
             request_id: None,
         }
     }
@@ -2230,6 +2268,56 @@ mod tests {
                     items.len() == 1 && items[0]["status"] == "cleared"
                 })
         ));
+    }
+
+    #[test]
+    fn clearing_a_tab_broadcasts_cleared_so_live_subscribers_settle() {
+        let registry = Registry::default();
+        let (_snapshot, rx) = registry.subscribe_agents().expect("subscribe");
+        registry
+            .report_agent(AgentReportPayload {
+                agent: "claude-code".to_string(),
+                worktree_id: "worktree-1".to_string(),
+                tab_id: "tab-1".to_string(),
+                status: Some(AgentStatus::Running),
+                session_name: None,
+                attention_kind: None,
+                command: None,
+                question: None,
+                options: vec![],
+                questions: vec![],
+                request_id: None,
+            })
+            .expect("report agent");
+
+        registry.clear_agents_for_tab("tab-1");
+
+        let mut saw_cleared = false;
+        while let Ok(event) = rx.recv_timeout(Duration::from_secs(1)) {
+            if let EventFrame::Agent {
+                worktree_id,
+                tab_id,
+                agent,
+                status: Some(AgentStatus::Cleared),
+                ..
+            } = event
+            {
+                assert_eq!(worktree_id, "worktree-1");
+                assert_eq!(tab_id, "tab-1");
+                assert_eq!(agent, "claude-code");
+                saw_cleared = true;
+                break;
+            }
+        }
+        assert!(
+            saw_cleared,
+            "expected a cleared broadcast for the removed tab"
+        );
+        let (snapshot, _rx) = registry.subscribe_agents().expect("subscribe");
+        assert!(
+            snapshot.is_empty(),
+            "cleared status should not linger in the snapshot"
+        );
     }
 
     #[test]
@@ -2450,6 +2538,7 @@ mod tests {
             command: None,
             question: None,
             options: vec![],
+            questions: vec![],
             request_id: None,
         };
         registry
@@ -2690,6 +2779,7 @@ mod tests {
                 command: None,
                 question: None,
                 options: vec![],
+                questions: vec![],
                 request_id: None,
             })
             .expect("report agent");

@@ -32,7 +32,11 @@ const MODELS = [
 const baseWatcher = createTuiWatcher({
   agent: "github-copilot",
   handleDecisions: false,
-  handleQuestionAnswers: false,
+  handleQuestionAnswers: true,
+  questionOtherMode: "navigate",
+  // Copilot's composer does not reliably decode synthetic bracketed-paste
+  // markers, so inject watcher messages as ordinary text.
+  interjectMode: "plain",
 });
 
 /** Pragma plugin for GitHub Copilot CLI. */
@@ -79,8 +83,11 @@ export const githubCopilotCliPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/copilot.png",
       launch: { command: ["copilot", "--no-auto-update"] },
-      excludeFeatures: ["questions", "abort", "interrupt"],
-      prefillDelayMs: 3000,
+      excludeFeatures: ["abort", "interrupt"],
+      // Copilot's interactive TUI mounts slowly on a cold start (skills,
+      // hooks, and extensions load before the composer accepts input), so a
+      // short fixed prefill is swallowed and the launch prompt is lost.
+      prefillDelayMs: 25000,
       prefillMode: "plain",
       prefillSubmit: "\r",
       models: MODELS,

@@ -46,7 +46,8 @@ from the desktop.
   `client.agents.connect()` on screen focus and closes on blur, folding events
   into the **pure** `lib/transcript-store.ts` (upsert-by-id, ts ordering,
   attention raise/clear; model reasoning rows are omitted). Reconnects with capped backoff; buzzes on attention +
-  approve/deny. Launch-time `agent`/`worktreeId` params let a freshly launched
+  approve/deny. Talk-back actions queue while that connection opens or reconnects;
+  never discard a send because `connectionRef.current` is temporarily null. Launch-time `agent`/`worktreeId` params let a freshly launched
   session attach before the workspace snapshot catches up. Catalog-qualified
   launch ids are reduced to the plugin's runtime agent id for stream routing.
 - **Icons** (`components/AgentIcon.tsx`): plugin agent icons are fetched by

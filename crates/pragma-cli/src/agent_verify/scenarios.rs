@@ -71,6 +71,20 @@ pub fn definitions() -> &'static [ScenarioDef] {
             run: question_free_text,
         },
         ScenarioDef {
+            id: "question-multi",
+            name: "multiple questions",
+            slow: false,
+            features: &[AgentFeature::Questions],
+            run: question_multi,
+        },
+        ScenarioDef {
+            id: "message-submit",
+            name: "interjection submit",
+            slow: false,
+            features: &[],
+            run: message_submit,
+        },
+        ScenarioDef {
             id: "command-allow",
             name: "command allow",
             slow: false,
@@ -291,14 +305,56 @@ fn question_free_text(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcom
         Some(MARKER),
     )?;
     session.await_answer_echo(&attention.request_id, Some(MARKER))?;
-    // Primary path: the TUI's custom-answer editor delivers the marker inside
-    // the same turn. Secondary path: a TUI without a free-text editor (Codex)
-    // selects its fallback row ("None of the above"), aborts the response, and
-    // resubmits the answer as an `Answer to question ...` follow-up prompt —
-    // the marker then arrives in that follow-up turn. Both paths must end with
-    // the agent echoing the marker back, proving the answer reached it.
+    // Native TUI custom-answer editor must deliver marker inside same turn.
     session.await_assistant_message_containing(MARKER)?;
     session.await_settled()?;
+    Ok(Outcome::Passed)
+}
+
+fn question_multi(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, String> {
+    let mut session = ctx.launch(prompts.get("question-multi")?)?;
+    session.await_running()?;
+    let attention = session.await_attention(AgentAttentionKind::Question)?;
+    validate_multi_question(
+        &attention,
+        &[
+            ("Choose Red or Blue?", &["Red", "Blue"]),
+            ("Choose Circle or Square?", &["Circle", "Square"]),
+        ],
+    )?;
+    // Mobile question wizard submits every answer on one ` | `-separated line.
+    // Watcher applies each part to corresponding native TUI prompt in order.
+    let combined = "Red | Circle";
+    ctx.api.answer(
+        &attention.agent,
+        session.worktree_id(),
+        session.tab_id(),
+        &attention.request_id,
+        Some(combined),
+    )?;
+    session.await_answer_echo(&attention.request_id, Some(combined))?;
+    session.await_assistant_message_containing("Red")?;
+    session.await_assistant_message_containing("Circle")?;
+    require_done(session.await_settled()?)?;
+    Ok(Outcome::Passed)
+}
+
+fn message_submit(ctx: &ScenarioCtx<'_>, prompts: &Prompts) -> Result<Outcome, String> {
+    const MARKER: &str = "pragma-verify-interjection";
+    let mut session = ctx.launch(prompts.get("message-submit")?)?;
+    session.await_running()?;
+    session.await_assistant_message_containing("waiting")?;
+    // Exercise the real mobile interjection path: publish an AgentInput, which
+    // the session watcher must type into the TUI and submit. A direct PTY write
+    // would bypass the watcher and prove nothing about phone delivery.
+    ctx.api.input(
+        ctx.runtime_agent_id,
+        session.worktree_id(),
+        session.tab_id(),
+        MARKER,
+    )?;
+    session.await_assistant_message_containing(MARKER)?;
+    require_done(session.await_settled()?)?;
     Ok(Outcome::Passed)
 }
 
@@ -546,6 +602,46 @@ fn require_done(status: AgentStatus) -> Result<(), String> {
     }
 }
 
+fn validate_multi_question(
+    attention: &super::engine::Attention,
+    expected: &[(&str, &[&str])],
+) -> Result<(), String> {
+    if attention.questions.len() != expected.len() {
+        return Err(format!(
+            "multi-question attention expected {} questions, got {}",
+            expected.len(),
+            attention.questions.len()
+        ));
+    }
+    for (actual, (expected_question, expected_options)) in
+        attention.questions.iter().zip(expected.iter())
+    {
+        if actual.question.trim() != *expected_question {
+            return Err(format!(
+                "multi-question text mismatch: expected {expected_question:?}, got {:?}",
+                actual.question
+            ));
+        }
+        let labels: Vec<&str> = actual
+            .options
+            .iter()
+            .map(|option| {
+                option
+                    .label
+                    .trim()
+                    .strip_suffix(" (Recommended)")
+                    .unwrap_or(option.label.trim())
+            })
+            .collect();
+        if labels != *expected_options {
+            return Err(format!(
+                "multi-question options mismatch: expected {expected_options:?}, got {labels:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_question(
     attention: &super::engine::Attention,
     expected_question: &str,
@@ -698,6 +794,7 @@ mod tests {
                     description: None,
                 },
             ],
+            questions: vec![],
             request_id: "request".to_string(),
         };
         assert!(validate_question(&attention, "Choose Red or Blue?", &["Red", "Blue"]).is_ok());

@@ -4,6 +4,10 @@ Prime Agent integration built from `@pragma/pi-plugin` factories. Prime Agent is
 Pi-derived CLI with the same extension lifecycle surface; do not copy or symlink Pi
 reporter/watcher code into this package.
 
+It also inherits Pi's Kitty Alt+Enter interjection submit and prefill composer
+cleanup. Do not replace either with carriage return: during a streaming turn that
+adds a newline instead of sending the message.
+
 ## Build and install
 
 ```sh

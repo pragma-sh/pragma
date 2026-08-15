@@ -72,6 +72,7 @@ export type {
   AgentIcon,
   AgentMessage,
   AgentMessageEvent,
+  AgentQuestion,
   AgentReportPayload,
   QuestionOption,
   AgentSessionLaunchPayload,
