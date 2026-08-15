@@ -30,6 +30,11 @@ interface QuestionDraft {
   otherText: string;
 }
 
+interface QuestionActionsProps {
+  request: AttentionRequest;
+  onAnswer: (requestId: string, reply: string | null) => void;
+}
+
 /**
  * Docked action card for a live agent request, using the Inbox card's visual
  * language. A `command` shows Approve/Deny; a `question` shows its options (plus
@@ -88,19 +93,8 @@ function CommandActions({
   );
 }
 
-function QuestionActions({
-  request,
-  onAnswer,
-}: {
-  request: AttentionRequest;
-  onAnswer: (requestId: string, reply: string | null) => void;
-}) {
+function QuestionActions({ request, onAnswer }: QuestionActionsProps) {
   const questions = questionEntries(request);
-  const [current, setCurrent] = useState(0);
-  const [drafts, setDrafts] = useState<QuestionDraft[]>(() =>
-    questions.map(() => ({ selected: null, otherText: "" })),
-  );
-
   if (questions.length <= 1) {
     const question = questions[0] ?? { question: request.prompt, options: request.options ?? [] };
     return (
@@ -113,24 +107,24 @@ function QuestionActions({
     );
   }
 
-  const active = questions[current] ?? questions[0];
-  if (!active) return null;
+  return <QuestionWizard onAnswer={onAnswer} questions={questions} request={request} />;
+}
+
+function QuestionWizard({
+  request,
+  questions,
+  onAnswer,
+}: QuestionActionsProps & { questions: QuestionEntry[] }) {
+  const [current, setCurrent] = useState(0);
+  const [drafts, setDrafts] = useState<QuestionDraft[]>(() =>
+    questions.map(() => ({ selected: null, otherText: "" })),
+  );
+
+  const active = questionAt(questions, current);
   const draft = drafts[current] ?? { selected: null, otherText: "" };
   const answers = drafts.map(answerForDraft);
   const allAnswered = answers.every(Boolean);
   const last = questions.length - 1;
-
-  function updateDraft(patch: Partial<QuestionDraft>): void {
-    setDrafts((previous) =>
-      previous.map((entry, index) => (index === current ? { ...entry, ...patch } : entry)),
-    );
-  }
-
-  function submitAll(): void {
-    if (!allAnswered) return;
-    hapticSelection();
-    onAnswer(request.requestId, answers.join(" | "));
-  }
 
   return (
     <>
@@ -151,12 +145,14 @@ function QuestionActions({
           selected={draft.selected}
           onSelect={(selected) => {
             hapticSelection();
-            updateDraft({ selected });
+            setDrafts((previous) => updateQuestionDraft(previous, current, { selected }));
           }}
         />
         <QuestionAnswerInput
           otherText={draft.otherText}
-          onOtherTextChange={(otherText) => updateDraft({ otherText })}
+          onOtherTextChange={(otherText) =>
+            setDrafts((previous) => updateQuestionDraft(previous, current, { otherText }))
+          }
           selected={draft.selected}
           show={active.options.length === 0 || draft.selected === OTHER}
         />
@@ -168,11 +164,23 @@ function QuestionActions({
           last={last}
           onDismiss={() => onAnswer(request.requestId, null)}
           onNext={() => setCurrent(Math.min(last, current + 1))}
-          onSubmitAll={submitAll}
+          onSubmitAll={() => {
+            if (!allAnswered) return;
+            hapticSelection();
+            onAnswer(request.requestId, answers.join(" | "));
+          }}
         />
       </CardContent>
     </>
   );
+}
+
+function updateQuestionDraft(
+  drafts: QuestionDraft[],
+  current: number,
+  patch: Partial<QuestionDraft>,
+): QuestionDraft[] {
+  return drafts.map((entry, index) => (index === current ? { ...entry, ...patch } : entry));
 }
 
 function SingleQuestionActions({
@@ -310,6 +318,10 @@ function questionEntries(request: AttentionRequest): QuestionEntry[] {
     }));
   }
   return [{ question: request.prompt, options: request.options ?? [] }];
+}
+
+function questionAt(questions: QuestionEntry[], current: number): QuestionEntry {
+  return questions[current] ?? questions[0]!;
 }
 
 function answerForDraft(draft: QuestionDraft | undefined): string {
