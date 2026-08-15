@@ -2,7 +2,7 @@ import { PragmaGatewayError } from "@pragma/sdk";
 import { router } from "expo-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 
 import { AgentIcon } from "@/components/AgentIcon";
 import { AgentModelSelector } from "@/components/AgentModelSelector";
@@ -245,7 +245,7 @@ function LaunchForm({
       </Field>
 
       {target.kind === "new" ? (
-        <Animated.View entering={FadeInDown.duration(200)}>
+        <Animated.View entering={FadeInDown.duration(200)} exiting={FadeOutUp.duration(150)}>
           <Field label="Branch name">
             <Input
               autoCapitalize="none"

@@ -2,7 +2,7 @@ import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma/constan
 
 import { statusRank } from "../agent-status";
 import { runtimeAgentId } from "../launch-form";
-import { displayTabTitle } from "../tab-title";
+import { agentSessionTitle } from "../tab-title";
 import { normalizeQuestionOptions, type AgentTab, type InboxItem } from "../types";
 import { worktreeLabel } from "../worktree-tree";
 
@@ -23,11 +23,13 @@ import { worktreeLabel } from "../worktree-tree";
  * therefore from this map; a report for a tab the snapshot no longer carries
  * is ignored. Status reports only overlay the dot/attention state — a session
  * with no report yet still appears, dotless.
+ *
+ * Titles are the desktop's agent-tab titles (see `agentSessionTitle`), never a
+ * live shell OSC title: agent tabs ignore OSC titles on the desktop too.
  */
 export function agentTabsBySnapshot(
   tabs: Tab[],
   statuses: AgentReportPayload[],
-  liveTitles: Readonly<Record<string, string>> = {},
 ): Record<string, AgentTab[]> {
   const reportsByTabId = reportsByTab(statuses);
   const result: Record<string, AgentTab[]> = {};
@@ -40,7 +42,7 @@ export function agentTabsBySnapshot(
       id: tab.id,
       worktreeId: tab.worktreeId,
       agent,
-      title: displayTabTitle(liveTitles[tab.id] ?? tab.title),
+      title: agentSessionTitle(tab.title, report?.sessionName),
       status: report?.status ?? "cleared",
       attentionKind: report?.attentionKind ?? null,
     };
@@ -54,6 +56,8 @@ interface MergedReport {
   agent: string;
   status: AgentTab["status"] | null;
   attentionKind: AgentTab["attentionKind"];
+  /** Last agent-reported session name, used when the tab carries no title yet. */
+  sessionName: string | null;
 }
 
 /**
@@ -72,9 +76,11 @@ function reportsByTab(statuses: AgentReportPayload[]): Map<string, MergedReport>
         agent: report.agent,
         status: report.status ?? null,
         attentionKind: report.attentionKind ?? null,
+        sessionName: report.sessionName ?? null,
       });
       continue;
     }
+    existing.sessionName = report.sessionName ?? existing.sessionName;
     if (statusRank(report.status ?? null) > statusRank(existing.status)) {
       existing.status = report.status ?? null;
       existing.attentionKind = report.attentionKind ?? null;

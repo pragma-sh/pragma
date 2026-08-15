@@ -15,8 +15,9 @@ import {
   useProjectRootPath,
   useWorktree,
 } from "@/lib/data/data-context";
+import { useThemeColors } from "@/lib/theme";
 import { useAgentConnection } from "@/lib/use-agent-connection";
-import { displayTabTitle } from "@/lib/tab-title";
+import { agentSessionTitle, DEFAULT_TAB_TITLE } from "@/lib/tab-title";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
 /**
@@ -98,7 +99,7 @@ function chatTitle(
   tabTitle: string | undefined,
   launchTitle: string | undefined,
 ): string | undefined {
-  return tabTitle && tabTitle !== "Shell" ? tabTitle : (launchTitle ?? tabTitle);
+  return tabTitle && tabTitle !== DEFAULT_TAB_TITLE ? tabTitle : (launchTitle ?? tabTitle);
 }
 
 function resolvedAgent(tab: ReturnType<typeof useAgentTab>, agent: string | undefined): string {
@@ -113,16 +114,17 @@ function resolvedWorktreeId(
 }
 
 function ChatNavigation({ title, worktreeId }: { title: string | undefined; worktreeId: string }) {
+  const { foreground } = useThemeColors();
   return (
     <Stack.Screen
       options={{
-        title: displayTabTitle(title),
+        title: agentSessionTitle(title),
         headerLargeTitle: false,
         headerTitleAlign: "center",
         headerRight: renderNewWorktreeButton,
         // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
         headerLeft: ({ tintColor }) => (
-          <WorktreeBackButton color={tintColor ?? "black"} worktreeId={worktreeId} />
+          <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
         ),
       }}
     />

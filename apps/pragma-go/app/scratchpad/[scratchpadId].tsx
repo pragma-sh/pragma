@@ -22,6 +22,7 @@ import { useScratchpadAgent } from "@/lib/use-scratchpad-agent";
 import { useScratchpadComments } from "@/lib/use-scratchpad-comments";
 import { useScratchpad } from "@/lib/use-scratchpads";
 import { errorText } from "@/lib/utils";
+import { useThemeColors } from "@/lib/theme";
 
 /**
  * One scratchpad, read-only, with a touch comment layer.
@@ -40,6 +41,7 @@ export default function ScratchpadScreen() {
     title: string;
   }>();
   const { scratchpad, root, loading, reload } = useScratchpad(worktreeId, filePath);
+  const { foreground } = useThemeColors();
 
   return (
     <>
@@ -48,7 +50,7 @@ export default function ScratchpadScreen() {
           title: scratchpad?.title ?? title,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? "black"} worktreeId={worktreeId} />
+            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
           ),
         }}
       />
@@ -90,6 +92,7 @@ function ScratchpadContent({
   worktreeId: string;
 }) {
   const insets = useSafeAreaInsets();
+  const { foreground } = useThemeColors();
   const { add, comments, loaded, save } = useScratchpadComments(root, scratchpad.filePath);
   const agent = useScratchpadAgent(scratchpad, worktreeId, root, onReload);
   const [commentMode, setCommentMode] = useState(false);
@@ -157,7 +160,7 @@ function ScratchpadContent({
           headerRight: renderCommentModeButton,
           // oxlint-disable-next-line react/no-unstable-nested-components -- React Navigation header render callback.
           headerLeft: ({ tintColor }) => (
-            <WorktreeBackButton color={tintColor ?? "black"} worktreeId={worktreeId} />
+            <WorktreeBackButton color={tintColor ?? foreground} worktreeId={worktreeId} />
           ),
         }}
       />

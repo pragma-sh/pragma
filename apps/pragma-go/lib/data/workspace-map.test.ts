@@ -146,10 +146,17 @@ describe("agentTabsBySnapshot", () => {
     );
   });
 
-  it("prefers a live terminal title over the workspace snapshot", () => {
-    const map = agentTabsBySnapshot([tab({ title: "Shell" })], [status()], {
-      t1: "Implement mobile session titles",
-    });
+  it("uses the desktop's agent tab title, ignoring shell OSC titles", () => {
+    const map = agentTabsBySnapshot([tab({ title: "~/projects/pragma — zsh" })], [status()]);
+
+    expect(map.w1?.[0]?.title).toBe("~/projects/pragma — zsh");
+  });
+
+  it("falls back to the reported session name while the tab is unnamed", () => {
+    const map = agentTabsBySnapshot(
+      [tab({ title: "Shell" })],
+      [status({ sessionName: "Implement mobile session titles" })],
+    );
 
     expect(map.w1?.[0]?.title).toBe("Implement mobile session titles");
   });

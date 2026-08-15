@@ -29,6 +29,10 @@ export default function TabsLayout() {
           <NativeTabs.Trigger.Badge>{String(inboxCount)}</NativeTabs.Trigger.Badge>
         ) : null}
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings">
+        <NativeTabs.Trigger.Icon drawable="ic_menu_preferences" sf="gearshape.fill" />
+        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

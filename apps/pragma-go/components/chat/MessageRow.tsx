@@ -9,6 +9,7 @@ import "prismjs/components/prism-rust";
 import "prismjs/components/prism-typescript";
 
 import { Text } from "@/components/ui/text";
+import { useThemeColors } from "@/lib/theme";
 import type { TranscriptRow } from "@/lib/types";
 
 type SyntaxToken = { type: string; content: string | SyntaxToken[] };
@@ -67,7 +68,9 @@ const markdownStyles: MarkedStyles = {
 /** Renders message markdown, reparsing safely as streamed text grows. */
 function MessageMarkdown({ children, isUser }: { children: string; isUser: boolean }) {
   const colorScheme = useColorScheme();
-  const userForeground = colorScheme === "dark" ? "#18181b" : "#fafafa";
+  // A user bubble paints `bg-primary`, so its text is the theme's own
+  // `primary-foreground` rather than a hard-coded near-black/near-white.
+  const userForeground = useThemeColors().primaryForeground;
   const renderer = new CodeHighlightingRenderer(colorScheme === "dark");
   const elements = useMarkdown(children, {
     colorScheme,

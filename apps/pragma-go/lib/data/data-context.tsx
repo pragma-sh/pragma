@@ -7,9 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
-  type Dispatch,
   type ReactNode,
-  type SetStateAction,
 } from "react";
 
 import { statusForTabs } from "../agent-status";
@@ -71,12 +69,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const {
     dismissed,
     hiddenTabIds,
-    liveTitles,
     renamedTitles,
     setDismissed,
     setHiddenTabIds,
     setRenamedTitles,
-  } = useAgentPresentation(client, statuses, handleUnauthorized);
+  } = useAgentPresentation(client);
   const visibleStatuses = useMemo(
     () => statuses.filter((status) => !hiddenTabIds.has(status.tabId)),
     [hiddenTabIds, statuses],
@@ -93,7 +90,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const agentTabs = useMemo<Record<string, AgentTab[]>>(() => {
     const tabs = paired
-      ? agentTabsBySnapshot(snapshot?.tabs ?? [], visibleStatuses, liveTitles)
+      ? agentTabsBySnapshot(snapshot?.tabs ?? [], visibleStatuses)
       : MOCK_AGENT_TABS;
     return Object.fromEntries(
       Object.entries(tabs).map(([worktreeId, entries]) => [
@@ -103,7 +100,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
       ]),
     );
-  }, [hiddenTabIds, paired, renamedTitles, snapshot, visibleStatuses, liveTitles]);
+  }, [hiddenTabIds, paired, renamedTitles, snapshot, visibleStatuses]);
 
   const derivedInbox = useMemo<InboxItem[]>(
     () =>
@@ -206,16 +203,10 @@ function useSubscriptionData(client: Client | null, onUnauthorized: () => void) 
   return { snapshot, statuses, setStatuses };
 }
 
-function useAgentPresentation(
-  client: Client | null,
-  statuses: AgentReportPayload[],
-  onUnauthorized: () => void,
-) {
-  const [liveTitles, setLiveTitles] = useState<Record<string, string>>({});
+function useAgentPresentation(client: Client | null) {
   const [renamedTitles, setRenamedTitles] = useState<Record<string, string>>({});
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [hiddenTabIds, setHiddenTabIds] = useState<Set<string>>(() => new Set());
-  const agentTabIdsKey = useMemo(() => tabIdsKey(statuses, hiddenTabIds), [hiddenTabIds, statuses]);
 
   useEffect(() => {
     setDismissed(new Set());
@@ -223,49 +214,14 @@ function useAgentPresentation(
     setRenamedTitles({});
   }, [client]);
 
-  useEffect(() => {
-    if (!client || !agentTabIdsKey) {
-      setLiveTitles({});
-      return undefined;
-    }
-    const controller = new AbortController();
-    const tabIds = agentTabIdsKey.split("\u0000");
-    setLiveTitles((previous) => retainActiveTitles(previous, tabIds));
-    for (const tabId of tabIds) {
-      runSessionTitleSubscription(client, tabId, controller.signal, setLiveTitles, onUnauthorized);
-    }
-    return () => controller.abort();
-  }, [agentTabIdsKey, client, onUnauthorized]);
-
   return {
     dismissed,
     hiddenTabIds,
-    liveTitles,
     renamedTitles,
     setDismissed,
     setHiddenTabIds,
     setRenamedTitles,
   };
-}
-
-function tabIdsKey(statuses: AgentReportPayload[], hiddenTabIds: Set<string>): string {
-  // Hermes does not yet provide Array.prototype.toSorted.
-  const tabIds = [
-    ...new Set(statuses.map((status) => status.tabId).filter((id) => !hiddenTabIds.has(id))),
-  ];
-  // oxlint-disable-next-line unicorn/no-array-sort
-  return tabIds.sort().join("\u0000");
-}
-
-function retainActiveTitles(
-  previous: Record<string, string>,
-  tabIds: string[],
-): Record<string, string> {
-  const activeTabIds = new Set(tabIds);
-  const next = Object.fromEntries(
-    Object.entries(previous).filter(([tabId]) => activeTabIds.has(tabId)),
-  );
-  return Object.keys(next).length === Object.keys(previous).length ? previous : next;
 }
 
 async function publishInboxResolution(
@@ -388,25 +344,6 @@ function runAgentStatusSubscription(
     for await (const event of client.events.subscribe("agentStatus", { signal })) {
       onDelivered();
       onStatuses(parseAgentStatuses(event.payload));
-    }
-  });
-}
-
-/** Streams OSC title events for one agent session and ignores terminal output. */
-function runSessionTitleSubscription(
-  client: Client,
-  tabId: string,
-  signal: AbortSignal,
-  onTitle: Dispatch<SetStateAction<Record<string, string>>>,
-  onUnauthorized: () => void,
-): void {
-  void subscriptionLoop(signal, onUnauthorized, async (onDelivered) => {
-    for await (const event of client.sessions.attach(tabId, { signal })) {
-      onDelivered();
-      if (event.type !== "title") continue;
-      onTitle((previous) =>
-        previous[tabId] === event.title ? previous : { ...previous, [tabId]: event.title },
-      );
     }
   });
 }

@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { Alert, ScrollView, View, type ColorValue } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AgentIcon } from "@/components/AgentIcon";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { LaunchAgentButton } from "@/components/LaunchAgentButton";
 import { LaunchSheet } from "@/components/LaunchSheet";
@@ -23,9 +24,11 @@ import {
 import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import { attachmentLabel } from "@/lib/scratchpad-agent";
 import type { AgentTab } from "@/lib/types";
+import { catalogAgentById, useCatalog } from "@/lib/use-catalog";
 import { useScratchpads } from "@/lib/use-scratchpads";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel, type WorktreeNode } from "@/lib/worktree-tree";
+import { useThemeColors } from "@/lib/theme";
 
 /** A worktree's view: nested child worktrees, then its agent tabs. Nests until
  *  a worktree has no children left — same recursion as the desktop sidebar. */
@@ -37,6 +40,7 @@ export default function WorktreeScreen() {
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
   const [launchOpen, setLaunchOpen] = useState(false);
+  const { foreground } = useThemeColors();
   useViewedProjectRoot(useProjectRootPath(worktree?.projectId));
 
   const openLaunchSheet = useCallback(() => {
@@ -45,9 +49,9 @@ export default function WorktreeScreen() {
   }, []);
   const renderLaunchAgentButton = useCallback(
     ({ tintColor }: { tintColor?: ColorValue }) => (
-      <LaunchAgentButton color={tintColor ?? "black"} onPress={openLaunchSheet} />
+      <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
     ),
-    [openLaunchSheet],
+    [foreground, openLaunchSheet],
   );
 
   const empty = children.length === 0 && agentTabs.length === 0;
@@ -199,6 +203,10 @@ function AgentTabsGroup({ tabs }: { tabs: AgentTab[] }) {
   );
 }
 
+/**
+ * One row per session, led by the launching agent's icon. The catalog is
+ * resolved once for the whole list — a per-row hook would refetch it per row.
+ */
 function AgentTabRows({
   tabs,
   onOpenActions,
@@ -206,9 +214,13 @@ function AgentTabRows({
   tabs: AgentTab[];
   onOpenActions: (tab: AgentTab) => void;
 }) {
+  const catalog = useCatalog();
   return tabs.map((tab) => (
     <NavRow
       key={tab.id}
+      leading={
+        <AgentIcon fallback="◆" icon={catalogAgentById(catalog, tab.agent)?.icon} size={22} />
+      }
       onLongPress={() => onOpenActions(tab)}
       onPress={() =>
         router.push({

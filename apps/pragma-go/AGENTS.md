@@ -53,7 +53,21 @@ from the desktop.
 - **Icons** (`components/AgentIcon.tsx`): plugin agent icons are fetched by
   content hash through the authed `AssetsClient` (SVG → `SvgXml`, raster →
   data-URI `Image`), cached by hash. **Never** render an agent icon as a bare
-  `Image` URL — the bearer token must ride the request header.
+  `Image` URL — the bearer token must ride the request header. Contrast is
+  handled by `lib/icon-contrast.ts`: brand marks are monochrome at both ends
+  (Grok near-black, opencode near-white) and the phone follows the host theme,
+  so an SVG is classified from the colours it paints with and an icon that
+  would fall below the 3:1 AA bar against the theme background is placed on a
+  neutral backdrop. The desktop samples pixels on a canvas and inverts; React
+  Native has no canvas, so a raster icon (unclassifiable) always gets the
+  backdrop.
+- **Session titles** (`lib/tab-title.ts`): an agent row shows the title the
+  **desktop** shows on its agent tab — the tab's own name (a user rename, or
+  the agent-reported session name the desktop persists), falling back to the
+  last reported `sessionName` and then to the shared
+  `constants.tabs.defaultTitles.fallback`. Never mirror the live shell OSC
+  title: the desktop's auto-title reducer skips any tab with an `agentId`, so
+  doing so shows a different name for the same session.
 - **Live data** (`lib/data/data-context.tsx`): when paired it subscribes to
   `client.workspace.subscribe()` (projects/worktrees/tabs) + the `agentStatus`
   protocol event, mapping rows to view models via the pure
@@ -138,8 +152,8 @@ from the desktop.
 app/
   _layout.tsx                     # providers: GestureHandlerRoot, SafeArea, Connection, Theme, Data, PortalHost
   pair.tsx                        # QR + manual pairing (modal)
-  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (with badge); sidebarAdaptable on iPad
-  (tabs)/_layout.web.tsx          # JS Projects + Inbox bottom tabs; wide routes also show a sidebar
+  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable on iPad
+  (tabs)/_layout.web.tsx          # JS Projects + Inbox + Settings bottom tabs; wide routes also show a sidebar
   (tabs)/(projects)/              # Stack: drill-down
     index.tsx                     #   all projects
     project/[projectId].tsx       #   project → root worktree(s)
@@ -147,6 +161,7 @@ app/
   chat/[tabId].tsx                # full-screen live agent chat (outside tabs)
   scratchpad/[scratchpadId].tsx   # read-only scratchpad web view + touch comments
   (tabs)/inbox/                   # Stack: swipeable event cards
+  (tabs)/settings/                # Stack: host connection — heartbeat probe + unpair
 components/
   AppShell.web                    # web-only contextual wide sidebar around root screens
   ui/*                            # React Native Reusables primitives
