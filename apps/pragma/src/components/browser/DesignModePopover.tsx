@@ -176,7 +176,7 @@ export function DesignModePopover({
 
 /**
  * Opens a terminal tab for the agent **without stealing focus** — the tab is
- * created and its PTY started in the background (same path the Kanban board
+ * created and its PTY started in the background (same path the agent board
  * uses), so the user keeps looking at the page they were designing.
  */
 async function launchDesignAgent(input: {

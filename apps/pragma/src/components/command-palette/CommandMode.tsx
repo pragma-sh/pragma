@@ -313,9 +313,9 @@ export function CommandMode({
       },
     },
     {
-      id: "prompt-board",
-      label: "Open prompt board",
-      keywords: "kanban tasks workspace",
+      id: "agent-board",
+      label: "Open agent board",
+      keywords: "agent board tasks workspace",
       icon: LayoutGrid,
       disabled: !workspace.selectedProjectId,
       run: () => {

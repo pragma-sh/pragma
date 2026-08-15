@@ -27,10 +27,10 @@ apps/pragma/
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
-│   ├── components/kanban/       # Project prompt board (ProjectKanbanWorkspace, cards, draft/completion modals)
+│   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
 │   ├── state/
 │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
-│   │   ├── kanban-context.tsx      # Project prompt board: cards, shell-mode switch, background launch, completion
+│   │   ├── kanban-context.tsx      # Project agent board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
 │   │   ├── agent-status-store.ts   # Runtime agent dots (useSyncExternalStore)
@@ -47,7 +47,7 @@ apps/pragma/
 └── src-tauri/                   # Rust backend
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
-    ├── src/kanban.rs            # Tauri commands for the prompt Kanban board (CRUD + move)
+    ├── src/kanban.rs            # Tauri commands for the agent board (CRUD + move)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
     ├── src/github.rs            # GitHub auth (0600 token file, OAuth device flow, gh CLI)
@@ -122,8 +122,11 @@ Animation uses **Motion** (`motion/react`). Timings, easings, and the shared
 variant sets live in `src/lib/motion.ts` — never inline a raw `{ duration }`; add a
 named entry there instead, the same rule as colors and shared constants.
 
-- **Animate at the component level.** The sliding tab indicator lives in
-  `components/ui/tabs.tsx`, the modal shrink in `components/ui/dialog.tsx` /
+- **Animate at the component level.** Tab indicators live with their tab
+  components: generic tabs in `components/ui/tabs.tsx`, terminal tabs in
+  `components/tabs/TerminalTabs.tsx`. The terminal indicator's shared layout id
+  includes the current tab ids, so it slides on selection changes but not when
+  closing a tab changes the selection. Modal shrink lives in `components/ui/dialog.tsx` /
   `alert-dialog.tsx` / `modal-shell.tsx`, the +→× rotation in
   `components/ui/plus-close-icon.tsx`. Feature code gets the animation by using
   the primitive, not by re-implementing it.
@@ -290,7 +293,7 @@ conflict-resolution changes. A PR review opens a `pr-review` `TabKind`
 (v7 `pr_number` column) rendered through
 `SplitHost` (`github/ReviewTab`): per-file done-toggle (ephemeral
 `state/review-done-store.ts`), side-by-side diff via the shared `editor/MergeDiff`
-(fed by `github_pr_file_diff`), and inline thread resolve/unresolve.
+(fed lazily near the viewport by `github_pr_file_diff`), and inline thread resolve/unresolve.
 
 Each `ReviewThreadCard` also offers two fix affordances: **Fix** (opens
 `github/FixCommentDialog` to launch an agent on that one comment) and **Add to fix it
@@ -388,7 +391,7 @@ before prompt prefill), and optional prefill controls (`prefillMode: "bracketed"
 "plain"`, `prefillSubmit`, `prefillSubmitDelayMs`). The prompt body and its submit key
 are always sent as two separate PTY writes (`prefillSubmitDelayMs` apart, default 200ms)
 so a paste-aware TUI commits the text before the submit keypress lands — this is why
-Kanban background launches and foreground launches both submit reliably across agents.
+Agent-board background launches and foreground launches both submit reliably across agents.
 Use these only for generic pre-TUI gates / input semantics owned by that agent
 definition; core must not hard-code per-agent keystrokes. `pragma-cli` is
 installed/updated to `~/.local/bin` on production startup. Dev builds install it under
@@ -474,6 +477,10 @@ captured instead of firing. Writes patch only the recorded action+platform in th
 selected scope's file through `read/writeKeybindingsFile`, then dispatch
 `pragma:keybindings-changed` so live shortcuts reload. Rust validates every write with
 `keybindings::validate_overrides`, so a bad patch can never break all shortcuts.
+Number navigation is part of the same action table: Cmd/Ctrl+1–9 selects a visible
+worktree, while Option/Alt+Shift+1–9 selects a tab in the current worktree. Holding a
+configured action's modifiers reveals its key badge on the matching sidebar rows or tab
+entries; remapping either family updates both behavior and hints without a reload.
 
 **Terminal** (`TerminalSection.tsx`) edits the `terminal` block of the scope's
 `config.json` (`{ backend, distro }`) — the shell a plain new tab opens in. The
@@ -558,9 +565,9 @@ immediately, then emits the `pragma:agent-session-launch` Tauri event. The tab c
 announced as `tabOpenedBackground` so the UI refreshes without selecting the tab —
 selecting would mount a terminal and spawn an empty shell that races the background
 agent `ptySpawn` (leaving a plain terminal with no agent command or prompt). A
-`workspace-context.tsx` listener runs the proven Kanban background-launch sequence
+`workspace-context.tsx` listener runs the proven agent-board background-launch sequence
 (`startBackgroundAgentSession` → `startWatcherForAgentSession`) so board-invisible
-launches from a phone work identically to a Kanban card start. The PTY spawns
+launches from a phone work identically to an agent-board card start. The PTY spawns
 directly — no mounted terminal needed. Bracketed prompt prefills wait for the PTY's
 alternate-screen enter sequence (bounded by the same 15-second fallback used by
 headless server launches) before typing, so slow agent startup cannot swallow the
@@ -893,7 +900,7 @@ capability; the existing URL-change re-assertion enables the new document with a
 one. Never reuse or expose the persistent gateway bearer token for this page-local flow.
 The toolbar count badge (`DesignModePopover`) lists staged changes and
 hands the lot to a **background** agent session (`createTab` + `startBackgroundAgentSession`,
-the Kanban path) so launching an agent never steals focus from the page. The toggle is
+the agent-board path) so launching an agent never steals focus from the page. The toggle is
 promoted to the toolbar only for loopback URLs with an explicit port (`isLocalPortUrl` in
 `lib/design-mode.ts`) and lives in the overflow menu otherwise; `buildDesignPrompt` in the
 same file renders the origin/port, each element's HTML and route, and the user's own words.
@@ -1203,7 +1210,7 @@ the contract for `pragma-cli fanout create --parent`.
 `WorktreeCreationProvider` runs the flow (optional `githubPullBranch`, `createWorktree`,
 then the terminal tab or agent session) and exposes its step list. `WorkspaceShell`
 swaps `WorktreeCreationScreen` in for the terminal area while it runs — full-frame like
-Kanban rather than an overlay, because native browser webviews float above HTML. Steps
+the agent board rather than an overlay, because native browser webviews float above HTML. Steps
 are "Syncing base" (only when the user chose to sync), "Creating worktree", and "Running
 scripts". The scripts step is appended from the `pragma:worktree-create-stage` Tauri
 event, which `create_worktree` emits just before the project's `setup` commands run
@@ -1273,15 +1280,15 @@ default chords to native menu events to prevent duplicate actions; remapped chor
 webview-handled. Xterm suppresses only legacy `keypress` Enter duplicates, never printable
 keypress events needed for shifted input.
 
-## Prompt Kanban board
+## Agent board
 
-A **project-scoped prompt board** lives behind the Kanban-icon button in the top tab
+A **project-scoped agent board** lives behind the agent-board button in the top tab
 toolbar (`TerminalTabs`, between the usage-limits popover and the editor launcher; it
 replaced the new-session button). `state/kanban-context.tsx` (`useKanban`) is mounted in
 `App.tsx` **inside** `WorkspaceProvider` and is **always alive**, so it works in both
 shell modes. It owns a `mode: "normal" | "kanban" | "settings"` switch: `WorkspaceShell` renders
-`ProjectKanbanWorkspace` in place of the terminal `<section>` + right sidebar in Kanban
-mode (the **sidebar stays**). Kanban **replaces** the shell rather than overlaying it —
+`ProjectKanbanWorkspace` in place of the terminal `<section>` + right sidebar in agent-board
+mode (the **sidebar stays**). The agent board **replaces** the shell rather than overlaying it —
 native browser webviews (BrowserView) float above HTML, so an overlay would be clipped.
 The automations UI is not a shell mode: it renders as the **Automations** section of the
 full-frame Settings workspace (`AutomationsWorkspace embedded`), reachable via the native
@@ -1305,13 +1312,14 @@ daemon PTY **directly** (`ptySpawn` + `ptyWrite`, no mounted `TerminalManager`) 
 board stays visible. The session persists in the daemon; opening the card later attaches
 (`ptyAttach`) and replays scrollback with the agent already running.
 
-**Completion** (`runCompletion`) reuses existing commands, never re-implements them:
-commit+merge = `stageAll` → `aiGenerateCommitMessage` → `commitStaged` →
-`mergeWorktreeToParent`, then asks about worktree cleanup; commit+PR =
-`aiCommitAllAndGeneratePullRequestDraft` → `githubPushBranch` → `createPullRequest`
-(records PR url/number, shown as a PR badge); manual marks complete and navigates.
+**Completion** (`runCompletion`) reuses existing commands, never re-implements them.
+The board offers commit+PR = `aiCommitAllAndGeneratePullRequestDraft` →
+`githubPushBranch` → `createPullRequest` (records PR url/number, shown as a PR badge),
+or manual completion, which marks complete and navigates. The legacy `commitMerge`
+action remains readable/executable for persisted cards and API compatibility, but is
+not offered in the board UI.
 Card-driven navigation (`openCardWorktree`) switches to `mode: "normal"` and leaves a
-**Back to Kanban** control in the shell; the board's own **Back** button just exits
-Kanban without that return affordance. The always-mounted `WorkspaceDialogs` hosts the
+**Back to agent board** control in the shell; the board's own **Exit agent board** button just
+exits without that return affordance. The always-mounted `WorkspaceDialogs` hosts the
 `NewAgentSessionDialog` + its deep-link listener (moved out of `ProjectSidebar`) so
 `pragma://open` works in both modes.

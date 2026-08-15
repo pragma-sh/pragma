@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { GripVertical, Plus } from "lucide-react";
+import { GripVertical, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { KanbanPromptCard, KanbanPromptStatus } from "@pragma/constants";
@@ -43,13 +43,13 @@ const COLUMNS: ColumnSpec[] = [
 function noop() {}
 
 /**
- * Full-shell prompt board for the selected project. Renders four status columns
+ * Full-shell agent board for the selected project. Renders four status columns
  * of persisted cards with drag-and-drop between columns and hosts the draft and
  * completion modals. A card dropped into a new column is routed through the same
  * transition the per-card buttons use (start, mark review, complete); reorders
  * within a column and unsupported drops are ignored. The board is left by
  * selecting a worktree in the sidebar (or Escape); card-driven navigation is what
- * leaves a "Back to Kanban" control in the normal shell.
+ * leaves a "Back to agent board" control in the normal shell.
  */
 export function ProjectKanbanWorkspace() {
   const kanban = useKanban();
@@ -145,7 +145,11 @@ export function ProjectKanbanWorkspace() {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
       <header className="flex items-center justify-between gap-3 border-b border-sidebar-border px-4 py-3">
-        <h1 className="truncate text-base font-semibold">Prompt board</h1>
+        <h1 className="truncate text-base font-semibold">Agent board</h1>
+        <Button size="sm" variant="outline" onClick={exitBoard}>
+          Exit agent board
+          <X className="size-3.5" />
+        </Button>
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-x-auto p-4">
@@ -216,6 +220,7 @@ export function ProjectKanbanWorkspace() {
                                 card={card}
                                 agent={agentConfig(card)}
                                 completingAction={kanban.completing[card.id] ?? null}
+                                onEdit={(item) => setDraftDialog({ open: true, card: item })}
                                 onOpen={(item) => kanban.openCardWorktree(item)}
                                 onDelete={(item) => setDeletionCard(item)}
                               />
@@ -242,6 +247,7 @@ export function ProjectKanbanWorkspace() {
                     card={card}
                     agent={agentConfig(card)}
                     completingAction={kanban.completing[card.id] ?? null}
+                    onEdit={() => {}}
                     onOpen={() => {}}
                     onDelete={() => {}}
                   />

@@ -9,9 +9,9 @@ import {
 
 /**
  * Always-mounted host for workspace-level dialogs that must work regardless of
- * which surface (normal shell or Kanban board) is visible. The new-session
+ * which surface (normal shell or agent board) is visible. The new-session
  * dialog used to live in `ProjectSidebar`, but the sidebar is replaced by the
- * Kanban board in Kanban mode — so a `pragma://open` deep link would have had no
+ * agent board in agent-board mode — so a `pragma://open` deep link would have had no
  * listener there. Hosting it here keeps deep links working in both modes.
  */
 export function WorkspaceDialogs() {
