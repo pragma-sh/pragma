@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,20 +50,19 @@ function ToolbarButton({
   children: ReactNode;
 }) {
   return (
-    <Button
-      aria-label={label}
+    <IconButton
       aria-pressed={active}
       className={cn("size-6", active && "bg-muted text-foreground")}
       disabled={disabled}
+      label={label}
       // Keep the editor's selection: a toolbar click must not blur the surface.
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       size="icon-sm"
-      title={label}
       variant="ghost"
     >
       {children}
-    </Button>
+    </IconButton>
   );
 }
 
@@ -94,16 +94,15 @@ function LinkControl({ editor, active }: { editor: Editor; active: boolean }) {
       open={open}
     >
       <PopoverTrigger asChild>
-        <Button
-          aria-label="Link"
+        <IconButton
           aria-pressed={active}
           className={cn("size-6", active && "bg-muted text-foreground")}
+          label="Link"
           size="icon-sm"
-          title="Link"
           variant="ghost"
         >
           <LinkIcon className="size-3.5" />
-        </Button>
+        </IconButton>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2">
         <form
@@ -134,16 +133,15 @@ function TableControl({ editor, inTable }: { editor: Editor; inTable: boolean })
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          aria-label="Table"
+        <IconButton
           aria-pressed={inTable}
           className={cn("size-6", inTable && "bg-muted text-foreground")}
+          label="Table"
           size="icon-sm"
-          title="Table"
           variant="ghost"
         >
           <TableIcon className="size-3.5" />
-        </Button>
+        </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         <DropdownMenuItem

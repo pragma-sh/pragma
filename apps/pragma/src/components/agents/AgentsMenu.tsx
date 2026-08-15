@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 
-import { Bot, ChevronDown, Pin, PinOff } from "lucide-react";
+import { ChevronDown, Pin, PinOff } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
 import { Button } from "@/components/ui/button";
+import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +12,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { startAgentInTab } from "@/lib/agent-launch";
 import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
@@ -43,21 +43,18 @@ export function AgentsMenu() {
       {pinnedAgents.length > 0 ? (
         <div className="flex max-w-64 items-center gap-1 overflow-x-auto pr-1">
           {pinnedAgents.map((agent) => (
-            <Tooltip key={agent.id}>
-              <TooltipTrigger asChild>
-                <Button
-                  className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                  size="icon"
-                  variant="ghost"
-                  disabled={!workspace.selectedWorktree}
-                  onClick={() => void launch(agent)}
-                  aria-label={`Launch ${agent.name}`}
-                >
-                  <AgentIcon agent={agent} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{agent.name}</TooltipContent>
-            </Tooltip>
+            <IconButton
+              aria-label={`Launch ${agent.name}`}
+              className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+              disabled={!workspace.selectedWorktree}
+              key={agent.id}
+              label={agent.name}
+              size="icon"
+              variant="ghost"
+              onClick={() => void launch(agent)}
+            >
+              <AgentIcon agent={agent} />
+            </IconButton>
           ))}
         </div>
       ) : null}
@@ -69,7 +66,6 @@ export function AgentsMenu() {
             size="sm"
             variant="outline"
           >
-            <Bot className="size-3.5" />
             <span>Open agent</span>
             <ChevronDown className="size-3 opacity-70" />
           </Button>
@@ -87,21 +83,25 @@ export function AgentsMenu() {
               >
                 <AgentIcon agent={agent} />
                 <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                <button
-                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleAgentPin(agent.id);
-                  }}
-                  aria-label={isAgentPinned(agent.id) ? `Unpin ${agent.name}` : `Pin ${agent.name}`}
-                >
-                  {isAgentPinned(agent.id) ? (
-                    <PinOff className="size-3" />
-                  ) : (
-                    <Pin className="size-3" />
-                  )}
-                </button>
+                <IconTooltip label={isAgentPinned(agent.id) ? "Unpin" : "Pin"}>
+                  <button
+                    className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleAgentPin(agent.id);
+                    }}
+                    aria-label={
+                      isAgentPinned(agent.id) ? `Unpin ${agent.name}` : `Pin ${agent.name}`
+                    }
+                  >
+                    {isAgentPinned(agent.id) ? (
+                      <PinOff className="size-3" />
+                    ) : (
+                      <Pin className="size-3" />
+                    )}
+                  </button>
+                </IconTooltip>
               </DropdownMenuItem>
             ))
           )}

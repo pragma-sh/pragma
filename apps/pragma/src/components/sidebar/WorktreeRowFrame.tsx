@@ -51,7 +51,10 @@ export const WorktreeRowFrame = forwardRef<HTMLDivElement, WorktreeRowFrameProps
       <div
         ref={ref}
         className={cn(
-          "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm",
+          // A fixed height keeps every row the same size whether or not its
+          // hover-revealed `size-6` actions (pin, new-child, delete) are
+          // showing, so hovering one row never nudges the rows below it.
+          "group flex h-8 items-center gap-1 rounded-lg px-2 text-sm",
           worktreeRowClass(selected),
           className,
         )}
@@ -68,9 +71,12 @@ export const WorktreeRowFrame = forwardRef<HTMLDivElement, WorktreeRowFrameProps
         >
           {icon}
           {label}
-          {status}
         </button>
         {trailing}
+        {/* The status slot is last and fixed-width, so dots land on the same
+            column on every row no matter how many trailing indicators a row
+            carries — and the label truncates against it instead of under it. */}
+        <span className="flex w-2 shrink-0 items-center justify-center">{status}</span>
       </div>
     );
   },

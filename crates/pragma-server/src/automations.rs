@@ -312,7 +312,7 @@ impl AutomationsRegistry {
             .lock()
             .map_err(|_| AutomationError::LockPoisoned)?
             .insert(
-                id.to_string(),
+                runtime.content_hash.clone(),
                 TrustRecord {
                     verdict,
                     content_hash: runtime.content_hash,
@@ -592,7 +592,7 @@ impl AutomationsRegistry {
             let content_hash = stable_hash(&source);
             let id = format!("automation-{}", stable_hash(&path.to_string_lossy()));
             let metadata = parse_metadata(&source, &path);
-            let trust = self.trust_for(&id, &content_hash, scope);
+            let trust = self.trust_for(&content_hash, scope);
             let status = match trust {
                 AutomationTrust::Trusted | AutomationTrust::Approved => AutomationStatus::Loaded,
                 AutomationTrust::Pending => AutomationStatus::Pending,
@@ -643,32 +643,26 @@ impl AutomationsRegistry {
         Ok(())
     }
 
-    fn trust_for(&self, id: &str, content_hash: &str, scope: AutomationScope) -> AutomationTrust {
+    fn trust_for(&self, content_hash: &str, scope: AutomationScope) -> AutomationTrust {
         if matches!(scope, AutomationScope::Global) {
             return AutomationTrust::Trusted;
         }
         let Ok(mut trust) = self.trust.lock() else {
             return AutomationTrust::Pending;
         };
-        match trust.get(id) {
+        match trust.get(content_hash) {
             Some(record) if matches!(record.verdict, TrustVerdict::Approved) => {
                 AutomationTrust::Approved
             }
-            Some(record)
-                if matches!(record.verdict, TrustVerdict::Rejected)
-                    && record.content_hash == content_hash =>
-            {
+            Some(record) if matches!(record.verdict, TrustVerdict::Rejected) => {
                 AutomationTrust::Rejected
             }
-            Some(record)
-                if matches!(record.verdict, TrustVerdict::Pending)
-                    && record.content_hash == content_hash =>
-            {
+            Some(record) if matches!(record.verdict, TrustVerdict::Pending) => {
                 AutomationTrust::Pending
             }
             _ => {
                 trust.insert(
-                    id.to_string(),
+                    content_hash.to_string(),
                     TrustRecord {
                         verdict: TrustVerdict::Pending,
                         content_hash: content_hash.to_string(),
@@ -1010,13 +1004,26 @@ fn automation_cache_dir() -> PathBuf {
 }
 
 fn read_state(path: &Path) -> PersistedState {
-    File::open(path)
+    let state = File::open(path)
         .ok()
         .and_then(|file| serde_json::from_reader(file).ok())
         .unwrap_or(PersistedState {
             trust: HashMap::new(),
             projects: Vec::new(),
-        })
+        });
+    // Trust is keyed by content hash so a cloned automation (same content, new
+    // path) keeps its verdict. Older state keyed trust by the path-derived
+    // automation id; re-key those records onto their content hash instead of
+    // dropping them and forcing a re-approval.
+    let trust = state
+        .trust
+        .into_values()
+        .map(|record| (record.content_hash.clone(), record))
+        .collect();
+    PersistedState {
+        trust,
+        projects: state.projects,
+    }
 }
 
 fn automation_files(dir: &Path) -> Result<Vec<PathBuf>, AutomationError> {
@@ -1194,7 +1201,40 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{cron_matches, parse_metadata, replace_if_changed, SidecarEvent};
+    use super::{
+        cron_matches, parse_metadata, read_state, replace_if_changed, PersistedState, SidecarEvent,
+        TrustRecord, TrustVerdict,
+    };
+
+    #[test]
+    fn read_state_rekeys_trust_onto_content_hash() {
+        let dir = std::env::temp_dir().join(format!("pragma-trust-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("automations-state.json");
+        // Legacy state keyed trust by the path-derived automation id. It must be
+        // re-keyed onto the content hash so a cloned automation keeps its verdict.
+        let legacy = PersistedState {
+            trust: [(
+                "automation-0123abcd".to_string(),
+                TrustRecord {
+                    verdict: TrustVerdict::Approved,
+                    content_hash: "content-1".to_string(),
+                },
+            )]
+            .into(),
+            projects: Vec::new(),
+        };
+        std::fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+        let state = read_state(&path);
+        assert!(!state.trust.contains_key("automation-0123abcd"));
+        assert_eq!(
+            state.trust.get("content-1").map(|record| record.verdict),
+            Some(TrustVerdict::Approved)
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn unchanged_scan_state_is_retained() {

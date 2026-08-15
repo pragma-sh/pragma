@@ -10,6 +10,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
   PopoverContent,
@@ -145,11 +146,11 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
   return (
     <Popover onOpenChange={(open) => open && setRefreshNonce((current) => current + 1)}>
       <PopoverTrigger asChild>
-        <Button aria-label="Usage limits" size="icon-sm" variant="ghost">
+        <IconButton label="Usage limits" size="icon-sm" variant="ghost">
           <Gauge />
-        </Button>
+        </IconButton>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 gap-1 p-2">
+      <PopoverContent align="start" className="w-96 gap-1 p-2">
         <PopoverHeader className="px-2 py-1">
           <PopoverTitle>Usage limits</PopoverTitle>
         </PopoverHeader>

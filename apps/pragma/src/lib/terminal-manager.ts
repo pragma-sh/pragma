@@ -287,6 +287,25 @@ interface ManagedTerminal {
   fileLinkProvider: IDisposable | null;
 }
 
+/** Checks whether a delayed focus request still targets the mounted terminal. */
+function isFocusableTerminalMount(
+  live: ManagedTerminal | undefined,
+  requested: ManagedTerminal | undefined,
+  hostGeneration: number | undefined,
+): live is ManagedTerminal {
+  if (!live || !live.visible || !live.container.isConnected) return false;
+  if (requested === undefined) return true;
+  return live === requested && live.hostGeneration === hostGeneration;
+}
+
+/** Leaves focus with text inputs and modal controls unless terminal focus is forced. */
+function focusIsClaimed(activeElement: Element | null): boolean {
+  const textInputFocused =
+    isTextEditingContext(activeElement) && !isTerminalEditingContext(activeElement);
+  const dialogOpen = activeElement?.closest('[role="dialog"], [role="alertdialog"]') !== null;
+  return textInputFocused || dialogOpen;
+}
+
 // Nerd Font variants ship full text-presentation glyph coverage for
 // box-drawing / block / powerline characters, which most dev machines
 // already have installed. We fall through to the system monospaces that
@@ -545,29 +564,13 @@ export class TerminalManager {
 
   /** Focuses one visible xterm after React has mounted and revealed its host. */
   focus(tabId: string, force = false): void {
-    const managed = this.terminals.get(tabId);
-    if (!managed) {
-      return;
-    }
-    const hostGeneration = managed.hostGeneration;
+    const requested = this.terminals.get(tabId);
+    const hostGeneration = requested?.hostGeneration;
     window.requestAnimationFrame(() => {
       const live = this.terminals.get(tabId);
-      if (
-        live !== managed ||
-        live.hostGeneration !== hostGeneration ||
-        !live.visible ||
-        !live.container.isConnected
-      ) {
-        return;
-      }
       const activeElement = document.activeElement;
-      if (
-        !force &&
-        ((isTextEditingContext(activeElement) && !isTerminalEditingContext(activeElement)) ||
-          activeElement?.closest('[role="dialog"], [role="alertdialog"]'))
-      ) {
-        return;
-      }
+      if (!isFocusableTerminalMount(live, requested, hostGeneration)) return;
+      if (!force && focusIsClaimed(activeElement)) return;
       live.terminal.focus();
     });
   }

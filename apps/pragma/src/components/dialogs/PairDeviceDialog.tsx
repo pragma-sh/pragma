@@ -6,6 +6,7 @@ import { renderSVG } from "uqr";
 import { constants } from "@pragma/constants";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -318,14 +319,15 @@ function CopyRow({ label, value, mono }: CopyRowProps) {
         >
           {value}
         </code>
-        <Button
+        <IconButton
           aria-label={`Copy ${label}`}
+          label="Copy"
           size="icon-sm"
           variant="ghost"
           onClick={() => void copy()}
         >
           <Copy />
-        </Button>
+        </IconButton>
       </div>
     </div>
   );

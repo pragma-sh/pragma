@@ -380,6 +380,13 @@ impl Db {
             .map_err(AppError::from)
     }
 
+    pub fn delete_project(&self, project_id: &str) -> AppResult<()> {
+        self.0
+            .lock()?
+            .execute("DELETE FROM projects WHERE id = ?1", [project_id])?;
+        Ok(())
+    }
+
     pub fn list_worktrees(&self, project_id: &str) -> AppResult<Vec<Worktree>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
@@ -1646,10 +1653,7 @@ mod tests {
             .expect("project should insert");
         db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None)
             .expect("card should insert");
-        db.0.lock()
-            .expect("lock")
-            .execute("DELETE FROM projects WHERE id = ?1", [&project.id])
-            .expect("project delete");
+        db.delete_project(&project.id).expect("project delete");
         assert!(db
             .list_kanban_cards(&project.id)
             .expect("cards should list")

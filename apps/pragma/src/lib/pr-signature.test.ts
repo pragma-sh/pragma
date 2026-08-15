@@ -28,11 +28,13 @@ beforeEach(() => {
 });
 
 describe("buildPrSignature", () => {
-  it("links the heading to Pragma's home page and the badge to the worktree deep link", () => {
+  it("links the heading to Pragma's home page and the link to the worktree deep link", () => {
     const signature = buildPrSignature("wt-1");
     expect(signature).toContain(`](${constants.github.homepageUrl})`);
-    expect(signature).toContain(`![${prSignature.badgeAlt}](${prSignature.badgeUrl})`);
-    expect(signature).toContain(`](${prSignature.openUrl}?worktree=wt-1)`);
+    expect(signature).toContain(
+      `<sub>[${prSignature.linkLabel}](${prSignature.openUrl}?worktree=wt-1)</sub>`,
+    );
+    expect(signature).not.toContain("![");
     expect(signature.startsWith(prSignature.startMarker)).toBe(true);
     expect(signature.endsWith(prSignature.endMarker)).toBe(true);
   });

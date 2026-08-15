@@ -4,7 +4,9 @@ import { constants } from "@pragma/constants";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AgentSelection } from "@/hooks/use-agent-selection";
 import type { AgentModelSelection } from "@/lib/tauri";
 
@@ -61,16 +63,16 @@ export function FanoutRows({ rows, onChange, selection }: FanoutRowsProps) {
               onLoadModels={selection.loadModels}
             />
           </div>
-          <Button
-            aria-label="Remove attempt"
+          <IconButton
             disabled={rows.length <= MIN_FANOUT_ROWS}
+            label="Remove attempt"
             size="icon"
             type="button"
             variant="ghost"
             onClick={() => onChange(rows.filter((candidate) => candidate.key !== row.key))}
           >
             <X className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
       ))}
       <Button
@@ -128,7 +130,7 @@ export function useFanoutMode(): FanoutMode {
   };
 }
 
-/** The Single | Fan out switch in the create dialog's heading. */
+/** Animated Standard | Fan out tabs in the create dialog's heading. */
 export function FanoutModeSwitch({
   mode,
   onSwitch,
@@ -137,20 +139,20 @@ export function FanoutModeSwitch({
   onSwitch: (next: "single" | "fanout") => void;
 }) {
   return (
-    <div className="flex rounded-md border border-border p-0.5 text-xs">
-      {(["single", "fanout"] as const).map((option) => (
-        <button
-          key={option}
-          aria-pressed={mode === option}
-          className={`rounded px-2 py-1 ${
-            mode === option ? "bg-muted text-foreground" : "text-muted-foreground"
-          }`}
-          type="button"
-          onClick={() => onSwitch(option)}
-        >
-          {option === "single" ? "Single" : "Fan out"}
-        </button>
-      ))}
-    </div>
+    <Tabs
+      value={mode}
+      onValueChange={(next) => {
+        if (next === "single" || next === "fanout") onSwitch(next);
+      }}
+    >
+      <TabsList aria-label="Worktree type" className="h-7 text-xs">
+        <TabsTrigger className="px-2 text-xs" value="single" onClick={() => onSwitch("single")}>
+          Standard
+        </TabsTrigger>
+        <TabsTrigger className="px-2 text-xs" value="fanout" onClick={() => onSwitch("fanout")}>
+          Fan out
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
   );
 }

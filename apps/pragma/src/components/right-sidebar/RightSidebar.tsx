@@ -12,6 +12,7 @@ import { FilesTab } from "@/components/right-sidebar/FilesTab";
 import { PullRequestTab } from "@/components/right-sidebar/PullRequestTab";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   aiCommitAllAndGeneratePullRequestDraft,
@@ -157,9 +158,23 @@ function CollapsedRightSidebar({ onExpand }: { onExpand: () => void }) {
       initial={{ opacity: 0 }}
       transition={motionTransition.fast}
     >
-      <Button aria-label="Expand files sidebar" onClick={onExpand} size="icon-sm" variant="ghost">
-        <PanelRightOpen />
-      </Button>
+      <IconButton
+        label="Expand sidebar"
+        side="left"
+        size="icon-sm"
+        variant="ghost"
+        onClick={onExpand}
+      >
+        {/* The strip appears as the panel collapses, so the chevron mounts
+            in the close orientation and flips to point at the expanding panel. */}
+        <motion.span
+          animate={{ rotate: 0 }}
+          initial={{ rotate: 180 }}
+          transition={motionTransition.base}
+        >
+          <PanelRightOpen />
+        </motion.span>
+      </IconButton>
     </motion.div>
   );
 }
@@ -190,14 +205,9 @@ function RightSidebarHeader({
 }: RightSidebarHeaderProps) {
   return (
     <div className="bg-sidebar flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border pl-1 pr-2">
-      <Button
-        aria-label="Collapse files sidebar"
-        onClick={onCollapse}
-        size="icon-sm"
-        variant="ghost"
-      >
+      <IconButton label="Collapse sidebar" size="icon-sm" variant="ghost" onClick={onCollapse}>
         <PanelRightClose />
-      </Button>
+      </IconButton>
       <Tabs
         className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         onValueChange={(value) => setActiveSubtab(value as RightSidebarSubtab)}

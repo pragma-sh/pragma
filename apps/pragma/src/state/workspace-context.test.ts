@@ -94,14 +94,16 @@ describe("workspaceReducer", () => {
     expect(state.selectedProjectId).toBe("one");
   });
 
-  it("hydrates the persisted project and per-project worktree selection", () => {
+  it("hydrates persisted project, worktree, and tab selections", () => {
     const state = workspaceReducer(baseState, {
       type: "hydrate-selection",
       projectId: "p-2",
       worktreeByProject: { "p-2": "wt-9", "p-3": "wt-7" },
+      tabByWorktree: { "wt-9": "tab-4", "wt-7": "tab-2" },
     });
     expect(state.selectedProjectId).toBe("p-2");
     expect(state.selectedWorktreeByProject).toEqual({ "p-2": "wt-9", "p-3": "wt-7" });
+    expect(state.activeTabByWorktree).toEqual({ "wt-9": "tab-4", "wt-7": "tab-2" });
   });
 
   it("activates new tabs and selects a fallback when one closes", () => {

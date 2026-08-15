@@ -30,6 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -425,16 +426,15 @@ function HeaderCard({ pr, merging = false }: { pr: PullRequestSummary; merging?:
         <h2 className="min-w-0 flex-1 text-lg leading-snug font-semibold text-foreground">
           {pr.title} <span className="font-normal text-muted-foreground">#{pr.number}</span>
         </h2>
-        <Button
-          aria-label="Open on GitHub"
+        <IconButton
           className="text-muted-foreground hover:text-foreground"
+          label="Open on GitHub"
           onClick={() => void browserOpenExternal(pr.htmlUrl)}
           size="icon-sm"
-          title="Open on GitHub"
           variant="ghost"
         >
           <Icon className="size-4" icon="simple-icons:github" />
-        </Button>
+        </IconButton>
       </div>
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${stateClass}`}>

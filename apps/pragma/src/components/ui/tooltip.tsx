@@ -5,8 +5,11 @@ import { Tooltip as TooltipPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
+/** Repo-wide hover delay before a tooltip opens, in milliseconds. */
+const TOOLTIP_DELAY_MS = 300;
+
 function TooltipProvider({
-  delayDuration = 0,
+  delayDuration = TOOLTIP_DELAY_MS,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
@@ -18,8 +21,18 @@ function TooltipProvider({
   );
 }
 
+/**
+ * A tooltip root that carries its own provider, so a single tooltip can be
+ * dropped anywhere (including inside a test that renders one component) without
+ * the caller having to mount `TooltipProvider` first. Nesting it inside an outer
+ * provider is harmless — the inner one simply wins for its subtree.
+ */
 function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
+  return (
+    <TooltipProvider>
+      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+    </TooltipProvider>
+  );
 }
 
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {

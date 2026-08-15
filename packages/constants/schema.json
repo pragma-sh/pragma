@@ -1170,7 +1170,7 @@
       "type": "object",
       "additionalProperties": false,
       "description": "The \"Created with Pragma\" footer appended to pull requests Pragma opens. The markers delimit the block so Pragma can strip it again when it renders a PR body, and so a body written by an older Pragma is still recognised.",
-      "required": ["enabled", "startMarker", "endMarker", "badgeUrl", "badgeAlt", "openUrl"],
+      "required": ["enabled", "startMarker", "endMarker", "linkLabel", "openUrl"],
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -1184,14 +1184,9 @@
           "type": "string",
           "description": "HTML comment closing the footer block."
         },
-        "badgeUrl": {
+        "linkLabel": {
           "type": "string",
-          "format": "uri",
-          "description": "Raw URL of the committed \"Open worktree\" button image (`assets/pr/` on Pragma's default branch). GitHub strips `data:` URIs, so the badge has to be hosted."
-        },
-        "badgeAlt": {
-          "type": "string",
-          "description": "Alt text for the badge image, and the text a viewer sees when the badge cannot be fetched."
+          "description": "Text of the small \"Open worktree\" link rendered under the footer heading."
         },
         "openUrl": {
           "type": "string",

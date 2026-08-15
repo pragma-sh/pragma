@@ -534,6 +534,21 @@ describe("TerminalManager lifecycle", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("pty_write", { sessionId: tab.id, data: "z" });
   });
 
+  it("focuses a terminal mounted after the focus request", async () => {
+    const manager = new TerminalManager();
+    const host = document.createElement("div");
+    document.body.append(host);
+
+    manager.focus(tab.id);
+    manager.mount(tab, "/repo", host);
+    const terminal = (Terminal as unknown as { instances: Array<{ focus: Mock }> }).instances.at(
+      -1,
+    )!;
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+
+    expect(terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
   it("does not steal delayed focus from another text editor", async () => {
     const manager = new TerminalManager();
     const host = document.createElement("div");

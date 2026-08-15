@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 
 import { Icon } from "@iconify/react";
 import { constants, type EditorLauncher, type ShellProfile, type Tab } from "@pragma/constants";
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
@@ -42,7 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useConfirmClose } from "@/components/editor/confirm-close";
+import { useConfirmClose, useConfirmCloseTabs } from "@/components/editor/confirm-close";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
@@ -249,21 +250,16 @@ function SplitButton({ direction, label, icon: IconComponent }: (typeof splitCon
 
   return (
     <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              disabled={!workspace.activeTabId || candidates.length === 0}
-              size="icon-sm"
-              variant="ghost"
-              aria-label={label}
-            >
-              <IconComponent />
-            </Button>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          disabled={!workspace.activeTabId || candidates.length === 0}
+          label={label}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <IconComponent />
+        </IconButton>
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56">
         <DropdownMenuLabel>Split with tab</DropdownMenuLabel>
         <DropdownMenuGroup>
@@ -298,10 +294,33 @@ function useSplitSummary(workspace: Workspace) {
     () => workspace.tabs.filter((tab) => !splitTabIds.has(tab.id) || tab.id === parentTabId),
     [workspace.tabs, splitTabIds, parentTabId],
   );
-  return { split, parentTabId, splitDirection, splitIsActive, topTabs };
+  const splitTabs = useMemo(
+    () => workspace.tabs.filter((tab) => splitTabIds.has(tab.id)),
+    [workspace.tabs, splitTabIds],
+  );
+  return { split, parentTabId, splitDirection, splitIsActive, splitTabs, topTabs };
 }
 
-/** The left side of the toolbar: agents menu, run/build/custom script buttons, go-back. */
+/** The run/build/custom script buttons, rendered wherever the toolbar places them. */
+function ProjectScriptButtons({ workspace }: { workspace: Workspace }) {
+  return workspace.scriptButtons.map((button) => {
+    const active = workspace.activeScripts.find((script) => script.name === button.name);
+    return (
+      <ProjectScriptButton
+        key={button.name}
+        button={button}
+        isActive={!!active}
+        stopping={!!active?.stopping}
+        configError={workspace.runScriptsConfigError}
+        disabled={computeScriptButtonDisabled(button, workspace)}
+        onRun={() => void workspace.runScript(button.name)}
+        onStop={() => void workspace.stopScript(button.name)}
+      />
+    );
+  });
+}
+
+/** The left side of the toolbar: agents menu, usage limits, go-back. */
 function TerminalToolbar({
   workspace,
   topperItems,
@@ -309,35 +328,17 @@ function TerminalToolbar({
   workspace: Workspace;
   topperItems: VisiblePluginContribution<TopperItemDefinition>[];
 }) {
-  // With the project sidebar collapsed on macOS, the inset traffic lights
-  // (x-inset 12 + three ~14px buttons) sit over the toolbar's left edge — pad
-  // past them so the first control stays clickable.
-  const { collapsed: sidebarCollapsed } = useLeftSidebar();
-  const clearTrafficLights = sidebarCollapsed && isMacPlatform();
   return (
-    <div className={cn("flex min-w-0 items-center gap-1", clearTrafficLights && "pl-16")}>
+    // `shrink-0`: the toolbar row scrolls sideways when it runs out of space
+    // rather than squeezing its controls into each other.
+    <div className="flex shrink-0 items-center gap-1">
       <AgentsMenu />
-      {workspace.scriptButtons.map((button) => {
-        const active = workspace.activeScripts.find((script) => script.name === button.name);
-        const disabled = computeScriptButtonDisabled(button, workspace);
-        return (
-          <ProjectScriptButton
-            key={button.name}
-            button={button}
-            isActive={!!active}
-            stopping={!!active?.stopping}
-            configError={workspace.runScriptsConfigError}
-            disabled={disabled}
-            onRun={() => void workspace.runScript(button.name)}
-            onStop={() => void workspace.stopScript(button.name)}
-          />
-        );
-      })}
+      <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
       <PluginTopperItems items={topperItems} />
       {workspace.agentBackAvailable ? (
         <Button size="sm" variant="ghost" onClick={() => void workspace.goBackFromAgent?.()}>
           <ArrowLeft className="size-3.5" />
-          <span className="hidden sm:inline">Go back</span>
+          <span className="hidden truncate sm:inline">Go back</span>
         </Button>
       ) : null}
     </div>
@@ -436,40 +437,59 @@ function tabEntryClassName(active: boolean): string {
   );
 }
 
-/** The "parent" entry shown in the top bar for a collapsed split. */
+/**
+ * The "parent" entry shown in the top bar for a collapsed split. Its X closes
+ * the whole split — every tab in every pane — because the split's panes are not
+ * individually reachable from this strip.
+ */
 function SplitParentTab({
   tab,
   splitDirection,
   splitIsActive,
   setActiveTab,
+  closeSplit,
 }: {
   tab: Tab;
   splitDirection: SplitDirection | null;
   splitIsActive: boolean;
   setActiveTab: (id: string) => void;
+  closeSplit: () => void;
 }) {
   const displayTitle = tabTitle(tab);
   const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
   return (
-    <motion.button
+    <motion.div
       animate="visible"
       className={tabEntryClassName(splitIsActive)}
       exit="exit"
       initial="hidden"
       key="split-parent"
-      onClick={() => {
-        setActiveTab(tab.id);
-        if (tab.kind === "terminal") terminalManager.focus(tab.id);
-      }}
       title={`Split: ${displayTitle}`}
       transition={motionTransition.fast}
       variants={tabItemVariants}
     >
       {splitIsActive ? <ActiveTabHighlight /> : null}
-      <ParentIcon className="text-primary relative size-3.5 shrink-0" />
-      <TabAgentDot tabId={tab.id} />
-      <span className="relative min-w-0 flex-1 truncate text-left">{displayTitle}</span>
-    </motion.button>
+      <button
+        className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
+        onClick={() => {
+          setActiveTab(tab.id);
+          if (tab.kind === "terminal") terminalManager.focus(tab.id);
+        }}
+      >
+        <ParentIcon className="text-primary size-3.5 shrink-0" />
+        <TabAgentDot tabId={tab.id} />
+        <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+      </button>
+      <IconTooltip label="Close split">
+        <button
+          aria-label="Close split"
+          className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
+          onClick={closeSplit}
+        >
+          <X className="size-3" />
+        </button>
+      </IconTooltip>
+    </motion.div>
   );
 }
 
@@ -543,13 +563,15 @@ function TerminalTabItem({
               </button>
             )}
             <TabDirtyDot tabId={tab.id} />
-            <button
-              aria-label="Close tab"
-              className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
-              onClick={() => requestClose(tab)}
-            >
-              <X className="size-3" />
-            </button>
+            <IconTooltip label="Close tab">
+              <button
+                aria-label="Close tab"
+                className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
+                onClick={() => requestClose(tab)}
+              >
+                <X className="size-3" />
+              </button>
+            </IconTooltip>
           </motion.div>
         </div>
       </ContextMenuTrigger>
@@ -567,51 +589,43 @@ function TerminalTabItem({
   );
 }
 
-/** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
-// fallow-ignore-next-line code-duplication
-function TerminalTabEntry({
-  tab,
-  active,
-  split,
-  parentTabId,
-  splitDirection,
-  splitIsActive,
-  rename,
-  requestClose,
-  beginTabDrag,
-  endTabDrag,
-  setActiveTab,
-}: {
+type TerminalTabEntryProps = {
   tab: Tab;
   active: boolean;
   split: SplitGroupNode | null;
   parentTabId: string | null;
   splitDirection: SplitDirection | null;
   splitIsActive: boolean;
+  closeSplit: () => void;
   rename: TabRenameApi;
   requestClose: (tab: Tab) => void;
   beginTabDrag: (tabId: string) => void;
   endTabDrag: () => void;
   setActiveTab: (id: string) => void;
-}) {
+};
+
+/** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
+function TerminalTabEntry(props: TerminalTabEntryProps) {
+  const { parentTabId, split, tab } = props;
   if (split && tab.id === parentTabId) {
     return (
       <SplitParentTab
-        setActiveTab={setActiveTab}
-        splitDirection={splitDirection}
-        splitIsActive={splitIsActive}
+        closeSplit={props.closeSplit}
+        setActiveTab={props.setActiveTab}
+        splitDirection={props.splitDirection}
+        splitIsActive={props.splitIsActive}
         tab={tab}
       />
     );
   }
   return (
     <TerminalTabItem
-      active={active}
-      beginTabDrag={beginTabDrag}
-      endTabDrag={endTabDrag}
-      rename={rename}
-      requestClose={requestClose}
-      setActiveTab={setActiveTab}
+      active={props.active}
+      beginTabDrag={props.beginTabDrag}
+      endTabDrag={props.endTabDrag}
+      rename={props.rename}
+      requestClose={props.requestClose}
+      setActiveTab={props.setActiveTab}
       tab={tab}
     />
   );
@@ -646,15 +660,15 @@ function EditorLauncherMenu({
           <span className="hidden truncate sm:inline">{selectedEditor.name}</span>
         </Button>
         <DropdownMenuTrigger asChild>
-          <Button
+          <IconButton
             className="rounded-l-none border-l border-l-border px-1"
             disabled={disabled}
+            label="Choose editor"
             size="icon-sm"
             variant="outline"
-            aria-label="Choose editor"
           >
             <ChevronDown className="size-4 opacity-70" />
-          </Button>
+          </IconButton>
         </DropdownMenuTrigger>
       </div>
       <DropdownMenuContent align="end" className="min-w-48">
@@ -679,20 +693,27 @@ function EditorLauncherMenu({
  */
 const NATIVE_SHELL_LABEL = "PowerShell";
 
-/** The prompt-board (Kanban) toggle, between the usage-limits and editor controls. */
+/**
+ * The prompt-board (Kanban) toggle, between the script buttons and the editor
+ * controls. It is a labelled `outline` button so it reads as a peer of the
+ * "open in editor" control next to it, not as one more icon-only affordance.
+ */
 function KanbanToggle() {
   const kanban = useKanban();
   const workspace = useWorkspace();
+  const active = kanban.mode === "kanban";
   return (
     <Button
       aria-label="Toggle prompt board"
-      aria-pressed={kanban.mode === "kanban"}
+      aria-pressed={active}
+      className="shrink-0 text-foreground"
       disabled={!workspace.selectedProjectId}
-      size="icon-sm"
-      variant={kanban.mode === "kanban" ? "secondary" : "ghost"}
-      onClick={() => (kanban.mode === "kanban" ? kanban.exitBoard() : kanban.openBoard())}
+      size="sm"
+      variant={active ? "secondary" : "outline"}
+      onClick={() => (active ? kanban.exitBoard() : kanban.openBoard())}
     >
-      <LayoutGrid />
+      <LayoutGrid className="size-3.5 shrink-0" />
+      <span className="hidden truncate sm:inline">Board</span>
     </Button>
   );
 }
@@ -733,15 +754,17 @@ function NewTabMenu({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button
+        <IconButton
           className="mr-2"
           disabled={disabled}
+          label="New tab"
           size="icon-sm"
+          // The menu itself explains the choice once it is open.
+          tooltipDisabled={open}
           variant="ghost"
-          aria-label="New tab"
         >
           <PlusCloseIcon open={open} />
-        </Button>
+        </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {/* With no distributions to choose between there is nothing to nest, so
@@ -792,13 +815,13 @@ function NewTabMenu({
 export function TerminalTabs() {
   const workspace = useWorkspace();
   const requestClose = useConfirmClose();
+  const requestCloseTabs = useConfirmCloseTabs();
   const { beginTabDrag, endTabDrag } = useTabDrag();
   const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
   const rename = useTabRename(workspace);
-  const { split, parentTabId, splitDirection, splitIsActive, topTabs } = useSplitSummary(workspace);
-  const leftTopperItems = usePluginTopperItems(workspace.selectedProjectId, "left");
-  const rightTopperItems = usePluginTopperItems(workspace.selectedProjectId, "right");
-  const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
+  const { split, parentTabId, splitDirection, splitIsActive, splitTabs, topTabs } =
+    useSplitSummary(workspace);
+  const closeSplit = useCallback(() => requestCloseTabs(splitTabs), [requestCloseTabs, splitTabs]);
   const selectedEditor = editorFor(selectedEditorId);
   const editorDisabled =
     !workspace.selectedWorktree ||
@@ -816,69 +839,131 @@ export function TerminalTabs() {
   return (
     <TooltipProvider delayDuration={300}>
       <header className="text-muted-foreground bg-sidebar flex shrink-0 flex-col">
-        {/* The toolbar doubles as the window drag handle on the content side. */}
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent */}
-        <div
-          className="flex h-9 items-center justify-between gap-2 border-b border-sidebar-border px-2"
-          onMouseDown={startWindowDrag}
-        >
-          <TerminalToolbar topperItems={leftTopperItems} workspace={workspace} />
-          <div className="flex shrink-0 items-center justify-end gap-1">
-            <PluginTopperItems items={rightTopperItems} />
-            <UsageLimitsPopover activeProjectId={workspace.selectedProjectId} />
-            <KanbanToggle />
-            <FanoutToolbarAction />
-            <EditorLauncherMenu
-              disabled={editorDisabled}
-              onSelect={openEditor}
-              selectedEditor={selectedEditor}
-            />
-          </div>
-        </div>
-        <div className="bg-canvas flex h-11 items-center">
-          <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
-            {/* `initial={false}` so the strip does not replay every tab's
-                entrance on mount — only tabs opened afterwards animate in. */}
-            <AnimatePresence initial={false}>
-              {topTabs.map((tab) => (
-                <TerminalTabEntry
-                  key={tab.id}
-                  active={tab.id === workspace.activeTabId}
-                  beginTabDrag={beginTabDrag}
-                  endTabDrag={endTabDrag}
-                  parentTabId={parentTabId}
-                  rename={rename}
-                  requestClose={requestClose}
-                  setActiveTab={workspace.setActiveTab}
-                  split={split}
-                  splitDirection={splitDirection}
-                  splitIsActive={splitIsActive}
-                  tab={tab}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-          <div className="mr-1 flex shrink-0 items-center gap-1">
-            {splitControls.map((control) => (
-              <SplitButton key={control.direction} {...control} />
-            ))}
-          </div>
-          <NewTabMenu
-            disabled={!workspace.selectedWorktree}
-            onCreateBrowser={() => void workspace.createBrowserTab()}
-            onCreateTerminal={(shell) =>
-              void workspace.createTerminalTab(
-                undefined,
-                shell === undefined ? undefined : { shell },
-              )
-            }
-            projectId={workspace.selectedProjectId}
-            shortcutModifier={shortcutModifier}
-            worktreeId={workspace.selectedWorktree?.id ?? null}
-          />
-        </div>
+        <TerminalTabsToolbar
+          editorDisabled={editorDisabled}
+          onOpenEditor={openEditor}
+          selectedEditor={selectedEditor}
+          workspace={workspace}
+        />
+        <TerminalTabStrip
+          beginTabDrag={beginTabDrag}
+          closeSplit={closeSplit}
+          endTabDrag={endTabDrag}
+          parentTabId={parentTabId}
+          rename={rename}
+          requestClose={requestClose}
+          split={split}
+          splitDirection={splitDirection}
+          splitIsActive={splitIsActive}
+          topTabs={topTabs}
+          workspace={workspace}
+        />
       </header>
     </TooltipProvider>
+  );
+}
+
+function TerminalTabsToolbar({
+  editorDisabled,
+  onOpenEditor,
+  selectedEditor,
+  workspace,
+}: {
+  editorDisabled: boolean;
+  onOpenEditor: (editor: EditorLauncher) => void;
+  selectedEditor: EditorLauncher;
+  workspace: ReturnType<typeof useWorkspace>;
+}) {
+  const leftTopperItems = usePluginTopperItems(workspace.selectedProjectId, "left");
+  const rightTopperItems = usePluginTopperItems(workspace.selectedProjectId, "right");
+  const { collapsed: leftSidebarCollapsed } = useLeftSidebar();
+  const clearTrafficLights = leftSidebarCollapsed && isMacPlatform();
+  return (
+    // The toolbar doubles as the window drag handle on the content side.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- window-drag handle is a pointer-only OS affordance with no ARIA role or keyboard equivalent
+    <div
+      className={cn(
+        "flex h-9 items-center border-b border-sidebar-border px-2",
+        clearTrafficLights && "pl-16",
+      )}
+      onMouseDown={startWindowDrag}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+        <TerminalToolbar topperItems={leftTopperItems} workspace={workspace} />
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <PluginTopperItems items={rightTopperItems} />
+          <ProjectScriptButtons workspace={workspace} />
+          <KanbanToggle />
+          <FanoutToolbarAction />
+          <EditorLauncherMenu
+            disabled={editorDisabled}
+            onSelect={onOpenEditor}
+            selectedEditor={selectedEditor}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TerminalTabStrip({
+  beginTabDrag,
+  closeSplit,
+  endTabDrag,
+  parentTabId,
+  rename,
+  requestClose,
+  split,
+  splitDirection,
+  splitIsActive,
+  topTabs,
+  workspace,
+}: Omit<TerminalTabEntryProps, "active" | "setActiveTab" | "tab"> & {
+  topTabs: Tab[];
+  workspace: ReturnType<typeof useWorkspace>;
+}) {
+  const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
+  return (
+    <div className="bg-canvas flex h-11 items-center">
+      <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
+        <LayoutGroup id={workspace.selectedWorktreeId ?? "no-worktree"}>
+          <AnimatePresence initial={false} key={workspace.selectedWorktreeId ?? "no-worktree"}>
+            {topTabs.map((tab) => (
+              <TerminalTabEntry
+                active={tab.id === workspace.activeTabId}
+                beginTabDrag={beginTabDrag}
+                closeSplit={closeSplit}
+                endTabDrag={endTabDrag}
+                key={tab.id}
+                parentTabId={parentTabId}
+                rename={rename}
+                requestClose={requestClose}
+                setActiveTab={workspace.setActiveTab}
+                split={split}
+                splitDirection={splitDirection}
+                splitIsActive={splitIsActive}
+                tab={tab}
+              />
+            ))}
+          </AnimatePresence>
+        </LayoutGroup>
+      </div>
+      <div className="mr-1 flex shrink-0 items-center gap-1">
+        {splitControls.map((control) => (
+          <SplitButton key={control.direction} {...control} />
+        ))}
+      </div>
+      <NewTabMenu
+        disabled={!workspace.selectedWorktree}
+        onCreateBrowser={() => void workspace.createBrowserTab()}
+        onCreateTerminal={(shell) =>
+          void workspace.createTerminalTab(undefined, shell === undefined ? undefined : { shell })
+        }
+        projectId={workspace.selectedProjectId}
+        shortcutModifier={shortcutModifier}
+        worktreeId={workspace.selectedWorktree?.id ?? null}
+      />
+    </div>
   );
 }
 

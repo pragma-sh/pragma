@@ -3,7 +3,7 @@ import { GitFork } from "lucide-react";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   fanoutForParent,
   fanoutStatusLabel,
@@ -38,10 +38,10 @@ export function FanoutIndicator({ worktreeId, label }: { worktreeId: string; lab
   const fanout = useFanoutForParent(worktreeId);
   if (!fanout) return null;
   return (
-    <Button
+    <IconButton
       aria-label={`Open fanout comparison for ${label}`}
+      label={`${fanout.title} · ${fanoutStatusLabel(fanout)}`}
       size="icon-xs"
-      title={`${fanout.title} · ${fanoutStatusLabel(fanout)}`}
       variant="ghost"
       onClick={(event) => {
         event.stopPropagation();
@@ -49,7 +49,7 @@ export function FanoutIndicator({ worktreeId, label }: { worktreeId: string; lab
       }}
     >
       <GitFork className="text-muted-foreground" />
-    </Button>
+    </IconButton>
   );
 }
 
@@ -129,7 +129,7 @@ function FanoutMemberRow({
       caret={<span className="w-3" />}
       onActivate={select}
       icon={<GitFork className="size-3.5 shrink-0 text-muted-foreground" />}
-      label={<span className="truncate">{memberLabel(member)}</span>}
+      label={<span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>}
       status={<AgentStatusDot status={agentStatusFor(member)} />}
     />
   );

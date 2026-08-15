@@ -1480,8 +1480,41 @@ fn base_file_diff(
 /// and deleting any orphaned directory so the caller can still drop its DB row.
 fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreResult<()> {
     if !worktree_path.exists() {
-        return prune_worktrees(repo_root);
+        // The directory is already gone, so there is nothing left to protect:
+        // a prune that fails (a project whose repo moved, an admin dir git no
+        // longer recognises) must not block dropping the record.
+        log_if_err(
+            "prune orphaned worktree metadata",
+            prune_worktrees(repo_root),
+        );
+        return Ok(());
     }
+    let Err(message) = git_worktree_remove(repo_root, worktree_path, force) else {
+        return Ok(());
+    };
+    if is_missing_worktree_admin_state(&message) {
+        // Git may already have removed the main worktree or its metadata after a
+        // merge, leaving no repository from which to prune. Disk cleanup still
+        // lets Pragma remove the stale worktree record.
+        return force_cleanup(repo_root, worktree_path);
+    }
+    // `git worktree remove` also refuses for reasons that have nothing to do
+    // with unsaved work — a worktree containing submodules, an admin entry that
+    // no longer validates, a locked entry. Retrying with `--force` (and finally
+    // deleting the directory outright) is safe as long as nothing is at stake:
+    // either the user already acknowledged the dirty worktree, or the worktree
+    // has no uncommitted changes to lose.
+    if force || !worktree_is_dirty(worktree_path) {
+        if git_worktree_remove(repo_root, worktree_path, true).is_ok() {
+            return Ok(());
+        }
+        return force_cleanup(repo_root, worktree_path);
+    }
+    Err(CoreError::Operation(message))
+}
+
+/// Runs `git worktree remove`, returning the trimmed stderr on failure.
+fn git_worktree_remove(repo_root: &Path, worktree_path: &Path, force: bool) -> Result<(), String> {
     let mut args: Vec<String> = vec![
         "-C".to_string(),
         path_string(repo_root),
@@ -1492,35 +1525,48 @@ fn remove_worktree(repo_root: &Path, worktree_path: &Path, force: bool) -> CoreR
         args.push("--force".to_string());
     }
     args.push(path_string(worktree_path));
-    let output = process_env::git().args(&args).output()?;
+    let output = match process_env::git().args(&args).output() {
+        Ok(output) => output,
+        Err(error) => return Err(format!("failed to run git worktree remove: {error}")),
+    };
     if output.status.success() {
-        return Ok(());
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
-    let message = String::from_utf8_lossy(&output.stderr);
-    if message.contains("not a working tree")
+}
+
+/// True when git's complaint is about worktree/repository metadata that is no
+/// longer there, rather than about work that would be lost.
+fn is_missing_worktree_admin_state(message: &str) -> bool {
+    message.contains("not a working tree")
         || message.contains("not a git worktree")
         || message.contains("not a git repository")
-    {
-        // Git may already have removed the main worktree or its metadata after a
-        // merge, leaving no repository from which to prune. Disk cleanup still
-        // lets Pragma remove the stale worktree record.
-        if let Err(error) = prune_worktrees(repo_root) {
-            eprintln!(
-                "pragma-core: failed to prune orphaned worktree metadata from {}: {error}",
-                repo_root.display()
-            );
+}
+
+/// Last resort: delete the worktree directory and prune the admin entry, so a
+/// worktree git refuses to remove can still leave Pragma's sidebar.
+fn force_cleanup(repo_root: &Path, worktree_path: &Path) -> CoreResult<()> {
+    if worktree_path.exists() {
+        if let Err(error) = std::fs::remove_dir_all(worktree_path) {
+            return Err(CoreError::Operation(format!(
+                "failed to remove worktree {}: {error}",
+                worktree_path.display()
+            )));
         }
-        if worktree_path.exists() {
-            if let Err(error) = std::fs::remove_dir_all(worktree_path) {
-                eprintln!(
-                    "pragma-core: failed to remove orphaned worktree {}: {error}",
-                    worktree_path.display()
-                );
-            }
-        }
-        return Ok(());
     }
-    Err(CoreError::Operation(message.trim().to_string()))
+    log_if_err(
+        "prune orphaned worktree metadata",
+        prune_worktrees(repo_root),
+    );
+    Ok(())
+}
+
+/// Reports a best-effort step that failed without turning it into an error.
+fn log_if_err(what: &str, result: CoreResult<()>) {
+    if let Err(error) = result {
+        eprintln!("pragma-core: failed to {what}: {error}");
+    }
 }
 
 /// Prunes stale worktree administrative entries (`git worktree prune`).
@@ -1910,9 +1956,9 @@ mod tests {
         discard_unstaged_file, ensure_pragma_excluded, file_diff, github_abort_merge,
         github_fetch_and_sync, github_merge_base_branch, github_merge_in_progress,
         github_pull_branch, github_sync_branch, has_unmerged_paths, list_headless_worktrees,
-        merge_worktree_to_parent, merged_status, stage_file, unstage_file, worktree_changes,
-        worktree_commits, worktree_is_dirty, MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE,
-        PRAGMA_WORKTREES_EXCLUDE,
+        merge_worktree_to_parent, merged_status, remove_worktree, stage_file, unstage_file,
+        worktree_changes, worktree_commits, worktree_is_dirty, MergedStatusItem,
+        PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -2313,6 +2359,56 @@ mod tests {
             std::fs::read_to_string(local.path().join("remote.txt")).expect("read remote"),
             "remote\n"
         );
+    }
+
+    /// A worktree git refuses to remove for a reason unrelated to unsaved work
+    /// (here: a lock, which needs `--force --force`) must still leave Pragma.
+    /// Real projects hit the same wall through submodules and drifted admin
+    /// entries — reporting "not a git repository" and keeping the row is worse
+    /// than cleaning the directory up, because the worktree has nothing to lose.
+    #[test]
+    fn removes_clean_worktree_git_refuses_to_remove() {
+        let (_remote, local, _peer) = project_with_remote();
+        let checkout = local.path().join("locked-worktree");
+        create_worktree(local.path(), "locked", &checkout, None).expect("create worktree");
+        run(
+            local.path(),
+            &["worktree", "lock", checkout.to_string_lossy().as_ref()],
+        );
+
+        remove_worktree(local.path(), &checkout, false).expect("remove a clean locked worktree");
+
+        assert!(!checkout.exists(), "worktree directory should be gone");
+    }
+
+    /// A dirty worktree the user has *not* confirmed keeps its error: escalating
+    /// there would discard the very changes the confirmation dialog exists for.
+    #[test]
+    fn refuses_dirty_worktree_without_force() {
+        let (_remote, local, _peer) = project_with_remote();
+        let checkout = local.path().join("dirty-worktree");
+        create_worktree(local.path(), "dirty", &checkout, None).expect("create worktree");
+        std::fs::write(checkout.join("scratch.txt"), "wip\n").expect("write scratch");
+
+        let error = remove_worktree(local.path(), &checkout, false)
+            .expect_err("dirty worktree must not be force-removed");
+
+        assert!(
+            error.to_string().contains("--force"),
+            "unexpected error: {error}"
+        );
+        assert!(checkout.exists(), "dirty worktree must stay on disk");
+    }
+
+    /// An already-deleted directory means there is nothing left to protect, so a
+    /// prune that cannot run (repo moved, admin state gone) must not block the
+    /// caller from dropping its record.
+    #[test]
+    fn tolerates_missing_worktree_outside_a_repository() {
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("already-gone");
+
+        remove_worktree(dir.path(), &missing, false).expect("missing worktree is not an error");
     }
 
     #[test]

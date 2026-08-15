@@ -35,6 +35,7 @@ import { EMPTY_MODEL_SELECTION, resolveDeepLinkAgentSelection } from "@/lib/agen
 import { refreshAgentModels } from "@/lib/agent-model-cache";
 import {
   alertAgent,
+  dismissAlertToastsForTab,
   latchAlertedStatus,
   releaseAlertLatch,
   releaseAlertLatchForTab,
@@ -211,6 +212,7 @@ export type WorkspaceAction =
       type: "hydrate-selection";
       projectId: string | null;
       worktreeByProject: Record<string, string>;
+      tabByWorktree: Record<string, string>;
     }
   | { type: "set-worktrees"; projectId: string; worktrees: Worktree[] }
   | { type: "set-tabs"; tabs: Tab[] }
@@ -265,6 +267,8 @@ interface WorkspaceContextValue extends WorkspaceState {
   splitRoot: SplitLayoutNode | null;
   focusedPaneId: string | null;
   reload: () => Promise<void>;
+  /** Dismisses the workspace error banner. */
+  clearError: () => void;
   refreshProject: (projectId?: string | null) => Promise<void>;
   selectProject: (projectId: string | null) => Promise<void>;
   selectWorktree: (worktreeId: string | null, projectId?: string) => void;
@@ -440,13 +444,15 @@ function parseStoredSplits(records: SplitLayout[]): Record<string, SplitLayoutNo
 interface PersistedSelection {
   projectId: string | null;
   worktreeByProject: Record<string, string>;
+  tabByWorktree: Record<string, string>;
 }
 
 function serializeSelection(
   projectId: string | null,
   worktreeByProject: Record<string, string>,
+  tabByWorktree: Record<string, string>,
 ): string {
-  return JSON.stringify({ projectId, worktreeByProject });
+  return JSON.stringify({ projectId, worktreeByProject, tabByWorktree });
 }
 
 /** Parses a persisted selection blob; returns null on a corrupt/missing one. */
@@ -456,21 +462,26 @@ function parseSelection(raw: string | null): PersistedSelection | null {
   }
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedSelection>;
-    const projectId = typeof parsed.projectId === "string" ? parsed.projectId : null;
-    const worktreeByProject: Record<string, string> = {};
-    if (parsed.worktreeByProject && typeof parsed.worktreeByProject === "object") {
-      for (const [key, value] of Object.entries(parsed.worktreeByProject)) {
-        if (typeof value === "string") {
-          worktreeByProject[key] = value;
-        }
-      }
-    }
-    return { projectId, worktreeByProject };
+    return {
+      projectId: typeof parsed.projectId === "string" ? parsed.projectId : null,
+      worktreeByProject: parseStringRecord(parsed.worktreeByProject),
+      tabByWorktree: parseStringRecord(parsed.tabByWorktree),
+    };
   } catch {
     // A corrupt blob is treated as no selection; the user lands on the first
     // project's main worktree, the same as a first launch.
     return null;
   }
+}
+
+/** Keeps only valid string entries from persisted object-shaped data. */
+function parseStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
 }
 
 function defaultPaneId(worktreeId: string): string {
@@ -1462,6 +1473,7 @@ function reduceHydrateSelection(
     ...state,
     selectedProjectId: action.projectId,
     selectedWorktreeByProject: { ...action.worktreeByProject },
+    activeTabByWorktree: { ...action.tabByWorktree },
   };
 }
 
@@ -2615,10 +2627,12 @@ function useProjectSelection(
           type: "hydrate-selection",
           projectId: selection.projectId,
           worktreeByProject: selection.worktreeByProject,
+          tabByWorktree: selection.tabByWorktree,
         });
         lastPersistedRef.current = serializeSelection(
           selection.projectId,
           selection.worktreeByProject,
+          selection.tabByWorktree,
         );
       } else {
         lastPersistedRef.current = null;
@@ -3432,6 +3446,27 @@ function useProjectLoading(
     }
   }, [dispatch, state.icons, state.projects]);
 
+  // A project's icon file is read from disk once, so a project that gains (or
+  // changes) a favicon after Pragma started would otherwise keep the stale
+  // glyph — or none — until the app is relaunched. Re-read every icon whenever
+  // the window regains focus, which covers "the user just edited the repo in
+  // another app" without polling.
+  useEffect(() => {
+    const projectIds = state.projects.map((project) => project.id);
+    if (projectIds.length === 0) {
+      return;
+    }
+    function refreshIcons() {
+      for (const projectId of projectIds) {
+        void projectIcon(projectId)
+          .then((icon) => dispatch({ type: "set-icon", projectId, icon }))
+          .catch(() => undefined);
+      }
+    }
+    window.addEventListener("focus", refreshIcons);
+    return () => window.removeEventListener("focus", refreshIcons);
+  }, [dispatch, state.projects]);
+
   useEffect(() => {
     const unknownWorktreeIds = Object.values(state.worktrees)
       .flat()
@@ -3496,7 +3531,7 @@ function useSplitPersist(state: WorkspaceState): void {
   }, [state.splitRootByWorktree]);
 }
 
-/** Persists the active project + per-project last-active worktree selection. */
+/** Persists active project, worktree, and tab selections across app restarts. */
 function useSelectionPersistence(
   state: WorkspaceState,
   didHydrateRef: RefObject<boolean>,
@@ -3506,7 +3541,11 @@ function useSelectionPersistence(
     if (!didHydrateRef.current) {
       return;
     }
-    const json = serializeSelection(state.selectedProjectId, state.selectedWorktreeByProject);
+    const json = serializeSelection(
+      state.selectedProjectId,
+      state.selectedWorktreeByProject,
+      state.activeTabByWorktree,
+    );
     if (json === lastPersistedRef.current) {
       return;
     }
@@ -3514,7 +3553,13 @@ function useSelectionPersistence(
     void setActiveSelection(json).catch((cause) => {
       toast.error(`Failed to save active selection: ${errorMessage(cause)}`);
     });
-  }, [didHydrateRef, lastPersistedRef, state.selectedProjectId, state.selectedWorktreeByProject]);
+  }, [
+    didHydrateRef,
+    lastPersistedRef,
+    state.activeTabByWorktree,
+    state.selectedProjectId,
+    state.selectedWorktreeByProject,
+  ]);
 }
 
 /** Records every resolved worktree selection through one centralized effect. */
@@ -3547,6 +3592,9 @@ function latchAndClearSeenTab(tabId: string): void {
   if (hasDone) {
     void markAgentsSeen(tabId);
   }
+  // The user just went and looked — any "done"/"awaiting answer" toast drawing
+  // them to this tab is answered.
+  dismissAlertToastsForTab(tabId);
 }
 
 /** Marks on-screen tabs' agent statuses as seen so reconnect replays don't re-alert. */
@@ -4461,7 +4509,7 @@ function useWorkspaceActions({
   );
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+function useWorkspaceProviderSetup() {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
   const [managedScriptsState, setManagedScriptsState] = useState<ManagedScriptsState>({});
   const mainWorktreeId = useMemo(() => {
@@ -4480,9 +4528,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     didHydrateRef,
     lastPersistedRef,
   } = useWorkspaceRefs(state);
-
   const visibleTabIdsRef = useRef<Set<string>>(new Set());
+  return {
+    state,
+    dispatch,
+    managedScriptsState,
+    setManagedScriptsState,
+    runScriptsConfig,
+    runScriptsConfigError,
+    setRunScriptsConfig,
+    setRunScriptsConfigError,
+    stateRef,
+    tabsRef,
+    selectedProjectIdRef,
+    worktreeProjectIdRef,
+    didHydrateRef,
+    lastPersistedRef,
+    visibleTabIdsRef,
+  };
+}
 
+function useWorkspaceProviderSelection(setup: ReturnType<typeof useWorkspaceProviderSetup>) {
+  const {
+    dispatch,
+    state,
+    stateRef,
+    worktreeProjectIdRef,
+    didHydrateRef,
+    lastPersistedRef,
+    selectedProjectIdRef,
+    visibleTabIdsRef,
+  } = setup;
   const {
     agentBackLocation,
     setAgentBackLocation,
@@ -4536,16 +4612,101 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       });
       dispatch({ type: "set-active-tab", worktreeId: input.worktreeId, tabId: tab.id });
     },
-    [stateRef],
+    [dispatch, stateRef],
   );
-
+  const clearError = useCallback(() => {
+    dispatch({ type: "clear-error" });
+  }, [dispatch]);
   const { reload, selectProject, refreshProject, selectWorktree } = useProjectSelection(
     state,
     dispatch,
     { didHydrateRef, lastPersistedRef, selectedProjectIdRef, worktreeProjectIdRef },
     setAgentBackLocation,
   );
+  return {
+    agentBackLocation,
+    activateTabLocation,
+    openFileLocation,
+    clearError,
+    reload,
+    selectProject,
+    refreshProject,
+    selectWorktree,
+    navigateToAgentLocation,
+    goBackFromAgent,
+    resolveProjectForWorktree,
+  };
+}
 
+function useWorkspaceProviderTabs(
+  setup: ReturnType<typeof useWorkspaceProviderSetup>,
+  selection: ReturnType<typeof useWorkspaceProviderSelection>,
+) {
+  const {
+    state,
+    dispatch,
+    stateRef,
+    worktreeProjectIdRef,
+    selectedProjectIdRef,
+    tabsRef,
+    didHydrateRef,
+    lastPersistedRef,
+    setManagedScriptsState,
+  } = setup;
+  const { selectProject, selectWorktree, resolveProjectForWorktree, reload, refreshProject } =
+    selection;
+  const tabs = useTabManagement({
+    state,
+    dispatch,
+    stateRef,
+    worktreeProjectIdRef,
+    selectedProjectIdRef,
+    tabsRef,
+    selectWorktree,
+    selectProject,
+    resolveProjectForWorktree,
+    setManagedScriptsState,
+  });
+  useWorkspaceListeners({
+    state,
+    dispatch,
+    reload,
+    refreshProject,
+    tabsRef,
+    terminalTabIdsKey: tabs.terminalTabIdsKey,
+    setActiveTabRef: tabs.setActiveTabRef,
+  });
+  useWorkspacePersistence(state, didHydrateRef, lastPersistedRef);
+  return tabs;
+}
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const setup = useWorkspaceProviderSetup();
+  const selection = useWorkspaceProviderSelection(setup);
+  const tabs = useWorkspaceProviderTabs(setup, selection);
+  const {
+    state,
+    dispatch,
+    managedScriptsState,
+    setManagedScriptsState,
+    setRunScriptsConfig,
+    setRunScriptsConfigError,
+    runScriptsConfig,
+    runScriptsConfigError,
+    visibleTabIdsRef,
+  } = setup;
+  const {
+    agentBackLocation,
+    activateTabLocation,
+    openFileLocation,
+    clearError,
+    reload,
+    selectProject,
+    refreshProject,
+    selectWorktree,
+    navigateToAgentLocation,
+    goBackFromAgent,
+  } = selection;
   const {
     createTerminalTab,
     createBrowserTab,
@@ -4561,33 +4722,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     renameTerminalTab,
     markTabAgent,
     setActiveTab,
-    setActiveTabRef,
-    terminalTabIdsKey,
-  } = useTabManagement({
-    state,
-    dispatch,
-    stateRef,
-    worktreeProjectIdRef,
-    selectedProjectIdRef,
-    tabsRef,
-    selectWorktree,
-    selectProject,
-    resolveProjectForWorktree,
-    setManagedScriptsState,
-  });
-
-  useWorkspaceListeners({
-    state,
-    dispatch,
-    reload,
-    refreshProject,
-    tabsRef,
-    terminalTabIdsKey,
-    setActiveTabRef,
-  });
-
-  useWorkspacePersistence(state, didHydrateRef, lastPersistedRef);
-
+  } = tabs;
   const { activeProject, selectedWorktreeId, selectedWorktree } = deriveSelectedWorktree(state);
 
   const workspaceActions = useWorkspaceActions({
@@ -4614,6 +4749,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeProject,
       selectedWorktree,
       reload,
+      clearError,
       refreshProject,
       selectProject,
       selectWorktree,
@@ -4645,6 +4781,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeProject,
       selectedWorktree,
       reload,
+      clearError,
       refreshProject,
       selectProject,
       selectWorktree,

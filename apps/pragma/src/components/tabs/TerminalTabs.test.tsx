@@ -1,5 +1,5 @@
 import type { ShellProfile, Tab } from "@pragma/constants";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,11 +9,11 @@ import { useWorkspace } from "@/state/workspace-context";
 
 type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
 
-function tab(id: string): Tab {
+function tab(id: string, worktreeId = "worktree"): Tab {
   return {
     id,
     projectId: "project",
-    worktreeId: "worktree",
+    worktreeId,
     kind: "terminal",
     title: id,
     url: null,
@@ -88,6 +88,7 @@ const mockWorkspace: WorkspaceContextValue = {
   splitRoot,
   focusedPaneId: "pane-right",
   reload: vi.fn(),
+  clearError: vi.fn(),
   refreshProject: vi.fn(),
   selectProject: vi.fn(),
   selectWorktree: vi.fn(),
@@ -161,8 +162,11 @@ vi.mock("@/state/left-sidebar-context", () => ({
   useLeftSidebar: () => ({ collapsed: false }),
 }));
 
+const requestCloseTabsMock = vi.fn();
+
 vi.mock("@/components/editor/confirm-close", () => ({
   useConfirmClose: () => vi.fn(),
+  useConfirmCloseTabs: () => requestCloseTabsMock,
 }));
 
 vi.mock("@/lib/terminal-manager", () => ({
@@ -193,6 +197,8 @@ afterEach(() => {
   mockWorkspace.splitRootByWorktree = {};
   mockWorkspace.selectedWorktree = null;
   mockWorkspace.selectedWorktreeId = "worktree";
+  mockWorkspace.tabs = [tab("one"), tab("two"), tab("three")];
+  mockWorkspace.activeTabId = "one";
   mockWorkspace.remoteWorktrees = {};
   mockWorkspace.scriptButtons = [
     { name: "run", icon: null, available: false },
@@ -225,14 +231,45 @@ describe("TerminalTabs", () => {
     expect(screen.queryByText("three")).not.toBeInTheDocument();
   });
 
+  /// Regression: the strip was one `AnimatePresence` shared by every worktree,
+  /// so switching worktrees played the old worktree's exit alongside the new
+  /// worktree's entrance. Both sets held layout space at once and the tabs
+  /// visibly slid as the outgoing ones were finally removed. The strip is now
+  /// keyed by worktree, so a switch replaces it outright.
+  it("replaces the whole strip when the selected worktree changes", () => {
+    const { rerender } = render(<TerminalTabs />);
+    expect(screen.getByText("one")).toBeInTheDocument();
+
+    mockWorkspace.selectedWorktreeId = "other-worktree";
+    mockWorkspace.tabs = [tab("alpha", "other-worktree")];
+    mockWorkspace.activeTabId = "alpha";
+    rerender(<TerminalTabs />);
+
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.queryByText("one")).not.toBeInTheDocument();
+    expect(screen.queryByText("two")).not.toBeInTheDocument();
+    expect(screen.queryByText("three")).not.toBeInTheDocument();
+  });
+
   it("focuses the terminal when its top-level tab is clicked", async () => {
     mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
     render(<TerminalTabs />);
 
-    await userEvent.click(screen.getByTitle("Split: one"));
+    await userEvent.click(
+      within(screen.getByTitle("Split: one")).getByRole("button", { name: "one" }),
+    );
 
     expect(mockWorkspace.setActiveTab).toHaveBeenCalledWith("one");
     expect(terminalManager.focus).toHaveBeenCalledWith("one");
+  });
+
+  it("closes every tab in the split from the parent tab's X", async () => {
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+
+    await userEvent.click(screen.getByLabelText("Close split"));
+
+    expect(requestCloseTabsMock).toHaveBeenCalledWith([tab("one"), tab("two"), tab("three")]);
   });
 
   it("runs project scripts from the header play button", async () => {

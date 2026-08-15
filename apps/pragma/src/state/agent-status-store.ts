@@ -231,6 +231,18 @@ export function worktreeAgentStatus(worktreeId: string | null): AgentStatus | nu
   return aggregate(values);
 }
 
+/** Returns the highest-priority agent status across a project's worktrees. */
+export function projectAgentStatus(worktreeIds: Iterable<string>): AgentStatus | null {
+  const values: AgentStatus[] = [];
+  for (const worktreeId of worktreeIds) {
+    const tabs = statuses.get(worktreeId);
+    for (const agents of tabs?.values() ?? []) {
+      values.push(...agents.values());
+    }
+  }
+  return aggregate(values);
+}
+
 /** Returns every stored agent entry for a worktree (used by the plugin hooks bridge). */
 export function agentEntriesForWorktree(
   worktreeId: string | null,
@@ -301,6 +313,16 @@ export function useWorktreeAgentStatus(worktreeId: string | null): AgentStatus |
   return useSyncExternalStore(
     subscribe,
     () => worktreeAgentStatus(worktreeId),
+    () => null,
+  );
+}
+
+/** React hook for aggregate status across one project's worktrees. */
+export function useProjectAgentStatus(worktreeIds: string[]): AgentStatus | null {
+  const key = worktreeIds.join("\0");
+  return useSyncExternalStore(
+    subscribe,
+    () => projectAgentStatus(key ? key.split("\0") : []),
     () => null,
   );
 }

@@ -34,9 +34,11 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { TERMINAL_SETTINGS_CHANGED_EVENT } from "@/hooks/use-terminal-settings";
+import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { validateAgentStatusSettings } from "@/lib/agent-status-settings";
 import { errorMessage } from "@/lib/errors";
 import { resetPrSignatureCache, validateGitHubSettings } from "@/lib/pr-signature";
@@ -216,6 +218,42 @@ function validateOptionalField(value: unknown, name: string, type: "boolean" | "
   }
 }
 
+/**
+ * Selectors for an overlay that owns Escape itself — a radix dialog, alert,
+ * menu, or listbox. Settings is a full frame rather than a modal, so its own
+ * Escape must not also close it out from under whatever the user opened on top.
+ */
+const OVERLAY_SELECTOR = '[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"]';
+
+/**
+ * Closes Settings on Escape, matching the OS convention for a dismissible frame.
+ *
+ * The listener is deliberately on the bubble phase: the keybinding recorder
+ * stops propagation during capture, so a recorded Escape never reaches here.
+ * Anything else that renders an overlay is handled by the DOM check.
+ */
+function useEscapeClosesSettings(close: () => void): void {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector(OVERLAY_SELECTOR)) return;
+      close();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [close]);
+}
+
+/**
+ * Whether this scope's terminals run on a Windows host that has WSL installed.
+ * The shell picker only has a choice to offer there, so the WSL section stays
+ * hidden everywhere else.
+ */
+function useWslAvailable(worktreeId: string | null): boolean {
+  const wsl = useWslDistros(worktreeId);
+  return wsl.isWindows && wsl.distros.length > 0;
+}
+
 // fallow-ignore-next-line complexity -- coordinates settings loading, queued persistence, and scope constraints.
 export function SettingsWorkspace() {
   const workspace = useWorkspace();
@@ -228,6 +266,12 @@ export function SettingsWorkspace() {
   const loadGeneration = useRef(0);
   const latestConfig = useRef<PragmaConfig | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const worktreeId = workspace.selectedWorktree?.id ?? null;
+  // Project settings describe the machine that project's terminals run on,
+  // which for an SSH project is not this one.
+  const wslAvailable = useWslAvailable(scope === "project" ? worktreeId : null);
+
+  useEscapeClosesSettings(shell.closeSettings);
 
   // Honor deep-links while Settings is already mounted (command palette / menu).
   useEffect(() => {
@@ -263,7 +307,10 @@ export function SettingsWorkspace() {
     // GitHub, AI, mobile, and automations are app-global, so project scope falls
     // back to the first section that has a project layer.
     if (scope === "project" && !PROJECT_SECTIONS.has(section)) setSection("plugins");
-  }, [scope, section, workspace.selectedProjectId]);
+    // The WSL section can disappear under the user (scope switch, or a probe
+    // that lands after the deep link opened it).
+    if (section === "terminal" && !wslAvailable) setSection("plugins");
+  }, [scope, section, workspace.selectedProjectId, wslAvailable]);
 
   const persist = useCallback(
     async (update: (current: PragmaConfig) => PragmaConfig) => {
@@ -306,14 +353,14 @@ export function SettingsWorkspace() {
         onMouseDown={startWindowDrag}
       >
         <div className="flex items-center gap-3">
-          <Button
-            aria-label="Back to workspace"
+          <IconButton
+            label="Back to workspace"
             size="icon-sm"
             variant="ghost"
             onClick={shell.closeSettings}
           >
             <ArrowLeft />
-          </Button>
+          </IconButton>
           <div>
             <h1 className="text-sm font-semibold">Settings</h1>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -329,7 +376,12 @@ export function SettingsWorkspace() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <SettingsNavigation scope={scope} section={section} setSection={setSection} />
+        <SettingsNavigation
+          scope={scope}
+          section={section}
+          setSection={setSection}
+          wslAvailable={wslAvailable}
+        />
         <SettingsContent
           error={error}
           loaded={loaded}
@@ -340,7 +392,7 @@ export function SettingsWorkspace() {
           reload={load}
           scope={scope}
           section={section}
-          worktreeId={workspace.selectedWorktree?.id ?? null}
+          worktreeId={worktreeId}
         />
       </div>
     </section>
@@ -351,10 +403,12 @@ function SettingsNavigation({
   scope,
   section,
   setSection,
+  wslAvailable,
 }: {
   scope: ConfigScope;
   section: Section;
   setSection: (section: Section) => void;
+  wslAvailable: boolean;
 }) {
   return (
     <aside className="w-64 shrink-0 border-r border-sidebar-border bg-sidebar p-3">
@@ -379,13 +433,15 @@ function SettingsNavigation({
       >
         Theme
       </SettingsNavItem>
-      <SettingsNavItem
-        active={section === "terminal"}
-        icon={<SquareTerminal />}
-        onClick={() => setSection("terminal")}
-      >
-        Terminal
-      </SettingsNavItem>
+      {wslAvailable ? (
+        <SettingsNavItem
+          active={section === "terminal"}
+          icon={<SquareTerminal />}
+          onClick={() => setSection("terminal")}
+        >
+          WSL
+        </SettingsNavItem>
+      ) : null}
       <SettingsNavItem
         active={section === "agentStatus"}
         icon={<BellRing />}
@@ -403,7 +459,7 @@ function SettingsNavigation({
 function GlobalSettingsNavigation({
   section,
   setSection,
-}: Omit<Parameters<typeof SettingsNavigation>[0], "scope">) {
+}: Omit<Parameters<typeof SettingsNavigation>[0], "scope" | "wslAvailable">) {
   return (
     <>
       <SettingsNavItem
@@ -652,15 +708,16 @@ function PluginsSection({
               <p className="min-w-0 truncate text-sm" title={plugin.path}>
                 {name}
               </p>
-              <Button
+              <IconButton
                 aria-label={`Delete plugin ${name}`}
                 className="shrink-0"
+                label="Delete plugin"
                 size="icon-sm"
                 variant="ghost"
                 onClick={() => void remove(index)}
               >
                 <Trash2 />
-              </Button>
+              </IconButton>
             </div>
           );
         })}

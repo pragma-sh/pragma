@@ -138,7 +138,6 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
-├── assets/                       # Images referenced by URL from outside the app (see assets/pr/README.md)
 ├── skills/                       # Canonical first-party skill sources; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -172,10 +171,9 @@ than no guide.
 - Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
   project root for project clips) and are read through the owning host, so a remote
   project's clips work the same as a local one's.
-- An image referenced by URL from **outside** the app (today: the pull-request footer's
-  "Open worktree" button) → `assets/`, at the repo root and outside every package. Its raw
-  URL on `main` is a published contract, so those paths are append-only —
-  see `assets/pr/README.md`.
+- The pull-request footer is text-only — a heading, a tagline, a small "Open worktree"
+  link, and the opt-out line. It references **no** hosted image: a raw URL on `main` would
+  be a published contract baked into other people's repositories. Keep it that way.
 - A value used by both frontend and backend → `packages/constants` (`values.json`).
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.

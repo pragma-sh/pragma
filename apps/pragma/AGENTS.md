@@ -95,6 +95,27 @@ apps/pragma/
   in `src/index.css` (`@theme`/CSS variables) — use semantic tokens (`bg-background`,
   `text-muted-foreground`), not raw colors.
 
+### Icon buttons always carry a tooltip
+
+Every icon-only control goes through `components/ui/icon-button.tsx`:
+
+- **`<IconButton label="New tab">`** is a `Button` that renders its tooltip and its
+  `aria-label` from one `label` prop, so the two cannot drift. Keep labels to one or
+  two words; pass an explicit `aria-label` when the accessible name has to be longer
+  or more specific than the tooltip (`aria-label={`Delete worktree ${name}`}`).
+  It composes like a `Button`, so a Radix `*Trigger asChild` can wrap it. Set
+  `tooltipDisabled` when the control's own open surface already explains it.
+- **`<IconTooltip label="Close tab">`** adds the same tooltip to an icon control that
+  cannot be a `Button` (a bare `<button>` with its own layout, a third-party handle).
+  That child keeps its own `aria-label`.
+- **`TOOLBAR_BUTTON_CLASS`** is the shared muted-until-hover treatment for toolbar and
+  header icons — pair it with `variant="ghost"` instead of retyping the classes.
+- Never use the native `title` attribute as a tooltip: it is unstyled, slow, and
+  invisible to touch. `Tooltip` carries its own provider, so a tooltip works in a test
+  that renders one component, and the hover delay is set once in `components/ui/tooltip.tsx`.
+- Disclosure carets (tree expanders, collapsible section headers) are deliberately
+  left bare — a tooltip on every row's caret is noise, not help.
+
 ### Motion (`src/lib/motion.ts`)
 
 Animation uses **Motion** (`motion/react`). Timings, easings, and the shared
@@ -145,6 +166,21 @@ named entry there instead, the same rule as colors and shared constants.
   the centre pane (and the terminal's `ResizeObserver`) jump in one frame. The
   spring is suppressed while the resize handle is being dragged so the edge tracks
   the pointer exactly.
+- **Both sidebars share one hook** — `hooks/use-collapsible-panel.ts` owns the
+  persisted collapsed flag, the persisted width, and the automatic collapse; the two
+  contexts are thin wrappers over it. The automatic collapse is an **overlay** on the
+  stored preference, never a write to it: below `layoutBreakpoints` (`lib/responsive.ts`)
+  the panel shows its rail, and a manual toggle while the window is narrow wins until
+  the width crosses the breakpoint again. Both breakpoints sit under the 1024px default
+  window width, so a fresh window still opens with both sidebars showing. Measure the
+  window with `useViewportNarrowerThan` (`window.innerWidth` + a `ResizeObserver`),
+  never a CSS viewport unit — WKWebView does not recompute those on a live resize.
+- **The toolbar row scrolls sideways rather than colliding.** Every control in the
+  `h-9` row is `shrink-0` inside an `overflow-x-auto` scroller, with the right group
+  pushed by `ml-auto` (an auto margin collapses to 0 on overflow; `justify-between`
+  would strand it past the scroll origin). The macOS traffic-light padding stays on the
+  non-scrolling row outside the scroller, so panning can't slide a control under the
+  window buttons. Horizontal scrollbars are globally 0px high, so the pan is invisible.
 
 ### User themes (`.pragma/theme.json`)
 
@@ -191,19 +227,19 @@ PR review tab (metadata + local file diffs), and the worktree-sidebar PR lifecyc
 poll all ride this cache at a 10s cadence.
 
 **"Created with Pragma" footer.** `lib/pr-signature.ts` owns the marketing block Pragma
-appends to every PR it opens: a heading linking to `github.homepageUrl`, an "Open
-worktree" button, and the opt-out line. `createPullRequest` appends it and `toSummary`
-strips it, so the block exists only on GitHub — inside Pragma every consumer of
-`PullRequestSummary.body` sees what the author wrote. Three constraints drove the shape,
-and each is easy to undo by accident:
+appends to every PR it opens: a heading linking to `github.homepageUrl`, a small "Open
+worktree" link under it, and the opt-out line. `createPullRequest` appends it and
+`toSummary` strips it, so the block exists only on GitHub — inside Pragma every consumer
+of `PullRequestSummary.body` sees what the author wrote. Three constraints drove the
+shape, and each is easy to undo by accident:
 
-- **The badge has to be hosted.** GitHub's markdown sanitizer drops `data:` URIs, so the
-  button is `assets/pr/open-worktree.svg`, fetched from `raw.githubusercontent.com` on
-  `main`. That URL is baked into PR bodies that already exist elsewhere — treat
-  `assets/pr/` as append-only. It is one fixed color (the shipped `--primary`), not the
-  user's theme: a file on `main` looks the same to everyone reading the PR.
+- **It is text, not an image.** The footer used to carry a hosted SVG button
+  (`assets/pr/open-worktree.svg` on `raw.githubusercontent.com`), because GitHub's
+  markdown sanitizer drops `data:` URIs. That made a raw URL on `main` a published
+  contract baked into PR bodies in other people's repositories. It is now a plain
+  `<sub>`-wrapped markdown link — do not reintroduce a hosted asset.
 - **The href must be `https`.** The sanitizer keeps only `http`/`https`/`mailto`, so a
-  raw `pragma://open?worktree=…` would render as inert text. The button points at
+  raw `pragma://open?worktree=…` would render as inert text. The link points at
   `github.prSignature.openUrl` (`https://pragma-app.sh/open`), which forwards its query
   string to the deep link. The worktree id resolves only on the machine that owns it;
   elsewhere the deep link falls back to the current selection.
@@ -289,7 +325,9 @@ The `simple-icons:github` glyph is bundled offline through `brand-icons.json`.
 The frontend stores runtime agent status in `state/agent-status-store.ts` via
 `useSyncExternalStore`. Status dots: `done` = green, `running` = yellow, `attention` =
 red, precedence **red > yellow > green** when aggregating a tab's agents or a
-worktree's tabs. Green is a "finished, go look" notification.
+worktree's tabs. Project-switcher icons aggregate every loaded worktree using the same
+precedence. Green is a "finished, go look" notification. Right-clicking a project icon
+removes its client registration and cascaded metadata without deleting checkout files.
 
 The Rust event bridge subscribes once per connected host (`agent_events::start_for`):
 the local managed server at startup, and each SSH remote when it registers or
@@ -495,7 +533,7 @@ bursts with a ~250ms idle debounce, reads all rows from `Db` (`list_projects` +
 host its `PublishWorkspace` snapshot. The work never runs on the macOS main thread.
 Mutation commands (`create_tab`, `close_tab`, `rename_tab`, `set_tab_*`,
 `create_plugin_webview_tab`, `create_worktree`, `rename_worktree`, `hide_worktree`,
-`delete_worktree`, `add_project`, `clone_project`) and brokered `control.rs` handlers
+`delete_worktree`, `add_project`, `remove_project`, `clone_project`) and brokered `control.rs` handlers
 (`worktree_create`, `worktree_delete`, `worktree_rename`, `worktree_set_hidden`,
 `tab_open`, `tab_close`, `tab_rename`, `agent_session_launch`) all call `trigger()` after
 their DB write.
@@ -1179,8 +1217,8 @@ the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` 
 surfaced through a "Show N hidden" toggle. When the user hides the currently-selected
 worktree, the reducer falls back to the main worktree (or the first remaining root).
 
-**Active selection persists across restarts.** The last active project and each
-project's last active worktree are saved in the `settings` table under one opaque JSON
+**Active selection persists across restarts.** The last active project, each
+project's last active worktree, and each worktree's active tab are saved in the `settings` table under one opaque JSON
 key (`activeSelection`) via `get_active_selection` / `set_active_selection` — Rust
 stores the string verbatim (same pattern as split layouts). The mount-time `reload`
 rehydrates via `hydrate-selection`; a persist effect writes on every selection change,

@@ -18,7 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -254,7 +254,7 @@ export const ColorPickerAlpha = ({ className, ...props }: ColorPickerAlphaProps)
   );
 };
 
-export type ColorPickerEyeDropperProps = ComponentProps<typeof Button>;
+export type ColorPickerEyeDropperProps = Omit<ComponentProps<typeof IconButton>, "label">;
 
 export const ColorPickerEyeDropper = ({ className, ...props }: ColorPickerEyeDropperProps) => {
   const { setHue, setSaturation, setLightness, setAlpha } = useColorPicker();
@@ -275,16 +275,17 @@ export const ColorPickerEyeDropper = ({ className, ...props }: ColorPickerEyeDro
   };
 
   return (
-    <Button
+    <IconButton
       className={cn("shrink-0 text-muted-foreground", className)}
-      onClick={handleEyeDropper}
+      label="Pick color"
       size="icon"
       type="button"
       variant="outline"
+      onClick={handleEyeDropper}
       {...(props as any)}
     >
       <PipetteIcon size={16} />
-    </Button>
+    </IconButton>
   );
 };
 

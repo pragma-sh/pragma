@@ -14,15 +14,14 @@ import {
 
 import type { Tab } from "@pragma/constants";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { IconButton, TOOLBAR_BUTTON_CLASS } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DesignModePopover } from "@/components/browser/DesignModePopover";
 import { useBrowserFind } from "@/components/browser/use-browser-find";
 import { useDesignMode } from "@/components/browser/use-design-mode";
@@ -274,172 +273,151 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   }, []);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="flex h-full w-full flex-col bg-canvas">
-        <div
-          className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-elevated px-2"
-          onPointerDown={(event) => event.stopPropagation()}
+    <div className="flex h-full w-full flex-col bg-canvas">
+      <div
+        className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-elevated px-2"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Back"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void browserBack(tab.id)}
         >
-          <Button
-            aria-label="Back"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => void browserBack(tab.id)}
-          >
-            <ArrowLeft />
-          </Button>
-          <Button
-            aria-label="Forward"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => void browserForward(tab.id)}
-          >
-            <ArrowRight />
-          </Button>
-          <Button
-            aria-label="Reload"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => void browserReload(tab.id)}
-          >
-            <RotateCw />
-          </Button>
-          <form className="min-w-0 flex-1" onSubmit={submitAddress}>
-            <Input
-              aria-label="Address"
-              className="h-8 bg-canvas text-sm text-foreground"
-              placeholder="Enter a URL"
-              spellCheck={false}
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-            />
-          </form>
-          {designPromoted ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Design mode"
-                  aria-pressed={design.enabled}
-                  className={
-                    design.enabled
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => design.setEnabled(!design.enabled)}
-                >
-                  <Paintbrush />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Design mode</TooltipContent>
-            </Tooltip>
-          ) : null}
-          {design.changes.length > 0 ? (
-            <DesignModePopover
-              changes={design.changes}
-              pageUrl={tab.url ?? address}
-              onApplied={design.clear}
-              onRemove={design.remove}
-            />
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label="Open dev tools"
-                className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => void browserDevtools(tab.id)}
-              >
-                <Code />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open dev tools</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label="Open in default browser"
-                className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => void browserOpenExternal(tab.url ?? address)}
-              >
-                <ArrowUpRight />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open in default browser</TooltipContent>
-          </Tooltip>
-          <Button
-            aria-label="Save screenshot"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
-            size="icon-sm"
-            variant="ghost"
-            onClick={takeScreenshot}
-          >
-            <Camera />
-          </Button>
-          <Button
-            aria-label="Find in page"
-            className="text-muted-foreground hover:bg-muted hover:text-foreground"
-            size="icon-sm"
-            variant="ghost"
-            onClick={find.openBar}
-          >
-            <Search />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label="More options"
-                className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                size="icon-sm"
-                variant="ghost"
-              >
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {designPromoted ? null : (
-                <DropdownMenuItem onSelect={() => design.setEnabled(!design.enabled)}>
-                  <Paintbrush />
-                  {design.enabled ? "Exit design mode" : "Design mode"}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={() => void browserClearData(tab.id)}>
-                Clear browsing data
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <div className="relative min-h-0 flex-1" ref={contentRef}>
-          {snapshot ? (
-            <img
-              alt=""
-              aria-hidden
-              className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-              src={snapshot}
-            />
-          ) : null}
-          <FindReplaceBar
-            currentMatch={find.currentMatch}
-            findPlaceholder="Find on page"
-            ignoreCase={find.ignoreCase}
-            matchCount={find.matchCount}
-            onClose={find.closeBar}
-            onIgnoreCaseChange={find.setIgnoreCase}
-            onNext={find.findNext}
-            onPrevious={find.findPrevious}
-            onQueryChange={find.setQuery}
-            open={find.open}
-            query={find.query}
+          <ArrowLeft />
+        </IconButton>
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Forward"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void browserForward(tab.id)}
+        >
+          <ArrowRight />
+        </IconButton>
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Reload"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void browserReload(tab.id)}
+        >
+          <RotateCw />
+        </IconButton>
+        <form className="min-w-0 flex-1" onSubmit={submitAddress}>
+          <Input
+            aria-label="Address"
+            className="h-8 bg-canvas text-sm text-foreground"
+            placeholder="Enter a URL"
+            spellCheck={false}
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
           />
-        </div>
+        </form>
+        {designPromoted ? (
+          <IconButton
+            aria-pressed={design.enabled}
+            className={design.enabled ? "bg-muted text-foreground" : TOOLBAR_BUTTON_CLASS}
+            label="Design mode"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => design.setEnabled(!design.enabled)}
+          >
+            <Paintbrush />
+          </IconButton>
+        ) : null}
+        {design.changes.length > 0 ? (
+          <DesignModePopover
+            changes={design.changes}
+            pageUrl={tab.url ?? address}
+            onApplied={design.clear}
+            onRemove={design.remove}
+          />
+        ) : null}
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Dev tools"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void browserDevtools(tab.id)}
+        >
+          <Code />
+        </IconButton>
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Open externally"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void browserOpenExternal(tab.url ?? address)}
+        >
+          <ArrowUpRight />
+        </IconButton>
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Screenshot"
+          size="icon-sm"
+          variant="ghost"
+          onClick={takeScreenshot}
+        >
+          <Camera />
+        </IconButton>
+        <IconButton
+          className={TOOLBAR_BUTTON_CLASS}
+          label="Find in page"
+          size="icon-sm"
+          variant="ghost"
+          onClick={find.openBar}
+        >
+          <Search />
+        </IconButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              className={TOOLBAR_BUTTON_CLASS}
+              label="More options"
+              size="icon-sm"
+              variant="ghost"
+            >
+              <MoreHorizontal />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {designPromoted ? null : (
+              <DropdownMenuItem onSelect={() => design.setEnabled(!design.enabled)}>
+                <Paintbrush />
+                {design.enabled ? "Exit design mode" : "Design mode"}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => void browserClearData(tab.id)}>
+              Clear browsing data
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </TooltipProvider>
+      <div className="relative min-h-0 flex-1" ref={contentRef}>
+        {snapshot ? (
+          <img
+            alt=""
+            aria-hidden
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+            src={snapshot}
+          />
+        ) : null}
+        <FindReplaceBar
+          currentMatch={find.currentMatch}
+          findPlaceholder="Find on page"
+          ignoreCase={find.ignoreCase}
+          matchCount={find.matchCount}
+          onClose={find.closeBar}
+          onIgnoreCaseChange={find.setIgnoreCase}
+          onNext={find.findNext}
+          onPrevious={find.findPrevious}
+          onQueryChange={find.setQuery}
+          open={find.open}
+          query={find.query}
+        />
+      </div>
+    </div>
   );
 }

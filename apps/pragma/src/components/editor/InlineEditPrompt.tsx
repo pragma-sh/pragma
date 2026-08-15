@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Plus, Square } from "lucide-react";
 
+import { IconTooltip } from "@/components/ui/icon-button";
 import type { InlineEditPhase } from "@/components/editor/inline-edit-extension";
 import { cn } from "@/lib/utils";
 
@@ -82,24 +83,28 @@ export function InlineEditPrompt({
           onKeyDown={onKeyDown}
         />
         {running ? (
-          <button
-            aria-label="Abort edit"
-            className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover"
-            type="button"
-            onClick={onAbort}
-          >
-            <Square className="size-3 fill-current" />
-          </button>
+          <IconTooltip label="Abort edit">
+            <button
+              aria-label="Abort edit"
+              className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover"
+              type="button"
+              onClick={onAbort}
+            >
+              <Square className="size-3 fill-current" />
+            </button>
+          </IconTooltip>
         ) : (
-          <button
-            aria-label="Submit edit"
-            className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
-            disabled={!instruction.trim()}
-            type="button"
-            onClick={submit}
-          >
-            <Plus className="size-4 stroke-[2.5]" />
-          </button>
+          <IconTooltip label="Submit edit">
+            <button
+              aria-label="Submit edit"
+              className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+              disabled={!instruction.trim()}
+              type="button"
+              onClick={submit}
+            >
+              <Plus className="size-4 stroke-[2.5]" />
+            </button>
+          </IconTooltip>
         )}
       </div>
       {error ? <p className="pt-1.5 pl-3.5 text-xs text-destructive">{error}</p> : null}

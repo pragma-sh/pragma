@@ -48,6 +48,7 @@ const { mockWorkspace, selectProjectMock } = vi.hoisted(() => {
     splitRoot: null,
     focusedPaneId: null,
     reload: vi.fn(),
+    clearError: vi.fn(),
     refreshProject: vi.fn(),
     selectProject,
     selectWorktree: vi.fn(),

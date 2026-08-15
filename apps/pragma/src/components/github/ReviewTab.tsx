@@ -22,6 +22,7 @@ import { PullRequestStackCard } from "@/components/github/PullRequestStackCard";
 import { ActorAvatar } from "@/components/github/ViewPullRequestView";
 import { startRefreshLoop } from "@/components/right-sidebar/refresh-loop";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   type PullFile,
   type PullRequestSummary,
@@ -524,26 +525,24 @@ function ReviewToolbar({
   return (
     <div className="sticky top-0 z-20 flex h-9 shrink-0 items-center gap-2 border-b border-border bg-elevated px-3">
       <div className="flex items-center gap-0.5">
-        <Button
-          aria-label="Previous comment"
+        <IconButton
           disabled={!hasPrev}
+          label="Previous comment"
           onClick={() => go("prev")}
           size="icon-sm"
-          title="Previous comment (⌘/Ctrl ↑)"
           variant="ghost"
         >
           <ChevronUp />
-        </Button>
-        <Button
-          aria-label="Next comment"
+        </IconButton>
+        <IconButton
           disabled={!hasNext}
+          label="Next comment"
           onClick={() => go("next")}
           size="icon-sm"
-          title="Next comment (⌘/Ctrl ↓)"
           variant="ghost"
         >
           <ChevronDown />
-        </Button>
+        </IconButton>
       </div>
       <span className="text-[11px] text-muted-foreground">
         {count} comment{count === 1 ? "" : "s"}

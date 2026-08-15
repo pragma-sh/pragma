@@ -100,6 +100,7 @@ function AlertDialogContent({
                 )}
                 exit="exit"
                 initial="hidden"
+                layout="size"
                 variants={modalVariants}
               >
                 {children}
