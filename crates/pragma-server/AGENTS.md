@@ -105,6 +105,16 @@ records the agent id and default title in the host snapshot; `listAgents` lets t
 desktop overlay that durable metadata over legacy local tab rows after restart. Do
 not add tab persistence back to the Tauri SQLite shell.
 
+## Automations are project-scoped (`automations.rs`)
+
+`discover` scans `$HOME/.pragma/automations` (global, implicitly trusted) and each
+registered project's own `.pragma/automations` — **never a worktree's**. Those files
+are tracked in git, so every worktree checkout holds a copy of them; scanning
+worktrees gave each copy its own id (the id is a hash of the path) and so re-asked
+for approval of source the user had already approved, once per worktree created. It
+also multiplied the 5s scan and the loaded-automation set by the worktree count.
+`AutomationInfo.worktreeId` / `worktreeLabel` are therefore always `null`.
+
 ## Fanout orchestration (`fanouts.rs`, `fanout_host.rs`)
 
 A fanout runs one prompt in N isolated attempt worktrees under a single parent,

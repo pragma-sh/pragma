@@ -526,7 +526,6 @@ impl AutomationsRegistry {
                 &dir,
                 AutomationScope::Global,
                 None,
-                None,
                 Some(&root),
                 &mut discovered,
             )?;
@@ -536,39 +535,29 @@ impl AutomationsRegistry {
             .lock()
             .map_err(|_| AutomationError::LockPoisoned)?
             .clone();
+        // Only the project root is scanned. A worktree is a checkout of the same
+        // `.pragma/automations` files at a new path, so scanning them made every
+        // worktree creation surface a fresh copy of each automation — a new id
+        // per path, and an approval prompt for source the user had already
+        // approved. Automations are project-scoped; a worktree does not get its
+        // own.
         for project in projects {
             self.discover_dir(
                 &Path::new(&project.project_path).join(AUTOMATIONS_DIR),
                 AutomationScope::Local,
                 Some(project.project_id.as_str()),
                 None,
-                None,
                 &mut discovered,
             )?;
-            for worktree in project.worktrees {
-                if Path::new(&worktree.path) == Path::new(&project.project_path) {
-                    continue;
-                }
-                self.discover_dir(
-                    &Path::new(&worktree.path).join(AUTOMATIONS_DIR),
-                    AutomationScope::Local,
-                    Some(project.project_id.as_str()),
-                    Some((worktree.worktree_id.as_str(), worktree.label.as_str())),
-                    Some(worktree.path.as_str()),
-                    &mut discovered,
-                )?;
-            }
         }
         Ok(discovered)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn discover_dir(
         &self,
         dir: &Path,
         scope: AutomationScope,
         project_id: Option<&str>,
-        worktree: Option<(&str, &str)>,
         root_override: Option<&str>,
         discovered: &mut Vec<DiscoveredAutomation>,
     ) -> Result<(), AutomationError> {
@@ -608,9 +597,6 @@ impl AutomationsRegistry {
             } else {
                 dir_relative_path
             };
-            let (worktree_id, worktree_label) = worktree.map_or((None, None), |(id, label)| {
-                (Some(id.to_string()), Some(label.to_string()))
-            });
             let next_run_at = metadata
                 .schedule
                 .as_deref()
@@ -629,8 +615,8 @@ impl AutomationsRegistry {
                     trigger_kind: metadata.trigger_kind,
                     status,
                     project_id: project_id.map(ToOwned::to_owned),
-                    worktree_id,
-                    worktree_label,
+                    worktree_id: None,
+                    worktree_label: None,
                     last_run_at: None,
                     next_run_at,
                     error: None,
