@@ -161,10 +161,9 @@ impl ScenarioSession<'_> {
         // the cadence is tens of seconds.
         loop {
             self.retype_prompt()?;
-            let remaining = match self.remaining_timeout() {
-                Ok(remaining) => remaining,
-                // The retype itself consumed the last of the budget.
-                Err(_) => break,
+            // The retype itself may consume the last of the budget.
+            let Ok(remaining) = self.remaining_timeout() else {
+                break;
             };
             if self
                 .await_status_within(remaining.min(self.retry_cadence), |status| {
@@ -825,7 +824,7 @@ mod tests {
         session.await_running().expect("running after retries");
         let writes = api.writes.lock().expect("writes lock");
         assert!(
-            writes.len() >= 4 && writes.len() % 2 == 0,
+            writes.len() >= 4 && writes.len().is_multiple_of(2),
             "expected at least two prompt body + submit retypes, got {writes:?}"
         );
     }
@@ -845,7 +844,7 @@ mod tests {
         assert_eq!(error, "no running status even after prefill retries");
         let writes = api.writes.lock().expect("writes lock");
         assert!(
-            writes.len() >= 2 && writes.len() % 2 == 0,
+            writes.len() >= 2 && writes.len().is_multiple_of(2),
             "expected at least one full prompt + submit retype, got {writes:?}"
         );
     }
