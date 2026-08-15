@@ -113,13 +113,13 @@ function useNativeMenuActions(
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
     const actions = {
       "settings.open": shell.openSettings,
-      "tabs.new-terminal": () => void workspace.createTerminalTab(),
+      "tabs.new-terminal": () => workspace.createTerminalTab(),
       "tabs.close-active": () => {
         if (workspace.activeTab) requestClose(workspace.activeTab);
       },
       "workspace.open-command-palette": onOpenCommandPalette,
       "workspace.open-command-mode": onOpenCommandMode,
-      "troubleshooting.open-daemon-logs": () => void workspace.openDaemonLogTab(),
+      "troubleshooting.open-daemon-logs": () => workspace.openDaemonLogTab(),
       "troubleshooting.reload": reloadWebview,
       "troubleshooting.restart-daemon": () => restartDaemonWithToast(workspace),
     } satisfies Record<MenuAction, () => void | Promise<void>>;

@@ -1547,10 +1547,6 @@ fn is_missing_worktree_admin_state(message: &str) -> bool {
 /// Last resort: delete the worktree directory and prune the admin entry, so a
 /// worktree git refuses to remove can still leave Pragma's sidebar.
 fn force_cleanup(repo_root: &Path, worktree_path: &Path) -> CoreResult<()> {
-    log_if_err(
-        "prune orphaned worktree metadata",
-        prune_worktrees(repo_root),
-    );
     if worktree_path.exists() {
         if let Err(error) = std::fs::remove_dir_all(worktree_path) {
             return Err(CoreError::Operation(format!(

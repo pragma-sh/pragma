@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Ref } from "react";
 import { Trash2 } from "lucide-react";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
@@ -90,7 +90,7 @@ interface ProjectButtonProps {
   name: string;
   onRemove: () => Promise<void>;
   onSelect: () => Promise<void>;
-  ref?: React.Ref<HTMLButtonElement>;
+  ref?: Ref<HTMLButtonElement>;
   worktreeIds: string[];
 }
 
