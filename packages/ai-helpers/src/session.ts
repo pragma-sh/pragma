@@ -3,8 +3,11 @@ import {
   type AgentSession,
   type AuthStorage,
   createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
   type ModelRegistry,
   SessionManager,
+  SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
@@ -114,6 +117,16 @@ export async function createPragmaSession(
     );
   }
 
+  const agentDir = getAgentDir();
+  const settingsManager = SettingsManager.create(options.cwd, agentDir);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir,
+    settingsManager,
+    noExtensions: true,
+  });
+  await resourceLoader.reload();
+
   const { session } = await createAgentSession({
     model,
     cwd: options.cwd,
@@ -124,6 +137,8 @@ export async function createPragmaSession(
     excludeTools: options.excludeTools,
     noTools: options.noTools,
     customTools: options.customTools,
+    resourceLoader,
+    settingsManager,
   });
 
   return { session, model };
