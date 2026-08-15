@@ -577,7 +577,7 @@ describe("multi-question answers", () => {
   it("answers each native TUI prompt in order", async () => {
     const { ctx, sendKeys } = context([
       multiQuestionAttention("req-multi"),
-      answer("Red | Circle", { requestId: "req-multi" }),
+      answer("Red\x1fCircle", { requestId: "req-multi" }),
     ]);
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "1");
@@ -585,10 +585,24 @@ describe("multi-question answers", () => {
     expect(sendKeys).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the question mapping intact when a free-text reply contains ' | '", async () => {
+    const { ctx, sendKeys } = context([
+      multiQuestionAttention("req-multi"),
+      answer("Red | ish\x1fCircle", { requestId: "req-multi" }),
+    ]);
+    await approvalWatcher.watch(ctx as never);
+    // First reply is free-text ("Red | ish" is not a listed option), second is
+    // the listed "Circle" option -- neither answer bleeds into the other.
+    expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(2, "Red | ish\r");
+    expect(sendKeys).toHaveBeenNthCalledWith(3, "1");
+    expect(sendKeys).toHaveBeenCalledTimes(3);
+  });
+
   it("uses each native custom-answer editor for free-text replies", async () => {
     const { ctx, sendKeys } = context([
       multiQuestionAttention("req-multi"),
-      answer("Crimson | Triangle", { requestId: "req-multi" }),
+      answer("Crimson\x1fTriangle", { requestId: "req-multi" }),
     ]);
     await approvalWatcher.watch(ctx as never);
     expect(sendKeys).toHaveBeenNthCalledWith(1, "\x1b[B\x1b[B\r");

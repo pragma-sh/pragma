@@ -804,7 +804,7 @@ describe("report.sh", () => {
     });
     const output = runRaw("permission", {
       stdin,
-      env: { PRAGMA_TEST_ANSWER: "OAuth | API key" },
+      env: { PRAGMA_TEST_ANSWER: "OAuth\x1fAPI key" },
     });
     expect(JSON.parse(output)).toEqual({
       hookSpecificOutput: {

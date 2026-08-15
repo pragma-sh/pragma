@@ -383,9 +383,11 @@ print(json.dumps({
 }
 
 # Prints the PermissionRequest allow decision for a multi-question
-# AskUserQuestion. The mobile wizard submits all answers on one ` | `-separated
-# line; split it back into answers keyed by question text so Claude continues
-# without ever showing its terminal question UI.
+# AskUserQuestion. The mobile wizard submits all answers on one line joined by
+# the ASCII unit separator (0x1f) -- not " | ", which an option label or
+# free-text answer could legitimately contain and which would then corrupt
+# the split below; split it back into answers keyed by question text so
+# Claude continues without ever showing its terminal question UI.
 question_multi_allow_decision() {
   [ -n "$py3" ] || return 0
   printf '%s' "$1" | "$py3" -c '
@@ -395,7 +397,7 @@ try:
 except Exception:
     sys.exit(0)
 questions = tool_input.get("questions") or []
-parts = [part.strip() for part in sys.argv[1].split(" | ")]
+parts = [part.strip() for part in sys.argv[1].split("\x1f")]
 if len(questions) < 2:
     sys.exit(0)
 updated = dict(tool_input)
@@ -428,8 +430,8 @@ handle_question() {
   request_id="${agent}-${tab}-$(date +%s)-$$"
   if [ -n "$qjson" ]; then
     # Multi-question: mobile/desktop render a back/next wizard and submit one
-    # ` | `-separated line. Report the questions array and feed the collected
-    # answers back through updatedInput.answers.
+    # unit-separator-joined line. Report the questions array and feed the
+    # collected answers back through updatedInput.answers.
     if ! report_checked attention --kind question --questions "$qjson" --request-id "$request_id"; then
       # Installed pragma-cli is older than this hook and rejects `--questions`.
       # Raise a generic attention and let Claude's own UI collect the answers

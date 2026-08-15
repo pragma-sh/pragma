@@ -56,6 +56,7 @@ pub trait VerifyApi: Send + Sync {
         approved: bool,
     ) -> Result<(), String>;
     fn interrupt(&self, agent: &str, worktree_id: &str, tab_id: &str) -> Result<(), String>;
+    /// Publishes free-form input to the selected running agent session.
     fn input(&self, agent: &str, worktree_id: &str, tab_id: &str, text: &str)
         -> Result<(), String>;
     fn write_input(&self, session_id: &str, bytes: &[u8]) -> Result<(), String>;

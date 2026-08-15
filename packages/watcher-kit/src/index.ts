@@ -105,6 +105,16 @@ const QUESTION_OTHER_INPUT_DELAY_MS = 150;
 /** Lets the next prompt in a multi-question TUI mount after one answer submits. */
 const QUESTION_NEXT_PROMPT_DELAY_MS = 500;
 
+/**
+ * Wire delimiter joining a multi-question wizard's answers into one reply.
+ * The ASCII unit separator, not `" | "`: an option label or free-text answer
+ * can legitimately contain `" | "`, which would corrupt the question/answer
+ * mapping. Matches the client's `ANSWER_SEPARATOR`
+ * (`apps/pragma-go/components/chat/AttentionDock.tsx`) and
+ * `packages/claude-code-plugin/hooks/report.sh`.
+ */
+const ANSWER_SEPARATOR = "\x1f";
+
 /** Backoff before re-subscribing after the agent event stream drops. */
 const RESUBSCRIBE_DELAY_MS = 500;
 /**
@@ -417,8 +427,9 @@ async function writeFreeTextAnswer(
 }
 
 /**
- * Multi-question delivery. Clients submit every answer on one ` | `-separated
- * line. Apply each answer to its corresponding native TUI prompt in order.
+ * Multi-question delivery. Clients submit every answer on one line joined by
+ * `ANSWER_SEPARATOR`. Apply each answer to its corresponding native TUI
+ * prompt in order.
  */
 async function writeMultipleQuestionAnswers(
   ctx: WatcherContext<TuiWatcherConfig>,
@@ -426,7 +437,7 @@ async function writeMultipleQuestionAnswers(
   questions: CachedQuestionEntry[],
   combined: string,
 ): Promise<void> {
-  const replies = combined.split(" | ").map((reply) => reply.trim());
+  const replies = combined.split(ANSWER_SEPARATOR).map((reply) => reply.trim());
   for (const [index, question] of questions.entries()) {
     const reply = replies[index];
     if (!reply || ctx.signal.aborted) return;

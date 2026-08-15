@@ -13,6 +13,14 @@ import type { AttentionRequest } from "@/lib/types";
 import type { QuestionOption } from "@pragma/constants";
 
 const OTHER = "__other__";
+/**
+ * Wire delimiter joining a multi-question wizard's answers into one reply.
+ * The ASCII unit separator, not `" | "`: an option label or free-text answer
+ * can legitimately contain `" | "`, which would corrupt the question/answer
+ * mapping on the consuming end (see `packages/watcher-kit` and
+ * `packages/claude-code-plugin/hooks/report.sh`).
+ */
+const ANSWER_SEPARATOR = "\x1f";
 
 interface AttentionDockProps {
   request: AttentionRequest;
@@ -167,7 +175,7 @@ function QuestionWizard({
           onSubmitAll={() => {
             if (!allAnswered) return;
             hapticSelection();
-            onAnswer(request.requestId, answers.join(" | "));
+            onAnswer(request.requestId, answers.join(ANSWER_SEPARATOR));
           }}
         />
       </CardContent>
