@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearFixItComments } from "@/state/fix-it-store";
 import { clearReviewFocus, requestReviewFocus } from "@/state/review-focus-store";
 
-const { resolveReviewThread, state } = vi.hoisted(() => ({
+const { listPullReviews, resolveReviewThread, state } = vi.hoisted(() => ({
+  listPullReviews: vi.fn(),
   resolveReviewThread: vi.fn(async () => {}),
   state: { threadResolved: false },
 }));
@@ -30,16 +31,7 @@ vi.mock("@/lib/github", () => ({
   listPullFiles: vi.fn(async () => [
     { path: "f.ts", oldPath: null, status: "modified", additions: 1, deletions: 0 },
   ]),
-  listPullReviews: vi.fn(async () => [
-    {
-      id: 7,
-      body: "Please address the comments",
-      state: "CHANGES_REQUESTED",
-      htmlUrl: "",
-      submittedAt: "",
-      user: { login: "rev", avatarUrl: "" },
-    },
-  ]),
+  listPullReviews,
   listReviewThreads: vi.fn(async () => [
     {
       id: "thr1",
@@ -80,6 +72,17 @@ describe("ReviewTab interactions", () => {
   beforeEach(() => {
     state.threadResolved = false;
     resolveReviewThread.mockClear();
+    listPullReviews.mockReset();
+    listPullReviews.mockResolvedValue([
+      {
+        id: 7,
+        body: "Please address the comments",
+        state: "CHANGES_REQUESTED",
+        htmlUrl: "",
+        submittedAt: "",
+        user: { login: "rev", avatarUrl: "" },
+      },
+    ]);
     clearFixItComments(1);
   });
 
@@ -103,6 +106,20 @@ describe("ReviewTab interactions", () => {
     expect(view.getByText("requested changes")).toBeInTheDocument();
   });
 
+  it("shows inline comments before review summaries finish loading", async () => {
+    let finishReviews: (() => void) | undefined;
+    listPullReviews.mockReturnValue(
+      new Promise((resolve) => {
+        finishReviews = () => resolve([]);
+      }),
+    );
+
+    render(<ReviewTab tab={tab} />);
+
+    expect(await screen.findByText("hi")).toBeInTheDocument();
+    act(() => finishReviews?.());
+  });
+
   it("resolves the thread on click", async () => {
     render(<ReviewTab tab={tab} />);
     const btn = await screen.findByRole("button", { name: /Resolve/ });
@@ -119,7 +136,13 @@ describe("ReviewTab interactions", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /On fix it list/ })).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: /Address fix it list/ })).toBeEnabled();
+    const addressButton = screen.getByRole("button", { name: /Address fix it list/ });
+    expect(addressButton).toBeEnabled();
+    fireEvent.click(addressButton);
+    const commitAndPush = await screen.findByRole("switch", { name: "Commit and push" });
+    expect(commitAndPush).not.toBeChecked();
+    fireEvent.click(commitAndPush);
+    expect(commitAndPush).toBeChecked();
   });
 
   it("opens the single-comment fix dialog from the Fix button", async () => {

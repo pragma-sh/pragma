@@ -40,19 +40,29 @@ export function buildSingleFixPrompt(comment: FixItComment): string {
 }
 
 /** Prompt asking an agent to verify-and-fix every comment on the fix-it list. */
-export function buildListFixPrompt(comments: FixItComment[]): string {
+export function buildListFixPrompt(
+  comments: FixItComment[],
+  options: { commitAndPush?: boolean } = {},
+): string {
   const items = comments
     .map(
       (comment, index) =>
         `${index + 1}. \`${commentLocation(comment)}\`:\n${quoteBody(comment.body)}`,
     )
     .join("\n\n");
-  return [
+  const prompt = [
     "Verify and fix all of the following code review issues.",
     "For each one, first confirm the issue actually exists in the current code. If an issue is not present or no longer relevant, do not change anything for it — instead explain to the user why it is not relevant.",
     "",
     "The comments to address are as follows:",
     "",
     items,
-  ].join("\n");
+  ];
+  if (options.commitAndPush) {
+    prompt.push(
+      "",
+      "After addressing all applicable issues, commit all resulting changes and push the current branch.",
+    );
+  }
+  return prompt.join("\n");
 }
