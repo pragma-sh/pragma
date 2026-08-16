@@ -125,6 +125,48 @@ function flattenThreads(threadsByPath: Map<string, ReviewThread[]>): ReviewThrea
   return threads;
 }
 
+async function fetchReviewData(
+  worktreeId: string,
+  prNumber: number,
+  force: boolean,
+  reviews: PullReview[],
+): Promise<{ data: ReviewData; reviewsPromise: Promise<PullReview[] | null> }> {
+  const repo = await githubRepoRef(worktreeId);
+  const reviewsPromise = listPullReviews(repo, prNumber, { force }).catch(() => null);
+  const [pr, files, threads] = await Promise.all([
+    getPullRequest(repo, prNumber, { force }),
+    listPullFiles(repo, prNumber, { force }),
+    listReviewThreads(repo, prNumber, { force }),
+  ]);
+  return {
+    data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
+    reviewsPromise,
+  };
+}
+
+function publishReviewData(
+  data: ReviewData,
+  signature: { current: string | null },
+  setState: (state: LoadState) => void,
+): boolean {
+  const nextSignature = reviewDataSignature(data);
+  if (signature.current === nextSignature) return false;
+  signature.current = nextSignature;
+  setState({ kind: "ready", data });
+  return true;
+}
+
+function publishReviewLoadError(
+  cause: unknown,
+  active: boolean,
+  hasReady: boolean,
+  setState: (state: LoadState) => void,
+): void {
+  if (active && !hasReady) {
+    setState({ kind: "error", message: errorMessage(cause) });
+  }
+}
+
 /** Load the PR + files + reviews + threads, and own the optimistic thread-resolve flip. */
 function useReviewData(worktreeId: string, prNumber: number | null) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -145,47 +187,24 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
         setState({ kind: "loading" });
       }
       try {
-        const repo = await githubRepoRef(worktreeId);
         // Review summaries are optional chrome. Start them with critical requests,
         // but do not make inline comments wait for their REST pagination.
-        const reviewsPromise = listPullReviews(repo, prNumber, { force }).catch(() => null);
-        const [pr, files, threads] = await Promise.all([
-          getPullRequest(repo, prNumber, { force }),
-          listPullFiles(repo, prNumber, { force }),
-          listReviewThreads(repo, prNumber, { force }),
-        ]);
-        if (!active.current) {
-          return;
-        }
-        const data: ReviewData = {
-          repo,
-          pr,
-          files,
-          reviews: reviewsRef.current,
-          threadsByPath: groupThreadsByPath(threads),
-        };
-        const nextSignature = reviewDataSignature(data);
-        if (signature.current !== nextSignature) {
-          signature.current = nextSignature;
-          hasReady.current = true;
-          setState({ kind: "ready", data });
-        }
+        const { data, reviewsPromise } = await fetchReviewData(
+          worktreeId,
+          prNumber,
+          force,
+          reviewsRef.current,
+        );
+        if (!active.current) return;
+        hasReady.current = publishReviewData(data, signature, setState) || hasReady.current;
 
         const reviews = await reviewsPromise;
-        if (!active.current || reviews === null) {
-          return;
-        }
+        if (!active.current || reviews === null) return;
         reviewsRef.current = reviews;
         const dataWithReviews = { ...data, reviews };
-        const reviewsSignature = reviewDataSignature(dataWithReviews);
-        if (signature.current !== reviewsSignature) {
-          signature.current = reviewsSignature;
-          setState({ kind: "ready", data: dataWithReviews });
-        }
+        publishReviewData(dataWithReviews, signature, setState);
       } catch (cause) {
-        if (active.current && !hasReady.current) {
-          setState({ kind: "error", message: errorMessage(cause) });
-        }
+        publishReviewLoadError(cause, active.current, hasReady.current, setState);
       }
     },
     [worktreeId, prNumber],

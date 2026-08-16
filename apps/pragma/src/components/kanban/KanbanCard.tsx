@@ -114,6 +114,27 @@ function KanbanCardFooter({
   );
 }
 
+function KanbanCardHeader({
+  card,
+  agentStatus,
+  badge,
+}: {
+  card: KanbanPromptCard;
+  agentStatus: ReturnType<typeof useTabAgentStatus>;
+  badge: CompletedBadge | null;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <GitBranch className="size-3.5 shrink-0" />
+      <span className="truncate font-medium text-foreground">{card.branchName}</span>
+      {card.status === "inProgress" ? (
+        <AgentStatusDot status={agentStatus} className="ml-auto" />
+      ) : null}
+      {badge ? <KanbanCardBadge badge={badge} /> : null}
+    </div>
+  );
+}
+
 /**
  * One prompt card. Its affordances are status-driven and enforce the allowed
  * transitions: drafts open their editor, in-progress cards open their session (and show
@@ -180,14 +201,7 @@ export function KanbanCard({
   return (
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- clickable cards add role/tabIndex/keydown below; non-clickable cards attach no handlers.
     <div className="space-y-2 rounded-lg border border-border bg-card p-3 shadow-sm" {...cardProps}>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <GitBranch className="size-3.5 shrink-0" />
-        <span className="truncate font-medium text-foreground">{card.branchName}</span>
-        {card.status === "inProgress" ? (
-          <AgentStatusDot status={agentStatus} className="ml-auto" />
-        ) : null}
-        {badge ? <KanbanCardBadge badge={badge} /> : null}
-      </div>
+      <KanbanCardHeader card={card} agentStatus={agentStatus} badge={badge} />
 
       <p className="line-clamp-3 whitespace-pre-wrap text-sm">{card.prompt || "No prompt"}</p>
 

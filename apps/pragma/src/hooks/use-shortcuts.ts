@@ -150,42 +150,8 @@ export function useShortcuts(options: UseShortcutsOptions): ShortcutHints {
         return;
       }
 
-      // Defer to active plugin command bindings (e.g. a plugin command bound to
-      // `cmd+k`) so the plugin handler owns the chord instead of the built-in
-      // app shortcut. Mirrors the bubble check in `terminal-manager.ts`.
-      if (hasPluginCommandForEvent(event)) {
-        return;
-      }
-
-      // Native menu accelerators own default chords that macOS/WebKit may consume
-      // before the webview. Avoid running both native and webview handlers while
-      // preserving configurable non-default chords.
-      if (
-        NATIVE_MENU_ACTIONS.has(action) &&
-        actionForEvent(event, defaultKeybindingsConfig, state.platform) === action
-      ) {
-        return;
-      }
-
-      const current = optionsRef.current;
-      const simpleKey = SIMPLE_ACTIONS[action];
-      if (simpleKey) {
-        event.preventDefault();
-        current[simpleKey]();
-        return;
-      }
-
-      if (action === "clearTerminal") {
-        handleClearTerminalAction(event, current);
-        return;
-      }
-
-      if (action === "deleteFile") {
-        handleDeleteFileAction(event, current);
-        return;
-      }
-
-      handleNavigationIndexAction(event, action, current);
+      if (shouldIgnoreShortcut(event, action, state)) return;
+      runShortcutAction(event, action, optionsRef.current);
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -209,6 +175,37 @@ export function useShortcuts(options: UseShortcutsOptions): ShortcutHints {
   }, [shortcutState]);
 
   return hints;
+}
+
+function shouldIgnoreShortcut(
+  event: KeyboardEvent,
+  action: KeybindingAction,
+  state: ShortcutState,
+): boolean {
+  // Plugin bindings own their chords; native menus own unchanged default chords.
+  return (
+    hasPluginCommandForEvent(event) ||
+    (NATIVE_MENU_ACTIONS.has(action) &&
+      actionForEvent(event, defaultKeybindingsConfig, state.platform) === action)
+  );
+}
+
+function runShortcutAction(
+  event: KeyboardEvent,
+  action: KeybindingAction,
+  current: UseShortcutsOptions,
+): void {
+  const simpleKey = SIMPLE_ACTIONS[action];
+  if (simpleKey) {
+    event.preventDefault();
+    current[simpleKey]();
+  } else if (action === "clearTerminal") {
+    handleClearTerminalAction(event, current);
+  } else if (action === "deleteFile") {
+    handleDeleteFileAction(event, current);
+  } else {
+    handleNavigationIndexAction(event, action, current);
+  }
 }
 
 function isModifierKey(key: string): boolean {

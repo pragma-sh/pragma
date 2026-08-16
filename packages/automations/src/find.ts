@@ -66,6 +66,71 @@ function within(root: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
+interface FindWaveResult {
+  files: string[];
+  directories: string[];
+}
+
+function inspectDirectory(path: string, entry: Dirent): FindWaveResult {
+  return {
+    files: [],
+    directories: FIND_SKIP_DIRS.has(entry.name) ? [] : [path],
+  };
+}
+
+async function inspectFile(
+  root: string,
+  path: string,
+  entry: Dirent,
+  options: FindOptions,
+): Promise<FindWaveResult> {
+  if (!entry.isFile() || (options.name !== undefined && entry.name !== options.name)) {
+    return { files: [], directories: [] };
+  }
+  if (options.minBytes === undefined) {
+    return { files: [relative(root, path)], directories: [] };
+  }
+  const info = await statSafe(path);
+  return {
+    files: info && fileMatches(path, info.size, options) ? [relative(root, path)] : [],
+    directories: [],
+  };
+}
+
+async function inspectEntry(
+  root: string,
+  directory: string,
+  entry: Dirent,
+  options: FindOptions,
+): Promise<FindWaveResult> {
+  const path = join(directory, entry.name);
+  if (entry.isSymbolicLink()) return { files: [], directories: [] };
+  return entry.isDirectory()
+    ? inspectDirectory(path, entry)
+    : inspectFile(root, path, entry, options);
+}
+
+async function inspectWave(
+  root: string,
+  wave: string[],
+  options: FindOptions,
+): Promise<FindWaveResult> {
+  const result: FindWaveResult = { files: [], directories: [] };
+  const listings = await Promise.all(wave.map((directory) => readdirSafe(directory)));
+  for (const [index, entries] of listings.entries()) {
+    const directory = wave[index];
+    if (directory === undefined) continue;
+    for (const entry of entries) {
+      // Serial stats keep descriptor use flat even inside a concurrent directory wave.
+      // eslint-disable-next-line no-await-in-loop
+      const inspected = await inspectEntry(root, directory, entry, options);
+      result.files.push(...inspected.files);
+      result.directories.push(...inspected.directories);
+    }
+  }
+  return result;
+}
+
 /**
  * Lists files under `start`, relative to the automation `root`.
  */
@@ -93,32 +158,9 @@ export async function findFiles(
     for (let index = 0; index < level.length; index += FIND_CONCURRENCY) {
       const wave = level.slice(index, index + FIND_CONCURRENCY);
       // eslint-disable-next-line no-await-in-loop -- serialising the waves is the point: it is what bounds open file descriptors
-      const listings = await Promise.all(wave.map((dir) => readdirSafe(dir)));
-      for (const [waveIndex, entries] of listings.entries()) {
-        const dir = wave[waveIndex];
-        if (dir === undefined) continue;
-        for (const entry of entries) {
-          const path = join(dir, entry.name);
-          // Symlinks are not followed: a link back up the tree would loop, and
-          // a link out of the root would escape it.
-          if (entry.isSymbolicLink()) continue;
-          if (entry.isDirectory()) {
-            if (!FIND_SKIP_DIRS.has(entry.name)) next.push(path);
-            continue;
-          }
-          if (!entry.isFile()) continue;
-          // Name mismatches are rejected before the `stat`, so the common
-          // "watch for one filename" poll never touches most files at all.
-          if (options.name !== undefined && entry.name !== options.name) continue;
-          if (options.minBytes === undefined) {
-            result.push(relative(root, path));
-            continue;
-          }
-          // eslint-disable-next-line no-await-in-loop -- same reason: one stat at a time keeps the descriptor count flat
-          const info = await statSafe(path);
-          if (info && fileMatches(path, info.size, options)) result.push(relative(root, path));
-        }
-      }
+      const inspected = await inspectWave(root, wave, options);
+      result.push(...inspected.files);
+      next.push(...inspected.directories);
     }
     level = next;
   }
