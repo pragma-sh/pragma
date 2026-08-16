@@ -1,30 +1,22 @@
-import { useSyncExternalStore } from "react";
+import { createToggleSetStore } from "@/lib/external-set-store";
 
-const STORAGE_KEY = "pragma.agentPins";
-const listeners = new Set<() => void>();
-let pins = readPins();
+const store = createToggleSetStore("pragma.agentPins");
 
 /** Returns whether an agent launcher is pinned. */
 export function isAgentPinned(agentId: string): boolean {
-  return pins.has(agentId);
+  return store.has(agentId);
 }
 
 /** Toggles a persisted agent launcher pin. */
 export function toggleAgentPin(agentId: string): void {
-  pins = new Set(pins);
-  if (pins.has(agentId)) {
-    pins.delete(agentId);
-  } else {
-    pins.add(agentId);
-  }
-  writePins(pins);
-  for (const listener of listeners) {
-    listener();
-  }
+  store.toggle(agentId);
 }
 
 /** Returns agents with pinned ones first, preserving order within each group. */
-export function sortAgentsByPin<T extends { id: string }>(agents: T[], pinned: Set<string>): T[] {
+export function sortAgentsByPin<T extends { id: string }>(
+  agents: T[],
+  pinned: ReadonlySet<string>,
+): T[] {
   const top: T[] = [];
   const rest: T[] = [];
   for (const agent of agents) {
@@ -34,32 +26,6 @@ export function sortAgentsByPin<T extends { id: string }>(agents: T[], pinned: S
 }
 
 /** React hook for the current pinned agent ids. */
-export function useAgentPins(): Set<string> {
-  return useSyncExternalStore(
-    subscribe,
-    () => pins,
-    () => new Set(),
-  );
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function readPins(): Set<string> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function writePins(value: Set<string>): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...value]));
-  } catch {
-    // Pinning is cosmetic; ignore unavailable storage.
-  }
+export function useAgentPins(): ReadonlySet<string> {
+  return store.useSnapshot();
 }
