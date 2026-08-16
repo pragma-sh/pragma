@@ -1,9 +1,12 @@
+import { useId, useState } from "react";
+
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { FixAgentControls } from "@/components/github/FixAgentControls";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { useFixLauncher } from "@/hooks/use-fix-launcher";
 import { buildListFixPrompt, commentLocation } from "@/lib/fix-it-prompt";
 import {
@@ -41,12 +45,14 @@ export function FixItListDialog({
 }) {
   const comments = useFixItComments(prNumber);
   const launcher = useFixLauncher(open, worktreeId);
+  const [commitAndPush, setCommitAndPush] = useState(false);
+  const commitAndPushId = useId();
 
   async function submit() {
     if (comments.length === 0) {
       return;
     }
-    const ok = await launcher.launch(buildListFixPrompt([...comments]));
+    const ok = await launcher.launch(buildListFixPrompt([...comments], { commitAndPush }));
     if (ok) {
       toast.success(
         `Launched agent to fix ${comments.length} comment${comments.length === 1 ? "" : "s"}`,
@@ -81,6 +87,16 @@ export function FixItListDialog({
         )}
 
         <FixAgentControls launcher={launcher} />
+
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-canvas px-3 py-2">
+          <div className="space-y-0.5">
+            <Label htmlFor={commitAndPushId}>Commit and push</Label>
+            <p className="text-xs text-muted-foreground">
+              Ask agent to commit resulting changes and push current branch.
+            </p>
+          </div>
+          <Switch checked={commitAndPush} id={commitAndPushId} onCheckedChange={setCommitAndPush} />
+        </div>
 
         {launcher.error ? <p className="text-xs text-destructive">{launcher.error}</p> : null}
 

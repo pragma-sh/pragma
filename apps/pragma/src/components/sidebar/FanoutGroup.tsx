@@ -2,6 +2,7 @@ import type { AgentStatus, Fanout, FanoutMember } from "@pragma/constants";
 import { GitFork } from "lucide-react";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { ShortcutHint } from "@/components/ShortcutHint";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -14,6 +15,7 @@ import {
 import { useFanouts } from "@/state/fanouts-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useShortcutHint, useWorktreeShortcutIndex } from "@/lib/shortcut-hints";
 
 /**
  * The active fanout a worktree is the parent of, if any.
@@ -106,6 +108,8 @@ function FanoutMemberRow({
   const workspace = useWorkspace();
   const kanban = useKanban();
   const selected = member.worktreeId ? workspace.selectedWorktreeId === member.worktreeId : false;
+  const shortcutIndex = useWorktreeShortcutIndex(member.worktreeId);
+  const shortcutHint = useShortcutHint("worktree", shortcutIndex);
 
   const select = () => {
     if (!member.worktreeId) return;
@@ -131,6 +135,7 @@ function FanoutMemberRow({
       icon={<GitFork className="size-3.5 shrink-0 text-muted-foreground" />}
       label={<span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>}
       status={<AgentStatusDot status={agentStatusFor(member)} />}
+      trailing={<ShortcutHint value={shortcutHint} />}
     />
   );
 }

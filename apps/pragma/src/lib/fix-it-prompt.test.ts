@@ -67,5 +67,16 @@ describe("buildListFixPrompt", () => {
     expect(prompt).toContain("> one");
     expect(prompt).toContain("2. `b.ts`:");
     expect(prompt).toContain("> two");
+    expect(prompt).not.toContain("commit all resulting changes");
+  });
+
+  it("appends commit and push instructions when requested", () => {
+    const prompt = buildListFixPrompt([{ threadId: "t1", path: "a.ts", line: 5, body: "one" }], {
+      commitAndPush: true,
+    });
+
+    expect(prompt).toContain(
+      "After addressing all applicable issues, commit all resulting changes and push the current branch.",
+    );
   });
 });

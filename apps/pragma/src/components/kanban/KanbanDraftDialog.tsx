@@ -1,5 +1,6 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Check, ChevronsUpDown } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 
 import type { KanbanPromptCard } from "@pragma/constants";
@@ -7,9 +8,16 @@ import type { KanbanPromptCard } from "@pragma/constants";
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAgentModels } from "@/hooks/use-agent-models";
 import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import {
@@ -152,6 +160,88 @@ function useDraftBranchOptions(workspace: ReturnType<typeof useWorkspace>): stri
       : [];
     return [...new Set(worktrees.map((worktree) => worktree.branch))];
   }, [workspace.selectedProjectId, workspace.worktrees]);
+}
+
+/** Normalizes typed branch names before persisting or matching them. */
+function normalizeBranch(value: string): string {
+  return value.replace(/\s+/g, "-");
+}
+
+/** Shadcn command combobox for existing branches or a new normalized name. */
+function BranchCombobox({
+  branch,
+  branchOptions,
+  onBranchChange,
+  onKeyDown,
+}: {
+  branch: string;
+  branchOptions: string[];
+  onBranchChange: (value: string) => void;
+  onKeyDown: (event: SubmitKeyEvent) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizeBranch(query.trim());
+  const matchingOptions = branchOptions.filter((option) =>
+    option.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const canCreate = normalizedQuery.length > 0 && !branchOptions.includes(normalizedQuery);
+
+  function selectBranch(value: string) {
+    onBranchChange(value);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setQuery("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          id="kanban-branch"
+          type="button"
+          variant="outline"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate">{branch || "Select or create branch"}</span>
+          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search or create branch..."
+            value={query}
+            onValueChange={setQuery}
+            onKeyDown={(event) => onKeyDown(event)}
+          />
+          <CommandList>
+            {canCreate ? (
+              <CommandItem value={normalizedQuery} onSelect={() => selectBranch(normalizedQuery)}>
+                <Check className="size-4 opacity-0" />
+                Create <span className="font-mono">{normalizedQuery}</span>
+              </CommandItem>
+            ) : null}
+            {matchingOptions.map((option) => (
+              <CommandItem key={option} value={option} onSelect={() => selectBranch(option)}>
+                <Check className={option === branch ? "size-4 opacity-100" : "size-4 opacity-0"} />
+                {option}
+              </CommandItem>
+            ))}
+            {matchingOptions.length === 0 && !canCreate ? (
+              <CommandEmpty>No branches found.</CommandEmpty>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /** Prime the model cache for any agents already resolved. */
@@ -361,7 +451,7 @@ function useKanbanDraftForm({ open, card, onOpenChange }: KanbanDraftDialogProps
 /**
  * Creates or edits a Kanban draft card. The user writes a markdown prompt, picks
  * an agent/model, and selects an existing project worktree branch or types a new
- * one (a native combobox via `<datalist>`). Editing an existing draft also offers
+ * one (a shadcn command combobox). Editing an existing draft also offers
  * Discard, which deletes the card.
  */
 export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDraftDialogProps) {
@@ -390,24 +480,12 @@ export function KanbanDraftDialog({ open: isOpen, onOpenChange, card }: KanbanDr
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="kanban-branch">Branch</Label>
-                <Input
-                  id="kanban-branch"
-                  list="kanban-branch-options"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  placeholder="existing or new branch"
-                  value={form.branch}
-                  onChange={(event) => form.setBranch(event.target.value.replace(/\s+/g, "-"))}
+                <BranchCombobox
+                  branch={form.branch}
+                  branchOptions={form.branchOptions}
+                  onBranchChange={form.setBranch}
                   onKeyDown={form.handleKeyDown}
                 />
-                <datalist id="kanban-branch-options">
-                  {form.branchOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </datalist>
               </div>
               <div className="space-y-2">
                 <Label>Agent</Label>

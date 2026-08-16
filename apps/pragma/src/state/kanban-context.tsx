@@ -43,7 +43,7 @@ import {
 } from "@/lib/tauri";
 import { useWorkspace } from "@/state/workspace-context";
 
-/** Which surface the workspace is showing: normal shell, Kanban board, or settings. */
+/** Which surface the workspace is showing: normal shell, agent board, or settings. */
 type WorkspaceMode = "normal" | "kanban" | "settings";
 
 /** Fields a draft card carries when created or edited. */
@@ -55,7 +55,7 @@ interface KanbanDraftInput {
 }
 
 interface KanbanContextValue {
-  /** Whether the Kanban board or the normal workspace shell is visible. */
+  /** Whether the agent board or the normal workspace shell is visible. */
   mode: WorkspaceMode;
   /** Opens the board for the selected project (clears any return affordance). */
   openBoard: () => void;
@@ -67,9 +67,9 @@ interface KanbanContextValue {
   settingsSection: string | null;
   /** Exits the board to the normal shell without leaving a return affordance. */
   exitBoard: () => void;
-  /** Returns to the board (the "Back to Kanban" control). */
+  /** Returns to the board (the "Back to agent board" control). */
   returnToKanban: () => void;
-  /** True when a card-driven navigation left a "Back to Kanban" affordance up. */
+  /** True when a card-driven navigation left a "Back to agent board" affordance up. */
   backToKanbanAvailable: boolean;
   /** Cards for the selected project. */
   cards: KanbanPromptCard[];
@@ -104,7 +104,7 @@ interface KanbanContextValue {
   completeCard: (card: KanbanPromptCard, action: KanbanCompletedAction) => Promise<void>;
   /** Cards running a background completion right now, keyed by id → its action. */
   completing: Record<string, KanbanCompletedAction>;
-  /** Navigates the normal shell to a card's worktree/tab and shows Back to Kanban. */
+  /** Navigates the normal shell to a card's worktree/tab and shows Back to agent board. */
   openCardWorktree: (card: KanbanPromptCard) => void;
 }
 
@@ -624,7 +624,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
   return <KanbanContext.Provider value={value}>{children}</KanbanContext.Provider>;
 }
 
-/** Accesses the project Kanban board state and actions. */
+/** Accesses the project agent-board state and actions. */
 export function useKanban(): KanbanContextValue {
   return useRequiredContext(KanbanContext, "useKanban");
 }

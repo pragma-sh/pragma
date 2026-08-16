@@ -3291,7 +3291,7 @@ function useWorkspaceChangedListener(
         releaseAlertLatchForTab(tabId);
       }
       // `tabOpened` is for interactive CLI opens (select so the user sees it).
-      // `tabOpenedBackground` is for mobile/Kanban-style agent launches: refresh
+      // `tabOpenedBackground` is for mobile/agent-board-style launches: refresh
       // the snapshot only — selecting would mount a terminal and spawn an empty
       // shell that races the background agent `ptySpawn`.
       if (payload.action === "tabOpened" && payload.worktreeId && payload.tabId) {

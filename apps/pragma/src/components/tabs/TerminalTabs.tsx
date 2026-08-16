@@ -48,6 +48,7 @@ import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
 import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
+import { ShortcutHint } from "@/components/ShortcutHint";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
 import { useWslDistros } from "@/hooks/use-wsl-distros";
 import { FanoutToolbarAction } from "@/components/fanout/FanoutToolbarAction";
@@ -65,6 +66,7 @@ import { motionTransition, tabItemVariants } from "@/lib/motion";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { startWindowDrag } from "@/lib/window-drag";
+import { useShortcutHint } from "@/lib/shortcut-hints";
 import {
   RenderPluginContribution,
   usePluginTopperItems,
@@ -413,17 +415,18 @@ type TabRenameApi = ReturnType<typeof useTabRename>;
 
 /**
  * The single highlight that marks the active tab. It is one element shared
- * across the whole strip via `layoutId`, so activating another tab slides it
- * there instead of blinking the fill from one box to the next.
+ * across the current tab set via `layoutId`, so activating another tab slides
+ * it there. Adding or removing a tab changes the id, preventing a close from
+ * animating the highlight onto the fallback tab.
  */
 const ACTIVE_TAB_LAYOUT_ID = "terminal-tab-active";
 
-function ActiveTabHighlight() {
+function ActiveTabHighlight({ layoutId }: { layoutId: string }) {
   return (
     <motion.span
       aria-hidden
       className="absolute inset-0 rounded-md border border-border bg-elevated"
-      layoutId={ACTIVE_TAB_LAYOUT_ID}
+      layoutId={layoutId}
       transition={motionTransition.indicator}
     />
   );
@@ -446,14 +449,18 @@ function SplitParentTab({
   tab,
   splitDirection,
   splitIsActive,
+  activeTabLayoutId,
   setActiveTab,
   closeSplit,
+  shortcutHint,
 }: {
   tab: Tab;
   splitDirection: SplitDirection | null;
   splitIsActive: boolean;
+  activeTabLayoutId: string;
   setActiveTab: (id: string) => void;
   closeSplit: () => void;
+  shortcutHint: string | null;
 }) {
   const displayTitle = tabTitle(tab);
   const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
@@ -468,7 +475,7 @@ function SplitParentTab({
       transition={motionTransition.fast}
       variants={tabItemVariants}
     >
-      {splitIsActive ? <ActiveTabHighlight /> : null}
+      {splitIsActive ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
       <button
         className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
         onClick={() => {
@@ -478,6 +485,7 @@ function SplitParentTab({
       >
         <ParentIcon className="text-primary size-3.5 shrink-0" />
         <TabAgentDot tabId={tab.id} />
+        <ShortcutHint value={shortcutHint} />
         <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
       </button>
       <IconTooltip label="Close split">
@@ -498,19 +506,23 @@ function SplitParentTab({
 function TerminalTabItem({
   tab,
   active,
+  activeTabLayoutId,
   rename,
   requestClose,
   beginTabDrag,
   endTabDrag,
   setActiveTab,
+  shortcutHint,
 }: {
   tab: Tab;
   active: boolean;
+  activeTabLayoutId: string;
   rename: TabRenameApi;
   requestClose: (tab: Tab) => void;
   beginTabDrag: (tabId: string) => void;
   endTabDrag: () => void;
   setActiveTab: (id: string) => void;
+  shortcutHint: string | null;
 }) {
   const displayTitle = tabTitle(tab);
   const isRenaming = tab.id === rename.renamingTabId;
@@ -537,7 +549,7 @@ function TerminalTabItem({
             transition={motionTransition.fast}
             variants={tabItemVariants}
           >
-            {active ? <ActiveTabHighlight /> : null}
+            {active ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
             {isRenaming ? (
               <input
                 ref={rename.inputRef}
@@ -559,6 +571,7 @@ function TerminalTabItem({
               >
                 <TabIcon tab={tab} />
                 <TabAgentDot tabId={tab.id} />
+                <ShortcutHint value={shortcutHint} />
                 <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
               </button>
             )}
@@ -592,6 +605,7 @@ function TerminalTabItem({
 type TerminalTabEntryProps = {
   tab: Tab;
   active: boolean;
+  activeTabLayoutId: string;
   split: SplitGroupNode | null;
   parentTabId: string | null;
   splitDirection: SplitDirection | null;
@@ -602,18 +616,22 @@ type TerminalTabEntryProps = {
   beginTabDrag: (tabId: string) => void;
   endTabDrag: () => void;
   setActiveTab: (id: string) => void;
+  shortcutIndex: number | null;
 };
 
 /** Renders one top-bar entry: a split parent (if applicable) or a regular tab. */
 function TerminalTabEntry(props: TerminalTabEntryProps) {
   const { parentTabId, split, tab } = props;
+  const shortcutHint = useShortcutHint("tab", props.shortcutIndex);
   if (split && tab.id === parentTabId) {
     return (
       <SplitParentTab
+        activeTabLayoutId={props.activeTabLayoutId}
         closeSplit={props.closeSplit}
         setActiveTab={props.setActiveTab}
         splitDirection={props.splitDirection}
         splitIsActive={props.splitIsActive}
+        shortcutHint={shortcutHint}
         tab={tab}
       />
     );
@@ -621,11 +639,13 @@ function TerminalTabEntry(props: TerminalTabEntryProps) {
   return (
     <TerminalTabItem
       active={props.active}
+      activeTabLayoutId={props.activeTabLayoutId}
       beginTabDrag={props.beginTabDrag}
       endTabDrag={props.endTabDrag}
       rename={props.rename}
       requestClose={props.requestClose}
       setActiveTab={props.setActiveTab}
+      shortcutHint={shortcutHint}
       tab={tab}
     />
   );
@@ -694,7 +714,7 @@ function EditorLauncherMenu({
 const NATIVE_SHELL_LABEL = "PowerShell";
 
 /**
- * The prompt-board (Kanban) toggle, between the script buttons and the editor
+ * The agent-board toggle, between the script buttons and the editor
  * controls. It is a labelled `outline` button so it reads as a peer of the
  * "open in editor" control next to it, not as one more icon-only affordance.
  */
@@ -704,7 +724,7 @@ function KanbanToggle() {
   const active = kanban.mode === "kanban";
   return (
     <Button
-      aria-label="Toggle prompt board"
+      aria-label="Toggle agent board"
       aria-pressed={active}
       className="shrink-0 text-foreground"
       disabled={!workspace.selectedProjectId}
@@ -918,11 +938,15 @@ function TerminalTabStrip({
   splitIsActive,
   topTabs,
   workspace,
-}: Omit<TerminalTabEntryProps, "active" | "setActiveTab" | "tab"> & {
+}: Omit<
+  TerminalTabEntryProps,
+  "active" | "activeTabLayoutId" | "setActiveTab" | "shortcutIndex" | "tab"
+> & {
   topTabs: Tab[];
   workspace: ReturnType<typeof useWorkspace>;
 }) {
   const shortcutModifier = isMacPlatform() ? "⌘" : "Ctrl+";
+  const activeTabLayoutId = `${ACTIVE_TAB_LAYOUT_ID}:${topTabs.map((tab) => tab.id).join(",")}`;
   return (
     <div className="bg-canvas flex h-11 items-center">
       <div className="flex min-w-0 flex-1 items-center overflow-x-auto px-2">
@@ -931,6 +955,7 @@ function TerminalTabStrip({
             {topTabs.map((tab) => (
               <TerminalTabEntry
                 active={tab.id === workspace.activeTabId}
+                activeTabLayoutId={activeTabLayoutId}
                 beginTabDrag={beginTabDrag}
                 closeSplit={closeSplit}
                 endTabDrag={endTabDrag}
@@ -939,6 +964,9 @@ function TerminalTabStrip({
                 rename={rename}
                 requestClose={requestClose}
                 setActiveTab={workspace.setActiveTab}
+                shortcutIndex={
+                  workspace.tabs.indexOf(tab) < 9 ? workspace.tabs.indexOf(tab) + 1 : null
+                }
                 split={split}
                 splitDirection={splitDirection}
                 splitIsActive={splitIsActive}

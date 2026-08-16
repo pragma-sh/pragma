@@ -62,7 +62,13 @@ const tabsListVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-muted",
+        // `overflow-hidden` keeps the sliding pill inside the strip. The
+        // indicator is a shared-layout element measured in viewport
+        // coordinates, so a resizing ancestor (e.g. `ModalShell`'s
+        // `layout="size"` card growing as a dialog swaps modes) skews its
+        // projection mid-flight and it would otherwise sweep past the list.
+        default: "overflow-hidden bg-muted",
+        // Not clipped: the underline deliberately sits outside the list box.
         line: "gap-1 bg-transparent",
       },
     },

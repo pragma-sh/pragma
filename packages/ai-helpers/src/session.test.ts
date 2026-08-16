@@ -4,12 +4,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
+  resourceLoader: { reload: vi.fn(async () => {}) },
+  defaultResourceLoader: vi.fn(),
+  settingsManager: {},
   candidates: [] as unknown[],
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession: mocks.createAgentSession,
+  DefaultResourceLoader: class {
+    reload = mocks.resourceLoader.reload;
+
+    constructor(options: unknown) {
+      mocks.defaultResourceLoader(options);
+    }
+  },
+  getAgentDir: () => "/agent-dir",
   SessionManager: { inMemory: () => ({}) },
+  SettingsManager: { create: () => mocks.settingsManager },
 }));
 
 vi.mock("./model-insights.ts", () => ({
@@ -23,7 +35,7 @@ vi.mock("./pick-model.ts", () => ({
 
 import { RUN_FALLBACK } from "./constants.ts";
 import { NoWorkingModelError } from "./run-failure.ts";
-import { runPromptToText, runPromptWithFallback } from "./session.ts";
+import { createPragmaSession, runPromptToText, runPromptWithFallback } from "./session.ts";
 
 function sessionWithEvents(events: readonly unknown[]): AgentSession {
   let listener: ((event: unknown) => void) | undefined;
@@ -139,6 +151,30 @@ describe("runPromptToText", () => {
 
     await expect(runPromptToText(session, "prompt")).rejects.toThrow(
       "429 Monthly usage limit reached.",
+    );
+  });
+});
+
+describe("createPragmaSession", () => {
+  it("does not load installed Pi extensions for internal AI work", async () => {
+    const session = sessionWithEvents([]);
+    mocks.createAgentSession.mockResolvedValue({ session });
+    const model = candidate("anthropic", "claude-sonnet", { reply: "ok" });
+
+    await createPragmaSession({ ...fallbackOptions, model });
+
+    expect(mocks.defaultResourceLoader).toHaveBeenCalledWith({
+      cwd: "/repo",
+      agentDir: "/agent-dir",
+      settingsManager: mocks.settingsManager,
+      noExtensions: true,
+    });
+    expect(mocks.resourceLoader.reload).toHaveBeenCalled();
+    expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceLoader: expect.objectContaining({ reload: mocks.resourceLoader.reload }),
+        settingsManager: mocks.settingsManager,
+      }),
     );
   });
 });

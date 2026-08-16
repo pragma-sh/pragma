@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useWorktreeFileChange } from "@/lib/file-watch";
 import { cn } from "@/lib/utils";
 import { listScratchpads } from "@/lib/tauri";
+import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
 /** Prefix every managed scratchpad file shares, used to filter watch events. */
@@ -15,6 +16,7 @@ const SCRATCHPAD_PREFIX = `${constants.scratchpads.directory}/`;
 /** Sidebar inventory of managed scratchpad files in the currently selected worktree. */
 export function ScratchpadsCard() {
   const [open, setOpen] = useState(true);
+  const kanban = useKanban();
   const workspace = useWorkspace();
   const worktreeId = workspace.selectedWorktreeId;
   const [scratchpads, setScratchpads] = useState<ScratchpadSummary[]>([]);
@@ -83,6 +85,8 @@ export function ScratchpadsCard() {
               className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               key={scratchpad.id}
               onClick={() => {
+                // The board replaces the normal shell, where scratchpad tabs render.
+                kanban.exitBoard();
                 void workspace.openScratchpadFile(scratchpad.filePath, scratchpad.title);
               }}
               type="button"

@@ -84,6 +84,12 @@ every project worktree path and marks the currently selected one; the session `c
 the main worktree root so nested checkouts stay reachable. The UI streams deltas via
 the Tauri channel the same way login streams OAuth events.
 
+**Internal sessions never load installed Pi extensions.** `createPragmaSession` uses a
+`DefaultResourceLoader` with `noExtensions: true` while retaining AGENTS files, skills,
+prompts, and other context. Otherwise an installed Pragma Pi extension can observe these
+SDK-only helper turns and report them as user-visible Pi agent sessions when the app was
+launched from a Pragma terminal environment.
+
 ## Model selection
 
 Three tiers, all picked automatically from the user's **authenticated** models:

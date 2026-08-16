@@ -19,6 +19,11 @@ import { WorkspaceDialogs } from "@/components/workspace/WorkspaceDialogs";
 import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
 import { useShortcuts } from "@/hooks/use-shortcuts";
+import {
+  ShortcutHintsProvider,
+  useWorktreeShortcutOrder,
+  type ShortcutHints,
+} from "@/lib/shortcut-hints";
 import { browserDevtools, browserReload, onMenuAction, type MenuAction } from "@/lib/tauri";
 import { errorMessage } from "@/lib/errors";
 import { terminalManager } from "@/lib/terminal-manager";
@@ -45,13 +50,21 @@ function useWorkspaceShortcuts(
   requestClose: (tab: Tab) => void,
   onOpenCommandPalette: () => void,
   onOpenCommandMode: () => void,
-) {
+): ShortcutHints {
   const activeBrowserTabId =
     workspace.activeTab?.kind === "browser" ? workspace.activeTab.id : null;
-  useShortcuts({
+  const worktreeOrder = useWorktreeShortcutOrder();
+  return useShortcuts({
     projectId: workspace.activeProject?.id ?? null,
     projectCount: workspace.projects.length,
     onProject: (index) => void workspace.selectProject(workspace.projects[index]?.id ?? null),
+    worktreeCount: worktreeOrder.length,
+    onWorktree: (index) => workspace.selectWorktree(worktreeOrder[index] ?? null),
+    tabCount: workspace.tabs.length,
+    onTab: (index) => {
+      const tab = workspace.tabs[index];
+      if (tab) workspace.setActiveTab(tab.id);
+    },
     onNextTab: () => workspace.cycleTab(1),
     onPreviousTab: () => workspace.cycleTab(-1),
     onCloseTopTab: () => {
@@ -139,14 +152,14 @@ function useNativeMenuActions(
   }, []);
 }
 
-/** The "Opened from the prompt board" banner with a Back to Kanban button. */
-function BackToKanbanBar({ onReturn }: { onReturn: () => void }) {
+/** The "Opened from the agent board" banner with a return button. */
+function BackToAgentBoardBar({ onReturn }: { onReturn: () => void }) {
   return (
     <div className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-3 py-1.5">
-      <span className="text-xs text-muted-foreground">Opened from the prompt board</span>
+      <span className="text-xs text-muted-foreground">Opened from the agent board</span>
       <Button size="sm" variant="secondary" onClick={onReturn}>
         <LayoutGrid className="size-3.5" />
-        Back to Kanban
+        Back to agent board
       </Button>
     </div>
   );
@@ -202,7 +215,7 @@ function NoProjectsState() {
   );
 }
 
-/** The terminal/right-sidebar area: banner, tabs, error toast, and main split or empty state. */
+/** The terminal/right-sidebar area: tabs, board-return strip, errors, and main content. */
 function WorkspaceContent({
   kanban,
   workspace,
@@ -221,8 +234,10 @@ function WorkspaceContent({
   return (
     <>
       <section className="app-content bg-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {kanban.backToKanbanAvailable ? <BackToKanbanBar onReturn={kanban.returnToKanban} /> : null}
         <TerminalTabs />
+        {kanban.backToKanbanAvailable ? (
+          <BackToAgentBoardBar onReturn={kanban.returnToKanban} />
+        ) : null}
         <WorkspaceErrorToast error={workspace.error} onDismiss={workspace.clearError} />
         {workspace.projects.length === 0 && !workspace.loading ? (
           <NoProjectsState />
@@ -248,7 +263,7 @@ export function WorkspaceShell() {
     setCommandPaletteMode(mode);
     setCommandPaletteOpen(true);
   };
-  useWorkspaceShortcuts(
+  const shortcutHints = useWorkspaceShortcuts(
     workspace,
     requestClose,
     () => openCommandPalette("search"),
@@ -262,51 +277,53 @@ export function WorkspaceShell() {
   );
 
   return (
-    <LeftSidebarProvider>
-      <RightSidebarProvider>
-        <TabDragProvider>
-          {/* h-full (not h-svh): WKWebView does not recompute viewport units (svh/vh)
+    <ShortcutHintsProvider hints={shortcutHints}>
+      <LeftSidebarProvider>
+        <RightSidebarProvider>
+          <TabDragProvider>
+            {/* h-full (not h-svh): WKWebView does not recompute viewport units (svh/vh)
             on live window resize, which froze the whole height chain — and with it
             the terminal's ResizeObserver — at the launch size. A percentage chain
             from html/body/#root (all height:100% in index.css) does recalc on
             resize, so the terminal re-fits. */}
-          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onContextMenu on <main> blocks the WebView debug menu behind Radix context menus; there is no interactive role that fits a full-shell capture. */}
-          <main
-            className="bg-background flex h-full overflow-hidden text-foreground"
-            onContextMenu={preventNativeContextMenu}
-          >
-            {/* Settings mode takes the full frame. Kanban and the normal shell
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onContextMenu on <main> blocks the WebView debug menu behind Radix context menus; there is no interactive role that fits a full-shell capture. */}
+            <main
+              className="bg-background flex h-full overflow-hidden text-foreground"
+              onContextMenu={preventNativeContextMenu}
+            >
+              {/* Settings mode takes the full frame. Agent board and normal shell
               keep the project sidebar mounted. */}
-            {kanban.mode === "settings" ? (
-              <SettingsWorkspace />
-            ) : (
-              <>
-                <ProjectSidebar />
-                {/* Kanban mode replaces the shell rather than overlaying it: native
+              {kanban.mode === "settings" ? (
+                <SettingsWorkspace />
+              ) : (
+                <>
+                  <ProjectSidebar />
+                  {/* Agent board mode replaces the shell rather than overlaying it: native
                   browser webviews float above HTML, so an overlay would be clipped.
                   The sidebar stays; only the terminal/right-sidebar area is swapped. */}
-                {/* Creating a worktree takes over the same area for the same
+                  {/* Creating a worktree takes over the same area for the same
                   reason: it is a full-frame loading screen, not an overlay. */}
-                {creation ? (
-                  <WorktreeCreationScreen />
-                ) : kanban.mode === "kanban" ? (
-                  <ProjectKanbanWorkspace />
-                ) : (
-                  <WorkspaceContent kanban={kanban} workspace={workspace} />
-                )}
-              </>
-            )}
-            {/* Always-mounted dialogs (new-session / deep links) so they work in
-              both the normal shell and the Kanban board. */}
-            <WorkspaceDialogs />
-            <CommandPalette
-              mode={commandPaletteMode}
-              open={commandPaletteOpen}
-              onOpenChange={setCommandPaletteOpen}
-            />
-          </main>
-        </TabDragProvider>
-      </RightSidebarProvider>
-    </LeftSidebarProvider>
+                  {creation ? (
+                    <WorktreeCreationScreen />
+                  ) : kanban.mode === "kanban" ? (
+                    <ProjectKanbanWorkspace />
+                  ) : (
+                    <WorkspaceContent kanban={kanban} workspace={workspace} />
+                  )}
+                </>
+              )}
+              {/* Always-mounted dialogs (new-session / deep links) so they work in
+              both the normal shell and the agent board. */}
+              <WorkspaceDialogs />
+              <CommandPalette
+                mode={commandPaletteMode}
+                open={commandPaletteOpen}
+                onOpenChange={setCommandPaletteOpen}
+              />
+            </main>
+          </TabDragProvider>
+        </RightSidebarProvider>
+      </LeftSidebarProvider>
+    </ShortcutHintsProvider>
   );
 }

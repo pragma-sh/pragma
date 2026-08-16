@@ -21,6 +21,8 @@ interface KanbanCardProps {
   agent: AgentConfig | null;
   /** The background completion action running on this card, if any. */
   completingAction?: KanbanCompletedAction | null;
+  /** Opens a draft for editing. */
+  onEdit: (card: KanbanPromptCard) => void;
   onOpen: (card: KanbanPromptCard) => void;
   onDelete: (card: KanbanPromptCard) => void;
 }
@@ -62,7 +64,7 @@ function KanbanCardBadge({ badge }: { badge: CompletedBadge }) {
   return (
     <span
       className={cn(
-        "ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium",
+        "ml-auto shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium",
         badge.className,
         badge.spinning && "flex items-center gap-1",
       )}
@@ -112,20 +114,49 @@ function KanbanCardFooter({
   );
 }
 
+function KanbanCardHeader({
+  card,
+  agentStatus,
+  badge,
+}: {
+  card: KanbanPromptCard;
+  agentStatus: ReturnType<typeof useTabAgentStatus>;
+  badge: CompletedBadge | null;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <GitBranch className="size-3.5 shrink-0" />
+      <span className="truncate font-medium text-foreground">{card.branchName}</span>
+      {card.status === "inProgress" ? (
+        <AgentStatusDot status={agentStatus} className="ml-auto" />
+      ) : null}
+      {badge ? <KanbanCardBadge badge={badge} /> : null}
+    </div>
+  );
+}
+
 /**
  * One prompt card. Its affordances are status-driven and enforce the allowed
- * transitions: drafts edit/start, in-progress cards open their session (and show
+ * transitions: drafts open their editor, in-progress cards open their session (and show
  * live agent status), review cards expose Merge/PR completion buttons, completed
  * cards show their merge/PR outcome (or a live "Merging…"/"Opening PR…" badge
  * while the background job runs).
  */
-export function KanbanCard({ card, agent, completingAction, onOpen, onDelete }: KanbanCardProps) {
+export function KanbanCard({
+  card,
+  agent,
+  completingAction,
+  onEdit,
+  onOpen,
+  onDelete,
+}: KanbanCardProps) {
   // Only in-progress cards have a live agent session to reflect.
   const agentStatus = useTabAgentStatus(
     card.status === "inProgress" ? (card.agentTabId ?? null) : null,
   );
 
-  const clickable = card.status === "inProgress" || card.status === "reviewNeeded";
+  const clickable =
+    card.status === "draft" || card.status === "inProgress" || card.status === "reviewNeeded";
   const displayAgent: AgentConfig = agent ?? {
     id: card.agentId,
     name: card.agentId,
@@ -133,12 +164,18 @@ export function KanbanCard({ card, agent, completingAction, onOpen, onDelete }: 
     start: [],
   };
 
-  const handleOpen = useCallback(() => onOpen(card), [onOpen, card]);
+  const handleActivate = useCallback(() => {
+    if (card.status === "draft") {
+      onEdit(card);
+      return;
+    }
+    onOpen(card);
+  }, [card, onEdit, onOpen]);
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Enter") onOpen(card);
+      if (event.key === "Enter") handleActivate();
     },
-    [onOpen, card],
+    [handleActivate],
   );
   const handleDelete = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -150,10 +187,10 @@ export function KanbanCard({ card, agent, completingAction, onOpen, onDelete }: 
 
   const badge: CompletedBadge | null =
     card.status === "completed" ? completedBadge(card, completingAction ?? null) : null;
-  // In-progress / review cards navigate to their worktree session on click.
+  // Draft cards open their editor; in-progress/review cards open their session.
   const cardProps = clickable
     ? {
-        onClick: handleOpen,
+        onClick: handleActivate,
         role: "button" as const,
         tabIndex: 0,
         onKeyDown: handleKeyDown,
@@ -164,14 +201,7 @@ export function KanbanCard({ card, agent, completingAction, onOpen, onDelete }: 
   return (
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- clickable cards add role/tabIndex/keydown below; non-clickable cards attach no handlers.
     <div className="space-y-2 rounded-lg border border-border bg-card p-3 shadow-sm" {...cardProps}>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <GitBranch className="size-3.5 shrink-0" />
-        <span className="truncate font-medium text-foreground">{card.branchName}</span>
-        {card.status === "inProgress" ? (
-          <AgentStatusDot status={agentStatus} className="ml-auto" />
-        ) : null}
-        {badge ? <KanbanCardBadge badge={badge} /> : null}
-      </div>
+      <KanbanCardHeader card={card} agentStatus={agentStatus} badge={badge} />
 
       <p className="line-clamp-3 whitespace-pre-wrap text-sm">{card.prompt || "No prompt"}</p>
 

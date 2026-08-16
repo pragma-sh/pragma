@@ -125,6 +125,48 @@ function flattenThreads(threadsByPath: Map<string, ReviewThread[]>): ReviewThrea
   return threads;
 }
 
+async function fetchReviewData(
+  worktreeId: string,
+  prNumber: number,
+  force: boolean,
+  reviews: PullReview[],
+): Promise<{ data: ReviewData; reviewsPromise: Promise<PullReview[] | null> }> {
+  const repo = await githubRepoRef(worktreeId);
+  const reviewsPromise = listPullReviews(repo, prNumber, { force }).catch(() => null);
+  const [pr, files, threads] = await Promise.all([
+    getPullRequest(repo, prNumber, { force }),
+    listPullFiles(repo, prNumber, { force }),
+    listReviewThreads(repo, prNumber, { force }),
+  ]);
+  return {
+    data: { repo, pr, files, reviews, threadsByPath: groupThreadsByPath(threads) },
+    reviewsPromise,
+  };
+}
+
+function publishReviewData(
+  data: ReviewData,
+  signature: { current: string | null },
+  setState: (state: LoadState) => void,
+): boolean {
+  const nextSignature = reviewDataSignature(data);
+  if (signature.current === nextSignature) return false;
+  signature.current = nextSignature;
+  setState({ kind: "ready", data });
+  return true;
+}
+
+function publishReviewLoadError(
+  cause: unknown,
+  active: boolean,
+  hasReady: boolean,
+  setState: (state: LoadState) => void,
+): void {
+  if (active && !hasReady) {
+    setState({ kind: "error", message: errorMessage(cause) });
+  }
+}
+
 /** Load the PR + files + reviews + threads, and own the optimistic thread-resolve flip. */
 function useReviewData(worktreeId: string, prNumber: number | null) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -133,6 +175,7 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
   // on screen so a cache hit doesn't flash the spinner again.
   const hasReady = useRef(false);
   const signature = useRef<string | null>(null);
+  const reviewsRef = useRef<PullReview[]>([]);
 
   const load = useCallback(
     async (force = false) => {
@@ -144,36 +187,24 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
         setState({ kind: "loading" });
       }
       try {
-        const repo = await githubRepoRef(worktreeId);
-        // Parallel + cached: cache hits return immediately, misses coalesce, and a
-        // stale hit returns now while a background revalidate refreshes the store.
-        const [pr, files, reviews, threads] = await Promise.all([
-          getPullRequest(repo, prNumber, { force }),
-          listPullFiles(repo, prNumber, { force }),
-          listPullReviews(repo, prNumber, { force }),
-          listReviewThreads(repo, prNumber, { force }),
-        ]);
-        if (!active.current) {
-          return;
-        }
-        const data: ReviewData = {
-          repo,
-          pr,
-          files,
-          reviews,
-          threadsByPath: groupThreadsByPath(threads),
-        };
-        const nextSignature = reviewDataSignature(data);
-        if (signature.current === nextSignature) {
-          return;
-        }
-        signature.current = nextSignature;
-        hasReady.current = true;
-        setState({ kind: "ready", data });
+        // Review summaries are optional chrome. Start them with critical requests,
+        // but do not make inline comments wait for their REST pagination.
+        const { data, reviewsPromise } = await fetchReviewData(
+          worktreeId,
+          prNumber,
+          force,
+          reviewsRef.current,
+        );
+        if (!active.current) return;
+        hasReady.current = publishReviewData(data, signature, setState) || hasReady.current;
+
+        const reviews = await reviewsPromise;
+        if (!active.current || reviews === null) return;
+        reviewsRef.current = reviews;
+        const dataWithReviews = { ...data, reviews };
+        publishReviewData(dataWithReviews, signature, setState);
       } catch (cause) {
-        if (active.current && !hasReady.current) {
-          setState({ kind: "error", message: errorMessage(cause) });
-        }
+        publishReviewLoadError(cause, active.current, hasReady.current, setState);
       }
     },
     [worktreeId, prNumber],
@@ -220,6 +251,7 @@ function useReviewData(worktreeId: string, prNumber: number | null) {
     active.current = true;
     hasReady.current = false;
     signature.current = null;
+    reviewsRef.current = [];
     // Poll with force=false so cache serves stale-while-revalidate; each tick
     // + window focus still revalidates in the background while the tab is open.
     const stopRefresh = startRefreshLoop(() => load(false), REVIEW_REFRESH_INTERVAL_MS);
@@ -719,17 +751,24 @@ function useCommentReveals(
   comments: DiffComment[],
   registerCommentReveal: (key: string, reveal: (() => void) | null) => void,
   diffRef: React.RefObject<MergeDiffHandle | null>,
+  revealDeferredComment: (key: string) => void,
 ): void {
   useEffect(() => {
     for (const comment of comments) {
-      registerCommentReveal(comment.key, () => diffRef.current?.scrollCommentIntoView(comment.key));
+      registerCommentReveal(comment.key, () => {
+        if (diffRef.current) {
+          diffRef.current.scrollCommentIntoView(comment.key);
+        } else {
+          revealDeferredComment(comment.key);
+        }
+      });
     }
     return () => {
       for (const comment of comments) {
         registerCommentReveal(comment.key, null);
       }
     };
-  }, [comments, registerCommentReveal, diffRef]);
+  }, [comments, registerCommentReveal, diffRef, revealDeferredComment]);
 }
 
 /** Loads (and keeps fresh) a single file's local `base...HEAD` diff. */
@@ -737,6 +776,7 @@ function useFileDiff(
   worktreeId: string,
   base: string,
   file: PullFile,
+  enabled: boolean,
 ): { diff: FileDiff | null; error: string | null } {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -763,6 +803,9 @@ function useFileDiff(
   );
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     active.current = true;
     hasDiff.current = false;
     const stopRefresh = startRefreshLoop(() => loadDiff(false), REVIEW_REFRESH_INTERVAL_MS);
@@ -770,17 +813,48 @@ function useFileDiff(
       active.current = false;
       stopRefresh();
     };
-  }, [loadDiff]);
+  }, [enabled, loadDiff]);
 
   // Background revalidate of this file's cache key updates the pane immediately.
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const key = prFileDiffCacheKey(worktreeId, base, file.path, file.oldPath);
     return subscribeGitHubCache(key, () => {
       void loadDiff(false);
     });
-  }, [worktreeId, base, file.path, file.oldPath, loadDiff]);
+  }, [enabled, worktreeId, base, file.path, file.oldPath, loadDiff]);
 
   return { diff, error };
+}
+
+/** Defers expensive diff loading/rendering until its pane nears the viewport. */
+function useDeferredDiffMount(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+): [boolean, () => void] {
+  const [mounted, setMounted] = useState(() => typeof IntersectionObserver === "undefined");
+  const mount = useCallback(() => setMounted(true), []);
+
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (mounted || !element || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          mount();
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "640px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mount, mounted, wrapperRef]);
+
+  return [mounted, mount];
 }
 
 /** Redirects wheel scrolling over the pane to the review scroll container until
@@ -839,15 +913,40 @@ function FileDiffPane({
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const diffRef = useRef<MergeDiffHandle>(null);
+  const pendingComment = useRef<string | null>(null);
+  const [mounted, mount] = useDeferredDiffMount(wrapperRef);
+  const revealDeferredComment = useCallback(
+    (key: string) => {
+      pendingComment.current = key;
+      mount();
+    },
+    [mount],
+  );
 
-  useCommentReveals(comments, registerCommentReveal, diffRef);
-  const { diff, error } = useFileDiff(worktreeId, base, file);
+  useCommentReveals(comments, registerCommentReveal, diffRef, revealDeferredComment);
+  const { diff, error } = useFileDiff(worktreeId, base, file, mounted);
   const wheelHandlers = useWheelRedirect(wrapperRef);
+
+  useEffect(() => {
+    const key = pendingComment.current;
+    if (!diff || !key) {
+      return;
+    }
+    pendingComment.current = null;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        diffRef.current?.scrollCommentIntoView(key);
+        wrapperRef.current
+          ?.querySelector<HTMLElement>(`[data-review-comment="${CSS.escape(key)}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }),
+    );
+  }, [diff]);
 
   let content: React.ReactNode;
   if (error) {
     content = <p className="px-3 py-2 text-xs text-destructive">{error}</p>;
-  } else if (!diff) {
+  } else if (!mounted || !diff) {
     content = <p className="px-3 py-2 text-xs text-muted-foreground">Loading diff…</p>;
   } else if (diff.binary) {
     content = <p className="px-3 py-2 text-xs text-muted-foreground">Binary file — no diff.</p>;

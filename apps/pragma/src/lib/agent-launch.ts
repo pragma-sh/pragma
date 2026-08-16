@@ -199,7 +199,7 @@ const BACKGROUND_TERMINAL_ROWS = 40;
  * pastes `prefill` into its TUI — all over `ptyWrite`, bypassing
  * {@link terminalManager}. The daemon keeps the session alive; when the user
  * later opens the tab, `terminalManager.mount` attaches to it (replaying
- * scrollback) and finds the agent already running. Used by the Kanban board so
+ * scrollback) and finds the agent already running. Used by the agent board so
  * starting a card keeps the board visible.
  */
 export async function startBackgroundAgentSession(

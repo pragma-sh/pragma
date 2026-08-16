@@ -1,10 +1,11 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readStdinLines } from "@pragma/sidecar-kit";
 
+import { findFiles } from "./find.ts";
 import { defineAutomation, type AutomationContext, type AutomationDefinition } from "./index.ts";
 
 declare const Bun: {
@@ -173,61 +174,6 @@ async function copyEntry(command: LoadCommand, source: string, root: string): Pr
   const entry = join(entryRoot, `automation.${extension}`);
   await writeFile(entry, rewritten);
   return entry;
-}
-
-function within(root: string, candidate: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate));
-  return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
-}
-
-interface FindOptions {
-  name?: string;
-  minBytes?: number;
-}
-
-// Missing or unreadable paths (ENOENT, EPERM, …) are skipped, not fatal —
-// a watcher polling for a file that does not exist yet must not throw.
-async function statSafe(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
-  try {
-    return await stat(path);
-  } catch {
-    return null;
-  }
-}
-
-async function readdirSafe(path: string): Promise<string[]> {
-  try {
-    return await readdir(path);
-  } catch {
-    return [];
-  }
-}
-
-function fileMatches(path: string, size: number | bigint, options: FindOptions): boolean {
-  if (options.name !== undefined && basename(path) !== options.name) return false;
-  return options.minBytes === undefined || size >= options.minBytes;
-}
-
-async function findFiles(
-  root: string,
-  start: string,
-  options: FindOptions = {},
-): Promise<string[]> {
-  const base = resolve(root, start);
-  if (!within(root, base)) throw new Error("path escapes automation root");
-  const result: string[] = [];
-  async function walk(path: string): Promise<void> {
-    const info = await statSafe(path);
-    if (!info) return;
-    if (info.isDirectory()) {
-      const entries = await readdirSafe(path);
-      await Promise.all(entries.map((entry) => walk(join(path, entry))));
-      return;
-    }
-    if (fileMatches(path, info.size, options)) result.push(relative(root, path));
-  }
-  await walk(base);
-  return result;
 }
 
 function contextFor(command: LoadCommand): AutomationContext {

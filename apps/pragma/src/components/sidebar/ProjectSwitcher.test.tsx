@@ -27,6 +27,7 @@ vi.mock("@/lib/tauri", () => ({ removeProject }));
 
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { applyAgentReport, clearAllAgentStatuses } from "@/state/agent-status-store";
+import { ShortcutHintsProvider } from "@/lib/shortcut-hints";
 
 afterEach(() => {
   cleanup();
@@ -70,6 +71,17 @@ describe("ProjectSwitcher", () => {
     expect(screen.getByRole("button", { name: "Beta" }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("reveals animated shortcut keys over project icons", () => {
+    render(
+      <ShortcutHintsProvider hints={{ projects: { 1: "1", 2: "G" }, worktrees: {}, tabs: {} }}>
+        <ProjectSwitcher />
+      </ShortcutHintsProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Beta" })).toHaveTextContent("G");
+  });
+
   it("shows aggregate agent status on each project icon", () => {
     applyAgentReport({
       worktreeId: "worktree-1",
@@ -86,7 +98,9 @@ describe("ProjectSwitcher", () => {
 
     render(<ProjectSwitcher />);
 
-    expect(screen.getByTitle("Agent attention")).toBeTruthy();
+    const status = screen.getByTitle("Agent attention");
+    expect(status.className).toContain("top-0");
+    expect(status.className).not.toContain("-top-0.5");
     expect(
       screen.getByRole("button", { name: "Beta" }).querySelector("[title^='Agent']"),
     ).toBeNull();

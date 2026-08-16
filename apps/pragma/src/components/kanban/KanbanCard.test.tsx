@@ -26,6 +26,7 @@ function card(overrides: Partial<KanbanPromptCard> = {}): KanbanPromptCard {
 function noopProps() {
   return {
     agent: agent(),
+    onEdit: vi.fn(),
     onOpen: vi.fn(),
     onDelete: vi.fn(),
   };
@@ -49,10 +50,17 @@ describe("KanbanCard", () => {
     expect(props.onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it("opens a draft for editing when clicked", () => {
+    const props = noopProps();
+    render(<KanbanCard card={card()} {...props} />);
+    fireEvent.click(screen.getByText("feature/x"));
+    expect(props.onEdit).toHaveBeenCalledWith(card());
+    expect(props.onOpen).not.toHaveBeenCalled();
+  });
+
   it("only renders the footer delete action button", () => {
     render(<KanbanCard card={card({ status: "reviewNeeded" })} {...noopProps()} />);
     expect(screen.queryByRole("button", { name: "Start card" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit draft" })).toBeNull();
     expect(screen.getByRole("button", { name: "Delete card" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Commit and merge" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Commit and open PR" })).toBeNull();
@@ -74,6 +82,17 @@ describe("KanbanCard", () => {
       />,
     );
     expect(screen.getByText("Merging…")).toBeTruthy();
+  });
+
+  it("keeps the opening PR badge on one line", () => {
+    render(
+      <KanbanCard
+        card={card({ status: "completed", completedAction: "commitPr" })}
+        completingAction="commitPr"
+        {...noopProps()}
+      />,
+    );
+    expect(screen.getByText("Opening PR…")).toHaveClass("shrink-0", "whitespace-nowrap");
   });
 
   it("renders the agent as its plugin icon in the footer", () => {

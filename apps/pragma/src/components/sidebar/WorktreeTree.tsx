@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { Icon } from "@iconify/react";
-import type { Worktree } from "@pragma/constants";
+import type { Fanout, Worktree } from "@pragma/constants";
 import {
   ChevronRight,
   Copy,
@@ -55,15 +55,23 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
+import { toggleWorktreeCollapsed, useCollapsedWorktreeIds } from "@/state/worktree-collapsed";
 import {
   FanoutIndicator,
   FanoutMembersSlot,
   useFanoutForParent,
 } from "@/components/sidebar/FanoutGroup";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
-import { attemptWorktreeIds } from "@/lib/fanout";
+import { ShortcutHint } from "@/components/ShortcutHint";
+import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
+import {
+  setWorktreeShortcutOrder,
+  useShortcutHint,
+  useWorktreeShortcutIndex,
+  WorktreeShortcutOrderProvider,
+} from "@/lib/shortcut-hints";
 
 /** Low-frequency safety net for ref-only git changes that file watches cannot see. */
 const MERGED_STATUS_FALLBACK_INTERVAL_MS = 30_000;
@@ -409,6 +417,29 @@ interface WorktreeTreeProps {
   onCreateChild: (parentWorktreeId: string) => void;
 }
 
+/** Worktree ids in exact sidebar render order, including fanout attempts.
+ *  Descendants of a collapsed row are skipped, since they aren't visible. */
+function sidebarWorktreeOrder(
+  tree: WorktreeNode[],
+  fanouts: Fanout[],
+  collapsedIds: ReadonlySet<string>,
+): string[] {
+  const order: string[] = [];
+  function visit(node: WorktreeNode) {
+    order.push(node.worktree.id);
+    if (collapsedIds.has(node.worktree.id)) return;
+    const fanout = fanoutForParent(fanouts, node.worktree.id);
+    if (fanout) {
+      for (const member of orderedMembers(fanout)) {
+        if (member.worktreeId) order.push(member.worktreeId);
+      }
+    }
+    for (const child of node.children) visit(child);
+  }
+  for (const node of tree) visit(node);
+  return order;
+}
+
 /** Collapsible list of hidden worktrees under the main tree. */
 function HiddenWorktreesSection({
   hidden,
@@ -446,6 +477,56 @@ function HiddenWorktreesSection({
   );
 }
 
+function WorktreeTreeContent({
+  tree,
+  hidden,
+  pinTimes,
+  shortcutOrder,
+  mergedByWorktreeId,
+  prLifecycleByWorktreeId,
+  onCreateChild,
+  onUnhide,
+}: {
+  tree: WorktreeNode[];
+  hidden: Worktree[];
+  pinTimes: ReadonlyMap<string, number>;
+  shortcutOrder: string[];
+  mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  onCreateChild: (parentWorktreeId: string) => void;
+  onUnhide: (worktreeId: string) => void;
+}) {
+  const pinnedRootCount = tree.filter((node) => pinTimes.has(node.worktree.id)).length;
+  const separatorIndex =
+    pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
+  return (
+    <WorktreeShortcutOrderProvider worktreeIds={shortcutOrder}>
+      <div className="space-y-1">
+        {tree.map((node, index) => (
+          <Fragment key={node.worktree.id}>
+            {index === separatorIndex ? <Separator className="my-2" /> : null}
+            <WorktreeRow
+              depth={0}
+              mergedByWorktreeId={mergedByWorktreeId}
+              node={node}
+              onCreateChild={onCreateChild}
+              prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+            />
+          </Fragment>
+        ))}
+        {hidden.length > 0 ? (
+          <HiddenWorktreesSection
+            hidden={hidden}
+            mergedByWorktreeId={mergedByWorktreeId}
+            onUnhide={onUnhide}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+          />
+        ) : null}
+      </div>
+    </WorktreeShortcutOrderProvider>
+  );
+}
+
 export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
   const workspace = useWorkspace();
   const { authenticated } = useGitHub();
@@ -471,40 +552,31 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       }),
     [worktrees, attempts, pinTimes, prLifecycleByWorktreeId],
   );
+  const collapsedIds = useCollapsedWorktreeIds();
+  const shortcutOrder = useMemo(
+    () => sidebarWorktreeOrder(tree, fanouts, collapsedIds),
+    [tree, fanouts, collapsedIds],
+  );
+  useEffect(() => {
+    setWorktreeShortcutOrder(shortcutOrder);
+    return () => setWorktreeShortcutOrder([]);
+  }, [shortcutOrder]);
 
   if (tree.length === 0 && hidden.length === 0) {
     return <p className="px-2 py-6 text-sm text-muted-foreground">No worktrees loaded.</p>;
   }
 
-  // Pinned rows sort first; the rule below the last one sets them apart from
-  // the rest of the tree. Only drawn when both sides are non-empty.
-  const pinnedRootCount = tree.filter((node) => pinTimes.has(node.worktree.id)).length;
-  const separatorIndex =
-    pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
-
   return (
-    <div className="space-y-1">
-      {tree.map((node, index) => (
-        <Fragment key={node.worktree.id}>
-          {index === separatorIndex ? <Separator className="my-2" /> : null}
-          <WorktreeRow
-            depth={0}
-            mergedByWorktreeId={mergedByWorktreeId}
-            node={node}
-            onCreateChild={onCreateChild}
-            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-          />
-        </Fragment>
-      ))}
-      {hidden.length > 0 ? (
-        <HiddenWorktreesSection
-          hidden={hidden}
-          mergedByWorktreeId={mergedByWorktreeId}
-          onUnhide={(id) => void workspace.hideWorktree(id, false)}
-          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-        />
-      ) : null}
-    </div>
+    <WorktreeTreeContent
+      hidden={hidden}
+      mergedByWorktreeId={mergedByWorktreeId}
+      onCreateChild={onCreateChild}
+      onUnhide={(id) => void workspace.hideWorktree(id, false)}
+      pinTimes={pinTimes}
+      prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+      shortcutOrder={shortcutOrder}
+      tree={tree}
+    />
   );
 }
 
@@ -580,6 +652,7 @@ interface WorktreeRowLabelState {
   selected: boolean;
   WorktreeIcon: typeof GitBranch;
   agentStatus: ReturnType<typeof useWorktreeAgentStatus>;
+  shortcutHint: string | null;
   worktreeId: string;
 }
 
@@ -738,6 +811,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
       selected,
       WorktreeIcon,
       agentStatus,
+      shortcutHint,
       worktreeId,
     } = row;
     const {
@@ -771,6 +845,7 @@ const WorktreeRowLabel = forwardRef<HTMLDivElement, WorktreeRowLabelProps>(
         status={<AgentStatusDot status={agentStatus} />}
         trailing={
           <>
+            <ShortcutHint value={shortcutHint} />
             <FanoutIndicator label={label} worktreeId={worktreeId} />
             {pinned ? <WorktreePinnedIndicator label={label} onUnpin={handleTogglePin} /> : null}
             <WorktreeRowActions
@@ -918,6 +993,7 @@ function WorktreeRow({
     prLifecycle,
     rename,
     selected,
+    shortcutHint,
     setDeleteOpen,
     toggleExpanded,
     WorktreeIcon,
@@ -948,6 +1024,7 @@ function WorktreeRow({
               prLifecycle,
               pinned,
               selected,
+              shortcutHint,
               WorktreeIcon,
               worktreeId: node.worktree.id,
             }}
@@ -992,12 +1069,7 @@ function useWorktreeRow(
   mergedByWorktreeId: Record<string, boolean>,
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
 ) {
-  const workspace = useWorkspace();
-  const kanban = useKanban();
-  const rename = useWorktreeRename(node.worktree);
-  const [expanded, setExpanded] = useState(true);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const selected = workspace.selectedWorktreeId === node.worktree.id;
+  const controls = useWorktreeRowControls(node, onCreateChild);
   const label = worktreeLabel(node.worktree);
   // Fanout attempts hang under the row like children do, so the caret has to
   // account for them — otherwise a parent with only attempts can't be collapsed.
@@ -1009,42 +1081,63 @@ function useWorktreeRow(
   const prLifecycle = prLifecycleByWorktreeId[node.worktree.id];
   const { Icon: WorktreeIcon } = worktreeGlyph(merged, prLifecycle);
   const agentStatus = useWorktreeAgentStatus(node.worktree.id);
+  const shortcutIndex = useWorktreeShortcutIndex(node.worktree.id);
+  const shortcutHint = useShortcutHint("worktree", shortcutIndex);
 
+  const handleTogglePin = useCallback(() => {
+    toggleWorktreePin(node.worktree.id);
+  }, [node.worktree.id]);
+
+  return {
+    agentStatus,
+    ...controls,
+    handleTogglePin,
+    hasChildren,
+    isMain,
+    label,
+    merged,
+    pinned,
+    prLifecycle,
+    shortcutHint,
+    WorktreeIcon,
+  };
+}
+
+function useWorktreeRowControls(
+  node: WorktreeNode,
+  onCreateChild: (parentWorktreeId: string) => void,
+) {
+  const workspace = useWorkspace();
+  const kanban = useKanban();
+  const rename = useWorktreeRename(node.worktree);
+  const collapsedIds = useCollapsedWorktreeIds();
+  const expanded = !collapsedIds.has(node.worktree.id);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const handleSelect = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
     // Selecting a worktree always returns to the terminal view, even when the
-    // prompt board is the visible surface.
+    // agent board is the visible surface.
     kanban.exitBoard();
   }, [workspace, kanban, node.worktree.id]);
   const handleCreateChild = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
     onCreateChild(node.worktree.id);
   }, [workspace, node.worktree.id, onCreateChild]);
-  const handleTogglePin = useCallback(() => {
-    toggleWorktreePin(node.worktree.id);
-  }, [node.worktree.id]);
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const toggleExpanded = useCallback(
+    () => toggleWorktreeCollapsed(node.worktree.id),
+    [node.worktree.id],
+  );
   const openDelete = useCallback(() => setDeleteOpen(true), []);
-
   return {
-    agentStatus,
     deleteOpen,
     expanded,
     handleCreateChild,
     handleSelect,
-    handleTogglePin,
-    hasChildren,
-    isMain,
-    label,
-    merged,
     openDelete,
-    pinned,
-    prLifecycle,
     rename,
-    selected,
+    selected: workspace.selectedWorktreeId === node.worktree.id,
     setDeleteOpen,
     toggleExpanded,
-    WorktreeIcon,
   };
 }
 

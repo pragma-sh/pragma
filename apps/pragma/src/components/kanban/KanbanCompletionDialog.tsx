@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence } from "motion/react";
 
-import { GitMerge, GitPullRequestCreate, Loader2, SquareArrowOutUpRight } from "lucide-react";
+import { GitPullRequestCreate, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
-import type { KanbanCompletedAction, KanbanPromptCard } from "@pragma/constants";
+import type { KanbanPromptCard } from "@pragma/constants";
 
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
@@ -19,10 +19,9 @@ interface KanbanCompletionDialogProps {
 
 /**
  * Picks how a reviewNeeded card is completed when it's dragged into the Completed
- * column (the per-card buttons trigger merge/PR directly). Commit & merge and
- * commit & open PR hand off to {@link useKanban}'s `completeCard`, which moves the
- * card immediately and runs the work in the background; "go to worktree" finishes
- * the card and opens its session.
+ * column. Commit & open PR hands off to {@link useKanban}'s `completeCard`, which
+ * moves the card immediately and runs the work in the background; "go to worktree"
+ * finishes the card and opens its session.
  */
 export function KanbanCompletionDialog({
   open: isOpen,
@@ -41,13 +40,13 @@ export function KanbanCompletionDialog({
     }
   }, [isOpen]);
 
-  // Commit/merge and commit/PR run in the background; close the dialog right away
-  // so the card's own loading badge tracks progress.
-  function complete(action: Extract<KanbanCompletedAction, "commitMerge" | "commitPr">) {
+  // Commit/PR runs in the background; close the dialog right away so the card's
+  // own loading badge tracks progress.
+  function complete() {
     if (!card) {
       return;
     }
-    void kanban.completeCard(card, action);
+    void kanban.completeCard(card, "commitPr");
     onOpenChange(false);
   }
 
@@ -80,20 +79,12 @@ export function KanbanCompletionDialog({
 
           <div className="mt-5 space-y-2">
             <CompletionOption
-              icon={<GitMerge className="size-4" />}
-              title="Commit all and merge"
-              description="Stage everything, generate a commit message, commit, and merge into the parent branch — runs in the background."
-              running={false}
-              disabled={manualRunning}
-              onClick={() => complete("commitMerge")}
-            />
-            <CompletionOption
               icon={<GitPullRequestCreate className="size-4" />}
               title="Commit all and open PR"
               description="Commit everything, push the branch, and open a pull request — runs in the background."
               running={false}
               disabled={manualRunning}
-              onClick={() => complete("commitPr")}
+              onClick={complete}
             />
             <CompletionOption
               icon={<SquareArrowOutUpRight className="size-4" />}
