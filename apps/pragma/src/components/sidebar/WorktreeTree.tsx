@@ -55,6 +55,7 @@ import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorktreeAgentStatus } from "@/state/agent-status-store";
 import { toggleWorktreePin, useWorktreePins } from "@/state/worktree-pins";
+import { toggleWorktreeCollapsed, useCollapsedWorktreeIds } from "@/state/worktree-collapsed";
 import {
   FanoutIndicator,
   FanoutMembersSlot,
@@ -416,11 +417,17 @@ interface WorktreeTreeProps {
   onCreateChild: (parentWorktreeId: string) => void;
 }
 
-/** Worktree ids in exact sidebar render order, including fanout attempts. */
-function sidebarWorktreeOrder(tree: WorktreeNode[], fanouts: Fanout[]): string[] {
+/** Worktree ids in exact sidebar render order, including fanout attempts.
+ *  Descendants of a collapsed row are skipped, since they aren't visible. */
+function sidebarWorktreeOrder(
+  tree: WorktreeNode[],
+  fanouts: Fanout[],
+  collapsedIds: ReadonlySet<string>,
+): string[] {
   const order: string[] = [];
   function visit(node: WorktreeNode) {
     order.push(node.worktree.id);
+    if (collapsedIds.has(node.worktree.id)) return;
     const fanout = fanoutForParent(fanouts, node.worktree.id);
     if (fanout) {
       for (const member of orderedMembers(fanout)) {
@@ -545,7 +552,11 @@ export function WorktreeTree({ onCreateChild }: WorktreeTreeProps) {
       }),
     [worktrees, attempts, pinTimes, prLifecycleByWorktreeId],
   );
-  const shortcutOrder = useMemo(() => sidebarWorktreeOrder(tree, fanouts), [tree, fanouts]);
+  const collapsedIds = useCollapsedWorktreeIds();
+  const shortcutOrder = useMemo(
+    () => sidebarWorktreeOrder(tree, fanouts, collapsedIds),
+    [tree, fanouts, collapsedIds],
+  );
   useEffect(() => {
     setWorktreeShortcutOrder(shortcutOrder);
     return () => setWorktreeShortcutOrder([]);
@@ -1099,7 +1110,8 @@ function useWorktreeRowControls(
   const workspace = useWorkspace();
   const kanban = useKanban();
   const rename = useWorktreeRename(node.worktree);
-  const [expanded, setExpanded] = useState(true);
+  const collapsedIds = useCollapsedWorktreeIds();
+  const expanded = !collapsedIds.has(node.worktree.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const handleSelect = useCallback(() => {
     workspace.selectWorktree(node.worktree.id);
@@ -1111,7 +1123,10 @@ function useWorktreeRowControls(
     workspace.selectWorktree(node.worktree.id);
     onCreateChild(node.worktree.id);
   }, [workspace, node.worktree.id, onCreateChild]);
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const toggleExpanded = useCallback(
+    () => toggleWorktreeCollapsed(node.worktree.id),
+    [node.worktree.id],
+  );
   const openDelete = useCallback(() => setDeleteOpen(true), []);
   return {
     deleteOpen,
