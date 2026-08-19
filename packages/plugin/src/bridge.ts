@@ -40,14 +40,6 @@ export interface PragmaActionsBridge {
     /** Reports one rich agent message through the host SDK bridge. */
     reportMessage: (message: AgentMessage) => Promise<void>;
   };
-  storage: {
-    /** Reads one plugin-owned durable value as serialized JSON. */
-    get: (pluginId: string, key: string) => Promise<string | null>;
-    /** Writes one plugin-owned durable value as serialized JSON. */
-    set: (pluginId: string, key: string, value: string) => Promise<void>;
-    /** Deletes one plugin-owned durable value. */
-    delete: (pluginId: string, key: string) => Promise<void>;
-  };
   events: {
     /** Subscribes to one named host event. */
     subscribe: (eventName: string, handler: (payload: unknown) => void) => () => void;

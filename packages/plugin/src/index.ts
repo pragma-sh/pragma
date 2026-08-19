@@ -83,7 +83,6 @@ export type { ThemeColors, ThemeDefinition, ThemeMode } from "./theme";
 export { defineTheme } from "./theme";
 export { getTheme, listSessions, subscribeEvent, subscribeTheme } from "./runtime";
 export type { PluginStorage } from "./storage";
-export { deleteStoredState, getStoredState, setStoredState, storageFor } from "./storage";
 export type { WatcherContext, WatcherDefinition } from "./watcher";
 export { defineWatcher } from "./watcher";
 export type {
