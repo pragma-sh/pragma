@@ -2789,10 +2789,13 @@ function useTabCreation(
       try {
         const tab = await createTabOfKind(kind, projectId, targetWorktreeId, options?.shell);
         // The workspace only keeps tabs for its selected project. A background
-        // creation may finish after its owner is no longer selected.
-        if (selectedProjectIdRef.current === projectId) {
-          dispatchNewTab(dispatch, tab, paneId);
+        // creation may finish after its owner is no longer selected — treat it
+        // as failed rather than handing callers a tab that was never dispatched
+        // (and so will never mount a terminal to receive an agent command).
+        if (selectedProjectIdRef.current !== projectId) {
+          return null;
         }
+        dispatchNewTab(dispatch, tab, paneId);
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
