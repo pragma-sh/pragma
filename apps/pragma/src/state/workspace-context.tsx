@@ -291,7 +291,7 @@ interface WorkspaceContextValue extends WorkspaceState {
     options?: WorktreeTargetOptions,
   ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
@@ -2766,7 +2766,7 @@ function useTabCreation(
   ) => Promise<Tab | null>;
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
 } {
   const createTab = useCallback(
     async (
@@ -2789,10 +2789,13 @@ function useTabCreation(
       try {
         const tab = await createTabOfKind(kind, projectId, targetWorktreeId, options?.shell);
         // The workspace only keeps tabs for its selected project. A background
-        // creation may finish after its owner is no longer selected.
-        if (selectedProjectIdRef.current === projectId) {
-          dispatchNewTab(dispatch, tab, paneId);
+        // creation may finish after its owner is no longer selected — treat it
+        // as failed rather than handing callers a tab that was never dispatched
+        // (and so will never mount a terminal to receive an agent command).
+        if (selectedProjectIdRef.current !== projectId) {
+          return null;
         }
+        dispatchNewTab(dispatch, tab, paneId);
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
@@ -2818,9 +2821,7 @@ function useTabCreation(
     [createTab],
   );
   const createTabInPane = useCallback(
-    async (paneId: string, kind: "terminal" | "browser") => {
-      await createTab(kind, paneId);
-    },
+    (paneId: string, kind: "terminal" | "browser") => createTab(kind, paneId),
     [createTab],
   );
   return { createTab, createTerminalTab, createBrowserTab, createTabInPane };
