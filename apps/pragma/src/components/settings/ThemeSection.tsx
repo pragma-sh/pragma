@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import type { ThemeDefinition } from "@pragma/plugin";
+
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -38,6 +40,7 @@ import {
   type ThemeTokenGroup,
 } from "@/lib/theme-tokens";
 import { cn } from "@/lib/utils";
+import { collectContributions, useActivePlugins } from "@/plugins/registry";
 import { useTheme } from "@/state/theme-context";
 
 /** Where a token's current value comes from, which is what the row badge reports. */
@@ -101,6 +104,10 @@ export function ThemeSection({
   projectId: string | null;
 }) {
   const theme = useTheme();
+  const pluginThemes = collectContributions(
+    useActivePlugins(scope === "project" ? projectId : null),
+    (definition) => definition.themes,
+  );
   const [mode, setMode] = useState<ThemeMode>("dark");
   const [saving, setSaving] = useState(false);
   useModePreview(mode);
@@ -128,6 +135,28 @@ export function ThemeSection({
   const applyPreset = useCallback(
     async (preset: ThemePreset) => {
       const next = withThemePreset(current, preset);
+      setSaving(true);
+      try {
+        await writeTheme(scope, serializeThemeFile(next), projectId);
+        window.dispatchEvent(new Event(THEME_CHANGED_EVENT));
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [current, projectId, scope],
+  );
+
+  const applyPluginTheme = useCallback(
+    async (pluginTheme: ThemeDefinition) => {
+      const next: ThemeFile = {
+        ...current,
+        colors: {
+          light: { ...pluginTheme.colors.light },
+          dark: { ...pluginTheme.colors.dark },
+        },
+      };
       setSaving(true);
       try {
         await writeTheme(scope, serializeThemeFile(next), projectId);
@@ -169,6 +198,16 @@ export function ThemeSection({
         onSelect={applyPreset}
       />
 
+      {pluginThemes.length > 0 ? (
+        <PluginThemes
+          current={current}
+          disabled={saving}
+          mode={mode}
+          themes={pluginThemes}
+          onSelect={applyPluginTheme}
+        />
+      ) : null}
+
       {THEME_TOKEN_GROUPS.map((group) => (
         <ThemeGroup
           key={group.id}
@@ -182,6 +221,64 @@ export function ThemeSection({
         />
       ))}
     </div>
+  );
+}
+
+function PluginThemes({
+  current,
+  disabled,
+  mode,
+  onSelect,
+  themes,
+}: {
+  current: ThemeFile | null;
+  disabled: boolean;
+  mode: ThemeMode;
+  onSelect: (theme: ThemeDefinition) => Promise<void>;
+  themes: ReturnType<typeof collectContributions<ThemeDefinition>>;
+}) {
+  return (
+    <section className="rounded-xl border bg-card p-5 shadow-sm">
+      <h3 className="font-semibold">Plugin themes</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Palettes supplied by active plugins. Applying one copies its colors into this scope.
+      </p>
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {themes.map(({ contribution, pluginId }) => {
+          const active = JSON.stringify(current?.colors) === JSON.stringify(contribution.colors);
+          const colors = contribution.colors[mode];
+          return (
+            <button
+              key={`${pluginId}:${contribution.id}`}
+              className={cn(
+                "group flex min-w-0 items-center gap-3 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent",
+                active && "border-primary ring-1 ring-primary",
+              )}
+              disabled={disabled}
+              title={contribution.description}
+              type="button"
+              onClick={() => void onSelect(contribution)}
+            >
+              <span className="flex shrink-0 -space-x-1.5" aria-hidden>
+                <span
+                  className="size-6 rounded-full border-2 border-background"
+                  style={{ backgroundColor: colors.primary ?? colors.foreground }}
+                />
+                <span
+                  className="size-6 rounded-full border-2 border-background"
+                  style={{ backgroundColor: colors.secondary ?? colors.background }}
+                />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{contribution.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{pluginId}</span>
+              </span>
+              {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

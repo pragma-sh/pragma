@@ -5,8 +5,16 @@ import type { PluginContext } from "./types";
 /** An icon contributed alongside a sidebar tab, command, or agent. */
 export type PluginIcon = ComponentType<{ className?: string }>;
 
-/** A host-rendered plugin component. Reads its own data via `@pragma/plugin`'s hooks. */
-export type PluginComponent = () => ReactNode;
+/** Values passed directly to every host-rendered plugin component. */
+export interface PluginComponentProps<TWebViewPayload = unknown> {
+  /** Payload supplied when this component renders as a plugin web view. */
+  webViewPayload?: TWebViewPayload;
+}
+
+/** A host-rendered plugin component. Hooks remain available for reactive host state. */
+export type PluginComponent<TWebViewPayload = unknown> = {
+  bivarianceHack(props: PluginComponentProps<TWebViewPayload>): ReactNode;
+}["bivarianceHack"];
 
 /** A guard evaluated by the host to decide whether a contribution should render. */
 export type PluginWhen<TConfig = unknown> = (ctx: PluginContext<TConfig>) => boolean;
@@ -27,6 +35,22 @@ export function defineSidebarTab<TConfig = unknown>(
   return input;
 }
 
+/** A page contributed to Pragma Settings. */
+export interface SettingsPageDefinition<TConfig = unknown> {
+  id: string;
+  title: string;
+  icon?: PluginIcon;
+  component: PluginComponent;
+  when?: PluginWhen<TConfig>;
+}
+
+/** Declares a React page contribution for Pragma Settings. */
+export function defineSettingsPage<TConfig = unknown>(
+  input: SettingsPageDefinition<TConfig>,
+): SettingsPageDefinition<TConfig> {
+  return input;
+}
+
 /** Options used when opening a plugin web view tab. */
 export interface OpenWebViewOptions<TPayload = unknown> {
   /** Overrides the tab title; falls back to the web view title, then id. */
@@ -41,7 +65,7 @@ export interface OpenWebViewOptions<TPayload = unknown> {
 export interface WebViewDefinition<TPayload = unknown> {
   id: string;
   title?: string;
-  component: PluginComponent;
+  component: PluginComponent<TPayload>;
   /** Opens this web view as a workspace tab. */
   open(options?: OpenWebViewOptions<TPayload>): Promise<void>;
 }

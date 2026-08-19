@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { PluginDefinition, ThemeDefinition } from "@pragma/plugin";
+
 import { ThemeSection } from "./ThemeSection";
 import { writeTheme } from "@/lib/tauri";
 import { parseThemeFile, type ThemeFile } from "@/lib/theme";
 import { THEME_OPTIONS, THEME_PRESETS, isThemePreset } from "@/lib/theme-presets";
 import { THEME_DEFAULTS } from "@/lib/theme-tokens";
 import { useTheme } from "@/state/theme-context";
+import { clearPlugins, setPluginsForScope } from "@/plugins/registry";
 
 vi.mock("@/lib/tauri", () => ({ writeTheme: vi.fn() }));
 vi.mock("@/state/theme-context", () => ({ useTheme: vi.fn() }));
@@ -30,6 +33,7 @@ function row(token: string): HTMLElement {
 describe("ThemeSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPlugins();
     writeThemeMock.mockResolvedValue();
   });
 
@@ -101,5 +105,43 @@ describe("ThemeSection", () => {
 
     view.unmount();
     expect(document.documentElement).toHaveClass("dark");
+  });
+
+  it("lists active plugin themes and copies the selected colors into the scope", async () => {
+    const theme = {
+      id: "ocean",
+      name: "Ocean",
+      description: "Cool blue palette",
+      colors: {
+        light: { background: "#ffffff", primary: "#0066cc" },
+        dark: { background: "#001122", primary: "#66ccff" },
+      },
+    } satisfies ThemeDefinition;
+    setPluginsForScope("global", null, [
+      {
+        pluginId: "example.themes",
+        version: "1.0.0",
+        scope: "global",
+        status: "loaded",
+        definition: {
+          name: "Example Themes",
+          themes: [theme],
+          __apiVersion: "0.3.0",
+        } satisfies PluginDefinition,
+        config: undefined,
+      },
+    ]);
+    mockTheme({ $schema: "./theme.schema.json" });
+    render(<ThemeSection projectId={null} scope="global" />);
+
+    expect(screen.getByRole("button", { name: /^Ocean/ })).toBeInTheDocument();
+    expect(screen.getByText("example.themes")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ocean/ }));
+    await waitFor(() => expect(writeThemeMock).toHaveBeenCalledTimes(1));
+    const [, contents] = writeThemeMock.mock.calls[0] ?? [];
+    const file = parseThemeFile(String(contents));
+    expect(file.$schema).toBe("./theme.schema.json");
+    expect(file.colors).toEqual(theme.colors);
   });
 });

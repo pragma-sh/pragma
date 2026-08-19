@@ -111,6 +111,14 @@ export function createBridge(hooks: Partial<PragmaHooksBridge> = {}): BridgeHand
     actions: {
       openWebView: async () => undefined,
       agents: { reportMessage: async () => undefined },
+      storage: {
+        get: async () => null,
+        set: async () => undefined,
+        delete: async () => undefined,
+      },
+      events: { subscribe: () => () => undefined },
+      theme: { get: () => "dark", subscribe: () => () => undefined },
+      sessions: { list: async () => [] },
     },
     ui: { Button, Kbd } as unknown as PragmaBridge["ui"],
   };

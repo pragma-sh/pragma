@@ -1,4 +1,5 @@
 import type { PragmaClient } from "@pragma/sdk";
+import type { PluginStorage } from "./storage";
 
 /** The active project a plugin is rendered against, or `null` when none is selected. */
 export interface PluginProject {
@@ -32,6 +33,8 @@ export interface PluginContext<TConfig = unknown> {
   sdk: PragmaClient;
   /** Shows an in-app notification. */
   notify: (message: string, options?: PluginNotifyOptions) => void;
+  /** Durable storage scoped to this plugin. Available in desktop-hosted callbacks. */
+  storage?: PluginStorage;
 }
 
 /** Result shape shared by every `useSdkQuery`-style hook. */
@@ -49,9 +52,9 @@ export interface PluginAgentStatusEntry {
 }
 
 /**
- * Minimal live-session summary surfaced by `useSessions`. `@pragma/sdk` does
- * not yet expose a dedicated session-list RPC, so this is intentionally small
- * — expect it to grow once that endpoint exists.
+ * Minimal live terminal-session summary surfaced by `useSessions` and
+ * `listSessions`. This is intentionally small until the SDK exposes a
+ * dedicated session-list RPC.
  */
 export interface PluginSessionSummary {
   id: string;

@@ -13,9 +13,12 @@ packages/plugin/
 ├── src/plugin.ts        # definePlugin + API-version stamp
 ├── src/agent.ts         # defineAgent and agent types
 ├── src/watcher.ts       # defineWatcher and watcher context types
-├── src/contributions.ts # UI slot, web view, and command contribution helpers
+├── src/contributions.ts # UI slot, Settings page, web view, and command contribution helpers
 ├── src/usage-limits.ts  # Host-rendered provider usage-limit declarations
+├── src/theme.ts         # Selectable Theme-settings declarations
 ├── src/hooks.ts         # Hook delegates onto __PRAGMA__.hooks
+├── src/storage.ts       # Imperative plugin-scoped durable JSON storage
+├── src/runtime.ts       # Imperative event, theme, and session access
 ├── src/bridge.ts        # __PRAGMA__ bridge/action contract
 ├── src/react*.ts        # React/ReactDOM/jsx-runtime shims
 ├── src/ui.ts            # Host UI primitive delegates

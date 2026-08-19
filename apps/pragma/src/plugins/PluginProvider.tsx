@@ -2,6 +2,7 @@ import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react"
 import { toast } from "sonner";
 
 import { PragmaClient } from "@pragma/sdk";
+import type { Tab, Worktree } from "@pragma/constants";
 
 import { PLUGIN_DEEP_LINK_EVENT, type PluginDeepLinkDetail } from "@/lib/deep-link";
 import { onAgentReport, readPluginManifests, gatewayConnectionInfo } from "@/lib/tauri";
@@ -9,7 +10,9 @@ import { useWorkspace } from "@/state/workspace-context";
 import { emitPluginEvent } from "./events";
 import {
   notifyFromPlugin,
+  pluginStorageFor,
   setPluginRuntimeProject,
+  setPluginRuntimeSessions,
   setPluginRuntimeSdk,
   usePluginRuntimeState,
 } from "./host-hooks";
@@ -22,6 +25,7 @@ import { setPluginWebViewOpener, setPluginWebViews } from "./webviews";
 
 /** How often dev mode polls plugin bundles for changes (hot-reload). */
 const DEV_RELOAD_POLL_MS = 2000;
+const EMPTY_WORKTREES: Worktree[] = [];
 
 /**
  * Loads configured plugins and keeps the plugin runtime in sync with the app:
@@ -37,14 +41,18 @@ const DEV_RELOAD_POLL_MS = 2000;
  * projects re-evaluates cheaply without re-importing bundles.
  */
 export function PluginProvider(props: { children: ReactNode }): ReactNode {
-  const { projects, selectedProjectId, openPluginWebView } = useWorkspace();
+  const { projects, projectTabs, selectedProjectId, worktrees, openPluginWebView } = useWorkspace();
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedPath = selectedProject?.path ?? null;
+  const selectedWorktrees = selectedProjectId
+    ? (worktrees[selectedProjectId] ?? EMPTY_WORKTREES)
+    : EMPTY_WORKTREES;
   const activePlugins = useActivePlugins(selectedProjectId);
   const runtime = usePluginRuntimeState();
   const manifestSignature = useRef<string | null>(null);
 
   useRuntimeProject(selectedProject);
+  useRuntimeSessions(projectTabs, selectedWorktrees);
   useRuntimeSdk();
   useAgentReportForwarding(activePlugins, runtime);
   useDeepLinkForwarding(activePlugins, runtime);
@@ -58,6 +66,18 @@ export function PluginProvider(props: { children: ReactNode }): ReactNode {
       {props.children}
     </>
   );
+}
+
+function useRuntimeSessions(tabs: Tab[], worktrees: Worktree[]): void {
+  useEffect(() => {
+    const cwdByWorktree = new Map(worktrees.map((worktree) => [worktree.id, worktree.path]));
+    setPluginRuntimeSessions(
+      tabs.flatMap((tab) => {
+        const cwd = cwdByWorktree.get(tab.worktreeId);
+        return tab.kind === "terminal" && cwd ? [{ id: tab.id, cwd }] : [];
+      }),
+    );
+  }, [tabs, worktrees]);
 }
 
 function useRuntimeProject(project: { id: string; name: string; path: string } | null): void {
@@ -242,6 +262,7 @@ function runDeclarativePluginEvent(
         project: runtime.project,
         sdk: runtime.sdk,
         notify: notifyFromPlugin,
+        storage: pluginStorageFor(record.pluginId),
       });
     } catch (cause) {
       console.error(`plugin "${record.pluginId}" ${eventName} handler threw`, cause);

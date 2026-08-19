@@ -21,13 +21,14 @@ import type {
   PluginProject,
   PluginQueryResult,
   PluginSessionSummary,
+  PluginStorage,
   PragmaHooksBridge,
 } from "@pragma/plugin";
 import type { AgentMessage, PragmaClient } from "@pragma/sdk";
 
 import { useRequiredContext } from "@/lib/context";
 import { errorMessage } from "@/lib/errors";
-import { pluginStorageGet, pluginStorageSet } from "@/lib/tauri";
+import { pluginStorageDelete, pluginStorageGet, pluginStorageSet } from "@/lib/tauri";
 import {
   agentEntriesForWorktree,
   agentMessagesForWorktree,
@@ -49,9 +50,10 @@ import { subscribePluginEvent } from "./events";
 interface PluginRuntimeState {
   sdk: PragmaClient | null;
   project: PluginProject | null;
+  sessions: PluginSessionSummary[];
 }
 
-let runtimeState: PluginRuntimeState = { sdk: null, project: null };
+let runtimeState: PluginRuntimeState = { sdk: null, project: null, sessions: [] };
 const runtimeListeners = new Set<() => void>();
 
 function emitRuntime(): void {
@@ -88,12 +90,36 @@ export function setPluginRuntimeProject(project: PluginProject | null): void {
   emitRuntime();
 }
 
+/** Publishes current terminal sessions for hook and imperative plugin APIs. */
+export function setPluginRuntimeSessions(sessions: PluginSessionSummary[]): void {
+  runtimeState = { ...runtimeState, sessions };
+  emitRuntime();
+}
+
 /** Reports one rich agent message through the current SDK bridge. */
 export async function reportAgentMessageFromPlugin(message: AgentMessage): Promise<void> {
   if (!runtimeState.sdk) {
     throw new Error("Pragma SDK is not connected yet — the local gateway has not come up");
   }
   await runtimeState.sdk.agents.reportMessage(message);
+}
+
+/** Returns durable storage scoped to one desktop-hosted plugin. */
+export function pluginStorageFor(pluginId: string): PluginStorage {
+  return {
+    get: async <T,>(key: string, initialValue: T): Promise<T> => {
+      const raw = await pluginStorageGet(pluginId, key);
+      return raw === null ? initialValue : (JSON.parse(raw) as T);
+    },
+    set: async <T,>(key: string, value: T): Promise<void> => {
+      const serialized = JSON.stringify(value);
+      if (serialized === undefined) {
+        throw new TypeError("Plugin stored state must be JSON-serializable");
+      }
+      await pluginStorageSet(pluginId, key, serialized);
+    },
+    delete: (key: string) => pluginStorageDelete(pluginId, key),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +180,8 @@ function useProjectImpl(): PluginProject | null {
 
 const darkQuery = "(prefers-color-scheme: dark)";
 
-function subscribeTheme(listener: () => void): () => void {
+/** Subscribes to host theme changes outside React. */
+export function subscribePluginTheme(listener: () => void): () => void {
   const media = window.matchMedia(darkQuery);
   media.addEventListener("change", listener);
   return () => {
@@ -162,12 +189,13 @@ function subscribeTheme(listener: () => void): () => void {
   };
 }
 
-function getTheme(): "light" | "dark" {
+/** Returns the current host theme outside React. */
+export function getPluginTheme(): "light" | "dark" {
   return window.matchMedia(darkQuery).matches ? "dark" : "light";
 }
 
 function useThemeImpl(): "light" | "dark" {
-  return useSyncExternalStore(subscribeTheme, getTheme, () => "light" as const);
+  return useSyncExternalStore(subscribePluginTheme, getPluginTheme, () => "light" as const);
 }
 
 function useWebViewPayloadImpl<TPayload>(): TPayload | undefined {
@@ -349,13 +377,15 @@ function useAgentMessagesImpl(
   return { data: entries, error: null, loading: false, refetch };
 }
 
-const noSessions: PluginSessionSummary[] = [];
+/** Lists current desktop terminal sessions outside React. */
+export function listPluginSessions(): Promise<PluginSessionSummary[]> {
+  return Promise.resolve(runtimeState.sessions);
+}
 
 function useSessionsImpl(): PluginQueryResult<PluginSessionSummary[]> {
-  // `@pragma/sdk` has no session-list RPC yet; this returns an empty list so
-  // the hook's shape is stable. Expect real data once that endpoint exists.
+  const sessions = usePluginRuntimeState().sessions;
   const refetch = useCallback(() => {}, []);
-  return { data: noSessions, error: null, loading: false, refetch };
+  return { data: sessions, error: null, loading: false, refetch };
 }
 
 /** The complete hooks object installed at `__PRAGMA__.hooks`. */
