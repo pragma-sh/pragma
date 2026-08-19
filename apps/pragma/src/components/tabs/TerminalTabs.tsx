@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 
 import { Icon } from "@iconify/react";
@@ -47,6 +47,8 @@ import { useConfirmClose, useConfirmCloseTabs } from "@/components/editor/confir
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
+import { TabRenameInput } from "@/components/tabs/TabRenameInput";
+import { type TabRenameApi, useTabRename } from "@/components/tabs/use-tab-rename";
 import { UsageLimitsPopover } from "@/components/usage-limits/UsageLimitsPopover";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
@@ -61,7 +63,6 @@ import {
   visibleDistros,
   wslProfile,
 } from "@/lib/shell-profile";
-import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { motionTransition, tabItemVariants } from "@/lib/motion";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
@@ -370,49 +371,6 @@ function computeScriptButtonDisabled(button: ScriptButtonInfo, workspace: Worksp
   return !workspace.selectedWorktree || !button.available;
 }
 
-/** Shared inline-rename state for terminal tabs (only one tab renames at a time). */
-function useTabRename(workspace: Workspace): {
-  renamingTabId: string | null;
-  renameValue: string;
-  setRenameValue: (value: string) => void;
-  inputRef: RefObject<HTMLInputElement | null>;
-  startRename: (tabId: string, currentTitle: string) => void;
-  commitRename: () => void;
-  cancelRename: () => void;
-} {
-  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (renamingTabId && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [renamingTabId]);
-  const startRename = useCallback((tabId: string, currentTitle: string) => {
-    setRenamingTabId(tabId);
-    setRenameValue(currentTitle);
-  }, []);
-  const commitRename = useCallback(() => {
-    if (renamingTabId && renameValue.trim()) {
-      void workspace.renameTerminalTab(renamingTabId, renameValue.trim());
-    }
-    setRenamingTabId(null);
-  }, [renamingTabId, renameValue, workspace]);
-  const cancelRename = useCallback(() => setRenamingTabId(null), []);
-  return {
-    renamingTabId,
-    renameValue,
-    setRenameValue,
-    inputRef,
-    startRename,
-    commitRename,
-    cancelRename,
-  };
-}
-
-type TabRenameApi = ReturnType<typeof useTabRename>;
-
 /**
  * The single highlight that marks the active tab. It is one element shared
  * across the current tab set via `layoutId`, so activating another tab slides
@@ -450,6 +408,7 @@ function SplitParentTab({
   splitDirection,
   splitIsActive,
   activeTabLayoutId,
+  rename,
   setActiveTab,
   closeSplit,
   shortcutHint,
@@ -458,46 +417,67 @@ function SplitParentTab({
   splitDirection: SplitDirection | null;
   splitIsActive: boolean;
   activeTabLayoutId: string;
+  rename: TabRenameApi;
   setActiveTab: (id: string) => void;
   closeSplit: () => void;
   shortcutHint: string | null;
 }) {
   const displayTitle = tabTitle(tab);
   const ParentIcon = splitDirection === "vertical" ? Rows2 : Columns2;
+  const isRenaming = tab.id === rename.renamingTabId;
   return (
-    <motion.div
-      animate="visible"
-      className={tabEntryClassName(splitIsActive)}
-      exit="exit"
-      initial="hidden"
-      key="split-parent"
-      title={`Split: ${displayTitle}`}
-      transition={motionTransition.fast}
-      variants={tabItemVariants}
-    >
-      {splitIsActive ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
-      <button
-        className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
-        onClick={() => {
-          setActiveTab(tab.id);
-          if (tab.kind === "terminal") terminalManager.focus(tab.id);
-        }}
-      >
-        <ParentIcon className="text-primary size-3.5 shrink-0" />
-        <TabAgentDot tabId={tab.id} />
-        <ShortcutHint value={shortcutHint} />
-        <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
-      </button>
-      <IconTooltip label="Close split">
-        <button
-          aria-label="Close split"
-          className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
-          onClick={closeSplit}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <motion.div
+          animate="visible"
+          className={tabEntryClassName(splitIsActive)}
+          exit="exit"
+          initial="hidden"
+          key="split-parent"
+          title={`Split: ${displayTitle}`}
+          transition={motionTransition.fast}
+          variants={tabItemVariants}
         >
-          <X className="size-3" />
-        </button>
-      </IconTooltip>
-    </motion.div>
+          {splitIsActive ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
+          {isRenaming ? (
+            <TabRenameInput className="text-sm" rename={rename} />
+          ) : (
+            <button
+              className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
+              onClick={() => {
+                setActiveTab(tab.id);
+                if (tab.kind === "terminal") terminalManager.focus(tab.id);
+              }}
+              onDoubleClick={() => rename.startRename(tab.id, displayTitle)}
+            >
+              <ParentIcon className="text-primary size-3.5 shrink-0" />
+              <TabAgentDot tabId={tab.id} />
+              <ShortcutHint value={shortcutHint} />
+              <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+            </button>
+          )}
+          <IconTooltip label="Close split">
+            <button
+              aria-label="Close split"
+              className="relative rounded p-0.5 opacity-60 transition-opacity hover:bg-muted hover:opacity-100"
+              onClick={closeSplit}
+            >
+              <X className="size-3" />
+            </button>
+          </IconTooltip>
+        </motion.div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => rename.startRenameFromMenu(tab.id, displayTitle)}>
+          <Pencil />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={closeSplit}>
+          <X />
+          Close split
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -551,15 +531,7 @@ function TerminalTabItem({
           >
             {active ? <ActiveTabHighlight layoutId={activeTabLayoutId} /> : null}
             {isRenaming ? (
-              <input
-                ref={rename.inputRef}
-                aria-label="Rename tab"
-                className="text-foreground ring-ring relative w-0 min-w-0 flex-1 rounded bg-muted px-1 text-left text-sm outline-none ring-1"
-                value={rename.renameValue}
-                onChange={(e) => rename.setRenameValue(e.target.value)}
-                onKeyDown={commitOnEnterCancelOnEscape(rename.commitRename, rename.cancelRename)}
-                onBlur={rename.commitRename}
-              />
+              <TabRenameInput className="text-sm" rename={rename} />
             ) : (
               <button
                 className="relative flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -589,7 +561,7 @@ function TerminalTabItem({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={() => rename.startRename(tab.id, displayTitle)}>
+        <ContextMenuItem onSelect={() => rename.startRenameFromMenu(tab.id, displayTitle)}>
           <Pencil />
           Rename
         </ContextMenuItem>
@@ -628,6 +600,7 @@ function TerminalTabEntry(props: TerminalTabEntryProps) {
       <SplitParentTab
         activeTabLayoutId={props.activeTabLayoutId}
         closeSplit={props.closeSplit}
+        rename={props.rename}
         setActiveTab={props.setActiveTab}
         splitDirection={props.splitDirection}
         splitIsActive={props.splitIsActive}
@@ -838,7 +811,7 @@ export function TerminalTabs() {
   const requestCloseTabs = useConfirmCloseTabs();
   const { beginTabDrag, endTabDrag } = useTabDrag();
   const [selectedEditorId, setSelectedEditorId] = useState(readSelectedEditorId);
-  const rename = useTabRename(workspace);
+  const rename = useTabRename();
   const { split, parentTabId, splitDirection, splitIsActive, splitTabs, topTabs } =
     useSplitSummary(workspace);
   const closeSplit = useCallback(() => requestCloseTabs(splitTabs), [requestCloseTabs, splitTabs]);

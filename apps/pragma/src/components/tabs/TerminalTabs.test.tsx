@@ -1,5 +1,5 @@
 import type { ShellProfile, Tab } from "@pragma/constants";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -261,6 +261,33 @@ describe("TerminalTabs", () => {
 
     expect(mockWorkspace.setActiveTab).toHaveBeenCalledWith("one");
     expect(terminalManager.focus).toHaveBeenCalledWith("one");
+  });
+
+  it("renames the split parent tab from a double click", async () => {
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+
+    await userEvent.dblClick(
+      within(screen.getByTitle("Split: one")).getByRole("button", { name: "one" }),
+    );
+    const input = screen.getByRole("textbox", { name: "Rename tab" });
+    fireEvent.change(input, { target: { value: "renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockWorkspace.renameTerminalTab).toHaveBeenCalledWith("one", "renamed");
+  });
+
+  it("renames the split parent tab from its context menu", async () => {
+    mockWorkspace.splitRootByWorktree = { worktree: splitRoot };
+    render(<TerminalTabs />);
+
+    fireEvent.contextMenu(screen.getByTitle("Split: one"));
+    await userEvent.click(await screen.findByText("Rename"));
+    const input = await screen.findByRole("textbox", { name: "Rename tab" });
+    fireEvent.change(input, { target: { value: "from-menu" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockWorkspace.renameTerminalTab).toHaveBeenCalledWith("one", "from-menu");
   });
 
   it("closes every tab in the split from the parent tab's X", async () => {
