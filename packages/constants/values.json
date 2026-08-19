@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 23,
+    "protocolVersion": 24,
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"

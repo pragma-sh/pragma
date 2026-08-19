@@ -60,6 +60,8 @@
   source and attached agent included. `root` is required and must be absolute;
   listing and frontmatter parsing belong to `pragma_core::scratchpads`, so this
   route only validates and forwards.
+- `POST /v1/control/boardDraftCreate` - create an agent-board draft for an existing
+  worktree through the running desktop controller.
 
 - `GET /web/{*path}` - no auth, the staged Pragma Go web bundle. See _Web app_ below.
 

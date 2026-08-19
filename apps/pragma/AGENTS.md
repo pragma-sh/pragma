@@ -208,6 +208,10 @@ also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports 
   ramps, and replace only the selected scope's `colors` block when applied. Selecting
   Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
   authoritative; merged values equal to a stylesheet default are also omitted.
+- Plugins may contribute selectable palettes with `defineTheme` and `definePlugin({ themes })`.
+  Theme Settings shows bundled/global contributions at global scope and adds active-project
+  contributions at project scope. Applying one copies its light/dark token values into
+  `.pragma/theme.json`; runtime theme resolution never depends on plugin remaining installed.
 - The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
   light ramp by temporarily removing the `dark` (and `vibrancy`) classes.
 
@@ -467,6 +471,10 @@ app-global and falls back to Plugins when the user switches to Project scope. Th
 automations context rather than `config.json`, so like Theme it renders past the
 config load state. `openSettings(section?)` deep-links a section (the command
 palette's "Open automations" uses it).
+
+Plugins add React settings sections with `defineSettingsPage` and
+`definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
+render under the standard plugin boundary, and use the same host hooks as sidebar tabs.
 
 **Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
 that actually applies after the `default → global → project` merge, whether it differs
@@ -1298,7 +1306,9 @@ Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
 commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The
 shared `KanbanPromptCard` shape lives in `@pragma/constants` (`KanbanPromptStatus` /
 `KanbanCompletedAction` / `KanbanSchedulingMode`). The board is project-scoped: cards
-load by `selectedProjectId` and reload after every mutation.
+load by `selectedProjectId` and reload after every mutation. SDK callers create drafts
+with `client.createBoardDraft`; the brokered desktop controller resolves its worktree to
+the owning project/branch and emits `pragma:kanban-changed` for live reload.
 
 **Transitions are enforced, not free-form** (no drag): `draft → inProgress` only via the
 card's Start flow; `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to

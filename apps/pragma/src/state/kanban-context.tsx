@@ -37,6 +37,7 @@ import {
   listKanbanCards,
   mergeWorktreeToParent,
   moveKanbanCard,
+  onKanbanChanged,
   onAgentReport,
   stageAll,
   updateKanbanCard,
@@ -52,6 +53,7 @@ interface KanbanDraftInput {
   prompt: string;
   agentId: string;
   modelId: string | null;
+  reasoningId: string | null;
 }
 
 interface KanbanContextValue {
@@ -257,6 +259,21 @@ function useKanbanCards(projectId: string | null): {
     }
     void reload();
   }, [projectId, reload]);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onKanbanChanged((changedProjectId) => {
+      if (changedProjectId === projectIdRef.current) void reload();
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+      return undefined;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [projectIdRef, reload]);
   return { cards, loading, reload, cardsRef };
 }
 
@@ -303,7 +320,14 @@ function useKanbanCardDrafts(
       if (!target) {
         return;
       }
-      await createKanbanCard(target, input.branchName, input.prompt, input.agentId, input.modelId);
+      await createKanbanCard(
+        target,
+        input.branchName,
+        input.prompt,
+        input.agentId,
+        input.modelId,
+        input.reasoningId,
+      );
       await reload();
     },
     [projectIdRef, reload],
@@ -316,6 +340,7 @@ function useKanbanCardDrafts(
         prompt: input.prompt,
         agentId: input.agentId,
         modelId: input.modelId,
+        reasoningId: input.reasoningId,
       });
       await reload();
     },
@@ -385,7 +410,7 @@ function useKanbanCardLifecycle(
       await ws.markTabAgent(tab.id, agent);
       await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
         modelId: card.modelId ?? null,
-        reasoningId: null,
+        reasoningId: card.reasoningId ?? null,
       });
       await updateKanbanCard({
         ...card,
