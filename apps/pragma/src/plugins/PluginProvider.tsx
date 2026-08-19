@@ -41,7 +41,19 @@ const EMPTY_WORKTREES: Worktree[] = [];
  * projects re-evaluates cheaply without re-importing bundles.
  */
 export function PluginProvider(props: { children: ReactNode }): ReactNode {
-  const { projects, projectTabs, selectedProjectId, worktrees, openPluginWebView } = useWorkspace();
+  const workspace = useWorkspace();
+  usePluginRuntimeSynchronization(workspace);
+
+  return (
+    <>
+      <PluginCommandKeybindings activeProjectId={workspace.selectedProjectId} />
+      {props.children}
+    </>
+  );
+}
+
+function usePluginRuntimeSynchronization(workspace: ReturnType<typeof useWorkspace>): void {
+  const { projects, projectTabs, selectedProjectId, worktrees, openPluginWebView } = workspace;
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedPath = selectedProject?.path ?? null;
   const selectedWorktrees = selectedProjectId
@@ -59,13 +71,6 @@ export function PluginProvider(props: { children: ReactNode }): ReactNode {
   usePluginContributionRegistries(activePlugins, runtime, openPluginWebView);
   usePluginLoading(projects, selectedPath, manifestSignature);
   usePluginDevReload(projects, selectedPath, manifestSignature);
-
-  return (
-    <>
-      <PluginCommandKeybindings activeProjectId={selectedProjectId} />
-      {props.children}
-    </>
-  );
 }
 
 function useRuntimeSessions(tabs: Tab[], worktrees: Worktree[]): void {
