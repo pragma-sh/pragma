@@ -913,7 +913,18 @@ single **parent tab** for the whole split (named after its top-left pane). Split
 pulls only the **active** tab into the new group. Dropping a tab on a pane's **content**
 always splits (four quadrant zones via `dropTargetAt`); dropping on a pane's **tab bar**
 stacks it into that pane. Each `PaneBar` has its own "+" that creates a tab inside that
-pane; the top strip's "+" and `⌘T`/`⌘B` always add normal top-level tabs.
+pane; the top strip's "+" and `⌘T`/`⌘B` always add normal top-level tabs. That pane "+"
+menu also carries **Open agent**, a submenu of the configured agents (`useAgentsList`),
+each launched into a fresh terminal tab of that pane — which is why `createTabInPane`
+returns the created `Tab`, not `void`.
+
+**Renaming works the same everywhere a tab is shown**: double-click the title or
+right-click → **Rename**, on a normal top-bar tab, on the split **parent** tab, and on
+every `PaneBar` tab. The state lives in `components/tabs/use-tab-rename.ts` and the field
+in `TabRenameInput` — one hook instance per strip, never a second implementation. Starting
+a rename from a menu must use `startRenameFromMenu`: Radix keeps focus trapped inside the
+open menu, so an input mounted straight from `onSelect` is blurred the moment it focuses
+itself and the blur commits the unchanged title.
 
 **Split layouts persist in SQLite** (`splits` table, v4 migration — one row per
 worktree, cascade-deleted with the worktree). The layout is an opaque JSON blob
