@@ -291,7 +291,7 @@ interface WorkspaceContextValue extends WorkspaceState {
     options?: WorktreeTargetOptions,
   ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
@@ -2766,7 +2766,7 @@ function useTabCreation(
   ) => Promise<Tab | null>;
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
 } {
   const createTab = useCallback(
     async (
@@ -2818,9 +2818,7 @@ function useTabCreation(
     [createTab],
   );
   const createTabInPane = useCallback(
-    async (paneId: string, kind: "terminal" | "browser") => {
-      await createTab(kind, paneId);
-    },
+    (paneId: string, kind: "terminal" | "browser") => createTab(kind, paneId),
     [createTab],
   );
   return { createTab, createTerminalTab, createBrowserTab, createTabInPane };
