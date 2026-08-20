@@ -1052,6 +1052,16 @@ fn plugin_storage_set(
     db.plugin_storage_set(&plugin_id, &key, &value)
 }
 
+/// Deletes one plugin-owned storage value.
+#[tauri::command]
+fn plugin_storage_delete(
+    db: tauri::State<'_, Db>,
+    plugin_id: String,
+    key: String,
+) -> AppResult<()> {
+    db.plugin_storage_delete(&plugin_id, &key)
+}
+
 /// Wires the app's managed state, menu, and dev-only plugins during Tauri setup.
 /// Extracted from `run` so the builder chain stays readable (and within the
 /// per-function line budget).
@@ -1225,6 +1235,7 @@ pub fn run() {
             set_active_selection,
             plugin_storage_get,
             plugin_storage_set,
+            plugin_storage_delete,
             kanban::list_kanban_cards,
             kanban::create_kanban_card,
             kanban::update_kanban_card,

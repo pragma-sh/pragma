@@ -55,8 +55,11 @@ interface DraftSetters {
 }
 
 /** Model selection seeded from a card's saved model id (or the empty default). */
-function seedModelSelection(modelId: string | null): AgentModelSelection {
-  return modelId ? { modelId, reasoningId: null } : EMPTY_MODEL_SELECTION;
+function seedModelSelection(
+  modelId: string | null,
+  reasoningId: string | null,
+): AgentModelSelection {
+  return modelId ? { modelId, reasoningId } : EMPTY_MODEL_SELECTION;
 }
 
 /** Seed the form from an existing draft card. */
@@ -65,7 +68,7 @@ function seedFromCard(card: KanbanPromptCard, apply: DraftSetters): void {
   apply.setPrompt(card.prompt);
   apply.setAgentId(card.agentId);
   apply.setPreviousAgent(card.agentId);
-  apply.setModelSelection(seedModelSelection(card.modelId ?? null));
+  apply.setModelSelection(seedModelSelection(card.modelId ?? null, card.reasoningId ?? null));
   apply.setError(null);
 }
 
@@ -335,6 +338,7 @@ function useDraftHandlers(ctx: DraftHandlersContext) {
         prompt,
         agentId,
         modelId: modelSelection.modelId,
+        reasoningId: modelSelection.reasoningId,
       };
       if (card) {
         await kanban.updateCardDraft(card, input);

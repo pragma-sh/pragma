@@ -13,9 +13,12 @@ packages/plugin/
 ├── src/plugin.ts        # definePlugin + API-version stamp
 ├── src/agent.ts         # defineAgent and agent types
 ├── src/watcher.ts       # defineWatcher and watcher context types
-├── src/contributions.ts # UI slot, web view, and command contribution helpers
+├── src/contributions.ts # UI slot, Settings page, web view, and command contribution helpers
 ├── src/usage-limits.ts  # Host-rendered provider usage-limit declarations
+├── src/theme.ts         # Selectable Theme-settings declarations
 ├── src/hooks.ts         # Hook delegates onto __PRAGMA__.hooks
+├── src/storage.ts       # Plugin-scoped durable JSON-storage type
+├── src/runtime.ts       # Imperative event, theme, and session access
 ├── src/bridge.ts        # __PRAGMA__ bridge/action contract
 ├── src/react*.ts        # React/ReactDOM/jsx-runtime shims
 ├── src/ui.ts            # Host UI primitive delegates
@@ -28,6 +31,8 @@ packages/plugin/
 - `definePlugin` is the only place the baked `PLUGIN_API_VERSION` is stamped. Server-side
   `onInstall` / `onPragmaLoad` execution belongs to `@pragma/plugins-host`.
 - Runtime shims must fail loudly when `globalThis.__PRAGMA__` is absent.
+- Storage reaches plugins only through a host-bound `PluginContext.storage`; never expose
+  a bridge or helper that accepts a plugin ID from plugin code.
 - **A plugin's `pragma.main` bundle must be browser-safe too.** The desktop webview
   imports it through a blob URL to list launchable agents, so a **static** `node:` import
   never resolves and a module-scope `process.*` read throws — either drops the plugin to

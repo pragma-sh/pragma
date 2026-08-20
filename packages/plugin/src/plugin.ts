@@ -4,6 +4,7 @@ import type { AgentDefinition } from "./agent";
 import type {
   CommandDefinition,
   PluginIcon,
+  SettingsPageDefinition,
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
@@ -14,6 +15,7 @@ import type { PluginContext } from "./types";
 import type { PluginDeepLinkEvent } from "./types";
 import type { WatcherDefinition } from "./watcher";
 import type { UsageLimitProviderDefinition } from "./usage-limits";
+import type { ThemeDefinition } from "./theme";
 
 /** Infers a config schema's parsed output type, defaulting to `unknown` when no schema is given. */
 export type InferConfig<TConfigSchema extends ZodTypeAny> =
@@ -22,6 +24,7 @@ export type InferConfig<TConfigSchema extends ZodTypeAny> =
 /** UI surfaces a plugin can contribute to. */
 export interface PluginUiContributions<TConfig = unknown> {
   sidebarTabs?: SidebarTabDefinition<TConfig>[];
+  settingsPages?: SettingsPageDefinition<TConfig>[];
   topper?: TopperItemDefinition<TConfig>[];
   sidebarCards?: SidebarCardDefinition<TConfig>[];
   webViews?: WebViewDefinition[];
@@ -62,6 +65,7 @@ export interface PluginDefinitionInput<TConfigSchema extends ZodTypeAny = ZodTyp
   keybindings?: PluginKeybindingsContributions;
   events?: PluginEventHandlers<InferConfig<TConfigSchema>>;
   usageLimits?: UsageLimitProviderDefinition<InferConfig<TConfigSchema>>[];
+  themes?: ThemeDefinition[];
   css?: string;
   /** Runs once when Pragma first discovers this plugin installation. */
   onInstall?: (ctx: PluginContext<InferConfig<TConfigSchema>>) => void | Promise<void>;

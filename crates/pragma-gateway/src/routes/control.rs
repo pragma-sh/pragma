@@ -26,10 +26,11 @@ pub fn control(
 }
 
 /// Parses the allowed control methods from the URL path. V1 allows only
-/// `agentSessionLaunch` and `tabRename`; other methods stay on the CLI's direct socket path.
+/// `agentSessionLaunch`, `boardDraftCreate`, and `tabRename`; other methods stay on the CLI's direct socket path.
 fn parse_method(method: &str) -> Option<ControlMethod> {
     Some(match method {
         "agentSessionLaunch" => ControlMethod::AgentSessionLaunch,
+        "boardDraftCreate" => ControlMethod::BoardDraftCreate,
         "tabRename" => ControlMethod::TabRename,
         _ => return None,
     })
@@ -46,6 +47,10 @@ mod tests {
         assert!(matches!(
             parse_method("agentSessionLaunch"),
             Some(ControlMethod::AgentSessionLaunch)
+        ));
+        assert!(matches!(
+            parse_method("boardDraftCreate"),
+            Some(ControlMethod::BoardDraftCreate)
         ));
         assert!(matches!(
             parse_method("tabRename"),

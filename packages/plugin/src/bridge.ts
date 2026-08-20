@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes, ComponentType, HTMLAttributes, JSX } from "r
 import type { AgentMessage } from "@pragma/sdk";
 import type { OpenWebViewOptions, WebViewReference } from "./contributions";
 import type { PragmaHooksBridge } from "./hooks";
+import type { PluginSessionSummary } from "./types";
 
 /** Minimal host Button props exposed through `@pragma/plugin/ui`. */
 export type PragmaButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -38,6 +39,20 @@ export interface PragmaActionsBridge {
   agents: {
     /** Reports one rich agent message through the host SDK bridge. */
     reportMessage: (message: AgentMessage) => Promise<void>;
+  };
+  events: {
+    /** Subscribes to one named host event. */
+    subscribe: (eventName: string, handler: (payload: unknown) => void) => () => void;
+  };
+  theme: {
+    /** Returns the host's current color theme. */
+    get: () => "light" | "dark";
+    /** Subscribes to host color-theme changes. */
+    subscribe: (listener: () => void) => () => void;
+  };
+  sessions: {
+    /** Lists current host sessions. */
+    list: () => Promise<PluginSessionSummary[]>;
   };
 }
 

@@ -2,14 +2,20 @@ import { Component as ReactComponent, type ErrorInfo, type ReactNode } from "rea
 
 import type {
   PluginContext,
+  PluginComponent,
   PluginWhen,
+  SettingsPageDefinition,
   SidebarCardDefinition,
   SidebarTabDefinition,
   TopperItemDefinition,
   UsageLimitProviderDefinition,
 } from "@pragma/plugin";
-
-import { PluginBoundary, notifyFromPlugin, usePluginRuntimeState } from "./host-hooks";
+import {
+  PluginBoundary,
+  notifyFromPlugin,
+  pluginStorageFor,
+  usePluginRuntimeState,
+} from "./host-hooks";
 import { useActivePlugins, type PluginRecord } from "./registry";
 
 /** A loaded plugin contribution tagged with the record that supplied it. */
@@ -25,6 +31,13 @@ export function usePluginSidebarTabs(
   activeProjectId: string | null,
 ): VisiblePluginContribution<SidebarTabDefinition>[] {
   return useVisibleContributions(activeProjectId, (definition) => definition.ui?.sidebarTabs);
+}
+
+/** Returns visible Settings-page contributions for the selected settings scope. */
+export function usePluginSettingsPages(
+  activeProjectId: string | null,
+): VisiblePluginContribution<SettingsPageDefinition>[] {
+  return useVisibleContributions(activeProjectId, (definition) => definition.ui?.settingsPages);
 }
 
 /** Returns visible workspace topper-item contributions for the active project. */
@@ -127,6 +140,7 @@ export function pluginContextForRecord(
     project: runtime.project,
     sdk: runtime.sdk,
     notify: notifyFromPlugin,
+    storage: pluginStorageFor(record.pluginId),
   };
 }
 
@@ -173,7 +187,7 @@ export function RenderPluginContribution(props: {
   config: unknown;
   webViewPayload?: unknown;
   resetKey: string;
-  component: () => ReactNode;
+  component: PluginComponent;
 }): ReactNode {
   const PluginComponent = props.component;
   return (
@@ -183,7 +197,7 @@ export function RenderPluginContribution(props: {
         pluginId={props.pluginId}
         webViewPayload={props.webViewPayload}
       >
-        <PluginComponent />
+        <PluginComponent webViewPayload={props.webViewPayload} />
       </PluginBoundary>
     </PluginErrorBoundary>
   );
