@@ -110,6 +110,7 @@ export type {
   KanbanCompletedAction,
   KanbanSchedulingMode,
   KanbanPromptCard,
+  BoardDraftCreatePayload,
   GitHub,
   GitHubUser,
   GitHubAuthMethod,

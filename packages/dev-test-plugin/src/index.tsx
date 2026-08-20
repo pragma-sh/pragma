@@ -1,9 +1,16 @@
-import { defineCommand, definePlugin, defineSidebarCard, defineSidebarTab } from "@pragma/plugin";
+import {
+  defineCommand,
+  definePlugin,
+  defineSettingsPage,
+  defineSidebarCard,
+  defineSidebarTab,
+} from "@pragma/plugin";
 
 import { AgentPulseCard } from "./agent-pulse-card";
 import { FORTUNE_REROLL_EVENT, FortuneTab } from "./fortune-tab";
 import { OverviewTab } from "./overview-tab";
 import { openReportWebView, reportWebView } from "./report-webview";
+import { DevTestSettingsPage } from "./settings-page";
 
 export default definePlugin({
   name: "Pragma Dev Test Plugin",
@@ -15,6 +22,13 @@ export default definePlugin({
       defineSidebarTab({ id: "fortune", title: "Fortune", component: FortuneTab }),
     ],
     sidebarCards: [defineSidebarCard({ title: "Agent Pulse", component: AgentPulseCard })],
+    settingsPages: [
+      defineSettingsPage({
+        id: "dev-test",
+        title: "Dev Test Plugin",
+        component: DevTestSettingsPage,
+      }),
+    ],
     webViews: [reportWebView],
   },
   commands: [

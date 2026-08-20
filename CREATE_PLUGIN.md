@@ -255,6 +255,35 @@ Core must never learn host-specific model output formats. Keep parsing in your p
 model provider and prefer supported host CLI/API model-list surfaces over private
 databases or internal caches.
 
+### Selectable themes
+
+Plugins may contribute palettes to Settings → Theme with `defineTheme`:
+
+```ts
+import { definePlugin, defineTheme } from "@pragma/plugin";
+
+const midnight = defineTheme({
+  id: "midnight",
+  name: "Midnight",
+  description: "Low-contrast dark palette",
+  colors: {
+    light: { background: "#ffffff", foreground: "#111111", primary: "#335cff" },
+    dark: { background: "#11131a", foreground: "#e8eaf0", primary: "#8aa2ff" },
+  },
+});
+
+export default definePlugin({
+  name: "Example",
+  themes: [midnight],
+});
+```
+
+Color keys are Pragma theme-token names without the `--` prefix. Supply both light and
+dark maps. Settings copies a selected palette into the current scope's
+`.pragma/theme.json`; it does not retain a runtime dependency on the plugin. Bundled and
+global plugin themes appear at both settings scopes. Project plugin themes appear only
+for their active project.
+
 ---
 
 ## Installation (through the host tool, not Pragma)

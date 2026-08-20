@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { PluginDefinition } from "@pragma/plugin";
+
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
   aiAuthMethods,
@@ -14,6 +16,7 @@ import {
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
 import { useGitHub } from "@/state/github-context";
+import { clearPlugins, setPluginsForScope } from "@/plugins/registry";
 
 const closeSettings = vi.fn();
 const signOut = vi.fn();
@@ -89,6 +92,7 @@ function gitHubValue(overrides: Partial<ReturnType<typeof useGitHub>> = {}) {
 describe("SettingsWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPlugins();
     vi.mocked(readConfig).mockResolvedValue({
       exists: true,
       path: "/home/user/.pragma/config.json",
@@ -156,6 +160,33 @@ describe("SettingsWorkspace", () => {
       ),
     );
     expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
+  });
+
+  it("renders plugin settings pages from the Settings navigation", async () => {
+    const definition = {
+      name: "Plugin Settings",
+      ui: {
+        settingsPages: [
+          { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
+        ],
+      },
+      __apiVersion: "0.4.0",
+    } as PluginDefinition;
+    setPluginsForScope("global", null, [
+      {
+        pluginId: "plugin-settings",
+        version: "1.0.0",
+        scope: "global",
+        status: "loaded",
+        config: undefined,
+        definition,
+      },
+    ]);
+
+    render(<SettingsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Plugin Account" }));
+
+    expect(screen.getByText("Account settings")).toBeInTheDocument();
   });
 
   it("hides the WSL section off Windows", async () => {

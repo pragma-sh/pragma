@@ -251,6 +251,11 @@ export function onTabsChanged(
   return listen<WorkspaceChangedEvent>("tabsChanged", (event) => handler(event.payload));
 }
 
+/** Subscribes to agent-board mutations created through the public SDK. */
+export function onKanbanChanged(handler: (projectId: string) => void): Promise<UnlistenFn> {
+  return listen<string>("pragma:kanban-changed", (event) => handler(event.payload));
+}
+
 /** A mobile-requested agent session ready for background launch. */
 export interface AgentSessionLaunchRequest {
   projectId: string;
@@ -723,6 +728,7 @@ export function createKanbanCard(
   prompt: string,
   agentId: string,
   modelId?: string | null,
+  reasoningId?: string | null,
 ): Promise<KanbanPromptCard> {
   return invoke<KanbanPromptCard>("create_kanban_card", {
     projectId,
@@ -730,6 +736,7 @@ export function createKanbanCard(
     prompt,
     agentId,
     modelId: modelId ?? null,
+    reasoningId: reasoningId ?? null,
   });
 }
 
@@ -1795,6 +1802,11 @@ export function pluginStorageGet(pluginId: string, key: string): Promise<string 
 /** Writes one plugin-owned durable storage value as an opaque JSON string. */
 export function pluginStorageSet(pluginId: string, key: string, value: string): Promise<void> {
   return invoke("plugin_storage_set", { pluginId, key, value });
+}
+
+/** Deletes one plugin-owned durable storage value. */
+export function pluginStorageDelete(pluginId: string, key: string): Promise<void> {
+  return invoke("plugin_storage_delete", { pluginId, key });
 }
 
 // -------------------------------- fanouts ---------------------------------

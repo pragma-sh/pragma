@@ -9,6 +9,7 @@ export {
   type FanoutSubscriptionEvent,
 } from "./fanouts-client";
 export type {
+  BoardDraftCreatePayload,
   Fanout,
   FanoutCreateRequest,
   FanoutDeliveryReceipt,
@@ -34,6 +35,7 @@ export type {
   FanoutSendTarget,
   FanoutStatus,
   FanoutSubscriptionPayload,
+  KanbanPromptCard,
 } from "@pragma/constants";
 export { PushClient, type PushRegistration } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";

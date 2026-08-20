@@ -26,6 +26,7 @@ pub fn create_kanban_card(
     prompt: String,
     agent_id: String,
     model_id: Option<String>,
+    reasoning_id: Option<String>,
 ) -> AppResult<KanbanPromptCard> {
     db.create_kanban_card(
         &project_id,
@@ -33,6 +34,7 @@ pub fn create_kanban_card(
         &prompt,
         &agent_id,
         model_id.as_deref(),
+        reasoning_id.as_deref(),
     )
 }
 

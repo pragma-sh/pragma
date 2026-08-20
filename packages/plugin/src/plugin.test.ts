@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PLUGIN_API_VERSION } from "./generated/version";
-import { defineWebView, openWebView } from "./contributions";
+import { defineSettingsPage, defineWebView, openWebView } from "./contributions";
 import { definePlugin, type PluginDefinitionInput } from "./plugin";
+import { defineTheme } from "./theme";
 import { defineUsageLimitProvider } from "./usage-limits";
 
 const onInstall = () => {};
@@ -43,6 +44,13 @@ describe("definePlugin", () => {
     expect(plugin.ui?.webViews).toEqual([webView]);
   });
 
+  it("preserves React settings-page contributions", () => {
+    const page = defineSettingsPage({ id: "account", title: "Account", component: () => null });
+    const plugin = definePlugin({ name: "Test Plugin", ui: { settingsPages: [page] } });
+
+    expect(plugin.ui?.settingsPages).toEqual([page]);
+  });
+
   it("preserves usage-limit providers", () => {
     const provider = defineUsageLimitProvider({
       id: "cursor",
@@ -54,6 +62,20 @@ describe("definePlugin", () => {
     const plugin = definePlugin({ name: "Test Plugin", usageLimits: [provider] });
 
     expect(plugin.usageLimits).toEqual([provider]);
+  });
+
+  it("preserves selectable themes", () => {
+    const theme = defineTheme({
+      id: "midnight",
+      name: "Midnight",
+      colors: {
+        light: { background: "#ffffff", foreground: "#111111" },
+        dark: { background: "#111111", foreground: "#ffffff" },
+      },
+    });
+    const plugin = definePlugin({ name: "Test Plugin", themes: [theme] });
+
+    expect(plugin.themes).toEqual([theme]);
   });
 });
 

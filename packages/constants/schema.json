@@ -905,6 +905,7 @@
         "browserScreenshot",
         "agentStart",
         "agentSessionLaunch",
+        "boardDraftCreate",
         "scratchpadCreate"
       ]
     },
@@ -3642,6 +3643,10 @@
           "type": ["string", "null"],
           "description": "Selected model id for the agent launch; null uses the agent default."
         },
+        "reasoningId": {
+          "type": ["string", "null"],
+          "description": "Selected reasoning level id for the agent launch; null uses automatic reasoning."
+        },
         "status": {
           "$ref": "#/definitions/KanbanPromptStatus"
         },
@@ -3688,6 +3693,31 @@
         "completedAt": {
           "type": ["string", "null"],
           "description": "When the card moved to completed; null until completed."
+        }
+      }
+    },
+    "BoardDraftCreatePayload": {
+      "title": "BoardDraftCreatePayload",
+      "description": "Payload for creating an agent-board draft through the brokered desktop controller.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "worktreeId", "agentId"],
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string",
+          "description": "Existing worktree whose project and branch receive the draft."
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": ["string", "null"]
+        },
+        "reasoningId": {
+          "type": ["string", "null"]
         }
       }
     },

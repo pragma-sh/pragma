@@ -1,7 +1,7 @@
 # packages/dev-test-plugin — @pragma/dev-test-plugin
 
 Lightweight dev/test Pragma plugin. Exercises the public `@pragma/plugin`
-surface (sidebar tabs, a sidebar card, a plugin web view, host + SDK event hooks) and ships with
+surface (sidebar tabs, a sidebar card, a Settings page, a plugin web view, host + SDK event hooks) and ships with
 Vitest + jsdom coverage for those React hooks. It also served as the
 real-world test target for the `create-pragma-plugin` scaffolder CLI: it was
 generated non-interactively with
@@ -30,6 +30,9 @@ and then adapted in place (workspace deps, split modules, tests, AGENTS.md).
   declared with `defineWebView`; `openReportWebView()` opens it with a typed
   payload and `dedupeKey`, and the view reads that payload via
   `useWebViewPayload`.
+- **`DevTestSettingsPage`** (`src/settings-page.tsx`) — React Settings page declared
+  with `defineSettingsPage`; its form calls `sdk.createBoardDraft` with prompt,
+  worktree, agent, model, and reasoning selections.
 - One `defineCommand` greeting (`pragma-dev-test-plugin.hello`).
 - One `defineCommand` web view opener (`pragma-dev-test-plugin.report.open`).
 
@@ -53,6 +56,8 @@ SDK event async generator). Cover:
   pulse; `useEvent("agent.report")` increments the counter via `emit`.
 - `src/report-webview.test.tsx` — `openReportWebView()` delegates to the
   host bridge action with the `defineWebView` handle and dedupe metadata.
+- `src/settings-page.test.tsx` — Settings form forwards all board-draft fields and
+  reports the created card through `useNotify`.
 
 ## Rules
 
