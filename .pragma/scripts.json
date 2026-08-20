@@ -3,6 +3,7 @@
   "runScripts": {
     "run": { "command": ["bun run dev"] },
     "build": { "command": ["bun run --filter pragma tauri:build"] },
-    "mobile": { "command": ["bun run dev:mobile:ios"], "icon": "lucide:smartphone" }
+    "mobile": { "command": ["bun run dev:mobile:ios"], "icon": "lucide:smartphone" },
+    "www": { "command": ["bun run dev:www"], "icon": "lucide:globe" }
   }
 }
