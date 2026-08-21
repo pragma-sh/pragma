@@ -32,6 +32,16 @@ from the desktop.
   reachability/token probe is `probeConnection()` (an authed `agents.catalog()`
   call). QR carries the protocol version; manual entry can't, so it's checked by
   the probe only.
+  - **The scanner highlights and then freezes.** Every detection is reduced to
+    one padded, clamped rectangle by the pure `lib/scan-frame.ts`, drawn over
+    the preview; `expo-camera` already reports corner points in the camera
+    view's own coordinate space on both platforms, so no projection is needed —
+    but a report that clamps to nothing (a stale layout, a letterboxed web
+    video) draws no box rather than a wrong one. `sameScanFrame` drops the
+    near-identical rectangles that arrive every camera frame, and a rectangle
+    that stops arriving expires. Once the screen is busy verifying a scan,
+    `CameraView.pausePreview()` holds the picture and the box stays on the code
+    that was read; a failed probe resumes both.
   - **ngrok interstitial gotcha:** every gateway request goes through
     `clientFor()` in `lib/connection-context.tsx`, which sets the
     `ngrok-skip-browser-warning` header. ngrok's free tier serves an HTML
@@ -193,7 +203,9 @@ lib/
   haptics.ts                     # haptic intent wrappers
   widgets/                       # widget-data (pure, Vitest) + widget layouts + app→widget sync
   push.ts                        # Expo push: permission, token registration, unregister + retry
+  push-check.ts                  # pure: settings notification check → one readable line (Vitest)
   push-route.ts                  # pure: notification data → chat route (Vitest)
+  scan-frame.ts                  # pure: barcode report → highlight rectangle (Vitest)
   pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
   registration-gate.ts           # pure: orders registration before unregister (Vitest)
   use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
@@ -339,6 +351,17 @@ implemented in `lib/widgets/`:
   minting needs an EAS project id from the runtime manifest or `extra.eas.projectId`
   in `app.json`; without it `registerForPush` returns `unsupported` and the app runs
   unchanged.
+- **Silence has several unrelated causes, so Settings names the one in play.** Push can
+  be quiet because permission was refused, because the build has no push service (a
+  simulator, the browser), because the host has no phone registered, because the
+  desktop window is focused and the gateway is deliberately holding alerts back, or
+  because Expo refused the message — an APNs key the EAS project never got shows up
+  only as an `InvalidCredentials` ticket, and nothing else ever reports it. The
+  Notifications card in `app/(tabs)/settings/index.tsx` registers and then calls
+  `client.push.test()`, which now answers `200` with `{ sent, errors }` so the
+  rejection reaches the phone verbatim; `lib/push-check.ts` holds the pure mapping to
+  one line. The agent-alert path logs the same rejections on the host. Before
+  debugging anything else, check the desktop is not simply in front of the user.
 - **An unregister the host never acknowledged is queued, never dropped.** Unpair has to
   work with the desktop unreachable, but discarding the failed `DELETE /v1/push/tokens`
   would leave the gateway pushing agent-alert text to a phone that can no longer ask it
@@ -373,6 +396,29 @@ Bun's default **isolated** linker (`@babel/preset-*` become unresolvable). The r
 `bunfig.toml` therefore pins `[install] linker = "hoisted"` — keep it. Without it,
 `expo export` / `expo start` fail with `Cannot find module 'babel-preset-expo'` and
 friends.
+
+## Config plugins (`plugins/`)
+
+Local Expo config plugins live in `plugins/` and are registered by path in
+`app.json`'s `plugins` array.
+
+- **`with-android-splash-logo`** strips the dangling
+  `windowSplashScreenAnimatedIcon` -> `@drawable/splashscreen_logo` item that
+  `expo-splash-screen` writes into `res/values/styles.xml`. That plugin writes
+  the item unconditionally but only emits the drawable when it is configured
+  with an `image`/`drawable`. Our splash is a background colour with no logo
+  (matching the iOS storyboard, whose `<subviews/>` is empty), so the drawable
+  never exists and `:app:processDebugResources` fails with
+  `resource drawable/splashscreen_logo ... not found`. Android then falls back
+  to the launcher icon, which `android:windowSplashScreenBehavior="icon_preferred"`
+  already asks for. If a splash logo is ever wanted, delete this plugin and give
+  `expo-splash-screen` an `image` instead.
+- **Mods run last-registered-first.** `withMod` intercepts whatever mod is
+  already on the config and calls it as `nextMod`, so an _earlier_ entry in the
+  `plugins` array runs _after_ a later one. A plugin that overrides another
+  plugin's output must therefore be listed **before** it —
+  `with-android-splash-logo` sits above `expo-splash-screen` for this reason.
+  Listing it after silently does nothing.
 
 ## Commands
 
