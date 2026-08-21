@@ -2,6 +2,14 @@
 import { routes } from "./routes";
 import { Transport } from "./transport";
 
+/** What a test push reached, and what the push service refused. */
+export interface PushTestResult {
+  /** How many registered phones the notification was addressed to. */
+  sent: number;
+  /** One line per message the push service rejected, with its reason. */
+  errors: string[];
+}
+
 /** One phone registered for Expo push notifications on this host. */
 export interface PushRegistration {
   /** Gateway device id (the `x-pragma-device-id` header the client sends). */
@@ -47,9 +55,14 @@ export class PushClient {
     });
   }
 
-  /** Sends a test notification to every registered phone. */
-  test(options: { signal?: AbortSignal } = {}): Promise<void> {
-    return this.transport.request<void>(routes.pushTest, {
+  /**
+   * Sends a test notification to every registered phone and reports what the
+   * push service made of it. `sent` counts the phones addressed; `errors`
+   * carries a line per message the push service refused, which is the only
+   * place a project-wide credential problem is ever named.
+   */
+  test(options: { signal?: AbortSignal } = {}): Promise<PushTestResult> {
+    return this.transport.request<PushTestResult>(routes.pushTest, {
       method: "POST",
       body: {},
       signal: options.signal,
