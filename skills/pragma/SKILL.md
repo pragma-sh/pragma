@@ -35,6 +35,7 @@ Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate na
 | Add Pragma UI, commands, launchable agents, themes          | `@pragma/plugin`                | `references/plugin-api.md`   |
 | Run scheduled or event-driven host tasks                    | `@pragma/automations`           | `references/automations.md`  |
 | Make coding-agent tool report status and appear in launcher | `@pragma/plugin` + `pragma-cli` | `references/agent-plugin.md` |
+| Author rich, interactive agent output (plan, comparison, review, dashboard) | Scratchpad (`pragma-cli scratchpad create`) | `references/scratchpads.md` |
 | Make repository-internal architecture change                | `pragma-architecture` skill     | Not this skill.              |
 
 Prefer, in order:
@@ -60,7 +61,7 @@ Useful agent patterns:
 - Open command in managed terminal when user should see or continue interacting with it.
 - Use `tab exec` or SDK `exec.run` for bounded background command needing collected output.
 - Use `tab read --watch` or SDK streams for long-running output; cancel stream when finished.
-- Use scratchpad for durable rich findings instead of dumping large output into chat.
+- Use scratchpad for durable rich findings instead of dumping large output into chat. Never write scratchpad files by hand; read `references/scratchpads.md` for creation, MDX authoring rules, and the component API before authoring one.
 - Use fanout when attempts benefit from independent branches, not merely parallel shell commands.
 - Treat `attention` as user action needed, `done` as completed work worth reviewing, and `cleared` as no remaining result or stale state.
 
