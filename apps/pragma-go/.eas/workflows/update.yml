@@ -1,0 +1,11 @@
+name: EAS Update (preview)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    type: update
+    params:
+      channel: preview

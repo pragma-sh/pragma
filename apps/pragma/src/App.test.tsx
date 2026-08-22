@@ -78,6 +78,20 @@ describe("App", () => {
       if (command === "gateway_connection_info") {
         return Promise.resolve({ baseUrl: "http://127.0.0.1:0", token: "test" });
       }
+      if (command === "get_update_runtime") {
+        return Promise.resolve({
+          platform: "darwin-aarch64",
+          isDev: true,
+          checkUrl: "http://localhost:3000/api/updates",
+          versions: { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" },
+        });
+      }
+      if (command === "check_for_update") {
+        return Promise.resolve({ available: false });
+      }
+      if (command === "read_config") {
+        return Promise.resolve({ exists: true, path: "/tmp/config.json", contents: "{}" });
+      }
       return Promise.resolve(null);
     });
   });

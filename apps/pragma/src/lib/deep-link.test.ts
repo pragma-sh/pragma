@@ -5,6 +5,7 @@ import {
   NEW_SESSION_EVENT,
   type NewSessionDeepLinkDetail,
   parseNewSessionDeepLink,
+  parsePluginInstallDeepLink,
   requestNewSession,
 } from "@/lib/deep-link";
 
@@ -114,6 +115,22 @@ describe("parseNewSessionDeepLink", () => {
 
   it("returns null for a malformed url", () => {
     expect(parseNewSessionDeepLink("not a url")).toBeNull();
+  });
+});
+
+describe("parsePluginInstallDeepLink", () => {
+  it("accepts encoded scoped npm package names", () => {
+    expect(
+      parsePluginInstallDeepLink("pragma://install-plugin?package=%40pragma-sh%2Fopencode-plugin"),
+    ).toEqual({ package: "@pragma-sh/opencode-plugin" });
+  });
+
+  it("rejects paths, URLs, and other deep-link hosts", () => {
+    expect(parsePluginInstallDeepLink("pragma://install-plugin?package=../plugin")).toBeNull();
+    expect(
+      parsePluginInstallDeepLink("pragma://install-plugin?package=https%3A%2F%2Fevil.test%2Fp.tgz"),
+    ).toBeNull();
+    expect(parsePluginInstallDeepLink("pragma://open?package=plugin")).toBeNull();
   });
 });
 

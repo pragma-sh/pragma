@@ -22,9 +22,16 @@
       "bundler": "metro",
       "output": "single"
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c581900c-5a9e-4c9c-abba-e7b9981f5062"
+    },
     "plugins": [
       "expo-router",
       "expo-notifications",
+      "expo-updates",
       [
         "expo-splash-screen",
         {

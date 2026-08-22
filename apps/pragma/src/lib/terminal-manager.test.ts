@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { Tab } from "@pragma/constants";
 
+import { AGENT_COMMAND_SUBMITTED_EVENT } from "./agent-plugin-prompt";
+
 const invokeMock = vi.fn();
 const channelInstances: Array<{ onmessage: (event: unknown) => void }> = [];
 
@@ -943,6 +945,26 @@ describe("TerminalManager output", () => {
 });
 
 describe("TerminalManager pending input replacement", () => {
+  it("announces a submitted interactive command before clearing its local mirror", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const terminal = (Terminal as unknown as { instances: TerminalMockShape[] }).instances.at(-1)!;
+    const onData = terminal.onData.mock.calls[0]![0];
+    const listener = vi.fn();
+    window.addEventListener(AGENT_COMMAND_SUBMITTED_EVENT, listener);
+
+    onData("opencode");
+    onData("\r");
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect((listener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ command: "opencode" });
+    expect(manager.getPendingInputLine(tab.id)).toBe("");
+    window.removeEventListener(AGENT_COMMAND_SUBMITTED_EVENT, listener);
+  });
+
   it("does not replace after cursor movement makes the local mirror uncertain", async () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
