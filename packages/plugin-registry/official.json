@@ -1,0 +1,16 @@
+{
+  "$schema": "./official.schema.json",
+  "schemaVersion": 1,
+  "packages": [
+    "@pragma-sh/claude-code-plugin",
+    "@pragma-sh/codex-plugin",
+    "@pragma-sh/cursor-plugin",
+    "@pragma-sh/grok-plugin",
+    "@pragma-sh/github-copilot-cli-plugin",
+    "@pragma-sh/junie-plugin",
+    "@pragma-sh/kimi-plugin",
+    "@pragma-sh/opencode-plugin",
+    "@pragma-sh/pi-plugin",
+    "@pragma-sh/prime-agent-plugin"
+  ]
+}

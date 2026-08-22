@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Claude Code",
+  "description": "Launch Claude Code in Pragma with live status, questions, usage limits, and session naming.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/claude-code-plugin/assets/claude-code.svg",
+      "alt": "Claude Code logo"
+    }
+  ],
+  "install": { "command": "sh", "args": ["scripts/install.sh"] },
+  "agentBinary": "claude"
+}

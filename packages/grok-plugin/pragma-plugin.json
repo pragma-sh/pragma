@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Grok Build",
+  "description": "Launch Grok Build in Pragma with live status, questions, usage limits, and session naming.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/grok-plugin/assets/grok.svg",
+      "alt": "Grok logo"
+    }
+  ],
+  "install": { "command": "node", "args": ["dist/install.mjs"] },
+  "agentBinary": "grok"
+}

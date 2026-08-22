@@ -1,0 +1,246 @@
+{
+  "$schema": "./lock.schema.json",
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "package": "@pragma-sh/claude-code-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/claude-code-plugin/-/claude-code-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-+ApI8NEyZCMJR6bq8BVQMwvtLofP2gALitH4ThcFohniGp8H7EObgUhtIix2WbODvLMMRIBgirEmXNRXciR+Hw==",
+      "manifestSha256": "78eacf024c7c1c5b40c1f7defc93664e980ebb9877b00a287fcf8436f65b1738",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Claude Code",
+        "description": "Launch Claude Code in Pragma with live status, questions, usage limits, and session naming.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/claude-code-plugin/assets/claude-code.svg",
+            "alt": "Claude Code logo"
+          }
+        ],
+        "install": {
+          "command": "sh",
+          "args": ["scripts/install.sh"]
+        },
+        "agentBinary": "claude"
+      }
+    },
+    {
+      "package": "@pragma-sh/codex-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/codex-plugin/-/codex-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-/ksg8T3upKS2ddMMAnfyF1o2ANE4GN+0IdJod873M+CCmbgHGsMoF9Q6ybqSgIRy13h7i7HNVlWmWrSYGcSjzA==",
+      "manifestSha256": "a45bf7abf7185e6e822683ecc79ed6389ccd968679e0be114b1542b89c49b889",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Codex CLI",
+        "description": "Launch Codex CLI in Pragma with live status, approvals, questions, usage limits, and session naming.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/codex-plugin/assets/codex.png",
+            "alt": "Codex logo"
+          }
+        ],
+        "install": {
+          "command": "sh",
+          "args": ["scripts/install-local.sh"]
+        },
+        "agentBinary": "codex"
+      }
+    },
+    {
+      "package": "@pragma-sh/cursor-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/cursor-plugin/-/cursor-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-wFSEPxc/zkbc1NgjN6cio7Mp5A0C5IgUl1OVUo/Kou29yn3mENJ/JWw5dA23kehsfv+5MMFBVVxRJRpAl5xShw==",
+      "manifestSha256": "7e4cc85a6e41368a9b8b0bf27bb1680bb246e3fcdf0dabd5b80bccd887c36b74",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Cursor Agent",
+        "description": "Launch Cursor Agent in Pragma with live status, session naming, and account usage.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/cursor-plugin/assets/cursor.svg",
+            "alt": "Cursor logo"
+          }
+        ],
+        "install": {
+          "command": "sh",
+          "args": ["scripts/install-local.sh"]
+        },
+        "agentBinary": "cursor-agent"
+      }
+    },
+    {
+      "package": "@pragma-sh/grok-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/grok-plugin/-/grok-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-xs8IJkHVSqRHPnuKTyWpAfOW48k7Xru2GwqWAv4oS4vOAgvZx+v+ajNA2UHrGdQAVecCZIKYnVZRSfCavykQ3Q==",
+      "manifestSha256": "bf33abf0aa01a0a9ce0f8847f62e864f302d1915411c03122cd0140c511b9cde",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Grok Build",
+        "description": "Launch Grok Build in Pragma with live status, questions, usage limits, and session naming.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/grok-plugin/assets/grok.svg",
+            "alt": "Grok logo"
+          }
+        ],
+        "install": {
+          "command": "node",
+          "args": ["dist/install.mjs"]
+        },
+        "agentBinary": "grok"
+      }
+    },
+    {
+      "package": "@pragma-sh/github-copilot-cli-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/github-copilot-cli-plugin/-/github-copilot-cli-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-tHM1+WWp5UhIn6s9fUyR1Nd8TckwvztdDttrVkTgKJkdCh8qKqIjSdT90dcJwb6Nuqpo+iM6TJgTHUxR1AMH9w==",
+      "manifestSha256": "b5fb4d8f0bdc2b770a9dfc664d27a912353da52b2968f1b18a88ed3c8a8067b6",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "GitHub Copilot CLI",
+        "description": "Launch GitHub Copilot CLI in Pragma with status, approvals, questions, and quota reporting.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/github-copilot-cli-plugin/assets/copilot.png",
+            "alt": "GitHub Copilot logo"
+          }
+        ],
+        "install": {
+          "command": "sh",
+          "args": ["scripts/install-local.sh"]
+        },
+        "agentBinary": "copilot"
+      }
+    },
+    {
+      "package": "@pragma-sh/junie-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/junie-plugin/-/junie-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-bDWihlKlcgsXnTj0nuXyN7I/kRsrZRG58A10beNP9rdwVWMALL11zj9+ioq8eXYgwYp3+y562+z+3n7QD9rI0g==",
+      "manifestSha256": "85cf71e978694eb4528915199741acd25221998f1de75e7c4f346e3a22878906",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Junie CLI",
+        "description": "Launch JetBrains Junie CLI in Pragma with live status, approvals, questions, usage limits, and session naming.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/junie-plugin/assets/junie.svg",
+            "alt": "Junie logo"
+          }
+        ],
+        "install": {
+          "command": "node",
+          "args": ["dist/install.mjs"]
+        },
+        "agentBinary": "junie"
+      }
+    },
+    {
+      "package": "@pragma-sh/kimi-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/kimi-plugin/-/kimi-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-/dTLrUCD6B4pYj1XKOwdlGL2u0OZbLimQfIyzKc5ibc5cI3XqFGwpJYqJjUAEV/ZcoLlcnyQ4cCXNjjxwh0exw==",
+      "manifestSha256": "5e135b6afcad6914f265e71550ffd6679df6ddcf54f49e85dad2c41ecbed148a",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Kimi Code CLI",
+        "description": "Launch Kimi Code CLI in Pragma with live status, approvals, questions, subagents, and session naming.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/kimi-plugin/assets/kimi.png",
+            "alt": "Kimi logo"
+          }
+        ],
+        "install": {
+          "command": "node",
+          "args": ["dist/install.mjs"]
+        },
+        "agentBinary": "kimi"
+      }
+    },
+    {
+      "package": "@pragma-sh/opencode-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/opencode-plugin/-/opencode-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-swim7KNFsfRuOTb1bj3gvz9lxNxk0YDhXG7c9IcXC0eiX05xgk3sufhpMsT2TRWllNLSDeJzsJNfd0xsypZl9g==",
+      "manifestSha256": "01115789eeace4745f22807e653211f2c90b240f567621eeccb24482b34bae2e",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "OpenCode",
+        "description": "Launch OpenCode in Pragma with streaming status, approvals, questions, and usage limits.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/opencode-plugin/assets/opencode.svg",
+            "alt": "OpenCode logo"
+          }
+        ],
+        "install": {
+          "command": "node",
+          "args": ["scripts/install.mjs"]
+        },
+        "agentBinary": "opencode"
+      }
+    },
+    {
+      "package": "@pragma-sh/pi-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/pi-plugin/-/pi-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-QrtaMN7Oa+U0Z1Ng+M+/L96o+HBKeSjhM4ybcKuNJYVVgyMKicIEMLwA4sC9BWiZpN/tPkkEznzzGkTOkD5pdg==",
+      "manifestSha256": "17974d0493b892b965f7e77302769a5f86d1c29c8c1af1e7017ab1d7e8105b59",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Pi",
+        "description": "Launch Pi in Pragma with live status, session naming, and interjections.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/pi-plugin/assets/pi-badge.svg",
+            "alt": "Pi logo"
+          }
+        ],
+        "install": {
+          "command": "pi",
+          "args": ["install", "."]
+        },
+        "agentBinary": "pi"
+      }
+    },
+    {
+      "package": "@pragma-sh/prime-agent-plugin",
+      "version": "0.1.0-alpha.0",
+      "tarball": "https://registry.npmjs.org/@pragma-sh/prime-agent-plugin/-/prime-agent-plugin-0.1.0-alpha.0.tgz",
+      "integrity": "sha512-GjBbcLKxa1WervsliChI5nhBkWiQFCcN2QKrfseos9N79oRW+DaWH6awaroVWf9gCl7wAJuGGhCc5xICJkp92g==",
+      "manifestSha256": "b60a0253f10810d6c5bdeadb6fa0e4c096470cfb76559f606e6f6a381260312f",
+      "manifest": {
+        "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+        "name": "Prime Agent",
+        "description": "Launch Prime Agent in Pragma with live status, session naming, and interjections.",
+        "categories": ["agent-plugin"],
+        "images": [
+          {
+            "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/prime-agent-plugin/assets/prime-butterfly.svg",
+            "alt": "Prime Agent logo"
+          }
+        ],
+        "install": {
+          "command": "prime-agent",
+          "args": ["package", "install", "."]
+        },
+        "agentBinary": "prime-agent"
+      }
+    }
+  ]
+}
