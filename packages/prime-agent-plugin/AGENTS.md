@@ -1,6 +1,6 @@
-# packages/prime-agent-plugin — @pragma/prime-agent-plugin
+# packages/prime-agent-plugin — @pragma-sh/prime-agent-plugin
 
-Prime Agent integration built from `@pragma/pi-plugin` factories. Prime Agent is a
+Prime Agent integration built from `@pragma-sh/pi-plugin` factories. Prime Agent is a
 Pi-derived CLI with the same extension lifecycle surface; do not copy or symlink Pi
 reporter/watcher code into this package.
 
@@ -11,8 +11,8 @@ adds a newline instead of sending the message.
 ## Build and install
 
 ```sh
-bun run --filter @pragma/pi-plugin build
-bun run --filter @pragma/prime-agent-plugin build
+bun run --filter @pragma-sh/pi-plugin build
+bun run --filter @pragma-sh/prime-agent-plugin build
 prime-agent package install /absolute/path/to/packages/prime-agent-plugin
 ```
 

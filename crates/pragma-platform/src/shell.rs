@@ -8,6 +8,7 @@
 //! Every default here comes from `@pragma/constants`, because the Settings UI
 //! shows the same list the session layer launches from.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use pragma_constants::{ShellProfile, TerminalBackend, CONSTANTS};
@@ -315,17 +316,33 @@ fn pick_windows_shell(candidates: &[&str], installed: impl Fn(&str) -> bool) -> 
 
 /// Finds an executable by walking `PATH`.
 ///
-/// Windows resolves a bare name against `PATHEXT`, but every candidate Pragma
-/// probes already carries its `.exe`, so a plain existence check is enough.
+/// Windows bare names are also checked against `PATHEXT`.
 #[must_use]
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|path| find_on_path_in(name, &path))
+}
+
+/// Finds an executable by walking an explicit platform-native PATH list.
+#[must_use]
+pub fn find_on_path_in(name: &str, path: &OsStr) -> Option<PathBuf> {
     if Path::new(name).is_absolute() {
         return Path::new(name).is_file().then(|| PathBuf::from(name));
     }
-    std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
+    std::env::split_paths(path).find_map(|dir| find_in_path_dir(&dir, name))
+}
+
+fn find_in_path_dir(dir: &Path, name: &str) -> Option<PathBuf> {
+    let candidate = dir.join(name);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    if !cfg!(windows) || Path::new(name).extension().is_some() {
+        return None;
+    }
+    let path_extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    path_extensions.split(';').find_map(|extension| {
+        let candidate = dir.join(format!("{name}{extension}"));
+        candidate.is_file().then_some(candidate)
     })
 }
 

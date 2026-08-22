@@ -286,14 +286,27 @@ for their active project.
 
 ---
 
+## Distribution
+
+Published plugins should follow npm name `pragma-plugin-NAME` (scoped names are allowed)
+and include root `pragma-plugin.json` matching
+`packages/plugin-registry/pragma-plugin.schema.json`. Manifest owns display name,
+description, optional categories/images, reviewed install command, and `agentBinary` for
+agent plugins. Add npm package name to `packages/plugin-registry/official.json`; never edit
+generated lock directly.
+
+Official install disables npm lifecycle scripts, verifies exact tarball + manifest hashes,
+then shows and runs only manifest command. Keep package build output self-contained and
+include every host-tool installer asset in npm `files`.
+
 ## Installation (through the host tool, not Pragma)
 
 The plugin code itself installs through the **host tool's own plugin mechanism**. Your
 `AGENTS.md` must document the exact command. Examples from the two existing plugins:
 
-**opencode (SDK route)** — register the built `dist/index.mjs` absolute path (or a
-`file://` URL) in the `plugin` array of `~/.config/opencode/opencode.json`. Never
-register it by bare package name (opencode would try to npm-fetch it).
+**opencode (SDK route)** — published packages register their npm name in `plugin` array
+of `~/.config/opencode/opencode.json`; local development registers built `dist/index.mjs`
+absolute path (or `file://` URL).
 
 **Claude Code (CLI route)** — through Claude Code's marketplace:
 

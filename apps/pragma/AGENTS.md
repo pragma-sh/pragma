@@ -28,8 +28,9 @@ apps/pragma/
 │   │   └── utils.ts             # cn() + small utilities
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
 │   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
-│   ├── state/
-│   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
+    │   ├── state/
+    │   │   ├── updates-context.tsx     # Polls GET /api/updates, Install Update, restart confirm
+    │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
 │   │   ├── kanban-context.tsx      # Project agent board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
@@ -48,6 +49,7 @@ apps/pragma/
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
     ├── src/kanban.rs            # Tauri commands for the agent board (CRUD + move)
+    ├── src/updates.rs           # Desktop auto-update check/download/apply (reload overlay vs OS installer)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
     ├── src/github.rs            # GitHub auth (0600 token file, OAuth device flow, gh CLI)
@@ -422,6 +424,22 @@ against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
+First-run agent plugin recommendations use the reviewed lock bundled with the app, then
+check agent names against the same GUI-augmented `PATH` used to launch children. Startup
+must not wait for GitHub or execute every candidate CLI with `--version`: either can delay
+the final onboarding step indefinitely.
+
+Manual terminal launches get a second chance after onboarding: when the submitted command
+matches an official agent whose active plugin still comes from bundled scope, the desktop
+offers to install its reviewed integration while letting the command continue. A global or
+project plugin record suppresses the prompt because it overrides the bundled launcher. The
+user can dismiss one run or persist `plugins.agentCommandPromptDismissed` in the settings
+table with **Don't show again**.
+
+Both agent-plugin install dialogs close before installation starts. Installation continues
+in the background; success or failure is reported later through a toast, so npm/network or
+host-configuration work never traps the user behind a modal.
+
 Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
 (worktree id → pin timestamp). The sidebar promotes pinned worktrees to roots
 at the top (newest pin first); each row exposes a hover pin button, a
@@ -475,6 +493,14 @@ palette's "Open automations" uses it).
 Plugins add React settings sections with `defineSettingsPage` and
 `definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
 render under the standard plugin boundary, and use the same host hooks as sidebar tabs.
+
+**Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
+`other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
+`updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default
+to `http://localhost:3000/api/updates`; production uses `https://pragma-app.sh/api/updates`.
+`InstallUpdateButton` sits above the project switcher when a shipped-into-the-app
+component is behind. Reload writes a UI overlay version marker; restart always launches
+the OS installer named by the manifest.
 
 **Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
 that actually applies after the `default → global → project` merge, whether it differs
@@ -727,6 +753,12 @@ event. `workspace-context` parses it with `parseNewSessionDeepLink` (`lib/deep-l
 auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new-session`
 window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
 deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
+
+`pragma://install-plugin?package=<npm-name>` opens install review. Package name is only a
+selector: app resolves exact version, integrity, cached manifest, and command from official
+GitHub lock. Native installer runs `npm pack` / `npm install --ignore-scripts` in private
+staging, verifies tarball integrity plus manifest hash, runs reviewed manifest command, then
+registers managed absolute path globally. Never put tarball URL or command in deep link.
 
 ## Terminal rendering (xterm + WebGL)
 

@@ -4,11 +4,14 @@
 # Rust checks, and the Linux app build — lives in `.rwx/ci.yml` and runs on RWX.
 # RWX only runs Linux containers, so the two remaining desktop targets stay
 # here. Keep the two files in sync when a check is added or removed.
+# PRs and `main` compile with `--no-bundle`. Git tags run a signed bundle.
 name: CI (macOS & Windows)
 
 on:
   push:
     branches: [main]
+    tags:
+      - "*"
   pull_request:
 
 # Cancel superseded runs on the same ref.
@@ -71,4 +74,17 @@ jobs:
           workspaces: "."
       - run: bun install --frozen-lockfile
       - name: Build Tauri app (compile only, no bundling)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: bun run --filter pragma tauri build --no-bundle
+      - name: Bundle signed release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run --filter pragma tauri build

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bump-minor-pre-major": true,
+  "include-component-in-tag": true,
+  "separate-pull-requests": false,
+  "packages": {
+    "apps/pragma": {
+      "release-type": "node",
+      "component": "pragma",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "../../packages/constants/values.json",
+          "jsonpath": "$.app.version"
+        },
+        {
+          "type": "json",
+          "path": "src-tauri/tauri.conf.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "toml",
+          "path": "src-tauri/Cargo.toml",
+          "jsonpath": "$.package.version"
+        }
+      ]
+    },
+    "apps/pragma-go": {
+      "release-type": "node",
+      "component": "pragma-go",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "app.json",
+          "jsonpath": "$.expo.version"
+        }
+      ]
+    },
+    "apps/www": {
+      "release-type": "node",
+      "component": "www"
+    },
+    "crates/pragma-protocol": {
+      "release-type": "rust",
+      "component": "pragma-protocol",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "../../packages/constants/values.json",
+          "jsonpath": "$.daemon.protocolVersion"
+        }
+      ]
+    },
+    "crates/pragma-server": { "release-type": "rust", "component": "pragma-server" },
+    "crates/pragma-gateway": { "release-type": "rust", "component": "pragma-gateway" },
+    "crates/pragma-cli": { "release-type": "rust", "component": "pragma-cli" },
+    "crates/pragma-client": { "release-type": "rust", "component": "pragma-client" },
+    "crates/pragma-core": { "release-type": "rust", "component": "pragma-core" },
+    "crates/pragma-platform": { "release-type": "rust", "component": "pragma-platform" },
+    "packages/constants": { "release-type": "node", "component": "constants" },
+    "packages/plugin": { "release-type": "node", "component": "plugin" },
+    "packages/sdk": { "release-type": "node", "component": "sdk" },
+    "packages/scratchpad": { "release-type": "node", "component": "scratchpad" },
+    "packages/scratchpad-contract": { "release-type": "node", "component": "scratchpad-contract" },
+    "packages/scratchpad-viewer": { "release-type": "node", "component": "scratchpad-viewer" },
+    "packages/automations": { "release-type": "node", "component": "automations" },
+    "packages/ai-helpers": { "release-type": "node", "component": "ai-helpers" },
+    "packages/github-helpers": { "release-type": "node", "component": "github-helpers" },
+    "packages/sidecar-kit": { "release-type": "node", "component": "sidecar-kit" },
+    "packages/plugins-host": { "release-type": "node", "component": "plugins-host" },
+    "packages/create-pragma-plugin": {
+      "release-type": "node",
+      "component": "create-pragma-plugin"
+    },
+    "packages/bench": { "release-type": "node", "component": "bench" },
+    "packages/watcher": { "release-type": "node", "component": "watcher" },
+    "packages/watcher-kit": { "release-type": "node", "component": "watcher-kit" },
+    "packages/opencode-plugin": { "release-type": "node", "component": "opencode-plugin" },
+    "packages/claude-code-plugin": { "release-type": "node", "component": "claude-code-plugin" },
+    "packages/cursor-plugin": { "release-type": "node", "component": "cursor-plugin" },
+    "packages/codex-plugin": { "release-type": "node", "component": "codex-plugin" },
+    "packages/pi-plugin": { "release-type": "node", "component": "pi-plugin" },
+    "packages/prime-agent-plugin": { "release-type": "node", "component": "prime-agent-plugin" },
+    "packages/grok-plugin": { "release-type": "node", "component": "grok-plugin" },
+    "packages/kimi-plugin": { "release-type": "node", "component": "kimi-plugin" },
+    "packages/junie-plugin": { "release-type": "node", "component": "junie-plugin" },
+    "packages/github-copilot-cli-plugin": {
+      "release-type": "node",
+      "component": "github-copilot-cli-plugin"
+    },
+    "packages/dev-test-plugin": { "release-type": "node", "component": "dev-test-plugin" }
+  }
+}

@@ -1,8 +1,9 @@
 # `apps/www` — Pragma marketing + docs site
 
-Public website for Pragma: a Next.js (App Router) app serving the marketing pages at `/`
-and the documentation at `/docs`. It is **not** part of the desktop app — it ships no
-Tauri, Rust, or `@pragma/*` dependency, and nothing in the desktop app may import from it.
+Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
+plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
+app. Its only `@pragma/*` dependency is data-only `@pragma/plugin-registry`; nothing in
+desktop app may import from website.
 
 ## Stack
 
@@ -35,9 +36,10 @@ apps/www/
 ├── proxy.ts                 # serves raw markdown for `.md` URLs and markdown-preferring clients
 └── src/
     ├── app/
-    │   ├── (home)/          # marketing route group (landing page + its layout)
+    │   ├── (home)/          # marketing route group (landing page + plugin gallery)
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
+    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
     │   └── global.css       # Tailwind + shadcn tokens + Fumadocs preset
@@ -47,6 +49,8 @@ apps/www/
     │   └── hero-scene.tsx   # react-three-fiber canvas (client component)
     └── lib/
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
+        ├── plugins.ts       # official-lock fetch, validation, install deep links
+        ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
 ```
@@ -58,6 +62,11 @@ apps/www/
   a color is defined once and both systems follow. Never restate a token in a component.
 - **Route strings live in `lib/shared.ts`.** `/docs`, `/og/docs`, and `/llms.mdx/docs` are
   referenced by the source loader, the proxy, and the page components — change them there.
+- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
+  The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
+  Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
+  In development a local fixture stands in for that file; production fetches it from
+  the latest GitHub Release.
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep
   the rest of the page a server component.

@@ -1,4 +1,4 @@
-# packages/claude-code-plugin — @pragma/claude-code-plugin
+# packages/claude-code-plugin — @pragma-sh/claude-code-plugin
 
 Static Claude Code plugin that reports agent status and plan usage into Pragma. Unlike the opencode
 plugin, **Claude Code has no in-process JS plugin API** — its only live extension point
