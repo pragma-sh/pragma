@@ -1,6 +1,6 @@
 import type { PushTestResult } from "@pragma/sdk";
 
-import type { PushRegistration } from "./push";
+import type { PushRegistration, PushRegistrationFailure } from "./push";
 
 // The settings notification check, reduced to something a person can act on.
 // Push has several independent ways to be silent — permission, a build with no
@@ -15,32 +15,30 @@ export type PushCheckState =
   | { kind: "ok"; summary: string }
   | { kind: "failed"; reason: string };
 
+/** Why a registration attempt failed, in the user's terms, keyed by its reason. */
+const REGISTRATION_FAILURES: Record<PushRegistrationFailure["reason"], string> = {
+  denied:
+    "Notifications are turned off for Pragma Go. Turn them on in the system Settings app, then check again.",
+  unsupported:
+    "This build can't receive push notifications. A simulator and the browser have no push service to register with.",
+  cancelled: "The check was cancelled.",
+  failed: "Couldn't register this device with the desktop. Check the connection, then try again.",
+};
+
 /** Why this device could not be registered for push, in the user's terms. */
 export function registrationFailure(registration: PushRegistration): PushCheckState | null {
   if (registration.ok) return null;
-  switch (registration.reason) {
-    case "denied":
-      return {
-        kind: "failed",
-        reason:
-          "Notifications are turned off for Pragma Go. Turn them on in the system Settings app, then check again.",
-      };
-    case "unsupported":
-      return {
-        kind: "failed",
-        reason:
-          "This build can't receive push notifications. A simulator and the browser have no push service to register with.",
-      };
-    case "cancelled":
-      return { kind: "failed", reason: "The check was cancelled." };
-    case "failed":
-      return {
-        kind: "failed",
-        reason:
-          "Couldn't register this device with the desktop. Check the connection, then try again.",
-      };
-  }
+  return { kind: "failed", reason: REGISTRATION_FAILURES[registration.reason] };
 }
+
+/**
+ * The result on a platform that has no push service to register with, stated
+ * without attempting a registration that cannot succeed (the web build).
+ */
+export const PUSH_UNSUPPORTED: PushCheckState = {
+  kind: "failed",
+  reason: REGISTRATION_FAILURES.unsupported,
+};
 
 /**
  * What the host's test push actually did. A rejection is reported verbatim

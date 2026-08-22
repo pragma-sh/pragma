@@ -50,6 +50,10 @@
     "apps/pragma-go/lib/widgets/use-widget-sync.ts",
     // Reachable only through `use-widget-sync.ts`, so it disappears with it.
     "apps/pragma-go/lib/widgets/widgets.tsx",
+    // Expo config plugins are named as *strings* in `app.json`'s `plugins`
+    // array (`"./plugins/with-android-splash-logo"`) and loaded by the prebuild
+    // at build time — there is no import for fallow's scan to follow.
+    "apps/pragma-go/plugins/**",
     // Documentation pages are discovered by Fumadocs from the `content/docs`
     // directory at build time (`defineDocs` in `apps/www/src/lib/source.ts`),
     // never statically imported.
@@ -90,8 +94,13 @@
   // `react-native-web` is never imported by name: Metro aliases `react-native`
   // to it for the web platform, so it is a build-time requirement fallow's
   // import scan cannot see.
+  // `expo-dev-client` is consumed by the native dev build (it swaps in the
+  // dev-client runtime and launcher), and `@expo/ngrok` is resolved by name by
+  // `expo start --tunnel` — both are Expo tooling requirements with no import.
   "ignoreDependencies": [
+    "@expo/ngrok",
     "@google/design.md",
+    "expo-dev-client",
     "expo-splash-screen",
     "expo-system-ui",
     "react-native-web",

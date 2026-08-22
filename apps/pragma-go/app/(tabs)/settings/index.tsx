@@ -8,6 +8,7 @@ import { Text } from "@/components/ui/text";
 import { useConnection } from "@/lib/connection-context";
 import { checkHeartbeat, heartbeatSummary, type HeartbeatState } from "@/lib/heartbeat";
 import {
+  PUSH_UNSUPPORTED,
   pushCheckSummary,
   registrationFailure,
   testOutcome,
@@ -143,16 +144,17 @@ function usePushCheck() {
   return { busy: !client || state.kind === "checking", run, state };
 }
 
+/** The connected client, which every check here needs and none can create. */
+type PushClient = NonNullable<ReturnType<typeof useConnection>["client"]>;
+
 /** Registers (or refreshes) this device, then asks the host to push to it. */
-async function runPushCheck(
-  client: NonNullable<ReturnType<typeof useConnection>["client"]>,
-): Promise<PushCheckState> {
-  if (Platform.OS === "web") {
-    return registrationFailure({ ok: false, reason: "unsupported" }) ?? { kind: "idle" };
-  }
-  const registration = await registerForPush(client);
-  const failure = registrationFailure(registration);
-  if (failure) return failure;
+async function runPushCheck(client: PushClient): Promise<PushCheckState> {
+  if (Platform.OS === "web") return PUSH_UNSUPPORTED;
+  return registrationFailure(await registerForPush(client)) ?? sendTestPush(client);
+}
+
+/** Asks the host for a test push, reporting a transport failure as one. */
+async function sendTestPush(client: PushClient): Promise<PushCheckState> {
   try {
     return testOutcome(await client.push.test());
   } catch {

@@ -14,10 +14,14 @@ import {
 } from "./pending-revocation";
 import { createRegistrationGate } from "./registration-gate";
 
+/** A registration that did not happen, and the reason it did not. */
+export type PushRegistrationFailure = {
+  ok: false;
+  reason: "denied" | "unsupported" | "failed" | "cancelled";
+};
+
 /** Whether push registration succeeded, and why it did not when it did not. */
-export type PushRegistration =
-  | { ok: true; token: string }
-  | { ok: false; reason: "denied" | "unsupported" | "failed" | "cancelled" };
+export type PushRegistration = { ok: true; token: string } | PushRegistrationFailure;
 
 /** Orders registration against the revocation that unpairing sends after it. */
 const registrationGate = createRegistrationGate();
