@@ -1,8 +1,4 @@
----
-
-## name: creating-scratchpads description: Use when an agent running inside a Pragma terminal should answer with rich, interactive content instead of terminal text — plans, comparisons, diffs to review, questions with options, progress dashboards, tables, charts. Covers when to suggest a scratchpad, the `pragma-cli scratchpad create` command, MDX authoring rules, and the `@pragma/scratchpad` component API.
-
-# Create A Pragma Scratchpad
+# Scratchpads
 
 A scratchpad is an agent-authored MDX document Pragma renders as a real, interactive tab: React components, live agent bindings, user-editable prose, inline comments. It is the rich-output channel for an agent that would otherwise dump ASCII or walls of text into a terminal.
 
@@ -11,7 +7,6 @@ A scratchpad is an agent-authored MDX document Pragma renders as a real, interac
 Suggest (or just create) a scratchpad when the answer is more than linear text:
 
 - **Plan / design / architecture writeup** the user will read, edit, and comment on.
-
 - **Complex comparison, matrix, table, checklist, chart** — anything with structure.
 - **Long-running multi-tab work** — use `AgentProgress` for live status.
 - **Anything the user will keep and revisit.** Terminal scrollback is disposable; a scratchpad is a file with a tab.
