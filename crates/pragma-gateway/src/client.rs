@@ -14,7 +14,7 @@ use crate::error::{GatewayError, GatewayResult};
 #[derive(Clone)]
 pub struct GatewayClient {
     client: PragmaClient,
-    expected_protocol_version: u64,
+    expected_protocol_version: String,
 }
 
 impl GatewayClient {
@@ -23,14 +23,14 @@ impl GatewayClient {
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
             client: PragmaClient::new_socket(socket_path),
-            expected_protocol_version: CONSTANTS.daemon.protocol_version.get(),
+            expected_protocol_version: CONSTANTS.daemon.protocol_version.clone(),
         }
     }
 
     /// Expected protocol version.
     #[must_use]
-    pub fn protocol_version(&self) -> u64 {
-        self.expected_protocol_version
+    pub fn protocol_version(&self) -> &str {
+        &self.expected_protocol_version
     }
 
     /// Verifies the upstream server speaks the expected protocol.
@@ -43,7 +43,7 @@ impl GatewayClient {
             Ok(())
         } else {
             Err(GatewayError::ProtocolMismatch {
-                expected: self.expected_protocol_version,
+                expected: self.expected_protocol_version.clone(),
                 actual,
             })
         }

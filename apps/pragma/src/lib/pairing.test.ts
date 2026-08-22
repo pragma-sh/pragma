@@ -11,7 +11,7 @@ import {
 const VALID = {
   url: "https://abc.ngrok-free.app",
   token: "secret-token",
-  protocolVersion: 13,
+  protocolVersion: "0.0.0",
   hostName: "Pragma",
 };
 
@@ -35,7 +35,7 @@ describe("pairing payload", () => {
   });
 
   it("rejects a wrong-typed protocolVersion", () => {
-    expect(validatePairingPayload({ ...VALID, protocolVersion: "13" })).toBeNull();
+    expect(validatePairingPayload({ ...VALID, protocolVersion: 13 })).toBeNull();
   });
 
   it("rejects non-object values", () => {

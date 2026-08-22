@@ -377,11 +377,18 @@ pub enum EventFrame {
     },
 }
 
+/// SemVer this crate speaks on the wire (`HelloFrame.protocol_version`).
+///
+/// Mirrored into `@pragma/constants` `daemon.protocolVersion` by `bun run generate`.
+/// Comparison is exact equality.
+pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Sent by the daemon as the first frame on every accepted connection.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloFrame {
-    pub protocol_version: u64,
+    /// Exact SemVer of `pragma-protocol` this process speaks.
+    pub protocol_version: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -518,8 +525,9 @@ mod tests {
         read_frame, read_json_frame, write_input_frame, write_json_frame, write_output_frame,
         AgentAnswer, AgentDecision, AgentStatus, ControlEnvelope, ControlMethod, ControlRequest,
         ControlResult, EventFrame, Frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
-        ServerFrame,
+        ServerFrame, PROTOCOL_VERSION,
     };
+    use pragma_constants::CONSTANTS;
 
     #[test]
     fn round_trips_length_prefixed_json() {
@@ -656,13 +664,13 @@ mod tests {
     #[test]
     fn server_frame_is_tagged() {
         let frame = ServerFrame::Hello(HelloFrame {
-            protocol_version: 3,
+            protocol_version: "0.0.0".to_string(),
         });
         let mut bytes = Vec::new();
         write_json_frame(&mut bytes, &frame).expect("write hello");
         let decoded: ServerFrame = read_json_frame(&mut bytes.as_slice()).expect("read hello");
         match decoded {
-            ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, 3),
+            ServerFrame::Hello(hello) => assert_eq!(hello.protocol_version, "0.0.0"),
             ServerFrame::Response(_)
             | ServerFrame::Rpc(_)
             | ServerFrame::Event(_)
@@ -671,6 +679,11 @@ mod tests {
                 panic!("expected hello")
             }
         }
+    }
+
+    #[test]
+    fn protocol_version_matches_constants_mirror() {
+        assert_eq!(PROTOCOL_VERSION, CONSTANTS.daemon.protocol_version);
     }
 
     #[test]

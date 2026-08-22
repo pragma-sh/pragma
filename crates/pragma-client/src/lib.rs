@@ -396,7 +396,7 @@ impl PragmaClient {
     /// first frame; for a managed-local endpoint it spawns the server first.
     /// Used to verify a remote `pragma-server` matches the client's expected
     /// protocol before a project is routed to it.
-    pub fn server_protocol_version(&self) -> ClientResult<u64> {
+    pub fn server_protocol_version(&self) -> ClientResult<String> {
         let mut stream = match &self.endpoint {
             ClientEndpoint::Socket(path) => ipc::connect(path)?,
             ClientEndpoint::ManagedLocal(_) => self.connect_with_spawn()?,
@@ -719,7 +719,7 @@ impl PragmaClient {
         };
         configure_stream(&stream)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        let expected = CONSTANTS.daemon.protocol_version.get();
+        let expected = CONSTANTS.daemon.protocol_version.as_str();
         match read_json_frame::<ServerFrame>(&mut stream) {
             Ok(ServerFrame::Hello(hello)) if hello.protocol_version == expected => {
                 configure_stream(&stream)?;

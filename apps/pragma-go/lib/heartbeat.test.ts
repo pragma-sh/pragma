@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { checkHeartbeat, heartbeatFailure, heartbeatSummary } from "./heartbeat";
 
-const health: GatewayHealth = { status: "ok", protocolVersion: 3, gatewayVersion: "0.4.1" };
+const health: GatewayHealth = { status: "ok", protocolVersion: "0.0.0", gatewayVersion: "0.4.1" };
 
 function clientReturning(result: Promise<GatewayHealth>): PragmaClient {
   return { health: { check: () => result } } as unknown as PragmaClient;

@@ -995,7 +995,7 @@ fn frame_output_bytes(frame: &EventFrame) -> usize {
 struct GatewayDiscovery {
     port: u16,
     token: String,
-    protocol_version: u64,
+    protocol_version: String,
 }
 
 struct GatewayEnv {
@@ -1008,8 +1008,7 @@ fn gateway_env(server_socket: &str) -> Option<GatewayEnv> {
         Path::new(server_socket).with_file_name(CONSTANTS.gateway.discovery_file.as_str());
     let discovery: GatewayDiscovery =
         serde_json::from_str(&std::fs::read_to_string(discovery_path).ok()?).ok()?;
-    if discovery.protocol_version != CONSTANTS.daemon.protocol_version.get()
-        || discovery.token.is_empty()
+    if discovery.protocol_version != CONSTANTS.daemon.protocol_version || discovery.token.is_empty()
     {
         return None;
     }
@@ -1488,8 +1487,8 @@ mod tests {
         std::fs::write(
             socket.with_file_name(CONSTANTS.gateway.discovery_file.as_str()),
             format!(
-                r#"{{"port":4567,"token":"secret","pid":123,"protocolVersion":{}}}"#,
-                CONSTANTS.daemon.protocol_version.get()
+                r#"{{"port":4567,"token":"secret","pid":123,"protocolVersion":"{}"}}"#,
+                CONSTANTS.daemon.protocol_version
             ),
         )
         .expect("write discovery");
@@ -1506,7 +1505,7 @@ mod tests {
         let socket = dir.path().join("daemon.sock");
         std::fs::write(
             socket.with_file_name(CONSTANTS.gateway.discovery_file.as_str()),
-            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":0}"#,
+            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":"0"}"#,
         )
         .expect("write discovery");
 
