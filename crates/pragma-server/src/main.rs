@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
+use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 use pragma_platform::ipc::{self, LocalStream};

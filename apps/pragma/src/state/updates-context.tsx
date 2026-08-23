@@ -75,12 +75,6 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const effectiveCheckUrl = useCallback((settings: OtherSettings, current: UpdateRuntime) => {
-    const override = settings.serverUrl?.trim();
-    if (override) return override;
-    return current.checkUrl;
-  }, []);
-
   const checkNow = useCallback(async () => {
     setChecking(true);
     try {
@@ -95,7 +89,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
     } finally {
       setChecking(false);
     }
-  }, [effectiveCheckUrl, loadSettings]);
+  }, [loadSettings]);
 
   const applyOffer = useCallback(async (current: UpdateCheck) => {
     if (!current.apply || !current.version || !current.asset) {
@@ -214,4 +208,8 @@ function changelogAction(url: string | undefined) {
       },
     },
   };
+}
+
+function effectiveCheckUrl(settings: OtherSettings, current: UpdateRuntime): string {
+  return settings.serverUrl?.trim() || current.checkUrl;
 }

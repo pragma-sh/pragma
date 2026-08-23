@@ -3,6 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn();
 
+const invokeResults: Record<string, unknown> = {
+  list_projects: [],
+  get_projects_directory: "/tmp",
+  ai_status: { available: false, signedIn: [] },
+  ai_setup_dismissed: true,
+  read_plugin_manifests: [],
+  gateway_connection_info: { baseUrl: "http://127.0.0.1:0", token: "test" },
+  get_update_runtime: {
+    platform: "darwin-aarch64",
+    isDev: true,
+    checkUrl: "http://localhost:3000/api/updates",
+    versions: { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" },
+  },
+  check_for_update: { available: false },
+  read_config: { exists: true, path: "/tmp/config.json", contents: "{}" },
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   Channel: class MockChannel<T> {
     onmessage?: (message: T) => void;
@@ -52,48 +69,9 @@ import App from "./App";
 describe("App", () => {
   beforeEach(() => {
     invokeMock.mockReset();
-    invokeMock.mockImplementation((command: string) => {
-      if (command === "list_projects") {
-        return Promise.resolve([]);
-      }
-      if (command === "get_projects_directory") {
-        return Promise.resolve("/tmp");
-      }
-      // Keep the first-run AI setup modal closed so it doesn't aria-hide the
-      // workspace under test: report AI as already-dismissed.
-      if (command === "ai_status") {
-        return Promise.resolve({ available: false, signedIn: [] });
-      }
-      if (command === "ai_setup_dismissed") {
-        return Promise.resolve(true);
-      }
-      // PluginProvider reads plugin manifests on mount; under test there are
-      // none, so return an empty array rather than letting the call fall
-      // through to the real Tauri internals.
-      if (command === "read_plugin_manifests") {
-        return Promise.resolve([]);
-      }
-      // No local gateway in tests; report a benign connection info so the
-      // SDK bridge wires up without trying to talk to a running process.
-      if (command === "gateway_connection_info") {
-        return Promise.resolve({ baseUrl: "http://127.0.0.1:0", token: "test" });
-      }
-      if (command === "get_update_runtime") {
-        return Promise.resolve({
-          platform: "darwin-aarch64",
-          isDev: true,
-          checkUrl: "http://localhost:3000/api/updates",
-          versions: { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" },
-        });
-      }
-      if (command === "check_for_update") {
-        return Promise.resolve({ available: false });
-      }
-      if (command === "read_config") {
-        return Promise.resolve({ exists: true, path: "/tmp/config.json", contents: "{}" });
-      }
-      return Promise.resolve(null);
-    });
+    invokeMock.mockImplementation((command: string) =>
+      Promise.resolve(invokeResults[command] ?? null),
+    );
   });
 
   it("renders the terminal workspace empty state", async () => {

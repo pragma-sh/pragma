@@ -25,25 +25,41 @@ export async function readJson<T>(path: string): Promise<T> {
 }
 
 export function validateManifest(manifest: PluginManifest, context: string): void {
-  if (!manifest.name?.trim() || !manifest.description?.trim()) {
-    throw new Error(`${context}: name and description are required`);
-  }
-  if (!manifest.install?.command?.match(/^[A-Za-z0-9._+-]+$/)) {
-    throw new Error(`${context}: install.command must be a bare executable name`);
-  }
-  if (
+  rejectInvalidManifest(
+    !manifest.name?.trim() || !manifest.description?.trim(),
+    context,
+    "name and description are required",
+  );
+  rejectInvalidManifest(
+    !manifest.install?.command?.match(/^[A-Za-z0-9._+-]+$/),
+    context,
+    "install.command must be a bare executable name",
+  );
+  rejectInvalidManifest(
     manifest.categories?.some(
       (category) => !["agent-plugin", "theme", "general"].includes(category),
-    )
-  ) {
-    throw new Error(`${context}: invalid category`);
-  }
-  if (manifest.images?.some((image) => !image.url.startsWith("https://") || !image.alt.trim())) {
-    throw new Error(`${context}: images require HTTPS URLs and alt text`);
-  }
-  if (manifest.categories?.includes("agent-plugin") && !manifest.agentBinary) {
-    throw new Error(`${context}: agent-plugin category requires agentBinary`);
-  }
+    ),
+    context,
+    "invalid category",
+  );
+  rejectInvalidManifest(
+    manifest.images?.some((image) => !image.url.startsWith("https://") || !image.alt.trim()),
+    context,
+    "images require HTTPS URLs and alt text",
+  );
+  rejectInvalidManifest(
+    manifest.categories?.includes("agent-plugin") && !manifest.agentBinary,
+    context,
+    "agent-plugin category requires agentBinary",
+  );
+}
+
+function rejectInvalidManifest(
+  invalid: boolean | undefined,
+  context: string,
+  message: string,
+): void {
+  if (invalid) throw new Error(`${context}: ${message}`);
 }
 
 export function registryTarball(packageName: string, version: string): string {

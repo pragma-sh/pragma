@@ -43,7 +43,11 @@ function validateLock(lock: PluginLock): LockedPlugin[] {
 }
 
 function validateManifest(manifest: PragmaPluginManifest, packageName: string): void {
-  if (!manifest.name || !manifest.description || !manifest.install?.command) {
+  if (![manifest.name, manifest.description, manifest.install?.command].every(hasText)) {
     throw new Error(`${packageName} has incomplete plugin metadata`);
   }
+}
+
+function hasText(value: string | undefined): boolean {
+  return Boolean(value);
 }

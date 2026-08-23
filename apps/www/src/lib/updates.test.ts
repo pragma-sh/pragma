@@ -1,8 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
-import { evaluateUpdate, type ReleaseManifest } from "./updates";
+import { GET } from "../app/api/updates/route";
+import { evaluateUpdate, loadGithubManifest, type ReleaseManifest } from "./updates";
 
 const running = { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" };
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function manifest(overrides: Partial<ReleaseManifest>): ReleaseManifest {
   return {
@@ -88,5 +94,48 @@ describe("evaluateUpdate", () => {
       running,
     });
     expect(result).toEqual({ available: false });
+  });
+});
+
+describe("update endpoint", () => {
+  test("qualifies fixture asset URLs against the request origin", async () => {
+    const response = await GET(
+      new Request(
+        "https://pragma.test/api/updates?platform=darwin-aarch64&ui=0.0.0&app=0.0.0&server=0.0.0&protocol=0.0.0",
+      ),
+    );
+
+    expect(await response.json()).toMatchObject({
+      available: true,
+      asset: { url: "https://pragma.test/api/updates/asset" },
+    });
+  });
+});
+
+describe("loadGithubManifest", () => {
+  test("returns null when the latest release cannot be loaded", async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+
+    expect(await loadGithubManifest(1)).toBeNull();
+  });
+
+  test("loads and caches the release manifest", async () => {
+    const releaseManifest = manifest({});
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json({
+          assets: [
+            { name: "release.json", browser_download_url: "https://example.com/release.json" },
+          ],
+        });
+      }
+      return Response.json(releaseManifest);
+    }) as typeof fetch;
+
+    expect(await loadGithubManifest(10)).toEqual(releaseManifest);
+    expect(await loadGithubManifest(11)).toEqual(releaseManifest);
+    expect(calls).toBe(2);
   });
 });

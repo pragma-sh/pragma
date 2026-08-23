@@ -22,8 +22,7 @@ if (official.schemaVersion !== 1 || lock.schemaVersion !== 1) {
 const packageNames = new Set<string>();
 await Promise.all(
   official.packages.map(async (packageName) => {
-    if (packageNames.has(packageName)) throw new Error(`duplicate package: ${packageName}`);
-    packageNames.add(packageName);
+    registerPackageName(packageNames, packageName);
     const source = workspaceSource(packageName);
     const pkg = await readJson<{ name?: string; version?: string; pragma?: { main?: string } }>(
       join(source, "package.json"),
@@ -35,6 +34,11 @@ await Promise.all(
     validateManifest(await readJson(join(source, "pragma-plugin.json")), packageName);
   }),
 );
+
+function registerPackageName(names: Set<string>, packageName: string): void {
+  if (names.has(packageName)) throw new Error(`duplicate package: ${packageName}`);
+  names.add(packageName);
+}
 
 if (lock.plugins.length !== official.packages.length) {
   throw new Error("official lock does not cover official package list");
