@@ -1,21 +1,21 @@
----
-name: agent-plugin
-description: Use when building or modifying a Pragma agent plugin: an integration that makes a host TUI coding agent such as OpenCode, Claude Code, Cursor, or a new tool report status into Pragma and appear in its launcher. Covers choosing hooks, TypeScript, or TUI watchers; status and message reporting; defineAgent, createTuiWatcher, usage-limit providers; official branding icons; registration, bundling, and pragma-cli agent verify.
----
+# Pragma Agent Plugin Reference
 
-# Build A Pragma Agent Plugin
+An **agent plugin** integrates a host coding-agent tool — OpenCode, Claude Code, Cursor,
+Codex, or a new TUI agent — so it reports live status into Pragma and appears in the
+agent launcher. Use this reference for lifecycle reporters, launchable agents, PTY
+watchers, and account usage-limit providers.
 
-Use this skill only for agent integrations: lifecycle reporters, launchable agents,
-PTY watchers, and account usage-limit providers. For sidebar tabs, cards, web views,
-commands, keybindings, settings, or CSS, use `CREATE_PLUGIN.md` directly.
+For sidebar tabs, cards, web views, commands, keybindings, settings, or CSS, use
+`plugin-api.md` instead. Derive the reporting contract from this file only; `plugin-api.md`
+covers the general plugin API and does not define status semantics.
 
-Read these canonical guides before editing:
+Companion references:
 
-- `CREATE_PLUGIN.md`: full plugin workflow and core-boundary rule.
-- `SDK.md`: typed reporting from an in-process TypeScript plugin.
-- `CLI.md`: shell-hook reporting contract.
-- `references/cli-reference.md`: exact agent CLI commands and flags.
-- `references/patterns.md`: abort, sub-agent, watcher, and usage-limit patterns.
+- `plugin-api.md`: `definePlugin` contributions, plugin context, hooks, bundling rules.
+- `sdk.md`: typed `@pragma/sdk` client and reporting helpers.
+- `cli.md`: general `pragma-cli` surface.
+- `agent-plugin-cli.md`: exact agent CLI commands and flags.
+- `agent-plugin-patterns.md`: abort, sub-agent, watcher, and usage-limit patterns.
 
 ## Choose Route First
 
@@ -124,7 +124,7 @@ clear mutes every turn-guarded report (see `packages/claude-code-plugin/AGENTS.m
 
 If host emits no abort hook, use an empirically verified secondary signal. Claude Code
 watches transcript bytes after current turn's starting offset; do not grep entire tail,
-because stale interrupt markers clear later turns. See `references/patterns.md`.
+because stale interrupt markers clear later turns. See `agent-plugin-patterns.md`.
 
 Stream assistant replies during the turn, not only at stop. Chat consumers (mobile)
 render raw Markdown as it arrives; a reply that first appears after the done report reads
@@ -153,6 +153,20 @@ Contribute launcher with `defineAgent`:
   `commandApproval`, `commands`, `subagents`, `abort`, `interrupt`, `usageLimits`,
   `sessionName`) so `agent verify` skips scenarios the host cannot implement.
 
+Model discovery rules:
+
+- Never emit a provider-level Auto model in static `models` or provider output. When a
+  selected model has `reasoning` entries, Pragma shows an Auto reasoning choice for
+  model-only launch, which appends `args.model` and no reasoning arguments.
+- Provider entries are `{ id, name, reasoning?: [{ id, name }] }`. Omit `reasoning` when
+  the host has none or cannot expose levels reliably for that model.
+- Emit fast variants as separate model entries. Never collapse them into a fast toggle.
+- Discovery is lazy: Pragma calls the provider when the selector submenu is focused,
+  shows cached results immediately, then updates with the refreshed result.
+- Keep host-specific model parsing inside the plugin provider and prefer supported host
+  CLI/API model-list surfaces over private databases or internal caches. Core must never
+  learn a host's model output format.
+
 Attach `createTuiWatcher`:
 
 Use `@pragma/watcher-kit` for basic agent prompting operations: interjections, command
@@ -179,7 +193,7 @@ plugins install the published package normally.
 Add `defineUsageLimitProvider` when applicable. Return either `ready` with finite,
 well-formed `limits`, or `unavailable` with a supported reason and useful message. Throw
 for unexpected transport/parser failures so verification detects regressions. See real
-Claude Code and Cursor implementations in `references/patterns.md`.
+Claude Code and Cursor implementations in `agent-plugin-patterns.md`.
 
 ## Find Official Branding Icon
 
@@ -238,7 +252,9 @@ also hits the correct machine for a remote project. Register development bundle 
 project/global `.pragma/config.json` `plugins[]`. Install runtime reporting through
 host's own mechanism:
 
-- OpenCode: absolute built `dist/index.mjs` path in OpenCode `plugin` config.
+- OpenCode: absolute built `dist/index.mjs` path (or a `file://` URL) in the `plugin`
+  array of `~/.config/opencode/opencode.json`. Never register by bare package name —
+  OpenCode would try to npm-fetch it.
 - Claude Code: marketplace add/install.
 - Cursor: package's `install-local.sh` hook merger.
 
