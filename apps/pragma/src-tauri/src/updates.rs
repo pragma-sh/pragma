@@ -4,6 +4,7 @@
 //! component is behind, downloads the named asset, and either records a UI
 //! overlay version (`reload`) or launches the OS installer (`restart`).
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -283,7 +284,11 @@ fn fetch_bytes(url: &str) -> AppResult<Vec<u8>> {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
 }
 
 fn urlencoding_lite(value: &str) -> String {
@@ -293,7 +298,7 @@ fn urlencoding_lite(value: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 encoded.push(char::from(byte));
             }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
+            _ => write!(encoded, "%{byte:02X}").expect("writing to String cannot fail"),
         }
     }
     encoded
