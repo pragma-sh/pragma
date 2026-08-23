@@ -110,6 +110,7 @@ than no guide.
 ├── packages/
 │   ├── constants/               # Dual TS + Rust shared constants → see packages/constants/AGENTS.md
 │   ├── bench/                   # Dual TS + Rust terminal lag benchmark (`pragma-bench`) → see packages/bench/AGENTS.md
+│   ├── brand/                   # `@pragma/brand` the Pragma mark as vector geometry + palettes → see packages/brand/AGENTS.md
 │   ├── sdk/                     # `@pragma/sdk` Node/Bun wrapper → see packages/sdk/AGENTS.md
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
@@ -178,6 +179,11 @@ than no guide.
 - A value/helper used by multiple frontend modules → `apps/pragma/src/lib/`.
 - A helper/type that could be reused by a future app → a new `packages/*` package.
 - A typed JS wrapper over the bundled Pragma CLI → `packages/sdk` (`@pragma/sdk`).
+- The Pragma mark itself — its geometry, or the colours it is painted in →
+  `packages/brand` (`@pragma/brand`), which emits SVG strings and knows nothing
+  about platforms. Which icon slots exist and what each demands stays with the
+  app that ships them (`apps/pragma-go/scripts/icon-variants.ts`). Never
+  hand-draw the mark a second time.
 - Agent-authored scratchpad runtime and UI components → `packages/scratchpad` (`@pragma/scratchpad`).
 - The scratchpad **file contract** (managed frontmatter, agent attachment, the
   sibling comment-thread file) → `packages/scratchpad-contract`
