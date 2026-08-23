@@ -28,15 +28,15 @@ Do not lead with servers, sockets, sidecars, protocol frames, Tauri, or crate na
 
 ## Choose Public Surface
 
-| Goal                                                        | Surface                         | Reference                    |
-| ----------------------------------------------------------- | ------------------------------- | ---------------------------- |
-| Control worktrees, tabs, agents, browser, or fanout         | `pragma-cli`                    | `references/cli.md`          |
-| Build typed JavaScript/TypeScript integration               | `@pragma/sdk`                   | `references/sdk.md`          |
-| Add Pragma UI, commands, launchable agents, themes          | `@pragma/plugin`                | `references/plugin-api.md`   |
-| Run scheduled or event-driven host tasks                    | `@pragma/automations`           | `references/automations.md`  |
-| Make coding-agent tool report status and appear in launcher | `@pragma/plugin` + `pragma-cli` | `references/agent-plugin.md` |
-| Author rich, interactive agent output (plan, comparison, review, dashboard) | Scratchpad (`pragma-cli scratchpad create`) | `references/scratchpads.md` |
-| Make repository-internal architecture change                | `pragma-architecture` skill     | Not this skill.              |
+| Goal                                                                        | Surface                                     | Reference                    |
+| --------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------- |
+| Control worktrees, tabs, agents, browser, or fanout                         | `pragma-cli`                                | `references/cli.md`          |
+| Build typed JavaScript/TypeScript integration                               | `@pragma/sdk`                               | `references/sdk.md`          |
+| Add Pragma UI, commands, launchable agents, themes                          | `@pragma/plugin`                            | `references/plugin-api.md`   |
+| Run scheduled or event-driven host tasks                                    | `@pragma/automations`                       | `references/automations.md`  |
+| Make coding-agent tool report status and appear in launcher                 | `@pragma/plugin` + `pragma-cli`             | `references/agent-plugin.md` |
+| Author rich, interactive agent output (plan, comparison, review, dashboard) | Scratchpad (`pragma-cli scratchpad create`) | `references/scratchpads.md`  |
+| Make repository-internal architecture change                                | `pragma-architecture` skill                 | Not this skill.              |
 
 Prefer, in order:
 
