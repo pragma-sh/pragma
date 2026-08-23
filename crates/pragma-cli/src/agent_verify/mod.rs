@@ -60,8 +60,7 @@ pub fn run(args: &AgentVerifyArgs, out: &Output) -> Result<(), CliError> {
     // Prefill-retry inputs mirroring the host's launch behavior (see
     // `ScenarioSession::await_running`).
     let prefill_plain = serde_json::to_value(&catalog_agent.launch)
-        .ok()
-        .is_some_and(|launch| launch["prefillMode"] == "plain");
+        .is_ok_and(|launch| launch["prefillMode"] == "plain");
     let prefill_submit = catalog_agent
         .launch
         .prefill_submit
