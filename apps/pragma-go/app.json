@@ -6,9 +6,15 @@
     "version": "0.0.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/images/icon.png",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "icon": {
+        "light": "./assets/images/icon-light.png",
+        "dark": "./assets/images/icon.png",
+        "tinted": "./assets/images/icon-tinted.png"
+      },
       "bundleIdentifier": "sh.pragma.go",
       "infoPlist": {
         "CFBundleDisplayName": "Pragma Go"
@@ -16,11 +22,17 @@
     },
     "android": {
       "package": "sh.pragma.go",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
+        "backgroundColor": "#0b0b0c"
+      }
     },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -56,19 +68,25 @@
               "name": "PragmaAgents",
               "displayName": "Agent Status",
               "description": "Agents working, needing attention, and done.",
-              "ios": { "supportedFamilies": ["systemMedium"] }
+              "ios": {
+                "supportedFamilies": ["systemMedium"]
+              }
             },
             {
               "name": "PragmaInbox",
               "displayName": "Inbox",
               "description": "The approvals and questions waiting for a decision.",
-              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+              "ios": {
+                "supportedFamilies": ["systemMedium", "systemLarge"]
+              }
             },
             {
               "name": "PragmaProjects",
               "displayName": "Projects",
               "description": "Agent status rolled up per project.",
-              "ios": { "supportedFamilies": ["systemMedium", "systemLarge"] }
+              "ios": {
+                "supportedFamilies": ["systemMedium", "systemLarge"]
+              }
             }
           ]
         }

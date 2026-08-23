@@ -215,6 +215,12 @@ lib/
   theme.ts                       # resolved colors for native props that take a string
   viewed-project.ts              # pure: focused screen's project theme root store (Vitest)
   use-viewed-project.ts          # focus hook reporting a screen's project root to that store
+assets/images/                   # generated app icons + favicon source (never hand-edited)
+public/                          # copied verbatim into the web export: index.html, favicon.svg
+scripts/
+  icon-variants.ts               # which icon slots exist + the SVG behind each (mark from @pragma/brand)
+  generate-icons.ts              # rasterises them into assets/images + public (`bun run icons`)
+  icons.test.ts                  # appearance/transparency + Android safe-zone invariants (Vitest)
 ```
 
 ## Widgets
@@ -420,6 +426,72 @@ Local Expo config plugins live in `plugins/` and are registered by path in
   `with-android-splash-logo` sits above `expo-splash-screen` for this reason.
   Listing it after silently does nothing.
 
+## App icons and favicon (`assets/images/`, `scripts/`)
+
+Every icon is rendered from one vector source — `@pragma/brand`, a redraw of
+the desktop app's mark (`apps/pragma/src-tauri/icons`, which ships only raster
+files). That package owns the geometry and the palettes and nothing else;
+`scripts/icon-variants.ts` owns the Expo- and platform-shaped decisions on top
+of it. `bun run --filter pragma-go icons` regenerates the PNGs, the
+theme-aware `public/favicon.svg`, and `public/index.html`. **Do not hand-edit
+any of those outputs**; they are committed because `expo prebuild` and
+`expo export` read them as plain files and neither native builds nor CI run the
+generator.
+
+- **The mark's geometry was traced off the desktop icon, not eyeballed.** Three
+  measurements are easy to get wrong and all three are glaring: the bowl is a
+  **rounded rectangle** (right edge straight for ~60 units between corners of
+  radius 157), _not_ a semicircular cap; the rule under the bowl runs the
+  **full width** from the left edge to the bowl's bottom-right curve, so the
+  stem's right edge meets it as a T rather than closing a corner; and the two
+  stacked cards are near-square and step **down-and-right** in equal measure,
+  so the stack recedes down the page instead of rising to the right. If you
+  re-trace, measure edge positions off the PNG rather than trusting a redraw.
+- **The plated icons draw at their authored coordinates; only Android
+  re-centres.** The desktop composition sits slightly right of centre, because
+  the bold "P" is left-heavy and the faint cards balance it. `placedMark` is
+  for the Android safe zone and the favicon; `markMarkup` is for everything
+  else.
+- **`ios.icon.light` is Expo's name for the "Any" slot, not a light-appearance
+  asset.** `@expo/prebuild-config` builds the base entry from
+  `icon.light ?? icon.dark ?? icon.tinted` and writes _no_ `light` appearance
+  of its own — so whatever `light` names is what a default home screen shows,
+  and the top-level `icon` key is ignored entirely once `ios.icon` is an
+  object. Pointing it at the wrong file silently puts a different icon on the
+  home screen than the one you think you are shipping, which is exactly what
+  happened once already.
+- **Pragma's dark variant carries its own black plate.** Apple lets the dark
+  icon omit its background and have the system fill one in, but we ship the
+  brand plate instead so the dark appearance matches the desktop app rather
+  than a system gradient. `ios.icon.dark` therefore points at `icon.png`, the
+  same file Android's legacy launcher icon and the store use.
+- **Only the Android foregrounds keep an alpha channel.** Every plated asset is
+  opaque, and must be: Apple requires a fully opaque greyscale image for the
+  tinted appearance, and `@expo/prebuild-config` renders every appearance
+  except `dark` with `removeTransparency`, flattening onto **white** — a white
+  mark on a white plate is an invisible icon. `scripts/icons.test.ts` asserts
+  both directions.
+- **The Android adaptive foreground is deliberately small.** A launcher masks
+  the 108dp canvas to a shape of its choosing and only the central 66dp is
+  guaranteed to survive. The mark is nearly square, so its corners sit much
+  further from the centre than its edges — at the iOS coverage a circular mask
+  takes a corner off the "P" and the back card. `ADAPTIVE_COVERAGE` keeps the
+  outermost ink inside that circle, and the test measures it.
+- **`monochromeImage` is what makes Android themed icons work**, and it is the
+  Android counterpart of the iOS tinted appearance: the system keeps only the
+  alpha channel, so the stacked cards carry their depth as partial alpha.
+- **The favicon keeps the outlined mark but drops the cards and thickens the
+  stroke 1.9x.** The cards are the first thing to turn to noise, and at its
+  authored weight the outline lands under half a pixel at 16px and dissolves.
+  1.9x is where the bowl's counter still reads as a hole at 16px without the
+  mark becoming a blob at 48px. A solid letter "P" survives 16px better still,
+  but it stops looking like the app icon, which is the point of a favicon.
+- **The favicon links live in `public/index.html`.** Expo reads that file as its
+  web template (`getTemplateIndexHtmlAsync`), and `web.favicon` only ever emits
+  one `/favicon.ico`. The theme-aware SVG is inlined there as a `data:` URI on
+  purpose: the bundle is served under a base path (`/web`), and a relative
+  `href` would resolve against the current route on a deep-link reload.
+
 ## Commands
 
 ```bash
@@ -428,8 +500,9 @@ bun run --filter pragma-go start         # Metro dev server (needs a dev build t
 bun run --filter pragma-go ios           # build + run iOS dev client
 bun run --filter pragma-go android       # build + run Android dev client
 bun run --filter pragma-go typecheck     # tsc --noEmit
-bun run --filter pragma-go test          # Vitest (pure lib/**/*.test.ts, node env)
+bun run --filter pragma-go test          # Vitest (lib/** + scripts/** *.test.ts, node env)
 bun run --filter pragma-go prebuild      # generate native ios/ android projects
+bun run --filter pragma-go icons         # re-render app icons + favicon from the vector source
 bun run --filter pragma-go web           # Metro dev server for the browser build
 bun run --filter pragma-go export:web    # production web export into ./dist
 bun run --filter pragma web:stage        # export + stage into the desktop's Tauri resources
