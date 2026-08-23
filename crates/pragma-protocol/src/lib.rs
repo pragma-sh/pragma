@@ -377,7 +377,7 @@ pub enum EventFrame {
     },
 }
 
-/// SemVer this crate speaks on the wire (`HelloFrame.protocol_version`).
+/// `SemVer` this crate speaks on the wire (`HelloFrame.protocol_version`).
 ///
 /// Mirrored into `@pragma/constants` `daemon.protocolVersion` by `bun run generate`.
 /// Comparison is exact equality.
@@ -387,7 +387,7 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloFrame {
-    /// Exact SemVer of `pragma-protocol` this process speaks.
+    /// Exact `SemVer` of `pragma-protocol` this process speaks.
     pub protocol_version: String,
 }
 
