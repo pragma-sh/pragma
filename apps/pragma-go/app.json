@@ -17,7 +17,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pragma Go connects to the Pragma desktop app on your computer, which may be on the same local network."
       },
-      "buildNumber": "2"
+      "buildNumber": "5"
     },
     "android": {
       "package": "sh.pragma.go",
