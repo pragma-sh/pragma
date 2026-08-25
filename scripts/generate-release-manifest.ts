@@ -22,6 +22,12 @@ interface ReleaseManifest {
   assets: Record<string, ReleaseAsset>;
 }
 
+interface NativeComponents {
+  app: string;
+  server: string;
+  protocol: string;
+}
+
 const PLATFORM_BY_MARKER: Record<string, string> = {
   "darwin-aarch64": "darwin-aarch64",
   "darwin-x86_64": "darwin-x86_64",
@@ -53,7 +59,7 @@ function fileAtTag(tag: string, path: string): string {
 }
 
 /** Returns reload only when every substantive change belongs to desktop React UI. */
-export function releaseApplyMode(previousTag: string | undefined): "reload" | "restart" {
+function releaseApplyMode(previousTag: string | undefined): "reload" | "restart" {
   if (!previousTag) return "restart";
   return applyModeForPaths(substantivePaths(`${previousTag}..HEAD`));
 }
@@ -95,17 +101,19 @@ function nativeBaseTag(previousTag: string): string {
   )
     .split("\n")
     .filter(Boolean);
-  const start = tags.indexOf(previousTag);
-  if (start === -1) throw new Error(`previous desktop tag not found: ${previousTag}`);
-  for (let index = start; index < tags.length; index += 1) {
-    const tag = tags[index];
-    if (!tag) continue;
-    const prior = tags[index + 1];
-    if (!prior || applyModeForPaths(substantivePaths(`${prior}..${tag}`)) === "restart") {
-      return tag;
-    }
+  const start = requiredTagIndex(tags, previousTag);
+  for (const [index, tag] of tags.slice(start).entries()) {
+    const prior = tags[start + index + 1];
+    if (!prior) return tag;
+    if (applyModeForPaths(substantivePaths(`${prior}..${tag}`)) === "restart") return tag;
   }
   return previousTag;
+}
+
+function requiredTagIndex(tags: string[], tag: string): number {
+  const index = tags.indexOf(tag);
+  if (index === -1) throw new Error(`previous desktop tag not found: ${tag}`);
+  return index;
 }
 
 function assetKey(fileName: string): string | undefined {
@@ -124,10 +132,71 @@ function releaseAssets(directory: string, downloadBaseUrl: string): Record<strin
     assets[key] = {
       url: `${downloadBaseUrl}/${encodeURIComponent(basename(path))}`,
       sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
-      signature: existsSync(signaturePath) ? readFileSync(signaturePath, "utf8").trim() : "",
+      signature: assetSignature(signaturePath),
     };
   }
   return assets;
+}
+
+function assetSignature(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : "";
+}
+
+function currentNativeComponents(appVersion: string): NativeComponents {
+  return {
+    app: appVersion,
+    server: cargoVersion("crates/pragma-server/Cargo.toml"),
+    protocol: cargoVersion("crates/pragma-protocol/Cargo.toml"),
+  };
+}
+
+function nativeComponentsAtTag(tag: string): NativeComponents {
+  return {
+    app: (
+      JSON.parse(fileAtTag(tag, "packages/constants/values.json")) as {
+        app: { version: string };
+      }
+    ).app.version,
+    server: cargoVersionFromText(
+      fileAtTag(tag, "crates/pragma-server/Cargo.toml"),
+      "crates/pragma-server/Cargo.toml",
+    ),
+    protocol: cargoVersionFromText(
+      fileAtTag(tag, "crates/pragma-protocol/Cargo.toml"),
+      "crates/pragma-protocol/Cargo.toml",
+    ),
+  };
+}
+
+function releaseNativeComponents(
+  appVersion: string,
+  apply: "reload" | "restart",
+  previousTag: string | undefined,
+): NativeComponents {
+  if (apply !== "reload" || !previousTag) return currentNativeComponents(appVersion);
+  return nativeComponentsAtTag(nativeBaseTag(previousTag));
+}
+
+function requiredAssetKeys(apply: "reload" | "restart"): string[] {
+  return apply === "reload"
+    ? ["ui"]
+    : [
+        "darwin-aarch64",
+        "darwin-x86_64",
+        "linux-aarch64-deb",
+        "linux-aarch64-rpm",
+        "linux-x86_64-deb",
+        "linux-x86_64-rpm",
+        "windows-x86_64",
+      ];
+}
+
+function validateAssets(manifest: ReleaseManifest): void {
+  for (const key of requiredAssetKeys(manifest.apply)) {
+    const asset = manifest.assets[key];
+    if (!asset) throw new Error(`release is ${manifest.apply} but ${key} asset is missing`);
+    if (!asset.signature) throw new Error(`${key} asset is unsigned`);
+  }
 }
 
 function main(): void {
@@ -141,29 +210,7 @@ function main(): void {
   };
   const apply = releaseApplyMode(process.env.PREVIOUS_RELEASE_TAG?.trim() || undefined);
   const previousTag = process.env.PREVIOUS_RELEASE_TAG?.trim();
-  const nativeTag = previousTag ? nativeBaseTag(previousTag) : undefined;
-  const nativeComponents =
-    apply === "reload" && nativeTag
-      ? {
-          app: (
-            JSON.parse(fileAtTag(nativeTag, "packages/constants/values.json")) as {
-              app: { version: string };
-            }
-          ).app.version,
-          server: cargoVersionFromText(
-            fileAtTag(nativeTag, "crates/pragma-server/Cargo.toml"),
-            "crates/pragma-server/Cargo.toml",
-          ),
-          protocol: cargoVersionFromText(
-            fileAtTag(nativeTag, "crates/pragma-protocol/Cargo.toml"),
-            "crates/pragma-protocol/Cargo.toml",
-          ),
-        }
-      : {
-          app: app.app.version,
-          server: cargoVersion("crates/pragma-server/Cargo.toml"),
-          protocol: cargoVersion("crates/pragma-protocol/Cargo.toml"),
-        };
+  const nativeComponents = releaseNativeComponents(app.app.version, apply, previousTag);
   const downloadBaseUrl = `https://github.com/${repository}/releases/download/${tag}`;
   const manifest: ReleaseManifest = {
     schemaVersion: 1,
@@ -180,26 +227,7 @@ function main(): void {
     },
     assets: releaseAssets(assetsDir, downloadBaseUrl),
   };
-  const requiredAssets =
-    apply === "reload"
-      ? ["ui"]
-      : [
-          "darwin-aarch64",
-          "darwin-x86_64",
-          "linux-aarch64-deb",
-          "linux-aarch64-rpm",
-          "linux-x86_64-deb",
-          "linux-x86_64-rpm",
-          "windows-x86_64",
-        ];
-  for (const requiredAsset of requiredAssets) {
-    if (!manifest.assets[requiredAsset]) {
-      throw new Error(`release is ${apply} but ${requiredAsset} asset is missing`);
-    }
-    if (!manifest.assets[requiredAsset].signature) {
-      throw new Error(`${requiredAsset} asset is unsigned`);
-    }
-  }
+  validateAssets(manifest);
   writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`release manifest: ${apply} -> ${output}`);
 }

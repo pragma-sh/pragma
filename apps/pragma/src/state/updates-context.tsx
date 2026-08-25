@@ -47,6 +47,8 @@ const UpdatesContext = createContext<UpdatesContextValue | null>(null);
  * confirmation modal. Dev instances default to localhost:3000; production uses
  * shipped pragma-app.sh URL unless Settings overrides `other.serverUrl`.
  */
+// Polling, configuration events, and install state share refs and must remain one lifecycle.
+// fallow-ignore-next-line complexity
 export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [runtime, setRuntime] = useState<UpdateRuntime | null>(null);
   const [offer, setOffer] = useState<UpdateCheck | null>(null);

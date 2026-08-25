@@ -42,6 +42,11 @@ export interface ReleaseDocument {
   manifestSignature: string;
 }
 
+interface ParsedVersion {
+  core: [number, number, number];
+  pre: string[];
+}
+
 /** Selects newest safe offer, falling back through UI releases to a native installer. */
 export function evaluateUpdates(args: {
   documents: Array<Partial<ReleaseDocument> & Pick<ReleaseDocument, "manifest">>;
@@ -144,18 +149,38 @@ export function evaluateUpdate(args: {
   running: Partial<Record<(typeof SHIPPED_QUERY_KEYS)[number], string>>;
 }): UpdateCheckResponse {
   const { manifest, platform, running } = args;
-  const nativeBehind = (["app", "server", "protocol"] as const).some((key) =>
-    componentIsBehind(manifest, running, key),
-  );
-  if (manifest.apply === "reload" && nativeBehind) {
+  if (reloadRequiresNativeUpdate(manifest, running)) {
     return { available: false };
   }
   if (!SHIPPED_QUERY_KEYS.some((key) => componentIsBehind(manifest, running, key))) {
     return { available: false };
   }
-  const assetKey = updateAssetKey(manifest.apply, platform);
-  const asset = manifest.assets[assetKey];
+  const asset = manifest.assets[updateAssetKey(manifest.apply, platform)];
   if (!asset) return { available: false };
+  return availableUpdate(args, asset);
+}
+
+function reloadRequiresNativeUpdate(
+  manifest: ReleaseManifest,
+  running: Partial<Record<(typeof SHIPPED_QUERY_KEYS)[number], string>>,
+): boolean {
+  return manifest.apply === "reload" && nativeIsBehind(manifest, running);
+}
+
+function nativeIsBehind(
+  manifest: ReleaseManifest,
+  running: Partial<Record<(typeof SHIPPED_QUERY_KEYS)[number], string>>,
+): boolean {
+  return (["app", "server", "protocol"] as const).some((key) =>
+    componentIsBehind(manifest, running, key),
+  );
+}
+
+function availableUpdate(
+  args: Parameters<typeof evaluateUpdate>[0],
+  asset: ReleaseAsset,
+): UpdateCheckResponse {
+  const { manifest } = args;
   return {
     available: true,
     apply: manifest.apply,
@@ -183,32 +208,57 @@ function isNewerVersion(released: string, current: string): boolean {
   const next = parseVersion(released);
   const running = parseVersion(current);
   if (!next || !running) return false;
-  for (const index of [0, 1, 2] as const) {
-    const difference = next.core[index] - running.core[index];
-    if (difference !== 0) return difference > 0;
-  }
-  if (next.pre.length === 0) return running.pre.length > 0;
-  if (running.pre.length === 0) return false;
-  const length = Math.max(next.pre.length, running.pre.length);
-  for (let index = 0; index < length; index += 1) {
-    const left = next.pre[index];
-    const right = running.pre[index];
-    if (left === undefined) return false;
-    if (right === undefined) return true;
-    if (left === right) continue;
-    const leftNumber = /^\d+$/.test(left) ? Number(left) : null;
-    const rightNumber = /^\d+$/.test(right) ? Number(right) : null;
-    if (leftNumber !== null && rightNumber !== null) return leftNumber > rightNumber;
-    if (leftNumber !== null) return false;
-    if (rightNumber !== null) return true;
-    return left > right;
-  }
-  return false;
+  const coreComparison = compareCore(next.core, running.core);
+  if (coreComparison !== 0) return coreComparison > 0;
+  return comparePrerelease(next.pre, running.pre) > 0;
 }
 
-function parseVersion(value: string): { core: [number, number, number]; pre: string[] } | null {
+function compareCore(left: ParsedVersion["core"], right: ParsedVersion["core"]): number {
+  for (const index of [0, 1, 2] as const) {
+    const difference = left[index] - right[index];
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function comparePrerelease(left: string[], right: string[]): number {
+  if (left.length === 0 || right.length === 0) {
+    return Number(left.length === 0) - Number(right.length === 0);
+  }
+  return comparePrereleaseParts(left, right);
+}
+
+function comparePrereleaseParts(left: string[], right: string[]): number {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const comparison = comparePrereleasePart(left[index], right[index]);
+    if (comparison !== 0) return comparison;
+  }
+  return 0;
+}
+
+function comparePrereleasePart(left: string | undefined, right: string | undefined): number {
+  if (left === right) return 0;
+  if (left === undefined) return -1;
+  if (right === undefined) return 1;
+  return compareDefinedPrereleaseParts(left, right);
+}
+
+function compareDefinedPrereleaseParts(left: string, right: string): number {
+  const leftPart = sortablePrereleasePart(left);
+  const rightPart = sortablePrereleasePart(right);
+  const categoryDifference = leftPart[0] - rightPart[0];
+  if (categoryDifference !== 0) return categoryDifference;
+  return leftPart[1] < rightPart[1] ? -1 : leftPart[1] > rightPart[1] ? 1 : 0;
+}
+
+function sortablePrereleasePart(value: string): [number, number | string] {
+  return /^\d+$/.test(value) ? [0, Number(value)] : [1, value];
+}
+
+function parseVersion(value: string): ParsedVersion | null {
   const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
-  if (!match?.[1] || !match[2] || !match[3]) return null;
+  if (!match) return null;
   return {
     core: [Number(match[1]), Number(match[2]), Number(match[3])],
     pre: match[4]?.split(".") ?? [],
@@ -230,6 +280,15 @@ export async function loadGithubManifests(now = Date.now()): Promise<ReleaseDocu
   if (existing) return existing;
   const headers = githubHeaders();
   const assetUrls = await recentManifestUrls(headers);
+  const documents = await fetchRecentManifests(assetUrls, headers);
+  if (documents.length > 0) cached = { expires: now + CACHE_MS, documents };
+  return documents;
+}
+
+async function fetchRecentManifests(
+  assetUrls: Array<{ manifest: string; signature: string }>,
+  headers: Record<string, string>,
+): Promise<ReleaseDocument[]> {
   const documents: ReleaseDocument[] = [];
   for (const urls of assetUrls) {
     // oxlint-disable-next-line no-await-in-loop -- stop after first restart manifest to bound GitHub requests.
@@ -237,9 +296,6 @@ export async function loadGithubManifests(now = Date.now()): Promise<ReleaseDocu
     if (!document) continue;
     documents.push(document);
     if (document.manifest.apply === "restart") break;
-  }
-  if (documents.length > 0) {
-    cached = { expires: now + CACHE_MS, documents };
   }
   return documents;
 }
@@ -270,14 +326,29 @@ async function recentManifestUrls(
     prerelease?: boolean;
     assets?: Array<{ name: string; browser_download_url: string }>;
   }>;
-  return releases.flatMap((release) => {
-    if (release.draft || release.prerelease) return [];
-    const manifest = release.assets?.find((asset) => asset.name === "release.json");
-    const signature = release.assets?.find((asset) => asset.name === "release.json.sig");
-    return manifest && signature
-      ? [{ manifest: manifest.browser_download_url, signature: signature.browser_download_url }]
-      : [];
-  });
+  return releases.flatMap(releaseManifestUrls);
+}
+
+function releaseManifestUrls(release: {
+  draft?: boolean;
+  prerelease?: boolean;
+  assets?: Array<{ name: string; browser_download_url: string }>;
+}): Array<{ manifest: string; signature: string }> {
+  if (!isPublishedRelease(release)) return [];
+  return releaseManifestAssetUrls(release.assets ?? []);
+}
+
+function isPublishedRelease(release: { draft?: boolean; prerelease?: boolean }): boolean {
+  return !release.draft && !release.prerelease;
+}
+
+function releaseManifestAssetUrls(
+  assets: Array<{ name: string; browser_download_url: string }>,
+): Array<{ manifest: string; signature: string }> {
+  const manifest = assets.find((asset) => asset.name === "release.json");
+  const signature = assets.find((asset) => asset.name === "release.json.sig");
+  if (!manifest || !signature) return [];
+  return [{ manifest: manifest.browser_download_url, signature: signature.browser_download_url }];
 }
 
 async function fetchManifest(
