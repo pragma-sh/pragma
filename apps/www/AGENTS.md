@@ -65,8 +65,12 @@ apps/www/
 - **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
-  In development a local fixture stands in for that file; production fetches it from
-  the latest GitHub Release.
+  In development a local fixture stands in for that file; production fetches signed
+  manifests from recent GitHub Releases. Do not use `/releases/latest`: another
+  independently-versioned monorepo component may be newer. Walk reload manifests through
+  the newest restart manifest so a client that skipped native releases gets the required
+  installer before a newer UI overlay. An update without the requested
+  UI/platform/package-format asset is unavailable rather than an un-installable offer.
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep
   the rest of the page a server component.

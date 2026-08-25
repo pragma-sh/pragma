@@ -357,6 +357,24 @@ CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, o
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
 compile-only Tauri build on macOS, Linux, **and** Windows.
 
+**Releases are cut by Release Please.** `.github/workflows/release.yml` updates one
+combined release PR from Conventional Commits. Merging it creates component GitHub
+Releases; a desktop (`pragma-v*`) release then builds signed installers for every
+advertised OS/architecture/package format, builds a tarred React UI overlay, and uploads
+them with a signed `release.json`. That manifest is `reload` only when every substantive change since the
+previous desktop tag is under `apps/pragma/src/`; any native/server/tooling change is
+`restart`. Desktop-shipped crates/packages use Release Please's `linked-versions` group,
+so changing one also creates a desktop release instead of shipping under an unrelated
+component version. Configure `RELEASE_PLEASE_TOKEN` with contents + pull-request write
+access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
+GitHub suppresses workflows caused by that token. Release builds also require
+`TAURI_SIGNING_PRIVATE_KEY`, its password, and `TAURI_SIGNING_PUBLIC_KEY`; every installer
+and UI overlay is signed, and production clients reject a missing/invalid signature. Linux
+package-manager installs select `.deb` or `.rpm`; AppImage sessions receive no automatic
+restart offer until in-place replacement is supported. The website update API scans recent
+releases through the newest restart manifest, because another monorepo component may be
+GitHub's latest release and a client may have skipped a required native release.
+
 **CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
 Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and
 runners are x86_64/arm64 Linux — so everything that can run on Linux (commitlint, the

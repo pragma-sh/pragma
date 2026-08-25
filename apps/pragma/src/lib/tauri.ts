@@ -1490,11 +1490,14 @@ export interface UpdateCheck {
   changelogUrl?: string;
   version?: string;
   asset?: UpdateAsset;
+  manifestJson?: string;
+  manifestSignature?: string;
 }
 
 /** Outcome of applying a checked offer. */
 export interface UpdateApplyResult {
   mode: "reload" | "restart";
+  url?: string;
 }
 
 /** Runtime identity used to poll and display Settings → Updates. */
@@ -1512,8 +1515,15 @@ export function applyUpdate(request: {
   apply: "reload" | "restart";
   version: string;
   asset: UpdateAsset;
+  manifestJson: string;
+  manifestSignature: string;
 }): Promise<UpdateApplyResult> {
   return invoke<UpdateApplyResult>("apply_update", { request });
+}
+
+/** Marks a newly loaded UI overlay healthy so next launch keeps using it. */
+export function confirmUiOverlay(): Promise<void> {
+  return invoke<void>("confirm_ui_overlay");
 }
 
 /**

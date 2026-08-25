@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      desktop-created: ${{ steps.release.outputs['apps/pragma--release_created'] }}
+      desktop-body: ${{ steps.release.outputs['apps/pragma--body'] }}
+      desktop-sha: ${{ steps.release.outputs['apps/pragma--sha'] }}
+      desktop-tag: ${{ steps.release.outputs['apps/pragma--tag_name'] }}
+      desktop-version: ${{ steps.release.outputs['apps/pragma--version'] }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+  desktop-build:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.desktop-created == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-aarch64
+            source: target/release/bundle/dmg/*.dmg
+            extension: dmg
+          - runner: macos-15-intel
+            platform: darwin-x86_64
+            source: target/release/bundle/dmg/*.dmg
+            extension: dmg
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            formats: deb rpm
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+            formats: deb rpm
+          - runner: windows-latest
+            platform: windows-x86_64
+            source: target/release/bundle/nsis/*-setup.exe
+            extension: exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.desktop-tag }}
+      - name: Install Linux dependencies
+        if: ${{ startsWith(matrix.platform, 'linux-') }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev libgtk-3-dev libpipewire-0.3-dev libgbm-dev libclang-dev build-essential file
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - run: bun install --frozen-lockfile
+      - name: Require update signing keys
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+        run: test -n "$PRIVATE_KEY" && test -n "$PUBLIC_KEY"
+      - name: Build signed desktop bundle
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PRAGMA_UPDATE_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+        run: bun run --filter pragma tauri build
+      - name: Normalize installer name
+        shell: bash
+        env:
+          SOURCE_GLOB: ${{ matrix.source }}
+          DESTINATION: Pragma-${{ needs.release-please.outputs.desktop-version }}-${{ matrix.platform }}.${{ matrix.extension }}
+          FORMATS: ${{ matrix.formats }}
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.release-please.outputs.desktop-version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ "$PLATFORM" == linux-* ]]; then
+            mkdir release-asset
+            for format in $FORMATS; do
+              files=( target/release/bundle/$format/*.$format )
+              if [ "${#files[@]}" -ne 1 ] || [ ! -f "${files[0]}" ]; then
+                printf 'Expected one %s installer, found %s\n' "$format" "${#files[@]}" >&2
+                exit 1
+              fi
+              destination="release-asset/Pragma-$VERSION-$PLATFORM-$format.$format"
+              cp "${files[0]}" "$destination"
+              bunx tauri signer sign "$destination"
+            done
+            exit 0
+          fi
+          files=( $SOURCE_GLOB )
+          if [ "${#files[@]}" -ne 1 ] || [ ! -f "${files[0]}" ]; then
+            printf 'Expected one installer for %s, found %s\n' "$SOURCE_GLOB" "${#files[@]}" >&2
+            exit 1
+          fi
+          mkdir release-asset
+          cp "${files[0]}" "release-asset/$DESTINATION"
+          bunx tauri signer sign "release-asset/$DESTINATION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: release-asset/*
+          if-no-files-found: error
+
+  publish-desktop:
+    needs: [release-please, desktop-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.desktop-tag }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+      - name: Build UI overlay
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          bun run --filter pragma build
+          tar -cf "release-assets/Pragma-${{ needs.release-please.outputs.desktop-version }}-ui.tar" -C apps/pragma/dist .
+          bunx tauri signer sign "release-assets/Pragma-${{ needs.release-please.outputs.desktop-version }}-ui.tar"
+      - name: Find previous desktop release
+        id: previous
+        env:
+          CURRENT_TAG: ${{ needs.release-please.outputs.desktop-tag }}
+        run: |
+          previous="$(git tag --list 'pragma-v*' --sort=-version:refname | grep -Fvx "$CURRENT_TAG" | head -1 || true)"
+          printf 'tag=%s\n' "$previous" >> "$GITHUB_OUTPUT"
+      - name: Generate release manifest
+        env:
+          PREVIOUS_RELEASE_TAG: ${{ steps.previous.outputs.tag }}
+          RELEASE_ASSETS_DIR: release-assets
+          RELEASE_NOTES: ${{ needs.release-please.outputs.desktop-body }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.desktop-sha }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
+        run: |
+          bun scripts/generate-release-manifest.ts
+          bunx tauri signer sign release-assets/release.json
+      - name: Upload installers and metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.desktop-tag }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber

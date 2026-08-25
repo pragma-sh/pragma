@@ -1115,6 +1115,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
+    updates::load_ui_overlay(app.handle());
     install_menu(app.handle())?;
     install_deep_links(app);
     ensure_gateway_in_background(pty.clone());
@@ -1156,6 +1157,9 @@ pub fn run() {
         Err(error) => log::warn!("could not raise the open-file limit: {error}"),
     }
     tauri::Builder::default()
+        .register_uri_scheme_protocol("pragma-ui", |context, request| {
+            updates::ui_overlay_response(context.app_handle(), request.uri().path())
+        })
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1167,6 +1171,7 @@ pub fn run() {
             updates::get_update_runtime,
             updates::check_for_update,
             updates::apply_update,
+            updates::confirm_ui_overlay,
             load_keybindings,
             set_menu_accelerators_enabled,
             read_plugin_manifests,

@@ -1,7 +1,7 @@
 import {
-  evaluateUpdate,
+  evaluateUpdates,
   fixtureManifest,
-  loadGithubManifest,
+  loadGithubManifests,
   useDevFixture,
   type UpdateCheckResponse,
 } from "@/lib/updates";
@@ -9,25 +9,23 @@ import {
 /** `GET /api/updates` — desktop poll endpoint. Never imports `@pragma/*`. */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  const manifest = await availableManifest();
-  if (!manifest) {
+  const documents = await availableManifests();
+  if (documents.length === 0) {
     return Response.json({ available: false });
   }
 
-  const body = evaluateUpdate({
-    manifest,
-    platform: url.searchParams.get("platform") ?? "",
-    running: runningVersions(url),
-  });
+  const platform = url.searchParams.get("platform") ?? "";
+  const running = runningVersions(url);
+  const body = evaluateUpdates({ documents, platform, running });
   return Response.json(withAbsoluteAssetUrl(body, url.origin));
 }
 
-async function availableManifest() {
-  if (useDevFixture()) return fixtureManifest();
+async function availableManifests() {
+  if (useDevFixture()) return [{ manifest: fixtureManifest() }];
   try {
-    return await loadGithubManifest();
+    return await loadGithubManifests();
   } catch {
-    return null;
+    return [];
   }
 }
 

@@ -24,6 +24,7 @@ import { errorMessage } from "@/lib/errors";
 import {
   applyUpdate,
   checkForUpdate,
+  confirmUiOverlay,
   getUpdateRuntime,
   readConfig,
   type UpdateCheck,
@@ -53,6 +54,10 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [applying, setApplying] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
   const settingsRef = useRef<OtherSettings>({});
+
+  useEffect(() => {
+    void confirmUiOverlay().catch(() => undefined);
+  }, []);
 
   const loadSettings = useCallback(async (): Promise<OtherSettings> => {
     try {
@@ -92,7 +97,13 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   }, [loadSettings]);
 
   const applyOffer = useCallback(async (current: UpdateCheck) => {
-    if (!current.apply || !current.version || !current.asset) {
+    if (
+      !current.apply ||
+      !current.version ||
+      !current.asset ||
+      current.manifestJson === undefined ||
+      current.manifestSignature === undefined
+    ) {
       toast.error("Update is missing an asset.");
       return;
     }
@@ -102,10 +113,13 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
         apply: current.apply,
         version: current.version,
         asset: current.asset,
+        manifestJson: current.manifestJson,
+        manifestSignature: current.manifestSignature,
       });
       if (result.mode === "reload") {
         toast.success("UI update applied. Reloading…", changelogAction(current.changelogUrl));
-        window.location.reload();
+        if (!result.url) throw new Error("UI update did not return its reload URL.");
+        window.location.replace(result.url);
         return;
       }
       toast.success(

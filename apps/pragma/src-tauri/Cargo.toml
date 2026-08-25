@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 base64 = "0.22"
 log = "0.4"
+minisign = "0.9"
 opener = "0.7"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = [
@@ -39,6 +40,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 scopeguard = "1"
+semver = "1"
 tauri = { version = "2.11.2", features = [
   "unstable",
   "devtools",
@@ -56,6 +58,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 pragma-platform = { version = "0.0.0", path = "../../../crates/pragma-platform" }
 sha2 = { workspace = true }
+tar = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6.15"

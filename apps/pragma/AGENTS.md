@@ -500,7 +500,17 @@ render under the standard plugin boundary, and use the same host hooks as sideba
 to `http://localhost:3000/api/updates`; production uses `https://pragma-app.sh/api/updates`.
 `InstallUpdateButton` sits above the project switcher when a shipped-into-the-app
 component is behind. Reload writes a UI overlay version marker; restart always launches
-the OS installer named by the manifest.
+the OS installer named by the manifest. Release CI packages `dist/` as a tar archive for
+React-only releases. Rust extracts it under the instance update directory and serves only
+that tree through the private `pragma-ui` protocol; subsequent launches navigate back to
+the installed overlay. A `.pending` marker is removed only after `UpdatesProvider` mounts;
+an overlay that fails before that point is deleted on next launch so bundled UI recovers.
+Do not broaden that protocol to arbitrary app-data paths. Every production asset and the
+manifest binding its version/apply mode/URL are minisign-verified against
+`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. Linux selects `.deb` vs `.rpm`
+from its package family; AppImage sessions are deliberately not offered a restart update
+until replacement can be atomic. Any change outside `apps/pragma/src/` produces restart
+metadata and platform installers.
 
 **Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
 that actually applies after the `default → global → project` merge, whether it differs
