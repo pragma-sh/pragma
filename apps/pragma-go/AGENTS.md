@@ -1,6 +1,6 @@
 # Pragma Go — Agent & Contributor Guide
 
-Expo (SDK 57) client — iPhone, iPad, Android, and the browser — that mirrors the
+Expo (SDK 57) client — iPhone, Android, and the browser — that mirrors the
 desktop sidebar's worktree navigation, surfaces agent approvals/questions as an
 actionable inbox, and — once paired with a desktop — streams live agent chat and
 launches new sessions. The name is the point: it is Pragma for when you are away
@@ -162,7 +162,7 @@ from the desktop.
 app/
   _layout.tsx                     # providers: GestureHandlerRoot, SafeArea, Connection, Theme, Data, PortalHost
   pair.tsx                        # QR + manual pairing (modal)
-  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable on iPad
+  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable (iPad support is off — see App Store builds)
   (tabs)/_layout.web.tsx          # JS Projects + Inbox + Settings bottom tabs; wide routes also show a sidebar
   (tabs)/(projects)/              # Stack: drill-down
     index.tsx                     #   all projects
@@ -215,7 +215,8 @@ lib/
   theme.ts                       # resolved colors for native props that take a string
   viewed-project.ts              # pure: focused screen's project theme root store (Vitest)
   use-viewed-project.ts          # focus hook reporting a screen's project root to that store
-assets/images/                   # generated app icons + favicon source (never hand-edited)
+assets/AppIcon.icon/             # generated layered iOS Liquid Glass icon
+assets/images/                   # generated Android/store icons + favicon source (never hand-edited)
 public/                          # copied verbatim into the web export: index.html, favicon.svg
 scripts/
   icon-variants.ts               # which icon slots exist + the SVG behind each (mark from @pragma/brand)
@@ -419,6 +420,18 @@ Local Expo config plugins live in `plugins/` and are registered by path in
   to the launcher icon, which `android:windowSplashScreenBehavior="icon_preferred"`
   already asks for. If a splash logo is ever wanted, delete this plugin and give
   `expo-splash-screen` an `image` instead.
+- **`with-store-ios-cleanup`** strips the `expo-dev-client` traces
+  (`NSBonjourServices: _expo._tcp`, the `exp+pragma-go` URL scheme) from the
+  iOS `Info.plist`. The dev launcher's pods are Debug-only, but its config
+  plugin writes those keys into _every_ prebuild, so a store binary would ship
+  a Bonjour service it never browses and a URL scheme nothing handles — both of
+  which App Review reads as undeclared capabilities. It is applied by
+  `app.config.ts`, not `app.json`, and only when `PRAGMA_STORE_BUILD` is set,
+  so a dev-client prebuild keeps the discovery it depends on. The EAS `preview`
+  and `production` profiles set it. `NSLocalNetworkUsageDescription` is
+  **not** stripped — pairing to a desktop at a LAN address genuinely needs it —
+  it is overridden in `app.json` with wording about pairing rather than the
+  dev-launcher default about development servers.
 - **Mods run last-registered-first.** `withMod` intercepts whatever mod is
   already on the config and calls it as `nextMod`, so an _earlier_ entry in the
   `plugins` array runs _after_ a later one. A plugin that overrides another
@@ -426,17 +439,17 @@ Local Expo config plugins live in `plugins/` and are registered by path in
   `with-android-splash-logo` sits above `expo-splash-screen` for this reason.
   Listing it after silently does nothing.
 
-## App icons and favicon (`assets/images/`, `scripts/`)
+## App icons and favicon (`assets/`, `scripts/`)
 
 Every icon is rendered from one vector source — `@pragma/brand`, a redraw of
 the desktop app's mark (`apps/pragma/src-tauri/icons`, which ships only raster
 files). That package owns the geometry and the palettes and nothing else;
 `scripts/icon-variants.ts` owns the Expo- and platform-shaped decisions on top
-of it. `bun run --filter pragma-go icons` regenerates the PNGs, the
-theme-aware `public/favicon.svg`, and `public/index.html`. **Do not hand-edit
-any of those outputs**; they are committed because `expo prebuild` and
-`expo export` read them as plain files and neither native builds nor CI run the
-generator.
+of it. `bun run --filter pragma-go icons` regenerates the Icon Composer bundle,
+PNGs, theme-aware `public/favicon.svg`, and `public/index.html`. **Do not
+hand-edit any of those outputs**; they are committed because `expo prebuild`
+and `expo export` read them as plain files and neither native builds nor CI run
+the generator.
 
 - **The mark's geometry was traced off the desktop icon, not eyeballed.** Three
   measurements are easy to get wrong and all three are glaring: the bowl is a
@@ -452,25 +465,16 @@ generator.
   the bold "P" is left-heavy and the faint cards balance it. `placedMark` is
   for the Android safe zone and the favicon; `markMarkup` is for everything
   else.
-- **`ios.icon.light` is Expo's name for the "Any" slot, not a light-appearance
-  asset.** `@expo/prebuild-config` builds the base entry from
-  `icon.light ?? icon.dark ?? icon.tinted` and writes _no_ `light` appearance
-  of its own — so whatever `light` names is what a default home screen shows,
-  and the top-level `icon` key is ignored entirely once `ios.icon` is an
-  object. Pointing it at the wrong file silently puts a different icon on the
-  home screen than the one you think you are shipping, which is exactly what
-  happened once already.
-- **Pragma's dark variant carries its own black plate.** Apple lets the dark
-  icon omit its background and have the system fill one in, but we ship the
-  brand plate instead so the dark appearance matches the desktop app rather
-  than a system gradient. `ios.icon.dark` therefore points at `icon.png`, the
-  same file Android's legacy launcher icon and the store use.
-- **Only the Android foregrounds keep an alpha channel.** Every plated asset is
-  opaque, and must be: Apple requires a fully opaque greyscale image for the
-  tinted appearance, and `@expo/prebuild-config` renders every appearance
-  except `dark` with `removeTransparency`, flattening onto **white** — a white
-  mark on a white plate is an invisible icon. `scripts/icons.test.ts` asserts
-  both directions.
+- **iOS uses Icon Composer, not flattened appearance PNGs.** `ios.icon` points
+  at `assets/AppIcon.icon`, whose `system-light` / `system-dark` fills and
+  layered vector artwork let iOS apply native Liquid Glass, depth, lighting,
+  and tint effects. Baking either plate into a PNG makes the icon look like a
+  solid tile beside current iOS icons. The generator emits separate light,
+  dark, and tinted artwork layers because recolouring one composite SVG turns
+  the whole mark into a silhouette and loses its prompt and card details.
+- **Only Android foregrounds keep an alpha channel among PNG outputs.** The
+  Android/store plate stays opaque; adaptive and monochrome foregrounds remain
+  transparent because the launcher supplies their background.
 - **The Android adaptive foreground is deliberately small.** A launcher masks
   the 108dp canvas to a shape of its choosing and only the central 66dp is
   guaranteed to survive. The mark is nearly square, so its corners sit much
@@ -507,6 +511,49 @@ bun run --filter pragma-go web           # Metro dev server for the browser buil
 bun run --filter pragma-go export:web    # production web export into ./dist
 bun run --filter pragma web:stage        # export + stage into the desktop's Tauri resources
 ```
+
+## App Store / Play Store builds
+
+`eas.json` holds three profiles: `development` (dev client, internal),
+`preview` (a store-shaped build for internal distribution), and `production`.
+
+```bash
+eas build --platform ios --profile production
+eas submit --platform ios --latest
+```
+
+- **`appVersionSource` is `local`**, so `app.json` is the source of truth for
+  `version` / `ios.buildNumber` / `android.versionCode`. `autoIncrement` on the
+  production profile bumps the build number in that file — commit the result.
+- **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
+  and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
+  set it for a dev-client build.
+- **The App Store listing name is `Pragma Sh Go`; everything here says
+  `Pragma Go`. This is deliberate — do not "fix" it.** `Pragma Go` was already
+  taken in App Store Connect, whose names are globally unique, so the listing
+  had to differ. The listing name lives only in App Store Connect metadata: it
+  is never read from `app.json`, and the binary is matched to the record by
+  bundle ID (`sh.pragma.go`). `expo.name` / `CFBundleDisplayName` drive the
+  **home-screen** name, which stays `Pragma Go` — shorter than the ~12
+  characters iOS truncates at, and a store name that contains the device name
+  is ordinary (App Review guideline 2.3.8 asks only that the two not mislead).
+  User-visible copy, docs, and the privacy policy all use `Pragma Go` for the
+  same reason: the `Sh` is a listing workaround, not a product rename.
+- **`supportsTablet` is off.** iPad is a separate review surface with its own
+  required screenshots and its own wide-layout code path (`AppSidebar`, the
+  `NativeTabs sidebarAdaptable` sidebar). Turning it on means committing to
+  testing it — the web build's wide layout is not proof.
+- **Permission strings must name their purpose.** `expo-camera` is configured
+  with a `cameraPermission` that says QR pairing and `microphonePermission:
+false`; an unused permission string is a rejection on its own.
+- **The privacy policy** is served by `apps/www` at `/privacy` and its URL is
+  stored in App Store Connect; support goes to the repository's GitHub issues.
+  Keep the policy honest about the push-notification relay (Expo -> APNs/FCM),
+  the camera's single use, and the fact that the app talks only to the user's
+  own desktop. It is written to cover future analytics and hosted services as
+  things disclosed _before_ they launch — so shipping either means editing that
+  page first, and re-answering App Store Connect's App Privacy questionnaire,
+  which today declares "Data Not Collected".
 
 Typecheck needs `@pragma/sdk`'s built `dist` (`bun run --filter @pragma/sdk build`);
 `turbo typecheck`/`test` build it via `^build`.

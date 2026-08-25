@@ -3,22 +3,21 @@
     "name": "Pragma Go",
     "slug": "pragma-go",
     "scheme": "pragma",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/images/icon.png",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
-      "icon": {
-        "light": "./assets/images/icon-light.png",
-        "dark": "./assets/images/icon.png",
-        "tinted": "./assets/images/icon-tinted.png"
-      },
+      "supportsTablet": false,
+      "icon": "./assets/AppIcon.icon",
       "bundleIdentifier": "sh.pragma.go",
       "infoPlist": {
-        "CFBundleDisplayName": "Pragma Go"
-      }
+        "CFBundleDisplayName": "Pragma Go",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Pragma Go connects to the Pragma desktop app on your computer, which may be on the same local network."
+      },
+      "buildNumber": "1"
     },
     "android": {
       "package": "sh.pragma.go",
@@ -27,7 +26,8 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
         "backgroundColor": "#0b0b0c"
-      }
+      },
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -36,6 +36,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Pragma Go uses the camera to scan the pairing QR code shown by the Pragma desktop app.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-notifications",
       "./plugins/with-android-splash-logo",
       [

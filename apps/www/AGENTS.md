@@ -35,7 +35,7 @@ apps/www/
 ├── proxy.ts                 # serves raw markdown for `.md` URLs and markdown-preferring clients
 └── src/
     ├── app/
-    │   ├── (home)/          # marketing route group (landing page + its layout)
+    │   ├── (home)/          # marketing route group (landing page, /privacy, and their layout)
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
@@ -46,6 +46,7 @@ apps/www/
     │   ├── mdx.tsx          # MDX component map exposed to docs authors
     │   └── hero-scene.tsx   # react-three-fiber canvas (client component)
     └── lib/
+        ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
@@ -65,6 +66,15 @@ apps/www/
   namespace with every three.js export, which makes `mdx/types`' `MDXComponents` — indexed
   by intrinsic element name — reject the Fumadocs default component map. `components/mdx.tsx`
   casts around this; that cast is deliberate, don't "fix" it by widening the map's type.
+- **`/privacy` is an App Store submission artifact, not a marketing page.** App Store
+  Connect stores its URL for Pragma Go and App Review follows it, which is why it is
+  reached by URL and deliberately kept out of the site navigation. Change its route only
+  by changing `lib/legal.ts` **and** the URL in App Store Connect — a dead policy URL is
+  grounds for rejection on the next update. The page must keep describing what the apps
+  actually do with data (see `apps/pragma-go/AGENTS.md`); it is written to cover future
+  analytics and hosted services as _disclosed-before-they-launch_, so adding either means
+  editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
+  Support is handled through GitHub issues, so there is no support page here.
 - **Docs content is a placeholder.** Pragma is still being implemented; `content/docs`
   holds one index page so the route, the search index, and the llms.txt output have
   something to serve. Add real pages as features land.
