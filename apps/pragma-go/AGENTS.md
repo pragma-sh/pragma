@@ -522,6 +522,15 @@ eas build --platform ios --profile production
 eas submit --platform ios --latest
 ```
 
+- **`eas-build-post-install` builds the workspace dependencies, and the build
+  fails without it.** `@pragma/sdk` and `@pragma/scratchpad-viewer` resolve
+  through `./dist/*`, and `@pragma/constants` needs its `src/generated/**` —
+  all three are gitignored, so on an EAS worker they do not exist and the
+  Bundle JavaScript phase dies with an unhelpful `Unknown error`. The hook runs
+  the same `turbo run build --filter=pragma-go^...` that `preexport:web` uses
+  for the web export. Any new workspace dependency whose entry point is built
+  rather than committed is covered automatically by that filter — but a package
+  that builds through some other task is not.
 - **`appVersionSource` is `local`**, so `app.json` is the source of truth for
   `version` / `ios.buildNumber` / `android.versionCode`. `autoIncrement` on the
   production profile bumps the build number in that file — commit the result.

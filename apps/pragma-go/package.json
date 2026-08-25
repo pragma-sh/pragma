@@ -16,7 +16,8 @@
     "icons": "bun run scripts/generate-icons.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "eas-build-post-install": "bunx turbo run build --filter=pragma-go^..."
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",
