@@ -1,3 +1,4 @@
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import sharp from "sharp";
@@ -6,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CANVAS } from "@pragma/brand";
 
 const imagesDir = join(import.meta.dirname, "..", "assets", "images");
+const iconComposerDir = join(import.meta.dirname, "..", "assets", "AppIcon.icon");
 
 /** Alpha above this counts as ink; anti-aliased edges fall below it. */
 const INK_ALPHA = 24;
@@ -43,18 +45,29 @@ async function inkRadius(file: string): Promise<number> {
 }
 
 describe("generated icons", () => {
-  it.each([
-    "icon.png",
-    "icon-light.png",
-    "icon-tinted.png",
-    "adaptive-icon.png",
-    "adaptive-icon-monochrome.png",
-    "favicon.png",
-  ])("%s is a square %dpx canvas", async (file) => {
-    const { width, height } = await alpha(file);
-    expect(width).toBe(CANVAS);
-    expect(height).toBe(CANVAS);
+  it("uses native iOS appearance backgrounds in the Icon Composer bundle", async () => {
+    const document = JSON.parse(await readFile(join(iconComposerDir, "icon.json"), "utf8")) as {
+      "fill-specializations": Array<{ appearance?: string; value: string }>;
+    };
+    expect(document["fill-specializations"]).toEqual([
+      { value: "system-light" },
+      { appearance: "dark", value: "system-dark" },
+    ]);
+    await Promise.all(
+      ["mark-light.svg", "mark-dark.svg", "mark-tinted.svg"].map((file) =>
+        access(join(iconComposerDir, "Assets", file)),
+      ),
+    );
   });
+
+  it.each(["icon.png", "adaptive-icon.png", "adaptive-icon-monochrome.png", "favicon.png"])(
+    "%s is a square %dpx canvas",
+    async (file) => {
+      const { width, height } = await alpha(file);
+      expect(width).toBe(CANVAS);
+      expect(height).toBe(CANVAS);
+    },
+  );
 
   it.each(["adaptive-icon.png", "adaptive-icon-monochrome.png"])(
     "%s keeps its ink inside the Android safe circle",
@@ -63,13 +76,8 @@ describe("generated icons", () => {
     },
   );
 
-  // Nothing plated may be transparent. Apple requires an opaque greyscale
-  // image for the tinted appearance, and `@expo/prebuild-config` renders every
-  // appearance except `dark` with `removeTransparency`, flattening onto
-  // **white** — a white mark on a white plate is an invisible icon. Pragma's
-  // dark variant carries its own black plate rather than letting the system
-  // supply one, so it is opaque too.
-  it.each(["icon.png", "icon-light.png", "icon-tinted.png"])("%s is fully opaque", async (file) => {
+  it("keeps the plated Android and store icon fully opaque", async () => {
+    const file = "icon.png";
     const { data } = await alpha(file);
     expect(data.reduce((lowest, value) => Math.min(lowest, value), 255)).toBe(255);
   });

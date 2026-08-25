@@ -45,3 +45,5 @@ bench-report.json
 
 # Logs/artifacts pulled down by `rwx logs` / `rwx artifacts`
 .rwx/downloads/
+.vercel
+.env*.local

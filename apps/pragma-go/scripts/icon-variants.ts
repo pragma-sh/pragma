@@ -6,25 +6,11 @@
 //
 // What each output is for:
 //
-//   icon.png                     The black brand plate, as on the desktop app:
-//                                the iOS **dark** appearance, the Android
-//                                legacy launcher icon, and the store.
-//   icon-light.png               The inverted mark on a white plate. This fills
-//                                iOS's "Any" slot, because `ios.icon.light` is
-//                                Expo's name for that slot rather than for a
-//                                light-appearance entry — so it is what a
-//                                default home screen shows.
-//   icon-tinted.png              iOS 18 tinted appearance. Greyscale and
-//                                deliberately opaque, which is what Apple asks
-//                                for: the tinted variant is the one appearance
-//                                that must carry its own background, and iOS
-//                                maps its luminance onto the user's tint.
-//                                `@expo/prebuild-config` enforces that by
-//                                passing `removeTransparency` for every
-//                                appearance except `dark` — so do not "fix"
-//                                this by making the plate transparent. Expo
-//                                flattens onto white, and a white mark on a
-//                                white plate is an invisible icon.
+//   assets/AppIcon.icon          iOS Icon Composer bundle. Its transparent
+//                                vector layer receives Apple's system light,
+//                                dark, tinted, and Liquid Glass treatments.
+//   icon.png                     The black brand plate used by Android's legacy
+//                                launcher icon and the stores.
 //   adaptive-icon.png            Android adaptive foreground, transparent. Its
 //                                coverage is set so the mark's outermost ink
 //                                stays inside the 66/108dp circle every
@@ -40,7 +26,6 @@ import {
   CANVAS,
   DARK_PLATE,
   INK,
-  LIGHT_PLATE,
   type MarkPalette,
   markMarkup,
   MONOCHROME,
@@ -48,8 +33,6 @@ import {
   ON_LIGHT,
   ON_TRANSPARENT,
   placedMark,
-  TINTED,
-  TINTED_PLATE,
 } from "@pragma/brand";
 
 /**
@@ -225,11 +208,72 @@ export function indexHtml(): string {
 `;
 }
 
+/** Appearance artwork consumed by Apple's Icon Composer renderer. */
+export const ICON_COMPOSER_SVGS = [
+  { file: "mark-light.svg", svg: svg(markMarkup(ON_LIGHT, { idPrefix: "app-icon-light" })) },
+  { file: "mark-dark.svg", svg: svg(markMarkup(ON_DARK, { idPrefix: "app-icon-dark" })) },
+  { file: "mark-tinted.svg", svg: svg(markMarkup(MONOCHROME, { idPrefix: "app-icon-tinted" })) },
+] as const;
+
+/** Icon Composer document using Apple's native appearance backgrounds and effects. */
+export function iconComposerJson(): string {
+  return `${JSON.stringify(
+    {
+      "fill-specializations": [
+        { value: "system-light" },
+        { appearance: "dark", value: "system-dark" },
+      ],
+      groups: [
+        {
+          layers: [
+            {
+              "image-name": "mark-light.svg",
+              "hidden-specializations": [
+                { value: false },
+                { appearance: "dark", value: true },
+                { appearance: "tinted", value: true },
+              ],
+              glass: true,
+              name: "Pragma mark light",
+            },
+            {
+              "image-name": "mark-dark.svg",
+              "hidden-specializations": [
+                { value: true },
+                { appearance: "dark", value: false },
+                { appearance: "tinted", value: true },
+              ],
+              glass: true,
+              name: "Pragma mark dark",
+            },
+            {
+              "image-name": "mark-tinted.svg",
+              "hidden-specializations": [
+                { value: true },
+                { appearance: "dark", value: true },
+                { appearance: "tinted", value: false },
+              ],
+              glass: true,
+              name: "Pragma mark tinted",
+            },
+          ],
+          lighting: "combined",
+          name: "Pragma mark",
+          shadow: { kind: "neutral", opacity: 0.5 },
+          specular: true,
+          translucency: { enabled: true, value: 0.5 },
+        },
+      ],
+      "supported-platforms": { squares: "shared" },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 /** Every PNG the app ships, as the SVG each is rendered from. */
 export const PNG_VARIANTS: Array<{ file: string; svg: string }> = [
   { file: "icon.png", svg: plateSvg(DARK_PLATE, ON_DARK) },
-  { file: "icon-light.png", svg: plateSvg(LIGHT_PLATE, ON_LIGHT, 0) },
-  { file: "icon-tinted.png", svg: plateSvg(TINTED_PLATE, TINTED) },
   { file: "adaptive-icon.png", svg: safeZoneSvg(ON_TRANSPARENT) },
   { file: "adaptive-icon-monochrome.png", svg: safeZoneSvg(MONOCHROME) },
   { file: "favicon.png", svg: faviconPngSvg() },

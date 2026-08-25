@@ -13,13 +13,22 @@ import { fileURLToPath } from "node:url";
 
 import sharp from "sharp";
 
-import { faviconSvg, indexHtml, PNG_VARIANTS } from "./icon-variants";
+import {
+  faviconSvg,
+  ICON_COMPOSER_SVGS,
+  iconComposerJson,
+  indexHtml,
+  PNG_VARIANTS,
+} from "./icon-variants";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const imagesDir = join(appDir, "assets", "images");
+const iconComposerDir = join(appDir, "assets", "AppIcon.icon");
+const iconComposerAssetsDir = join(iconComposerDir, "Assets");
 const publicDir = join(appDir, "public");
 
 mkdirSync(imagesDir, { recursive: true });
+mkdirSync(iconComposerAssetsDir, { recursive: true });
 mkdirSync(publicDir, { recursive: true });
 
 await Promise.all(
@@ -34,3 +43,9 @@ writeFileSync(join(publicDir, "favicon.svg"), faviconSvg());
 console.log(`wrote ${join(publicDir, "favicon.svg")}`);
 writeFileSync(join(publicDir, "index.html"), indexHtml());
 console.log(`wrote ${join(publicDir, "index.html")}`);
+writeFileSync(join(iconComposerDir, "icon.json"), iconComposerJson());
+console.log(`wrote ${join(iconComposerDir, "icon.json")}`);
+for (const { file, svg } of ICON_COMPOSER_SVGS) {
+  writeFileSync(join(iconComposerAssetsDir, file), svg);
+  console.log(`wrote ${join(iconComposerAssetsDir, file)}`);
+}
