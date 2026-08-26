@@ -32,15 +32,6 @@ export function registrationFailure(registration: PushRegistration): PushCheckSt
 }
 
 /**
- * The result on a platform that has no push service to register with, stated
- * without attempting a registration that cannot succeed (the web build).
- */
-export const PUSH_UNSUPPORTED: PushCheckState = {
-  kind: "failed",
-  reason: REGISTRATION_FAILURES.unsupported,
-};
-
-/**
  * What the host's test push actually did. A rejection is reported verbatim
  * because the push service's own wording (`InvalidCredentials`, a rate limit)
  * is the part that says what to fix.
