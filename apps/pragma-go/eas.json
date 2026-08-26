@@ -13,12 +13,14 @@
     },
     "development": {
       "extends": "base",
+      "channel": "development",
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": true }
     },
     "preview": {
       "extends": "base",
+      "channel": "preview",
       "distribution": "internal",
       "env": {
         "PRAGMA_STORE_BUILD": "1"
@@ -28,6 +30,7 @@
     },
     "production": {
       "extends": "base",
+      "channel": "production",
       "distribution": "store",
       "autoIncrement": true,
       "env": {

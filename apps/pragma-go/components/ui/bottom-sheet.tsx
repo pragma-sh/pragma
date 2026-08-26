@@ -15,6 +15,11 @@ export interface BottomSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  /**
+   * Action row pinned below the scrolling content. Keep the sheet's buttons
+   * here: content scrolls away under a raised keyboard, a footer does not.
+   */
+  footer?: ReactNode;
   className?: string;
 }
 
@@ -30,8 +35,13 @@ export interface BottomSheetProps {
  * the panel is a `flexShrink` child of it with its content in a `ScrollView`:
  * whatever room the keyboard leaves is the most the panel can occupy, and the
  * rest scrolls.
+ *
+ * **Actions belong in `footer`, not in `children`.** Anything inside the
+ * `ScrollView` is scrolled out of sight when the keyboard shrinks the panel, so
+ * a submit button placed after a text field disappears exactly when the user is
+ * ready to press it. The footer sits outside the scroller and stays put.
  */
-export function BottomSheet({ open, onOpenChange, children, className }: BottomSheetProps) {
+export function BottomSheet({ open, onOpenChange, children, footer, className }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   return (
     <Modal
@@ -73,6 +83,7 @@ export function BottomSheet({ open, onOpenChange, children, className }: BottomS
             >
               {children}
             </ScrollView>
+            {footer}
           </Animated.View>
         </KeyboardAvoidingView>
       </View>

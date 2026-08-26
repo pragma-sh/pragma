@@ -306,6 +306,11 @@ implemented in `lib/widgets/`:
   and platform checks stay in one place. The same rule covers
   `@react-native-menu/menu` (`components/ui/menu-view`), `expo-secure-store`
   (`lib/secret-store`), and `expo/fetch` (`lib/gateway-fetch`).
+- **A `BottomSheet`'s buttons go in its `footer` prop, never in `children`.** The
+  panel shrinks to whatever room the keyboard leaves and its content scrolls, so a
+  submit button placed after a text field is scrolled out of sight exactly when the
+  user reaches for it. `footer` renders outside the `ScrollView` and stays pinned
+  above the home indicator.
 - **Web differences belong in a `.web` twin, not an `if`.** A `*.web.ts(x)` file
   beside the native one is how the browser build differs; a `Platform.OS === "web"`
   branch inside a shared module is not. The twin is also what keeps a native-only
@@ -531,12 +536,38 @@ eas submit --platform ios --latest
   for the web export. Any new workspace dependency whose entry point is built
   rather than committed is covered automatically by that filter — but a package
   that builds through some other task is not.
-- **`appVersionSource` is `local`**, so `app.json` is the source of truth for
-  `version` / `ios.buildNumber` / `android.versionCode`. `autoIncrement` on the
-  production profile bumps the build number in that file — commit the result.
+- **`appVersionSource` is `remote`**, so EAS owns `ios.buildNumber` /
+  `android.versionCode` and `autoIncrement` on the production profile bumps them
+  server-side; `app.json`'s `version` (the marketing version, `1.0.0`) stays the
+  source of truth for the store listing. Do not hand-bump the build number.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.
+
+## Over-the-air updates (EAS Update)
+
+A JavaScript-only fix ships with `eas update`; no new binary, no new TestFlight
+build, no review.
+
+```bash
+eas update --branch production --message "fix: keep sheet actions above the keyboard"
+```
+
+- **`runtimeVersion.policy` is `appVersion`.** An update is only served to
+  builds whose runtime version matches, and here that is `expo.version`
+  (`1.0.0`) — so every build of 1.0.0 takes the same updates regardless of
+  build number, and bumping `version` deliberately cuts old binaries off from
+  new JS. Change anything native (a new module, a config-plugin change, an SDK
+  bump) and you must ship a new binary: the old one keeps the old native code
+  and an OTA JS bundle expecting the new one crashes on launch.
+- **Each build profile has a `channel`** (`development` / `preview` /
+  `production`) which EAS maps to a branch of the same name. `--branch` on
+  `eas update` names the branch, not the channel.
+- **A build made before `expo-updates` was installed can never receive an
+  update.** The runtime is native. Installing the package is itself a native
+  change, so the first OTA-capable binary has to be built and submitted the
+  ordinary way.
+
 - **The App Store listing name is `Pragma Sh Go`; everything here says
   `Pragma Go`. This is deliberate — do not "fix" it.** `Pragma Go` was already
   taken in App Store Connect, whose names are globally unique, so the listing
