@@ -1,5 +1,13 @@
-import { type ReactNode } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from "react-native";
+import { type ReactNode, useEffect, useState } from "react";
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  View,
+} from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -10,6 +18,36 @@ const SHEET_RESIZE_MS = 220;
 
 /** Gap kept between the top of the panel and the status bar. */
 const TOP_GAP = 12;
+
+/** Gap kept between the panel's bottom edge and a raised keyboard. */
+const KEYBOARD_GAP = 10;
+
+/** Gap kept below the panel's content when no keyboard is raised. */
+const BOTTOM_GAP = 16;
+
+/**
+ * Whether a software keyboard is currently raised.
+ *
+ * The panel's bottom padding clears the home indicator, but with the keyboard
+ * up the keyboard itself is what the panel sits on, so that inset becomes dead
+ * space under the action row.
+ */
+function useKeyboardVisible() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    // iOS reports the frame change before the animation; Android only emits the
+    // `did` pair.
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvent, () => setVisible(true));
+    const hide = Keyboard.addListener(hideEvent, () => setVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return visible;
+}
 
 export interface BottomSheetProps {
   open: boolean;
@@ -39,10 +77,14 @@ export interface BottomSheetProps {
  * **Actions belong in `footer`, not in `children`.** Anything inside the
  * `ScrollView` is scrolled out of sight when the keyboard shrinks the panel, so
  * a submit button placed after a text field disappears exactly when the user is
- * ready to press it. The footer sits outside the scroller and stays put.
+ * ready to press it. The footer sits outside the scroller and stays put, and
+ * with the keyboard up it sits `KEYBOARD_GAP` above it rather than over the
+ * home-indicator inset, which the keyboard already covers.
  */
 export function BottomSheet({ open, onOpenChange, children, footer, className }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const paddingBottom = keyboardVisible ? KEYBOARD_GAP : insets.bottom + BOTTOM_GAP;
   return (
     <Modal
       animationType="slide"
@@ -71,7 +113,7 @@ export function BottomSheet({ open, onOpenChange, children, footer, className }:
           <Animated.View
             className={cn("rounded-t-2xl border border-border bg-card px-5 pt-3", className)}
             layout={LinearTransition.duration(SHEET_RESIZE_MS)}
-            style={{ flexShrink: 1, paddingBottom: insets.bottom + 16 }}
+            style={{ flexShrink: 1, paddingBottom }}
           >
             <View className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/40" />
             <ScrollView
