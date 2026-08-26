@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const USAGE_URL = "https://cursor.com/api/usage-summary";
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -165,6 +166,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-if (import.meta.main) {
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(resolve(entry)).href) {
   process.exitCode = await main();
 }

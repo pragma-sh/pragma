@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "OpenCode",
+  "description": "Launch OpenCode in Pragma with streaming status, approvals, questions, and usage limits.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/opencode-plugin/assets/opencode.svg",
+      "alt": "OpenCode logo"
+    }
+  ],
+  "install": { "command": "node", "args": ["scripts/install.mjs"] },
+  "agentBinary": "opencode"
+}

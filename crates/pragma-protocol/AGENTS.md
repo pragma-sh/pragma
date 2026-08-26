@@ -54,9 +54,10 @@ already depends on.
 
 ## Rules
 
-- Any change to the frame layout, tag values, or the binary input/output format **must** bump
-  `daemon.protocolVersion` in `packages/constants/values.json`. See
-  `crates/pragma-server/AGENTS.md`.
+- Any change to the frame layout, tag values, or the binary input/output format **must**
+  bump `crates/pragma-protocol`'s Cargo SemVer (Release Please). `bun run generate`
+  copies that version into `daemon.protocolVersion`. Do not hand-edit the integer that
+  used to live in `values.json` — it is gone. See `crates/pragma-server/AGENTS.md`.
 - The app must **never** re-encode PTY output — relay `Vec<u8>` bytes straight through
   as `InvokeResponseBody::Raw`.
 - Terminal input must stay on `write_input_frame`'s fire-and-forget binary path; do not

@@ -39,7 +39,7 @@ architecture** with **consistent conventions across TypeScript and Rust**.
 - `packages/github-helpers/` — `@pragma/github-helpers`, the `pragma-github` host-side sidecar scaffold.
 - `packages/ai-helpers/` — `@pragma/ai-helpers`, the Node-side AI helper package and `pragma-ai`
   sidecar entrypoint for auth, model selection, prompts, commit planning, and PR draft generation.
-- `packages/opencode-plugin/` — `@pragma/opencode-plugin`, an ESM opencode plugin that reports
+- `packages/opencode-plugin/` — `@pragma-sh/opencode-plugin`, an ESM opencode plugin that reports
   status via `@pragma/sdk`. Launchable Pragma agents are `defineAgent` plugin contributions,
   not bundled `pragma/agents` JSON.
   Pragma does **not** bundle, install, or register the plugin — you register its built

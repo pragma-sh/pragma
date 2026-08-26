@@ -45,6 +45,16 @@ vi.mock("@/components/sidebar/WorktreeTree", () => ({
   ),
 }));
 vi.mock("@/components/sidebar/ProjectSwitcher", () => ({ ProjectSwitcher: () => null }));
+vi.mock("@/state/updates-context", () => ({
+  useUpdates: () => ({
+    runtime: null,
+    offer: null,
+    checking: false,
+    applying: false,
+    checkNow: vi.fn(),
+    install: vi.fn(),
+  }),
+}));
 vi.mock("@/components/sidebar/OpenPortsCard", () => ({ OpenPortsCard: () => null }));
 vi.mock("@/components/dialogs/CreateProjectDialog", () => ({ CreateProjectDialog: () => null }));
 vi.mock("@/components/dialogs/CreateWorktreeDialog", () => ({

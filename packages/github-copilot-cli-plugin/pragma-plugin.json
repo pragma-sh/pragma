@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "GitHub Copilot CLI",
+  "description": "Launch GitHub Copilot CLI in Pragma with status, approvals, questions, and quota reporting.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/github-copilot-cli-plugin/assets/copilot.png",
+      "alt": "GitHub Copilot logo"
+    }
+  ],
+  "install": { "command": "sh", "args": ["scripts/install-local.sh"] },
+  "agentBinary": "copilot"
+}

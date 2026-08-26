@@ -26,7 +26,7 @@ pub enum GatewayError {
     Conflict(String),
     /// Server and gateway protocol versions differ.
     #[error("protocol version mismatch: expected {expected}, actual {actual}")]
-    ProtocolMismatch { expected: u64, actual: u64 },
+    ProtocolMismatch { expected: String, actual: String },
     /// Socket transport failed.
     #[error("transport failure: {0}")]
     Transport(String),

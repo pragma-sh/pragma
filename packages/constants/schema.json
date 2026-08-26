@@ -26,7 +26,8 @@
     "bench",
     "files",
     "scratchpads",
-    "fanout"
+    "fanout",
+    "updates"
   ],
   "properties": {
     "app": {
@@ -94,6 +95,9 @@
     },
     "fanout": {
       "$ref": "#/definitions/FanoutDefaults"
+    },
+    "updates": {
+      "$ref": "#/definitions/Updates"
     }
   },
   "definitions": {
@@ -1208,6 +1212,22 @@
         }
       }
     },
+    "OtherSettings": {
+      "title": "OtherSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Persisted `other` block of global `.pragma/config.json`. Global-only. Every field is optional; missing values use shipped updater defaults.",
+      "properties": {
+        "serverUrl": {
+          "type": "string",
+          "description": "Override for server providing update metadata. Empty/omitted uses shipped production or dev default."
+        },
+        "autoDownload": {
+          "type": "boolean",
+          "description": "When true, Pragma polls on launch, on an interval, and when the window becomes visible. When false, only Check now runs. The download itself starts when the user clicks Install Update."
+        }
+      }
+    },
     "GitHubUser": {
       "title": "GitHubUser",
       "type": "object",
@@ -1427,9 +1447,8 @@
       "description": "Contract between the Pragma app and the detached PTY daemon.",
       "properties": {
         "protocolVersion": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Wire-protocol version negotiated between the app and the detached PTY daemon. The daemon greets every connection with this version; the app replaces a daemon whose version does not match (or that sends no greeting). Bump it whenever the daemon protocol or its PTY-stream handling changes so a stale long-lived daemon is restarted instead of silently serving old behavior."
+          "type": "string",
+          "description": "Wire-protocol SemVer the host speaks on Hello, gateway.json, health, and pairing. Mirrored from crates/pragma-protocol's package version by `bun run generate`; do not edit by hand. Comparison is exact equality."
         },
         "socketFile": {
           "type": "string",
@@ -2144,8 +2163,8 @@
           "description": "Gateway bearer token the paired device must present."
         },
         "protocolVersion": {
-          "type": "integer",
-          "description": "Daemon protocol version the host speaks, so the client can reject an incompatible host early."
+          "type": "string",
+          "description": "pragma-protocol SemVer the host speaks, so the client can reject an incompatible host early."
         },
         "hostName": {
           "type": "string",
@@ -3942,6 +3961,107 @@
         },
         "bindings": {
           "$ref": "#/definitions/Keybindings"
+        }
+      }
+    },
+    "UpdateApplyMode": {
+      "title": "UpdateApplyMode",
+      "type": "string",
+      "description": "How a desktop update is applied. `reload` swaps the webview UI overlay and leaves the host running. `restart` always runs the full OS installer.",
+      "enum": ["reload", "restart"]
+    },
+    "UpdatePlatform": {
+      "title": "UpdatePlatform",
+      "type": "string",
+      "description": "Installer target id sent on the check request so a restart offer returns the right asset.",
+      "enum": [
+        "darwin-aarch64",
+        "darwin-x86_64",
+        "linux-x86_64-deb",
+        "linux-x86_64-rpm",
+        "linux-x86_64-appimage",
+        "linux-aarch64-deb",
+        "linux-aarch64-rpm",
+        "linux-aarch64-appimage",
+        "windows-x86_64"
+      ]
+    },
+    "Updates": {
+      "title": "Updates",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped defaults for desktop auto-updates. User overrides live in global `.pragma/config.json` under `updates`.",
+      "required": [
+        "checkUrl",
+        "devCheckUrl",
+        "pollIntervalMs",
+        "autoDownload",
+        "manifestFile",
+        "uiDirName",
+        "buttonLabel",
+        "changelogLabel",
+        "restartWarningTitle",
+        "restartWarningBody",
+        "applyModes",
+        "platforms"
+      ],
+      "properties": {
+        "checkUrl": {
+          "type": "string",
+          "description": "Production Next.js check endpoint. Dev builds use `devCheckUrl` unless user overrides `other.serverUrl`."
+        },
+        "devCheckUrl": {
+          "type": "string",
+          "description": "Check endpoint used by `pragma-dev-*` builds so they never poll production."
+        },
+        "pollIntervalMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "How often a production (or opted-in) session re-checks for an update."
+        },
+        "autoDownload": {
+          "type": "boolean",
+          "description": "Default for whether the desktop polls on launch and on an interval."
+        },
+        "manifestFile": {
+          "type": "string",
+          "description": "GitHub Release asset name for the per-release manifest."
+        },
+        "uiDirName": {
+          "type": "string",
+          "description": "Directory name under the instance data dir that holds the optional UI overlay (`<data>/<uiDirName>/<version>/`)."
+        },
+        "buttonLabel": {
+          "type": "string",
+          "description": "Sidebar button that applies a downloaded (or on-click) update."
+        },
+        "changelogLabel": {
+          "type": "string",
+          "description": "Link label for the GitHub Release notes URL."
+        },
+        "restartWarningTitle": {
+          "type": "string",
+          "description": "Modal title shown before a restart (installer) update."
+        },
+        "restartWarningBody": {
+          "type": "string",
+          "description": "Modal body warning that the app server restarts and terminals stop."
+        },
+        "applyModes": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/definitions/UpdateApplyMode"
+          },
+          "description": "Supported apply modes, in display order."
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/UpdatePlatform"
+          },
+          "description": "Installer platform ids the check API accepts."
         }
       }
     }

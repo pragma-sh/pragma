@@ -1,4 +1,4 @@
-# packages/cursor-plugin — @pragma/cursor-plugin
+# packages/cursor-plugin — @pragma-sh/cursor-plugin
 
 Static Cursor Agent CLI integration that reports agent status into Pragma. Cursor has
 **no in-process JS plugin API** for status — its extension point is **shell hooks**
@@ -133,12 +133,12 @@ treating known host limitations as failures.
 ## Installation
 
 ```bash
-bun run --filter @pragma/cursor-plugin install:local
+bun run --filter @pragma-sh/cursor-plugin install:local
 ```
 
 This copies hooks to `~/.pragma/plugins/cursor/hooks/`, merges hook entries into
 `~/.cursor/hooks.json`, and updates CLI + permissions settings (see above).
-It also installs the compiled TypeScript usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
+It also installs the bundled Node usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
 reuses `cursor-agent login` credentials and never persists or prints access tokens.
 Re-run after updating the package. Removes legacy launcher assets if present.
 

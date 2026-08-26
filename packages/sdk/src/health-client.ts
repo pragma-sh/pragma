@@ -4,7 +4,7 @@ import type { Transport } from "./transport";
 /** Body of `GET /v1/health`. */
 export interface GatewayHealth {
   status: string;
-  protocolVersion: number;
+  protocolVersion: string;
   gatewayVersion: string;
 }
 

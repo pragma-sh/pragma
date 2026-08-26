@@ -1,7 +1,6 @@
 {
-  "name": "@pragma/claude-code-plugin",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@pragma-sh/claude-code-plugin",
+  "version": "0.1.0-alpha.0",
   "description": "Claude Code plugin that reports agent status to Pragma automatically via shell hooks.",
   "license": "AGPL-3.0-only",
   "files": [
@@ -9,24 +8,27 @@
     "assets",
     "dist",
     "hooks",
-    "pragma",
+    "pragma-plugin.json",
+    "scripts",
     "src"
   ],
   "type": "module",
   "exports": {
     "./pragma-plugin": "./src/pragma-plugin.ts"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "prepack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
-  "dependencies": {
-    "@pragma/plugin": "workspace:*",
-    "@pragma/watcher-kit": "workspace:*"
-  },
   "devDependencies": {
+    "@pragma/plugin": "workspace:*",
+    "@pragma/watcher-kit": "workspace:*",
     "@types/node": "^24.12.3",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",

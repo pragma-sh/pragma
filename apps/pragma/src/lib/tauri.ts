@@ -1371,6 +1371,53 @@ export function writeConfig(
   return invoke("write_config", { scope, projectId: projectId ?? null, contents });
 }
 
+/** Integrity-pinned official npm release accepted by native plugin installer. */
+export interface OfficialPluginInstallRequest {
+  package: string;
+  version: string;
+  integrity: string;
+  manifestSha256: string;
+}
+
+/** Installed package identity returned after host setup and global registration. */
+export interface OfficialPluginInstallResult {
+  package: string;
+  version: string;
+  pluginId: string;
+}
+
+/** Installs one reviewed official plugin release with npm lifecycle scripts disabled. */
+export function installOfficialPlugin(
+  request: OfficialPluginInstallRequest,
+): Promise<OfficialPluginInstallResult> {
+  return invoke<OfficialPluginInstallResult>("install_official_plugin", { request });
+}
+
+/** Returns binaries executable from Pragma's GUI-safe PATH. */
+export function availablePluginBinaries(binaries: string[]): Promise<string[]> {
+  return invoke<string[]>("available_plugin_binaries", { binaries });
+}
+
+/** Whether first-run agent plugin recommendations were completed or dismissed. */
+export function pluginOnboardingDismissed(): Promise<boolean> {
+  return invoke<boolean>("plugin_onboarding_dismissed");
+}
+
+/** Persists first-run agent plugin recommendation completion. */
+export function setPluginOnboardingDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_plugin_onboarding_dismissed", { dismissed });
+}
+
+/** Whether prompts after manually running an unconnected agent are disabled. */
+export function agentPluginPromptDismissed(): Promise<boolean> {
+  return invoke<boolean>("agent_plugin_prompt_dismissed");
+}
+
+/** Persists whether manual agent-command integration prompts are disabled. */
+export function setAgentPluginPromptDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_agent_plugin_prompt_dismissed", { dismissed });
+}
+
 /** Reads global or project `.pragma/theme.json`; a missing file reports `exists: false`. */
 export function readTheme(scope: ConfigScope, projectId?: string | null): Promise<ConfigDocument> {
   return invoke<ConfigDocument>("read_theme", { scope, projectId: projectId ?? null });
@@ -1413,6 +1460,70 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 /** Returns the runtime platform name used to pick keybinding chords ("mac" or "linux"). */
 export function getPlatform(): Promise<"mac" | "linux"> {
   return invoke<"mac" | "linux">("platform_name");
+}
+
+/** Shipped-into-the-app versions, update platform id, and the default check URL. */
+export interface UpdateRuntime {
+  platform: string;
+  isDev: boolean;
+  checkUrl: string;
+  versions: {
+    ui: string;
+    app: string;
+    server: string;
+    protocol: string;
+  };
+}
+
+/** Downloadable file named by the check API. */
+export interface UpdateAsset {
+  url: string;
+  sha256: string;
+  signature: string;
+}
+
+/** Body of `GET /api/updates`. */
+export interface UpdateCheck {
+  available: boolean;
+  apply?: "reload" | "restart";
+  notes?: string;
+  changelogUrl?: string;
+  version?: string;
+  asset?: UpdateAsset;
+  manifestJson?: string;
+  manifestSignature?: string;
+}
+
+/** Outcome of applying a checked offer. */
+export interface UpdateApplyResult {
+  mode: "reload" | "restart";
+  url?: string;
+}
+
+/** Runtime identity used to poll and display Settings → Updates. */
+export function getUpdateRuntime(): Promise<UpdateRuntime> {
+  return invoke<UpdateRuntime>("get_update_runtime");
+}
+
+/** Polls the check API. Pass a settings override, or omit to use the instance default. */
+export function checkForUpdate(checkUrl?: string | null): Promise<UpdateCheck> {
+  return invoke<UpdateCheck>("check_for_update", { checkUrl: checkUrl ?? null });
+}
+
+/** Downloads the offer and applies reload (overlay) or restart (OS installer). */
+export function applyUpdate(request: {
+  apply: "reload" | "restart";
+  version: string;
+  asset: UpdateAsset;
+  manifestJson: string;
+  manifestSignature: string;
+}): Promise<UpdateApplyResult> {
+  return invoke<UpdateApplyResult>("apply_update", { request });
+}
+
+/** Marks a newly loaded UI overlay healthy so next launch keeps using it. */
+export function confirmUiOverlay(): Promise<void> {
+  return invoke<void>("confirm_ui_overlay");
 }
 
 /**

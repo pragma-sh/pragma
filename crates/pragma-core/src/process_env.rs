@@ -26,6 +26,12 @@ pub fn command(program: &str) -> Command {
     command
 }
 
+/// Finds a program on the same augmented PATH used for child processes.
+#[must_use]
+pub fn find_executable(program: &str) -> Option<PathBuf> {
+    pragma_platform::shell::find_on_path_in(program, &user_path())
+}
+
 /// Creates a `git` command with optional locks disabled.
 ///
 /// Host git queries (status/diff/merged-status batches) now run concurrently —
@@ -166,5 +172,20 @@ mod tests {
                 .count(),
             1,
         );
+    }
+
+    #[test]
+    fn executable_lookup_does_not_launch_candidate() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join("launched");
+        let executable = dir.path().join("agent");
+        std::fs::write(&executable, format!("touch {}", marker.display()))
+            .expect("seed executable candidate");
+
+        assert_eq!(
+            pragma_platform::shell::find_on_path_in("agent", dir.path().as_os_str()),
+            Some(executable)
+        );
+        assert!(!marker.exists());
     }
 }

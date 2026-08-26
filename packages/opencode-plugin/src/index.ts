@@ -17,7 +17,7 @@ import { type Environment, type PragmaReporter, createPragmaOpencodeHooks } from
 
 const DEFAULT_AGENT_ID = "opencode";
 
-/** Options accepted by `@pragma/opencode-plugin` in opencode's plugin config tuple. */
+/** Options accepted by `@pragma-sh/opencode-plugin` in opencode's plugin config tuple. */
 export interface PragmaOpencodePluginOptions extends PluginOptions {
   /** Stable Pragma agent id. Defaults to `opencode`. */
   agent?: string;
@@ -97,7 +97,7 @@ function createSdkReporter(options: PragmaOpencodePluginOptions): PragmaReporter
       await run();
     } catch (error) {
       if (debug) {
-        console.warn("@pragma/opencode-plugin failed to report status", error);
+        console.warn("@pragma-sh/opencode-plugin failed to report status", error);
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "@pragma/plugin",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "private": true,
   "description": "Public TypeScript API for building Pragma plugins.",
   "license": "AGPL-3.0-only",

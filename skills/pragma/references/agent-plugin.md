@@ -237,6 +237,12 @@ Set package metadata:
 }
 ```
 
+For npm distribution, also ship root `pragma-plugin.json` matching official registry
+schema. Prefer package name `pragma-plugin-NAME`; scoped first-party names are allowed.
+Agent manifests set category `agent-plugin`, declare agent CLI as `agentBinary`, and use a
+structured install command. Official lock caches exact manifest and npm integrity; never
+run npm lifecycle scripts as installation mechanism.
+
 Build agent-side TypeScript and Pragma-side bundle with Bunup. Keep icons and helpers in
 plugin package. **The Pragma-side `dist/pragma-plugin.mjs` must stay browser-safe:** the
 desktop webview loads it through a blob-URL `import()`, so a bare `node:fs` / `node:os`

@@ -41,9 +41,15 @@ export interface PluginDeepLinkDetail {
   params: Record<string, string[]>;
 }
 
+/** Reviewed package requested through `pragma://install-plugin?package=...`. */
+export interface PluginInstallDeepLinkDetail {
+  package: string;
+}
+
 /** Window event name carrying a {@link NewSessionDeepLinkDetail}. */
 export const NEW_SESSION_EVENT = "pragma:new-session";
 export const PLUGIN_DEEP_LINK_EVENT = "pragma:plugin-deep-link";
+export const PLUGIN_INSTALL_EVENT = "pragma:plugin-install";
 
 /**
  * Buffer for the most recent new-session request. A cold-start deep link is handled
@@ -51,6 +57,7 @@ export const PLUGIN_DEEP_LINK_EVENT = "pragma:plugin-deep-link";
  * would be lost; the buffer lets the listener drain the request once on mount.
  */
 let pendingNewSession: NewSessionDeepLinkDetail | null = null;
+let pendingPluginInstall: PluginInstallDeepLinkDetail | null = null;
 
 /**
  * Requests the prefilled new-session dialog. Dispatches {@link NEW_SESSION_EVENT} for an
@@ -75,11 +82,27 @@ export function requestPluginDeepLink(detail: PluginDeepLinkDetail): void {
   window.dispatchEvent(new CustomEvent<PluginDeepLinkDetail>(PLUGIN_DEEP_LINK_EVENT, { detail }));
 }
 
+/** Requests official plugin install review, buffering cold-start delivery. */
+export function requestPluginInstall(detail: PluginInstallDeepLinkDetail): void {
+  pendingPluginInstall = detail;
+  window.dispatchEvent(
+    new CustomEvent<PluginInstallDeepLinkDetail>(PLUGIN_INSTALL_EVENT, { detail }),
+  );
+}
+
+/** Returns and clears buffered plugin install request. */
+export function consumePendingPluginInstall(): PluginInstallDeepLinkDetail | null {
+  const detail = pendingPluginInstall;
+  pendingPluginInstall = null;
+  return detail;
+}
+
 /** The single deep-link scheme Pragma owns. */
 const DEEP_LINK_SCHEME = "pragma:";
 /** The only deep-link host/action currently supported: open the new-session flow. */
 const DEEP_LINK_OPEN_HOST = "open";
 const DEEP_LINK_PLUGIN_HOST = "plugin";
+const DEEP_LINK_INSTALL_PLUGIN_HOST = "install-plugin";
 
 /**
  * Parses a `pragma://open?...` deep link into a {@link NewSessionDeepLink}, or
@@ -135,6 +158,24 @@ export function parsePluginDeepLink(raw: string): PluginDeepLinkDetail | null {
     params[key] = [...(params[key] ?? []), value];
   }
   return { pluginId, path: segments.slice(1).join("/"), url: raw, params };
+}
+
+/** Parses official gallery install links; package still must exist in official lock. */
+export function parsePluginInstallDeepLink(raw: string): PluginInstallDeepLinkDetail | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== DEEP_LINK_SCHEME || url.hostname !== DEEP_LINK_INSTALL_PLUGIN_HOST) {
+    return null;
+  }
+  const packageName = lastParam(url.searchParams, "package");
+  if (!packageName || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/.test(packageName)) {
+    return null;
+  }
+  return { package: packageName };
 }
 
 /** Returns the last non-empty value for a query param, making duplicate params deterministic. */

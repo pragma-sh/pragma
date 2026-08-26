@@ -62,6 +62,22 @@ vi.mock("@/state/ai-context", () => ({
   useAi: vi.fn(),
 }));
 
+vi.mock("@/state/updates-context", () => ({
+  useUpdates: () => ({
+    runtime: {
+      platform: "darwin-aarch64",
+      isDev: true,
+      checkUrl: "http://localhost:3000/api/updates",
+      versions: { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" },
+    },
+    offer: null,
+    checking: false,
+    applying: false,
+    checkNow: vi.fn(),
+    install: vi.fn(),
+  }),
+}));
+
 vi.mock("@/lib/tauri", () => ({
   aiAuthMethods: vi.fn(),
   aiLogout: vi.fn(),
@@ -388,6 +404,18 @@ describe("SettingsWorkspace", () => {
 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("sidecar unavailable"));
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
-    expect(button).not.toBeDisabled();
+  });
+
+  it("shows the Other section with the local server URL", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+
+    expect(screen.getByLabelText("Server URL")).toHaveAttribute(
+      "placeholder",
+      "http://localhost:3000/api/updates",
+    );
+    expect(screen.getByRole("button", { name: "Check now" })).toBeInTheDocument();
   });
 });
