@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Platform, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import { Text } from "@/components/ui/text";
 import { useConnection } from "@/lib/connection-context";
 import { checkHeartbeat, heartbeatSummary, type HeartbeatState } from "@/lib/heartbeat";
 import {
-  PUSH_UNSUPPORTED,
   pushCheckSummary,
   registrationFailure,
   testOutcome,
@@ -149,7 +148,6 @@ type PushClient = NonNullable<ReturnType<typeof useConnection>["client"]>;
 
 /** Registers (or refreshes) this device, then asks the host to push to it. */
 async function runPushCheck(client: PushClient): Promise<PushCheckState> {
-  if (Platform.OS === "web") return PUSH_UNSUPPORTED;
   return registrationFailure(await registerForPush(client)) ?? sendTestPush(client);
 }
 

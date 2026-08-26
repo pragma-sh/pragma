@@ -91,6 +91,7 @@ export default function PairScreen() {
       <CameraScanner
         frozen={busy}
         granted={permission?.granted ?? false}
+        handledRef={handledRef}
         onRequest={requestPermission}
         onScan={onScan}
       />
@@ -180,11 +181,13 @@ const SCAN_FRAME_TTL_MS = 500;
 function CameraScanner({
   frozen,
   granted,
+  handledRef,
   onRequest,
   onScan,
 }: {
   frozen: boolean;
   granted: boolean;
+  handledRef: RefObject<boolean>;
   onRequest: () => void;
   onScan: (raw: string) => void;
 }) {
@@ -203,13 +206,16 @@ function CameraScanner({
 
   const onBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
-      // A paused preview still delivers the frame that was in flight; ignoring
-      // it keeps the frozen highlight on the code that was actually scanned.
-      if (frozen) return;
+      // A paused preview still delivers the frame that was in flight, and a
+      // scan can land after `onScan` has already claimed one but before the
+      // `frozen` prop re-renders; `handledRef` is a synchronous ref, so it
+      // catches that race and keeps the highlight on the code that was
+      // actually scanned instead of jumping to whichever one arrives next.
+      if (frozen || handledRef.current) return;
       if (size) track(scanFrame(result, size));
       onScan(result.data);
     },
-    [frozen, onScan, size, track],
+    [frozen, handledRef, onScan, size, track],
   );
 
   if (!granted) {
@@ -310,14 +316,18 @@ function useScanFrame(frozen: boolean): {
 /**
  * Freezes the preview on the frame the code was read from, and thaws it if
  * pairing fails and the user gets another go. `pausePreview` is a no-op on a
- * camera that has not started yet, so failures are ignored rather than
- * surfaced as a pairing error.
+ * camera that has not started yet, so a rejection here isn't surfaced as a
+ * pairing error — but it's still logged, since a failed transition can leave
+ * the live preview out of sync with the locked highlight.
  */
 function useFrozenPreview(cameraRef: RefObject<CameraView | null>, frozen: boolean): void {
   useEffect(() => {
     const camera = cameraRef.current;
     if (!camera) return;
+    const action = frozen ? "pause" : "resume";
     const settled = frozen ? camera.pausePreview() : camera.resumePreview();
-    void settled.catch(() => undefined);
+    settled.catch((error: unknown) => {
+      console.warn(`camera preview failed to ${action}`, error);
+    });
   }, [cameraRef, frozen]);
 }
