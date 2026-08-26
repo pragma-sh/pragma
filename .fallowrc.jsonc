@@ -97,11 +97,15 @@
   // `expo-dev-client` is consumed by the native dev build (it swaps in the
   // dev-client runtime and launcher), and `@expo/ngrok` is resolved by name by
   // `expo start --tunnel` — both are Expo tooling requirements with no import.
+  // `expo-updates` is wired through `app.json`'s `updates` + `runtimeVersion`
+  // keys and loaded by the native runtime at launch (EAS Update); nothing in
+  // source imports it.
   "ignoreDependencies": [
     "@expo/ngrok",
     "@google/design.md",
     "expo-dev-client",
     "expo-splash-screen",
+    "expo-updates",
     "expo-system-ui",
     "react-native-web",
   ],
@@ -171,6 +175,12 @@
       // two palettes are independent — the desktop one is a live token catalog
       // parsed at runtime by the theme system, the website's is static CSS.
       "apps/www/src/app/global.css",
+      // The privacy policy is prose, not logic: every section is an `<h2>`
+      // followed by paragraphs and the odd `<ul>`, so semantic clone detection
+      // matches the JSX *shape* of one section against the next. There is no
+      // extractable behaviour — collapsing sections into a data-driven renderer
+      // would bury legal copy that has to be read and revised as written text.
+      "apps/www/src/app/(home)/privacy/page.tsx",
     ],
   },
   "rules": {

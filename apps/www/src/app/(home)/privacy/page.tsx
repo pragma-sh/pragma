@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 
-import { privacyLastUpdated } from "@/lib/legal";
+import { privacyLastUpdated, privacyRoute } from "@/lib/legal";
 import { appName, gitConfig } from "@/lib/shared";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description: `How ${appName} and Pragma Go handle your data.`,
+  // The URL submitted to App Store Connect, so the canonical one has to match
+  // it exactly rather than whatever path a crawler happened to arrive on.
+  alternates: { canonical: privacyRoute },
 };
 
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
