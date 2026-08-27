@@ -1127,6 +1127,13 @@ export interface BrowserMeta {
   url?: string;
 }
 
+/** Native page-load lifecycle update for one browser tab. */
+export interface BrowserLoadEvent {
+  tabId: string;
+  status: "started" | "finished" | "failed";
+  url: string;
+}
+
 /** Creates the native browser webview for a tab, positioned over its placeholder. */
 export function browserCreate(tabId: string, url: string, bounds: BrowserBounds): Promise<void> {
   return invoke("browser_create", { tabId, url, ...bounds });
@@ -1240,6 +1247,11 @@ export function browserFindClear(tabId: string): Promise<void> {
 /** Subscribes to per-tab page metadata (title/url) from browser webviews. */
 export function onBrowserMeta(handler: (meta: BrowserMeta) => void): Promise<UnlistenFn> {
   return listen<BrowserMeta>("browser-meta", (event) => handler(event.payload));
+}
+
+/** Subscribes to native browser page-load lifecycle updates. */
+export function onBrowserLoad(handler: (load: BrowserLoadEvent) => void): Promise<UnlistenFn> {
+  return listen<BrowserLoadEvent>("browser-load", (event) => handler(event.payload));
 }
 
 /** Payload sent by a browser webview when the user interacts with its content. */

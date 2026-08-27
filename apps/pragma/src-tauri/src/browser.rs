@@ -19,7 +19,7 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use tauri::webview::WebviewBuilder;
+use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, Webview, WebviewUrl,
     Window,
@@ -32,6 +32,10 @@ use crate::error::{AppError, AppResult};
 const MAIN_WINDOW_LABEL: &str = "main";
 /// Event name carrying `{ tabId, title?, url? }` page metadata to the frontend.
 const META_EVENT: &str = "browser-meta";
+/// Event name carrying native page-load lifecycle updates to the frontend.
+const LOAD_EVENT: &str = "browser-load";
+/// Cancelled navigation used by the post-load probe to report `WebKit`'s blank error page.
+const LOAD_CHECK_SENTINEL_SCHEME: &str = "pragma-load-check";
 /// Event name emitted by a browser webview when the user interacts with its content.
 const FOCUS_REQUEST_EVENT: &str = "browser-focus-request";
 /// Event name emitted by a browser webview when the page-side handler sees
@@ -154,6 +158,22 @@ struct BrowserMeta {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum BrowserLoadStatus {
+    Started,
+    Finished,
+    Failed,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserLoad {
+    tab_id: String,
+    status: BrowserLoadStatus,
+    url: String,
 }
 
 /// Derives the child-webview label that hosts a given tab's page.
@@ -880,14 +900,48 @@ pub(crate) fn parse_url(input: &str) -> AppResult<Url> {
     if trimmed.is_empty() {
         return Err(AppError::Browser("empty url".to_string()));
     }
-    let candidate = if trimmed.contains("://") {
+    let has_scheme = trimmed.contains("://");
+    let candidate = if has_scheme {
         trimmed.to_string()
     } else {
         format!("https://{trimmed}")
     };
-    Url::parse(&candidate)
-        .map_err(|error| AppError::Browser(format!("invalid url '{input}': {error}")))
+    let mut url = Url::parse(&candidate)
+        .map_err(|error| AppError::Browser(format!("invalid url '{input}': {error}")))?;
+    if !has_scheme && url.host_str().is_some_and(is_local_host) {
+        url.set_scheme("http")
+            .map_err(|()| AppError::Browser(format!("invalid url '{input}'")))?;
+    }
+    Ok(url)
 }
+
+fn is_local_host(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']);
+    host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+}
+
+fn navigation_script(url: &Url) -> AppResult<String> {
+    let url = serde_json::to_string(url.as_str())?;
+    Ok(format!("window.location.assign({url});"))
+}
+
+const BLANK_PAGE_CHECK_SCRIPT: &str = r"
+window.setTimeout(function() {
+  const body = document.body;
+  const blank = !body || (
+    !document.title.trim() &&
+    body.childElementCount === 0 &&
+    !(body.textContent || '').trim()
+  );
+  if (blank) {
+    window.location.href = 'pragma-load-check://failed?url=' + encodeURIComponent(window.location.href);
+  }
+}, 0);
+";
 
 #[cfg(test)]
 mod tests {
@@ -895,8 +949,8 @@ mod tests {
 
     use super::{
         browser_design_stage_payload, browser_eval_callback_payload, build_eval_callback_script,
-        clear_design_session, design_script, design_session_authorized, parse_url,
-        set_design_session,
+        clear_design_session, design_script, design_session_authorized, navigation_script,
+        parse_url, set_design_session, BLANK_PAGE_CHECK_SCRIPT,
     };
 
     fn encoded_payload(json: &str) -> String {
@@ -911,10 +965,41 @@ mod tests {
     }
 
     #[test]
+    fn parse_url_defaults_local_addresses_to_http() {
+        for (input, expected) in [
+            ("localhost:5173", "http://localhost:5173/"),
+            ("app.localhost:3000", "http://app.localhost:3000/"),
+            ("127.0.0.1:8080", "http://127.0.0.1:8080/"),
+            ("[::1]:4000", "http://[::1]:4000/"),
+        ] {
+            let url = parse_url(input).expect("local url should parse");
+
+            assert_eq!(url.as_str(), expected);
+        }
+    }
+
+    #[test]
     fn parse_url_preserves_existing_scheme() {
         let url = parse_url("http://example.com/path").expect("url should parse");
 
         assert_eq!(url.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn navigation_script_assigns_serialized_url() {
+        let url = parse_url("https://example.com/a?query=hello world").expect("url should parse");
+        let script = navigation_script(&url).expect("script should build");
+
+        assert_eq!(
+            script,
+            r#"window.location.assign("https://example.com/a?query=hello%20world");"#
+        );
+    }
+
+    #[test]
+    fn blank_page_check_reports_native_error_pages() {
+        assert!(BLANK_PAGE_CHECK_SCRIPT.contains("body.childElementCount === 0"));
+        assert!(BLANK_PAGE_CHECK_SCRIPT.contains("pragma-load-check://failed"));
     }
 
     #[test]
@@ -1019,9 +1104,28 @@ pub fn browser_create(
     let title_tab = tab_id.clone();
     let nav_app = app.clone();
     let nav_tab = tab_id.clone();
+    let load_app = app.clone();
+    let load_tab = tab_id.clone();
 
     let builder = WebviewBuilder::new(label, WebviewUrl::External(start_url))
         .initialization_script(format!("{}{}", focus_script(), design_script()))
+        .on_page_load(move |webview, payload| {
+            let status = match payload.event() {
+                PageLoadEvent::Started => BrowserLoadStatus::Started,
+                PageLoadEvent::Finished => {
+                    let _ = webview.eval(BLANK_PAGE_CHECK_SCRIPT);
+                    BrowserLoadStatus::Finished
+                }
+            };
+            let _ = load_app.emit(
+                LOAD_EVENT,
+                BrowserLoad {
+                    tab_id: load_tab.clone(),
+                    status,
+                    url: payload.url().to_string(),
+                },
+            );
+        })
         .on_document_title_changed(move |_webview, title| {
             emit_meta(
                 &title_app,
@@ -1033,6 +1137,21 @@ pub fn browser_create(
             );
         })
         .on_navigation(move |url| {
+            if url.scheme() == LOAD_CHECK_SENTINEL_SCHEME {
+                let failed_url = url
+                    .query_pairs()
+                    .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))
+                    .unwrap_or_default();
+                let _ = nav_app.emit(
+                    LOAD_EVENT,
+                    BrowserLoad {
+                        tab_id: nav_tab.clone(),
+                        status: BrowserLoadStatus::Failed,
+                        url: failed_url,
+                    },
+                );
+                return false;
+            }
             if url.scheme() == EVAL_SENTINEL_SCHEME {
                 receive_eval_navigation(url);
                 return false;
@@ -1128,7 +1247,7 @@ pub fn browser_focus(app: tauri::AppHandle, tab_id: String) -> AppResult<()> {
 pub fn browser_navigate(app: tauri::AppHandle, tab_id: String, url: String) -> AppResult<()> {
     let url = parse_url(&url)?;
     if let Some(webview) = app.get_webview(&webview_label(&tab_id)) {
-        webview.navigate(url)?;
+        webview.eval(navigation_script(&url)?)?;
     }
     Ok(())
 }

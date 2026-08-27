@@ -917,6 +917,17 @@ Native browser webviews float **above** all HTML. The shared `isDragging` signal
 native overlays for the duration of a drag so drop zones underneath become reachable;
 drop-zone geometry lives in `components/tabs/tab-drag.ts`.
 
+Address-bar text is normalized by `browser::parse_url`: schemeless public hosts default
+to HTTPS, while localhost, `.localhost`, loopback IPs, and unspecified IPs default to HTTP
+so ordinary local dev servers load without requiring users to type the scheme. Navigation
+uses an evaluated, JSON-serialized `window.location.assign`, not `Webview::navigate`:
+Tauri's runtime only queues the latter and swallows any subsequent `load_url` failure.
+Wry exposes page-load start/finish but no cross-platform failure callback, so
+`BrowserView` treats a load that never finishes within `BROWSER_LOAD_TIMEOUT_MS` as failed,
+hides the native surface, and shows retry UI. An immediate IPC failure uses the same screen.
+WKWebView can report a failed navigation as finished while rendering an empty white document;
+the native finish hook probes for an empty title/body/DOM and reports that as failed too.
+
 Any HTML overlay that opens over a browser pane (dropdown, popover) would be clipped by
 the native webview, so shadcn `DropdownMenu`/`Popover` roots register with
 `lib/native-overlay.ts` while open; `BrowserView` steps its webview aside whenever
