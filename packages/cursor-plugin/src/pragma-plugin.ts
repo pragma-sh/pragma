@@ -35,7 +35,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       dashboardUrl: "https://cursor.com/dashboard/spending",
       iconPath: "assets/cursor.svg",
       primaryLimitId: "api",
-      refreshIntervalMs: 15_000,
+      refreshIntervalMs: 5 * 60_000,
       load: loadCursorUsageLimits,
     }),
   ],
@@ -44,7 +44,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       agent: "cursor",
       async watch(ctx) {
         try {
-          await baseWatcher.watch(ctx);
+          await Promise.all([baseWatcher.watch(ctx), watchCursorTitles(ctx)]);
         } finally {
           try {
             await ctx.sdk.agents.report({
@@ -68,7 +68,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       icon: () => null,
       iconPath: "assets/cursor.svg",
       launch: { command: ["cursor-agent", "--force", "--approve-mcps"] },
-      excludeFeatures: ["questions", "commandApproval", "subagents", "abort", "interrupt"],
+      excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
       startupInput: [{ delayMs: 5000, data: "a" }],
       prefillDelayMs: 14000,
       prefillMode: "plain",
@@ -96,6 +96,63 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
 
 export default cursorAgentPlugin;
 
+const CURSOR_QUESTION_TITLE = /^(?:choice asker|ask question)$/i;
+const CURSOR_ACTIVE_TITLE = /^cursor agent$/i;
+
+/** Reports Cursor's question state from OSC window titles in its PTY output. */
+async function watchCursorTitles(ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0]) {
+  let buffer = "";
+  let awaitingQuestion = false;
+  try {
+    for await (const chunk of ctx.output) {
+      buffer += chunk;
+      // oxlint-disable-next-line no-control-regex -- OSC framing is defined by ESC and BEL bytes.
+      const titlePattern = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+      let consumed = 0;
+      for (const match of buffer.matchAll(titlePattern)) {
+        consumed = (match.index ?? 0) + match[0].length;
+        const title = match[1]?.trim() ?? "";
+        if (CURSOR_QUESTION_TITLE.test(title) && !awaitingQuestion) {
+          awaitingQuestion = true;
+          await reportCursorStatus(ctx, "attention", "question");
+        } else if (CURSOR_ACTIVE_TITLE.test(title) && awaitingQuestion) {
+          awaitingQuestion = false;
+          await reportCursorStatus(ctx, "running", null);
+        }
+      }
+      buffer = consumed > 0 ? buffer.slice(consumed) : buffer.slice(-4096);
+    }
+  } catch {
+    // Output transport may reconnect independently; keep watcher alive until session exit.
+  }
+  await waitForAbort(ctx.signal);
+}
+
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) =>
+    signal.addEventListener("abort", () => resolve(), { once: true }),
+  );
+}
+
+async function reportCursorStatus(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  status: "running" | "attention",
+  attentionKind: "question" | null,
+): Promise<void> {
+  try {
+    await ctx.sdk.agents.report({
+      agent: ctx.agentId,
+      tabId: ctx.session.tabId,
+      worktreeId: ctx.session.worktreeId,
+      status,
+      attentionKind,
+    });
+  } catch {
+    // Status reporting must never disrupt Cursor's terminal stream.
+  }
+}
+
 async function execFirst(ctx: PluginContext, command: string): Promise<string> {
   const cwd = ctx.project?.path ?? "/tmp";
   const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
@@ -106,13 +163,24 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
 export async function loadCursorUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
   const cwd = ctx.project?.path ?? "/tmp";
   const bundledHelper = ctx.pluginDir ? `${ctx.pluginDir}/dist/usage-limits` : null;
-  const helperFallback = bundledHelper
-    ? `elif test -f ${shellQuote(bundledHelper)}; then helper=${shellQuote(bundledHelper)}; `
-    : "";
-  const script = `if test -x "${INSTALLED_CURSOR_USAGE_HELPER}"; then helper="${INSTALLED_CURSOR_USAGE_HELPER}"; ${helperFallback}else exit 20; fi; "$helper"`;
-  const command = `/bin/sh -c ${shellQuote(script)}`;
-  const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
-  if (result?.status === 20) {
+  const [installed] = await ctx.sdk.exec.run({
+    cwd,
+    commands: [`node "${INSTALLED_CURSOR_USAGE_HELPER}"`],
+  });
+  const [fallback] =
+    installed?.status !== 0 && bundledHelper
+      ? await ctx.sdk.exec.run({ cwd, commands: [`node ${shellQuote(bundledHelper)}`] })
+      : [];
+  const result = fallback ?? installed;
+  if (!result || (installed?.status !== 0 && fallback?.status !== 0)) {
+    const stderr = `${installed?.stderr ?? ""}\n${fallback?.stderr ?? ""}`;
+    if (!/MODULE_NOT_FOUND|cannot find module|not recognized|not found/i.test(stderr)) {
+      return {
+        status: "unavailable",
+        reason: "unsupported",
+        message: "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+      };
+    }
     return {
       status: "unavailable",
       reason: "not-configured",
@@ -120,7 +188,11 @@ export async function loadCursorUsageLimits(ctx: PluginContext): Promise<UsageLi
     };
   }
   if (!result || result.status !== 0) {
-    throw new Error(result?.stderr.trim() || "Cursor usage helper failed");
+    return {
+      status: "unavailable",
+      reason: "unsupported",
+      message: "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+    };
   }
   const value: unknown = JSON.parse(result.stdout);
   if (isUnavailableResult(value)) {

@@ -58,16 +58,20 @@ async function main(): Promise<number> {
       return 0;
     }
     if (!response.ok) {
-      process.stderr.write(`Cursor usage API returned HTTP ${response.status}\n`);
-      return 3;
+      unavailable(
+        "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+        "unsupported",
+      );
+      return 0;
     }
     process.stdout.write(`${JSON.stringify(await readLimitedJson(response))}\n`);
     return 0;
-  } catch (error) {
-    process.stderr.write(
-      `Cursor usage request failed: ${error instanceof Error ? error.message : String(error)}\n`,
+  } catch {
+    unavailable(
+      "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+      "unsupported",
     );
-    return 3;
+    return 0;
   }
 }
 
@@ -152,10 +156,11 @@ async function readLimitedJson(response: Response): Promise<Record<string, unkno
   return value;
 }
 
-function unavailable(message: string): void {
-  process.stdout.write(
-    `${JSON.stringify({ status: "unavailable", reason: "authentication-required", message })}\n`,
-  );
+function unavailable(
+  message: string,
+  reason: "authentication-required" | "unsupported" = "authentication-required",
+): void {
+  process.stdout.write(`${JSON.stringify({ status: "unavailable", reason, message })}\n`);
 }
 
 function stringValue(value: unknown): string | undefined {
