@@ -106,12 +106,9 @@ async function watchCursorTitles(ctx: Parameters<NonNullable<typeof baseWatcher.
   try {
     for await (const chunk of ctx.output) {
       buffer += chunk;
-      // oxlint-disable-next-line no-control-regex -- OSC framing is defined by ESC and BEL bytes.
-      const titlePattern = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
-      let consumed = 0;
-      for (const match of buffer.matchAll(titlePattern)) {
-        consumed = (match.index ?? 0) + match[0].length;
-        const title = match[1]?.trim() ?? "";
+      const parsed = extractCursorTitles(buffer);
+      buffer = parsed.remaining;
+      for (const title of parsed.titles) {
         if (CURSOR_QUESTION_TITLE.test(title) && !awaitingQuestion) {
           awaitingQuestion = true;
           await reportCursorStatus(ctx, "attention", "question");
@@ -120,12 +117,26 @@ async function watchCursorTitles(ctx: Parameters<NonNullable<typeof baseWatcher.
           await reportCursorStatus(ctx, "running", null);
         }
       }
-      buffer = consumed > 0 ? buffer.slice(consumed) : buffer.slice(-4096);
     }
   } catch {
     // Output transport may reconnect independently; keep watcher alive until session exit.
   }
   await waitForAbort(ctx.signal);
+}
+
+function extractCursorTitles(buffer: string): { remaining: string; titles: string[] } {
+  // oxlint-disable-next-line no-control-regex -- OSC framing is defined by ESC and BEL bytes.
+  const titlePattern = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+  const titles: string[] = [];
+  let consumed = 0;
+  for (const match of buffer.matchAll(titlePattern)) {
+    consumed = (match.index ?? 0) + match[0].length;
+    titles.push(match[1]?.trim() ?? "");
+  }
+  return {
+    remaining: consumed > 0 ? buffer.slice(consumed) : buffer.slice(-4096),
+    titles,
+  };
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
@@ -163,42 +174,81 @@ async function execFirst(ctx: PluginContext, command: string): Promise<string> {
 export async function loadCursorUsageLimits(ctx: PluginContext): Promise<UsageLimitsResult> {
   const cwd = ctx.project?.path ?? "/tmp";
   const bundledHelper = ctx.pluginDir ? `${ctx.pluginDir}/dist/usage-limits` : null;
-  const [installed] = await ctx.sdk.exec.run({
-    cwd,
-    commands: [`node "${INSTALLED_CURSOR_USAGE_HELPER}"`],
-  });
-  const [fallback] =
-    installed?.status !== 0 && bundledHelper
-      ? await ctx.sdk.exec.run({ cwd, commands: [`node ${shellQuote(bundledHelper)}`] })
-      : [];
-  const result = fallback ?? installed;
-  if (!result || (installed?.status !== 0 && fallback?.status !== 0)) {
-    const stderr = `${installed?.stderr ?? ""}\n${fallback?.stderr ?? ""}`;
-    if (!/MODULE_NOT_FOUND|cannot find module|not recognized|not found/i.test(stderr)) {
-      return {
-        status: "unavailable",
-        reason: "unsupported",
-        message: "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
-      };
-    }
+  const attempt = await runCursorUsageHelper(ctx, cwd, bundledHelper);
+  if (attempt.classifyFailure) {
+    return cursorUsageHelperFailure(attempt.stderr);
+  }
+  if (!attempt.result || attempt.result.status !== 0) {
+    return cursorUsageTemporarilyUnavailable();
+  }
+  const value: unknown = JSON.parse(attempt.result.stdout);
+  if (isUnavailableResult(value)) {
+    return value;
+  }
+  return parseCursorUsageSummary(value, Date.now());
+}
+
+type UsageCommandResult = Awaited<ReturnType<PluginContext["sdk"]["exec"]["run"]>>[number];
+
+async function runCursorUsageHelper(
+  ctx: PluginContext,
+  cwd: string,
+  bundledHelper: string | null,
+): Promise<{
+  result: UsageCommandResult | undefined;
+  stderr: string;
+  classifyFailure: boolean;
+}> {
+  const installed = await runUsageCommand(ctx, cwd, `node "${INSTALLED_CURSOR_USAGE_HELPER}"`);
+  if (commandSucceeded(installed) || bundledHelper === null) {
+    return {
+      result: installed,
+      stderr: commandStderr(installed),
+      classifyFailure: installed === undefined,
+    };
+  }
+  const fallback = await runUsageCommand(ctx, cwd, `node ${shellQuote(bundledHelper)}`);
+  return {
+    result: fallback ?? installed,
+    stderr: `${commandStderr(installed)}\n${commandStderr(fallback)}`,
+    classifyFailure: !commandSucceeded(fallback),
+  };
+}
+
+async function runUsageCommand(
+  ctx: PluginContext,
+  cwd: string,
+  command: string,
+): Promise<UsageCommandResult | undefined> {
+  const [result] = await ctx.sdk.exec.run({ cwd, commands: [command] });
+  return result;
+}
+
+function commandSucceeded(result: UsageCommandResult | undefined): boolean {
+  return result !== undefined && result.status === 0;
+}
+
+function commandStderr(result: UsageCommandResult | undefined): string {
+  return result?.stderr ?? "";
+}
+
+function cursorUsageHelperFailure(stderr: string): UsageLimitsResult {
+  if (/MODULE_NOT_FOUND|cannot find module|not recognized|not found/i.test(stderr)) {
     return {
       status: "unavailable",
       reason: "not-configured",
       message: "Reinstall the Cursor integration to enable usage limits.",
     };
   }
-  if (!result || result.status !== 0) {
-    return {
-      status: "unavailable",
-      reason: "unsupported",
-      message: "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
-    };
-  }
-  const value: unknown = JSON.parse(result.stdout);
-  if (isUnavailableResult(value)) {
-    return value;
-  }
-  return parseCursorUsageSummary(value, Date.now());
+  return cursorUsageTemporarilyUnavailable();
+}
+
+function cursorUsageTemporarilyUnavailable(): UsageLimitsResult {
+  return {
+    status: "unavailable",
+    reason: "unsupported",
+    message: "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+  };
 }
 
 function shellQuote(value: string): string {
