@@ -964,6 +964,82 @@ describe("Pragma opencode plugin", () => {
     ]);
   });
 
+  it("keeps the canonical request id when a legacy question update arrives later", async () => {
+    const { hooks, reports, questions } = testHooks();
+
+    await hooks.event?.(
+      runtimeEvent("question.asked", {
+        id: "que-1",
+        sessionID: "s1",
+        questions: [
+          {
+            question: "Choose Red or Blue?",
+            options: [{ label: "Red" }, { label: "Blue" }],
+          },
+        ],
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("message.part.updated", {
+        part: {
+          type: "tool",
+          tool: "question",
+          callID: "c1",
+          state: {
+            status: "pending",
+            input: {
+              questions: [
+                {
+                  question: "Choose Red or Blue?",
+                  options: [{ label: "Red" }, { label: "Blue" }],
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    await flushLegacyQuestion();
+
+    expect(reports).toEqual(["attention:question"]);
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.requestId).toBe("que-1");
+  });
+
+  it("ignores a stale reply while a newer canonical question is active", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("question.asked", {
+        id: "que-2",
+        sessionID: "s1",
+        questions: [{ question: "Continue?", options: [{ label: "Yes" }] }],
+      }),
+    );
+    await hooks.event?.(
+      runtimeEvent("question.replied", {
+        sessionID: "s1",
+        requestID: "que-1",
+        answers: [["Yes"]],
+      }),
+    );
+
+    expect(reports).toEqual(["attention:question"]);
+  });
+
+  it("ignores an uncorrelated reply while a canonical question is active", async () => {
+    const { hooks, reports } = testHooks();
+    await hooks.event?.(
+      runtimeEvent("question.asked", {
+        id: "que-2",
+        sessionID: "s1",
+        questions: [{ question: "Continue?", options: [{ label: "Yes" }] }],
+      }),
+    );
+    await hooks.event?.(runtimeEvent("question.replied", { sessionID: "s1" }));
+
+    expect(reports).toEqual(["attention:question"]);
+  });
+
   it("does not emit generic attention for an incomplete question tool part", async () => {
     const { hooks, reports } = testHooks();
     await hooks.event?.(
