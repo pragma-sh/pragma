@@ -513,6 +513,46 @@ describe("report.sh", () => {
     );
   });
 
+  itWithPython3("streams assistant responses after tools and dedupes the final Stop", () => {
+    const live = transcriptFile([]);
+    run("started", { stdin: live.stdin });
+    appendFileSync(
+      live.path,
+      `${JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "I found the cause." }] },
+      })}\n`,
+    );
+
+    run("running", {
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", transcript_path: live.path }),
+    });
+    expect(messagePayloads()).toContainEqual(
+      expect.objectContaining({ role: "assistant", text: "I found the cause." }),
+    );
+
+    appendFileSync(
+      live.path,
+      `${JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Fix complete." }] },
+      })}\n`,
+    );
+    run("stopped", {
+      stdin: JSON.stringify({
+        hook_event_name: "Stop",
+        transcript_path: live.path,
+        last_assistant_message: "Fix complete.",
+      }),
+    });
+
+    const assistantTexts = messagePayloads()
+      .filter((payload) => payload.role === "assistant")
+      .map((payload) => payload.text)
+      .filter((text) => text !== "Claude Code turn started");
+    expect(assistantTexts).toEqual(["I found the cause.", "Fix complete."]);
+  });
+
   it("reports stopped when Stop carries no transcript (older Claude Code)", () => {
     run("started");
     expect(run("stopped")).toEqual([

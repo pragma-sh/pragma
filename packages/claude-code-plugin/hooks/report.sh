@@ -50,6 +50,8 @@ children_dir="${state_dir}/pragma-cli-${agent}-${tab}.subagents"
 # marker-guarded report for the rest of the turn. This file lets `cleared` tell
 # a stale clear from a legitimate one.
 turn_session_file="${state_dir}/pragma-cli-${agent}-${tab}.turn-session"
+assistant_cursor_file="${state_dir}/pragma-cli-${agent}-${tab}.assistant-cursor"
+assistant_hash_file="${state_dir}/pragma-cli-${agent}-${tab}.assistant-hash"
 
 # Poll cadence and absolute lifetime backstop (overridable for tests). The
 # backstop guarantees a watcher can't outlive its session forever if the session
@@ -183,6 +185,81 @@ print(json.dumps({
 }))' "$id" "$role" "$text" "$ts" "$active" 2>/dev/null)
   [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
+}
+
+# Reports assistant text once per turn. Stop payloads often repeat the newest
+# transcript segment, so retain its checksum to avoid duplicate chat bubbles.
+assistant_message_once() {
+  text="$1"
+  [ -n "$text" ] || return 0
+  hash=$(printf '%s' "$text" | cksum | tr -d '[:space:]')
+  [ "$(cat "$assistant_hash_file" 2>/dev/null)" = "$hash" ] && return 0
+  content_message assistant "$text"
+  printf '%s' "$hash" >"$assistant_hash_file"
+}
+
+assistant_text_count() {
+  tp="$1"
+  [ -n "$py3" ] && [ -n "$tp" ] && [ -f "$tp" ] || {
+    printf '0'
+    return 0
+  }
+  "$py3" -c '
+import json, sys
+count = 0
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "assistant":
+        continue
+    content = (obj.get("message") or {}).get("content") or []
+    if any(isinstance(c, dict) and c.get("type") == "text" and c.get("text") for c in content):
+        count += 1
+print(count)
+' "$tp" 2>/dev/null
+}
+
+# Prints base64-encoded assistant text records after a text-record cursor.
+assistant_texts_since() {
+  tp="$1"
+  start="$2"
+  [ -n "$py3" ] && [ -n "$tp" ] && [ -f "$tp" ] || return 0
+  "$py3" -c '
+import base64, json, sys
+start = int(sys.argv[2])
+index = 0
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "assistant":
+        continue
+    content = (obj.get("message") or {}).get("content") or []
+    parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+    text = "\n".join(p for p in parts if p)
+    if not text:
+        continue
+    if index >= start:
+        print(base64.b64encode(text.encode()).decode())
+    index += 1
+' "$tp" "$start" 2>/dev/null
+}
+
+# Streams newly completed transcript segments. Cursor is initialized when turn
+# starts, excluding every assistant record from earlier turns.
+sync_assistant_transcript() {
+  tp="$1"
+  [ -n "$py3" ] && [ -n "$tp" ] && [ -f "$tp" ] || return 0
+  cursor=$(cat "$assistant_cursor_file" 2>/dev/null)
+  [ -n "$cursor" ] || cursor=0
+  for encoded in $(assistant_texts_since "$tp" "$cursor"); do
+    text=$("$py3" -c 'import base64,sys; print(base64.b64decode(sys.argv[1]).decode())' "$encoded" 2>/dev/null)
+    assistant_message_once "$text"
+  done
+  assistant_text_count "$tp" >"$assistant_cursor_file"
 }
 
 # Prints the newest assistant text in a Claude Code transcript JSONL — the
@@ -626,7 +703,7 @@ run_watcher() {
       # Re-check the token right before acting so we never clear a turn that
       # started in the gap between the poll and now.
       [ "$(cat "$marker" 2>/dev/null)" = "$token" ] || exit 0
-      rm -f "$marker" "$turn_session_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
       report cleared
       exit 0
     fi
@@ -710,8 +787,10 @@ case "${1:-}" in
       ;;
     esac
     stop_watcher
+    rm -f "$assistant_cursor_file" "$assistant_hash_file"
     tp="$(transcript_path "$input")"
     if [ -n "$tp" ]; then
+      assistant_text_count "$tp" >"$assistant_cursor_file"
       # Pin the watcher to where the transcript stands *now* so a prior turn's
       # interrupt marker (already in the file) can't be mistaken for this turn's
       # cancel while Claude is still thinking and has appended nothing yet.
@@ -728,7 +807,7 @@ case "${1:-}" in
     tp="$(transcript_path "$input")"
     if turn_interrupted "$tp"; then
       stop_watcher
-      rm -f "$marker" "$turn_session_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
       report cleared
       message system "Claude Code turn interrupted"
     elif has_running_subagents "$input" || has_tracked_subagents; then
@@ -739,10 +818,11 @@ case "${1:-}" in
       # is still detected, and surface the parent's interim reply.
       [ -f "$marker" ] || printf '%s' "$$-$(date +%s)" >"$marker"
       report started
+      sync_assistant_transcript "$tp"
       reply="$(json_field last_assistant_message "$input")"
       [ -n "$reply" ] || reply="$(last_assistant_text "$tp")"
       if [ -n "$reply" ]; then
-        content_message assistant "$reply"
+        assistant_message_once "$reply"
       else
         message assistant "Claude Code is waiting on subagents"
       fi
@@ -751,17 +831,19 @@ case "${1:-}" in
       # green "done" dot.
       stop_watcher
       rm -f "$marker" "$turn_session_file"
-      report stopped
       # Stop carries the completed reply directly on current Claude builds.
       # Prefer it over rereading the transcript, then retain transcript support
       # for older builds that omit the field.
+      sync_assistant_transcript "$tp"
       reply="$(json_field last_assistant_message "$input")"
       [ -n "$reply" ] || reply="$(last_assistant_text "$tp")"
       if [ -n "$reply" ]; then
-        content_message assistant "$reply"
+        assistant_message_once "$reply"
       else
         message assistant "Claude Code turn completed"
       fi
+      report stopped
+      rm -f "$assistant_cursor_file" "$assistant_hash_file"
     fi
     ;;
   cleared)
@@ -778,7 +860,7 @@ case "${1:-}" in
       exit 0
     fi
     stop_watcher
-    rm -f "$marker" "$turn_session_file"
+    rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
     clear_subagents
     if [ "$hook_event_name" = "SessionEnd" ]; then
       rm -f "$session_file"
@@ -796,6 +878,7 @@ case "${1:-}" in
     # marker so a stray PostToolUse outside a turn can't flash a phantom "running".
     if [ -f "$marker" ]; then
       report started
+      sync_assistant_transcript "$(transcript_path "$input")"
       message tool "Claude Code tool finished"
     fi
     ;;
@@ -863,7 +946,7 @@ case "${1:-}" in
     # Claude Code build emits it, a lingering marker still clears the turn.)
     if [ -f "$marker" ]; then
       stop_watcher
-      rm -f "$marker" "$turn_session_file"
+      rm -f "$marker" "$turn_session_file" "$assistant_cursor_file" "$assistant_hash_file"
       report cleared
       message system "Claude Code turn cleared"
     fi
