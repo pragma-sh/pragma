@@ -26,6 +26,7 @@ if (isMacPlatform()) {
     void appWindow
       .isFullscreen()
       .then((fullscreen) => {
+        root.classList.toggle("vibrancy", !fullscreen);
         root.style.setProperty(
           "--titlebar-height",
           fullscreen ? "5px" : `${constants.window.titlebarHeight}px`,

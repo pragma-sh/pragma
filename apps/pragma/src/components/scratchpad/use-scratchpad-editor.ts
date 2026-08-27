@@ -96,6 +96,10 @@ export function useScratchpadEditor(
       handleKeyDown: (view, event) => handleEditorKeyDown(view, event, callbacksRef.current),
     },
     onUpdate: ({ editor: instance }) => {
+      // Extensions can normalize initial MDX through a doc-changing transaction
+      // while mounting. External rewrites disable updates below, so an unfocused
+      // update is never user-authored and must not dirty the file.
+      if (!instance.isFocused) return;
       const next = getMarkdown(instance);
       appliedBodyRef.current = next;
       callbacksRef.current.onBodyChange(next);

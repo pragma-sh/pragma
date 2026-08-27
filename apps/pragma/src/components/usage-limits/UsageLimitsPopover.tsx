@@ -37,7 +37,6 @@ let nextRecordId = 1;
 
 interface ProviderState {
   result?: UsageLimitsResult;
-  error?: string;
   loading: boolean;
 }
 
@@ -57,6 +56,7 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
     if (!runtime.sdk) {
       return;
     }
+    const sdk = runtime.sdk;
 
     let disposed = false;
     const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -106,12 +106,20 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
           }
         } catch (cause) {
           failures += 1;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          void sdk
+            .rpc("plugins", {
+              action: "logUsageLimitsError",
+              pluginId: provider.pluginId,
+              providerId: provider.contribution.id,
+              message,
+            })
+            .catch(() => undefined);
           if (!disposed) {
             setStates((current) => ({
               ...current,
               [provider.key]: {
                 ...current[provider.key],
-                error: cause instanceof Error ? cause.message : String(cause),
                 loading: false,
               },
             }));
@@ -225,9 +233,6 @@ function ProviderAccordionContent({
       ) : (
         <ProviderStatus state={state} verbose />
       )}
-      {state.error && result?.status === "ready" ? (
-        <p className="text-[11px] text-destructive">Update failed: {state.error}</p>
-      ) : null}
       <Button
         className="self-start"
         size="sm"
@@ -275,9 +280,7 @@ function ProviderStatus({ state, verbose = false }: { state: ProviderState; verb
     ? "Loading..."
     : state.result?.status === "unavailable"
       ? state.result.message
-      : state.error
-        ? state.error
-        : "No usage data";
+      : "No usage data";
   return (
     <p
       className={cn(

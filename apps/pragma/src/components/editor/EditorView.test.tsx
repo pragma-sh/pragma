@@ -38,7 +38,7 @@ vi.mock("@uiw/react-codemirror", () => ({
 }));
 
 import { EditorView } from "./EditorView";
-import { isTabDirty } from "@/state/editor-dirty-store";
+import { disposeTab, isTabDirty } from "@/state/editor-dirty-store";
 
 function editorTab(): Tab {
   return {
@@ -63,7 +63,10 @@ function editorTab(): Tab {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  disposeTab("editor-1");
+});
 beforeEach(() => {
   fileChangeListener = null;
   readFileMock.mockReset();

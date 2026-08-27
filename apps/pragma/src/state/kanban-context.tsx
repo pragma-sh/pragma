@@ -226,6 +226,7 @@ function useKanbanCards(projectId: string | null): {
   loading: boolean;
   reload: () => Promise<void>;
   cardsRef: RefObject<KanbanPromptCard[]>;
+  setCardStatus: (cardId: string, status: KanbanPromptCard["status"]) => void;
 } {
   const [cards, setCards] = useState<KanbanPromptCard[]>([]);
   const [loading, setLoading] = useState(false);
@@ -233,6 +234,9 @@ function useKanbanCards(projectId: string | null): {
   projectIdRef.current = projectId;
   const cardsRef = useRef(cards);
   cardsRef.current = cards;
+  const setCardStatus = useCallback((cardId: string, status: KanbanPromptCard["status"]) => {
+    setCards((current) => current.map((card) => (card.id === cardId ? { ...card, status } : card)));
+  }, []);
   const reload = useCallback(async () => {
     const target = projectIdRef.current;
     if (!target) {
@@ -274,7 +278,7 @@ function useKanbanCards(projectId: string | null): {
       unlisten?.();
     };
   }, [projectIdRef, reload]);
-  return { cards, loading, reload, cardsRef };
+  return { cards, loading, reload, cardsRef, setCardStatus };
 }
 
 /** Moves in-progress cards to Review needed as their agent tabs report `done`. */
@@ -370,6 +374,7 @@ function useKanbanCardLifecycle(
   workspaceRef: RefObject<ReturnType<typeof useWorkspace>>,
   agents: AgentConfig[],
   reload: () => Promise<void>,
+  setCardStatus: (cardId: string, status: KanbanPromptCard["status"]) => void,
   setCompleting: (
     updater: (
       current: Record<string, KanbanCompletedAction>,
@@ -393,35 +398,45 @@ function useKanbanCardLifecycle(
       if (!agent) {
         throw new Error("No agent configured to start this card");
       }
-      const ws = workspaceRef.current;
-      const projectWorktrees = ws.worktrees[target] ?? [];
-      // Reuse an existing worktree on the same branch; otherwise branch a fresh
-      // one off the project's main worktree.
-      const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
-      const tab = await createTabCommand(
-        target,
-        worktree.id,
-        "terminal",
-        defaultTabTitle("terminal"),
-      );
-      // Load the new worktree + tab into workspace state so opening the card
-      // later attaches to the (now persisted) background session.
-      await ws.refreshProject(target);
-      await ws.markTabAgent(tab.id, agent);
-      await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
-        modelId: card.modelId ?? null,
-        reasoningId: card.reasoningId ?? null,
-      });
-      await updateKanbanCard({
-        ...card,
-        status: "inProgress",
-        worktreeId: worktree.id,
-        agentTabId: tab.id,
-        startedAt: nowIso(),
-      });
-      await reload();
+      setCardStatus(card.id, "inProgress");
+      let persisted = false;
+      try {
+        const ws = workspaceRef.current;
+        const projectWorktrees = ws.worktrees[target] ?? [];
+        // Reuse an existing worktree on the same branch; otherwise branch a fresh
+        // one off the project's main worktree.
+        const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
+        const tab = await createTabCommand(
+          target,
+          worktree.id,
+          "terminal",
+          defaultTabTitle("terminal"),
+        );
+        // Load the new worktree + tab into workspace state so opening the card
+        // later attaches to the (now persisted) background session.
+        await ws.refreshProject(target);
+        await ws.markTabAgent(tab.id, agent);
+        await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
+          modelId: card.modelId ?? null,
+          reasoningId: card.reasoningId ?? null,
+        });
+        await updateKanbanCard({
+          ...card,
+          status: "inProgress",
+          worktreeId: worktree.id,
+          agentTabId: tab.id,
+          startedAt: nowIso(),
+        });
+        persisted = true;
+        await reload();
+      } catch (cause) {
+        if (!persisted) {
+          setCardStatus(card.id, card.status);
+        }
+        throw cause;
+      }
     },
-    [agents, reload, workspaceRef],
+    [agents, reload, setCardStatus, workspaceRef],
   );
 
   const runCompletion = useCallback(
@@ -582,7 +597,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     setMode,
   } = useKanbanBoardMode(projectId);
   const agents = useAgentsList();
-  const { cards, loading, reload, cardsRef } = useKanbanCards(projectId);
+  const { cards, loading, reload, cardsRef, setCardStatus } = useKanbanCards(projectId);
   useKanbanCompletionSync(cardsRef, reload);
   const { createCard, updateCardDraft, deleteCard } = useKanbanCardDrafts(
     workspaceRef,
@@ -593,6 +608,7 @@ export function KanbanProvider({ children }: { children: ReactNode }) {
     workspaceRef,
     agents,
     reload,
+    setCardStatus,
     setCompleting,
     setBackToKanbanAvailable,
     setMode,
