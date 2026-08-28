@@ -156,7 +156,10 @@ export function KanbanCard({
   );
 
   const clickable =
-    card.status === "draft" || card.status === "inProgress" || card.status === "reviewNeeded";
+    card.status === "draft" ||
+    card.status === "inProgress" ||
+    card.status === "reviewNeeded" ||
+    card.status === "completed";
   const displayAgent: AgentConfig = agent ?? {
     id: card.agentId,
     name: card.agentId,
@@ -187,7 +190,7 @@ export function KanbanCard({
 
   const badge: CompletedBadge | null =
     card.status === "completed" ? completedBadge(card, completingAction ?? null) : null;
-  // Draft cards open their editor; in-progress/review cards open their session.
+  // Draft cards open their editor; started cards open their worktree/session.
   const cardProps = clickable
     ? {
         onClick: handleActivate,

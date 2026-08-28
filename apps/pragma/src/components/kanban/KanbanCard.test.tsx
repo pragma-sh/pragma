@@ -50,6 +50,18 @@ describe("KanbanCard", () => {
     expect(props.onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the worktree when a completed card is clicked", () => {
+    const props = noopProps();
+    const completedCard = card({
+      status: "completed",
+      worktreeId: "worktree-1",
+      agentTabId: "tab-1",
+    });
+    render(<KanbanCard card={completedCard} {...props} />);
+    fireEvent.click(screen.getByText("feature/x"));
+    expect(props.onOpen).toHaveBeenCalledWith(completedCard);
+  });
+
   it("opens a draft for editing when clicked", () => {
     const props = noopProps();
     render(<KanbanCard card={card()} {...props} />);
