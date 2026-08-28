@@ -88,11 +88,13 @@ impl PushWorker {
     }
 
     /// Sends one notification to every registered phone, outside the agent
-    /// stream. Used by `POST /v1/push/test`.
-    pub fn notify_all(&self, title: &str, body: &str, data: &Value) -> Result<usize, String> {
+    /// stream. Used by `POST /v1/push/test`, whose whole purpose is telling the
+    /// user why a phone is not being woken — so Expo's per-message rejections
+    /// come back with the count rather than only reaching the log.
+    pub fn notify_all(&self, title: &str, body: &str, data: &Value) -> Result<TestReport, String> {
         let tokens = self.push_tokens();
         if tokens.is_empty() {
-            return Ok(0);
+            return Ok(TestReport::default());
         }
         let messages: Vec<PushMessage> = tokens
             .into_iter()
@@ -105,9 +107,12 @@ impl PushWorker {
             })
             .collect();
         let sent = messages.len();
-        let dead = expo::send(&self.http, &messages)?;
-        self.forget(&dead);
-        Ok(sent)
+        let outcome = expo::send(&self.http, &messages)?;
+        self.forget(&outcome.dead);
+        Ok(TestReport {
+            sent,
+            errors: outcome.errors,
+        })
     }
 
     fn mirror_workspace(&self) -> Result<(), String> {
@@ -219,8 +224,14 @@ impl PushWorker {
                 sound: "default",
             })
             .collect();
-        let dead = expo::send(&self.http, &messages)?;
-        self.forget(&dead);
+        let outcome = expo::send(&self.http, &messages)?;
+        for error in &outcome.errors {
+            // A rejection every phone shares (an APNs key the project never got,
+            // say) is otherwise invisible: the send "succeeded" and nothing was
+            // delivered.
+            eprintln!("push: expo rejected an agent alert: {error}");
+        }
+        self.forget(&outcome.dead);
         Ok(())
     }
 
@@ -317,6 +328,16 @@ impl PushWorker {
         }
         names
     }
+}
+
+/// What `POST /v1/push/test` observed, so a user can tell "no phones are
+/// registered" apart from "the push service refused every message".
+#[derive(Debug, Default)]
+pub struct TestReport {
+    /// How many phones the notification was addressed to.
+    pub sent: usize,
+    /// One line per message Expo refused.
+    pub errors: Vec<String>,
 }
 
 /// The parts of an agent event push cares about.

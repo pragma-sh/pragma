@@ -34,16 +34,31 @@ pub fn is_expo_token(token: &str) -> bool {
         && token.len() <= 256
 }
 
-/// Sends messages to Expo in batches and returns the tokens Expo says are dead,
-/// so the caller can drop them. Transport failures are reported as errors; a
-/// per-message rejection is not, because the rest of the batch still went out.
+/// What Expo made of one batch of messages.
+///
+/// A per-message rejection is not a transport failure — the rest of the batch
+/// still went out — but it is the only place the reason a platform refuses
+/// delivery ever appears. An APNs key that was never uploaded for the project,
+/// for instance, shows up here as `InvalidCredentials` on every iOS ticket and
+/// nowhere else, so the rejections are carried back to the caller rather than
+/// dropped.
+#[derive(Debug, Default)]
+pub struct SendOutcome {
+    /// Tokens whose device is permanently gone, for the caller to forget.
+    pub dead: Vec<String>,
+    /// One human-readable line per rejected message.
+    pub errors: Vec<String>,
+}
+
+/// Sends messages to Expo in batches, reporting the dead tokens and the
+/// per-message rejections. Transport failures are reported as errors.
 pub fn send(
     client: &reqwest::blocking::Client,
     messages: &[PushMessage],
-) -> Result<Vec<String>, String> {
+) -> Result<SendOutcome, String> {
     let push = &CONSTANTS.gateway.push;
     let batch_size = usize::try_from(push.batch_size.get()).unwrap_or(usize::MAX);
-    let mut dead = Vec::new();
+    let mut outcome = SendOutcome::default();
     for batch in messages.chunks(batch_size) {
         let response = client
             .post(push.send_url.as_str())
@@ -55,34 +70,51 @@ pub fn send(
             return Err(format!("expo push responded {}", response.status()));
         }
         let body: Value = response.json().map_err(|error| error.to_string())?;
-        dead.extend(dead_tokens(&body, batch));
+        let batch_outcome = read_tickets(&body, batch);
+        outcome.dead.extend(batch_outcome.dead);
+        outcome.errors.extend(batch_outcome.errors);
     }
-    Ok(dead)
+    Ok(outcome)
 }
 
-/// Reads Expo's per-message tickets, which are returned in request order, and
-/// collects the tokens whose device is permanently gone.
-fn dead_tokens(body: &Value, batch: &[PushMessage]) -> Vec<String> {
+/// Reads Expo's per-message tickets, which are returned in request order.
+fn read_tickets(body: &Value, batch: &[PushMessage]) -> SendOutcome {
     let Some(tickets) = body.get("data").and_then(Value::as_array) else {
-        return Vec::new();
+        return SendOutcome::default();
     };
-    tickets
-        .iter()
-        .zip(batch)
-        .filter(|(ticket, _)| {
-            ticket
-                .get("details")
-                .and_then(|details| details.get("error"))
-                .and_then(Value::as_str)
-                == Some("DeviceNotRegistered")
-        })
-        .map(|(_, message)| message.to.clone())
-        .collect()
+    let mut outcome = SendOutcome::default();
+    for (ticket, message) in tickets.iter().zip(batch) {
+        if ticket.get("status").and_then(Value::as_str) != Some("error") {
+            continue;
+        }
+        let code = ticket
+            .get("details")
+            .and_then(|details| details.get("error"))
+            .and_then(Value::as_str);
+        if code == Some("DeviceNotRegistered") {
+            outcome.dead.push(message.to.clone());
+        }
+        outcome.errors.push(ticket_error(ticket, code));
+    }
+    outcome
+}
+
+/// One rejection, as a line worth showing a person: the error code Expo names
+/// (`InvalidCredentials`, `MessageRateExceeded`, …) plus its explanation.
+fn ticket_error(ticket: &Value, code: Option<&str>) -> String {
+    let message = ticket
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("expo rejected the message");
+    match code {
+        Some(code) => format!("{code}: {message}"),
+        None => message.to_string(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{dead_tokens, is_expo_token, PushMessage};
+    use super::{is_expo_token, read_tickets, PushMessage};
     use serde_json::json;
 
     fn message(to: &str) -> PushMessage {
@@ -114,11 +146,36 @@ mod tests {
             ]
         });
 
-        assert_eq!(dead_tokens(&body, &batch), vec!["token-b".to_string()]);
+        assert_eq!(
+            read_tickets(&body, &batch).dead,
+            vec!["token-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn reports_every_rejection_with_its_reason() {
+        let batch = [message("token-a"), message("token-b")];
+        let body = json!({
+            "data": [
+                { "status": "ok" },
+                {
+                    "status": "error",
+                    "message": "the recipient is not a valid Expo push token",
+                    "details": { "error": "InvalidCredentials" },
+                },
+            ]
+        });
+
+        assert_eq!(
+            read_tickets(&body, &batch).errors,
+            vec!["InvalidCredentials: the recipient is not a valid Expo push token".to_string()]
+        );
     }
 
     #[test]
     fn tolerates_a_response_without_tickets() {
-        assert!(dead_tokens(&json!({}), &[message("token-a")]).is_empty());
+        let outcome = read_tickets(&json!({}), &[message("token-a")]);
+        assert!(outcome.dead.is_empty());
+        assert!(outcome.errors.is_empty());
     }
 }

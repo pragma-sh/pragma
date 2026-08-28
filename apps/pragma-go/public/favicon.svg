@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <style>
+    .dark { display: none }
+    @media (prefers-color-scheme: dark) {
+      .light { display: none }
+      .dark { display: inline }
+    }
+  </style>
+  <g class="light"><rect width="1024" height="1024" rx="224" fill="#0b0b0c"/>
+    <g transform="translate(-2.56 12.96) scale(0.9700)">
+    <path d="M 223 157 L 562 157 A 157 157 0 0 1 719 314 L 719 375 A 157 157 0 0 1 562 532 L 418 532 L 418 820 A 52 52 0 0 1 366 872 L 224 872 A 52 52 0 0 1 172 820 L 172 208 A 51 51 0 0 1 223 157 Z M 172 532 L 418 532" fill="none" stroke="#ffffff" stroke-width="41.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 256 250 L 352 307 L 256 371" stroke="#ffffff" stroke-width="45.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M 365 367 L 448 367" stroke="#ffffff" stroke-width="45.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g></g>
+  <g class="dark"><rect width="1024" height="1024" rx="224" fill="#ffffff"/>
+    <g transform="translate(-2.56 12.96) scale(0.9700)">
+    <path d="M 223 157 L 562 157 A 157 157 0 0 1 719 314 L 719 375 A 157 157 0 0 1 562 532 L 418 532 L 418 820 A 52 52 0 0 1 366 872 L 224 872 A 52 52 0 0 1 172 820 L 172 208 A 51 51 0 0 1 223 157 Z M 172 532 L 418 532" fill="none" stroke="#0b0b0c" stroke-width="41.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 256 250 L 352 307 L 256 371" stroke="#0b0b0c" stroke-width="45.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M 365 367 L 448 367" stroke="#0b0b0c" stroke-width="45.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g></g>
+</svg>

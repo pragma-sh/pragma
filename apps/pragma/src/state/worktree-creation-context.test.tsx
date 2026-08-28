@@ -54,6 +54,14 @@ const testAgent: AgentConfig = {
   start: ["agent"],
 };
 
+function withResolvers<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 /** Fires a creation on mount so the test only has to assert on the screen. */
 function Harness({
   syncWorktreeId,
@@ -103,7 +111,7 @@ function renderHarness(
 
 /** Holds `createWorktree` open so the screen can be asserted mid-flight. */
 function deferCreate() {
-  const deferred = Promise.withResolvers<Worktree>();
+  const deferred = withResolvers<Worktree>();
   createWorktreeMock.mockReturnValue(deferred.promise);
   return deferred;
 }
@@ -141,7 +149,7 @@ describe("WorktreeCreationProvider", () => {
   });
 
   it("pulls the base first when a sync target is given", async () => {
-    const pull = Promise.withResolvers<void>();
+    const pull = withResolvers<void>();
     githubPullBranchMock.mockReturnValue(pull.promise);
     renderHarness("main");
 

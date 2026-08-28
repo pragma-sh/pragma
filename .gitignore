@@ -2,6 +2,9 @@
 node_modules/
 .pnp.*
 
+# Machine-local Expo CLI state
+.expo/
+
 # Build output
 dist/
 apps/pragma/src-tauri/resources/plugins/
@@ -45,3 +48,5 @@ bench-report.json
 
 # Logs/artifacts pulled down by `rwx logs` / `rwx artifacts`
 .rwx/downloads/
+.vercel
+.env*.local

@@ -23,7 +23,24 @@ export function CommentComposerSheet({ block, onCancel, onSubmit }: CommentCompo
   useEffect(() => setText(""), [block?.index]);
 
   return (
-    <BottomSheet onOpenChange={(open) => !open && onCancel()} open={block !== null}>
+    <BottomSheet
+      footer={
+        <View className="mt-4 flex-row gap-3">
+          <Button className="flex-1" onPress={onCancel} variant="secondary">
+            <Text>Cancel</Text>
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={text.trim().length === 0}
+            onPress={() => onSubmit(text)}
+          >
+            <Text>Add comment</Text>
+          </Button>
+        </View>
+      }
+      onOpenChange={(open) => !open && onCancel()}
+      open={block !== null}
+    >
       <Text className="text-lg font-semibold text-foreground">Comment</Text>
       <Text className="mt-1 text-sm text-muted-foreground" numberOfLines={3}>
         {block?.quote || "This block has no text."}
@@ -37,18 +54,6 @@ export function CommentComposerSheet({ block, onCancel, onSubmit }: CommentCompo
         textAlignVertical="top"
         value={text}
       />
-      <View className="mt-4 flex-row gap-3">
-        <Button className="flex-1" onPress={onCancel} variant="secondary">
-          <Text>Cancel</Text>
-        </Button>
-        <Button
-          className="flex-1"
-          disabled={text.trim().length === 0}
-          onPress={() => onSubmit(text)}
-        >
-          <Text>Add comment</Text>
-        </Button>
-      </View>
     </BottomSheet>
   );
 }

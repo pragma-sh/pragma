@@ -82,21 +82,27 @@ fn list(state: &AppState) -> GatewayResult<JsonResponse> {
     json_response(200, &registrations)
 }
 
-/// Handles `POST /v1/push/test`: sends a test notification to every phone.
+/// Handles `POST /v1/push/test`: sends a test notification to every phone and
+/// reports what the push service made of it. Answered `200` rather than `202`
+/// because the body is the point — a phone that is not being woken needs to
+/// know whether nothing was addressed to it or everything was refused.
 fn test(state: &AppState) -> GatewayResult<JsonResponse> {
     let Some(worker) = state.push.as_ref() else {
         return Err(GatewayError::Http(
             "push delivery is unavailable in this gateway".to_string(),
         ));
     };
-    let sent = worker
+    let report = worker
         .notify_all(
             "Pragma notifications are on",
             "Agent alerts from this host will show up here.",
             &json!({}),
         )
         .map_err(GatewayError::Http)?;
-    json_response(202, &json!({ "sent": sent }))
+    json_response(
+        200,
+        &json!({ "sent": report.sent, "errors": report.errors }),
+    )
 }
 
 /// Handles `POST /v1/push/presence`: records desktop window focus, which

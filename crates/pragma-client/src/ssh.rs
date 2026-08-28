@@ -295,7 +295,7 @@ impl Handler for TrustServerKey {
     fn check_server_key(
         &mut self,
         _server_public_key: &PublicKey,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> {
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
         std::future::ready(Ok(true))
     }
 }

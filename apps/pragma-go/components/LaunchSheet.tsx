@@ -70,7 +70,13 @@ export function LaunchSheet({ open, onOpenChange, projectId, worktreeId }: Launc
   }
 
   return (
-    <BottomSheet onOpenChange={onOpenChange} open={open}>
+    <BottomSheet
+      footer={
+        <LaunchSheetActions busy={busy} onCancel={() => onOpenChange(false)} onLaunch={launch} />
+      }
+      onOpenChange={onOpenChange}
+      open={open}
+    >
       <LaunchSheetHeader />
       <LaunchForm
         agents={agents}
@@ -83,7 +89,6 @@ export function LaunchSheet({ open, onOpenChange, projectId, worktreeId }: Launc
         selection={effectiveSelection}
         target={target}
       />
-      <LaunchSheetActions busy={busy} onCancel={() => onOpenChange(false)} onLaunch={launch} />
     </BottomSheet>
   );
 }
