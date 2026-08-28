@@ -369,6 +369,61 @@ function useKanbanCardDrafts(
   return { createCard, updateCardDraft, deleteCard };
 }
 
+/** Resources a `startCard` attempt created before it failed, so they can be rolled back. */
+interface StartCardResources {
+  createdWorktreeId: string | null;
+  createdTabId: string | null;
+}
+
+/** Undoes whatever launch resources a failed `startCard` attempt created. */
+async function rollbackStartCard(
+  workspace: ReturnType<typeof useWorkspace>,
+  resources: StartCardResources,
+): Promise<void> {
+  if (resources.createdTabId) {
+    await workspace.closeTab(resources.createdTabId).catch(() => undefined);
+  }
+  if (resources.createdWorktreeId) {
+    await workspace
+      .deleteWorktree(resources.createdWorktreeId, { deleteBranch: true, force: true })
+      .catch(() => undefined);
+  }
+}
+
+/** Creates the worktree/tab/agent session for a card and persists it as started. */
+async function launchCard(
+  workspace: ReturnType<typeof useWorkspace>,
+  card: KanbanPromptCard,
+  agent: AgentConfig,
+  resources: StartCardResources,
+): Promise<void> {
+  const target = card.projectId;
+  const projectWorktrees = workspace.worktrees[target] ?? [];
+  // Reuse an existing worktree on the same branch; otherwise branch a fresh
+  // one off the project's main worktree.
+  const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
+  if (!projectWorktrees.some((item) => item.id === worktree.id)) {
+    resources.createdWorktreeId = worktree.id;
+  }
+  const tab = await createTabCommand(target, worktree.id, "terminal", defaultTabTitle("terminal"));
+  resources.createdTabId = tab.id;
+  // Load the new worktree + tab into workspace state so opening the card
+  // later attaches to the (now persisted) background session.
+  await workspace.refreshProject(target);
+  await workspace.markTabAgent(tab.id, agent);
+  await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
+    modelId: card.modelId ?? null,
+    reasoningId: card.reasoningId ?? null,
+  });
+  await updateKanbanCard({
+    ...card,
+    status: "inProgress",
+    worktreeId: worktree.id,
+    agentTabId: tab.id,
+    startedAt: nowIso(),
+  });
+}
+
 /** Card lifecycle: start a card, run completion inline, complete in background, or open its worktree. */
 function useKanbanCardLifecycle(
   workspaceRef: RefObject<ReturnType<typeof useWorkspace>>,
@@ -393,47 +448,15 @@ function useKanbanCardLifecycle(
 } {
   const startCard = useCallback(
     async (card: KanbanPromptCard) => {
-      const target = card.projectId;
       const agent = agents.find((item) => item.id === card.agentId) ?? agents[0];
       if (!agent) {
         throw new Error("No agent configured to start this card");
       }
       setCardStatus(card.id, "inProgress");
       let persisted = false;
-      let createdWorktreeId: string | null = null;
-      let createdTabId: string | null = null;
+      const resources: StartCardResources = { createdWorktreeId: null, createdTabId: null };
       try {
-        const ws = workspaceRef.current;
-        const projectWorktrees = ws.worktrees[target] ?? [];
-        // Reuse an existing worktree on the same branch; otherwise branch a fresh
-        // one off the project's main worktree.
-        const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
-        const worktreeExisted = projectWorktrees.some((item) => item.id === worktree.id);
-        if (!worktreeExisted) {
-          createdWorktreeId = worktree.id;
-        }
-        const tab = await createTabCommand(
-          target,
-          worktree.id,
-          "terminal",
-          defaultTabTitle("terminal"),
-        );
-        createdTabId = tab.id;
-        // Load the new worktree + tab into workspace state so opening the card
-        // later attaches to the (now persisted) background session.
-        await ws.refreshProject(target);
-        await ws.markTabAgent(tab.id, agent);
-        await startBackgroundAgentSession(tab.id, worktree.id, worktree.path, agent, card.prompt, {
-          modelId: card.modelId ?? null,
-          reasoningId: card.reasoningId ?? null,
-        });
-        await updateKanbanCard({
-          ...card,
-          status: "inProgress",
-          worktreeId: worktree.id,
-          agentTabId: tab.id,
-          startedAt: nowIso(),
-        });
+        await launchCard(workspaceRef.current, card, agent, resources);
         persisted = true;
         await reload();
       } catch (cause) {
@@ -441,14 +464,7 @@ function useKanbanCardLifecycle(
           setCardStatus(card.id, card.status);
           // Undo whatever launch resources this attempt created so a retry
           // doesn't pile up extra tabs/worktrees behind a card stuck in Draft.
-          if (createdTabId) {
-            await workspaceRef.current.closeTab(createdTabId).catch(() => undefined);
-          }
-          if (createdWorktreeId) {
-            await workspaceRef.current
-              .deleteWorktree(createdWorktreeId, { deleteBranch: true, force: true })
-              .catch(() => undefined);
-          }
+          await rollbackStartCard(workspaceRef.current, resources);
         }
         throw cause;
       }
