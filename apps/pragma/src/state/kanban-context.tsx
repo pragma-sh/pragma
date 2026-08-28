@@ -33,6 +33,7 @@ import {
   createWorktree,
   deleteKanbanCard,
   githubPushBranch,
+  githubPullBranch,
   githubRepoRef,
   listKanbanCards,
   mergeWorktreeToParent,
@@ -90,7 +91,10 @@ interface KanbanContextValue {
    */
   deleteCard: (card: KanbanPromptCard, options?: { deleteBranch?: boolean }) => Promise<void>;
   /** draft -> inProgress: create/reuse a worktree, launch the agent in a background tab. */
-  startCard: (card: KanbanPromptCard) => Promise<void>;
+  startCard: (
+    card: KanbanPromptCard,
+    options?: { syncMainWorktreeId?: string | null },
+  ) => Promise<void>;
   /** reviewNeeded -> completed via the chosen completion path. */
   runCompletion: (
     card: KanbanPromptCard,
@@ -396,9 +400,13 @@ async function launchCard(
   card: KanbanPromptCard,
   agent: AgentConfig,
   resources: StartCardResources,
+  syncMainWorktreeId: string | null,
 ): Promise<void> {
   const target = card.projectId;
   const projectWorktrees = workspace.worktrees[target] ?? [];
+  if (syncMainWorktreeId) {
+    await githubPullBranch(syncMainWorktreeId);
+  }
   // Reuse an existing worktree on the same branch; otherwise branch a fresh
   // one off the project's main worktree.
   const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
@@ -438,7 +446,10 @@ function useKanbanCardLifecycle(
   setBackToKanbanAvailable: (value: boolean) => void,
   setMode: (mode: WorkspaceMode) => void,
 ): {
-  startCard: (card: KanbanPromptCard) => Promise<void>;
+  startCard: (
+    card: KanbanPromptCard,
+    options?: { syncMainWorktreeId?: string | null },
+  ) => Promise<void>;
   runCompletion: (
     card: KanbanPromptCard,
     action: KanbanCompletedAction,
@@ -447,7 +458,7 @@ function useKanbanCardLifecycle(
   openCardWorktree: (card: KanbanPromptCard) => void;
 } {
   const startCard = useCallback(
-    async (card: KanbanPromptCard) => {
+    async (card: KanbanPromptCard, options?: { syncMainWorktreeId?: string | null }) => {
       const agent = agents.find((item) => item.id === card.agentId) ?? agents[0];
       if (!agent) {
         throw new Error("No agent configured to start this card");
@@ -456,7 +467,13 @@ function useKanbanCardLifecycle(
       let persisted = false;
       const resources: StartCardResources = { createdWorktreeId: null, createdTabId: null };
       try {
-        await launchCard(workspaceRef.current, card, agent, resources);
+        await launchCard(
+          workspaceRef.current,
+          card,
+          agent,
+          resources,
+          options?.syncMainWorktreeId ?? null,
+        );
         persisted = true;
         await reload();
       } catch (cause) {

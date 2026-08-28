@@ -22,6 +22,8 @@ Tauri or client presentation code.
   serves a local project and an SSH-bridged remote one. Worktree lifecycle
   operations (exclude setup, create/remove, branch delete, dirty check,
   headless-checkout listing) and setup/teardown scripts run on the owning host.
+  Forced removal retries transient `DirectoryNotEmpty` races from dying worktree
+  processes, but still surfaces persistent filesystem and permission failures.
 - **Migrating metadata:** legacy project/worktree/tab rows remain in the client
   DB, but daemon-owned terminal agent metadata now uses the `tabs` RPC so it
   persists with the host that owns the PTY. Other metadata domains still return

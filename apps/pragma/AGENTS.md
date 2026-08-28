@@ -1401,6 +1401,9 @@ crux: starting a draft creates/reuses a worktree, creates a terminal tab, and sp
 daemon PTY **directly** (`ptySpawn` + `ptyWrite`, no mounted `TerminalManager`) so the
 board stays visible. The session persists in the daemon; opening the card later attaches
 (`ptyAttach`) and replays scrollback with the agent already running.
+Before a draft creates its worktree, the board uses the same main-behind check and
+Sync / Create without syncing confirmation as `CreateWorktreeDialog`; failed status
+fetches remain non-blocking so offline starts still work.
 
 **Completion** (`runCompletion`) reuses existing commands, never re-implements them.
 The board offers commit+PR = `aiCommitAllAndGeneratePullRequestDraft` →
