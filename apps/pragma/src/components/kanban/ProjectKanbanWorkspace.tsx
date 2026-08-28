@@ -9,6 +9,7 @@ import { KanbanCard } from "@/components/kanban/KanbanCard";
 import { KanbanCompletionDialog } from "@/components/kanban/KanbanCompletionDialog";
 import { KanbanDeleteDialog } from "@/components/kanban/KanbanDeleteDialog";
 import { KanbanDraftDialog } from "@/components/kanban/KanbanDraftDialog";
+import { MainBehindAlert } from "@/components/dialogs/MainBehindAlert";
 import { IconTooltip } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/kanban";
 import { routeKanbanMove } from "@/lib/kanban-move";
 import { type AgentConfig, moveKanbanCard } from "@/lib/tauri";
+import { mainBehindRemote, type MainBehindRemote } from "@/lib/worktree-sync";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -60,6 +62,10 @@ export function ProjectKanbanWorkspace() {
   });
   const [completionCard, setCompletionCard] = useState<KanbanPromptCard | null>(null);
   const [deletionCard, setDeletionCard] = useState<KanbanPromptCard | null>(null);
+  const [pendingStart, setPendingStart] = useState<{
+    card: KanbanPromptCard;
+    main: MainBehindRemote;
+  } | null>(null);
 
   const cardsByStatus = useMemo(() => {
     const groups: Record<KanbanPromptStatus, KanbanPromptCard[]> = {
@@ -78,7 +84,8 @@ export function ProjectKanbanWorkspace() {
     return groups;
   }, [kanban.cards, completionCard]);
 
-  const anyDialogOpen = draftDialog.open || completionCard !== null || deletionCard !== null;
+  const anyDialogOpen =
+    draftDialog.open || completionCard !== null || deletionCard !== null || pendingStart !== null;
 
   // Escape exits the board when no modal is open (modals own their own Escape).
   const { exitBoard } = kanban;
@@ -99,9 +106,23 @@ export function ProjectKanbanWorkspace() {
     return kanban.agents.find((agent) => agent.id === card.agentId) ?? null;
   }
 
-  async function start(card: KanbanPromptCard) {
+  async function start(card: KanbanPromptCard, syncMainWorktreeId: string | null = null) {
     try {
-      await kanban.startCard(card);
+      await kanban.startCard(card, { syncMainWorktreeId });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  async function requestStart(card: KanbanPromptCard) {
+    try {
+      const projectWorktrees = workspace.worktrees[card.projectId] ?? [];
+      const behindMain = await mainBehindRemote(projectWorktrees);
+      if (behindMain) {
+        setPendingStart({ card, main: behindMain });
+        return;
+      }
+      await start(card);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
@@ -121,7 +142,7 @@ export function ProjectKanbanWorkspace() {
 
     switch (routeKanbanMove(from, to)) {
       case "start":
-        await start(card);
+        await requestStart(card);
         break;
       case "review":
         try {
@@ -278,6 +299,18 @@ export function ProjectKanbanWorkspace() {
         onOpenChange={(open) => {
           if (!open) {
             setDeletionCard(null);
+          }
+        }}
+      />
+      <MainBehindAlert
+        behind={pendingStart?.main.behind ?? 0}
+        mainWorktreeId={pendingStart?.main.id ?? null}
+        onCancel={() => setPendingStart(null)}
+        onConfirm={(pullFirst) => {
+          const pending = pendingStart;
+          setPendingStart(null);
+          if (pending) {
+            void start(pending.card, pullFirst ? pending.main.id : null);
           }
         }}
       />
