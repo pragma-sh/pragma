@@ -2,6 +2,8 @@ import type { FileChange, Tab } from "@pragma/constants";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { disposeTab } from "@/state/editor-dirty-store";
+
 const readFileMock = vi.fn();
 const writeFileMock = vi.fn();
 
@@ -131,7 +133,10 @@ function markdownTab(): Tab {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  disposeTab("md-1");
+});
 beforeEach(() => {
   fileChangeListener = null;
   mockEditor = null;

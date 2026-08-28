@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 
 import { cn } from "@/lib/utils";
 import { modalVariants, scrimVariants } from "@/lib/motion";
+import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 
 interface ModalShellProps {
   /** Card contents. */
@@ -23,6 +24,7 @@ interface ModalShellProps {
  * `components/ui/dialog.tsx` so both dialog families move the same way.
  */
 export function ModalShell({ children, className }: ModalShellProps) {
+  useSuppressNativeOverlayWhile(true);
   return (
     <motion.div
       animate="visible"

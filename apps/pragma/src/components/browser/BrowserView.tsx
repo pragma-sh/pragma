@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   Camera,
+  CircleAlert,
   Code,
   MoreHorizontal,
   Paintbrush,
@@ -22,12 +23,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton, TOOLBAR_BUTTON_CLASS } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { DesignModePopover } from "@/components/browser/DesignModePopover";
 import { useBrowserFind } from "@/components/browser/use-browser-find";
 import { useDesignMode } from "@/components/browser/use-design-mode";
 import { FindReplaceBar } from "@/components/find-replace/FindReplaceBar";
 import { useTabDrag } from "@/components/tabs/tab-drag-context";
-import { BROWSER_START_URL, rectToBounds, screenshotBounds } from "@/lib/browser-manager";
+import {
+  BROWSER_LOAD_TIMEOUT_MS,
+  BROWSER_START_URL,
+  rectToBounds,
+  screenshotBounds,
+} from "@/lib/browser-manager";
 import { isLocalPortUrl } from "@/lib/design-mode";
 import { useNativeOverlaySuppressed } from "@/lib/native-overlay";
 import {
@@ -44,6 +51,7 @@ import {
   browserSetBounds,
   browserSetVisible,
   browserSnapshot,
+  onBrowserLoad,
 } from "@/lib/tauri";
 
 interface BrowserViewProps {
@@ -68,12 +76,40 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   // webview is shown (or genuinely hidden, e.g. inactive/dragging).
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [address, setAddress] = useState(tab.url ?? "");
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentLoadUrlRef = useRef<string | null>(null);
   const find = useBrowserFind(tab.id);
   const design = useDesignMode(tab.id, tab.url);
   // Design mode only helps on a local dev server (the agent needs source it can
   // edit), so its toggle is promoted to the toolbar there and tucked into the
   // overflow menu everywhere else.
   const designPromoted = isLocalPortUrl(tab.url);
+
+  const clearLoadTimeout = useCallback(() => {
+    if (loadTimeoutRef.current !== null) {
+      clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+  }, []);
+
+  const failLoad = useCallback(
+    (url: string) => {
+      clearLoadTimeout();
+      setFailedUrl(url);
+    },
+    [clearLoadTimeout],
+  );
+
+  const beginLoad = useCallback(
+    (url: string) => {
+      clearLoadTimeout();
+      setFailedUrl(null);
+      currentLoadUrlRef.current = url;
+      loadTimeoutRef.current = setTimeout(() => failLoad(url), BROWSER_LOAD_TIMEOUT_MS);
+    },
+    [clearLoadTimeout, failLoad],
+  );
 
   // Cmd/Ctrl+F while the React chrome (not the native page) holds focus; the
   // page-content case is forwarded via `onBrowserFindRequest` (see
@@ -115,6 +151,37 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
   useEffect(() => {
     setAddress(tab.url ?? "");
   }, [tab.url]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void onBrowserLoad((load) => {
+      if (load.tabId !== tab.id) {
+        return;
+      }
+      if (load.status === "started") {
+        beginLoad(load.url);
+      } else if (load.url === currentLoadUrlRef.current) {
+        // Ignore a stale finished/failed event from an earlier navigation that
+        // this tab has since moved on from; acting on it would clear the
+        // in-flight load's timeout/failure state instead of its own.
+        if (load.status === "finished") {
+          clearLoadTimeout();
+          setFailedUrl(null);
+        } else {
+          failLoad(load.url);
+        }
+      }
+    })
+      .then((stop) => {
+        unlisten = stop;
+        return stop;
+      })
+      .catch(() => undefined);
+    return () => {
+      clearLoadTimeout();
+      unlisten?.();
+    };
+  }, [beginLoad, clearLoadTimeout, failLoad, tab.id]);
 
   // Resolve the title-bar inset once, then realign the (already-created) webview.
   useEffect(() => {
@@ -186,6 +253,12 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
       return;
     }
 
+    if (failedUrl) {
+      setSnapshot(null);
+      void browserSetVisible(tab.id, false);
+      return;
+    }
+
     // A tab drag needs the whole pane free as an HTML drop target. `hide()` alone
     // doesn't reliably stop WebKit from keeping the native webview as a drop
     // target, so collapse it to zero size too; the restore branch re-applies real
@@ -245,16 +318,25 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [tab.id, active, isDragging, overlaySuppressed]);
+  }, [tab.id, active, isDragging, overlaySuppressed, failedUrl]);
+
+  const navigateToAddress = useCallback(
+    (value: string) => {
+      const url = value.trim();
+      if (url) {
+        beginLoad(url);
+        void browserNavigate(tab.id, url).catch(() => failLoad(url));
+      }
+    },
+    [beginLoad, failLoad, tab.id],
+  );
 
   const submitAddress = useCallback(
     (event: React.FormEvent) => {
       event.preventDefault();
-      if (address.trim()) {
-        void browserNavigate(tab.id, address.trim());
-      }
+      navigateToAddress(address);
     },
-    [address, tab.id],
+    [address, navigateToAddress],
   );
 
   const takeScreenshot = useCallback(() => {
@@ -313,6 +395,12 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             spellCheck={false}
             value={address}
             onChange={(event) => setAddress(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                navigateToAddress(event.currentTarget.value);
+              }
+            }}
           />
         </form>
         {designPromoted ? (
@@ -396,7 +484,28 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
         </DropdownMenu>
       </div>
       <div className="relative min-h-0 flex-1" ref={contentRef}>
-        {snapshot ? (
+        {failedUrl ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-canvas p-6">
+            <div className="flex max-w-md flex-col items-center text-center">
+              <div className="mb-5 flex size-12 items-center justify-center rounded-2xl border border-border bg-elevated text-muted-foreground shadow-sm">
+                <CircleAlert className="size-5" />
+              </div>
+              <h2 className="text-base font-semibold text-foreground">
+                This page couldn't be reached
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Check the address and make sure the server is running, then try again.
+              </p>
+              <p className="mt-3 max-w-full truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                {failedUrl}
+              </p>
+              <Button className="mt-5" onClick={() => navigateToAddress(failedUrl)}>
+                <RotateCw />
+                Try again
+              </Button>
+            </div>
+          </div>
+        ) : snapshot ? (
           <img
             alt=""
             aria-hidden
@@ -404,19 +513,21 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
             src={snapshot}
           />
         ) : null}
-        <FindReplaceBar
-          currentMatch={find.currentMatch}
-          findPlaceholder="Find on page"
-          ignoreCase={find.ignoreCase}
-          matchCount={find.matchCount}
-          onClose={find.closeBar}
-          onIgnoreCaseChange={find.setIgnoreCase}
-          onNext={find.findNext}
-          onPrevious={find.findPrevious}
-          onQueryChange={find.setQuery}
-          open={find.open}
-          query={find.query}
-        />
+        {failedUrl ? null : (
+          <FindReplaceBar
+            currentMatch={find.currentMatch}
+            findPlaceholder="Find on page"
+            ignoreCase={find.ignoreCase}
+            matchCount={find.matchCount}
+            onClose={find.closeBar}
+            onIgnoreCaseChange={find.setIgnoreCase}
+            onNext={find.findNext}
+            onPrevious={find.findPrevious}
+            onQueryChange={find.setQuery}
+            open={find.open}
+            query={find.query}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { Dialog, DialogContent, DialogTitle } from "./dialog";
+import { isNativeOverlaySuppressed } from "@/lib/native-overlay";
 
 /** Advances Motion by a few animation frames. */
 async function frames(count: number): Promise<void> {
@@ -44,5 +45,27 @@ describe("Dialog", () => {
     // Still on screen, and smaller than it was — the close animation is running.
     expect(content.isConnected).toBe(true);
     expect(scaleOf(content)).toBeLessThan(1);
+  });
+
+  it("suppresses native browser webviews for the full modal lifetime", async () => {
+    const { rerender } = render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Hello</DialogTitle>
+        </DialogContent>
+      </Dialog>,
+    );
+    await waitFor(() => expect(isNativeOverlaySuppressed()).toBe(true));
+
+    rerender(
+      <Dialog open={false}>
+        <DialogContent>
+          <DialogTitle>Hello</DialogTitle>
+        </DialogContent>
+      </Dialog>,
+    );
+    await frames(4);
+    expect(isNativeOverlaySuppressed()).toBe(true);
+    await waitFor(() => expect(isNativeOverlaySuppressed()).toBe(false));
   });
 });

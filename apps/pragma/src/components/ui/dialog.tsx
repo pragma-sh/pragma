@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { modalVariants, scrimVariants } from "@/lib/motion";
+import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 import { XIcon } from "lucide-react";
 
 /**
@@ -16,6 +17,11 @@ import { XIcon } from "lucide-react";
  * leaves no frames for a close animation to play in.
  */
 const DialogOpenContext = React.createContext(false);
+
+function NativeOverlaySuppression() {
+  useSuppressNativeOverlayWhile(true);
+  return null;
+}
 
 function Dialog({
   open,
@@ -90,6 +96,7 @@ function DialogContent({
     <AnimatePresence>
       {open ? (
         <DialogPortal forceMount>
+          <NativeOverlaySuppression />
           <DialogOverlay />
           {/* Centering lives on this wrapper rather than on a `-translate-1/2`
               content box: Motion writes `transform` inline for the scale, which

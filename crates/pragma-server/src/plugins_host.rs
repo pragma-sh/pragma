@@ -40,6 +40,7 @@ const ASSET_MAX_BYTES: u64 = 256 * 1024;
 // `NotStarted`, causing every catalog caller to enqueue another full reload.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const USAGE_LIMITS_TIMEOUT: Duration = Duration::from_mins(2);
+const USAGE_LIMITS_LOG_FIELD_MAX_CHARS: usize = 2_000;
 #[cfg(not(test))]
 const INITIAL_GATEWAY_WAIT: Duration = Duration::from_secs(5);
 
@@ -265,6 +266,7 @@ impl PluginsRegistry {
             }
             "readAsset" => self.read_asset(payload),
             "usageLimits" => self.usage_limits(payload),
+            "logUsageLimitsError" => Self::log_usage_limits_error(payload),
             "reload" => {
                 self.reload()?;
                 Ok(json!({ "ok": true }))
@@ -516,6 +518,33 @@ impl PluginsRegistry {
             .map(|providers| json!({ "providers": providers }))
             .map_err(PluginsError::Operation)
     }
+
+    fn log_usage_limits_error(payload: &Value) -> Result<Value, PluginsError> {
+        let plugin_id = required_log_field(payload, "pluginId")?;
+        let provider_id = required_log_field(payload, "providerId")?;
+        let message = required_log_field(payload, "message")?;
+        eprintln!("usage limits update failed for {plugin_id}/{provider_id}: {message}");
+        Ok(json!({ "ok": true }))
+    }
+}
+
+fn required_log_field(payload: &Value, field: &str) -> Result<String, PluginsError> {
+    let value = payload
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| PluginsError::InvalidRequest(format!("missing {field}")))?;
+    Ok(value
+        .chars()
+        .take(USAGE_LIMITS_LOG_FIELD_MAX_CHARS)
+        .map(|character| {
+            if character == '\n' || character == '\r' {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect())
 }
 
 /// Reads the persisted plugin roots, or an empty list before the first
@@ -725,7 +754,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        is_lowercase_hex_sha256, AssetEntry, PluginsRegistry, SidecarEvent, PLUGIN_ROOTS_FILE,
+        is_lowercase_hex_sha256, AssetEntry, PluginsError, PluginsRegistry, SidecarEvent,
+        PLUGIN_ROOTS_FILE,
     };
 
     #[test]
@@ -788,6 +818,28 @@ mod tests {
             serde_json::from_str(r#"{"type":"usageLimits","requestId":"req-1","providers":[]}"#)
                 .expect("usage limits event must parse");
         assert!(matches!(event, SidecarEvent::UsageLimits { .. }));
+    }
+
+    #[test]
+    fn usage_limits_error_log_requires_identifying_fields() {
+        let result = PluginsRegistry::log_usage_limits_error(&json!({
+            "pluginId": "pragma.cursor",
+            "providerId": "cursor",
+        }));
+
+        assert!(matches!(result, Err(PluginsError::InvalidRequest(_))));
+    }
+
+    #[test]
+    fn usage_limits_error_log_accepts_complete_event() {
+        let result = PluginsRegistry::log_usage_limits_error(&json!({
+            "pluginId": "pragma.cursor",
+            "providerId": "cursor",
+            "message": "not logged in\nretry later",
+        }))
+        .expect("complete log event");
+
+        assert_eq!(result, json!({ "ok": true }));
     }
 
     #[test]

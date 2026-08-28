@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import type { KanbanPromptCard } from "@pragma/constants";
 
@@ -36,7 +37,6 @@ export function KanbanDeleteDialog({ open, onOpenChange, card }: KanbanDeleteDia
   const [unmerged, setUnmerged] = useState<boolean | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const hasWorktree = card !== null && card.status !== "draft" && card.worktreeId !== null;
   const worktreeId = card?.worktreeId ?? null;
@@ -76,20 +76,17 @@ export function KanbanDeleteDialog({ open, onOpenChange, card }: KanbanDeleteDia
     return null;
   }
 
-  async function confirm() {
+  function confirm() {
     if (!card) {
       return;
     }
-    setDeleting(true);
     setError(null);
-    try {
-      await kanban.deleteCard(card, { deleteBranch });
-      onOpenChange(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setDeleting(false);
-    }
+    onOpenChange(false);
+    void kanban.deleteCard(card, { deleteBranch }).catch((cause) => {
+      toast.error(
+        `Card deletion failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    });
   }
 
   return (
@@ -126,15 +123,10 @@ export function KanbanDeleteDialog({ open, onOpenChange, card }: KanbanDeleteDia
         ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-          <Button
-            disabled={deleting}
-            onClick={() => void confirm()}
-            size="default"
-            variant="destructive"
-          >
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button onClick={confirm} size="default" variant="destructive">
             <Trash2 data-icon="inline-start" />
-            {deleting ? "Deleting..." : "Delete"}
+            Delete
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

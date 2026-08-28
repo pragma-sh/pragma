@@ -5,9 +5,15 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { modalVariants, scrimVariants } from "@/lib/motion";
+import { useSuppressNativeOverlayWhile } from "@/lib/native-overlay";
 
 /** Mirrors the Radix root's open state so the content can animate on the way out. */
 const AlertDialogOpenContext = React.createContext(false);
+
+function NativeOverlaySuppression() {
+  useSuppressNativeOverlayWhile(true);
+  return null;
+}
 
 function AlertDialog({
   open,
@@ -80,6 +86,7 @@ function AlertDialogContent({
     <AnimatePresence>
       {open ? (
         <AlertDialogPortal forceMount>
+          <NativeOverlaySuppression />
           <AlertDialogOverlay />
           {/* Flex centring on a click-through wrapper: Motion owns `transform`
               for the shrink, so a `-translate-1/2` content box would be

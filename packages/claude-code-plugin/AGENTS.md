@@ -186,6 +186,11 @@ detection. Re-reporting `running` while already running is harmless: the daemon 
 status idempotently and only the transition the UI cares about (attention → running) is
 visible.
 
+The same hook advances a turn-scoped assistant-record cursor through the transcript and
+publishes each newly completed text segment. `Stop` performs one final sync before reporting
+`stopped`, then uses `last_assistant_message` only as a deduped fallback. This preserves
+responses around tool calls and guarantees final assistant content precedes done status.
+
 `PermissionRequest` reports `attention --kind command` (with the command + a requestId for
 the approval round-trip, see above). `Elicitation` reports a **generic** attention with no
 `--kind` — MCP input gives no structured question-vs-command signal, so Pragma shows a

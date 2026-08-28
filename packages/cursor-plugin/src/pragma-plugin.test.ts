@@ -14,12 +14,51 @@ it("launches Cursor's unambiguous binary", () => {
     "--approve-mcps",
   ]);
   expect(cursorAgentPlugin.agents?.[0]?.excludeFeatures).toEqual([
-    "questions",
     "commandApproval",
     "subagents",
     "abort",
     "interrupt",
   ]);
+});
+
+it("reports question attention from Cursor's OSC titles", async () => {
+  const watcher = cursorAgentPlugin.watchers?.[0];
+  const controller = new AbortController();
+  const report = vi.fn(async () => {});
+  const context = {
+    sdk: {
+      agents: {
+        connect: async () => ({
+          async *[Symbol.asyncIterator]() {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            controller.abort();
+            yield* [];
+          },
+        }),
+        report,
+      },
+    },
+    agentId: "cursor",
+    config: undefined,
+    session: { id: "session-1", tabId: "tab-1", worktreeId: "worktree-1" },
+    output: (async function* () {
+      yield "\x1b]0;Choice";
+      yield " Asker\x07";
+      yield "\x1b]2;Cursor Agent\x1b\\";
+    })(),
+    sendKeys: async () => {},
+    reportMessage: async () => {},
+    signal: controller.signal,
+  };
+
+  await watcher?.watch(context as never);
+
+  expect(report).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "attention", attentionKind: "question" }),
+  );
+  expect(report).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "running", attentionKind: null }),
+  );
 });
 
 it("includes Cursor's auto model", () => {
@@ -182,9 +221,35 @@ it("runs the bundled helper without passing credentials through the command", as
   expect(result).toMatchObject({ status: "ready", summary: { used: 15 } });
   expect(capturedRequest).toEqual({
     cwd: "/project",
-    commands: [
-      expect.stringContaining("/Applications/Pragma App/plugins/cursor/dist/usage-limits"),
-    ],
+    commands: [expect.stringContaining("$HOME/.pragma/plugins/cursor/scripts/usage-limits")],
   });
   expect(capturedRequest?.commands[0]).not.toContain("WorkosCursorSessionToken");
+  expect(capturedRequest?.commands[0]).not.toContain("/bin/sh");
+});
+
+it("renders helper failures as retryable unavailable state", async () => {
+  const run = vi.fn(async () => [
+    {
+      command: "usage helper",
+      stdout: "",
+      stderr: "Cursor usage API returned HTTP 429",
+      status: 3,
+      durationMs: 1,
+    },
+  ]);
+
+  const result = await loadCursorUsageLimits({
+    pluginId: "pragma.cursor",
+    pluginDir: "/plugin",
+    config: undefined,
+    project: null,
+    sdk: { exec: { run } } as never,
+    notify: () => {},
+  });
+
+  expect(result).toMatchObject({
+    status: "unavailable",
+    reason: "unsupported",
+    message: expect.stringContaining("retry automatically"),
+  });
 });

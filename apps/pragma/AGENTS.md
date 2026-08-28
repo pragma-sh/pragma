@@ -890,6 +890,10 @@ see-through instead of solid — the bug that put these flags in a separate file
 
 Two rules follow:
 
+- **Fullscreen is opaque.** `main.tsx` removes `.vibrancy` while the macOS window is
+  fullscreen and restores it on exit. The native effect may remain installed behind the
+  webview; opaque root surfaces prevent it from showing without rebuilding native chrome.
+
 - **Tauri's config merge replaces arrays, it does not merge them** (`json_patch::merge`).
   `app.windows` is an array, so `tauri.macos.conf.json` carries the _whole_ window object,
   not just the macOS keys. Change one, change both.
@@ -912,6 +916,17 @@ payloads until the `drop` event, so the dragged tab id is tracked in shared Reac
 Native browser webviews float **above** all HTML. The shared `isDragging` signal hides
 native overlays for the duration of a drag so drop zones underneath become reachable;
 drop-zone geometry lives in `components/tabs/tab-drag.ts`.
+
+Address-bar text is normalized by `browser::parse_url`: schemeless public hosts default
+to HTTPS, while localhost, `.localhost`, loopback IPs, and unspecified IPs default to HTTP
+so ordinary local dev servers load without requiring users to type the scheme. Navigation
+uses an evaluated, JSON-serialized `window.location.assign`, not `Webview::navigate`:
+Tauri's runtime only queues the latter and swallows any subsequent `load_url` failure.
+Wry exposes page-load start/finish but no cross-platform failure callback, so
+`BrowserView` treats a load that never finishes within `BROWSER_LOAD_TIMEOUT_MS` as failed,
+hides the native surface, and shows retry UI. An immediate IPC failure uses the same screen.
+WKWebView can report a failed navigation as finished while rendering an empty white document;
+the native finish hook probes for an empty title/body/DOM and reports that as failed too.
 
 Any HTML overlay that opens over a browser pane (dropdown, popover) would be clipped by
 the native webview, so shadcn `DropdownMenu`/`Popover` roots register with
@@ -1136,6 +1151,10 @@ and a buffer that only a tab close fixes is worse than one extra read. `Scratchp
 watches the same events for `.pragma/scratchpads/` so an agent creating a scratchpad shows
 up in the sidebar without waiting on unrelated tab churn.
 
+Dirty documents and their exact saved baselines survive ordinary pane unmounts; only a
+confirmed tab close disposes them. Scratchpad TipTap updates mark dirty only while focused,
+because MDX extensions can emit doc-changing normalization transactions during initial mount.
+
 **A scratchpad frame never restates a color.** The sandbox has its own document, so it
 sees neither Tailwind nor `index.css`. `lib/scratchpad-theme.ts` reads the computed value
 of every `THEME_TOKENS` variable (plus the radius/font/shadow support variables) off the
@@ -1285,6 +1304,11 @@ the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` 
 surfaced through a "Show N hidden" toggle. When the user hides the currently-selected
 worktree, the reducer falls back to the main worktree (or the first remaining root).
 
+Worktree deletion is optimistic: confirmation closes and local worktree/tab state disappears
+before teardown scripts and git removal finish. Failure raises a delayed toast and reloads the
+project snapshot instead of naively rolling back, because native deletion may have partially
+completed. Every caller uses the shared workspace action; do not reintroduce modal-owned waits.
+
 **Active selection persists across restarts.** The last active project, each
 project's last active worktree, and each worktree's active tab are saved in the `settings` table under one opaque JSON
 key (`activeSelection`) via `get_active_selection` / `set_active_selection` — Rust
@@ -1319,7 +1343,9 @@ filename with full path and worktree at right so duplicate names remain distingu
 `worktree_mru` is client-local SQLite state,
 touched by centralized workspace-selection effect. Cross-worktree file/tab actions use
 explicit `activateTabLocation` / `openFileLocation` APIs to avoid stale selection races;
-code matches use ephemeral `editor-location-store.ts` to reveal source line.
+`activateTabLocation` refreshes even the selected project when its target is absent from
+memory because host-created fanout worktrees/tabs are adopted asynchronously. Code matches
+use ephemeral `editor-location-store.ts` to reveal source line.
 
 Typing `>` enters command mode; `Cmd+Shift+P` / `Ctrl+Shift+P` opens it directly.
 Commands reuse existing workspace actions for remote access, server troubleshooting,
@@ -1363,8 +1389,9 @@ load by `selectedProjectId` and reload after every mutation. SDK callers create 
 with `client.createBoardDraft`; the brokered desktop controller resolves its worktree to
 the owning project/branch and emits `pragma:kanban-changed` for live reload.
 
-**Transitions are enforced, not free-form** (no drag): `draft → inProgress` only via the
-card's Start flow; `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to
+**Transitions are enforced, not free-form**: dragging a draft to In progress invokes the
+card's Start flow and moves it there optimistically while worktree creation runs (a failure
+returns it to Drafts); `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to
 `onAgentReport` and moves a card whose `agentTabId` matches a `done` report (live
 attention/running is shown per card via `useTabAgentStatus`); `reviewNeeded → completed`
 only after a completion-modal action succeeds; completed cards are read-only.

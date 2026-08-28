@@ -20,8 +20,8 @@ vi.mock("@/lib/file-watch", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { useEditorFileLoader } from "./use-editor-file";
-import { setTabDirty } from "@/state/editor-dirty-store";
+import { useEditorFileLoader, useEditorOnChange } from "./use-editor-file";
+import { disposeTab, isTabDirty, setTabDirty } from "@/state/editor-dirty-store";
 
 function tab(): Tab {
   return {
@@ -64,8 +64,8 @@ function Probe() {
     tab(),
     savedDocRef,
     currentDocRef,
-    { preserveOnUnmount: true },
   );
+  const onChange = useEditorOnChange("pad-1", savedDocRef, currentDocRef);
   return (
     <div>
       <span data-testid="kind">{state.kind}</span>
@@ -74,13 +74,19 @@ function Probe() {
       <button onClick={reloadFromDisk} type="button">
         reload
       </button>
+      <button onClick={() => onChange("edited")} type="button">
+        edit
+      </button>
+      <button onClick={() => onChange("first")} type="button">
+        revert
+      </button>
     </div>
   );
 }
 
 afterEach(() => {
   cleanup();
-  setTabDirty("pad-1", false);
+  disposeTab("pad-1");
 });
 
 beforeEach(() => {
@@ -171,5 +177,19 @@ describe("useEditorFileLoader", () => {
 
     expect(screen.getByTestId("kind")).toHaveTextContent("ready");
     expect(screen.getByTestId("doc")).toHaveTextContent("first");
+  });
+
+  it("restores a dirty document and its saved baseline after unmount", async () => {
+    const first = render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId("doc")).toHaveTextContent("first"));
+    act(() => screen.getByRole("button", { name: "edit" }).click());
+    expect(isTabDirty("pad-1")).toBe(true);
+    first.unmount();
+
+    render(<Probe />);
+    expect(screen.getByTestId("doc")).toHaveTextContent("edited");
+    expect(readFileMock).toHaveBeenCalledTimes(1);
+    act(() => screen.getByRole("button", { name: "revert" }).click());
+    expect(isTabDirty("pad-1")).toBe(false);
   });
 });

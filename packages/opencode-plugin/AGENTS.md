@@ -118,6 +118,9 @@ generic question attention for that incomplete state; it can race ahead of canon
 Legacy question-hook reports are deferred briefly so this canonical event can supersede
 their synthetic call id. Otherwise a fast remote answer targets the legacy id immediately
 before OpenCode raises its real `que_*` prompt, leaving the session stuck on attention.
+Once a canonical question is active, later legacy part updates are ignored and only a
+matching canonical reply/rejection clears it; stale events from an earlier question must
+not replace or clear the current request id.
 
 ## Command approval + question answers (the watcher route)
 
