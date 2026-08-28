@@ -1548,7 +1548,7 @@ fn is_missing_worktree_admin_state(message: &str) -> bool {
 /// worktree git refuses to remove can still leave Pragma's sidebar.
 fn force_cleanup(repo_root: &Path, worktree_path: &Path) -> CoreResult<()> {
     if worktree_path.exists() {
-        if let Err(error) = std::fs::remove_dir_all(worktree_path) {
+        if let Err(error) = remove_worktree_dir(worktree_path) {
             return Err(CoreError::Operation(format!(
                 "failed to remove worktree {}: {error}",
                 worktree_path.display()
@@ -1560,6 +1560,27 @@ fn force_cleanup(repo_root: &Path, worktree_path: &Path) -> CoreResult<()> {
         prune_worktrees(repo_root),
     );
     Ok(())
+}
+
+/// Recursively removes a worktree, retrying the short race where a dying
+/// process writes one last file after `remove_dir_all` has started walking it.
+fn remove_worktree_dir(worktree_path: &Path) -> std::io::Result<()> {
+    const ATTEMPTS: usize = 11;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+    for attempt in 0..ATTEMPTS {
+        match std::fs::remove_dir_all(worktree_path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::DirectoryNotEmpty
+                    && attempt + 1 < ATTEMPTS =>
+            {
+                std::thread::sleep(RETRY_DELAY);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("directory removal loop always returns on its final attempt")
 }
 
 /// Reports a best-effort step that failed without turning it into an error.
