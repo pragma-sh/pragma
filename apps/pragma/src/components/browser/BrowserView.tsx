@@ -160,11 +160,16 @@ export function BrowserView({ tab, active }: BrowserViewProps) {
       }
       if (load.status === "started") {
         beginLoad(load.url);
-      } else if (load.status === "finished") {
-        clearLoadTimeout();
-        setFailedUrl(null);
-      } else {
-        failLoad(currentLoadUrlRef.current ?? load.url);
+      } else if (load.url === currentLoadUrlRef.current) {
+        // Ignore a stale finished/failed event from an earlier navigation that
+        // this tab has since moved on from; acting on it would clear the
+        // in-flight load's timeout/failure state instead of its own.
+        if (load.status === "finished") {
+          clearLoadTimeout();
+          setFailedUrl(null);
+        } else {
+          failLoad(load.url);
+        }
       }
     })
       .then((stop) => {

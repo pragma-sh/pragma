@@ -107,6 +107,7 @@ import {
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import { disposeTab as disposeEditorTab } from "@/state/editor-dirty-store";
 import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
@@ -3830,6 +3831,7 @@ function useWorktreeActions(
           terminalManager.dispose(tab.id);
           removeAgentStatusForTab(tab.id);
           releaseAlertLatchForTab(tab.id);
+          disposeEditorTab(tab.id);
           if (tab.kind === "browser") {
             void browserClose(tab.id);
           }

@@ -400,18 +400,25 @@ function useKanbanCardLifecycle(
       }
       setCardStatus(card.id, "inProgress");
       let persisted = false;
+      let createdWorktreeId: string | null = null;
+      let createdTabId: string | null = null;
       try {
         const ws = workspaceRef.current;
         const projectWorktrees = ws.worktrees[target] ?? [];
         // Reuse an existing worktree on the same branch; otherwise branch a fresh
         // one off the project's main worktree.
         const worktree = await resolveStartCardWorktree(projectWorktrees, card, target);
+        const worktreeExisted = projectWorktrees.some((item) => item.id === worktree.id);
+        if (!worktreeExisted) {
+          createdWorktreeId = worktree.id;
+        }
         const tab = await createTabCommand(
           target,
           worktree.id,
           "terminal",
           defaultTabTitle("terminal"),
         );
+        createdTabId = tab.id;
         // Load the new worktree + tab into workspace state so opening the card
         // later attaches to the (now persisted) background session.
         await ws.refreshProject(target);
@@ -432,6 +439,16 @@ function useKanbanCardLifecycle(
       } catch (cause) {
         if (!persisted) {
           setCardStatus(card.id, card.status);
+          // Undo whatever launch resources this attempt created so a retry
+          // doesn't pile up extra tabs/worktrees behind a card stuck in Draft.
+          if (createdTabId) {
+            await workspaceRef.current.closeTab(createdTabId).catch(() => undefined);
+          }
+          if (createdWorktreeId) {
+            await workspaceRef.current
+              .deleteWorktree(createdWorktreeId, { deleteBranch: true, force: true })
+              .catch(() => undefined);
+          }
         }
         throw cause;
       }
