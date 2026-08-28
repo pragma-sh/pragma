@@ -3824,7 +3824,6 @@ function useWorktreeActions(
         worktrees.some((worktree) => worktree.id === worktreeId),
       )?.[0];
       dispatch({ type: "remove-worktree", worktreeId });
-      toast.success("Worktree deleted");
       try {
         await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
         for (const tab of removedTabs) {
@@ -3840,6 +3839,7 @@ function useWorktreeActions(
           const { [worktreeId]: _, ...remaining } = current;
           return remaining;
         });
+        toast.success("Worktree deleted");
       } catch (cause) {
         if (projectId && stateRef.current.selectedProjectId === projectId) {
           await loadProjectWorkspace(projectId, dispatch).catch(() => undefined);
