@@ -21,6 +21,7 @@ import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
+import { InstallUpdateButton } from "@/components/sidebar/InstallUpdateButton";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { OpenPortsCard } from "@/components/sidebar/OpenPortsCard";
 import { ScratchpadsCard } from "@/components/sidebar/ScratchpadsCard";
@@ -178,6 +179,7 @@ function ExpandedProjectSidebar({
         <ScratchpadsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />
+        <InstallUpdateButton />
         <div className="flex items-center gap-1.5">
           <div className="min-w-0 flex-1">
             <ProjectSwitcher />
@@ -248,6 +250,9 @@ function CollapsedProjectSidebar({ onExpand }: { onExpand: () => void }) {
       >
         <PanelLeftOpen />
       </Button>
+      <div className="mt-auto">
+        <InstallUpdateButton compact />
+      </div>
     </motion.div>
   );
 }

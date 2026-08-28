@@ -32,3 +32,5 @@ parses `values.json` at startup and panics if it drifts from the schema — inte
   `apps/pragma/src-tauri/tauri.conf.json` (Tauri reads its config statically).
 - Tests already assert basic invariants (`src/index.test.ts`, `src/lib.rs` tests); add
   to them when you add structure.
+- `daemon.protocolVersion` is copied from `crates/pragma-protocol`'s Cargo version by
+  `bun run generate`. Do not edit it by hand.

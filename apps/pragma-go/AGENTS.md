@@ -124,6 +124,9 @@ from the desktop.
 ## Stack
 
 - **Expo SDK 57** + **expo-router** (file-based routing, typed routes, React Compiler).
+- **EAS Update** (`eas.json` + `expo-updates`): preview channel publishes OTA on `main`
+  via `.eas/workflows/update.yml`. Native binary bumps still go through EAS Build
+  (`runtimeVersion.policy: appVersion`).
 - **New Architecture** enabled; requires a **custom dev build** (not Expo Go) because
   of native modules (liquid glass, native tabs, gesture-handler/reanimated 4).
 - **NativeWind v4** (Tailwind) for styling; tokens live in `global.css` + `tailwind.config.js`.

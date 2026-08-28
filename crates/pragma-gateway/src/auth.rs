@@ -21,7 +21,7 @@ pub struct GatewayDiscovery {
     /// Gateway process id.
     pub pid: u32,
     /// Pragma server protocol version this gateway expects.
-    pub protocol_version: u64,
+    pub protocol_version: String,
 }
 
 /// Generates a random bearer token.
@@ -86,7 +86,7 @@ pub fn write_discovery(path: &Path, discovery: &GatewayDiscovery) -> GatewayResu
 /// serve this app again (clients reject the mismatched discovery file), so it
 /// is terminated and replaced instead of refused — otherwise a leftover
 /// gateway from a previous app version deadlocks every future gateway start.
-pub fn remove_stale_or_refuse(path: &Path, protocol_version: u64) -> GatewayResult<()> {
+pub fn remove_stale_or_refuse(path: &Path, protocol_version: &str) -> GatewayResult<()> {
     if !path.exists() {
         return Ok(());
     }
@@ -171,14 +171,14 @@ mod tests {
         (port, handle)
     }
 
-    fn discovery(port: u16, protocol_version: u64) -> GatewayDiscovery {
+    fn discovery(port: u16, protocol_version: &str) -> GatewayDiscovery {
         GatewayDiscovery {
             port,
             // A pid that is never a live pragma-gateway, so the takeover path
             // skips the kill while still exercising file removal.
             pid: u32::MAX,
             token: "token".to_string(),
-            protocol_version,
+            protocol_version: protocol_version.to_string(),
         }
     }
 
@@ -187,9 +187,9 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("gateway.json");
         let (port, handle) = fake_live_gateway();
-        write_discovery(&path, &discovery(port, 11)).expect("write discovery");
+        write_discovery(&path, &discovery(port, "11")).expect("write discovery");
 
-        let result = remove_stale_or_refuse(&path, 11);
+        let result = remove_stale_or_refuse(&path, "11");
 
         handle.join().expect("responder");
         assert!(result.is_err());
@@ -201,9 +201,9 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("gateway.json");
         let (port, handle) = fake_live_gateway();
-        write_discovery(&path, &discovery(port, 9)).expect("write discovery");
+        write_discovery(&path, &discovery(port, "9")).expect("write discovery");
 
-        remove_stale_or_refuse(&path, 11).expect("takeover");
+        remove_stale_or_refuse(&path, "11").expect("takeover");
 
         handle.join().expect("responder");
         assert!(!path.exists());
@@ -219,9 +219,9 @@ mod tests {
             .local_addr()
             .expect("addr")
             .port();
-        write_discovery(&path, &discovery(port, 11)).expect("write discovery");
+        write_discovery(&path, &discovery(port, "11")).expect("write discovery");
 
-        remove_stale_or_refuse(&path, 11).expect("stale removal");
+        remove_stale_or_refuse(&path, "11").expect("stale removal");
 
         assert!(!path.exists());
     }
@@ -232,7 +232,7 @@ mod tests {
         let path = dir.path().join("gateway.json");
         fs::write(&path, "not json").expect("write");
 
-        remove_stale_or_refuse(&path, 11).expect("corrupt removal");
+        remove_stale_or_refuse(&path, "11").expect("corrupt removal");
 
         assert!(!path.exists());
     }
@@ -272,7 +272,7 @@ mod tests {
             port: 1234,
             token: "token".to_string(),
             pid: 42,
-            protocol_version: 8,
+            protocol_version: "8".to_string(),
         };
         write_discovery(&path, &discovery).expect("write discovery");
         assert_eq!(read_discovery(&path).expect("read discovery"), discovery);

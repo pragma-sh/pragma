@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, CONSTANTS};
+use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod};
 use pragma_core::rpc::protocol_error_code;
 use pragma_core::Core;
 use pragma_platform::ipc::{self, LocalStream};
@@ -196,7 +196,7 @@ fn handle_client(mut stream: LocalStream, registry: &Arc<Registry>, core: &Arc<C
     // frame written; the app consumes exactly one hello before any request.
     if let Ok(mut writer_guard) = writer.lock() {
         let hello = ServerFrame::Hello(HelloFrame {
-            protocol_version: CONSTANTS.daemon.protocol_version.get(),
+            protocol_version: pragma_protocol::PROTOCOL_VERSION.to_string(),
         });
         if write_json_frame(&mut *writer_guard, &hello).is_err() {
             return;

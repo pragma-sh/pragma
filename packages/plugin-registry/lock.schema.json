@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OfficialPluginLock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "plugins"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["package", "version", "tarball", "integrity", "manifestSha256", "manifest"],
+        "properties": {
+          "package": { "type": "string" },
+          "version": { "type": "string" },
+          "tarball": { "type": "string", "pattern": "^https://registry\\.npmjs\\.org/" },
+          "integrity": { "type": "string", "pattern": "^sha512-" },
+          "manifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "manifest": { "$ref": "pragma-plugin.schema.json" }
+        }
+      }
+    }
+  }
+}

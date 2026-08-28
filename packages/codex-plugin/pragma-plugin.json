@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Codex CLI",
+  "description": "Launch Codex CLI in Pragma with live status, approvals, questions, usage limits, and session naming.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/codex-plugin/assets/codex.png",
+      "alt": "Codex logo"
+    }
+  ],
+  "install": { "command": "sh", "args": ["scripts/install-local.sh"] },
+  "agentBinary": "codex"
+}

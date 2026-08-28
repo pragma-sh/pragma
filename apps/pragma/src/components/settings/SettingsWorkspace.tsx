@@ -22,6 +22,7 @@ import {
   type GitHubAuthMethod,
   type GitHubSettings,
   type TerminalSettings,
+  type OtherSettings,
 } from "@pragma/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
@@ -33,6 +34,7 @@ import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
+import { OtherSection } from "@/components/settings/OtherSection";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +72,8 @@ type BuiltinSection =
   | "github"
   | "ai"
   | "mobile"
-  | "automations";
+  | "automations"
+  | "other";
 
 type Section = BuiltinSection | `plugin:${string}`;
 
@@ -93,6 +96,7 @@ const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "ai",
   "mobile",
   "automations",
+  "other",
 ]);
 
 /** Narrows the `openSettings` target to a known section, defaulting to Plugins. */
@@ -127,6 +131,8 @@ interface PragmaConfig {
   };
   agentStatus?: AgentStatusSettings;
   github?: GitHubSettings;
+  other?: OtherSettings;
+  updates?: { checkUrl?: string; autoDownload?: boolean };
   terminal?: TerminalSettings;
   [key: string]: unknown;
 }
@@ -149,6 +155,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
   validateGitHubSettings(config.github);
+  validateOtherSettings(config.other);
   return config;
 }
 
@@ -203,6 +210,13 @@ function validatePlugin(plugin: PluginConfig, index: number): void {
   ) {
     throw new Error(`plugins[${index}].config must be an object`);
   }
+}
+
+function validateOtherSettings(other: PragmaConfig["other"]): void {
+  if (other === undefined) return;
+  validateConfigObject(other, "other");
+  validateOptionalField(other.serverUrl, "other.serverUrl", "string");
+  validateOptionalField(other.autoDownload, "other.autoDownload", "boolean");
 }
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
@@ -318,7 +332,7 @@ export function SettingsWorkspace() {
   useEffect(() => void load(), [load]);
   useEffect(() => {
     if (scope === "project" && !workspace.selectedProjectId) setScope("global");
-    // GitHub, AI, mobile, and automations are app-global, so project scope falls
+    // GitHub, AI, mobile, automations, and other are app-global, so project scope falls
     // back to the first section that has a project layer.
     if (scope === "project" && !isProjectSection(section)) setSection("plugins");
     if (
@@ -530,6 +544,13 @@ function GlobalSettingsNavigation({
       >
         Automations
       </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "other"}
+        icon={<RefreshCw />}
+        onClick={() => setSection("other")}
+      >
+        Other
+      </SettingsNavItem>
     </>
   );
 }
@@ -652,6 +673,23 @@ function SettingsContent({
         {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
         {loaded && section === "mobile" && scope === "global" ? (
           <MobileSection config={loaded.value} persist={persist} />
+        ) : null}
+        {loaded && section === "other" && scope === "global" ? (
+          <OtherSection
+            persist={(patch) =>
+              persist((current) => ({
+                ...current,
+                other: { ...current.other, ...patch },
+                updates: undefined,
+              }))
+            }
+            settings={
+              loaded.value.other ?? {
+                serverUrl: loaded.value.updates?.checkUrl,
+                autoDownload: loaded.value.updates?.autoDownload,
+              }
+            }
+          />
         ) : null}
       </div>
     </main>

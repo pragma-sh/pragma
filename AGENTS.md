@@ -54,10 +54,12 @@ than no guide.
   package, move a file, change a command, bump a tool, adopt a new pattern → update the
   matching AGENTS.md (root and/or child) in the same commit. Because `CLAUDE.md` is a
   symlink to the root AGENTS.md, both humans and agents stay in sync automatically.
-- **Mirror it in the skills.** Canonical first-party skill sources live under `skills/`
-  and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes). If you
+- **Mirror it in the skills.** Canonical user-facing skill sources live under `skills/`
+  and are symlinked into `.agents/skills/` (which `.claude/skills` also exposes). Internal
+  contributor skills live directly in `.agents/skills/`, so that directory contains both
+  internal and user-facing skills. If you
   change a workflow here, update the relevant skill (`pragma-architecture`,
-  `shared-constants`, `tauri-command`, `code-quality`, `agent-plugin`) too, and
+  `shared-constants`, `tauri-command`, `code-quality`, `pragma`) too, and
   add a new skill when you add a substantial new workflow.
 - **When you discover something the hard way, write it down.** A non-obvious gotcha, a
   setup step, a "don't do X because Y" — capture it here (or in the relevant child
@@ -116,6 +118,7 @@ than no guide.
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
 │   ├── scratchpad-viewer/       # read-only scratchpad web-view document → see packages/scratchpad-viewer/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
+│   ├── plugin-registry/         # official npm list + generated manifest lock → see packages/plugin-registry/AGENTS.md
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
 │   ├── create-pragma-plugin/    # Plugin scaffolder CLI → see packages/create-pragma-plugin/AGENTS.md
 │   ├── github-helpers/          # `pragma-github` sidecar → see packages/github-helpers/AGENTS.md
@@ -137,9 +140,9 @@ than no guide.
 │   ├── automations/             # `@pragma/automations` API + `pragma-automations` host sidecar
 │   ├── ai-helpers/              # `@pragma/ai-helpers` — wraps the pi coding-agent SDK (auth, pickModel, prompts); `src/cli.ts` is the `pragma-ai` sidecar
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
-│   ├── opencode-plugin/         # `@pragma/opencode-plugin` ESM opencode status plugin
+│   ├── opencode-plugin/         # `@pragma-sh/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
-├── skills/                       # Canonical first-party skill sources; symlinked into `.agents/skills`
+├── skills/                       # Canonical user-facing skills; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
 ├── rustfmt.toml                 # Rust formatting rules
@@ -148,7 +151,7 @@ than no guide.
 ├── .oxlintrc.json / .oxfmtrc.json
 ├── .rwx/                        # RWX run definitions (Linux CI)
 ├── .husky/                      # Git hooks
-└── .agents/skills/              # Installed skill view (also exposed through .claude/skills)
+└── .agents/skills/              # Internal skills + user-facing symlinks; exposed through .claude/skills
 ```
 
 **Where things go:**
@@ -156,14 +159,15 @@ than no guide.
 - User-tunable global settings live in `~/.pragma/config.json` (plugins under `plugins[]`,
   remote-access tunnel under `tunnel` = `{ command, urlPattern }`, agent alerts under
   `agentStatus` = `{ notificationsEnabled, soundName }`, the "Created with Pragma"
-  pull-request footer under `github` = `{ prSignature }`). Keyboard shortcuts are separate:
+  pull-request footer under `github` = `{ prSignature }`, desktop auto-update overrides
+  under `updates` = `{ checkUrl, autoDownload }`). Keyboard shortcuts are separate:
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
-  belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`) so Rust and
-  TS agree, never hard-coded in one language.
+  belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
+  so Rust and TS agree, never hard-coded in one language.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
-  and Agent Status have both a global and a project scope (project wins); GitHub, AI, and
-  mobile pairing/gateway history are global-only.
+  and Agent Status have both a global and a project scope (project wins); GitHub, AI,
+  Other (update server/download), and mobile pairing/gateway history are global-only.
 - Color overrides live in a separate optional `.pragma/theme.json`, global and per project,
   merged `index.css` defaults <- global <- project. Never restate a shipped default color in
   TS or Rust: `apps/pragma/src/index.css` is the source of truth and the token catalog is
@@ -257,6 +261,8 @@ bun run fallow:check       # fallow audit (TS/JS): block on issues this branch i
 bun run check              # Lint + format/type checks + rustfmt/clippy (tests run separately)
 
 bun run generate           # Regenerate shared-constant types from schema/values
+bun run plugins:lock:local # Build/pack official workspace plugins and refresh local test lock
+bun run plugins:lock       # Refresh lock from exact published npm releases
 cargo run -p pragma-server # Run the persistent server directly for debugging
 cargo run -p pragma-gateway -- --socket /path/to/daemon.sock # Run the localhost HTTP gateway
 cargo run -p pragma-cli -- agent report --agent dev started # Manually send an agent report (inside a Pragma terminal env)
@@ -356,6 +362,24 @@ Shared rules:
 CI re-verifies everything in **check** mode (it never auto-fixes): commitlint, oxlint,
 oxfmt `--check`, typecheck, `cargo fmt --check`, clippy, both test suites, and a
 compile-only Tauri build on macOS, Linux, **and** Windows.
+
+**Releases are cut by Release Please.** `.github/workflows/release.yml` updates one
+combined release PR from Conventional Commits. Merging it creates component GitHub
+Releases; a desktop (`pragma-v*`) release then builds signed installers for every
+advertised OS/architecture/package format, builds a tarred React UI overlay, and uploads
+them with a signed `release.json`. That manifest is `reload` only when every substantive change since the
+previous desktop tag is under `apps/pragma/src/`; any native/server/tooling change is
+`restart`. Desktop-shipped crates/packages use Release Please's `linked-versions` group,
+so changing one also creates a desktop release instead of shipping under an unrelated
+component version. Configure `RELEASE_PLEASE_TOKEN` with contents + pull-request write
+access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
+GitHub suppresses workflows caused by that token. Release builds also require
+`TAURI_SIGNING_PRIVATE_KEY`, its password, and `TAURI_SIGNING_PUBLIC_KEY`; every installer
+and UI overlay is signed, and production clients reject a missing/invalid signature. Linux
+package-manager installs select `.deb` or `.rpm`; AppImage sessions receive no automatic
+restart offer until in-place replacement is supported. The website update API scans recent
+releases through the newest restart manifest, because another monorepo component may be
+GitHub's latest release and a client may have skipped a required native release.
 
 **CI is split across two providers, by platform.** [RWX](https://www.rwx.com) runs
 Linux containers only — `rwx/base` supports the `ubuntu:*` images and nothing else, and

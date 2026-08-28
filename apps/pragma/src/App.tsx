@@ -3,6 +3,8 @@ import { MotionConfig } from "motion/react";
 import { AiSetupModal } from "@/components/ai/AiSetupModal";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { GitHubSetupModal } from "@/components/github/GitHubSetupModal";
+import { AgentPluginInstallPrompt } from "@/components/plugins/AgentPluginInstallPrompt";
+import { AgentPluginSetupModal } from "@/components/plugins/AgentPluginSetupModal";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { PluginProvider } from "@/plugins/PluginProvider";
 import { AiProvider } from "@/state/ai-context";
@@ -13,6 +15,7 @@ import { OpenPortsProvider } from "@/state/open-ports-context";
 import { ThemeProvider } from "@/state/theme-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
 import { FanoutsProvider } from "@/state/fanouts-context";
+import { UpdatesProvider } from "@/state/updates-context";
 import { WorktreeCreationProvider } from "@/state/worktree-creation-context";
 
 function App() {
@@ -34,9 +37,13 @@ function App() {
                       <ConfirmCloseProvider>
                         <WorktreeCreationProvider>
                           <FanoutsProvider>
-                            <WorkspaceShell />
-                            <GitHubSetupModal />
-                            <AiSetupModal />
+                            <UpdatesProvider>
+                              <WorkspaceShell />
+                              <GitHubSetupModal />
+                              <AiSetupModal />
+                              <AgentPluginSetupModal />
+                              <AgentPluginInstallPrompt />
+                            </UpdatesProvider>
                           </FanoutsProvider>
                         </WorktreeCreationProvider>
                       </ConfirmCloseProvider>

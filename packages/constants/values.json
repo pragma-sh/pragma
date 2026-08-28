@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": 24,
+    "protocolVersion": "0.0.0",
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -183,6 +183,30 @@
     "name": "Pragma",
     "identifier": "com.pragma.app",
     "version": "0.0.0"
+  },
+  "updates": {
+    "checkUrl": "https://pragma-app.sh/api/updates",
+    "devCheckUrl": "http://localhost:3000/api/updates",
+    "pollIntervalMs": 300000,
+    "autoDownload": true,
+    "manifestFile": "release.json",
+    "uiDirName": "ui",
+    "buttonLabel": "Install Update",
+    "changelogLabel": "View changelog",
+    "restartWarningTitle": "This update restarts the app server",
+    "restartWarningBody": "Open terminal sessions will stop. Save anything you need before installing.",
+    "applyModes": ["reload", "restart"],
+    "platforms": [
+      "darwin-aarch64",
+      "darwin-x86_64",
+      "linux-x86_64-deb",
+      "linux-x86_64-rpm",
+      "linux-x86_64-appimage",
+      "linux-aarch64-deb",
+      "linux-aarch64-rpm",
+      "linux-aarch64-appimage",
+      "windows-x86_64"
+    ]
   },
   "window": {
     "defaultWidth": 1024,

@@ -23,6 +23,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod plugin_distribution;
 mod plugins;
 mod ports;
 pub(crate) use pragma_core::process_env;
@@ -31,6 +32,7 @@ mod pty;
 mod scratchpads;
 mod scripts;
 mod ssh_host;
+mod updates;
 mod window_chrome;
 mod workspace_mirror;
 mod worktrees;
@@ -1097,6 +1099,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(pty.clone());
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
+    app.manage(plugin_distribution::PluginInstaller::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(ai::AskRegistry::default());
     app.manage(control::BrowserHistory::default());
@@ -1112,6 +1115,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
+    updates::load_ui_overlay(app.handle());
     install_menu(app.handle())?;
     install_deep_links(app);
     ensure_gateway_in_background(pty.clone());
@@ -1153,6 +1157,9 @@ pub fn run() {
         Err(error) => log::warn!("could not raise the open-file limit: {error}"),
     }
     tauri::Builder::default()
+        .register_uri_scheme_protocol("pragma-ui", |context, request| {
+            updates::ui_overlay_response(context.app_handle(), request.uri().path())
+        })
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1161,10 +1168,20 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             platform_name,
+            updates::get_update_runtime,
+            updates::check_for_update,
+            updates::apply_update,
+            updates::confirm_ui_overlay,
             load_keybindings,
             set_menu_accelerators_enabled,
             read_plugin_manifests,
             read_plugin_bundle,
+            plugin_distribution::install_official_plugin,
+            plugin_distribution::available_plugin_binaries,
+            plugin_distribution::plugin_onboarding_dismissed,
+            plugin_distribution::set_plugin_onboarding_dismissed,
+            plugin_distribution::agent_plugin_prompt_dismissed,
+            plugin_distribution::set_agent_plugin_prompt_dismissed,
             gateway_connection_info,
             regenerate_gateway_token,
             gateway_devices,

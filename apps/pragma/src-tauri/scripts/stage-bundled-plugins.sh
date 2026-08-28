@@ -31,7 +31,7 @@ release_lock() {
 }
 trap release_lock EXIT INT TERM
 
-bunx turbo run build --filter=@pragma/claude-code-plugin --filter=@pragma/opencode-plugin --filter=@pragma/cursor-plugin --filter=@pragma/github-copilot-cli-plugin
+bunx turbo run build --filter=@pragma-sh/claude-code-plugin --filter=@pragma-sh/opencode-plugin --filter=@pragma-sh/cursor-plugin --filter=@pragma-sh/github-copilot-cli-plugin
 
 plugins_dir_name="$(bun -e 'import { constants } from "@pragma/constants"; process.stdout.write(constants.plugins.bundledDirName)')"
 bundled_plugins_dir="$src_tauri_dir/resources/$plugins_dir_name"

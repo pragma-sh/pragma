@@ -1,4 +1,4 @@
-# packages/pi-plugin — @pragma/pi-plugin
+# packages/pi-plugin — @pragma-sh/pi-plugin
 
 Self-contained Pi CLI integration. It builds an in-process Pi extension and a Pragma
 catalog/watcher bundle; it must not add Pi-specific installers or parsing to Pragma core.
@@ -44,7 +44,7 @@ failures are swallowed so cleanup cannot disrupt watcher shutdown.
 ## Build and install
 
 ```sh
-bun run --filter @pragma/pi-plugin build
+bun run --filter @pragma-sh/pi-plugin build
 pi install /absolute/path/to/packages/pi-plugin
 ```
 

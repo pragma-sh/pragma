@@ -1,4 +1,4 @@
-# packages/grok-plugin - @pragma/grok-plugin
+# packages/grok-plugin - @pragma-sh/grok-plugin
 
 Self-contained xAI **Grok Build** CLI integration. Grok loads no in-process JavaScript
 plugin, so lifecycle reporting uses grok's native hooks plus `pragma-cli`. TypeScript
@@ -193,8 +193,8 @@ substitute a third-party aggregator's copy.
 ## Installation
 
 ```bash
-bun run --filter @pragma/grok-plugin build
-bun run --filter @pragma/grok-plugin install:local
+bun run --filter @pragma-sh/grok-plugin build
+bun run --filter @pragma-sh/grok-plugin install:local
 ```
 
 For the Pragma side, register this package's absolute path in global
@@ -212,9 +212,9 @@ running it brokers headed launches from its _own_ plugin copy, so quit it before
 ## Verification
 
 ```bash
-bun run --filter @pragma/grok-plugin test
-bun run --filter @pragma/grok-plugin typecheck
-bun run --filter @pragma/grok-plugin build
+bun run --filter @pragma-sh/grok-plugin test
+bun run --filter @pragma-sh/grok-plugin typecheck
+bun run --filter @pragma-sh/grok-plugin build
 pragma-cli agent verify --agent pragma.grok --abort-input '\x1b'
 ```
 

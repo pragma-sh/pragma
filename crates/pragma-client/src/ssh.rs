@@ -290,6 +290,8 @@ struct TrustServerKey;
 impl Handler for TrustServerKey {
     type Error = russh::Error;
 
+    // Not `async fn`: the body awaits nothing, and clippy's
+    // `unused_async_trait_impl` rejects that form.
     fn check_server_key(
         &mut self,
         _server_public_key: &PublicKey,

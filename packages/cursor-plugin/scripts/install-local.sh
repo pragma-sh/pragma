@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Install @pragma/cursor-plugin for local use:
+# Install @pragma-sh/cursor-plugin for local use:
 # - Copies hooks into ~/.pragma/plugins/cursor/hooks/
 # - Copies the CLI-authenticated usage helper into ~/.pragma/plugins/cursor/scripts/
 # - Merges Pragma hook entries into ~/.cursor/hooks.json
@@ -32,14 +32,14 @@ require_write() {
   target="$1"
   dir="$(dirname "$target")"
   if ! mkdir -p "$dir" 2>/dev/null; then
-    fail "cannot create $dir (run outside the sandbox: bun run --filter @pragma/cursor-plugin install:local)"
+    fail "cannot create $dir (run outside the sandbox: bun run --filter @pragma-sh/cursor-plugin install:local)"
   fi
   if [ -e "$target" ] && [ ! -w "$target" ]; then
-    fail "cannot write $target (run outside the sandbox: bun run --filter @pragma/cursor-plugin install:local)"
+    fail "cannot write $target (run outside the sandbox: bun run --filter @pragma-sh/cursor-plugin install:local)"
   fi
   probe="$dir/.pragma-cursor-install-probe"
   if ! touch "$probe" 2>/dev/null; then
-    fail "cannot write under $dir (run outside the sandbox: bun run --filter @pragma/cursor-plugin install:local)"
+    fail "cannot write under $dir (run outside the sandbox: bun run --filter @pragma-sh/cursor-plugin install:local)"
   fi
   rm -f "$probe"
 }

@@ -46,8 +46,10 @@ import type { AgentAlertLocation } from "@/lib/agent-notification-text";
 import { startAgentInTab, startBackgroundAgentSession } from "@/lib/agent-launch";
 import {
   parseNewSessionDeepLink,
+  parsePluginInstallDeepLink,
   parsePluginDeepLink,
   requestNewSession,
+  requestPluginInstall,
   requestPluginDeepLink,
 } from "@/lib/deep-link";
 import { basename } from "@/lib/path";
@@ -2877,6 +2879,11 @@ function useDeepLinkHandler(
     async (rawUrl: string) => {
       const link = parseNewSessionDeepLink(rawUrl);
       if (!link) {
+        const installLink = parsePluginInstallDeepLink(rawUrl);
+        if (installLink) {
+          requestPluginInstall(installLink);
+          return;
+        }
         const pluginLink = parsePluginDeepLink(rawUrl);
         if (pluginLink) {
           requestPluginDeepLink(pluginLink);

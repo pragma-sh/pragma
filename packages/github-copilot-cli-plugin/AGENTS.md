@@ -1,4 +1,4 @@
-# packages/github-copilot-cli-plugin - @pragma/github-copilot-cli-plugin
+# packages/github-copilot-cli-plugin - @pragma-sh/github-copilot-cli-plugin
 
 Self-contained GitHub Copilot CLI integration. Copilot CLI has no in-process lifecycle
 plugin API; its native plugin hooks invoke `hooks/report.sh`, while TypeScript defines
@@ -124,8 +124,8 @@ endorsement. Do not trace, recolor, or replace it with icon-aggregator artwork.
 ## Build, install, verify
 
 ```bash
-bun run --filter @pragma/github-copilot-cli-plugin build
-bun run --filter @pragma/github-copilot-cli-plugin install:local
+bun run --filter @pragma-sh/github-copilot-cli-plugin build
+bun run --filter @pragma-sh/github-copilot-cli-plugin install:local
 copilot plugin list
 ```
 
@@ -138,8 +138,8 @@ crashes on Windows when bundled workspace dependency paths contain backslashes; 
 resources only consume `dist/pragma-plugin.mjs` and do not need emitted declarations.
 
 ```bash
-bun run --filter @pragma/github-copilot-cli-plugin test
-bun run --filter @pragma/github-copilot-cli-plugin typecheck
+bun run --filter @pragma-sh/github-copilot-cli-plugin test
+bun run --filter @pragma-sh/github-copilot-cli-plugin typecheck
 pragma-cli agent verify --agent pragma.github-copilot --abort-input '\x1b' --include-slow
 ```
 

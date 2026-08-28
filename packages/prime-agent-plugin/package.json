@@ -1,12 +1,12 @@
 {
-  "name": "@pragma/prime-agent-plugin",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@pragma-sh/prime-agent-plugin",
+  "version": "0.1.0-alpha.0",
   "description": "Prime Agent extension and Pragma launcher built on the shared Pi integration.",
   "license": "AGPL-3.0-only",
   "files": [
     "assets",
     "dist",
+    "pragma-plugin.json",
     "src"
   ],
   "type": "module",
@@ -14,16 +14,18 @@
     ".": "./dist/index.mjs",
     "./pragma-plugin": "./dist/pragma-plugin.mjs"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build src/index.ts src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "prepack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
-  "dependencies": {
-    "@pragma/pi-plugin": "workspace:*"
-  },
   "devDependencies": {
+    "@pragma-sh/pi-plugin": "workspace:*",
     "@types/node": "^24.12.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

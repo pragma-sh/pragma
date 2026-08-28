@@ -1,4 +1,4 @@
-# @pragma/junie-plugin
+# @pragma-sh/junie-plugin
 
 Pragma integration for the **JetBrains Junie CLI** (`junie`). Two halves:
 
@@ -15,8 +15,8 @@ Verified against **Junie 26.8.3 (2548.5)** on macOS.
 ## Install
 
 ```bash
-bun run --filter @pragma/junie-plugin build         # dist/pragma-plugin.mjs
-bun run --filter @pragma/junie-plugin install:local # hooks -> ~/.junie/config.json
+bun run --filter @pragma-sh/junie-plugin build         # dist/pragma-plugin.mjs
+bun run --filter @pragma-sh/junie-plugin install:local # hooks -> ~/.junie/config.json
 ```
 
 Then register this package directory in `plugins[]` of a `.pragma/config.json` (global
@@ -222,7 +222,7 @@ raster data, and it reads on both light and dark backgrounds. Refresh it from th
 ## Tests
 
 ```bash
-bun run --filter @pragma/junie-plugin test
+bun run --filter @pragma-sh/junie-plugin test
 ```
 
 `test/report.test.ts` drives the real `hooks/report.sh` through `sh` with a fake

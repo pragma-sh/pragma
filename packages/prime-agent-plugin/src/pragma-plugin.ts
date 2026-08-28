@@ -1,4 +1,4 @@
-import { createPiPragmaPlugin } from "@pragma/pi-plugin/pragma-plugin-factory";
+import { createPiPragmaPlugin } from "@pragma-sh/pi-plugin/pragma-plugin-factory";
 
 /** Pragma launcher and interjection watcher for Prime Agent. */
 export const primeAgentPlugin = createPiPragmaPlugin({

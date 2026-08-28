@@ -10,6 +10,7 @@ export const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:300
 
 /** Base route the documentation is served from. */
 export const docsRoute = "/docs";
+export const pluginsRoute = "/plugins";
 
 /** Base route for generated per-page OG images. */
 export const docsImageRoute = "/og/docs";

@@ -1,0 +1,28 @@
+{
+  "name": "@pragma/plugin-registry",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "Official Pragma plugin list, locked manifests, and registry tooling.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./official.json": "./official.json",
+    "./official.lock.json": "./official.lock.json"
+  },
+  "scripts": {
+    "build": "bun run validate",
+    "lock": "bun scripts/lock.ts",
+    "lock:local": "bun scripts/lock.ts --local",
+    "validate": "bun scripts/validate.ts",
+    "pretypecheck": "bun run validate",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "@types/node": "^24.12.3",
+    "typescript": "^6.0.3"
+  }
+}

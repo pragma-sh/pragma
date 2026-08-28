@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { NewAgentSessionDialog } from "@/components/dialogs/NewAgentSessionDialog";
+import { PluginInstallDialog } from "@/components/dialogs/PluginInstallDialog";
 import {
+  consumePendingPluginInstall,
   consumePendingNewSession,
   NEW_SESSION_EVENT,
+  PLUGIN_INSTALL_EVENT,
+  type PluginInstallDeepLinkDetail,
   type NewSessionDeepLinkDetail,
 } from "@/lib/deep-link";
 
@@ -17,6 +21,8 @@ import {
 export function WorkspaceDialogs() {
   const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
   const [newSessionInitial, setNewSessionInitial] = useState<NewSessionDeepLinkDetail | null>(null);
+  const [pluginPackage, setPluginPackage] = useState<string | null>(null);
+  const [pluginInstallOpen, setPluginInstallOpen] = useState(false);
 
   // A `pragma://open` deep link (without auto-submit) opens the new-session
   // dialog prefilled with the link's values. The workspace owns deep-link
@@ -41,11 +47,33 @@ export function WorkspaceDialogs() {
     return () => window.removeEventListener(NEW_SESSION_EVENT, onEvent);
   }, []);
 
+  useEffect(() => {
+    function openInstall(detail: PluginInstallDeepLinkDetail) {
+      setPluginPackage(detail.package);
+      setPluginInstallOpen(true);
+    }
+    function onEvent(event: Event) {
+      consumePendingPluginInstall();
+      openInstall((event as CustomEvent<PluginInstallDeepLinkDetail>).detail);
+    }
+    const pending = consumePendingPluginInstall();
+    if (pending) openInstall(pending);
+    window.addEventListener(PLUGIN_INSTALL_EVENT, onEvent);
+    return () => window.removeEventListener(PLUGIN_INSTALL_EVENT, onEvent);
+  }, []);
+
   return (
-    <NewAgentSessionDialog
-      open={newSessionDialogOpen}
-      onOpenChange={setNewSessionDialogOpen}
-      initial={newSessionInitial}
-    />
+    <>
+      <NewAgentSessionDialog
+        open={newSessionDialogOpen}
+        onOpenChange={setNewSessionDialogOpen}
+        initial={newSessionInitial}
+      />
+      <PluginInstallDialog
+        open={pluginInstallOpen}
+        onOpenChange={setPluginInstallOpen}
+        packageName={pluginPackage}
+      />
+    </>
   );
 }

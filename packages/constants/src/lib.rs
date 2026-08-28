@@ -38,15 +38,16 @@ pub use generated::{
     GitHubAuthStatus, GitHubRepoRef, GitHubUser, KanbanCompletedAction, KanbanPromptCard,
     KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
     Keybindings, KeybindingsConfig, KeybindingsFiles, Links, NewWorktreeSpec, OpenPort,
-    PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind, PaletteSearchResponse, Platform,
-    PlatformChord, Project, ProjectIcon, ProjectScriptsConfig, Protocol, ProtocolErrorCode,
-    ProtocolEventKind, ProtocolRpcMethod, QuestionOption, RunScriptDefinition, RunScriptEntry,
-    RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit, RunScriptVerticalSplit,
-    ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptRunStatus, Scripts, SettingsScope,
-    ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab,
-    TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel, WindowDefaults,
-    WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit, WorktreeCommitList,
-    WorktreeStatus, Wsl, WslDistro, WslDistroList,
+    OtherSettings, PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind,
+    PaletteSearchResponse, Platform, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
+    Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
+    RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
+    RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptRunStatus,
+    Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf,
+    SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings, Tunnel,
+    UpdateApplyMode, UpdatePlatform, Updates, WindowDefaults, WorkspaceSnapshot, Worktree,
+    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro,
+    WslDistroList,
 };
 
 /// The parsed, shared constants.
@@ -90,5 +91,20 @@ mod tests {
         assert!(CONSTANTS.editor_launchers.options.iter().any(|editor| {
             editor.id.as_str() == CONSTANTS.editor_launchers.default_editor_id.as_str()
         }));
+    }
+
+    #[test]
+    fn protocol_version_is_a_semver_string() {
+        assert!(
+            CONSTANTS.daemon.protocol_version.contains('.'),
+            "protocolVersion must be a SemVer string mirrored from pragma-protocol"
+        );
+    }
+
+    #[test]
+    fn updates_defaults_are_present() {
+        assert!(!CONSTANTS.updates.check_url.is_empty());
+        assert!(!CONSTANTS.updates.dev_check_url.is_empty());
+        assert!(CONSTANTS.updates.poll_interval_ms >= 1000);
     }
 }

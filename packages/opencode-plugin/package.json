@@ -1,12 +1,13 @@
 {
-  "name": "@pragma/opencode-plugin",
-  "version": "0.0.0",
+  "name": "@pragma-sh/opencode-plugin",
+  "version": "0.1.0-alpha.0",
   "description": "opencode plugin that reports agent status to Pragma automatically.",
   "license": "AGPL-3.0-only",
   "files": [
     "assets",
     "dist",
-    "pragma"
+    "pragma-plugin.json",
+    "scripts"
   ],
   "type": "module",
   "main": "./dist/index.mjs",
@@ -19,19 +20,21 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build src/index.ts src/pragma-plugin.ts --outdir dist --format esm --target node --packages bundle && mv dist/index.js dist/index.mjs && mv dist/pragma-plugin.js dist/pragma-plugin.mjs",
+    "prepack": "bun run build",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "test": "bun --bun vitest run",
     "lint": "oxlint ."
   },
-  "dependencies": {
-    "@pragma/plugin": "workspace:*",
-    "@pragma/sdk": "workspace:*",
-    "@pragma/watcher-kit": "workspace:*"
-  },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.17.8",
+    "@pragma/plugin": "workspace:*",
+    "@pragma/sdk": "workspace:*",
+    "@pragma/watcher-kit": "workspace:*",
     "@types/node": "^24.12.3",
     "bunup": "^0.16.32",
     "typescript": "^6.0.3",

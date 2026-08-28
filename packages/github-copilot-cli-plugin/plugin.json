@@ -1,7 +1,7 @@
 {
   "name": "pragma-github-copilot",
   "description": "Reports GitHub Copilot CLI lifecycle and attention state to Pragma.",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "author": {
     "name": "Pragma"
   },

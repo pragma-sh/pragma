@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { constants } from "@pragma/constants";
 
 import type { AgentConfig } from "@/lib/tauri";
+import { AGENT_COMMAND_SUBMITTED_EVENT } from "./agent-plugin-prompt";
 
 const ptyWriteMock = vi.fn();
 const ptySpawnMock = vi.fn();
@@ -64,12 +65,16 @@ describe("startAgentInTab", () => {
   });
 
   it("sends the start command after the launch delay", () => {
+    const listener = vi.fn();
+    window.addEventListener(AGENT_COMMAND_SUBMITTED_EVENT, listener);
     startAgentInTab("tab-1", agent(["opencode"]));
     expect(ptyWriteMock).not.toHaveBeenCalled();
     expect(writeWhenReadyMock).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
     expect(writeWhenReadyMock).toHaveBeenCalledWith("tab-1", "opencode\r");
     expect(ptyWriteMock).not.toHaveBeenCalled();
+    expect((listener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ command: "opencode" });
+    window.removeEventListener(AGENT_COMMAND_SUBMITTED_EVENT, listener);
   });
 
   it("does not prefill when no message is given", () => {

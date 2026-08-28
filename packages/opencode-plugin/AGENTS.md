@@ -1,4 +1,4 @@
-# packages/opencode-plugin — @pragma/opencode-plugin
+# packages/opencode-plugin — @pragma-sh/opencode-plugin
 
 ESM opencode plugin that reports agent status into Pragma. Built with Bunup
 (ESM-only). Imports opencode plugin types from `@opencode-ai/plugin`, reacts to
@@ -30,15 +30,14 @@ catalog and live watcher behavior.
 ## Installation
 
 **Pragma no longer auto-installs the opencode plugin** — the old
-`src-tauri/src/opencode_plugin.rs` installer was removed. To use it, register the built
-`packages/opencode-plugin/dist/index.mjs` absolute path in the `plugin` array of
-`~/.config/opencode/opencode.json` yourself.
+`src-tauri/src/opencode_plugin.rs` installer was removed. Local development registers built
+`packages/opencode-plugin/dist/index.mjs` absolute path in `plugin` array of
+`~/.config/opencode/opencode.json`; official npm install registers package name.
 
 **opencode does NOT auto-load plugins from any directory** (verified against opencode
 1.17.8). Only a `plugin`-array entry loads a plugin. A **file path / `file://` URL**
-entry loads fine and is **not** npm-resolved; only a **bare package name**
-`@pragma/opencode-plugin` is treated as an npm dependency (opencode tries to fetch it
-from the registry, where it does not exist) — never register it by name.
+entry loads fine and is **not** npm-resolved. Bare `@pragma-sh/opencode-plugin` is npm-resolved
+and is what official installer registers.
 
 ## State machine (hooks.ts)
 
