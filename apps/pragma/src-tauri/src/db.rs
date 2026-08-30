@@ -456,6 +456,22 @@ impl Db {
         self.worktree(id)
     }
 
+    /// Repairs a host-created worktree's parent during workspace adoption.
+    ///
+    /// Git worktree metadata carries no hierarchy, so fanout parentage comes
+    /// from the host's durable record and may correct an older fallback row.
+    pub(crate) fn set_worktree_parent(
+        &self,
+        worktree_id: &str,
+        parent_id: &str,
+    ) -> AppResult<Worktree> {
+        self.0.lock()?.execute(
+            "UPDATE worktrees SET parent_id = ?1 WHERE id = ?2",
+            params![parent_id, worktree_id],
+        )?;
+        self.worktree(worktree_id)
+    }
+
     /// Updates the optional display title. An empty/whitespace string clears it.
     pub fn rename_worktree(&self, worktree_id: &str, title: Option<&str>) -> AppResult<Worktree> {
         let normalized = title.map(str::trim).filter(|value| !value.is_empty());
@@ -724,7 +740,26 @@ impl Db {
         title: Option<String>,
         agent_id: &str,
     ) -> AppResult<Tab> {
+        let worktree = self.worktree(worktree_id)?;
+        if worktree.project_id != project_id {
+            return Err(AppError::InvalidInput(format!(
+                "worktree `{worktree_id}` does not belong to project `{project_id}`"
+            )));
+        }
         if let Ok(existing) = self.tab(id) {
+            if existing.worktree_id != worktree_id {
+                return Err(AppError::InvalidInput(format!(
+                    "host agent tab `{id}` already belongs to worktree `{}`",
+                    existing.worktree_id
+                )));
+            }
+            if existing.project_id != project_id {
+                self.0.lock()?.execute(
+                    "UPDATE tabs SET project_id = ?1 WHERE id = ?2",
+                    params![project_id, id],
+                )?;
+                return self.tab(id);
+            }
             return Ok(existing);
         }
         {
@@ -1217,6 +1252,128 @@ mod tests {
             .list_tabs(&project.id)
             .expect("tabs should list")
             .is_empty());
+    }
+
+    #[test]
+    fn adopts_host_agent_tab_under_its_existing_session_id() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktree = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+
+        let tab = db
+            .adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                Some("Fanout attempt".to_string()),
+                "pragma.opencode",
+            )
+            .expect("host tab should be adopted");
+
+        assert_eq!(tab.id, "host-session-1");
+        assert_eq!(tab.worktree_id, worktree.id);
+        assert_eq!(tab.agent_id.as_deref(), Some("pragma.opencode"));
+        assert_eq!(
+            db.adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                None,
+                "other-agent",
+            )
+            .expect("adoption should be idempotent"),
+            tab
+        );
+
+        let other_project = db
+            .insert_project_with_main_worktree(
+                "other".to_string(),
+                "/tmp/other".to_string(),
+                "main".to_string(),
+            )
+            .expect("other project should insert");
+        assert!(
+            db.adopt_agent_tab(
+                "cross-project-session",
+                &other_project.id,
+                &worktree.id,
+                None,
+                "pragma.opencode",
+            )
+            .is_err(),
+            "adoption must reject a project that does not own the worktree"
+        );
+        db.0.lock()
+            .expect("database should lock")
+            .execute(
+                "UPDATE tabs SET project_id = ?1 WHERE id = ?2",
+                rusqlite::params![other_project.id, tab.id],
+            )
+            .expect("legacy cross-project tab should be simulated");
+
+        let repaired = db
+            .adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                None,
+                "pragma.opencode",
+            )
+            .expect("legacy project ownership should repair");
+        assert_eq!(repaired.project_id, project.id);
+    }
+
+    #[test]
+    fn repairs_adopted_fanout_worktree_parent() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+        db.insert_worktree(
+            "fanout-parent",
+            &project.id,
+            &main.id,
+            "fanout-parent",
+            None,
+            "/tmp/repo/.pragma/worktrees/fanout-parent",
+        )
+        .expect("coordination parent should insert");
+        db.insert_worktree(
+            "attempt-a",
+            &project.id,
+            &main.id,
+            "fanout/a",
+            None,
+            "/tmp/repo/.pragma/worktrees/attempt-a",
+        )
+        .expect("attempt should insert with legacy fallback parent");
+
+        let repaired = db
+            .set_worktree_parent("attempt-a", "fanout-parent")
+            .expect("attempt parent should repair");
+
+        assert_eq!(repaired.parent_id.as_deref(), Some("fanout-parent"));
     }
 
     /// A project added before canonicalization moved to

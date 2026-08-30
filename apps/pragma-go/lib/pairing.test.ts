@@ -30,7 +30,11 @@ describe("parsePairingPayload", () => {
 
   it("returns null when a field is missing or mistyped", () => {
     expect(parsePairingPayload(JSON.stringify({ url: "https://x", token: "t" }))).toBeNull();
-    expect(parsePairingPayload(JSON.stringify({ ...payload(), protocolVersion: 15 }))).toBeNull();
+    expect(parsePairingPayload(JSON.stringify({ ...payload(), protocolVersion: true }))).toBeNull();
+  });
+
+  it("rejects legacy numeric protocol versions", () => {
+    expect(parsePairingPayload(JSON.stringify({ ...payload(), protocolVersion: 24 }))).toBeNull();
   });
 });
 

@@ -417,6 +417,11 @@ friends.
 Local Expo config plugins live in `plugins/` and are registered by path in
 `app.json`'s `plugins` array.
 
+- **Include the `.ts` suffix in local plugin paths.** Expo CLI can resolve an
+  extensionless TypeScript plugin during local config inspection, but EAS Update's
+  resolver cannot; both local `eas update` and remote update workflows fail before
+  bundling with `Failed to resolve plugin`.
+
 - **`with-android-splash-logo`** strips the dangling
   `windowSplashScreenAnimatedIcon` -> `@drawable/splashscreen_logo` item that
   `expo-splash-screen` writes into `res/values/styles.xml`. That plugin writes

@@ -1314,6 +1314,7 @@ pub fn run() {
             scratchpads::list_scratchpad_files,
             fanouts::fanout_rpc,
             fanouts::list_fanouts,
+            fanouts::restore_fanout_tab,
             fanouts::pick_fanout_member,
             ai::ai_generate_pull_request_draft,
             ai::ai_commit_all_and_generate_pull_request_draft,

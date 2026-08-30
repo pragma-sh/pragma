@@ -2,12 +2,19 @@ import type { Worktree } from "@pragma/constants";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  applyAgentReport,
+  clearAllAgentStatuses,
+  clearDoneStatusForTab,
+} from "@/state/agent-status-store";
+
 const fanoutsMock = vi.fn(() => [] as unknown[]);
 const openComparisonMock = vi.fn();
 const worktreesMergedStatusMock = vi.fn();
 const hideWorktreeMock = vi.fn();
 const selectWorktreeMock = vi.fn();
 const activateTabLocationMock = vi.fn();
+const restoreFanoutTabMock = vi.fn();
 const renameWorktreeMock = vi.fn();
 const openWorktreeInEditorMock = vi.fn();
 const worktreeFileListeners = new Map<string, (change: { path: string }) => void>();
@@ -52,6 +59,7 @@ let workspaceMock = {
   selectedProjectId: "p",
   selectedWorktreeId: "main",
   worktrees: { p: [mainWorktree, childWorktree] },
+  projectTabs: [],
   remoteWorktrees: {},
   hideWorktree: hideWorktreeMock,
   openWorktreeInEditor: openWorktreeInEditorMock,
@@ -62,6 +70,7 @@ let workspaceMock = {
 
 vi.mock("@/lib/tauri", () => ({
   worktreesMergedStatus: (...args: unknown[]) => worktreesMergedStatusMock(...args),
+  restoreFanoutTab: (...args: unknown[]) => restoreFanoutTabMock(...args),
   githubRepoRef: vi.fn().mockResolvedValue(null),
 }));
 
@@ -106,18 +115,23 @@ import { useWorktreeShortcutOrder } from "@/lib/shortcut-hints";
 
 afterEach(() => {
   cleanup();
+  clearAllAgentStatuses();
   vi.useRealTimers();
   worktreesMergedStatusMock.mockReset();
   hideWorktreeMock.mockReset();
   openWorktreeInEditorMock.mockReset();
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
+  activateTabLocationMock.mockReset();
+  restoreFanoutTabMock.mockReset();
+  restoreFanoutTabMock.mockResolvedValue(undefined);
   subscribeToWorktreeFilesMock.mockClear();
   worktreeFileListeners.clear();
   workspaceMock = {
     selectedProjectId: "p",
     selectedWorktreeId: "main",
     worktrees: { p: [mainWorktree, childWorktree] },
+    projectTabs: [],
     remoteWorktrees: {},
     hideWorktree: hideWorktreeMock,
     openWorktreeInEditor: openWorktreeInEditorMock,
@@ -417,7 +431,13 @@ describe("WorktreeTree fanout", () => {
     expect(openComparisonMock).toHaveBeenCalledWith("f1");
   });
 
-  it("opens an attempt's worktree and agent tab", async () => {
+  it("restores and opens an attempt's missing agent tab", async () => {
+    let finishRestore: (() => void) | undefined;
+    restoreFanoutTabMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishRestore = resolve;
+      }),
+    );
     workspaceMock = { ...workspaceMock, worktrees: { p: [mainWorktree, childWorktree, attempt] } };
     fanoutsMock.mockReturnValue([fanout]);
     worktreesMergedStatusMock.mockResolvedValue({});
@@ -425,7 +445,33 @@ describe("WorktreeTree fanout", () => {
     render(<WorktreeTree onCreateChild={vi.fn()} />);
     fireEvent.click(await screen.findByText("opencode · gpt-5.6"));
 
+    expect(selectWorktreeMock).not.toHaveBeenCalled();
+    expect(restoreFanoutTabMock).toHaveBeenCalledWith("p", "wt-attempt", "tab-1");
+    expect(activateTabLocationMock).not.toHaveBeenCalled();
+
+    await act(async () => finishRestore?.());
     expect(activateTabLocationMock).toHaveBeenCalledWith("p", "wt-attempt", "tab-1");
+  });
+
+  it("clears a finished attempt's status dot once its tab is viewed", async () => {
+    workspaceMock = { ...workspaceMock, worktrees: { p: [mainWorktree, childWorktree, attempt] } };
+    fanoutsMock.mockReturnValue([
+      { ...fanout, members: [{ ...fanout.members[0], status: "done" }] },
+    ]);
+    worktreesMergedStatusMock.mockResolvedValue({});
+    applyAgentReport({
+      worktreeId: "wt-attempt",
+      tabId: "tab-1",
+      agent: "opencode",
+      status: "done",
+    });
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+    expect(await screen.findByTitle("Agent done")).toBeInTheDocument();
+
+    act(() => clearDoneStatusForTab("tab-1"));
+
+    expect(screen.queryByTitle("Agent done")).not.toBeInTheDocument();
   });
 
   it("shows no fanout icon for a parent without a fanout", async () => {

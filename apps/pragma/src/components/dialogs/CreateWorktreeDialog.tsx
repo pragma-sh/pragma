@@ -134,9 +134,11 @@ function useFanoutSubmit(): (input: {
         reasoningId: row.selection.reasoningId,
       })),
     });
-    // Creation does not select each attempt as it appears, and it does not open
-    // the comparison: nothing has run yet, so comparing would only show an
-    // empty state. The user opens it from the fanout group when ready.
+    // The host creates fanout worktrees and tabs. Refresh after the native RPC
+    // synchronously adopts them so sidebar rows can open their live sessions.
+    await workspace.refreshProject(projectId);
+    // Creation does not select each attempt as it appears or open comparison.
+    // The user chooses an attempt or comparison from the fanout group.
     void workspace.selectWorktree(result.fanout.parentWorktreeId);
   };
 }
@@ -173,7 +175,7 @@ export function CreateWorktreeDialog({
   const submitFanout = useFanoutSubmit();
   const { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId } =
     useWorktreeSubmission();
-  useEscapeToClose(isOpen, () => onOpenChange(false));
+  useEscapeToClose(isOpen && !busy, () => onOpenChange(false));
 
   const isFanout = fanoutMode.isFanout;
   const canSubmit = isFanout ? fanoutMode.ready(message, branch) : branch.trim().length > 0;
@@ -375,9 +377,9 @@ interface SubmissionInput {
  * The dialog's submission flow, kept out of the component so the component
  * stays layout plus wiring.
  *
- * Both paths end the same way — the modal closes immediately and progress is
- * reported elsewhere (the full-frame creation screen for a single worktree, the
- * host's fanout record for a fanout) — so neither ever blocks the app.
+ * Single-worktree creation hands off to the full-frame progress screen. Fanout
+ * creation stays here until the host has provisioned and the desktop has loaded
+ * every created worktree and agent tab.
  */
 function useSubmission(input: SubmissionInput): {
   submit: () => Promise<void>;

@@ -20,12 +20,12 @@ import base from "./app.json";
  * Keeping both env-gated means `expo run:ios` and
  * `expo export --platform web` share one config.
  *
- * The cleanup plugin is registered **by path**, never imported: Expo transpiles
- * this file on its own, so a relative TypeScript import is unresolvable at
- * runtime (`Cannot find module './plugins/with-store-ios-cleanup'`). A path
- * string goes through Expo's own TS-aware plugin resolver. It is unshifted to
- * the **front** of the array because mods run last-registered-first, so the
- * first entry has the final say over the plist.
+ * The cleanup plugin is registered **by explicit TypeScript path**, never
+ * imported: Expo transpiles this file on its own, so a relative TypeScript
+ * import is unresolvable at runtime. EAS Update's plugin resolver does not append
+ * `.ts`, so the extension is required. It is unshifted to the **front** of the
+ * array because mods run last-registered-first, so the first entry has the final
+ * say over the plist.
  */
 export default (): ExpoConfig => {
   const config = base.expo as unknown as ExpoConfig;
@@ -36,6 +36,6 @@ export default (): ExpoConfig => {
   if (!process.env.PRAGMA_STORE_BUILD) return withBaseUrl;
   return {
     ...withBaseUrl,
-    plugins: ["./plugins/with-store-ios-cleanup", ...(withBaseUrl.plugins ?? [])],
+    plugins: ["./plugins/with-store-ios-cleanup.ts", ...(withBaseUrl.plugins ?? [])],
   };
 };

@@ -18,6 +18,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
+use pragma_constants::Worktree;
 use pragma_core::git::{GitRequest, HeadlessWorktree};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
@@ -78,7 +79,7 @@ fn worker(rx: Receiver<()>, app: AppHandle) {
             // Keep draining: another mutation landed; reset the idle window.
         }
         for attempt in 0..=PUBLISH_RETRIES {
-            match publish_once(&app) {
+            match publish_now(&app) {
                 Ok(()) => break,
                 Err(error) if attempt < PUBLISH_RETRIES => {
                     eprintln!("workspace publish failed (attempt {attempt}): {error}");
@@ -92,14 +93,13 @@ fn worker(rx: Receiver<()>, app: AppHandle) {
     }
 }
 
-/// Reads all projects/worktrees/tabs from `Db` and publishes one snapshot to
-/// every owning host. Remote hosts need their own snapshot: daemon-owned tab
-/// metadata must stay with the PTY host rather than the desktop shell.
-fn publish_once(app: &AppHandle) -> AppResult<()> {
+/// Reconciles host-created fanout rows and immediately publishes the current
+/// workspace. Destructive fanout finalization uses this to avoid validating
+/// against a hierarchy still waiting in the debounce queue.
+pub(crate) fn publish_now(app: &AppHandle) -> AppResult<()> {
     let db = app.state::<Db>();
     let hosts = app.state::<Hosts>();
-    adopt_headless_worktrees(&db, &hosts);
-    adopt_fanout_tabs(&db, &hosts);
+    adopt_fanout_workspace(&db, &hosts);
     let projects = db.list_projects()?;
     let worktrees = db.list_all_worktrees()?;
     let tabs = db.list_all_tabs()?;
@@ -143,6 +143,14 @@ fn publish_once(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+/// Adopts host-created fanout worktrees and their live agent tabs into the
+/// desktop database. Called both by the debounced publisher and synchronously
+/// after a desktop fanout create/retry so the RPC cannot return stale UI state.
+pub(crate) fn adopt_fanout_workspace(db: &Db, hosts: &Hosts) {
+    adopt_headless_worktrees(db, hosts);
+    adopt_fanout_tabs(db, hosts);
+}
+
 fn empty_snapshot() -> pragma_protocol::WorkspaceSnapshot {
     pragma_protocol::WorkspaceSnapshot {
         projects: Vec::new(),
@@ -165,9 +173,9 @@ fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
     let (Ok(projects), Ok(worktrees)) = (db.list_projects(), db.list_all_worktrees()) else {
         return;
     };
-    let known_paths: HashSet<&str> = worktrees
+    let known_by_path: HashMap<&str, &Worktree> = worktrees
         .iter()
-        .map(|worktree| worktree.path.as_str())
+        .map(|worktree| (worktree.path.as_str(), worktree))
         .collect();
     for project in &projects {
         let Some(main_id) = worktrees
@@ -193,11 +201,16 @@ fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
             project_root: project.path.clone(),
         };
         // An unreachable host skips the project until the next publish.
-        let Ok(candidates) = host_rpc::<Vec<HeadlessWorktree>>(&client, &request) else {
+        let Ok(mut candidates) = host_rpc::<Vec<HeadlessWorktree>>(&client, &request) else {
             continue;
         };
+        order_fanout_worktrees(&mut candidates, &parentage);
         for HeadlessWorktree { id, path, branch } in candidates {
-            if known_paths.contains(path.as_str()) {
+            let expected_parent = parentage.get(&id);
+            if let Some(existing) = known_by_path.get(path.as_str()) {
+                if let (true, Some(expected_parent)) = (existing.id == id, expected_parent) {
+                    repair_fanout_parent(db, existing, expected_parent);
+                }
                 continue;
             }
             if db.worktree(&id).is_ok() {
@@ -205,12 +218,54 @@ fn adopt_headless_worktrees(db: &Db, hosts: &Hosts) {
                 // recreated checkout) — leave it for the user to resolve.
                 continue;
             }
-            let parent_id = parentage.get(&id).map_or(main_id.as_str(), String::as_str);
+            let parent_id = expected_parent.map_or(main_id.as_str(), String::as_str);
             match db.insert_worktree(&id, &project.id, parent_id, &branch, None, &path) {
                 Ok(_) => log::info!("adopted headless worktree {id} ({branch}) at {path}"),
                 Err(error) => log::warn!("failed to adopt headless worktree {id}: {error}"),
             }
         }
+    }
+}
+
+/// Inserts every candidate after any candidate it names as its parent.
+fn order_fanout_worktrees(
+    candidates: &mut [HeadlessWorktree],
+    parentage: &HashMap<String, String>,
+) {
+    let candidate_ids: HashSet<String> = candidates
+        .iter()
+        .map(|candidate| candidate.id.clone())
+        .collect();
+    candidates.sort_by_key(|candidate| {
+        let mut current = &candidate.id;
+        let mut depth = 0;
+        while let Some(parent) = parentage.get(current) {
+            if !candidate_ids.contains(parent) || depth == candidate_ids.len() {
+                break;
+            }
+            depth += 1;
+            current = parent;
+        }
+        depth
+    });
+}
+
+/// Corrects a row previously adopted under the main worktree fallback.
+fn repair_fanout_parent(db: &Db, worktree: &Worktree, expected_parent: &str) {
+    if worktree.parent_id.as_deref() == Some(expected_parent) {
+        return;
+    }
+    match db.set_worktree_parent(&worktree.id, expected_parent) {
+        Ok(_) => log::info!(
+            "reparented fanout worktree {} under {}",
+            worktree.id,
+            expected_parent
+        ),
+        Err(error) => log::warn!(
+            "failed to reparent fanout worktree {} under {}: {error}",
+            worktree.id,
+            expected_parent
+        ),
     }
 }
 
@@ -259,6 +314,9 @@ fn adopt_fanout_tabs(db: &Db, hosts: &Hosts) {
             continue;
         };
         for fanout in snapshot["fanouts"].as_array().into_iter().flatten() {
+            if fanout["projectId"].as_str() != Some(project.id.as_str()) {
+                continue;
+            }
             for member in fanout["members"].as_array().into_iter().flatten() {
                 let (Some(tab_id), Some(worktree_id)) =
                     (member["tabId"].as_str(), member["worktreeId"].as_str())
@@ -292,7 +350,8 @@ fn adopt_fanout_tabs(db: &Db, hosts: &Hosts) {
 
 #[cfg(test)]
 mod tests {
-    use super::fanout_parentage;
+    use super::{fanout_parentage, order_fanout_worktrees};
+    use pragma_core::git::HeadlessWorktree;
     use serde_json::json;
 
     #[test]
@@ -356,5 +415,36 @@ mod tests {
             parents.get("attempt-a").map(String::as_str),
             Some("parent-1")
         );
+    }
+
+    #[test]
+    fn fanout_coordination_parent_is_adopted_before_its_attempts() {
+        let mut candidates = vec![
+            HeadlessWorktree {
+                id: "attempt-a".to_string(),
+                path: "/repo/.pragma/worktrees/attempt-a".to_string(),
+                branch: "fanout/a".to_string(),
+            },
+            HeadlessWorktree {
+                id: "parent-1".to_string(),
+                path: "/repo/.pragma/worktrees/parent-1".to_string(),
+                branch: "fanout-parent".to_string(),
+            },
+            HeadlessWorktree {
+                id: "source-1".to_string(),
+                path: "/repo/.pragma/worktrees/source-1".to_string(),
+                branch: "source".to_string(),
+            },
+        ];
+        let parentage = std::collections::HashMap::from([
+            ("parent-1".to_string(), "source-1".to_string()),
+            ("attempt-a".to_string(), "parent-1".to_string()),
+        ]);
+
+        order_fanout_worktrees(&mut candidates, &parentage);
+
+        assert_eq!(candidates[0].id, "source-1");
+        assert_eq!(candidates[1].id, "parent-1");
+        assert_eq!(candidates[2].id, "attempt-a");
     }
 }

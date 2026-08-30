@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use pragma_client::request_subscribe;
-use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod};
+use pragma_constants::{ProtocolEventKind, ProtocolRpcMethod, Tab};
 use pragma_protocol::{read_frame, write_json_frame, EventFrame, Frame, ServerFrame};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -31,11 +31,21 @@ const FANOUTS_EVENT: &str = "pragma:fanouts";
 pub fn fanout_rpc(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
     project_id: String,
     payload: Value,
 ) -> AppResult<Value> {
+    let adopts_workspace = matches!(
+        payload.get("action").and_then(Value::as_str),
+        Some("create" | "retry")
+    );
     let client = hosts.for_project(&db, &project_id)?;
-    client.rpc(ProtocolRpcMethod::Fanouts, payload)
+    let result = client.rpc(ProtocolRpcMethod::Fanouts, payload)?;
+    if adopts_workspace {
+        crate::workspace_mirror::adopt_fanout_workspace(&db, &hosts);
+        publisher.trigger();
+    }
+    Ok(result)
 }
 
 /// Reads a project's current fanouts once, for a window that just opened.
@@ -49,16 +59,45 @@ pub fn list_fanouts(
     first_snapshot(&client).map_err(AppError::Daemon)
 }
 
+/// Restores one host-owned fanout agent tab to the desktop database.
+///
+/// Fanout rows can arrive through the host event stream before the desktop has
+/// projected their worktrees and tabs. The caller already has the durable tab
+/// id, so preserve it rather than minting a second terminal session.
+#[tauri::command(async)]
+pub fn restore_fanout_tab(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
+    project_id: String,
+    worktree_id: String,
+    tab_id: String,
+) -> AppResult<Tab> {
+    crate::workspace_mirror::adopt_fanout_workspace(&db, &hosts);
+    publisher.trigger();
+    let tab = db.tab(&tab_id).map_err(|_| {
+        AppError::InvalidInput(format!("fanout agent tab `{tab_id}` is unavailable"))
+    })?;
+    if tab.project_id != project_id || tab.worktree_id != worktree_id {
+        return Err(AppError::InvalidInput(format!(
+            "fanout agent tab `{tab_id}` does not belong to worktree `{worktree_id}`"
+        )));
+    }
+    Ok(tab)
+}
+
 /// The destructive finalize, named explicitly so a caller cannot reach it by
 /// assembling a generic payload.
 #[tauri::command(async)]
 pub fn pick_fanout_member(
+    app: AppHandle,
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
     project_id: String,
     fanout_id: String,
     member_id: String,
 ) -> AppResult<Value> {
+    crate::workspace_mirror::publish_now(&app)?;
     let client = hosts.for_project(&db, &project_id)?;
     client.rpc(
         ProtocolRpcMethod::Fanouts,

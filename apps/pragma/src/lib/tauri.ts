@@ -1951,6 +1951,15 @@ export async function listFanouts(projectId: string): Promise<Fanout[]> {
   return payload?.fanouts ?? [];
 }
 
+/** Restores a host-owned fanout agent tab under its existing session id. */
+export function restoreFanoutTab(
+  projectId: string,
+  worktreeId: string,
+  tabId: string,
+): Promise<Tab> {
+  return invoke<Tab>("restore_fanout_tab", { projectId, worktreeId, tabId });
+}
+
 /**
  * Runs the destructive finalize: commit the winner, merge it into the parent,
  * promote its scratchpads, then delete every attempt.

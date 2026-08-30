@@ -597,8 +597,13 @@ clients' ids stay stable. The one exception is fanout worktrees: their hierarchy
 host-owned and git carries no parentage, so adoption reads the durable fanout snapshot
 (`fanout_parentage`) and parents the coordination parent under its source and each
 attempt under that parent — otherwise the host's pick-time `validate_finalize` rejects
-the merge because an attempt is no longer a direct child of its fanout parent. Adoption
-is local-only (remote SSH project paths are skipped) and best-effort.
+the merge because an attempt is no longer a direct child of its fanout parent. Coordination
+parents are inserted before their attempts, and adoption repairs existing fallback-parented
+rows rather than skipping them. Pick forces this reconciliation and publishes the repaired
+snapshot before host validation, rather than racing the publisher's debounce. Adoption is
+best-effort. Fanout snapshots are host-wide, so tab adoption filters each fanout by
+`projectId`; it also enforces that a tab's project matches its worktree and repairs legacy
+cross-project rows from older builds.
 
 ## Remote agent session launch
 
@@ -1263,7 +1268,13 @@ Fanout state itself is host-owned: `state/fanouts-context.tsx` reads
 `list_fanouts` once and then follows the `pragma:fanouts` bridge. The sidebar
 renders an explicit group row per fanout (`components/sidebar/FanoutGroup.tsx`)
 and hides its attempts from the ordinary tree — `parentId` alone cannot tell an
-attempt from a hand-made nested worktree.
+attempt from a hand-made nested worktree. Clicking an attempt restores its
+host-owned agent tab into the desktop database under the original session id
+when that projection is missing, then activates it; creating a replacement tab
+would open an empty shell beside the running agent. Child status dots use the
+tab's runtime status, with durable fanout state only seeding active
+`running`/`attention`; otherwise a viewed `done` dot could never clear because
+the fanout member remains completed.
 
 ## Toasts
 
@@ -1274,10 +1285,12 @@ errors via `toast.error(…)`.
 
 ## Worktree lifecycle
 
-`CreateWorktreeDialog` only _collects input_. It fetches the project main worktree's
-remote status before creation; when main is behind it offers cancel, create without
-pulling, or pull then create. As soon as the last question is answered it hands the run
-to `worktree-creation-context` and closes — creation never blocks the app behind a modal.
+`CreateWorktreeDialog` collects input and fetches the project main worktree's remote
+status before single-worktree creation; when main is behind it offers cancel, create
+without pulling, or pull then create. A single-worktree run hands off to
+`worktree-creation-context` and closes. A fanout stays open and busy until the host has
+provisioned its worktrees/tabs and the desktop has adopted and refreshed them, so every
+attempt row can immediately attach to its live agent session.
 
 Its **Fan out** mode is the same form with the single agent picker swapped for the
 repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display
