@@ -6,16 +6,55 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Brand constants from `DESIGN.md`. These are absolute values, not theme
+ * variants — the artboard palette is dark-only, so there is no light twin to
+ * mix toward. Nothing outside the `.artboard` block below reads them, and
+ * nothing anywhere restates one as a literal.
+ */
+:root {
+  --ds-canvas: #090909;
+  --ds-surface-1: #141414;
+  --ds-surface-2: #1c1c1c;
+  --ds-hairline: #262626;
+  --ds-hairline-soft: #1a1a1a;
+  --ds-ink: #ffffff;
+  --ds-ink-muted: #999999;
+  --ds-on-primary: #000000;
+  --ds-accent-blue: #0099ff;
+  --ds-success: #22c55e;
+  --ds-gradient-magenta: #d44df0;
+  --ds-gradient-violet: #6a4cf5;
+  --ds-gradient-blue: #2f6bff;
+  --ds-gradient-orange: #ff7a3d;
+  --ds-gradient-coral: #ff5577;
+}
+
+/*
+ * Docs palette: the stock shadcn/ui `neutral` ramp — pure greys, zero chroma.
+ * `/docs` is a reading surface and keeps its light/dark toggle; the marketing
+ * route group overrides all of this with `.artboard` and never falls back to
+ * it. `--primary` is ink, not a hue: buttons, badges, links, and focus rings
+ * are all monochrome.
+ *
+ * `--brand` is the one chromatic token and it is an *accent only* — a shell
+ * prompt, a highlighted column, the fanout illustration. Never a button, a
+ * badge, a card fill, or a border. If a second element on a screen wants it,
+ * that is the signal it is being overused.
+ */
 :root {
   --radius: 0.625rem;
+  --canvas: oklch(0.985 0 0);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+  --elevated: oklch(1 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
+  --primary-hover: oklch(0.145 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -23,11 +62,17 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --success: oklch(0.6 0.13 152);
+  --warning: oklch(0.7 0.13 78);
+  --skill: oklch(0.6 0.1 330);
+  --brand: oklch(0.55 0.2 256);
+  --shadow-raised-value: 0 1px 2px oklch(0 0 0 / 0.06);
+  --shadow-floating-value: 0 24px 60px -12px oklch(0 0 0 / 0.18);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-foreground: oklch(0.556 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
@@ -37,32 +82,87 @@
 }
 
 .dark {
+  --canvas: oklch(0.125 0 0);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
+  --elevated: oklch(0.269 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.269 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
+  --primary-hover: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --accent: oklch(0.371 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.74 0.15 152);
+  --warning: oklch(0.8 0.12 78);
+  --skill: oklch(0.74 0.08 330);
+  --brand: oklch(0.68 0.16 256);
+  --shadow-raised-value: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-floating-value: 0 24px 60px -12px oklch(0 0 0 / 0.7);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
   --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.708 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+ * The artboard: the marketing palette from `DESIGN.md`, mapped onto the same
+ * shadcn variables every primitive already reads, so a `Button`, a `Card`, or a
+ * `Table` follows the brand without a single component restating a colour.
+ *
+ * It is applied together with `dark` on the `(home)` route group — `dark` so the
+ * `dark:` variants baked into the shadcn primitives resolve on the right side,
+ * `.artboard` for the values themselves. The landing page has no light mode by
+ * design; `/docs` sits outside this wrapper and keeps the ramp above.
+ */
+.artboard {
+  /* 15px — `{rounded.lg}`; `rounded-xl` lands on 19px for `{rounded.xl}` cards. */
+  --radius: 0.9375rem;
+  --canvas: var(--ds-canvas);
+  --background: var(--ds-canvas);
+  --foreground: var(--ds-ink);
+  --elevated: var(--ds-surface-2);
+  --card: var(--ds-surface-1);
+  --card-foreground: var(--ds-ink);
+  --popover: var(--ds-surface-2);
+  --popover-foreground: var(--ds-ink);
+  /* Ink, not a hue: the primary CTA is a white pill on black. */
+  --primary: var(--ds-ink);
+  --primary-foreground: var(--ds-on-primary);
+  --primary-hover: var(--ds-ink);
+  --secondary: var(--ds-surface-1);
+  --secondary-foreground: var(--ds-ink);
+  --muted: var(--ds-surface-1);
+  --muted-foreground: var(--ds-ink-muted);
+  --accent: var(--ds-surface-2);
+  --accent-foreground: var(--ds-ink);
+  --success: var(--ds-success);
+  --brand: var(--ds-accent-blue);
+  --border: var(--ds-hairline);
+  --input: var(--ds-hairline);
+  /* The only chromatic depth signal in the system — focus and selection. */
+  --ring: var(--ds-accent-blue);
+  --shadow-raised-value: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-floating-value:
+    inset 0 1px 0 rgb(255 255 255 / 0.1), 0 10px 30px rgb(0 0 0 / 0.25),
+    0 40px 80px -20px rgb(0 0 0 / 0.75);
+  /* Body runs at about -1% tracking; the display tiers pull far harder. */
+  letter-spacing: -0.01em;
+  font-feature-settings: "cv01", "cv05", "cv09", "cv11", "ss03", "ss07", "dlig";
 }
 
 @theme inline {
@@ -70,6 +170,24 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* `{rounded.xxl}` — gradient spotlight cards and oversized panels only. */
+  --radius-panel: 30px;
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  /* Inter Variable, the artboard body voice. `/docs` stays on `--font-sans`. */
+  --font-body: var(--font-inter), var(--font-geist-sans), system-ui, sans-serif;
+  --color-canvas: var(--canvas);
+  --color-elevated: var(--elevated);
+  --color-primary-hover: var(--primary-hover);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-skill: var(--skill);
+  --color-brand: var(--brand);
+  /* Shadow strength is theme-dependent: a dark surface needs a much heavier
+     drop than a white one to read at all. */
+  --shadow-raised: var(--shadow-raised-value);
+  --shadow-floating: var(--shadow-floating-value);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -107,8 +225,194 @@
     scrollbar-gutter: stable;
   }
 
+  /*
+   * The artboard wrapper can only paint its own box, so the document canvas
+   * behind it — overscroll, the first paint, the browser's own chrome — would
+   * stay the light default and flash white on a page that has no light mode.
+   * `color-scheme` also puts the scrollbar and form controls on the dark side.
+   */
+  html:has(.artboard) {
+    background-color: var(--ds-canvas);
+    color-scheme: dark;
+  }
+
   html > body[data-scroll-locked] {
     margin-right: 0 !important;
     --removed-body-scroll-bar-size: 0px !important;
+  }
+}
+
+@layer components {
+  /*
+   * Display tiers from `DESIGN.md`. Tracking is authored in `em` (-5% at every
+   * display size, -3% at display-md) so the brand's compression survives the
+   * `clamp()` — the spec says to shrink the SIZE on small viewports, never the
+   * percentage, which a `px` letter-spacing would silently do.
+   */
+  .type-display-xxl {
+    font-size: clamp(2.5rem, 6.6vw, 6rem);
+    font-weight: 600;
+    line-height: 0.85;
+    letter-spacing: -0.05em;
+  }
+
+  .type-display-xl {
+    font-size: clamp(2.5rem, 6vw, 5.3125rem);
+    font-weight: 600;
+    line-height: 0.95;
+    letter-spacing: -0.05em;
+  }
+
+  .type-display-lg {
+    font-size: clamp(2.25rem, 4.6vw, 3.875rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.05em;
+  }
+
+  .type-display-md {
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+    font-weight: 600;
+    line-height: 1.13;
+    letter-spacing: -0.03em;
+  }
+
+  /*
+   * The CTA pill (`{components.button-primary}` / `-secondary`). Every text CTA
+   * on the marketing page is this shape — the brand has no square button and no
+   * bordered ghost button — so the geometry lives here once instead of being
+   * re-typed as utilities at each call site. The height is the spec's 44px
+   * minimum tap target rather than the shadcn size ramp.
+   */
+  .pill-cta {
+    height: 2.75rem;
+    padding-inline: 1.25rem;
+    border-radius: 100px;
+  }
+
+  /*
+   * The gradient spotlight card — the signature atmosphere device, and the one
+   * decorative surface on the page. It is a CARD: never a section ground, and
+   * exactly one of them (the closing call to action). The run walks magenta →
+   * violet → blue so the panel lands on the cool end rather than reading as a
+   * flat purple, and the last stop darkens the far corner so white type holds
+   * contrast across the whole width. `{colors.gradient-blue}` is a gradient
+   * anchor, not `{colors.accent-blue}` — the accent stays a signal colour.
+   */
+  .spotlight {
+    color: var(--ds-ink);
+    background-image:
+      radial-gradient(120% 120% at 12% 8%, rgb(255 255 255 / 0.24) 0%, transparent 55%),
+      linear-gradient(
+        118deg,
+        var(--ds-gradient-magenta) 0%,
+        var(--ds-gradient-violet) 34%,
+        var(--ds-gradient-blue) 74%,
+        color-mix(in oklch, var(--ds-gradient-blue) 62%, black) 100%
+      );
+    background-position:
+      0% 40%,
+      0% 50%;
+    background-size:
+      112% 112%,
+      115% 115%;
+    animation: spotlight-shift 18s ease-in-out infinite alternate;
+  }
+
+  /*
+   * The brand gradient clipped to a run of text, panning under it. Reserved for
+   * the single word a headline turns on ("parallel" in the hero) — never a
+   * whole heading, and never more than one word per page, or the device stops
+   * meaning anything. The stops are the same magenta -> violet -> blue as
+   * `.spotlight`, mirrored back to magenta so the pan can reverse at each end
+   * without a visible turn; the band is drawn at twice the box width and slid
+   * by `background-position`, which composites instead of repainting the run.
+   */
+  .text-gradient-animated {
+    background-image: linear-gradient(
+      100deg,
+      var(--ds-gradient-magenta) 0%,
+      var(--ds-gradient-violet) 25%,
+      var(--ds-gradient-blue) 50%,
+      var(--ds-gradient-violet) 75%,
+      var(--ds-gradient-magenta) 100%
+    );
+    background-size: 200% 100%;
+    background-position: 0% 50%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    /* Tight display tracking would otherwise clip the last glyph's overhang. */
+    padding-inline-end: 0.06em;
+    animation: text-gradient-pan 9s ease-in-out infinite alternate;
+  }
+
+  /* A pulse travelling out along one rail of the fanout background graph. */
+  .fanout-pulse {
+    opacity: 0;
+    animation: fanout-pulse-travel linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spotlight,
+    .text-gradient-animated,
+    .fanout-pulse {
+      animation: none;
+    }
+  }
+}
+
+@keyframes spotlight-shift {
+  from {
+    background-position:
+      0% 40%,
+      0% 50%;
+  }
+
+  to {
+    background-position:
+      12% 46%,
+      100% 55%;
+  }
+}
+
+@keyframes text-gradient-pan {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 100% 50%;
+  }
+}
+
+/*
+ * A pulse crosses its own rail in the first quarter of the cycle, then waits
+ * out the rest with the dash parked and invisible. Generations are delayed by
+ * one quarter each, so a single wave hands off down the tree and reaches the
+ * far side instead of every rail pulsing together.
+ */
+@keyframes fanout-pulse-travel {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+
+  4% {
+    opacity: 0.85;
+  }
+
+  21% {
+    opacity: 0.85;
+  }
+
+  25% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
   }
 }

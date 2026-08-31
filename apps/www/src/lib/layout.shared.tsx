@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
 import { appName, docsRoute, gitConfig, pluginsRoute } from "./shared";
@@ -6,7 +7,12 @@ import { appName, docsRoute, gitConfig, pluginsRoute } from "./shared";
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: appName,
+      title: (
+        <>
+          <Image src="/icon.png" alt="" width={24} height={24} className="size-6" priority />
+          <span className="font-semibold">{appName}</span>
+        </>
+      ),
     },
     links: [
       { text: "Plugins", url: pluginsRoute, active: "nested-url" },
