@@ -3,6 +3,12 @@
  * Generates `src/generated/constants.ts` from `schema.json` — writing the file
  * only when its contents actually change.
  *
+ * Also copies `crates/pragma-protocol`'s Cargo version into
+ * `values.json` `daemon.protocolVersion`, so TypeScript pairing/health never
+ * hand-edit a parallel constant. A no-op write is skipped for the same reason
+ * as the generated types: `tauri dev` watches this package as a Cargo path
+ * dependency and restarts on any file write.
+ *
  * The write-only-if-changed part is the whole point, not an optimization.
  * `generate` runs from `pretest`, `pretypecheck`, and `build`, so it fires
  * whenever anyone runs tests or a typecheck. The `tauri dev` file watcher
@@ -24,8 +30,24 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { compileFromFile } from "json-schema-to-typescript";
 
 const SCHEMA = "schema.json";
+const VALUES = "values.json";
+const PROTOCOL_CARGO = "../../crates/pragma-protocol/Cargo.toml";
 const OUTPUT = "src/generated/constants.ts";
 const BANNER = "/* AUTO-GENERATED from schema.json. Do not edit. Run `bun run generate`. */";
+
+const cargoToml = await readFile(PROTOCOL_CARGO, "utf8");
+const cargoVersion = cargoToml.match(/^version = "([^"]+)"/m)?.[1];
+if (!cargoVersion) {
+  throw new Error(`${PROTOCOL_CARGO} is missing a package version`);
+}
+
+const valuesText = await readFile(VALUES, "utf8");
+const values = JSON.parse(valuesText) as { daemon: { protocolVersion: string } };
+if (values.daemon.protocolVersion !== cargoVersion) {
+  values.daemon.protocolVersion = cargoVersion;
+  await writeFile(VALUES, `${JSON.stringify(values, null, 2)}\n`);
+  console.log(`${VALUES} daemon.protocolVersion synced to ${cargoVersion}`);
+}
 
 const generated = await compileFromFile(SCHEMA, {
   additionalProperties: false,

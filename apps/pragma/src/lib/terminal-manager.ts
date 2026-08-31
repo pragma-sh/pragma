@@ -5,6 +5,7 @@ import { Terminal, type IDisposable } from "@xterm/xterm";
 
 import { constants, type Tab } from "@pragma/constants";
 
+import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { actionForEvent, getKeybindingsConfig } from "@/lib/keybindings";
 import {
   isTerminalEditingContext,
@@ -521,13 +522,14 @@ export class TerminalManager {
         this.enqueueWheelInput(tab.id, managed, data);
         return;
       }
+      const pendingLine = this.inputLineBuffers.get(tab.id) ?? "";
+      if ((data === "\r" || data === "\n") && pendingLine.trim()) {
+        announceSubmittedCommand(pendingLine);
+      }
       if (!preservesLocalEchoConfidence(data)) {
         this.inputLineConfidence.set(tab.id, false);
       }
-      this.inputLineBuffers.set(
-        tab.id,
-        applyLocalEcho(this.inputLineBuffers.get(tab.id) ?? "", data),
-      );
+      this.inputLineBuffers.set(tab.id, applyLocalEcho(pendingLine, data));
       this.writeWhenReady(tab.id, data);
     });
     terminal.onRender(() => {

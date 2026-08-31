@@ -19,7 +19,7 @@ export function buildWebAppUrl(tunnelUrl: string, token: string): string {
 export function buildPairingPayload(parts: {
   url: string;
   token: string;
-  protocolVersion: number;
+  protocolVersion: string;
   hostName: string;
 }): PairingPayload {
   return {
@@ -59,7 +59,7 @@ export function validatePairingPayload(value: unknown): PairingPayload | null {
   if (
     typeof url !== "string" ||
     typeof token !== "string" ||
-    typeof protocolVersion !== "number" ||
+    typeof protocolVersion !== "string" ||
     typeof hostName !== "string"
   ) {
     return null;

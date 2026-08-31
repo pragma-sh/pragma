@@ -1,13 +1,14 @@
 import type { KeyboardEvent } from "react";
 
 import type { Worktree } from "@pragma/constants";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listPluginAgentsMock = vi.fn();
 const resolvePluginAgentModelsMock = vi.fn();
 const githubFetchAndSyncMock = vi.fn();
 const startCreationMock = vi.fn();
+const refreshProjectMock = vi.fn();
 
 vi.mock("@/lib/tauri", () => ({
   githubFetchAndSync: (...args: unknown[]) => githubFetchAndSyncMock(...args),
@@ -78,6 +79,7 @@ const newWorktree: Worktree = {
 const selectWorktreeMock = vi.fn();
 
 const workspaceMock = {
+  refreshProject: (...args: unknown[]) => refreshProjectMock(...args),
   selectWorktree: (...args: unknown[]) => selectWorktreeMock(...args),
   selectedProjectId: "p",
   selectedWorktreeId: "main",
@@ -116,6 +118,7 @@ describe("CreateWorktreeDialog", () => {
       behind: 0,
       hasUpstream: true,
     });
+    refreshProjectMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -336,8 +339,46 @@ describe("CreateWorktreeDialog fanout mode", () => {
     });
     expect(request.prompt).toBe("Do the thing");
     expect(request.members).toHaveLength(2);
-    // Nothing has run yet, so the comparison would only show an empty state.
+    await waitFor(() => expect(refreshProjectMock).toHaveBeenCalledWith("p"));
     expect(openComparisonMock).not.toHaveBeenCalled();
+  });
+
+  it("stays open until fanout worktrees and tabs are loaded", async () => {
+    let finishCreate: ((value: unknown) => void) | undefined;
+    let finishRefresh: (() => void) | undefined;
+    createFanoutMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishCreate = resolve;
+      }),
+    );
+    refreshProjectMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+    const onOpenChange = vi.fn();
+    render(<CreateWorktreeDialog open onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Fan out" }));
+    fireEvent.change(screen.getByLabelText("Branch name"), { target: { value: "fanout/test" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create & Fanout/ }));
+
+    expect(screen.getByRole("button", { name: /Working/ })).toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    await act(async () => {
+      finishCreate?.({
+        fanout: { id: "f1", parentWorktreeId: "fanout-parent", members: [] },
+        partial: false,
+        failures: [],
+      });
+    });
+
+    await waitFor(() => expect(refreshProjectMock).toHaveBeenCalledWith("p"));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    await act(async () => finishRefresh?.());
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(selectWorktreeMock).toHaveBeenCalledWith("fanout-parent");
   });
 
   it("has no ceiling on attempt rows", () => {

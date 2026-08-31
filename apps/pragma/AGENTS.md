@@ -28,8 +28,9 @@ apps/pragma/
 │   │   └── utils.ts             # cn() + small utilities
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
 │   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
-│   ├── state/
-│   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
+    │   ├── state/
+    │   │   ├── updates-context.tsx     # Polls GET /api/updates, Install Update, restart confirm
+    │   │   ├── workspace-context.tsx   # Projects / worktrees / tabs reducer + context
 │   │   ├── kanban-context.tsx      # Project agent board: cards, shell-mode switch, background launch, completion
 │   │   ├── github-context.tsx      # GitHub auth state (useGitHub)
 │   │   ├── theme-context.tsx       # Loads/merges global + project theme.json, applies on project switch
@@ -48,6 +49,7 @@ apps/pragma/
     ├── src/lib.rs               # App wiring, managed state, plugins, command registration
     ├── src/db.rs                # Legacy client-local SQLite migrations + typed CRUD
     ├── src/kanban.rs            # Tauri commands for the agent board (CRUD + move)
+    ├── src/updates.rs           # Desktop auto-update check/download/apply (reload overlay vs OS installer)
     ├── src/pty.rs               # Thin pragma-client adapter + PTY channel forwarding
     ├── src/git.rs               # Git CLI helpers
     ├── src/github.rs            # GitHub auth (0600 token file, OAuth device flow, gh CLI)
@@ -208,6 +210,10 @@ also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports 
   ramps, and replace only the selected scope's `colors` block when applied. Selecting
   Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
   authoritative; merged values equal to a stylesheet default are also omitted.
+- Plugins may contribute selectable palettes with `defineTheme` and `definePlugin({ themes })`.
+  Theme Settings shows bundled/global contributions at global scope and adds active-project
+  contributions at project scope. Applying one copies its light/dark token values into
+  `.pragma/theme.json`; runtime theme resolution never depends on plugin remaining installed.
 - The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
   light ramp by temporarily removing the `dark` (and `vibrancy`) classes.
 
@@ -418,6 +424,22 @@ against the plugin manifest directory and are converted to Tauri asset URLs.
 
 Agent pins are cosmetic localStorage state in `state/agent-pins.ts`.
 
+First-run agent plugin recommendations use the reviewed lock bundled with the app, then
+check agent names against the same GUI-augmented `PATH` used to launch children. Startup
+must not wait for GitHub or execute every candidate CLI with `--version`: either can delay
+the final onboarding step indefinitely.
+
+Manual terminal launches get a second chance after onboarding: when the submitted command
+matches an official agent whose active plugin still comes from bundled scope, the desktop
+offers to install its reviewed integration while letting the command continue. A global or
+project plugin record suppresses the prompt because it overrides the bundled launcher. The
+user can dismiss one run or persist `plugins.agentCommandPromptDismissed` in the settings
+table with **Don't show again**.
+
+Both agent-plugin install dialogs close before installation starts. Installation continues
+in the background; success or failure is reported later through a toast, so npm/network or
+host-configuration work never traps the user behind a modal.
+
 Worktree pins are cosmetic localStorage state in `state/worktree-pins.ts`
 (worktree id → pin timestamp). The sidebar promotes pinned worktrees to roots
 at the top (newest pin first); each row exposes a hover pin button, a
@@ -467,6 +489,28 @@ app-global and falls back to Plugins when the user switches to Project scope. Th
 automations context rather than `config.json`, so like Theme it renders past the
 config load state. `openSettings(section?)` deep-links a section (the command
 palette's "Open automations" uses it).
+
+Plugins add React settings sections with `defineSettingsPage` and
+`definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
+render under the standard plugin boundary, and use the same host hooks as sidebar tabs.
+
+**Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
+`other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
+`updates.checkUrl` / `updates.autoDownload`; next save removes old block. Dev/`pragma-dev-*` instances default
+to `http://localhost:3000/api/updates`; production uses `https://pragma-app.sh/api/updates`.
+`InstallUpdateButton` sits above the project switcher when a shipped-into-the-app
+component is behind. Reload writes a UI overlay version marker; restart always launches
+the OS installer named by the manifest. Release CI packages `dist/` as a tar archive for
+React-only releases. Rust extracts it under the instance update directory and serves only
+that tree through the private `pragma-ui` protocol; subsequent launches navigate back to
+the installed overlay. A `.pending` marker is removed only after `UpdatesProvider` mounts;
+an overlay that fails before that point is deleted on next launch so bundled UI recovers.
+Do not broaden that protocol to arbitrary app-data paths. Every production asset and the
+manifest binding its version/apply mode/URL are minisign-verified against
+`PRAGMA_UPDATE_PUBLIC_KEY` compiled into release builds. Linux selects `.deb` vs `.rpm`
+from its package family; AppImage sessions are deliberately not offered a restart update
+until replacement can be atomic. Any change outside `apps/pragma/src/` produces restart
+metadata and platform installers.
 
 **Keybindings** (`KeybindingsSection.tsx`) is a table of every action with the chord
 that actually applies after the `default → global → project` merge, whether it differs
@@ -553,8 +597,13 @@ clients' ids stay stable. The one exception is fanout worktrees: their hierarchy
 host-owned and git carries no parentage, so adoption reads the durable fanout snapshot
 (`fanout_parentage`) and parents the coordination parent under its source and each
 attempt under that parent — otherwise the host's pick-time `validate_finalize` rejects
-the merge because an attempt is no longer a direct child of its fanout parent. Adoption
-is local-only (remote SSH project paths are skipped) and best-effort.
+the merge because an attempt is no longer a direct child of its fanout parent. Coordination
+parents are inserted before their attempts, and adoption repairs existing fallback-parented
+rows rather than skipping them. Pick forces this reconciliation and publishes the repaired
+snapshot before host validation, rather than racing the publisher's debounce. Adoption is
+best-effort. Fanout snapshots are host-wide, so tab adoption filters each fanout by
+`projectId`; it also enforces that a tab's project matches its worktree and repairs legacy
+cross-project rows from older builds.
 
 ## Remote agent session launch
 
@@ -720,6 +769,12 @@ auto-submit launches via `startSession`; otherwise it dispatches the `pragma:new
 window event that `ProjectSidebar` opens the prefilled `NewAgentSessionDialog` with. Note:
 deep links only reach a packaged/registered app — `tauri dev` on macOS won't receive them.
 
+`pragma://install-plugin?package=<npm-name>` opens install review. Package name is only a
+selector: app resolves exact version, integrity, cached manifest, and command from official
+GitHub lock. Native installer runs `npm pack` / `npm install --ignore-scripts` in private
+staging, verifies tarball integrity plus manifest hash, runs reviewed manifest command, then
+registers managed absolute path globally. Never put tarball URL or command in deep link.
+
 ## Terminal rendering (xterm + WebGL)
 
 Terminal output → xterm in `src/lib/terminal-manager.ts`; never route through React
@@ -840,6 +895,10 @@ see-through instead of solid — the bug that put these flags in a separate file
 
 Two rules follow:
 
+- **Fullscreen is opaque.** `main.tsx` removes `.vibrancy` while the macOS window is
+  fullscreen and restores it on exit. The native effect may remain installed behind the
+  webview; opaque root surfaces prevent it from showing without rebuilding native chrome.
+
 - **Tauri's config merge replaces arrays, it does not merge them** (`json_patch::merge`).
   `app.windows` is an array, so `tauri.macos.conf.json` carries the _whole_ window object,
   not just the macOS keys. Change one, change both.
@@ -862,6 +921,17 @@ payloads until the `drop` event, so the dragged tab id is tracked in shared Reac
 Native browser webviews float **above** all HTML. The shared `isDragging` signal hides
 native overlays for the duration of a drag so drop zones underneath become reachable;
 drop-zone geometry lives in `components/tabs/tab-drag.ts`.
+
+Address-bar text is normalized by `browser::parse_url`: schemeless public hosts default
+to HTTPS, while localhost, `.localhost`, loopback IPs, and unspecified IPs default to HTTP
+so ordinary local dev servers load without requiring users to type the scheme. Navigation
+uses an evaluated, JSON-serialized `window.location.assign`, not `Webview::navigate`:
+Tauri's runtime only queues the latter and swallows any subsequent `load_url` failure.
+Wry exposes page-load start/finish but no cross-platform failure callback, so
+`BrowserView` treats a load that never finishes within `BROWSER_LOAD_TIMEOUT_MS` as failed,
+hides the native surface, and shows retry UI. An immediate IPC failure uses the same screen.
+WKWebView can report a failed navigation as finished while rendering an empty white document;
+the native finish hook probes for an empty title/body/DOM and reports that as failed too.
 
 Any HTML overlay that opens over a browser pane (dropdown, popover) would be clipped by
 the native webview, so shadcn `DropdownMenu`/`Popover` roots register with
@@ -913,7 +983,18 @@ single **parent tab** for the whole split (named after its top-left pane). Split
 pulls only the **active** tab into the new group. Dropping a tab on a pane's **content**
 always splits (four quadrant zones via `dropTargetAt`); dropping on a pane's **tab bar**
 stacks it into that pane. Each `PaneBar` has its own "+" that creates a tab inside that
-pane; the top strip's "+" and `⌘T`/`⌘B` always add normal top-level tabs.
+pane; the top strip's "+" and `⌘T`/`⌘B` always add normal top-level tabs. That pane "+"
+menu also carries **Open agent**, a submenu of the configured agents (`useAgentsList`),
+each launched into a fresh terminal tab of that pane — which is why `createTabInPane`
+returns the created `Tab`, not `void`.
+
+**Renaming works the same everywhere a tab is shown**: double-click the title or
+right-click → **Rename**, on a normal top-bar tab, on the split **parent** tab, and on
+every `PaneBar` tab. The state lives in `components/tabs/use-tab-rename.ts` and the field
+in `TabRenameInput` — one hook instance per strip, never a second implementation. Starting
+a rename from a menu must use `startRenameFromMenu`: Radix keeps focus trapped inside the
+open menu, so an input mounted straight from `onSelect` is blurred the moment it focuses
+itself and the blur commits the unchanged title.
 
 **Split layouts persist in SQLite** (`splits` table, v4 migration — one row per
 worktree, cascade-deleted with the worktree). The layout is an opaque JSON blob
@@ -1075,6 +1156,10 @@ and a buffer that only a tab close fixes is worse than one extra read. `Scratchp
 watches the same events for `.pragma/scratchpads/` so an agent creating a scratchpad shows
 up in the sidebar without waiting on unrelated tab churn.
 
+Dirty documents and their exact saved baselines survive ordinary pane unmounts; only a
+confirmed tab close disposes them. Scratchpad TipTap updates mark dirty only while focused,
+because MDX extensions can emit doc-changing normalization transactions during initial mount.
+
 **A scratchpad frame never restates a color.** The sandbox has its own document, so it
 sees neither Tailwind nor `index.css`. `lib/scratchpad-theme.ts` reads the computed value
 of every `THEME_TOKENS` variable (plus the radius/font/shadow support variables) off the
@@ -1183,7 +1268,13 @@ Fanout state itself is host-owned: `state/fanouts-context.tsx` reads
 `list_fanouts` once and then follows the `pragma:fanouts` bridge. The sidebar
 renders an explicit group row per fanout (`components/sidebar/FanoutGroup.tsx`)
 and hides its attempts from the ordinary tree — `parentId` alone cannot tell an
-attempt from a hand-made nested worktree.
+attempt from a hand-made nested worktree. Clicking an attempt restores its
+host-owned agent tab into the desktop database under the original session id
+when that projection is missing, then activates it; creating a replacement tab
+would open an empty shell beside the running agent. Child status dots use the
+tab's runtime status, with durable fanout state only seeding active
+`running`/`attention`; otherwise a viewed `done` dot could never clear because
+the fanout member remains completed.
 
 ## Toasts
 
@@ -1194,10 +1285,12 @@ errors via `toast.error(…)`.
 
 ## Worktree lifecycle
 
-`CreateWorktreeDialog` only _collects input_. It fetches the project main worktree's
-remote status before creation; when main is behind it offers cancel, create without
-pulling, or pull then create. As soon as the last question is answered it hands the run
-to `worktree-creation-context` and closes — creation never blocks the app behind a modal.
+`CreateWorktreeDialog` collects input and fetches the project main worktree's remote
+status before single-worktree creation; when main is behind it offers cancel, create
+without pulling, or pull then create. A single-worktree run hands off to
+`worktree-creation-context` and closes. A fanout stays open and busy until the host has
+provisioned its worktrees/tabs and the desktop has adopted and refreshed them, so every
+attempt row can immediately attach to its live agent session.
 
 Its **Fan out** mode is the same form with the single agent picker swapped for the
 repeatable attempt rows (`components/dialogs/FanoutRows.tsx`): branch name, display
@@ -1223,6 +1316,11 @@ worktree retain the launch request and offer Retry, which reopens it without cre
 the sidebar via `buildWorktreeTree(worktrees, { predicate: (w) => !w.hidden })` and
 surfaced through a "Show N hidden" toggle. When the user hides the currently-selected
 worktree, the reducer falls back to the main worktree (or the first remaining root).
+
+Worktree deletion is optimistic: confirmation closes and local worktree/tab state disappears
+before teardown scripts and git removal finish. Failure raises a delayed toast and reloads the
+project snapshot instead of naively rolling back, because native deletion may have partially
+completed. Every caller uses the shared workspace action; do not reintroduce modal-owned waits.
 
 **Active selection persists across restarts.** The last active project, each
 project's last active worktree, and each worktree's active tab are saved in the `settings` table under one opaque JSON
@@ -1258,7 +1356,9 @@ filename with full path and worktree at right so duplicate names remain distingu
 `worktree_mru` is client-local SQLite state,
 touched by centralized workspace-selection effect. Cross-worktree file/tab actions use
 explicit `activateTabLocation` / `openFileLocation` APIs to avoid stale selection races;
-code matches use ephemeral `editor-location-store.ts` to reveal source line.
+`activateTabLocation` refreshes even the selected project when its target is absent from
+memory because host-created fanout worktrees/tabs are adopted asynchronously. Code matches
+use ephemeral `editor-location-store.ts` to reveal source line.
 
 Typing `>` enters command mode; `Cmd+Shift+P` / `Ctrl+Shift+P` opens it directly.
 Commands reuse existing workspace actions for remote access, server troubleshooting,
@@ -1298,10 +1398,13 @@ Cards persist in SQLite (`kanban_cards`, v8 migration; `db.rs` CRUD, `kanban.rs`
 commands `list/create/update/move/delete_kanban_card`, typed in `lib/tauri.ts`). The
 shared `KanbanPromptCard` shape lives in `@pragma/constants` (`KanbanPromptStatus` /
 `KanbanCompletedAction` / `KanbanSchedulingMode`). The board is project-scoped: cards
-load by `selectedProjectId` and reload after every mutation.
+load by `selectedProjectId` and reload after every mutation. SDK callers create drafts
+with `client.createBoardDraft`; the brokered desktop controller resolves its worktree to
+the owning project/branch and emits `pragma:kanban-changed` for live reload.
 
-**Transitions are enforced, not free-form** (no drag): `draft → inProgress` only via the
-card's Start flow; `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to
+**Transitions are enforced, not free-form**: dragging a draft to In progress invokes the
+card's Start flow and moves it there optimistically while worktree creation runs (a failure
+returns it to Drafts); `inProgress → reviewNeeded` is **automatic** — `useKanban` listens to
 `onAgentReport` and moves a card whose `agentTabId` matches a `done` report (live
 attention/running is shown per card via `useTabAgentStatus`); `reviewNeeded → completed`
 only after a completion-modal action succeeds; completed cards are read-only.
@@ -1311,6 +1414,9 @@ crux: starting a draft creates/reuses a worktree, creates a terminal tab, and sp
 daemon PTY **directly** (`ptySpawn` + `ptyWrite`, no mounted `TerminalManager`) so the
 board stays visible. The session persists in the daemon; opening the card later attaches
 (`ptyAttach`) and replays scrollback with the agent already running.
+Before a draft creates its worktree, the board uses the same main-behind check and
+Sync / Create without syncing confirmation as `CreateWorktreeDialog`; failed status
+fetches remain non-blocking so offline starts still work.
 
 **Completion** (`runCompletion`) reuses existing commands, never re-implements them.
 The board offers commit+PR = `aiCommitAllAndGeneratePullRequestDraft` →

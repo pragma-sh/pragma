@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SplitHost } from "./SplitHost";
 import { TabDragProvider } from "@/components/tabs/tab-drag-context";
 import { TAB_DRAG_TYPE } from "@/components/tabs/tab-drag";
+import type { AgentConfig } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -156,10 +157,30 @@ vi.mock("@/lib/terminal-manager", () => ({
 }));
 
 const requestCloseTabsMock = vi.fn();
+const requestCloseMock = vi.fn();
 
 vi.mock("@/components/editor/confirm-close", () => ({
-  useConfirmClose: () => vi.fn(),
+  useConfirmClose: () => requestCloseMock,
   useConfirmCloseTabs: () => requestCloseTabsMock,
+}));
+
+const testAgent = {
+  id: "claude-code",
+  name: "Claude Code",
+  command: "claude",
+  args: [],
+  iconPath: null,
+  iconDataUrl: null,
+} as unknown as AgentConfig;
+
+vi.mock("@/hooks/use-agents-list", () => ({
+  useAgentsList: () => [testAgent],
+}));
+
+const startAgentInTabMock = vi.fn();
+
+vi.mock("@/lib/agent-launch", () => ({
+  startAgentInTab: (...args: unknown[]) => startAgentInTabMock(...args),
 }));
 
 /** Minimal DataTransfer carrying a single tab id, sufficient for the drag handlers. */
@@ -239,6 +260,11 @@ afterEach(() => {
   splitTabAtPaneMock.mockClear();
   moveTabToPaneMock.mockClear();
   createTabInPaneMock.mockClear();
+  requestCloseMock.mockClear();
+  requestCloseTabsMock.mockClear();
+  startAgentInTabMock.mockClear();
+  vi.mocked(mockWorkspace.renameTerminalTab).mockClear();
+  vi.mocked(mockWorkspace.markTabAgent).mockClear();
   vi.mocked(terminalManager.activate).mockClear();
   vi.mocked(terminalManager.focus).mockClear();
   vi.mocked(terminalManager.park).mockClear();
@@ -474,6 +500,55 @@ describe("SplitHost", () => {
     await userEvent.click(await screen.findByText("Browser"));
 
     expect(createTabInPaneMock).toHaveBeenCalledWith("pane-right", "browser");
+  });
+
+  it("renames a pane tab from a double click on its title", async () => {
+    renderHost();
+
+    await userEvent.dblClick(screen.getByText("two"));
+    const input = screen.getByRole("textbox", { name: "Rename tab" });
+    fireEvent.change(input, { target: { value: "renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockWorkspace.renameTerminalTab).toHaveBeenCalledWith("two", "renamed");
+  });
+
+  it("renames a pane tab from its context menu", async () => {
+    renderHost();
+
+    fireEvent.contextMenu(screen.getByText("two"));
+    await userEvent.click(await screen.findByText("Rename"));
+    const input = await screen.findByRole("textbox", { name: "Rename tab" });
+    fireEvent.change(input, { target: { value: "from-menu" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockWorkspace.renameTerminalTab).toHaveBeenCalledWith("two", "from-menu");
+  });
+
+  it("closes a pane tab from its context menu", async () => {
+    renderHost();
+
+    fireEvent.contextMenu(screen.getByText("two"));
+    await userEvent.click(await screen.findByText("Close"));
+
+    expect(requestCloseMock).toHaveBeenCalledWith(expect.objectContaining({ id: "two" }));
+  });
+
+  it("launches an agent into a new tab from the pane's + menu", async () => {
+    createTabInPaneMock.mockResolvedValueOnce(tab("three"));
+    renderHost();
+
+    const addButtons = screen.getAllByRole("button", { name: "New tab in pane" });
+    addButtons[1]!.focus();
+    await userEvent.keyboard("[Enter]");
+    await userEvent.click(await screen.findByText("Open agent"));
+    await userEvent.click(await screen.findByText("Claude Code"));
+
+    expect(createTabInPaneMock).toHaveBeenCalledWith("pane-right", "terminal");
+    await vi.waitFor(() => {
+      expect(mockWorkspace.markTabAgent).toHaveBeenCalledWith("three", testAgent);
+      expect(startAgentInTabMock).toHaveBeenCalledWith("three", testAgent);
+    });
   });
 
   it("closes every tab in a pane from the pane bar's X", async () => {

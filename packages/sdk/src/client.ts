@@ -1,4 +1,6 @@
 // fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
+import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma/constants";
+
 import { AgentsClient } from "./agents-client";
 import { AssetsClient } from "./assets-client";
 import { EventsClient } from "./events-client";
@@ -57,6 +59,18 @@ export class PragmaClient {
     options: { signal?: AbortSignal } = {},
   ): Promise<T> {
     return this.transport.request<T>(routes.rpc(method), {
+      method: "POST",
+      body: payload,
+      signal: options.signal,
+    });
+  }
+
+  /** Creates a draft on the agent board for an existing worktree. */
+  createBoardDraft(
+    payload: BoardDraftCreatePayload,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<KanbanPromptCard> {
+    return this.transport.request<KanbanPromptCard>(routes.control("boardDraftCreate"), {
       method: "POST",
       body: payload,
       signal: options.signal,

@@ -12,7 +12,8 @@ use std::thread;
 use std::time::Duration;
 
 use pragma_constants::{
-    ControlMethod, DiffSide, ProtocolRpcMethod, Tab, TabKind, Worktree, CONSTANTS,
+    BoardDraftCreatePayload, ControlMethod, DiffSide, ProtocolRpcMethod, Tab, TabKind, Worktree,
+    CONSTANTS,
 };
 use pragma_core::fs::FsRequest;
 use pragma_core::git::GitRequest;
@@ -267,8 +268,25 @@ fn dispatch_inner(
         ControlMethod::BrowserScreenshot => browser_screenshot(app, payload),
         ControlMethod::AgentStart => agent_start(app, payload),
         ControlMethod::AgentSessionLaunch => agent_session_launch(app, payload),
+        ControlMethod::BoardDraftCreate => board_draft_create(app, payload),
         ControlMethod::ScratchpadCreate => scratchpad_create(app, payload),
     }
+}
+
+fn board_draft_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
+    let input: BoardDraftCreatePayload = parse(payload)?;
+    let db = app.state::<Db>();
+    let worktree = db.worktree(&input.worktree_id)?;
+    let card = db.create_kanban_card(
+        &worktree.project_id,
+        &worktree.branch,
+        &input.prompt,
+        &input.agent_id,
+        input.model_id.as_deref(),
+        input.reasoning_id.as_deref(),
+    )?;
+    let _ = app.emit("pragma:kanban-changed", worktree.project_id);
+    json(card)
 }
 
 /// Prevents a remote controller from targeting worktrees or tabs owned by another host.

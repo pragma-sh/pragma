@@ -70,7 +70,7 @@ fn run(args: Args) -> GatewayResult<()> {
 
     remove_stale_or_refuse(
         &config.discovery_path,
-        CONSTANTS.daemon.protocol_version.get(),
+        CONSTANTS.daemon.protocol_version.as_str(),
     )?;
     let client = client::GatewayClient::new(config.socket_path.clone());
     client.ensure_protocol()?;
@@ -84,7 +84,7 @@ fn run(args: Args) -> GatewayResult<()> {
             port,
             token: config.token.clone(),
             pid: std::process::id(),
-            protocol_version: client.protocol_version(),
+            protocol_version: client.protocol_version().to_string(),
         },
     )?;
 

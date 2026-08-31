@@ -1,4 +1,4 @@
-# packages/cursor-plugin — @pragma/cursor-plugin
+# packages/cursor-plugin — @pragma-sh/cursor-plugin
 
 Static Cursor Agent CLI integration that reports agent status into Pragma. Cursor has
 **no in-process JS plugin API** for status — its extension point is **shell hooks**
@@ -85,10 +85,10 @@ watcher delivers the text by writing it into the live terminal, waiting briefly 
 paste-aware input to commit it, then writing Enter separately. Sending text and `\r` in one PTY
 write leaves Cursor's reply unsubmitted. This plugin's hooks stay approval-only.
 
-## AskQuestion — not reported (and why)
+## AskQuestion — OSC title signal
 
-Interactive questions (Cursor's **AskQuestion** tool) are **intentionally not** bridged
-to `attention --kind question`. There is no plugin-level signal to observe, confirmed
+Interactive questions (Cursor's **AskQuestion** tool) have no hook or transcript signal,
+confirmed
 empirically against Cursor Agent CLI `2026.06.19` and the [Cursor hooks docs](https://cursor.com/docs/hooks):
 
 - **No question hook.** Claude Code raises generic `attention` from `PermissionRequest`
@@ -101,11 +101,12 @@ empirically against Cursor Agent CLI `2026.06.19` and the [Cursor hooks docs](ht
   AskQuestion `tool_use` is only flushed **after** the user answers. Verified live: the
   transcript sat at exactly one line for the entire time the agent was blocked on a
   question. There is no other on-disk state to poll either.
-- **Only the PTY title carries it.** While blocked, Cursor sets the terminal title via an
+- **The PTY title carries it.** While blocked, Cursor sets the terminal title via an
   OSC sequence (`Choice Asker` / `Ask Question` vs `Cursor Agent`). A hook subprocess
-  cannot see the PTY stream — only pragma's daemon/frontend, which owns the PTY, could.
-  Wiring that up is a **core change** (out of plugin scope per the root `AGENTS.md`), so
-  it is deliberately not done here.
+  cannot see the PTY stream, but the plugin watcher receives decoded session output.
+  It reports generic question attention when either question title appears and restores
+  running when `Cursor Agent` returns. Prompt/options remain unavailable, so remote answer
+  controls are not offered; status still accurately shows that Cursor needs attention.
 
 **If Cursor ships a question hook** (e.g. `preToolUse` firing for AskQuestion, or a
 dedicated event), wire it in `hooks.fragment.json` to a new `report.sh` case that calls
@@ -125,22 +126,27 @@ Cursor exposes no reliable native session title in hook payloads. `report.sh` de
 from the first prompt's first nonblank line (47 characters plus `…` when truncated), reports it once per
 session, and resets that state on `sessionStart` / `sessionEnd`.
 
-The built-in launcher cannot expose questions, prompt-only command approval, subagent
-lifecycle, abort detection, or interrupt handling, so all five are declared in
+The built-in launcher cannot expose question contents/answers, prompt-only command approval,
+subagent lifecycle, abort detection, or interrupt handling, so the latter four are declared in
 `excludeFeatures`. `agent verify` skips those unsupported scenario groups instead of
 treating known host limitations as failures.
 
 ## Installation
 
 ```bash
-bun run --filter @pragma/cursor-plugin install:local
+bun run --filter @pragma-sh/cursor-plugin install:local
 ```
 
 This copies hooks to `~/.pragma/plugins/cursor/hooks/`, merges hook entries into
 `~/.cursor/hooks.json`, and updates CLI + permissions settings (see above).
-It also installs the compiled TypeScript usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
+It also installs the bundled Node usage helper under `~/.pragma/plugins/cursor/scripts/`; the helper
 reuses `cursor-agent login` credentials and never persists or prints access tokens.
 Re-run after updating the package. Removes legacy launcher assets if present.
+
+Usage refreshes every five minutes. Authentication failures ask for login; endpoint rate
+limits, redirects, and transport failures render as temporarily unavailable and retry instead
+of exposing raw helper errors in Settings. Commands rely on the host-selected shell and must
+not nest `/bin/sh`, which is absent on Windows.
 
 If install fails with "cannot write" inside a sandboxed agent, run the same command
 in a normal terminal (writes go to `~/.pragma` and `~/.cursor`).

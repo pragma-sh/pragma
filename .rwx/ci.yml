@@ -3,7 +3,9 @@
 # RWX runs Linux containers only (`rwx/base` supports the `ubuntu:*` images and
 # nothing else), so the macOS and Windows halves of CI stay on GitHub Actions in
 # `.github/workflows/ci.yml`. Between the two files, all three target platforms
-# are still covered on every push to `main` and every pull request.
+# are still covered on every push to `main`, every pull request, and (for
+# bundling) every tag. PRs and `main` stay `--no-bundle`; tags run a full
+# signed bundle.
 
 on:
   cli:
@@ -12,20 +14,23 @@ on:
       branch: ${{ event.git.branch }}
       base-ref: main
       lint-commits: false
+      tag: ""
   github:
     push:
-      if: ${{ event.git.branch == 'main' }}
+      if: ${{ event.git.branch == 'main' || event.git.tag != '' }}
       init:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
         lint-commits: false
+        tag: ${{ event.git.tag }}
     pull_request:
       init:
         commit-sha: ${{ event.git.sha }}
         branch: ${{ event.git.branch }}
         base-ref: main
         lint-commits: true
+        tag: ""
 
 # Supersede in-flight runs for the same ref, matching the GitHub Actions
 # `concurrency` block this file replaces.
@@ -275,7 +280,14 @@ tasks:
   - key: build-linux
     use: [generate, rust, system-packages]
     after: [lint, format-check, typecheck, test, clippy, cargo-test]
-    run: bun run --filter pragma tauri build --no-bundle
+    env:
+      GIT_TAG: ${{ init.tag }}
+    run: |
+      if [ -n "$GIT_TAG" ]; then
+        bun run --filter pragma tauri build
+      else
+        bun run --filter pragma tauri build --no-bundle
+      fi
     timeout: 60m
     runner:
       cpus: 16

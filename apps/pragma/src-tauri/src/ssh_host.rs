@@ -389,7 +389,7 @@ fn connect_client(host_id: &str, config: &SshConnectConfig, home: &str) -> AppRe
     let version = client
         .server_protocol_version()
         .map_err(|error| AppError::Daemon(format!("remote server unreachable: {error}")))?;
-    let expected = CONSTANTS.daemon.protocol_version.get();
+    let expected = CONSTANTS.daemon.protocol_version.as_str();
     if version != expected {
         return Err(AppError::Daemon(format!(
             "remote pragma-server speaks protocol v{version}, but this client requires v{expected}. \

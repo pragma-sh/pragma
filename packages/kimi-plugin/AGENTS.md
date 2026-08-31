@@ -1,4 +1,4 @@
-# packages/kimi-plugin — @pragma/kimi-plugin
+# packages/kimi-plugin — @pragma-sh/kimi-plugin
 
 Kimi Code CLI plugin that reports agent status into Pragma. Kimi has **no in-process JS
 plugin API** — its only live extension point is shell-command hooks — so this is the
@@ -9,7 +9,7 @@ here defines the Pragma-side agent, model provider, and watcher; Kimi never load
 Kimi installs plugins through its own mechanism: `/plugins install <local-path-or-zip-url>`
 in the Kimi TUI (a third-party trust prompt then copies the plugin into
 `~/.kimi-code/plugins/managed/<id>/`). There is no `kimi plugins` CLI. After editing,
-run `bun run --filter @pragma/kimi-plugin install:local`; it rebuilds the Pragma bundle,
+run `bun run --filter @pragma-sh/kimi-plugin install:local`; it rebuilds the Pragma bundle,
 replaces Kimi's managed snapshot, and updates `installed.json` without dropping other
 plugins or the existing enabled state. Run `/plugins reload` or start a new Kimi session.
 
@@ -137,9 +137,9 @@ When Kimi cannot be queried, the launcher still opens without a model picker.
 ## Verification
 
 ```bash
-bun run --filter @pragma/kimi-plugin install:local
-bun run --filter @pragma/kimi-plugin test
-bun run --filter @pragma/kimi-plugin typecheck
+bun run --filter @pragma-sh/kimi-plugin install:local
+bun run --filter @pragma-sh/kimi-plugin test
+bun run --filter @pragma-sh/kimi-plugin typecheck
 pragma-cli agent verify --agent pragma.kimi --model <working-model-alias> --abort-input '\x1b'
 ```
 

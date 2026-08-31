@@ -8,7 +8,14 @@ import type { PragmaBridge } from "@pragma/plugin";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
-import { hostHooks, reportAgentMessageFromPlugin } from "./host-hooks";
+import { subscribePluginEvent } from "./events";
+import {
+  getPluginTheme,
+  hostHooks,
+  listPluginSessions,
+  reportAgentMessageFromPlugin,
+  subscribePluginTheme,
+} from "./host-hooks";
 import { openRegisteredWebView } from "./webviews";
 
 declare global {
@@ -42,6 +49,9 @@ export function installPragmaBridge(): void {
     actions: {
       openWebView: openRegisteredWebView,
       agents: { reportMessage: reportAgentMessageFromPlugin },
+      events: { subscribe: subscribePluginEvent },
+      theme: { get: getPluginTheme, subscribe: subscribePluginTheme },
+      sessions: { list: listPluginSessions },
     },
   };
 }

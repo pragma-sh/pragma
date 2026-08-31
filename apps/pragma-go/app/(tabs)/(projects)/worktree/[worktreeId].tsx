@@ -303,7 +303,20 @@ function AgentTabActionSheets({
           </Button>
         </View>
       </BottomSheet>
-      <BottomSheet onOpenChange={(open) => !open && setRenamingTab(null)} open={!!renamingTab}>
+      <BottomSheet
+        footer={
+          <View className="mt-3 flex-row justify-end gap-2">
+            <Button onPress={() => setRenamingTab(null)} size="sm" variant="outline">
+              <Text>Cancel</Text>
+            </Button>
+            <Button disabled={!title.trim() || renaming} onPress={() => void rename()} size="sm">
+              <Text>{renaming ? "Renaming..." : "Rename"}</Text>
+            </Button>
+          </View>
+        }
+        onOpenChange={(open) => !open && setRenamingTab(null)}
+        open={!!renamingTab}
+      >
         <View className="gap-1">
           <Text className="text-lg font-semibold">Rename agent</Text>
           <Text className="text-sm text-muted-foreground">
@@ -317,14 +330,6 @@ function AgentTabActionSheets({
             onSubmitEditing={() => void rename()}
             value={title}
           />
-          <View className="flex-row justify-end gap-2">
-            <Button onPress={() => setRenamingTab(null)} size="sm" variant="outline">
-              <Text>Cancel</Text>
-            </Button>
-            <Button disabled={!title.trim() || renaming} onPress={() => void rename()} size="sm">
-              <Text>{renaming ? "Renaming..." : "Rename"}</Text>
-            </Button>
-          </View>
         </View>
       </BottomSheet>
     </>

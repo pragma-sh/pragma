@@ -46,8 +46,10 @@ import type { AgentAlertLocation } from "@/lib/agent-notification-text";
 import { startAgentInTab, startBackgroundAgentSession } from "@/lib/agent-launch";
 import {
   parseNewSessionDeepLink,
+  parsePluginInstallDeepLink,
   parsePluginDeepLink,
   requestNewSession,
+  requestPluginInstall,
   requestPluginDeepLink,
 } from "@/lib/deep-link";
 import { basename } from "@/lib/path";
@@ -105,6 +107,7 @@ import {
 } from "@/lib/tauri";
 import type { AgentConfig, AgentModelSelection, SplitLayout } from "@/lib/tauri";
 import { listPluginAgents, resolvePluginAgentModels } from "@/plugins/agents";
+import { disposeTab as disposeEditorTab } from "@/state/editor-dirty-store";
 import { requestEditorLocation } from "@/state/editor-location-store";
 import type { OpenPluginWebViewRequest } from "@/plugins/webviews";
 import {
@@ -291,7 +294,7 @@ interface WorkspaceContextValue extends WorkspaceState {
     options?: WorktreeTargetOptions,
   ) => Promise<Tab | null>;
   /** Create a new tab inside a specific split pane (the pane's "+" button). */
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
   /** Opens (or focuses) an editor tab for a worktree-relative file path. */
   openFileTab: (path: string, opts?: { paneId?: string }) => Promise<void>;
   /** Opens (or focuses) a read-only diff tab for a worktree-relative file path. */
@@ -2380,8 +2383,20 @@ function useAgentNavigation(
       if (recordBack) {
         recordAgentBackLocation(stateRef.current, setAgentBackLocation);
       }
-      if (stateRef.current.selectedProjectId !== projectId) {
-        await loadProjectWorkspace(projectId, dispatch);
+      const current = stateRef.current;
+      const targetMissing =
+        !current.tabs.some((tab) => tab.id === tabId && tab.worktreeId === worktreeId) ||
+        !current.worktrees[projectId]?.some((worktree) => worktree.id === worktreeId);
+      let loadedTabs = current.tabs;
+      if (current.selectedProjectId !== projectId || targetMissing) {
+        loadedTabs = await loadProjectWorkspace(projectId, dispatch);
+      }
+      if (!loadedTabs.some((tab) => tab.id === tabId && tab.worktreeId === worktreeId)) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 300));
+        loadedTabs = await loadProjectWorkspace(projectId, dispatch);
+      }
+      if (!loadedTabs.some((tab) => tab.id === tabId && tab.worktreeId === worktreeId)) {
+        return;
       }
       dispatch({ type: "select-worktree", projectId, worktreeId });
       dispatch({ type: "set-active-tab", worktreeId, tabId });
@@ -2766,7 +2781,7 @@ function useTabCreation(
   ) => Promise<Tab | null>;
   createTerminalTab: (worktreeId?: string, options?: WorktreeTargetOptions) => Promise<Tab | null>;
   createBrowserTab: (worktreeId?: string) => Promise<Tab | null>;
-  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<void>;
+  createTabInPane: (paneId: string, kind: "terminal" | "browser") => Promise<Tab | null>;
 } {
   const createTab = useCallback(
     async (
@@ -2789,10 +2804,13 @@ function useTabCreation(
       try {
         const tab = await createTabOfKind(kind, projectId, targetWorktreeId, options?.shell);
         // The workspace only keeps tabs for its selected project. A background
-        // creation may finish after its owner is no longer selected.
-        if (selectedProjectIdRef.current === projectId) {
-          dispatchNewTab(dispatch, tab, paneId);
+        // creation may finish after its owner is no longer selected — treat it
+        // as failed rather than handing callers a tab that was never dispatched
+        // (and so will never mount a terminal to receive an agent command).
+        if (selectedProjectIdRef.current !== projectId) {
+          return null;
         }
+        dispatchNewTab(dispatch, tab, paneId);
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
@@ -2818,9 +2836,7 @@ function useTabCreation(
     [createTab],
   );
   const createTabInPane = useCallback(
-    async (paneId: string, kind: "terminal" | "browser") => {
-      await createTab(kind, paneId);
-    },
+    (paneId: string, kind: "terminal" | "browser") => createTab(kind, paneId),
     [createTab],
   );
   return { createTab, createTerminalTab, createBrowserTab, createTabInPane };
@@ -2876,6 +2892,11 @@ function useDeepLinkHandler(
     async (rawUrl: string) => {
       const link = parseNewSessionDeepLink(rawUrl);
       if (!link) {
+        const installLink = parsePluginInstallDeepLink(rawUrl);
+        if (installLink) {
+          requestPluginInstall(installLink);
+          return;
+        }
         const pluginLink = parsePluginDeepLink(rawUrl);
         if (pluginLink) {
           requestPluginDeepLink(pluginLink);
@@ -3745,6 +3766,7 @@ function useManagedScripts(
 /** Worktree open/status/delete/rename/hide actions. */
 function useWorktreeActions(
   state: WorkspaceState,
+  stateRef: RefObject<WorkspaceState>,
   dispatch: WorkspaceDispatch,
   setManagedScriptsState: Dispatch<SetStateAction<ManagedScriptsState>>,
   selectedWorktree: Worktree | null,
@@ -3798,22 +3820,35 @@ function useWorktreeActions(
   const deleteWorktree = useCallback(
     async (worktreeId: string, options: { deleteBranch: boolean; force: boolean }) => {
       const removedTabs = state.tabs.filter((tab) => tab.worktreeId === worktreeId);
-      await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
-      for (const tab of removedTabs) {
-        terminalManager.dispose(tab.id);
-        removeAgentStatusForTab(tab.id);
-        releaseAlertLatchForTab(tab.id);
-        if (tab.kind === "browser") {
-          void browserClose(tab.id);
-        }
-      }
+      const projectId = Object.entries(state.worktrees).find(([, worktrees]) =>
+        worktrees.some((worktree) => worktree.id === worktreeId),
+      )?.[0];
       dispatch({ type: "remove-worktree", worktreeId });
-      setManagedScriptsState((current) => {
-        const { [worktreeId]: _, ...remaining } = current;
-        return remaining;
-      });
+      try {
+        await deleteWorktreeCommand(worktreeId, options.deleteBranch, options.force);
+        for (const tab of removedTabs) {
+          terminalManager.dispose(tab.id);
+          removeAgentStatusForTab(tab.id);
+          releaseAlertLatchForTab(tab.id);
+          disposeEditorTab(tab.id);
+          if (tab.kind === "browser") {
+            void browserClose(tab.id);
+          }
+        }
+        setManagedScriptsState((current) => {
+          const { [worktreeId]: _, ...remaining } = current;
+          return remaining;
+        });
+        toast.success("Worktree deleted");
+      } catch (cause) {
+        if (projectId && stateRef.current.selectedProjectId === projectId) {
+          await loadProjectWorkspace(projectId, dispatch).catch(() => undefined);
+        }
+        toast.error(`Worktree deletion failed: ${errorMessage(cause)}`);
+        throw cause;
+      }
     },
-    [dispatch, setManagedScriptsState, state.tabs],
+    [dispatch, setManagedScriptsState, state.tabs, state.worktrees, stateRef],
   );
 
   const renameWorktree = useCallback(
@@ -4362,6 +4397,7 @@ function useWorkspacePersistence(
 /** Worktree actions, split layout, managed scripts, visible tabs, and split actions. */
 function useWorkspaceActions({
   state,
+  stateRef,
   dispatch,
   closeTab,
   managedScriptsState,
@@ -4374,6 +4410,7 @@ function useWorkspaceActions({
   visibleTabIdsRef,
 }: {
   state: WorkspaceState;
+  stateRef: RefObject<WorkspaceState>;
   dispatch: WorkspaceDispatch;
   closeTab: (tabId: string) => Promise<void>;
   managedScriptsState: ManagedScriptsState;
@@ -4392,7 +4429,7 @@ function useWorkspaceActions({
     deleteWorktree,
     renameWorktree,
     hideWorktree,
-  } = useWorktreeActions(state, dispatch, setManagedScriptsState, selectedWorktree);
+  } = useWorktreeActions(state, stateRef, dispatch, setManagedScriptsState, selectedWorktree);
 
   const {
     visibleTabs,
@@ -4693,6 +4730,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setRunScriptsConfigError,
     runScriptsConfig,
     runScriptsConfigError,
+    stateRef,
     visibleTabIdsRef,
   } = setup;
   const {
@@ -4727,6 +4765,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const workspaceActions = useWorkspaceActions({
     state,
+    stateRef,
     dispatch,
     closeTab,
     managedScriptsState,

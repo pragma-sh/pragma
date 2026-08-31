@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Pi",
+  "description": "Launch Pi in Pragma with live status, session naming, and interjections.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/pi-plugin/assets/pi-badge.svg",
+      "alt": "Pi logo"
+    }
+  ],
+  "install": { "command": "pi", "args": ["install", "."] },
+  "agentBinary": "pi"
+}

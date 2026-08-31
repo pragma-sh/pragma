@@ -8,7 +8,7 @@ use crate::http::AppState;
 #[serde(rename_all = "camelCase")]
 struct HealthBody {
     status: &'static str,
-    protocol_version: u64,
+    protocol_version: String,
     gateway_version: &'static str,
 }
 
@@ -16,7 +16,7 @@ struct HealthBody {
 #[serde(rename_all = "camelCase")]
 struct VersionBody {
     gateway_version: &'static str,
-    protocol_version: u64,
+    protocol_version: String,
 }
 
 /// Handles `GET /v1/health`.
@@ -25,7 +25,7 @@ pub fn health(state: &AppState) -> GatewayResult<tiny_http::Response<std::io::Cu
         200,
         &HealthBody {
             status: "ok",
-            protocol_version: state.client.protocol_version(),
+            protocol_version: state.client.protocol_version().to_string(),
             gateway_version: state.gateway_version,
         },
     )
@@ -37,7 +37,7 @@ pub fn version(state: &AppState) -> GatewayResult<tiny_http::Response<std::io::C
         200,
         &VersionBody {
             gateway_version: state.gateway_version,
-            protocol_version: state.client.protocol_version(),
+            protocol_version: state.client.protocol_version().to_string(),
         },
     )
 }

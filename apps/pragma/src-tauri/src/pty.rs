@@ -435,7 +435,7 @@ impl PtyClient {
 
     /// Reads the host server's advertised protocol version (used to verify a
     /// remote `pragma-server` is compatible before routing a project to it).
-    pub fn server_protocol_version(&self) -> AppResult<u64> {
+    pub fn server_protocol_version(&self) -> AppResult<String> {
         Ok(self.inner.server_protocol_version()?)
     }
 
@@ -606,8 +606,8 @@ fn gateway_discovery_healthy(path: &Path) -> bool {
     };
     let protocol_matches = value
         .get("protocolVersion")
-        .and_then(serde_json::Value::as_u64)
-        .is_some_and(|version| version == CONSTANTS.daemon.protocol_version.get());
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|version| version == CONSTANTS.daemon.protocol_version);
     let has_token = value
         .get("token")
         .and_then(serde_json::Value::as_str)
@@ -844,8 +844,8 @@ mod tests {
         std::fs::write(
             &discovery_path,
             format!(
-                r#"{{"port":{port},"token":"secret","pid":123,"protocolVersion":{}}}"#,
-                CONSTANTS.daemon.protocol_version.get()
+                r#"{{"port":{port},"token":"secret","pid":123,"protocolVersion":"{}"}}"#,
+                CONSTANTS.daemon.protocol_version
             ),
         )
         .expect("write discovery");
@@ -860,7 +860,7 @@ mod tests {
         let discovery_path = dir.path().join(CONSTANTS.gateway.discovery_file.as_str());
         std::fs::write(
             &discovery_path,
-            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":0}"#,
+            r#"{"port":4567,"token":"secret","pid":123,"protocolVersion":"0"}"#,
         )
         .expect("write discovery");
 

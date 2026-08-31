@@ -51,7 +51,6 @@ export function useScratchpadFile(tab: Tab): ScratchpadFile {
     tab,
     savedDocRef,
     currentDocRef,
-    { preserveOnUnmount: true },
   );
   const save = useEditorSave(tabId, worktreeId, filePath, savedDocRef);
   const onChange = useEditorOnChange(tabId, savedDocRef, currentDocRef);

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OfficialPluginList",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "packages"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "packages": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(?:@[a-z0-9._-]+/)?[a-z0-9._-]+$" }
+    }
+  }
+}

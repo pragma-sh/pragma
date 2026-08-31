@@ -3,6 +3,8 @@ import { isMarkdownPreferred, rewritePath } from "fumadocs-core/negotiation";
 
 import { docsContentRoute, docsRoute } from "@/lib/shared";
 
+export const config = { matcher: "/docs/:path*" };
+
 const { rewrite: rewriteDocs } = rewritePath(
   `${docsRoute}{/*path}`,
   `${docsContentRoute}{/*path}/content.md`,

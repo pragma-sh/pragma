@@ -35,9 +35,8 @@ interface WorktreeDeleteDialogProps {
  *     so a long-running session is still flagged), and
  *  2. Optionally, the user checking the "Also delete the branch" box.
  *
- * We use a plain `Button` (not `AlertDialogAction`) for the confirm action so
- * the click handler keeps full control: teardown scripts can fail and must keep
- * the modal open with an inline error.
+ * Confirmation closes immediately. Native teardown continues in the background;
+ * workspace state reconciles and shows a toast if it later fails.
  */
 export function WorktreeDeleteDialog({
   worktreeId,
@@ -62,7 +61,6 @@ export function WorktreeDeleteDialog({
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [dirty, setDirty] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -90,20 +88,15 @@ export function WorktreeDeleteDialog({
     };
   }, [open, worktreeId, workspace]);
 
-  async function confirm() {
-    setDeleting(true);
+  function confirm() {
     setError(null);
-    try {
-      await workspace.deleteWorktree(worktreeId, {
+    setOpen(false);
+    void workspace
+      .deleteWorktree(worktreeId, {
         deleteBranch,
         force: dirty === true,
-      });
-      setOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setDeleting(false);
-    }
+      })
+      .catch(() => undefined);
   }
 
   return (
@@ -138,15 +131,10 @@ export function WorktreeDeleteDialog({
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-          <Button
-            disabled={deleting}
-            onClick={() => void confirm()}
-            size="default"
-            variant="destructive"
-          >
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button onClick={confirm} size="default" variant="destructive">
             <Trash2 data-icon="inline-start" />
-            {deleting ? "Deleting..." : "Delete anyway"}
+            Delete anyway
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

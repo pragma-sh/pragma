@@ -7,6 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Text } from "@/components/ui/text";
 import { useConnection } from "@/lib/connection-context";
 import { checkHeartbeat, heartbeatSummary, type HeartbeatState } from "@/lib/heartbeat";
+import {
+  pushCheckSummary,
+  registrationFailure,
+  testOutcome,
+  type PushCheckState,
+} from "@/lib/push-check";
+import { registerForPush } from "@/lib/push";
 
 /** Settings tab: the host connection and the checks that act on it. */
 export default function SettingsScreen() {
@@ -24,6 +31,7 @@ export default function SettingsScreen() {
         contentInsetAdjustmentBehavior="automatic"
       >
         <HeartbeatCard />
+        <NotificationsCard />
         <UnpairCard host={hostName ?? config?.url ?? null} />
       </ScrollView>
     </View>
@@ -74,6 +82,87 @@ function useHeartbeat() {
 /** The heartbeat's one-line result, in the destructive tone when it failed. */
 function HeartbeatSummary({ state }: { state: HeartbeatState }) {
   const summary = heartbeatSummary(state);
+  if (!summary) return null;
+  return (
+    <Text
+      className={
+        state.kind === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+      }
+    >
+      {summary}
+    </Text>
+  );
+}
+
+/**
+ * Registers this device for agent alerts and asks the host to push one back.
+ *
+ * Push is silent in several unrelated ways — permission, a build with no push
+ * service, a host with nothing registered, a push service that refuses the
+ * message — and none of them surface anywhere else, so this is the one place
+ * that names which one is in play.
+ */
+function NotificationsCard() {
+  const { busy, run, state } = usePushCheck();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Notifications</CardTitle>
+        <CardDescription>
+          Agent alerts arrive as notifications while Pragma Go is closed. The desktop holds them
+          back while its own window is in front.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="gap-3">
+        <Button
+          className={busy ? "opacity-50" : undefined}
+          disabled={busy}
+          onPress={run}
+          variant="secondary"
+        >
+          <Text>Send a test notification</Text>
+        </Button>
+        <PushSummary state={state} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The notification check's state plus the action that runs it. */
+function usePushCheck() {
+  const { client } = useConnection();
+  const [state, setState] = useState<PushCheckState>({ kind: "idle" });
+
+  const run = () => {
+    if (!client) return;
+    setState({ kind: "checking" });
+    void runPushCheck(client).then(setState);
+  };
+
+  return { busy: !client || state.kind === "checking", run, state };
+}
+
+/** The connected client, which every check here needs and none can create. */
+type PushClient = NonNullable<ReturnType<typeof useConnection>["client"]>;
+
+/** Registers (or refreshes) this device, then asks the host to push to it. */
+async function runPushCheck(client: PushClient): Promise<PushCheckState> {
+  return registrationFailure(await registerForPush(client)) ?? sendTestPush(client);
+}
+
+/** Asks the host for a test push, reporting a transport failure as one. */
+async function sendTestPush(client: PushClient): Promise<PushCheckState> {
+  try {
+    return testOutcome(await client.push.test());
+  } catch {
+    return { kind: "failed", reason: "The desktop couldn't send a test notification." };
+  }
+}
+
+/** The check's one-line result, in the destructive tone when it failed. */
+function PushSummary({ state }: { state: PushCheckState }) {
+  const summary = pushCheckSummary(state);
   if (!summary) return null;
   return (
     <Text

@@ -11,6 +11,7 @@ import { useSyncExternalStore } from "react";
  */
 const dirty = new Map<string, boolean>();
 const docs = new Map<string, string>();
+const savedDocs = new Map<string, string>();
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -48,9 +49,20 @@ export function getTabDoc(tabId: string): string | null {
   return docs.get(tabId) ?? null;
 }
 
-/** Drops all transient state for a tab (on close/unmount). */
+/** Records the on-disk baseline used to restore dirty editors after a remount. */
+export function setTabSavedDoc(tabId: string, doc: string): void {
+  savedDocs.set(tabId, doc);
+}
+
+/** Reads the saved baseline for a preserved editor document, if any. */
+export function getTabSavedDoc(tabId: string): string | null {
+  return savedDocs.get(tabId) ?? null;
+}
+
+/** Drops all transient state for a tab after its close is confirmed. */
 export function disposeTab(tabId: string): void {
   docs.delete(tabId);
+  savedDocs.delete(tabId);
   setTabDirty(tabId, false);
 }
 

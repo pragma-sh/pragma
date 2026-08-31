@@ -1,6 +1,6 @@
 # Pragma Go — Agent & Contributor Guide
 
-Expo (SDK 57) client — iPhone, iPad, Android, and the browser — that mirrors the
+Expo (SDK 57) client — iPhone, Android, and the browser — that mirrors the
 desktop sidebar's worktree navigation, surfaces agent approvals/questions as an
 actionable inbox, and — once paired with a desktop — streams live agent chat and
 launches new sessions. The name is the point: it is Pragma for when you are away
@@ -32,6 +32,16 @@ from the desktop.
   reachability/token probe is `probeConnection()` (an authed `agents.catalog()`
   call). QR carries the protocol version; manual entry can't, so it's checked by
   the probe only.
+  - **The scanner highlights and then freezes.** Every detection is reduced to
+    one padded, clamped rectangle by the pure `lib/scan-frame.ts`, drawn over
+    the preview; `expo-camera` already reports corner points in the camera
+    view's own coordinate space on both platforms, so no projection is needed —
+    but a report that clamps to nothing (a stale layout, a letterboxed web
+    video) draws no box rather than a wrong one. `sameScanFrame` drops the
+    near-identical rectangles that arrive every camera frame, and a rectangle
+    that stops arriving expires. Once the screen is busy verifying a scan,
+    `CameraView.pausePreview()` holds the picture and the box stays on the code
+    that was read; a failed probe resumes both.
   - **ngrok interstitial gotcha:** every gateway request goes through
     `clientFor()` in `lib/connection-context.tsx`, which sets the
     `ngrok-skip-browser-warning` header. ngrok's free tier serves an HTML
@@ -114,6 +124,9 @@ from the desktop.
 ## Stack
 
 - **Expo SDK 57** + **expo-router** (file-based routing, typed routes, React Compiler).
+- **EAS Update** (`eas.json` + `expo-updates`): preview channel publishes OTA on `main`
+  via `.eas/workflows/update.yml`. Native binary bumps still go through EAS Build
+  (`runtimeVersion.policy: appVersion`).
 - **New Architecture** enabled; requires a **custom dev build** (not Expo Go) because
   of native modules (liquid glass, native tabs, gesture-handler/reanimated 4).
 - **NativeWind v4** (Tailwind) for styling; tokens live in `global.css` + `tailwind.config.js`.
@@ -152,7 +165,7 @@ from the desktop.
 app/
   _layout.tsx                     # providers: GestureHandlerRoot, SafeArea, Connection, Theme, Data, PortalHost
   pair.tsx                        # QR + manual pairing (modal)
-  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable on iPad
+  (tabs)/_layout.tsx              # NativeTabs: Projects + Inbox (badge) + Settings; sidebarAdaptable (iPad support is off — see App Store builds)
   (tabs)/_layout.web.tsx          # JS Projects + Inbox + Settings bottom tabs; wide routes also show a sidebar
   (tabs)/(projects)/              # Stack: drill-down
     index.tsx                     #   all projects
@@ -193,7 +206,9 @@ lib/
   haptics.ts                     # haptic intent wrappers
   widgets/                       # widget-data (pure, Vitest) + widget layouts + app→widget sync
   push.ts                        # Expo push: permission, token registration, unregister + retry
+  push-check.ts                  # pure: settings notification check → one readable line (Vitest)
   push-route.ts                  # pure: notification data → chat route (Vitest)
+  scan-frame.ts                  # pure: barcode report → highlight rectangle (Vitest)
   pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
   registration-gate.ts           # pure: orders registration before unregister (Vitest)
   use-push-notifications.ts      # registers on pair, opens the tab a tapped alert names
@@ -203,6 +218,13 @@ lib/
   theme.ts                       # resolved colors for native props that take a string
   viewed-project.ts              # pure: focused screen's project theme root store (Vitest)
   use-viewed-project.ts          # focus hook reporting a screen's project root to that store
+assets/AppIcon.icon/             # generated layered iOS Liquid Glass icon
+assets/images/                   # generated Android/store icons + favicon source (never hand-edited)
+public/                          # copied verbatim into the web export: index.html, favicon.svg
+scripts/
+  icon-variants.ts               # which icon slots exist + the SVG behind each (mark from @pragma/brand)
+  generate-icons.ts              # rasterises them into assets/images + public (`bun run icons`)
+  icons.test.ts                  # appearance/transparency + Android safe-zone invariants (Vitest)
 ```
 
 ## Widgets
@@ -287,6 +309,11 @@ implemented in `lib/widgets/`:
   and platform checks stay in one place. The same rule covers
   `@react-native-menu/menu` (`components/ui/menu-view`), `expo-secure-store`
   (`lib/secret-store`), and `expo/fetch` (`lib/gateway-fetch`).
+- **A `BottomSheet`'s buttons go in its `footer` prop, never in `children`.** The
+  panel shrinks to whatever room the keyboard leaves and its content scrolls, so a
+  submit button placed after a text field is scrolled out of sight exactly when the
+  user reaches for it. `footer` renders outside the `ScrollView` and stays pinned
+  above the home indicator.
 - **Web differences belong in a `.web` twin, not an `if`.** A `*.web.ts(x)` file
   beside the native one is how the browser build differs; a `Platform.OS === "web"`
   branch inside a shared module is not. The twin is also what keeps a native-only
@@ -339,6 +366,17 @@ implemented in `lib/widgets/`:
   minting needs an EAS project id from the runtime manifest or `extra.eas.projectId`
   in `app.json`; without it `registerForPush` returns `unsupported` and the app runs
   unchanged.
+- **Silence has several unrelated causes, so Settings names the one in play.** Push can
+  be quiet because permission was refused, because the build has no push service (a
+  simulator, the browser), because the host has no phone registered, because the
+  desktop window is focused and the gateway is deliberately holding alerts back, or
+  because Expo refused the message — an APNs key the EAS project never got shows up
+  only as an `InvalidCredentials` ticket, and nothing else ever reports it. The
+  Notifications card in `app/(tabs)/settings/index.tsx` registers and then calls
+  `client.push.test()`, which now answers `200` with `{ sent, errors }` so the
+  rejection reaches the phone verbatim; `lib/push-check.ts` holds the pure mapping to
+  one line. The agent-alert path logs the same rejections on the host. Before
+  debugging anything else, check the desktop is not simply in front of the user.
 - **An unregister the host never acknowledged is queued, never dropped.** Unpair has to
   work with the desktop unreachable, but discarding the failed `DELETE /v1/push/tokens`
   would leave the gateway pushing agent-alert text to a phone that can no longer ask it
@@ -374,6 +412,103 @@ Bun's default **isolated** linker (`@babel/preset-*` become unresolvable). The r
 `expo export` / `expo start` fail with `Cannot find module 'babel-preset-expo'` and
 friends.
 
+## Config plugins (`plugins/`)
+
+Local Expo config plugins live in `plugins/` and are registered by path in
+`app.json`'s `plugins` array.
+
+- **Include the `.ts` suffix in local plugin paths.** Expo CLI can resolve an
+  extensionless TypeScript plugin during local config inspection, but EAS Update's
+  resolver cannot; both local `eas update` and remote update workflows fail before
+  bundling with `Failed to resolve plugin`.
+
+- **`with-android-splash-logo`** strips the dangling
+  `windowSplashScreenAnimatedIcon` -> `@drawable/splashscreen_logo` item that
+  `expo-splash-screen` writes into `res/values/styles.xml`. That plugin writes
+  the item unconditionally but only emits the drawable when it is configured
+  with an `image`/`drawable`. Our splash is a background colour with no logo
+  (matching the iOS storyboard, whose `<subviews/>` is empty), so the drawable
+  never exists and `:app:processDebugResources` fails with
+  `resource drawable/splashscreen_logo ... not found`. Android then falls back
+  to the launcher icon, which `android:windowSplashScreenBehavior="icon_preferred"`
+  already asks for. If a splash logo is ever wanted, delete this plugin and give
+  `expo-splash-screen` an `image` instead.
+- **`with-store-ios-cleanup`** strips the `expo-dev-client` traces
+  (`NSBonjourServices: _expo._tcp`, the `exp+pragma-go` URL scheme) from the
+  iOS `Info.plist`. The dev launcher's pods are Debug-only, but its config
+  plugin writes those keys into _every_ prebuild, so a store binary would ship
+  a Bonjour service it never browses and a URL scheme nothing handles — both of
+  which App Review reads as undeclared capabilities. It is applied by
+  `app.config.ts`, not `app.json`, and only when `PRAGMA_STORE_BUILD` is set,
+  so a dev-client prebuild keeps the discovery it depends on. The EAS `preview`
+  and `production` profiles set it. `NSLocalNetworkUsageDescription` is
+  **not** stripped — pairing to a desktop at a LAN address genuinely needs it —
+  it is overridden in `app.json` with wording about pairing rather than the
+  dev-launcher default about development servers.
+- **Mods run last-registered-first.** `withMod` intercepts whatever mod is
+  already on the config and calls it as `nextMod`, so an _earlier_ entry in the
+  `plugins` array runs _after_ a later one. A plugin that overrides another
+  plugin's output must therefore be listed **before** it —
+  `with-android-splash-logo` sits above `expo-splash-screen` for this reason.
+  Listing it after silently does nothing.
+
+## App icons and favicon (`assets/`, `scripts/`)
+
+Every icon is rendered from one vector source — `@pragma/brand`, a redraw of
+the desktop app's mark (`apps/pragma/src-tauri/icons`, which ships only raster
+files). That package owns the geometry and the palettes and nothing else;
+`scripts/icon-variants.ts` owns the Expo- and platform-shaped decisions on top
+of it. `bun run --filter pragma-go icons` regenerates the Icon Composer bundle,
+PNGs, theme-aware `public/favicon.svg`, and `public/index.html`. **Do not
+hand-edit any of those outputs**; they are committed because `expo prebuild`
+and `expo export` read them as plain files and neither native builds nor CI run
+the generator.
+
+- **The mark's geometry was traced off the desktop icon, not eyeballed.** Three
+  measurements are easy to get wrong and all three are glaring: the bowl is a
+  **rounded rectangle** (right edge straight for ~60 units between corners of
+  radius 157), _not_ a semicircular cap; the rule under the bowl runs the
+  **full width** from the left edge to the bowl's bottom-right curve, so the
+  stem's right edge meets it as a T rather than closing a corner; and the two
+  stacked cards are near-square and step **down-and-right** in equal measure,
+  so the stack recedes down the page instead of rising to the right. If you
+  re-trace, measure edge positions off the PNG rather than trusting a redraw.
+- **The plated icons draw at their authored coordinates; only Android
+  re-centres.** The desktop composition sits slightly right of centre, because
+  the bold "P" is left-heavy and the faint cards balance it. `placedMark` is
+  for the Android safe zone and the favicon; `markMarkup` is for everything
+  else.
+- **iOS uses Icon Composer, not flattened appearance PNGs.** `ios.icon` points
+  at `assets/AppIcon.icon`, whose `system-light` / `system-dark` fills and
+  layered vector artwork let iOS apply native Liquid Glass, depth, lighting,
+  and tint effects. Baking either plate into a PNG makes the icon look like a
+  solid tile beside current iOS icons. The generator emits separate light,
+  dark, and tinted artwork layers because recolouring one composite SVG turns
+  the whole mark into a silhouette and loses its prompt and card details.
+- **Only Android foregrounds keep an alpha channel among PNG outputs.** The
+  Android/store plate stays opaque; adaptive and monochrome foregrounds remain
+  transparent because the launcher supplies their background.
+- **The Android adaptive foreground is deliberately small.** A launcher masks
+  the 108dp canvas to a shape of its choosing and only the central 66dp is
+  guaranteed to survive. The mark is nearly square, so its corners sit much
+  further from the centre than its edges — at the iOS coverage a circular mask
+  takes a corner off the "P" and the back card. `ADAPTIVE_COVERAGE` keeps the
+  outermost ink inside that circle, and the test measures it.
+- **`monochromeImage` is what makes Android themed icons work**, and it is the
+  Android counterpart of the iOS tinted appearance: the system keeps only the
+  alpha channel, so the stacked cards carry their depth as partial alpha.
+- **The favicon keeps the outlined mark but drops the cards and thickens the
+  stroke 1.9x.** The cards are the first thing to turn to noise, and at its
+  authored weight the outline lands under half a pixel at 16px and dissolves.
+  1.9x is where the bowl's counter still reads as a hole at 16px without the
+  mark becoming a blob at 48px. A solid letter "P" survives 16px better still,
+  but it stops looking like the app icon, which is the point of a favicon.
+- **The favicon links live in `public/index.html`.** Expo reads that file as its
+  web template (`getTemplateIndexHtmlAsync`), and `web.favicon` only ever emits
+  one `/favicon.ico`. The theme-aware SVG is inlined there as a `data:` URI on
+  purpose: the bundle is served under a base path (`/web`), and a relative
+  `href` would resolve against the current route on a deep-link reload.
+
 ## Commands
 
 ```bash
@@ -382,12 +517,91 @@ bun run --filter pragma-go start         # Metro dev server (needs a dev build t
 bun run --filter pragma-go ios           # build + run iOS dev client
 bun run --filter pragma-go android       # build + run Android dev client
 bun run --filter pragma-go typecheck     # tsc --noEmit
-bun run --filter pragma-go test          # Vitest (pure lib/**/*.test.ts, node env)
+bun run --filter pragma-go test          # Vitest (lib/** + scripts/** *.test.ts, node env)
 bun run --filter pragma-go prebuild      # generate native ios/ android projects
+bun run --filter pragma-go icons         # re-render app icons + favicon from the vector source
 bun run --filter pragma-go web           # Metro dev server for the browser build
 bun run --filter pragma-go export:web    # production web export into ./dist
 bun run --filter pragma web:stage        # export + stage into the desktop's Tauri resources
 ```
+
+## App Store / Play Store builds
+
+`eas.json` holds three profiles: `development` (dev client, internal),
+`preview` (a store-shaped build for internal distribution), and `production`.
+
+```bash
+eas build --platform ios --profile production
+eas submit --platform ios --latest
+```
+
+- **`eas-build-post-install` builds the workspace dependencies, and the build
+  fails without it.** `@pragma/sdk` and `@pragma/scratchpad-viewer` resolve
+  through `./dist/*`, and `@pragma/constants` needs its `src/generated/**` —
+  all three are gitignored, so on an EAS worker they do not exist and the
+  Bundle JavaScript phase dies with an unhelpful `Unknown error`. The hook runs
+  the same `turbo run build --filter=pragma-go^...` that `preexport:web` uses
+  for the web export. Any new workspace dependency whose entry point is built
+  rather than committed is covered automatically by that filter — but a package
+  that builds through some other task is not.
+- **`appVersionSource` is `remote`**, so EAS owns `ios.buildNumber` /
+  `android.versionCode` and `autoIncrement` on the production profile bumps them
+  server-side; `app.json`'s `version` (the marketing version, `1.0.0`) stays the
+  source of truth for the store listing. Do not hand-bump the build number.
+- **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
+  and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
+  set it for a dev-client build.
+
+## Over-the-air updates (EAS Update)
+
+A JavaScript-only fix ships with `eas update`; no new binary, no new TestFlight
+build, no review.
+
+```bash
+eas update --branch production --message "fix: keep sheet actions above the keyboard"
+```
+
+- **`runtimeVersion.policy` is `appVersion`.** An update is only served to
+  builds whose runtime version matches, and here that is `expo.version`
+  (`1.0.0`) — so every build of 1.0.0 takes the same updates regardless of
+  build number, and bumping `version` deliberately cuts old binaries off from
+  new JS. Change anything native (a new module, a config-plugin change, an SDK
+  bump) and you must ship a new binary: the old one keeps the old native code
+  and an OTA JS bundle expecting the new one crashes on launch.
+- **Each build profile has a `channel`** (`development` / `preview` /
+  `production`) which EAS maps to a branch of the same name. `--branch` on
+  `eas update` names the branch, not the channel.
+- **A build made before `expo-updates` was installed can never receive an
+  update.** The runtime is native. Installing the package is itself a native
+  change, so the first OTA-capable binary has to be built and submitted the
+  ordinary way.
+
+- **The App Store listing name is `Pragma Sh Go`; everything here says
+  `Pragma Go`. This is deliberate — do not "fix" it.** `Pragma Go` was already
+  taken in App Store Connect, whose names are globally unique, so the listing
+  had to differ. The listing name lives only in App Store Connect metadata: it
+  is never read from `app.json`, and the binary is matched to the record by
+  bundle ID (`sh.pragma.go`). `expo.name` / `CFBundleDisplayName` drive the
+  **home-screen** name, which stays `Pragma Go` — shorter than the ~12
+  characters iOS truncates at, and a store name that contains the device name
+  is ordinary (App Review guideline 2.3.8 asks only that the two not mislead).
+  User-visible copy, docs, and the privacy policy all use `Pragma Go` for the
+  same reason: the `Sh` is a listing workaround, not a product rename.
+- **`supportsTablet` is off.** iPad is a separate review surface with its own
+  required screenshots and its own wide-layout code path (`AppSidebar`, the
+  `NativeTabs sidebarAdaptable` sidebar). Turning it on means committing to
+  testing it — the web build's wide layout is not proof.
+- **Permission strings must name their purpose.** `expo-camera` is configured
+  with a `cameraPermission` that says QR pairing and `microphonePermission:
+false`; an unused permission string is a rejection on its own.
+- **The privacy policy** is served by `apps/www` at `/privacy` and its URL is
+  stored in App Store Connect; support goes to the repository's GitHub issues.
+  Keep the policy honest about the push-notification relay (Expo -> APNs/FCM),
+  the camera's single use, and the fact that the app talks only to the user's
+  own desktop. It is written to cover future analytics and hosted services as
+  things disclosed _before_ they launch — so shipping either means editing that
+  page first, and re-answering App Store Connect's App Privacy questionnaire,
+  which today declares "Data Not Collected".
 
 Typecheck needs `@pragma/sdk`'s built `dist` (`bun run --filter @pragma/sdk build`);
 `turbo typecheck`/`test` build it via `^build`.

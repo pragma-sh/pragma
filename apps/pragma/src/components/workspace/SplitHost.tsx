@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
-import { Globe, Plus, SquareTerminal, X } from "lucide-react";
+import { Bot, Globe, Pencil, Plus, SquareTerminal, X } from "lucide-react";
 
 import { BrowserView } from "@/components/browser/BrowserView";
 import { DiffView } from "@/components/editor/DiffView";
@@ -16,10 +16,21 @@ import { ReviewTab } from "@/components/github/ReviewTab";
 import { PluginWebViewTab } from "@/plugins/PluginWebViewTab";
 import { IconButton, IconTooltip } from "@/components/ui/icon-button";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
+import { AgentIcon } from "@/components/agents/AgentIcon";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -36,7 +47,11 @@ import {
   TAB_DRAG_TYPE,
 } from "@/components/tabs/tab-drag";
 import { TabDirtyDot, TabIcon, tabTitle } from "@/components/tabs/tab-label";
-import { browserFocus } from "@/lib/tauri";
+import { TabRenameInput } from "@/components/tabs/TabRenameInput";
+import { type TabRenameApi, useTabRename } from "@/components/tabs/use-tab-rename";
+import { useAgentsList } from "@/hooks/use-agents-list";
+import { startAgentInTab } from "@/lib/agent-launch";
+import { type AgentConfig, browserFocus } from "@/lib/tauri";
 import { terminalManager } from "@/lib/terminal-manager";
 import { cn } from "@/lib/utils";
 import { useTabAgentStatus } from "@/state/agent-status-store";
@@ -422,10 +437,10 @@ function PaneBar({
   pane: SplitPaneNode;
   tabs: Tab[];
 }) {
-  const workspace = useWorkspace();
   const requestClose = useConfirmClose();
   const requestCloseTabs = useConfirmCloseTabs();
   const { beginTabDrag, endTabDrag } = useTabDrag();
+  const rename = useTabRename();
 
   // The drop itself is resolved from the window (see `useTabDropIntent`); the bar
   // only reports that a drop here would merge rather than split.
@@ -437,78 +452,19 @@ function PaneBar({
       )}
       {...{ [PANE_BAR_ATTR]: "" }}
     >
-      {tabs.map((tab) => {
-        const active = tab.id === activeTabId;
-        return (
-          <div
-            className={cn(
-              "group flex h-6 min-w-24 max-w-44 items-center gap-1 rounded-md border px-1.5 text-xs",
-              active
-                ? "border-border bg-elevated text-foreground"
-                : "text-muted-foreground border-transparent hover:bg-muted",
-            )}
-            draggable
-            key={tab.id}
-            onDragStart={(event) => {
-              event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
-              event.dataTransfer.effectAllowed = "move";
-              beginTabDrag(tab.id);
-            }}
-            onDragEnd={endTabDrag}
-          >
-            <button
-              className="flex h-full min-w-0 flex-1 items-center gap-1 text-left"
-              onClick={(event) => {
-                event.stopPropagation();
-                workspace.setPaneActiveTab(pane.id, tab.id);
-                if (tab.kind === "terminal") {
-                  terminalManager.focus(tab.id, true);
-                }
-              }}
-            >
-              <TabIcon tab={tab} />
-              <TabAgentDot tabId={tab.id} />
-              <span className="min-w-0 flex-1 truncate">{tabTitle(tab)}</span>
-            </button>
-            <TabDirtyDot tabId={tab.id} />
-            <IconTooltip label="Close tab">
-              <button
-                aria-label="Close tab"
-                className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  requestClose(tab);
-                }}
-              >
-                <X className="size-3" />
-              </button>
-            </IconTooltip>
-          </div>
-        );
-      })}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <IconButton
-            aria-label="New tab in pane"
-            className="size-6 shrink-0"
-            label="New tab"
-            size="icon-sm"
-            variant="ghost"
-          >
-            <Plus className="size-3.5" />
-          </IconButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem onSelect={() => void workspace.createTabInPane(pane.id, "terminal")}>
-            <SquareTerminal />
-            Terminal
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void workspace.createTabInPane(pane.id, "browser")}>
-            <Globe />
-            Browser
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {tabs.map((tab) => (
+        <PaneTab
+          active={tab.id === activeTabId}
+          beginTabDrag={beginTabDrag}
+          endTabDrag={endTabDrag}
+          key={tab.id}
+          paneId={pane.id}
+          rename={rename}
+          requestClose={requestClose}
+          tab={tab}
+        />
+      ))}
+      <PaneNewTabMenu paneId={pane.id} />
       {/* Closing every tab in the pane collapses it, which is how a split is
           dissolved from inside the split itself. */}
       <IconButton
@@ -525,6 +481,168 @@ function PaneBar({
         <X className="size-3.5" />
       </IconButton>
     </div>
+  );
+}
+
+/** One tab entry in a pane bar: drag handle, inline rename, close, context menu. */
+function PaneTab({
+  active,
+  beginTabDrag,
+  endTabDrag,
+  paneId,
+  rename,
+  requestClose,
+  tab,
+}: {
+  active: boolean;
+  beginTabDrag: (tabId: string) => void;
+  endTabDrag: () => void;
+  paneId: string;
+  rename: TabRenameApi;
+  requestClose: (tab: Tab) => void;
+  tab: Tab;
+}) {
+  const workspace = useWorkspace();
+  const displayTitle = tabTitle(tab);
+  const isRenaming = tab.id === rename.renamingTabId;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group flex h-6 min-w-24 max-w-44 items-center gap-1 rounded-md border px-1.5 text-xs",
+            active
+              ? "border-border bg-elevated text-foreground"
+              : "text-muted-foreground border-transparent hover:bg-muted",
+          )}
+          // A renaming tab must not be draggable: the drag gesture otherwise wins
+          // over selecting text inside the input.
+          draggable={!isRenaming}
+          onDragStart={(event) => {
+            event.dataTransfer.setData(TAB_DRAG_TYPE, tab.id);
+            event.dataTransfer.effectAllowed = "move";
+            beginTabDrag(tab.id);
+          }}
+          onDragEnd={endTabDrag}
+        >
+          {isRenaming ? (
+            <TabRenameInput className="text-xs" rename={rename} />
+          ) : (
+            <button
+              className="flex h-full min-w-0 flex-1 items-center gap-1 text-left"
+              onClick={(event) => {
+                event.stopPropagation();
+                workspace.setPaneActiveTab(paneId, tab.id);
+                if (tab.kind === "terminal") {
+                  terminalManager.focus(tab.id, true);
+                }
+              }}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                rename.startRename(tab.id, displayTitle);
+              }}
+            >
+              <TabIcon tab={tab} />
+              <TabAgentDot tabId={tab.id} />
+              <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+            </button>
+          )}
+          <TabDirtyDot tabId={tab.id} />
+          <IconTooltip label="Close tab">
+            <button
+              aria-label="Close tab"
+              className="rounded p-0.5 opacity-60 hover:bg-muted hover:opacity-100"
+              onClick={(event) => {
+                event.stopPropagation();
+                requestClose(tab);
+              }}
+            >
+              <X className="size-3" />
+            </button>
+          </IconTooltip>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => rename.startRenameFromMenu(tab.id, displayTitle)}>
+          <Pencil />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => requestClose(tab)}>
+          <X />
+          Close
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/**
+ * The pane's "+" menu: a new terminal or browser tab in this pane, plus the
+ * configured agents, each launched into a terminal tab of this pane.
+ */
+function PaneNewTabMenu({ paneId }: { paneId: string }) {
+  const workspace = useWorkspace();
+  const agents = useAgentsList();
+
+  const launchAgent = useCallback(
+    async (agent: AgentConfig) => {
+      const tab = await workspace.createTabInPane(paneId, "terminal");
+      if (!tab) {
+        return;
+      }
+      void workspace.markTabAgent(tab.id, agent);
+      startAgentInTab(tab.id, agent);
+    },
+    [paneId, workspace],
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          aria-label="New tab in pane"
+          className="size-6 shrink-0"
+          label="New tab"
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Plus className="size-3.5" />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => void workspace.createTabInPane(paneId, "terminal")}>
+          <SquareTerminal />
+          Terminal
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void workspace.createTabInPane(paneId, "browser")}>
+          <Globe />
+          Browser
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Bot />
+            Open agent
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="min-w-52">
+            {agents.length === 0 ? (
+              <DropdownMenuItem disabled>No agents configured</DropdownMenuItem>
+            ) : (
+              agents.map((agent) => (
+                <DropdownMenuItem
+                  className="gap-2"
+                  key={agent.id}
+                  onSelect={() => void launchAgent(agent)}
+                >
+                  <AgentIcon agent={agent} />
+                  <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

@@ -1,5 +1,6 @@
 import { constants } from "@pragma/constants";
 
+import { announceSubmittedCommand } from "@/lib/agent-plugin-prompt";
 import { modelLaunchArgs } from "@/lib/agent-model-selection";
 import {
   type AgentConfig,
@@ -76,12 +77,17 @@ export function startAgentInTab(
   const message = prefill?.trim() ? prefill : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
   window.setTimeout(() => {
-    write(`${command}\r`);
+    runAgentCommand(command, write);
     scheduleStartupInput(agent, write);
     if (message) {
       schedulePrefill(agent, message, write);
     }
   }, AGENT_START_DELAY_MS);
+}
+
+function runAgentCommand(command: string, write: (data: string) => void): void {
+  announceSubmittedCommand(command);
+  write(`${command}\r`);
 }
 
 function prefillDelayMs(agent: AgentConfig): number {
@@ -238,7 +244,7 @@ export async function startBackgroundAgentSession(
     }
   }
   window.setTimeout(() => {
-    write(`${command}\r`);
+    runAgentCommand(command, write);
     scheduleStartupInput(agent, write);
     if (message) {
       scheduleBackgroundPrefill(agent, message, write, alternateScreen);

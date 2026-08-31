@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["bun", "node"]
+  },
+  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+}

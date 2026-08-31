@@ -24,5 +24,6 @@ system prerequisites (https://v2.tauri.app/start/prerequisites/).
 ## Contributing
 
 Read **[AGENTS.md](./AGENTS.md)** — it documents the architecture, code standards, and
-workflows for both humans and AI agents (`CLAUDE.md` is a symlink to it). Agent skills
-live in `.agents/skills` (symlinked to `.claude/skills`).
+workflows for both humans and AI agents (`CLAUDE.md` is a symlink to it). User-facing skill
+sources live in `skills/` and link into `.agents/skills`; internal skills live directly in
+`.agents/skills` (exposed through `.claude/skills`).

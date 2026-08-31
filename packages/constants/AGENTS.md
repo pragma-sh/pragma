@@ -31,8 +31,12 @@ The Rust side parses `values.json` against the schema-generated types at startup
 
 - `app.name` / `app.identifier` — mirror in `src-tauri/tauri.conf.json` (Tauri reads
   its config statically; keep the two in sync if you change window defaults here).
-- `daemon.protocolVersion` — protocol compatibility value for `pragma-server`; see
-  `crates/pragma-server/AGENTS.md`.
+- `daemon.protocolVersion` — SemVer string mirrored from `crates/pragma-protocol`'s
+  Cargo version by `bun run generate`. Exact equality on Hello / pairing / health.
+  Do not edit it by hand.
+- `updates.*` — shipped desktop auto-update defaults (production/dev check URLs,
+  poll interval, apply-mode labels, installer platform ids). User overrides live in
+  global `.pragma/config.json` `other` block (`OtherSettings`).
 - `gateway.discoveryFile` / `gateway.tokenHeader` — local HTTP gateway discovery file
   name and bearer auth header. The gateway port is intentionally runtime-assigned and
   must not be added as a constant.

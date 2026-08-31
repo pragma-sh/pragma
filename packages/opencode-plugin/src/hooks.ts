@@ -115,6 +115,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
   const childSessions = new Map<string, string>();
   const activeChildSessions = new Set<string>();
   let pendingLegacyQuestion: ReturnType<typeof setTimeout> | null = null;
+  let activeCanonicalQuestionId: string | null = null;
 
   const EVENT_HANDLERS: Record<string, (event: RuntimeEvent) => EventAction> = {
     "session.status": applySessionStatusEvent,
@@ -171,6 +172,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
       return false;
     }
     cancelPendingLegacyQuestion();
+    activeCanonicalQuestionId = questionRequestId(event) ?? null;
     await raiseQuestionAttention(
       isRecord(event.properties) ? event.properties : {},
       questionRequestId(event),
@@ -377,6 +379,7 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
    */
   async function clear(): Promise<void> {
     cancelPendingLegacyQuestion();
+    activeCanonicalQuestionId = null;
     busy = false;
     attention = false;
     childSessions.clear();
@@ -533,8 +536,13 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     return "sync";
   }
 
-  function applyQuestionRepliedEvent(): EventAction {
+  function applyQuestionRepliedEvent(event: RuntimeEvent): EventAction {
+    const responseId = questionResponseId(event);
+    if (activeCanonicalQuestionId !== null && responseId !== activeCanonicalQuestionId) {
+      return "none";
+    }
     cancelPendingLegacyQuestion();
+    activeCanonicalQuestionId = null;
     attention = false;
     busy = true;
     return "sync";
@@ -676,6 +684,9 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
 
   /** Updates flags from a question tool part's state: resume when resolved, else raise. */
   function applyQuestionPartState(part: Record<string, unknown>): void {
+    if (activeCanonicalQuestionId !== null) {
+      return;
+    }
     const state = isRecord(part.state) ? part.state : undefined;
     if (questionPartFinished(state)) {
       cancelPendingLegacyQuestion();
@@ -698,12 +709,18 @@ export function createPragmaOpencodeHooks(reporter: PragmaReporter): Hooks {
     args: Record<string, unknown>,
     requestId: string | undefined,
   ): void {
+    if (activeCanonicalQuestionId !== null) {
+      return;
+    }
     cancelPendingLegacyQuestion();
     // OpenCode 1.18 invokes legacy question hooks immediately before emitting
     // `question.asked`, whose `que_*` id is the only id its live prompt owns.
     // Defer fallback reporting until that canonical event has a chance to win.
     pendingLegacyQuestion = setTimeout(() => {
       pendingLegacyQuestion = null;
+      if (activeCanonicalQuestionId !== null) {
+        return;
+      }
       void raiseQuestionAttention(args, requestId).catch(() => undefined);
     }, 50);
   }
@@ -801,6 +818,13 @@ function questionPartInput(
 function questionRequestId(event: RuntimeEvent): string | undefined {
   const properties: unknown = event.properties;
   return isRecord(properties) && typeof properties.id === "string" ? properties.id : undefined;
+}
+
+function questionResponseId(event: RuntimeEvent): string | undefined {
+  const properties: unknown = event.properties;
+  if (!isRecord(properties)) return undefined;
+  if (typeof properties.requestID === "string") return properties.requestID;
+  return typeof properties.id === "string" ? properties.id : undefined;
 }
 
 /** A unique correlation id for one command-approval round-trip. Opaque. */

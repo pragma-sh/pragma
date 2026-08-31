@@ -1,4 +1,4 @@
-# packages/codex-plugin - @pragma/codex-plugin
+# packages/codex-plugin - @pragma-sh/codex-plugin
 
 Self-contained OpenAI Codex CLI integration. Codex plugins are declarative bundles, not
 in-process JavaScript plugins, so lifecycle reporting uses Codex's native command hooks and
@@ -169,8 +169,8 @@ or generic terminal icons.
 ## Installation
 
 ```bash
-bun run --filter @pragma/codex-plugin build
-bun run --filter @pragma/codex-plugin install:local
+bun run --filter @pragma-sh/codex-plugin build
+bun run --filter @pragma-sh/codex-plugin install:local
 ```
 
 Installer registers this package as local Codex marketplace and installs
@@ -207,10 +207,10 @@ process: `ps -o command= -p $(pgrep -x codex)` must show the `--enable` flag.
 ## Verification
 
 ```bash
-bun run --filter @pragma/codex-plugin test
-bun run --filter @pragma/codex-plugin typecheck
-bun run --filter @pragma/codex-plugin build
-bun run --filter @pragma/codex-plugin install:local   # refresh ~/.codex hooks snapshot after report.sh edits
+bun run --filter @pragma-sh/codex-plugin test
+bun run --filter @pragma-sh/codex-plugin typecheck
+bun run --filter @pragma-sh/codex-plugin build
+bun run --filter @pragma-sh/codex-plugin install:local   # refresh ~/.codex hooks snapshot after report.sh edits
 pragma-cli agent verify --agent pragma.codex --abort-input '\x1b' --include-slow
 ```
 

@@ -1,19 +1,10 @@
-import type { FanoutParentSpec, Worktree } from "@pragma/constants";
+import type { FanoutParentSpec } from "@pragma/constants";
 import { useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 
 import { AgentModelSelector } from "@/components/agents/AgentModelSelector";
+import { MainBehindAlert } from "@/components/dialogs/MainBehindAlert";
 import { MarkdownEditor } from "@/components/github/MarkdownEditor";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Input } from "@/components/ui/input";
@@ -23,7 +14,8 @@ import { useEscapeToClose } from "@/hooks/use-escape-to-close";
 import { rememberModelSelection } from "@/lib/agent-model-selection";
 import { errorMessage } from "@/lib/errors";
 import { isMacPlatform } from "@/lib/platform";
-import { githubFetchAndSync, type AgentConfig, type AgentModelSelection } from "@/lib/tauri";
+import { type AgentConfig, type AgentModelSelection } from "@/lib/tauri";
+import { mainBehindRemote } from "@/lib/worktree-sync";
 import { useWorkspace } from "@/state/workspace-context";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorktreeCreation } from "@/state/worktree-creation-context";
@@ -50,67 +42,6 @@ interface CreateWorktreeDialogProps {
 type SubmitKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"> & {
   preventDefault: () => void;
 };
-
-interface MainBehindAlertProps {
-  behind: number;
-  mainWorktreeId: string | null;
-  onCancel: () => void;
-  onConfirm: (pullFirst: boolean) => void;
-}
-
-function MainBehindAlert({ behind, mainWorktreeId, onCancel, onConfirm }: MainBehindAlertProps) {
-  return (
-    <AlertDialog open={mainWorktreeId !== null} onOpenChange={(open) => !open && onCancel()}>
-      <AlertDialogContent className="data-[size=default]:sm:max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Main is behind remote</AlertDialogTitle>
-          <AlertDialogDescription>
-            Main has {behind} commit{behind === 1 ? "" : "s"} to sync. Sync before creating this
-            worktree?
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="outline" onClick={() => onConfirm(false)}>
-            Create without syncing
-          </Button>
-          <AlertDialogAction onClick={() => onConfirm(true)}>Sync and create</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-/**
- * Fetches the main worktree's sync status, treating a failed fetch (offline,
- * auth lapsed, remote unreachable) as "status unknown" rather than an error —
- * matching the ChangesTab behaviour so a flaky fetch never blocks creation.
- */
-async function fetchMainSyncStatus(
-  mainWorktreeId: string,
-): Promise<Awaited<ReturnType<typeof githubFetchAndSync>> | null> {
-  try {
-    return await githubFetchAndSync(mainWorktreeId);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The project's main worktree when it is behind its remote, so the caller can
- * offer to sync before branching off it. A failed fetch reads as "not behind":
- * a flaky network must never block creation.
- */
-async function mainBehindRemote(
-  worktrees: readonly Worktree[],
-): Promise<{ id: string; behind: number } | null> {
-  const main = worktrees.find((worktree) => worktree.isMain);
-  if (!main) {
-    throw new Error("Project main worktree was not found.");
-  }
-  const status = await fetchMainSyncStatus(main.id);
-  return status && status.behind > 0 ? { id: main.id, behind: status.behind } : null;
-}
 
 /**
  * A key handler that submits on ⌘/Ctrl+↵ and ignores everything else.
@@ -203,9 +134,11 @@ function useFanoutSubmit(): (input: {
         reasoningId: row.selection.reasoningId,
       })),
     });
-    // Creation does not select each attempt as it appears, and it does not open
-    // the comparison: nothing has run yet, so comparing would only show an
-    // empty state. The user opens it from the fanout group when ready.
+    // The host creates fanout worktrees and tabs. Refresh after the native RPC
+    // synchronously adopts them so sidebar rows can open their live sessions.
+    await workspace.refreshProject(projectId);
+    // Creation does not select each attempt as it appears or open comparison.
+    // The user chooses an attempt or comparison from the fanout group.
     void workspace.selectWorktree(result.fanout.parentWorktreeId);
   };
 }
@@ -242,7 +175,7 @@ export function CreateWorktreeDialog({
   const submitFanout = useFanoutSubmit();
   const { error, setError, busy, setBusy, behind, setBehind, mainWorktreeId, setMainWorktreeId } =
     useWorktreeSubmission();
-  useEscapeToClose(isOpen, () => onOpenChange(false));
+  useEscapeToClose(isOpen && !busy, () => onOpenChange(false));
 
   const isFanout = fanoutMode.isFanout;
   const canSubmit = isFanout ? fanoutMode.ready(message, branch) : branch.trim().length > 0;
@@ -444,9 +377,9 @@ interface SubmissionInput {
  * The dialog's submission flow, kept out of the component so the component
  * stays layout plus wiring.
  *
- * Both paths end the same way — the modal closes immediately and progress is
- * reported elsewhere (the full-frame creation screen for a single worktree, the
- * host's fanout record for a fanout) — so neither ever blocks the app.
+ * Single-worktree creation hands off to the full-frame progress screen. Fanout
+ * creation stays here until the host has provisioned and the desktop has loaded
+ * every created worktree and agent tab.
  */
 function useSubmission(input: SubmissionInput): {
   submit: () => Promise<void>;

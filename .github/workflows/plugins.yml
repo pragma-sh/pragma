@@ -1,0 +1,81 @@
+name: Publish official plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Publish one alpha or refresh official lock
+        required: true
+        type: choice
+        options: [publish, refresh-lock]
+      package:
+        description: npm package to publish
+        required: false
+        type: choice
+        options:
+          - "@pragma-sh/claude-code-plugin"
+          - "@pragma-sh/codex-plugin"
+          - "@pragma-sh/cursor-plugin"
+          - "@pragma-sh/grok-plugin"
+          - "@pragma-sh/github-copilot-cli-plugin"
+          - "@pragma-sh/junie-plugin"
+          - "@pragma-sh/kimi-plugin"
+          - "@pragma-sh/opencode-plugin"
+          - "@pragma-sh/pi-plugin"
+          - "@pragma-sh/prime-agent-plugin"
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  publish:
+    if: inputs.operation == 'publish'
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.package.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@latest
+      - run: bun install --frozen-lockfile
+      - name: Resolve reviewed package
+        id: package
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          bun -e 'const list = await Bun.file("packages/plugin-registry/official.json").json(); if (!list.packages.includes(process.env.PACKAGE)) throw new Error("package is not official"); const name = process.env.PACKAGE; console.log(`dir=packages/${name.split("/").at(-1)}`); console.log(`name=${name}`)' >> "$GITHUB_OUTPUT"
+      - run: bunx turbo run build --filter="${{ steps.package.outputs.name }}"
+      - run: npm pack "${{ steps.package.outputs.dir }}" --dry-run
+      - name: Publish alpha with provenance
+        run: npm publish "${{ steps.package.outputs.dir }}" --access public --tag alpha --provenance
+
+  refresh-lock:
+    if: always() && (inputs.operation == 'refresh-lock' || needs.publish.result == 'success')
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Wait for npm propagation
+        if: needs.publish.result == 'success'
+        run: sleep 20
+      - run: bun run --filter @pragma/plugin-registry lock
+      - run: bun run --filter @pragma/plugin-registry validate
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: packages/plugin-registry/official.lock.json
+          branch: automation/official-plugin-lock
+          commit-message: "chore(plugins): refresh official lock"
+          title: "chore(plugins): refresh official lock"
+          body: Generated from exact npm release metadata and cached `pragma-plugin.json` manifests.

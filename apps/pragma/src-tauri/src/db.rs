@@ -105,6 +105,7 @@ impl Db {
                prompt              TEXT NOT NULL,
                agent_id            TEXT NOT NULL,
                model_id            TEXT,
+               reasoning_id        TEXT,
                status              TEXT NOT NULL DEFAULT 'draft',
                agent_tab_id        TEXT,
                completed_action    TEXT,
@@ -328,6 +329,18 @@ impl Db {
             }
             conn.execute_batch("PRAGMA user_version = 15;")?;
         }
+        // v16 persists the reasoning level selected for an agent-board draft.
+        if version < 16 {
+            let has_reasoning_id: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('kanban_cards') WHERE name = 'reasoning_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_reasoning_id == 0 {
+                conn.execute_batch("ALTER TABLE kanban_cards ADD COLUMN reasoning_id TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 16;")?;
+        }
         Ok(())
     }
 
@@ -443,6 +456,22 @@ impl Db {
         self.worktree(id)
     }
 
+    /// Repairs a host-created worktree's parent during workspace adoption.
+    ///
+    /// Git worktree metadata carries no hierarchy, so fanout parentage comes
+    /// from the host's durable record and may correct an older fallback row.
+    pub(crate) fn set_worktree_parent(
+        &self,
+        worktree_id: &str,
+        parent_id: &str,
+    ) -> AppResult<Worktree> {
+        self.0.lock()?.execute(
+            "UPDATE worktrees SET parent_id = ?1 WHERE id = ?2",
+            params![parent_id, worktree_id],
+        )?;
+        self.worktree(worktree_id)
+    }
+
     /// Updates the optional display title. An empty/whitespace string clears it.
     pub fn rename_worktree(&self, worktree_id: &str, title: Option<&str>) -> AppResult<Worktree> {
         let normalized = title.map(str::trim).filter(|value| !value.is_empty());
@@ -541,6 +570,14 @@ impl Db {
             "INSERT INTO plugin_storage (plugin_id, key, value, updated_at) VALUES (?1, ?2, ?3, datetime('now'))
              ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             params![plugin_id, key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn plugin_storage_delete(&self, plugin_id: &str, key: &str) -> AppResult<()> {
+        self.0.lock()?.execute(
+            "DELETE FROM plugin_storage WHERE plugin_id = ?1 AND key = ?2",
+            params![plugin_id, key],
         )?;
         Ok(())
     }
@@ -703,7 +740,26 @@ impl Db {
         title: Option<String>,
         agent_id: &str,
     ) -> AppResult<Tab> {
+        let worktree = self.worktree(worktree_id)?;
+        if worktree.project_id != project_id {
+            return Err(AppError::InvalidInput(format!(
+                "worktree `{worktree_id}` does not belong to project `{project_id}`"
+            )));
+        }
         if let Ok(existing) = self.tab(id) {
+            if existing.worktree_id != worktree_id {
+                return Err(AppError::InvalidInput(format!(
+                    "host agent tab `{id}` already belongs to worktree `{}`",
+                    existing.worktree_id
+                )));
+            }
+            if existing.project_id != project_id {
+                self.0.lock()?.execute(
+                    "UPDATE tabs SET project_id = ?1 WHERE id = ?2",
+                    params![project_id, id],
+                )?;
+                return self.tab(id);
+            }
             return Ok(existing);
         }
         {
@@ -815,7 +871,7 @@ impl Db {
     pub fn list_kanban_cards(&self, project_id: &str) -> AppResult<Vec<KanbanPromptCard>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, status,
+            "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, reasoning_id, status,
                     agent_tab_id, completed_action, pull_request_url, pull_request_number,
                     scheduling_mode, scheduled_for, created_at, updated_at, started_at, completed_at
              FROM kanban_cards WHERE project_id = ?1 ORDER BY created_at DESC",
@@ -833,12 +889,13 @@ impl Db {
         prompt: &str,
         agent_id: &str,
         model_id: Option<&str>,
+        reasoning_id: Option<&str>,
     ) -> AppResult<KanbanPromptCard> {
         let id = Uuid::new_v4().to_string();
         self.0.lock()?.execute(
-            "INSERT INTO kanban_cards (id, project_id, branch_name, prompt, agent_id, model_id, status, scheduling_mode)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'draft', 'manual')",
-            params![id, project_id, branch_name, prompt, agent_id, model_id],
+            "INSERT INTO kanban_cards (id, project_id, branch_name, prompt, agent_id, model_id, reasoning_id, status, scheduling_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', 'manual')",
+            params![id, project_id, branch_name, prompt, agent_id, model_id, reasoning_id],
         )?;
         self.kanban_card(&id)
     }
@@ -855,14 +912,15 @@ impl Db {
                prompt = ?4,
                agent_id = ?5,
                model_id = ?6,
-               status = ?7,
-               agent_tab_id = ?8,
-               completed_action = ?9,
-               pull_request_url = ?10,
-               pull_request_number = ?11,
-               scheduled_for = ?12,
-               started_at = ?13,
-               completed_at = ?14,
+               reasoning_id = ?7,
+               status = ?8,
+               agent_tab_id = ?9,
+               completed_action = ?10,
+               pull_request_url = ?11,
+               pull_request_number = ?12,
+               scheduled_for = ?13,
+               started_at = ?14,
+               completed_at = ?15,
                updated_at = datetime('now')
              WHERE id = ?1",
             params![
@@ -872,6 +930,7 @@ impl Db {
                 card.prompt,
                 card.agent_id,
                 card.model_id,
+                card.reasoning_id,
                 kanban_status_as_str(card.status),
                 card.agent_tab_id,
                 card.completed_action.map(kanban_action_as_str),
@@ -910,7 +969,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, status,
+                "SELECT id, project_id, worktree_id, branch_name, prompt, agent_id, model_id, reasoning_id, status,
                         agent_tab_id, completed_action, pull_request_url, pull_request_number,
                         scheduling_mode, scheduled_for, created_at, updated_at, started_at, completed_at
                  FROM kanban_cards WHERE id = ?1",
@@ -1050,18 +1109,19 @@ fn kanban_card_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KanbanPromp
         prompt: row.get(4)?,
         agent_id: row.get(5)?,
         model_id: row.get(6)?,
-        status: kanban_status_from_str(&row.get::<_, String>(7)?),
-        agent_tab_id: row.get(8)?,
-        completed_action: kanban_action_from_str(row.get::<_, Option<String>>(9)?),
-        pull_request_url: row.get(10)?,
-        pull_request_number: row.get::<_, Option<i64>>(11)?,
+        reasoning_id: row.get(7)?,
+        status: kanban_status_from_str(&row.get::<_, String>(8)?),
+        agent_tab_id: row.get(9)?,
+        completed_action: kanban_action_from_str(row.get::<_, Option<String>>(10)?),
+        pull_request_url: row.get(11)?,
+        pull_request_number: row.get::<_, Option<i64>>(12)?,
         // MVP only ever stores "manual"; the column exists for forward-compat.
         scheduling_mode: KanbanSchedulingMode::Manual,
-        scheduled_for: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-        started_at: row.get(16)?,
-        completed_at: row.get(17)?,
+        scheduled_for: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+        started_at: row.get(17)?,
+        completed_at: row.get(18)?,
     })
 }
 
@@ -1194,6 +1254,128 @@ mod tests {
             .is_empty());
     }
 
+    #[test]
+    fn adopts_host_agent_tab_under_its_existing_session_id() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let worktree = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+
+        let tab = db
+            .adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                Some("Fanout attempt".to_string()),
+                "pragma.opencode",
+            )
+            .expect("host tab should be adopted");
+
+        assert_eq!(tab.id, "host-session-1");
+        assert_eq!(tab.worktree_id, worktree.id);
+        assert_eq!(tab.agent_id.as_deref(), Some("pragma.opencode"));
+        assert_eq!(
+            db.adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                None,
+                "other-agent",
+            )
+            .expect("adoption should be idempotent"),
+            tab
+        );
+
+        let other_project = db
+            .insert_project_with_main_worktree(
+                "other".to_string(),
+                "/tmp/other".to_string(),
+                "main".to_string(),
+            )
+            .expect("other project should insert");
+        assert!(
+            db.adopt_agent_tab(
+                "cross-project-session",
+                &other_project.id,
+                &worktree.id,
+                None,
+                "pragma.opencode",
+            )
+            .is_err(),
+            "adoption must reject a project that does not own the worktree"
+        );
+        db.0.lock()
+            .expect("database should lock")
+            .execute(
+                "UPDATE tabs SET project_id = ?1 WHERE id = ?2",
+                rusqlite::params![other_project.id, tab.id],
+            )
+            .expect("legacy cross-project tab should be simulated");
+
+        let repaired = db
+            .adopt_agent_tab(
+                "host-session-1",
+                &project.id,
+                &worktree.id,
+                None,
+                "pragma.opencode",
+            )
+            .expect("legacy project ownership should repair");
+        assert_eq!(repaired.project_id, project.id);
+    }
+
+    #[test]
+    fn repairs_adopted_fanout_worktree_parent() {
+        let db = Db::in_memory().expect("db should open");
+        let project = db
+            .insert_project_with_main_worktree(
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+                "main".to_string(),
+            )
+            .expect("project should insert");
+        let main = db
+            .list_worktrees(&project.id)
+            .expect("worktrees should list")
+            .into_iter()
+            .next()
+            .expect("main worktree should exist");
+        db.insert_worktree(
+            "fanout-parent",
+            &project.id,
+            &main.id,
+            "fanout-parent",
+            None,
+            "/tmp/repo/.pragma/worktrees/fanout-parent",
+        )
+        .expect("coordination parent should insert");
+        db.insert_worktree(
+            "attempt-a",
+            &project.id,
+            &main.id,
+            "fanout/a",
+            None,
+            "/tmp/repo/.pragma/worktrees/attempt-a",
+        )
+        .expect("attempt should insert with legacy fallback parent");
+
+        let repaired = db
+            .set_worktree_parent("attempt-a", "fanout-parent")
+            .expect("attempt parent should repair");
+
+        assert_eq!(repaired.parent_id.as_deref(), Some("fanout-parent"));
+    }
+
     /// A project added before canonicalization moved to
     /// `pragma_platform::path` stored a verbatim `\\?\C:\…` root, which git
     /// rejects as a UNC path. Re-migrating has to repair the row in place —
@@ -1252,6 +1434,15 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("3")
+        );
+
+        db.plugin_storage_delete("plugin-a", "count").unwrap();
+        assert_eq!(db.plugin_storage_get("plugin-a", "count").unwrap(), None);
+        assert_eq!(
+            db.plugin_storage_get("plugin-b", "count")
+                .unwrap()
+                .as_deref(),
+            Some("2")
         );
     }
 
@@ -1585,11 +1776,13 @@ mod tests {
                 "do the thing",
                 "claude",
                 Some("opus"),
+                Some("high"),
             )
             .expect("card should insert");
         assert_eq!(card.status, KanbanPromptStatus::Draft);
         assert_eq!(card.branch_name, "feature/x");
         assert_eq!(card.model_id.as_deref(), Some("opus"));
+        assert_eq!(card.reasoning_id.as_deref(), Some("high"));
         assert!(card.worktree_id.is_none());
 
         let listed = db
@@ -1651,7 +1844,7 @@ mod tests {
                 "main".to_string(),
             )
             .expect("project should insert");
-        db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None)
+        db.create_kanban_card(&project.id, "feature/y", "prompt", "claude", None, None)
             .expect("card should insert");
         db.delete_project(&project.id).expect("project delete");
         assert!(db

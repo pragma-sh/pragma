@@ -48,7 +48,24 @@ export function NewWorktreeSheet({ open, onOpenChange }: NewWorktreeSheetProps) 
   }
 
   return (
-    <BottomSheet onOpenChange={onOpenChange} open={open}>
+    <BottomSheet
+      footer={
+        <View className="mt-6 flex-row justify-end gap-3">
+          <Button onPress={close} variant="ghost">
+            <Text>Cancel</Text>
+          </Button>
+          <Button
+            className={canSubmit ? undefined : "opacity-50"}
+            disabled={!canSubmit}
+            onPress={submit}
+          >
+            <Text>Create worktree</Text>
+          </Button>
+        </View>
+      }
+      onOpenChange={onOpenChange}
+      open={open}
+    >
       <View className="gap-1">
         <Text className="text-lg font-semibold">New worktree</Text>
         <Text className="text-sm text-muted-foreground">
@@ -89,19 +106,6 @@ export function NewWorktreeSheet({ open, onOpenChange }: NewWorktreeSheetProps) 
             value={prompt}
           />
         </Field>
-      </View>
-
-      <View className="mt-6 flex-row justify-end gap-3">
-        <Button onPress={close} variant="ghost">
-          <Text>Cancel</Text>
-        </Button>
-        <Button
-          className={canSubmit ? undefined : "opacity-50"}
-          disabled={!canSubmit}
-          onPress={submit}
-        >
-          <Text>Create worktree</Text>
-        </Button>
       </View>
     </BottomSheet>
   );

@@ -251,6 +251,11 @@ export function onTabsChanged(
   return listen<WorkspaceChangedEvent>("tabsChanged", (event) => handler(event.payload));
 }
 
+/** Subscribes to agent-board mutations created through the public SDK. */
+export function onKanbanChanged(handler: (projectId: string) => void): Promise<UnlistenFn> {
+  return listen<string>("pragma:kanban-changed", (event) => handler(event.payload));
+}
+
 /** A mobile-requested agent session ready for background launch. */
 export interface AgentSessionLaunchRequest {
   projectId: string;
@@ -723,6 +728,7 @@ export function createKanbanCard(
   prompt: string,
   agentId: string,
   modelId?: string | null,
+  reasoningId?: string | null,
 ): Promise<KanbanPromptCard> {
   return invoke<KanbanPromptCard>("create_kanban_card", {
     projectId,
@@ -730,6 +736,7 @@ export function createKanbanCard(
     prompt,
     agentId,
     modelId: modelId ?? null,
+    reasoningId: reasoningId ?? null,
   });
 }
 
@@ -1120,6 +1127,13 @@ export interface BrowserMeta {
   url?: string;
 }
 
+/** Native page-load lifecycle update for one browser tab. */
+export interface BrowserLoadEvent {
+  tabId: string;
+  status: "started" | "finished" | "failed";
+  url: string;
+}
+
 /** Creates the native browser webview for a tab, positioned over its placeholder. */
 export function browserCreate(tabId: string, url: string, bounds: BrowserBounds): Promise<void> {
   return invoke("browser_create", { tabId, url, ...bounds });
@@ -1233,6 +1247,11 @@ export function browserFindClear(tabId: string): Promise<void> {
 /** Subscribes to per-tab page metadata (title/url) from browser webviews. */
 export function onBrowserMeta(handler: (meta: BrowserMeta) => void): Promise<UnlistenFn> {
   return listen<BrowserMeta>("browser-meta", (event) => handler(event.payload));
+}
+
+/** Subscribes to native browser page-load lifecycle updates. */
+export function onBrowserLoad(handler: (load: BrowserLoadEvent) => void): Promise<UnlistenFn> {
+  return listen<BrowserLoadEvent>("browser-load", (event) => handler(event.payload));
 }
 
 /** Payload sent by a browser webview when the user interacts with its content. */
@@ -1364,6 +1383,53 @@ export function writeConfig(
   return invoke("write_config", { scope, projectId: projectId ?? null, contents });
 }
 
+/** Integrity-pinned official npm release accepted by native plugin installer. */
+export interface OfficialPluginInstallRequest {
+  package: string;
+  version: string;
+  integrity: string;
+  manifestSha256: string;
+}
+
+/** Installed package identity returned after host setup and global registration. */
+export interface OfficialPluginInstallResult {
+  package: string;
+  version: string;
+  pluginId: string;
+}
+
+/** Installs one reviewed official plugin release with npm lifecycle scripts disabled. */
+export function installOfficialPlugin(
+  request: OfficialPluginInstallRequest,
+): Promise<OfficialPluginInstallResult> {
+  return invoke<OfficialPluginInstallResult>("install_official_plugin", { request });
+}
+
+/** Returns binaries executable from Pragma's GUI-safe PATH. */
+export function availablePluginBinaries(binaries: string[]): Promise<string[]> {
+  return invoke<string[]>("available_plugin_binaries", { binaries });
+}
+
+/** Whether first-run agent plugin recommendations were completed or dismissed. */
+export function pluginOnboardingDismissed(): Promise<boolean> {
+  return invoke<boolean>("plugin_onboarding_dismissed");
+}
+
+/** Persists first-run agent plugin recommendation completion. */
+export function setPluginOnboardingDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_plugin_onboarding_dismissed", { dismissed });
+}
+
+/** Whether prompts after manually running an unconnected agent are disabled. */
+export function agentPluginPromptDismissed(): Promise<boolean> {
+  return invoke<boolean>("agent_plugin_prompt_dismissed");
+}
+
+/** Persists whether manual agent-command integration prompts are disabled. */
+export function setAgentPluginPromptDismissed(dismissed: boolean): Promise<void> {
+  return invoke("set_agent_plugin_prompt_dismissed", { dismissed });
+}
+
 /** Reads global or project `.pragma/theme.json`; a missing file reports `exists: false`. */
 export function readTheme(scope: ConfigScope, projectId?: string | null): Promise<ConfigDocument> {
   return invoke<ConfigDocument>("read_theme", { scope, projectId: projectId ?? null });
@@ -1406,6 +1472,70 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
 /** Returns the runtime platform name used to pick keybinding chords ("mac" or "linux"). */
 export function getPlatform(): Promise<"mac" | "linux"> {
   return invoke<"mac" | "linux">("platform_name");
+}
+
+/** Shipped-into-the-app versions, update platform id, and the default check URL. */
+export interface UpdateRuntime {
+  platform: string;
+  isDev: boolean;
+  checkUrl: string;
+  versions: {
+    ui: string;
+    app: string;
+    server: string;
+    protocol: string;
+  };
+}
+
+/** Downloadable file named by the check API. */
+export interface UpdateAsset {
+  url: string;
+  sha256: string;
+  signature: string;
+}
+
+/** Body of `GET /api/updates`. */
+export interface UpdateCheck {
+  available: boolean;
+  apply?: "reload" | "restart";
+  notes?: string;
+  changelogUrl?: string;
+  version?: string;
+  asset?: UpdateAsset;
+  manifestJson?: string;
+  manifestSignature?: string;
+}
+
+/** Outcome of applying a checked offer. */
+export interface UpdateApplyResult {
+  mode: "reload" | "restart";
+  url?: string;
+}
+
+/** Runtime identity used to poll and display Settings → Updates. */
+export function getUpdateRuntime(): Promise<UpdateRuntime> {
+  return invoke<UpdateRuntime>("get_update_runtime");
+}
+
+/** Polls the check API. Pass a settings override, or omit to use the instance default. */
+export function checkForUpdate(checkUrl?: string | null): Promise<UpdateCheck> {
+  return invoke<UpdateCheck>("check_for_update", { checkUrl: checkUrl ?? null });
+}
+
+/** Downloads the offer and applies reload (overlay) or restart (OS installer). */
+export function applyUpdate(request: {
+  apply: "reload" | "restart";
+  version: string;
+  asset: UpdateAsset;
+  manifestJson: string;
+  manifestSignature: string;
+}): Promise<UpdateApplyResult> {
+  return invoke<UpdateApplyResult>("apply_update", { request });
+}
+
+/** Marks a newly loaded UI overlay healthy so next launch keeps using it. */
+export function confirmUiOverlay(): Promise<void> {
+  return invoke<void>("confirm_ui_overlay");
 }
 
 /**
@@ -1797,6 +1927,11 @@ export function pluginStorageSet(pluginId: string, key: string, value: string): 
   return invoke("plugin_storage_set", { pluginId, key, value });
 }
 
+/** Deletes one plugin-owned durable storage value. */
+export function pluginStorageDelete(pluginId: string, key: string): Promise<void> {
+  return invoke("plugin_storage_delete", { pluginId, key });
+}
+
 // -------------------------------- fanouts ---------------------------------
 
 /**
@@ -1814,6 +1949,15 @@ export function fanoutRpc<T>(projectId: string, payload: Record<string, unknown>
 export async function listFanouts(projectId: string): Promise<Fanout[]> {
   const payload = await invoke<FanoutSubscriptionPayload>("list_fanouts", { projectId });
   return payload?.fanouts ?? [];
+}
+
+/** Restores a host-owned fanout agent tab under its existing session id. */
+export function restoreFanoutTab(
+  projectId: string,
+  worktreeId: string,
+  tabId: string,
+): Promise<Tab> {
+  return invoke<Tab>("restore_fanout_tab", { projectId, worktreeId, tabId });
 }
 
 /**

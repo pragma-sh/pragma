@@ -47,6 +47,10 @@ before the gateway exists drops gateway-dependent agents (their model providers 
 so the host tracks whether the last load had credentials and re-loads on the next
 `catalog` read once they appear.
 
+Desktop usage-limit refresh failures use `logUsageLimitsError`: background polling keeps
+last-good data instead of raising user-facing errors, while bounded failure details remain
+available in server logs.
+
 Each server process also generates a boot id passed with the server state directory to
 `pragma-plugins`. The sidecar persists plugin lifecycle markers there: `onInstall` once per
 plugin id and `onPragmaLoad` once per server boot, including across catalog reloads or a

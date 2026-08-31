@@ -22,6 +22,7 @@ import {
   type GitHubAuthMethod,
   type GitHubSettings,
   type TerminalSettings,
+  type OtherSettings,
 } from "@pragma/constants";
 
 import { AiAuthOptions } from "@/components/ai/AiAuthOptions";
@@ -33,6 +34,7 @@ import { KeybindingsSection } from "@/components/settings/KeybindingsSection";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { TerminalSection } from "@/components/settings/TerminalSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
+import { OtherSection } from "@/components/settings/OtherSection";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -55,12 +57,13 @@ import {
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { startWindowDrag } from "@/lib/window-drag";
+import { RenderPluginContribution, usePluginSettingsPages } from "@/plugins/rendering";
 import { useAi } from "@/state/ai-context";
 import { useGitHub } from "@/state/github-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
 
-type Section =
+type BuiltinSection =
   | "plugins"
   | "keybindings"
   | "theme"
@@ -69,10 +72,13 @@ type Section =
   | "github"
   | "ai"
   | "mobile"
-  | "automations";
+  | "automations"
+  | "other";
+
+type Section = BuiltinSection | `plugin:${string}`;
 
 /** Sections that read and write per-project settings as well as global ones. */
-const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
+const PROJECT_SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "plugins",
   "keybindings",
   "theme",
@@ -80,7 +86,7 @@ const PROJECT_SECTIONS: ReadonlySet<Section> = new Set<Section>([
   "agentStatus",
 ]);
 
-const SECTIONS: ReadonlySet<string> = new Set<Section>([
+const SECTIONS: ReadonlySet<string> = new Set<BuiltinSection>([
   "plugins",
   "keybindings",
   "theme",
@@ -90,11 +96,20 @@ const SECTIONS: ReadonlySet<string> = new Set<Section>([
   "ai",
   "mobile",
   "automations",
+  "other",
 ]);
 
 /** Narrows the `openSettings` target to a known section, defaulting to Plugins. */
 function initialSection(raw: string | null): Section {
-  return raw !== null && SECTIONS.has(raw) ? (raw as Section) : "plugins";
+  return raw !== null && SECTIONS.has(raw) ? (raw as BuiltinSection) : "plugins";
+}
+
+function pluginSection(key: string): `plugin:${string}` {
+  return `plugin:${key}`;
+}
+
+function isProjectSection(section: Section): boolean {
+  return section.startsWith("plugin:") || PROJECT_SECTIONS.has(section);
 }
 
 interface PluginConfig {
@@ -116,6 +131,8 @@ interface PragmaConfig {
   };
   agentStatus?: AgentStatusSettings;
   github?: GitHubSettings;
+  other?: OtherSettings;
+  updates?: { checkUrl?: string; autoDownload?: boolean };
   terminal?: TerminalSettings;
   [key: string]: unknown;
 }
@@ -138,6 +155,7 @@ function parsePragmaConfig(contents: string): PragmaConfig {
   validateTerminal(config.terminal);
   validateAgentStatusSettings(config.agentStatus);
   validateGitHubSettings(config.github);
+  validateOtherSettings(config.other);
   return config;
 }
 
@@ -192,6 +210,13 @@ function validatePlugin(plugin: PluginConfig, index: number): void {
   ) {
     throw new Error(`plugins[${index}].config must be an object`);
   }
+}
+
+function validateOtherSettings(other: PragmaConfig["other"]): void {
+  if (other === undefined) return;
+  validateConfigObject(other, "other");
+  validateOptionalField(other.serverUrl, "other.serverUrl", "string");
+  validateOptionalField(other.autoDownload, "other.autoDownload", "boolean");
 }
 
 function validateTunnel(tunnel: PragmaConfig["tunnel"]): void {
@@ -267,6 +292,9 @@ export function SettingsWorkspace() {
   const latestConfig = useRef<PragmaConfig | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const worktreeId = workspace.selectedWorktree?.id ?? null;
+  const settingsPages = usePluginSettingsPages(
+    scope === "project" ? workspace.selectedProjectId : null,
+  );
   // Project settings describe the machine that project's terminals run on,
   // which for an SSH project is not this one.
   const wslAvailable = useWslAvailable(scope === "project" ? worktreeId : null);
@@ -278,7 +306,7 @@ export function SettingsWorkspace() {
     if (shell.settingsSection === null) return;
     const next = initialSection(shell.settingsSection);
     setSection(next);
-    if (!PROJECT_SECTIONS.has(next)) setScope("global");
+    if (!isProjectSection(next)) setScope("global");
   }, [shell.settingsSection]);
 
   const load = useCallback(async () => {
@@ -304,13 +332,19 @@ export function SettingsWorkspace() {
   useEffect(() => void load(), [load]);
   useEffect(() => {
     if (scope === "project" && !workspace.selectedProjectId) setScope("global");
-    // GitHub, AI, mobile, and automations are app-global, so project scope falls
+    // GitHub, AI, mobile, automations, and other are app-global, so project scope falls
     // back to the first section that has a project layer.
-    if (scope === "project" && !PROJECT_SECTIONS.has(section)) setSection("plugins");
+    if (scope === "project" && !isProjectSection(section)) setSection("plugins");
+    if (
+      section.startsWith("plugin:") &&
+      !settingsPages.some((page) => pluginSection(page.key) === section)
+    ) {
+      setSection("plugins");
+    }
     // The WSL section can disappear under the user (scope switch, or a probe
     // that lands after the deep link opened it).
     if (section === "terminal" && !wslAvailable) setSection("plugins");
-  }, [scope, section, workspace.selectedProjectId, wslAvailable]);
+  }, [scope, section, settingsPages, workspace.selectedProjectId, wslAvailable]);
 
   const persist = useCallback(
     async (update: (current: PragmaConfig) => PragmaConfig) => {
@@ -380,6 +414,7 @@ export function SettingsWorkspace() {
           scope={scope}
           section={section}
           setSection={setSection}
+          settingsPages={settingsPages}
           wslAvailable={wslAvailable}
         />
         <SettingsContent
@@ -392,6 +427,7 @@ export function SettingsWorkspace() {
           reload={load}
           scope={scope}
           section={section}
+          settingsPages={settingsPages}
           worktreeId={worktreeId}
         />
       </div>
@@ -403,11 +439,13 @@ function SettingsNavigation({
   scope,
   section,
   setSection,
+  settingsPages,
   wslAvailable,
 }: {
   scope: ConfigScope;
   section: Section;
   setSection: (section: Section) => void;
+  settingsPages: ReturnType<typeof usePluginSettingsPages>;
   wslAvailable: boolean;
 }) {
   return (
@@ -449,6 +487,19 @@ function SettingsNavigation({
       >
         Agent Status
       </SettingsNavItem>
+      {settingsPages.map((page) => {
+        const PageIcon = page.contribution.icon;
+        return (
+          <SettingsNavItem
+            key={page.key}
+            active={section === pluginSection(page.key)}
+            icon={PageIcon ? <PageIcon /> : <Blocks />}
+            onClick={() => setSection(pluginSection(page.key))}
+          >
+            {page.contribution.title}
+          </SettingsNavItem>
+        );
+      })}
       {scope === "global" ? (
         <GlobalSettingsNavigation section={section} setSection={setSection} />
       ) : null}
@@ -459,7 +510,10 @@ function SettingsNavigation({
 function GlobalSettingsNavigation({
   section,
   setSection,
-}: Omit<Parameters<typeof SettingsNavigation>[0], "scope" | "wslAvailable">) {
+}: {
+  section: Section;
+  setSection: (section: Section) => void;
+}) {
   return (
     <>
       <SettingsNavItem
@@ -490,6 +544,13 @@ function GlobalSettingsNavigation({
       >
         Automations
       </SettingsNavItem>
+      <SettingsNavItem
+        active={section === "other"}
+        icon={<RefreshCw />}
+        onClick={() => setSection("other")}
+      >
+        Other
+      </SettingsNavItem>
     </>
   );
 }
@@ -505,6 +566,7 @@ function SettingsContent({
   reload,
   scope,
   section,
+  settingsPages,
   worktreeId,
 }: {
   error: string | null;
@@ -516,8 +578,24 @@ function SettingsContent({
   reload: () => Promise<void>;
   scope: ConfigScope;
   section: Section;
+  settingsPages: ReturnType<typeof usePluginSettingsPages>;
   worktreeId: string | null;
 }) {
+  const settingsPage = settingsPages.find((page) => pluginSection(page.key) === section);
+  if (settingsPage) {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto p-8">
+        <div className="mx-auto max-w-3xl">
+          <RenderPluginContribution
+            pluginId={settingsPage.pluginId}
+            config={settingsPage.record.config}
+            resetKey={settingsPage.key}
+            component={settingsPage.contribution.component}
+          />
+        </div>
+      </main>
+    );
+  }
   // The Theme page reads `.pragma/theme.json`, not the `config.json` document
   // the rest of Settings loads, so it renders past that load state.
   if (section === "theme") {
@@ -595,6 +673,23 @@ function SettingsContent({
         {section === "ai" && scope === "global" ? <AiProvidersSection /> : null}
         {loaded && section === "mobile" && scope === "global" ? (
           <MobileSection config={loaded.value} persist={persist} />
+        ) : null}
+        {loaded && section === "other" && scope === "global" ? (
+          <OtherSection
+            persist={(patch) =>
+              persist((current) => ({
+                ...current,
+                other: { ...current.other, ...patch },
+                updates: undefined,
+              }))
+            }
+            settings={
+              loaded.value.other ?? {
+                serverUrl: loaded.value.updates?.checkUrl,
+                autoDownload: loaded.value.updates?.autoDownload,
+              }
+            }
+          />
         ) : null}
       </div>
     </main>

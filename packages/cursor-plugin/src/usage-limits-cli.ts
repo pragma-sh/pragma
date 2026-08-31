@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const USAGE_URL = "https://cursor.com/api/usage-summary";
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -57,16 +58,20 @@ async function main(): Promise<number> {
       return 0;
     }
     if (!response.ok) {
-      process.stderr.write(`Cursor usage API returned HTTP ${response.status}\n`);
-      return 3;
+      unavailable(
+        "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+        "unsupported",
+      );
+      return 0;
     }
     process.stdout.write(`${JSON.stringify(await readLimitedJson(response))}\n`);
     return 0;
-  } catch (error) {
-    process.stderr.write(
-      `Cursor usage request failed: ${error instanceof Error ? error.message : String(error)}\n`,
+  } catch {
+    unavailable(
+      "Cursor usage is temporarily unavailable. Pragma will retry automatically.",
+      "unsupported",
     );
-    return 3;
+    return 0;
   }
 }
 
@@ -151,10 +156,11 @@ async function readLimitedJson(response: Response): Promise<Record<string, unkno
   return value;
 }
 
-function unavailable(message: string): void {
-  process.stdout.write(
-    `${JSON.stringify({ status: "unavailable", reason: "authentication-required", message })}\n`,
-  );
+function unavailable(
+  message: string,
+  reason: "authentication-required" | "unsupported" = "authentication-required",
+): void {
+  process.stdout.write(`${JSON.stringify({ status: "unavailable", reason, message })}\n`);
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -165,6 +171,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-if (import.meta.main) {
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(resolve(entry)).href) {
   process.exitCode = await main();
 }

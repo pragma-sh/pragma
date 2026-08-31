@@ -1,5 +1,5 @@
 import type { Tab } from "@pragma/constants";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,16 @@ const tauriMocks = vi.hoisted(() => ({
   browserSetVisible: vi.fn(() => Promise.resolve()),
   browserSetBounds: vi.fn(() => Promise.resolve()),
   browserFrameHeight: vi.fn(() => Promise.resolve(0)),
+  browserNavigate: vi.fn(() => Promise.resolve()),
+  onBrowserLoad: vi.fn(
+    (
+      _handler: (load: {
+        tabId: string;
+        status: "started" | "finished" | "failed";
+        url: string;
+      }) => void,
+    ) => Promise.resolve(() => {}),
+  ),
   browserSnapshot: vi.fn(() => Promise.resolve("data:image/png;base64,STILL")),
   browserDesignSet: vi.fn(() => Promise.resolve()),
 }));
@@ -24,13 +34,14 @@ vi.mock("@/lib/tauri", () => ({
   browserDevtools: vi.fn(() => Promise.resolve()),
   browserForward: vi.fn(() => Promise.resolve()),
   browserFrameHeight: tauriMocks.browserFrameHeight,
-  browserNavigate: vi.fn(() => Promise.resolve()),
+  browserNavigate: tauriMocks.browserNavigate,
   browserOpenExternal: vi.fn(() => Promise.resolve()),
   browserReload: vi.fn(() => Promise.resolve()),
   browserScreenshot: vi.fn(() => Promise.resolve(null)),
   browserSetBounds: tauriMocks.browserSetBounds,
   browserSetVisible: tauriMocks.browserSetVisible,
   browserSnapshot: tauriMocks.browserSnapshot,
+  onBrowserLoad: tauriMocks.onBrowserLoad,
   browserFindSet: vi.fn(() => Promise.resolve({ count: 0, index: -1 })),
   browserFindSeek: vi.fn(() => Promise.resolve({ count: 0, index: -1 })),
   browserFindClear: vi.fn(() => Promise.resolve()),
@@ -74,6 +85,85 @@ afterEach(() => {
 });
 
 describe("BrowserView", () => {
+  it("navigates to a typed address when Enter is pressed", async () => {
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab()} />
+      </TabDragProvider>,
+    );
+
+    const address = screen.getByLabelText("Address");
+    await userEvent.clear(address);
+    await userEvent.type(address, "  example.org/docs  {Enter}");
+
+    expect(tauriMocks.browserNavigate).toHaveBeenCalledOnce();
+    expect(tauriMocks.browserNavigate).toHaveBeenCalledWith("browser-1", "example.org/docs");
+  });
+
+  it("shows recovery UI when navigation fails and retries the address", async () => {
+    tauriMocks.browserNavigate.mockRejectedValueOnce(new Error("navigation failed"));
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab()} />
+      </TabDragProvider>,
+    );
+
+    const address = screen.getByLabelText("Address");
+    await userEvent.clear(address);
+    await userEvent.type(address, "missing.localhost:5173{Enter}");
+
+    expect(await screen.findByText("This page couldn't be reached")).toBeInTheDocument();
+    expect(screen.getByText("missing.localhost:5173")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(tauriMocks.browserNavigate).toHaveBeenCalledTimes(2);
+    expect(tauriMocks.browserNavigate).toHaveBeenLastCalledWith(
+      "browser-1",
+      "missing.localhost:5173",
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("This page couldn't be reached")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows recovery UI when the native webview reports a blank failed page", async () => {
+    let handleLoad:
+      | ((load: { tabId: string; status: "started" | "finished" | "failed"; url: string }) => void)
+      | undefined;
+    tauriMocks.onBrowserLoad.mockImplementationOnce((handler) => {
+      handleLoad = handler;
+      return Promise.resolve(() => {});
+    });
+    render(
+      <TabDragProvider>
+        <BrowserView active tab={browserTab()} />
+      </TabDragProvider>,
+    );
+    await waitFor(() => expect(handleLoad).toBeDefined());
+
+    act(() => {
+      handleLoad?.({
+        tabId: "browser-1",
+        status: "started",
+        url: "https://does-not-exist.invalid/",
+      });
+      handleLoad?.({
+        tabId: "browser-1",
+        status: "finished",
+        url: "https://does-not-exist.invalid/",
+      });
+      handleLoad?.({
+        tabId: "browser-1",
+        status: "failed",
+        url: "https://does-not-exist.invalid/",
+      });
+    });
+
+    expect(screen.getByText("This page couldn't be reached")).toBeInTheDocument();
+    expect(screen.getByText("https://does-not-exist.invalid/")).toBeInTheDocument();
+  });
+
   it("collapses and hides the native webview while a tab drag is in flight", async () => {
     render(
       <TabDragProvider>

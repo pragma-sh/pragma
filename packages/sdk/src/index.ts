@@ -9,6 +9,7 @@ export {
   type FanoutSubscriptionEvent,
 } from "./fanouts-client";
 export type {
+  BoardDraftCreatePayload,
   Fanout,
   FanoutCreateRequest,
   FanoutDeliveryReceipt,
@@ -34,8 +35,9 @@ export type {
   FanoutSendTarget,
   FanoutStatus,
   FanoutSubscriptionPayload,
+  KanbanPromptCard,
 } from "@pragma/constants";
-export { PushClient, type PushRegistration } from "./push-client";
+export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";

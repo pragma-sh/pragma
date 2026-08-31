@@ -1,6 +1,6 @@
 {
   "name": "@pragma/scratchpad-viewer",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "description": "Read-only scratchpad renderer: one self-contained HTML document that evaluates scratchpad MDX with live @pragma/scratchpad components and a touch comment layer.",
   "license": "AGPL-3.0-only",

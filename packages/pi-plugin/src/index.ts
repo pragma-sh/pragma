@@ -4,7 +4,7 @@ import { createPiExtension } from "./extension-factory";
 const pragmaPiExtension = createPiExtension({
   agentId: "pi",
   debugEnvVar: "PRAGMA_PI_PLUGIN_DEBUG",
-  logLabel: "@pragma/pi-plugin",
+  logLabel: "@pragma-sh/pi-plugin",
 });
 
 export default pragmaPiExtension;

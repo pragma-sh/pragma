@@ -4,10 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginDefinition } from "@pragma/plugin";
 import type { PragmaClient } from "@pragma/sdk";
 
-import { setPluginRuntimeProject, setPluginRuntimeSdk } from "./host-hooks";
+import {
+  setPluginRuntimeProject,
+  setPluginRuntimeSdk,
+  setPluginRuntimeSessions,
+} from "./host-hooks";
 import { clearPlugins, setPluginsForScope, type PluginRecord } from "./registry";
 import {
   RenderPluginContribution,
+  usePluginSettingsPages,
   usePluginSidebarCards,
   usePluginSidebarTabs,
   usePluginTopperItems,
@@ -38,6 +43,11 @@ function CardsProbe() {
   return <div>{cards.map((card) => card.contribution.title).join(",")}</div>;
 }
 
+function SettingsProbe() {
+  const pages = usePluginSettingsPages(null);
+  return <div>{pages.map((page) => page.contribution.title).join(",")}</div>;
+}
+
 function BrokenContribution(): never {
   throw new Error("boom");
 }
@@ -46,6 +56,7 @@ afterEach(() => {
   clearPlugins();
   setPluginRuntimeProject(null);
   setPluginRuntimeSdk(null);
+  setPluginRuntimeSessions([]);
   vi.restoreAllMocks();
 });
 
@@ -132,6 +143,19 @@ describe("plugin rendering helpers", () => {
     expect(screen.getByText("Card")).toBeInTheDocument();
   });
 
+  it("returns React settings pages", () => {
+    const definition = {
+      name: "settings",
+      ui: { settingsPages: [{ id: "account", title: "Account", component: () => null }] },
+      __apiVersion: "1.0.0",
+    } as unknown as PluginDefinition;
+    setPluginsForScope("global", null, [record({ pluginId: "settings", definition })]);
+
+    render(<SettingsProbe />);
+
+    expect(screen.getByText("Account")).toBeInTheDocument();
+  });
+
   it("renders plugin component crashes inside the plugin boundary", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -146,5 +170,19 @@ describe("plugin rendering helpers", () => {
 
     expect(screen.getByText('Plugin "broken-plugin" crashed.')).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("passes web view payload directly to plugin components", () => {
+    render(
+      <RenderPluginContribution
+        component={({ webViewPayload }) => <div>{String(webViewPayload)}</div>}
+        config={{}}
+        pluginId="payload-plugin"
+        resetKey="payload-plugin:view"
+        webViewPayload="payload value"
+      />,
+    );
+
+    expect(screen.getByText("payload value")).toBeInTheDocument();
   });
 });

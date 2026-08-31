@@ -10,7 +10,10 @@ import type { BrowserBounds } from "@/lib/tauri";
  */
 
 /** Default page a freshly-created browser tab opens to. */
-export const BROWSER_START_URL = "https://duckduckgo.com";
+export const BROWSER_START_URL = "https://pragma-app.sh";
+
+/** Time allowed for a native page navigation before showing recovery UI. */
+export const BROWSER_LOAD_TIMEOUT_MS = 15_000;
 
 /**
  * Logical (CSS-pixel) bounds relative to the window's top-left — the space Tauri

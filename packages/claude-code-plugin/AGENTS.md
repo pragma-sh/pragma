@@ -1,4 +1,4 @@
-# packages/claude-code-plugin — @pragma/claude-code-plugin
+# packages/claude-code-plugin — @pragma-sh/claude-code-plugin
 
 Static Claude Code plugin that reports agent status and plan usage into Pragma. Unlike the opencode
 plugin, **Claude Code has no in-process JS plugin API** — its only live extension point
@@ -185,6 +185,11 @@ alone (same turn), so it re-asserts running on every tool without disturbing can
 detection. Re-reporting `running` while already running is harmless: the daemon stores
 status idempotently and only the transition the UI cares about (attention → running) is
 visible.
+
+The same hook advances a turn-scoped assistant-record cursor through the transcript and
+publishes each newly completed text segment. `Stop` performs one final sync before reporting
+`stopped`, then uses `last_assistant_message` only as a deduped fallback. This preserves
+responses around tool calls and guarantees final assistant content precedes done status.
 
 `PermissionRequest` reports `attention --kind command` (with the command + a requestId for
 the approval round-trip, see above). `Elicitation` reports a **generic** attention with no

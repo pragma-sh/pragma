@@ -1,8 +1,9 @@
 # `apps/www` — Pragma marketing + docs site
 
-Public website for Pragma: a Next.js (App Router) app serving the marketing pages at `/`
-and the documentation at `/docs`. It is **not** part of the desktop app — it ships no
-Tauri, Rust, or `@pragma/*` dependency, and nothing in the desktop app may import from it.
+Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
+plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
+app. Its only `@pragma/*` dependency is data-only `@pragma/plugin-registry`; nothing in
+desktop app may import from website.
 
 ## Stack
 
@@ -40,9 +41,10 @@ apps/www/
 │   └── pragma-app.png       # hero screenshot of the desktop app
 └── src/
     ├── app/
-    │   ├── (home)/          # marketing route group (landing page + the `.artboard` layout)
+    │   ├── (home)/          # marketing route group (landing, plugins, privacy) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
+    │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
     │   ├── llms.txt/, llms-full.txt/, llms.mdx/  # machine-readable docs output
     │   ├── og/docs/         # per-page OG images
     │   └── global.css       # Tailwind + shadcn tokens + the `.artboard` palette + Fumadocs preset
@@ -60,7 +62,10 @@ apps/www/
     │       └── comparison.tsx, cta.tsx, site-footer.tsx
     └── lib/
         ├── css-color.ts     # resolves a CSS token to hex so three.js can use the palette
+        ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
+        ├── plugins.ts       # official-lock fetch, validation, install deep links
+        ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
 ```
@@ -80,6 +85,15 @@ apps/www/
   token in a component — a literal hex or a hand-mixed grey in a `className` is a bug.
 - **Route strings live in `lib/shared.ts`.** `/docs`, `/og/docs`, and `/llms.mdx/docs` are
   referenced by the source loader, the proxy, and the page components — change them there.
+- **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
+  The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
+  Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
+  In development a local fixture stands in for that file; production fetches signed
+  manifests from recent GitHub Releases. Do not use `/releases/latest`: another
+  independently-versioned monorepo component may be newer. Walk reload manifests through
+  the newest restart manifest so a client that skipped native releases gets the required
+  installer before a newer UI overlay. An update without the requested
+  UI/platform/package-format asset is unavailable rather than an un-installable offer.
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep
   the rest of the page a server component.
@@ -233,6 +247,15 @@ apps/www/
   overlays it once the page scrolls, so the field's top inset is a small breathing gap,
   not the nav's height. Every pixel of that inset comes straight out of the band's
   depth.
+- **`/privacy` is an App Store submission artifact, not a marketing page.** App Store
+  Connect stores its URL for Pragma Go and App Review follows it, which is why it is
+  reached by URL and deliberately kept out of the site navigation. Change its route only
+  by changing `lib/legal.ts` **and** the URL in App Store Connect — a dead policy URL is
+  grounds for rejection on the next update. The page must keep describing what the apps
+  actually do with data (see `apps/pragma-go/AGENTS.md`); it is written to cover future
+  analytics and hosted services as _disclosed-before-they-launch_, so adding either means
+  editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
+  Support is handled through GitHub issues, so there is no support page here.
 - **Docs content is a placeholder.** Pragma is still being implemented; `content/docs`
   holds one index page so the route, the search index, and the llms.txt output have
   something to serve. Add real pages as features land.

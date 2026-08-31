@@ -34,7 +34,15 @@ export function AttachAgentDrawer({
   onClose,
 }: AttachAgentDrawerProps) {
   return (
-    <BottomSheet onOpenChange={(next) => !next && onClose()} open={open}>
+    <BottomSheet
+      footer={
+        <Button className="mt-4" onPress={onClose} variant="secondary">
+          <Text>Cancel</Text>
+        </Button>
+      }
+      onOpenChange={(next) => !next && onClose()}
+      open={open}
+    >
       <Text className="text-lg font-semibold text-foreground">Attach an agent</Text>
       <Text className="mt-1 text-sm text-muted-foreground">
         Comments and interactive blocks in this scratchpad are sent to the agent you pick.
@@ -55,9 +63,6 @@ export function AttachAgentDrawer({
           ))
         )}
       </View>
-      <Button className="mt-4" onPress={onClose} variant="secondary">
-        <Text>Cancel</Text>
-      </Button>
     </BottomSheet>
   );
 }

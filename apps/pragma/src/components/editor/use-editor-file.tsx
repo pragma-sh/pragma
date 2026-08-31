@@ -8,11 +8,12 @@ import { errorMessage } from "@/lib/errors";
 import { useWorktreeFileChange } from "@/lib/file-watch";
 import { readFile, writeFile } from "@/lib/tauri";
 import {
-  disposeTab,
   getTabDoc,
+  getTabSavedDoc,
   isTabDirty,
   setTabDirty,
   setTabDoc,
+  setTabSavedDoc,
 } from "@/state/editor-dirty-store";
 
 /** Lifecycle of a file-backed editor surface: loading, ready, or a terminal failure. */
@@ -42,7 +43,6 @@ export function useEditorFileLoader(
   tab: Tab,
   savedDocRef: RefObject<string>,
   currentDocRef: RefObject<string>,
-  options: { preserveOnUnmount?: boolean } = {},
 ): EditorFileLoader {
   const { id: tabId, worktreeId, filePath } = tab;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -53,8 +53,9 @@ export function useEditorFileLoader(
       setState({ kind: "error", message: "This tab has no file path." });
       return () => undefined;
     }
-    const preserved = options.preserveOnUnmount && isTabDirty(tabId) ? getTabDoc(tabId) : null;
+    const preserved = isTabDirty(tabId) ? getTabDoc(tabId) : null;
     if (preserved !== null) {
+      savedDocRef.current = getTabSavedDoc(tabId) ?? savedDocRef.current;
       currentDocRef.current = preserved;
       setState({ kind: "ready", doc: preserved });
       return () => undefined;
@@ -76,6 +77,7 @@ export function useEditorFileLoader(
         }
         savedDocRef.current = contents.text;
         currentDocRef.current = contents.text;
+        setTabSavedDoc(tabId, contents.text);
         setTabDoc(tabId, contents.text);
         setTabDirty(tabId, false);
         setState({ kind: "ready", doc: contents.text });
@@ -86,7 +88,7 @@ export function useEditorFileLoader(
     return () => {
       cancelled = true;
     };
-  }, [tabId, worktreeId, filePath, savedDocRef, currentDocRef, options.preserveOnUnmount]);
+  }, [tabId, worktreeId, filePath, savedDocRef, currentDocRef]);
 
   /**
    * Re-reads the file **without** dropping back to the loading placeholder, so
@@ -110,6 +112,7 @@ export function useEditorFileLoader(
         }
         savedDocRef.current = contents.text;
         currentDocRef.current = contents.text;
+        setTabSavedDoc(tabId, contents.text);
         setTabDoc(tabId, contents.text);
         setTabDirty(tabId, false);
         setState((previous) =>
@@ -153,14 +156,6 @@ export function useEditorFileLoader(
 
   const reloadFromDisk = useCallback(() => void refresh(true), [refresh]);
 
-  // Drop transient dirty/doc state when the tab's editor unmounts.
-  useEffect(
-    () => () => {
-      if (!options.preserveOnUnmount) disposeTab(tabId);
-    },
-    [tabId, options.preserveOnUnmount],
-  );
-
   return { state, load, externalChange, reloadFromDisk };
 }
 
@@ -177,6 +172,7 @@ export function useEditorSave(
       try {
         await writeFile(worktreeId, filePath, contents);
         savedDocRef.current = contents;
+        setTabSavedDoc(tabId, contents);
         setTabDoc(tabId, contents);
         setTabDirty(tabId, false);
         toast.success("Saved");

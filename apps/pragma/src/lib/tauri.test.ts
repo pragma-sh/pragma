@@ -47,6 +47,7 @@ import {
   readFile,
   renameFile,
   renameWorktree,
+  restoreFanoutTab,
   setSplitLayout,
   setTabTitle,
   setWorktreeHidden,
@@ -556,6 +557,22 @@ describe("tab title IPC wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("set_tab_title", {
       tabId: "tab-1",
       title: "user@host: ~/repo",
+    });
+  });
+});
+
+describe("fanout IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("restores the exact host-owned agent tab", () => {
+    void restoreFanoutTab("project-1", "worktree-1", "tab-1");
+    expect(invokeMock).toHaveBeenCalledWith("restore_fanout_tab", {
+      projectId: "project-1",
+      worktreeId: "worktree-1",
+      tabId: "tab-1",
     });
   });
 });

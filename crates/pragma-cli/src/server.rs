@@ -45,7 +45,7 @@ pub fn connect() -> Result<Server, CliError> {
     let path = socket_path().map_err(CliError::config)?;
     let mut stream = ipc::connect(std::path::Path::new(&path))
         .map_err(|e| CliError::config(format!("connect to {path}: {e}")))?;
-    let expected = CONSTANTS.daemon.protocol_version.get();
+    let expected = CONSTANTS.daemon.protocol_version.as_str();
     match read_json_frame::<ServerFrame>(&mut stream) {
         Ok(ServerFrame::Hello(HelloFrame { protocol_version })) if protocol_version == expected => {
         }

@@ -9,6 +9,8 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
 `agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
+`client.createBoardDraft({ prompt, worktreeId, agentId, modelId?, reasoningId? })`
+creates a draft card through the running desktop controller.
 
 Configuration resolves from constructor options first, then `PRAGMA_GATEWAY_URL` and
 `PRAGMA_GATEWAY_TOKEN`. The SDK must not read discovery files; only the gateway owns

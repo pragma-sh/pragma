@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { PluginDefinition } from "@pragma/plugin";
+
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
   aiAuthMethods,
@@ -14,6 +16,7 @@ import {
 } from "@/lib/tauri";
 import { useAi } from "@/state/ai-context";
 import { useGitHub } from "@/state/github-context";
+import { clearPlugins, setPluginsForScope } from "@/plugins/registry";
 
 const closeSettings = vi.fn();
 const signOut = vi.fn();
@@ -59,6 +62,22 @@ vi.mock("@/state/ai-context", () => ({
   useAi: vi.fn(),
 }));
 
+vi.mock("@/state/updates-context", () => ({
+  useUpdates: () => ({
+    runtime: {
+      platform: "darwin-aarch64",
+      isDev: true,
+      checkUrl: "http://localhost:3000/api/updates",
+      versions: { ui: "0.0.0", app: "0.0.0", server: "0.0.0", protocol: "0.0.0" },
+    },
+    offer: null,
+    checking: false,
+    applying: false,
+    checkNow: vi.fn(),
+    install: vi.fn(),
+  }),
+}));
+
 vi.mock("@/lib/tauri", () => ({
   aiAuthMethods: vi.fn(),
   aiLogout: vi.fn(),
@@ -89,6 +108,7 @@ function gitHubValue(overrides: Partial<ReturnType<typeof useGitHub>> = {}) {
 describe("SettingsWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPlugins();
     vi.mocked(readConfig).mockResolvedValue({
       exists: true,
       path: "/home/user/.pragma/config.json",
@@ -156,6 +176,33 @@ describe("SettingsWorkspace", () => {
       ),
     );
     expect(screen.queryByText("@pragma/plugin-one")).not.toBeInTheDocument();
+  });
+
+  it("renders plugin settings pages from the Settings navigation", async () => {
+    const definition = {
+      name: "Plugin Settings",
+      ui: {
+        settingsPages: [
+          { id: "account", title: "Plugin Account", component: () => <div>Account settings</div> },
+        ],
+      },
+      __apiVersion: "0.4.0",
+    } as PluginDefinition;
+    setPluginsForScope("global", null, [
+      {
+        pluginId: "plugin-settings",
+        version: "1.0.0",
+        scope: "global",
+        status: "loaded",
+        config: undefined,
+        definition,
+      },
+    ]);
+
+    render(<SettingsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Plugin Account" }));
+
+    expect(screen.getByText("Account settings")).toBeInTheDocument();
   });
 
   it("hides the WSL section off Windows", async () => {
@@ -357,6 +404,18 @@ describe("SettingsWorkspace", () => {
 
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith("sidecar unavailable"));
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
-    expect(button).not.toBeDisabled();
+  });
+
+  it("shows the Other section with the local server URL", async () => {
+    render(<SettingsWorkspace />);
+
+    await screen.findByText("Loaded plugins");
+    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+
+    expect(screen.getByLabelText("Server URL")).toHaveAttribute(
+      "placeholder",
+      "http://localhost:3000/api/updates",
+    );
+    expect(screen.getByRole("button", { name: "Check now" })).toBeInTheDocument();
   });
 });

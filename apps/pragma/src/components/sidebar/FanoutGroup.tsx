@@ -1,5 +1,6 @@
 import type { AgentStatus, Fanout, FanoutMember } from "@pragma/constants";
 import { GitFork } from "lucide-react";
+import { toast } from "sonner";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { ShortcutHint } from "@/components/ShortcutHint";
@@ -12,6 +13,9 @@ import {
   memberTooltip,
   orderedMembers,
 } from "@/lib/fanout";
+import { errorMessage } from "@/lib/errors";
+import { restoreFanoutTab } from "@/lib/tauri";
+import { useTabAgentStatus } from "@/state/agent-status-store";
 import { useFanouts } from "@/state/fanouts-context";
 import { useKanban } from "@/state/kanban-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -71,18 +75,16 @@ export function FanoutMembersSlot({ worktreeId, depth }: { worktreeId: string; d
 }
 
 /**
- * The agent indicator a member's own status implies. Member status is the
- * fanout's vocabulary; the dot is the agent's, and only three of them overlap.
+ * Active fanout states can seed an indicator before runtime reports arrive.
+ * Completed states deliberately do not: runtime `done` is cleared when viewed,
+ * while the durable fanout member remains completed forever.
  */
-function agentStatusFor(member: FanoutMember): AgentStatus | null {
+function activeAgentStatusFor(member: FanoutMember): AgentStatus | null {
   switch (member.status) {
     case "running":
       return "running";
     case "attention":
       return "attention";
-    case "done":
-    case "selected":
-      return "done";
     default:
       return null;
   }
@@ -110,16 +112,27 @@ function FanoutMemberRow({
   const selected = member.worktreeId ? workspace.selectedWorktreeId === member.worktreeId : false;
   const shortcutIndex = useWorktreeShortcutIndex(member.worktreeId);
   const shortcutHint = useShortcutHint("worktree", shortcutIndex);
+  const runtimeStatus = useTabAgentStatus(member.tabId);
 
   const select = () => {
-    if (!member.worktreeId) return;
-    // Selecting an attempt is an ordinary worktree selection, plus its agent
-    // tab: the tab is the session a person opened, so opening the worktree
-    // without it strands them on an empty shell.
-    if (member.tabId) {
-      void workspace.activateTabLocation(projectId, member.worktreeId, member.tabId);
+    const worktreeId = member.worktreeId;
+    if (!worktreeId) return;
+    const tabId = member.tabId;
+    if (tabId) {
+      // Do not select the worktree before its host-created tab is restored: that
+      // exposes the generic no-tabs welcome screen while adoption is in flight.
+      const openAgentTab = async () => {
+        const known = workspace.projectTabs.some(
+          (tab) => tab.id === tabId && tab.worktreeId === worktreeId,
+        );
+        if (!known) {
+          await restoreFanoutTab(projectId, worktreeId, tabId);
+        }
+        await workspace.activateTabLocation(projectId, worktreeId, tabId);
+      };
+      void openAgentTab().catch((cause) => toast.error(errorMessage(cause)));
     } else {
-      workspace.selectWorktree(member.worktreeId);
+      workspace.selectWorktree(worktreeId, projectId);
     }
     kanban.exitBoard();
   };
@@ -134,7 +147,7 @@ function FanoutMemberRow({
       onActivate={select}
       icon={<GitFork className="size-3.5 shrink-0 text-muted-foreground" />}
       label={<span className="min-w-0 flex-1 truncate">{memberLabel(member)}</span>}
-      status={<AgentStatusDot status={agentStatusFor(member)} />}
+      status={<AgentStatusDot status={runtimeStatus ?? activeAgentStatusFor(member)} />}
       trailing={<ShortcutHint value={shortcutHint} />}
     />
   );

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
+  "name": "Prime Agent",
+  "description": "Launch Prime Agent in Pragma with live status, session naming, and interjections.",
+  "categories": ["agent-plugin"],
+  "images": [
+    {
+      "url": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/prime-agent-plugin/assets/prime-butterfly.svg",
+      "alt": "Prime Agent logo"
+    }
+  ],
+  "install": { "command": "prime-agent", "args": ["package", "install", "."] },
+  "agentBinary": "prime-agent"
+}

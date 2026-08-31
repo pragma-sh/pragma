@@ -23,6 +23,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod plugin_distribution;
 mod plugins;
 mod ports;
 pub(crate) use pragma_core::process_env;
@@ -31,6 +32,7 @@ mod pty;
 mod scratchpads;
 mod scripts;
 mod ssh_host;
+mod updates;
 mod window_chrome;
 mod workspace_mirror;
 mod worktrees;
@@ -1052,6 +1054,16 @@ fn plugin_storage_set(
     db.plugin_storage_set(&plugin_id, &key, &value)
 }
 
+/// Deletes one plugin-owned storage value.
+#[tauri::command]
+fn plugin_storage_delete(
+    db: tauri::State<'_, Db>,
+    plugin_id: String,
+    key: String,
+) -> AppResult<()> {
+    db.plugin_storage_delete(&plugin_id, &key)
+}
+
 /// Wires the app's managed state, menu, and dev-only plugins during Tauri setup.
 /// Extracted from `run` so the builder chain stays readable (and within the
 /// per-function line budget).
@@ -1087,6 +1099,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(pty.clone());
     app.manage(Hosts::new(pty.clone(), router));
     app.manage(GitLocks::default());
+    app.manage(plugin_distribution::PluginInstaller::default());
     app.manage(ai::LoginRegistry::default());
     app.manage(ai::AskRegistry::default());
     app.manage(control::BrowserHistory::default());
@@ -1102,6 +1115,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_chrome::apply(&window);
     }
+    updates::load_ui_overlay(app.handle());
     install_menu(app.handle())?;
     install_deep_links(app);
     ensure_gateway_in_background(pty.clone());
@@ -1143,6 +1157,9 @@ pub fn run() {
         Err(error) => log::warn!("could not raise the open-file limit: {error}"),
     }
     tauri::Builder::default()
+        .register_uri_scheme_protocol("pragma-ui", |context, request| {
+            updates::ui_overlay_response(context.app_handle(), request.uri().path())
+        })
         .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1151,10 +1168,20 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             platform_name,
+            updates::get_update_runtime,
+            updates::check_for_update,
+            updates::apply_update,
+            updates::confirm_ui_overlay,
             load_keybindings,
             set_menu_accelerators_enabled,
             read_plugin_manifests,
             read_plugin_bundle,
+            plugin_distribution::install_official_plugin,
+            plugin_distribution::available_plugin_binaries,
+            plugin_distribution::plugin_onboarding_dismissed,
+            plugin_distribution::set_plugin_onboarding_dismissed,
+            plugin_distribution::agent_plugin_prompt_dismissed,
+            plugin_distribution::set_agent_plugin_prompt_dismissed,
             gateway_connection_info,
             regenerate_gateway_token,
             gateway_devices,
@@ -1225,6 +1252,7 @@ pub fn run() {
             set_active_selection,
             plugin_storage_get,
             plugin_storage_set,
+            plugin_storage_delete,
             kanban::list_kanban_cards,
             kanban::create_kanban_card,
             kanban::update_kanban_card,
@@ -1286,6 +1314,7 @@ pub fn run() {
             scratchpads::list_scratchpad_files,
             fanouts::fanout_rpc,
             fanouts::list_fanouts,
+            fanouts::restore_fanout_tab,
             fanouts::pick_fanout_member,
             ai::ai_generate_pull_request_draft,
             ai::ai_commit_all_and_generate_pull_request_draft,

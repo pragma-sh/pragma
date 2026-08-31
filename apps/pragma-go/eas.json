@@ -1,0 +1,59 @@
+{
+  "cli": {
+    "version": ">= 21.4.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "22.22.1",
+      "bun": "1.3.14",
+      "env": {
+        "EXPO_NO_TELEMETRY": "1"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "channel": "development",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "simulator": true }
+    },
+    "preview": {
+      "extends": "base",
+      "channel": "preview",
+      "distribution": "internal",
+      "env": {
+        "PRAGMA_STORE_BUILD": "1"
+      },
+      "ios": { "simulator": false },
+      "android": { "buildType": "apk" }
+    },
+    "production": {
+      "extends": "base",
+      "channel": "production",
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "PRAGMA_STORE_BUILD": "1"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "ektechworld@gmail.com",
+        "ascAppId": "6804842149",
+        "appleTeamId": "PQ4223Y5J4"
+      },
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}
