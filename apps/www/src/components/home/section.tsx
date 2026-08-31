@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useReducedMotion } from "motion/react";
 import { Check } from "lucide-react";
@@ -109,20 +110,50 @@ export function MediaVideo({
   aspect?: MediaAspect;
 }) {
   const reduceMotion = useReducedMotion();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isNearViewport, setIsNearViewport] = useState(false);
+
+  useEffect(() => {
+    const node = videoRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setIsNearViewport(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isNearViewport) return;
+    const node = videoRef.current;
+    if (!node) return;
+
+    node.load();
+    if (!reduceMotion) {
+      void node.play();
+    }
+  }, [isNearViewport, reduceMotion]);
 
   return (
     <MediaFrame className={cn("md:scale-105 lg:scale-110", className)} aspect={aspect}>
       <video
+        ref={videoRef}
         aria-hidden
-        autoPlay={!reduceMotion}
         className="block h-auto w-full"
         loop
         muted
         playsInline
-        preload="metadata"
+        preload="none"
         tabIndex={-1}
       >
-        <source src={src} type="video/mp4" />
+        {isNearViewport ? <source src={src} type="video/mp4" /> : null}
       </video>
     </MediaFrame>
   );

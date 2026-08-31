@@ -32,7 +32,7 @@ export function CallToAction() {
           <h2 className="font-heading type-display-lg mx-auto max-w-3xl text-balance">
             Stop babysitting one agent at a time.
           </h2>
-          <p className="mx-auto mt-6 max-w-xl text-lg leading-[1.3] text-foreground/80 text-balance">
+          <p className="mx-auto mt-6 max-w-xl text-lg leading-[1.3] text-muted-foreground text-balance">
             Open a project, fan a prompt across your agents, and come back to pull requests.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
