@@ -185,18 +185,45 @@ function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, value));
 }
 
+/** `Math.sign`, but with a caller-chosen result for a zero input. */
+function signOr(value: number, fallback: number): number {
+  return Math.sign(value) || fallback;
+}
+
 /**
- * Stops a chip on the face of `rect` it would have crossed on its way from
- * (`prevX`, `prevY`) to its current position, and reflects the velocity on that
- * axis. Returns `true` when it intervened.
- *
- * This is the primary guard, and it is swept rather than positional on purpose.
- * Resolving after the move can only ask "which face is nearest *now*", which for
- * a chip that arrived deep inside is the face on the *far* side — so the fix for
- * an overlap was itself a trip underneath the screenshot. Asking "which face did
- * it cross first" has no such failure mode: the chip stops at the surface it hit
- * and never occupies the interior at all.
+ * How far a chip has pushed inside `rect`'s clearance outline through its
+ * rounded corner, plus the unit direction out of it. `null` when it is clear.
  */
+function cornerPenetration(
+  dx: number,
+  dy: number,
+  overX: number,
+  overY: number,
+  pad: number,
+): { depth: number; nx: number; ny: number } | null {
+  const reach = Math.hypot(overX, overY);
+  if (reach >= pad) return null;
+  const span = Math.max(reach, SURFACE_EPSILON);
+  return {
+    depth: pad - reach,
+    nx: (overX / span) * signOr(dx, 1),
+    ny: (overY / span) * signOr(dy, 1),
+  };
+}
+
+/** The same, for a chip that is past one face of `rect` but not both. */
+function facePenetration(
+  dx: number,
+  dy: number,
+  overX: number,
+  overY: number,
+  pad: number,
+): { depth: number; nx: number; ny: number } {
+  return overX > overY
+    ? { depth: pad - overX, nx: signOr(dx, 1), ny: 0 }
+    : { depth: pad - overY, nx: 0, ny: signOr(dy, -1) };
+}
+
 /**
  * How far a chip has pushed inside `rect`'s clearance outline, plus the unit
  * direction out of it. `null` when the chip is clear.
@@ -216,121 +243,214 @@ function penetration(
   const dy = body.y - rect.centerY;
   const overX = Math.abs(dx) - rect.halfX;
   const overY = Math.abs(dy) - rect.halfY;
-  if (overX >= pad || overY >= pad) return null;
+  if (Math.max(overX, overY) >= pad) return null;
   // Past both faces the nearest point on the rectangle is its corner, so the
   // clearance is measured radially from there rather than per axis.
-  if (overX > 0 && overY > 0) {
-    const reach = Math.hypot(overX, overY);
-    if (reach >= pad) return null;
-    const signX = Math.sign(dx) || 1;
-    const signY = Math.sign(dy) || 1;
-    const span = reach || 1;
-    return { depth: pad - reach, nx: (overX / span) * signX, ny: (overY / span) * signY };
-  }
-  return overX > overY
-    ? { depth: pad - overX, nx: Math.sign(dx) || 1, ny: 0 }
-    : { depth: pad - overY, nx: 0, ny: Math.sign(dy) || -1 };
+  return Math.min(overX, overY) > 0
+    ? cornerPenetration(dx, dy, overX, overY, pad)
+    : facePenetration(dx, dy, overX, overY, pad);
 }
 
-function sweepExclusion(body: ChipBody, rect: ExclusionRect): boolean {
+/** When a move crossed one axis' near face, as a fraction of the move. */
+function faceEntry(from: number, delta: number, pad: number): number {
+  return delta === 0 ? -Infinity : (signOr(delta, 1) * -pad - from) / delta;
+}
+
+/**
+ * Which face of `rect` the chip's last move entered through, and how far along
+ * that move it happened. `null` when the move began inside the padded box or
+ * covered no ground — the two cases the positional pushout owns.
+ */
+function sweepEntry(body: ChipBody, rect: ExclusionRect): { onX: boolean; entry: number } | null {
   const padX = rect.halfX + body.r + margin(body.r);
   const padY = rect.halfY + body.r + margin(body.r);
-  const toX = body.x - rect.centerX;
-  const toY = body.y - rect.centerY;
-  // Not ending up inside the rounded outline: nothing to do. Testing the round
-  // outline rather than the box is what leaves a chip seated on a corner alone.
-  if (penetration(body, rect) === null) return false;
-
   const fromX = body.prevX - rect.centerX;
   const fromY = body.prevY - rect.centerY;
   // Already inside when the segment started — the sweep has no entry face to
-  // find, so the positional pushout below handles it.
-  if (Math.abs(fromX) < padX && Math.abs(fromY) < padY) return false;
+  // find, so the positional pushout handles it.
+  if (Math.max(Math.abs(fromX) - padX, Math.abs(fromY) - padY) < 0) return null;
 
-  const dx = toX - fromX;
-  const dy = toY - fromY;
-  // A zero-length segment has no entry face; the pushout below owns that case.
-  if (dx === 0 && dy === 0) return false;
-  // Entry time per axis: when the segment crossed that axis' near face.
-  const entryX = dx === 0 ? -Infinity : (Math.sign(dx) * -padX - fromX) / dx;
-  const entryY = dy === 0 ? -Infinity : (Math.sign(dy) * -padY - fromY) / dy;
-  // The last face crossed is the one actually entered through.
+  const dx = body.x - body.prevX;
+  const dy = body.y - body.prevY;
+  // A zero-length segment has no entry face; the pushout owns that case too.
+  if (Math.abs(dx) + Math.abs(dy) === 0) return null;
+
+  // Entry time per axis, and the last face crossed is the one entered through.
+  const entryX = faceEntry(fromX, dx, padX);
+  const entryY = faceEntry(fromY, dy, padY);
   const onX = entryX > entryY;
-  const entry = Math.min(Math.max(onX ? entryX : entryY, 0), 1);
+  return { onX, entry: clamp(onX ? entryX : entryY, 0, 1) };
+}
 
-  if (onX) {
-    const face = Math.sign(dx) * -padX;
-    body.x = rect.centerX + face - Math.sign(dx) * SURFACE_EPSILON;
-    body.y = rect.centerY + fromY + dy * entry;
-    if (!body.held) {
-      body.vx = -body.vx * RESTITUTION;
-      body.spin += body.vy * -Math.sign(dx) * BOUNCE_SPIN;
-    }
-  } else {
-    const face = Math.sign(dy) * -padY;
-    body.y = rect.centerY + face - Math.sign(dy) * SURFACE_EPSILON;
-    body.x = rect.centerX + fromX + dx * entry;
-    if (!body.held) {
-      body.vy = -body.vy * RESTITUTION;
-      body.spin += body.vx * Math.sign(dy) * BOUNCE_SPIN;
-    }
-  }
+/** Seats a chip on `rect`'s vertical face and reflects it there. */
+function seatOnFaceX(body: ChipBody, rect: ExclusionRect, entry: number): void {
+  const padX = rect.halfX + body.r + margin(body.r);
+  const fromY = body.prevY - rect.centerY;
+  const dx = body.x - body.prevX;
+  const dy = body.y - body.prevY;
+  const direction = signOr(dx, 1);
+  body.x = rect.centerX + direction * -padX - direction * SURFACE_EPSILON;
+  body.y = rect.centerY + fromY + dy * entry;
+  if (body.held) return;
+  body.vx = -body.vx * RESTITUTION;
+  body.spin += body.vy * -direction * BOUNCE_SPIN;
+}
+
+/** The same, for `rect`'s horizontal face. */
+function seatOnFaceY(body: ChipBody, rect: ExclusionRect, entry: number): void {
+  const padY = rect.halfY + body.r + margin(body.r);
+  const fromX = body.prevX - rect.centerX;
+  const dx = body.x - body.prevX;
+  const dy = body.y - body.prevY;
+  const direction = signOr(dy, 1);
+  body.y = rect.centerY + direction * -padY - direction * SURFACE_EPSILON;
+  body.x = rect.centerX + fromX + dx * entry;
+  if (body.held) return;
+  body.vy = -body.vy * RESTITUTION;
+  body.spin += body.vx * direction * BOUNCE_SPIN;
+}
+
+/**
+ * Stops a chip on the face of `rect` its last move crossed first, walking it
+ * back from wherever it ended up, and reflects the velocity on that axis.
+ * Returns `true` when it intervened.
+ *
+ * This is the primary guard, and it is swept rather than positional on purpose.
+ * Resolving after the move can only ask "which face is nearest *now*", which for
+ * a chip that arrived deep inside is the face on the *far* side — so the fix for
+ * an overlap was itself a trip underneath the screenshot. Asking "which face did
+ * it cross first" has no such failure mode: the chip stops at the surface it hit
+ * and never occupies the interior at all.
+ */
+function sweepExclusion(body: ChipBody, rect: ExclusionRect): boolean {
+  // Not ending up inside the rounded outline: nothing to do. Testing the round
+  // outline rather than the box is what leaves a chip seated on a corner alone.
+  if (penetration(body, rect) === null) return false;
+  const hit = sweepEntry(body, rect);
+  if (!hit) return false;
+  if (hit.onX) seatOnFaceX(body, rect, hit.entry);
+  else seatOnFaceY(body, rect, hit.entry);
   return true;
+}
+
+/**
+ * Pushes a chip out along the rounded corner it is tucked into. Rounding the
+ * corner rather than choosing an axis matters: a chip in a corner is only a
+ * little way inside, and squaring it out sends it a long way along whichever
+ * axis won — which reads as a chip flinching away from the heading.
+ */
+function escapeCorner(body: ChipBody, hit: { depth: number; nx: number; ny: number }): void {
+  body.x += hit.nx * hit.depth;
+  body.y += hit.ny * hit.depth;
+  if (body.held) return;
+  const inward = body.vx * hit.nx + body.vy * hit.ny;
+  if (inward >= 0) return;
+  body.vx -= (1 + RESTITUTION) * inward * hit.nx;
+  body.vy -= (1 + RESTITUTION) * inward * hit.ny;
+}
+
+/** Pushes a chip out of a rectangle across the given axis, and bounces it. */
+function escapeAlongX(body: ChipBody, overlap: number, direction: number): void {
+  body.x += direction * overlap;
+  if (!body.held && body.vx * direction < 0) {
+    body.vx = -body.vx * RESTITUTION;
+    body.spin += body.vy * direction * BOUNCE_SPIN;
+  }
+}
+
+/** The same, across the other axis. */
+function escapeAlongY(body: ChipBody, overlap: number, direction: number): void {
+  body.y += direction * overlap;
+  if (!body.held && body.vy * direction < 0) {
+    body.vy = -body.vy * RESTITUTION;
+    body.spin += -body.vx * direction * BOUNCE_SPIN;
+  }
+}
+
+/**
+ * Whether a chip should escape `rect` sideways: only when that is the shallower
+ * way out *and* the side gutter is actually wide enough to hold a chip. A
+ * sideways escape into a too-narrow gutter is what parks a chip half-under the
+ * screenshot.
+ */
+function escapesSideways(
+  body: ChipBody,
+  rect: ExclusionRect,
+  bounds: StepOptions["bounds"],
+  overlapX: number,
+  overlapY: number,
+  direction: number,
+): boolean {
+  if (overlapX > overlapY) return false;
+  const gutter =
+    direction > 0 ? bounds.x - (rect.centerX + rect.halfX) : rect.centerX - rect.halfX + bounds.x;
+  return gutter >= 2 * body.r + margin(body.r);
 }
 
 /**
  * Pushes a chip that is *already* inside `rect` back out — the case the sweep
  * cannot cover, which happens when a rect grows or moves onto a settled chip
  * (an entrance animation, a resize) rather than when a chip moves into a rect.
- *
- * It escapes sideways only when the side gutter is actually wide enough to hold
- * a chip; otherwise it goes above or below, because a sideways escape into a
- * too-narrow gutter is what parks a chip half-under the screenshot.
  */
 function applyExclusion(body: ChipBody, rect: ExclusionRect, bounds: StepOptions["bounds"]): void {
   const hit = penetration(body, rect);
   if (!hit) return;
+  if (Math.min(Math.abs(hit.nx), Math.abs(hit.ny)) > 0) {
+    escapeCorner(body, hit);
+    return;
+  }
 
   const dx = body.x - rect.centerX;
   const dy = body.y - rect.centerY;
-  // Round the corner rather than choosing an axis: a chip tucked into a corner
-  // is only a little way inside, and squaring it out sends it a long way along
-  // whichever axis won — which reads as a chip flinching away from the heading.
-  if (hit.nx !== 0 && hit.ny !== 0) {
-    body.x += hit.nx * hit.depth;
-    body.y += hit.ny * hit.depth;
-    if (!body.held) {
-      const inward = body.vx * hit.nx + body.vy * hit.ny;
-      if (inward < 0) {
-        body.vx -= (1 + RESTITUTION) * inward * hit.nx;
-        body.vy -= (1 + RESTITUTION) * inward * hit.ny;
-      }
-    }
+  const overlapX = rect.halfX + body.r + margin(body.r) - Math.abs(dx);
+  const overlapY = rect.halfY + body.r + margin(body.r) - Math.abs(dy);
+  const dirX = signOr(dx, 1);
+  if (escapesSideways(body, rect, bounds, overlapX, overlapY, dirX)) {
+    escapeAlongX(body, overlapX, dirX);
     return;
   }
+  escapeAlongY(body, overlapY, signOr(dy, -1));
+}
 
-  const padX = rect.halfX + body.r + margin(body.r);
-  const padY = rect.halfY + body.r + margin(body.r);
-  const overlapX = padX - Math.abs(dx);
-  const overlapY = padY - Math.abs(dy);
-  const dirX = dx === 0 ? 1 : Math.sign(dx);
-  const gutter =
-    dirX > 0 ? bounds.x - (rect.centerX + rect.halfX) : rect.centerX - rect.halfX + bounds.x;
+/**
+ * Runs the exclusion guards over one chip once. Returns whether a sweep fired,
+ * which is the signal that another pass is worth running.
+ */
+function exclusionPass(body: ChipBody, options: StepOptions): boolean {
+  let touched = false;
+  for (const rect of options.exclusions) {
+    // Sweep first: it stops the chip at the face it crossed. The positional
+    // pushout only runs for a chip that was already inside to begin with.
+    if (sweepExclusion(body, rect)) touched = true;
+    else applyExclusion(body, rect, options.bounds);
+  }
+  return touched;
+}
 
-  if (overlapX <= overlapY && gutter >= 2 * body.r + margin(body.r)) {
-    body.x += dirX * overlapX;
-    if (!body.held && body.vx * dirX < 0) {
-      body.vx = -body.vx * RESTITUTION;
-      body.spin += body.vy * dirX * BOUNCE_SPIN;
-    }
-    return;
-  }
-  const dirY = dy === 0 ? -1 : Math.sign(dy);
-  body.y += dirY * overlapY;
-  if (!body.held && body.vy * dirY < 0) {
-    body.vy = -body.vy * RESTITUTION;
-    body.spin += -body.vx * dirY * BOUNCE_SPIN;
-  }
+/** Keeps a chip inside the viewport horizontally, bouncing it off the edge. */
+function clampAcrossX(body: ChipBody, limitX: number): void {
+  if (Math.abs(body.x) <= limitX) return;
+  body.x = Math.sign(body.x) * limitX;
+  if (body.held) return;
+  body.vx *= -RESTITUTION;
+  body.spin += body.vy * BOUNCE_SPIN;
+}
+
+/**
+ * A chip above the ceiling and moving down is dropping in from off-screen, so
+ * it falls through; only an upward escape counts.
+ */
+function escapesVertically(body: ChipBody, limitY: number): boolean {
+  return body.y < -limitY || (body.y > limitY && body.vy > 0);
+}
+
+/** Keeps a chip inside the viewport vertically, bouncing it off the edge. */
+function clampAcrossY(body: ChipBody, limitY: number): void {
+  if (!escapesVertically(body, limitY)) return;
+  body.y = Math.sign(body.y) * limitY;
+  if (body.held) return;
+  body.vy *= -RESTITUTION;
+  body.spin += -body.vx * BOUNCE_SPIN;
 }
 
 /**
@@ -342,45 +462,14 @@ function applyExclusion(body: ChipBody, rect: ExclusionRect, bounds: StepOptions
 function constrain(body: ChipBody, options: StepOptions): void {
   // Entrance chips are parked above the viewport on purpose; clamping them into
   // bounds here would delete the drop before it started.
-  if (body.delay > 0) {
-    body.prevX = body.x;
-    body.prevY = body.y;
-    return;
-  }
-  // Two passes: stopping a chip against one rectangle can slide it into the
-  // next, and the copy block and screenshot share a corner where that happens.
-  for (let pass = 0; pass < 2; pass += 1) {
-    let touched = false;
-    for (const rect of options.exclusions) {
-      // Sweep first: it stops the chip at the face it crossed. The positional
-      // pushout only runs for a chip that was already inside to begin with.
-      if (sweepExclusion(body, rect)) {
-        touched = true;
-      } else {
-        applyExclusion(body, rect, options.bounds);
-      }
+  if (body.delay <= 0) {
+    // Two passes: stopping a chip against one rectangle can slide it into the
+    // next, and the copy block and screenshot share a corner where that happens.
+    for (let pass = 0; pass < 2; pass += 1) {
+      if (!exclusionPass(body, options)) break;
     }
-    if (!touched) break;
-  }
-
-  const limitX = options.bounds.x - body.r;
-  const limitY = options.bounds.y - body.r;
-  if (Math.abs(body.x) > limitX) {
-    body.x = Math.sign(body.x) * limitX;
-    if (!body.held) {
-      body.vx *= -RESTITUTION;
-      body.spin += body.vy * BOUNCE_SPIN;
-    }
-  }
-  // A chip above the ceiling and moving down is dropping in from off-screen, so
-  // it falls through; only an upward escape is bounced back.
-  const escapingUp = body.y > limitY && body.vy > 0;
-  if (body.y < -limitY || escapingUp) {
-    body.y = Math.sign(body.y) * limitY;
-    if (!body.held) {
-      body.vy *= -RESTITUTION;
-      body.spin += -body.vx * BOUNCE_SPIN;
-    }
+    clampAcrossX(body, options.bounds.x - body.r);
+    clampAcrossY(body, options.bounds.y - body.r);
   }
 
   // This position is now legal, so it becomes the origin the next move sweeps
@@ -388,6 +477,17 @@ function constrain(body: ChipBody, options: StepOptions): void {
   // next sweep and defeat the whole guard.
   body.prevX = body.x;
   body.prevY = body.y;
+}
+
+/**
+/** How much of a lane's slack is spent between its chips rather than at its ends. */
+function laneSpread(reach: LaneReach, slack: number, count: number): number {
+  // "inset" leaves a margin at both ends as well as between the chips; "ends"
+  // spends the whole slack between them, so the outermost chips sit on the
+  // lane's own ends. A band uses "ends" because those ends are exactly the part
+  // of the lane that curls down beside the content — inset by a full share, the
+  // outer chips never reach the corner and the band reads as a flat row.
+  return reach === "ends" ? slack / Math.max(1, count - 1) : 0;
 }
 
 /**
@@ -408,15 +508,10 @@ function packLane(
   const count = radii.length;
   if (count === 0) return [];
   const span = Math.abs(from - to);
-  const direction = Math.sign(to - from) || 1;
+  const direction = signOr(to - from, 1);
   const slack = Math.max(0, span - laneLength(radii));
-  // "inset" leaves a margin at both ends as well as between the chips; "ends"
-  // spends the whole slack between them, so the outermost chips sit on the
-  // lane's own ends. A band uses "ends" because those ends are exactly the part
-  // of the lane that curls down beside the content — inset by a full share, the
-  // outer chips never reach the corner and the band reads as a flat row.
   const lead = reach === "ends" ? 0 : slack / (count + 1);
-  const between = reach === "ends" && count > 1 ? slack / (count - 1) : 0;
+  const between = laneSpread(reach, slack, count);
 
   let cursor = from;
   return radii.map((radius, index) => {
@@ -600,34 +695,48 @@ function lanePath(exclusions: readonly ExclusionRect[], shape: LaneShape): LaneP
   });
 }
 
+/** One segment of a lane path. `null` where the path has no length there. */
+function pathSegment(
+  path: LanePath,
+  index: number,
+): { from: { x: number; y: number }; to: { x: number; y: number }; span: number } | null {
+  const from = path[index - 1];
+  const to = path[index];
+  if (!from || !to) return null;
+  const span = Math.hypot(to.x - from.x, to.y - from.y);
+  return span > 0 ? { from, to, span } : null;
+}
+
+/** A point on a lane path, or the origin when the path does not reach there. */
+function pathPoint(path: LanePath, index: number): { x: number; y: number } {
+  return path[index] ?? { x: 0, y: 0 };
+}
+
 /** Total length of a lane path, in world units. */
 function pathLength(path: LanePath): number {
   let total = 0;
   for (let index = 1; index < path.length; index += 1) {
-    const from = path[index - 1];
-    const to = path[index];
-    if (!from || !to) continue;
-    total += Math.hypot(to.x - from.x, to.y - from.y);
+    total += pathSegment(path, index)?.span ?? 0;
   }
   return total;
 }
 
 /** The point `distance` along a lane path, clamped to its two ends. */
 function pointOnPath(path: LanePath, distance: number): { x: number; y: number } {
-  const first = path[0] ?? { x: 0, y: 0 };
   let left = Math.max(0, distance);
   for (let index = 1; index < path.length; index += 1) {
-    const from = path[index - 1];
-    const to = path[index];
-    if (!from || !to) continue;
-    const span = Math.hypot(to.x - from.x, to.y - from.y);
-    if (span <= 0) continue;
-    if (left <= span) {
-      return { x: mix(from.x, to.x, left / span), y: mix(from.y, to.y, left / span) };
+    const segment = pathSegment(path, index);
+    if (!segment) continue;
+    if (left <= segment.span) {
+      const along = left / segment.span;
+      return {
+        x: mix(segment.from.x, segment.to.x, along),
+        y: mix(segment.from.y, segment.to.y, along),
+      };
     }
-    left -= span;
+    left -= segment.span;
   }
-  return path[path.length - 1] ?? first;
+  return pathPoint(path, path.length - 1);
 }
 
 /**
@@ -649,6 +758,147 @@ function pathSlot(
   return { x: point.x, y: point.y, nx: (-dy / span) * sign, ny: (dx / span) * sign };
 }
 
+/** Seats the chips on a ring when nothing on the page is protected. */
+function ringHomes(count: number, limitX: number, limitY: number): { x: number; y: number }[] {
+  return Array.from({ length: count }, (_unused, index) => {
+    const angle = Math.PI / 2 - (index / count) * Math.PI * 2;
+    return { x: Math.cos(angle) * limitX * 0.82, y: Math.sin(angle) * limitY * 0.78 };
+  });
+}
+
+/**
+ * Whether the side gutters can hold a column of chips at this size. An explicit
+ * `layout` answers for itself; otherwise the measured geometry decides.
+ */
+function seatsOnSides(
+  bounds: StepOptions["bounds"],
+  exclusions: readonly ExclusionRect[],
+  widest: number,
+  layout: FieldLayout | undefined,
+): boolean {
+  if (layout !== undefined) return layout === "side";
+  const left = Math.min(...exclusions.map((rect) => rect.centerX - rect.halfX));
+  const right = Math.max(...exclusions.map((rect) => rect.centerX + rect.halfX));
+  return Math.min(bounds.x - right, left + bounds.x) >= 2 * widest + margin(widest);
+}
+
+/** The viewport half-extents along a lane and across it, plus that axis' reader. */
+interface LaneAxis {
+  along: number;
+  across: number;
+  /** The coordinate a lane is offset in, for a point on its path. */
+  offsetOf: (point: { x: number; y: number }) => number;
+}
+
+/**
+ * The single arc a band seats its chips on, or `null` for a side layout.
+ *
+ * A band is *one* arc over the content, walked outward from its middle by both
+ * lanes, rather than a lane above the content and a second one below it. The
+ * lower band was never reachable: it sits under the screenshot, which is the
+ * tallest thing on the page, so the chips seated there spent forever pressed
+ * against its underside with the home spring still pulling — that permanent
+ * stand-off is what the field reads as a vibration. Everything above the content
+ * is reachable from anywhere, so the arc always settles.
+ */
+function bandLanePath(
+  sideFits: boolean,
+  exclusions: readonly ExclusionRect[],
+  gap: number,
+  axis: LaneAxis,
+): LanePath | null {
+  if (sideFits) return null;
+  return lanePath(exclusions, {
+    horizontal: true,
+    sign: 1,
+    gap,
+    alongLimit: axis.along,
+    acrossLimit: axis.across,
+    wrap: gap * BAND_WRAP_RATIO,
+  });
+}
+
+/** One lane's seating run: the path, the stretch of it used, and its normal. */
+interface LaneRun {
+  path: LanePath;
+  from: number;
+  to: number;
+  reach: LaneReach;
+  /** Which way the path normal points; the scatter runs along it. */
+  facing: number;
+}
+
+/**
+ * A band's two lanes share one path and split it at the middle, so the prominent
+ * chips crown the heading and the rest walk down either side. The half-gap keeps
+ * the two innermost chips off each other's slot, and the normal points away from
+ * the content on both halves — only a column flips it to face its own side.
+ */
+function bandRun(path: LanePath, away: number, widest: number): LaneRun {
+  const length = pathLength(path);
+  return {
+    path,
+    from: length / 2 + away * widest * SLOT_GAP_RATIO,
+    to: away > 0 ? length : 0,
+    reach: "ends",
+    facing: 1,
+  };
+}
+
+/** A column down one side gutter, walked from the top of its own path. */
+function columnRun(
+  exclusions: readonly ExclusionRect[],
+  away: number,
+  gap: number,
+  axis: LaneAxis,
+): LaneRun {
+  const path = lanePath(exclusions, {
+    horizontal: false,
+    sign: away,
+    gap,
+    alongLimit: axis.along,
+    acrossLimit: axis.across,
+    wrap: Infinity,
+  });
+  return { path, from: 0, to: pathLength(path), reach: "inset", facing: away };
+}
+
+/** Seats one lane's chips along its run, writing them into `homes`. */
+function seatLane(
+  lane: readonly { radius: number; index: number }[],
+  run: LaneRun,
+  widest: number,
+  axis: LaneAxis,
+  limits: { x: number; y: number },
+  homes: { x: number; y: number }[],
+): void {
+  // Outward scatter is sized once, from the room left over its crest — the
+  // part of the lane nearest the viewport edge. Sizing it per slot instead
+  // would hand the most room to the slots on the lane's wrapped ends, which
+  // are low precisely because the content leaves room there, and floating
+  // them back up to the ceiling is what flattens the curve out again.
+  const crestRoom =
+    axis.across - Math.max(...run.path.map((point) => Math.abs(axis.offsetOf(point))));
+  const distances = packLane(
+    lane.map((slot) => slot.radius),
+    run.from,
+    run.to,
+    run.reach,
+  );
+  distances.forEach((distance, slot) => {
+    const target = lane[slot];
+    if (!target) return;
+    const seat = pathSlot(run.path, distance, run.facing);
+    // Scatter runs along the path's own normal, so it reads as depth wherever
+    // the lane happens to be pointing rather than only on its straight runs.
+    const offset = stagger(target.index, target.radius, widest, crestRoom);
+    homes[target.index] = {
+      x: clamp(seat.x + seat.nx * offset, -limits.x, limits.x),
+      y: clamp(seat.y + seat.ny * offset, -limits.y, limits.y),
+    };
+  });
+}
+
 /**
  * Places one home slot per chip in the space left over by the excluded
  * rectangles: a column down each side gutter when the viewport is wide enough
@@ -660,7 +910,7 @@ function pathSlot(
  * curves down off the heading's corners. `radii` is per chip, in the array's own
  * prominence order.
  */
-export function planHomes(
+function planHomes(
   radii: readonly number[],
   bounds: StepOptions["bounds"],
   exclusions: readonly ExclusionRect[],
@@ -669,23 +919,10 @@ export function planHomes(
   const count = radii.length;
   if (count === 0) return [];
   const widest = Math.max(...radii);
-  const limitX = bounds.x - widest;
-  const limitY = bounds.y - widest;
-  if (exclusions.length === 0) {
-    return Array.from({ length: count }, (_unused, index) => {
-      const angle = Math.PI / 2 - (index / count) * Math.PI * 2;
-      return { x: Math.cos(angle) * limitX * 0.82, y: Math.sin(angle) * limitY * 0.78 };
-    });
-  }
+  const limits = { x: bounds.x - widest, y: bounds.y - widest };
+  if (exclusions.length === 0) return ringHomes(count, limits.x, limits.y);
 
-  const left = Math.min(...exclusions.map((rect) => rect.centerX - rect.halfX));
-  const right = Math.max(...exclusions.map((rect) => rect.centerX + rect.halfX));
-  const clearance = 2 * widest + margin(widest);
-  const sideFits =
-    layout === undefined
-      ? Math.min(bounds.x - right, left + bounds.x) >= clearance
-      : layout === "side";
-
+  const sideFits = seatsOnSides(bounds, exclusions, widest, layout);
   // Even indices take the right lane (or the upper band), odd the left, so the
   // prominence order reads the way the page does on both.
   const lanes = splitLanes(radii.map((radius, index) => ({ radius, index })));
@@ -693,70 +930,16 @@ export function planHomes(
   const gap = widest + margin(widest);
   // A column runs down the height and is offset across the width; a band is the
   // same thing with the axes swapped.
-  const alongLimit = sideFits ? limitY : limitX;
-  const acrossLimit = sideFits ? limitX : limitY;
-
-  // A band is *one* arc over the content, walked outward from its middle by
-  // both lanes, rather than a lane above the content and a second one below it.
-  // The lower band was never reachable: it sits under the screenshot, which is
-  // the tallest thing on the page, so the chips seated there spent forever
-  // pressed against its underside with the home spring still pulling — that
-  // permanent stand-off is what the field reads as a vibration. Everything
-  // above the content is reachable from anywhere, so the arc always settles.
-  const bandPath = sideFits
-    ? null
-    : lanePath(exclusions, {
-        horizontal: true,
-        sign: 1,
-        gap,
-        alongLimit,
-        acrossLimit,
-        wrap: gap * BAND_WRAP_RATIO,
-      });
-  const bandMiddle = bandPath ? pathLength(bandPath) / 2 : 0;
+  const axis: LaneAxis = sideFits
+    ? { along: limits.y, across: limits.x, offsetOf: (point) => point.x }
+    : { along: limits.x, across: limits.y, offsetOf: (point) => point.y };
+  const band = bandLanePath(sideFits, exclusions, gap, axis);
 
   lanes.forEach((lane, parity) => {
-    const laneRadii = lane.map((slot) => slot.radius);
     // Which way "outward" points for this lane: toward the nearer viewport edge.
     const away = parity === 0 ? 1 : -1;
-    const path =
-      bandPath ??
-      lanePath(exclusions, {
-        horizontal: false,
-        sign: away,
-        gap,
-        alongLimit,
-        acrossLimit,
-        wrap: Infinity,
-      });
-    // A band's two lanes share one path and split it at the middle, so the
-    // prominent chips crown the heading and the rest walk down either side. The
-    // half-gap keeps the two innermost chips off each other's slot.
-    const from = bandPath ? bandMiddle + away * widest * SLOT_GAP_RATIO : 0;
-    const to = bandPath ? (away > 0 ? pathLength(path) : 0) : pathLength(path);
-    const reach: LaneReach = sideFits ? "inset" : "ends";
-    // The normal points away from the content on both halves of a band; only a
-    // column flips it to face its own side of the hero.
-    const facing = bandPath ? 1 : away;
-    // Outward scatter is sized once, from the room left over its crest — the
-    // part of the lane nearest the viewport edge. Sizing it per slot instead
-    // would hand the most room to the slots on the lane's wrapped ends, which
-    // are low precisely because the content leaves room there, and floating
-    // them back up to the ceiling is what flattens the curve out again.
-    const crestRoom =
-      acrossLimit - Math.max(...path.map((point) => Math.abs(sideFits ? point.x : point.y)));
-    packLane(laneRadii, from, to, reach).forEach((distance, slot) => {
-      const target = lane[slot];
-      if (!target) return;
-      const seat = pathSlot(path, distance, facing);
-      // Scatter runs along the path's own normal, so it reads as depth wherever
-      // the lane happens to be pointing rather than only on its straight runs.
-      const offset = stagger(target.index, target.radius, widest, crestRoom);
-      homes[target.index] = {
-        x: clamp(seat.x + seat.nx * offset, -limitX, limitX),
-        y: clamp(seat.y + seat.ny * offset, -limitY, limitY),
-      };
-    });
+    const run = band ? bandRun(band, away, widest) : columnRun(exclusions, away, gap, axis);
+    seatLane(lane, run, widest, axis, limits, homes);
   });
 
   return homes;
@@ -815,21 +998,18 @@ export function planField(
 }
 
 /**
- * Resolves one elastic collision between two chips. A held chip acts as
- * infinite mass — it shoves its neighbours aside and never moves itself, which
- * is what makes dragging a chip through the field read as solid.
- */
-function collide(a: ChipBody, b: ChipBody): void {
-  // A chip still waiting on its entrance is parked off-screen and inert.
-  if (a.delay > 0 || b.delay > 0) return;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const distance = Math.hypot(dx, dy) || 0.0001;
-  const overlap = a.r + b.r - distance;
-  if (overlap <= 0) return;
+/** `true` while either chip is thrown or dragged — the state a knock spreads. */
+function disturbed(a: ChipBody, b: ChipBody): boolean {
+  return a.adrift || b.adrift || a.held || b.held;
+}
 
-  const nx = dx / distance;
-  const ny = dy / distance;
+/** A held chip acts as infinite mass, so its partner takes the whole impulse. */
+function impulseShare(other: ChipBody): number {
+  return other.held ? 2 : 1;
+}
+
+/** Pushes the pair apart along the contact normal. A held chip absorbs none of it. */
+function separate(a: ChipBody, b: ChipBody, nx: number, ny: number, overlap: number): void {
   // Share of the positional correction each body absorbs.
   const aShare = a.held ? 0 : b.held ? 1 : 0.5;
   const bShare = 1 - aShare;
@@ -837,30 +1017,62 @@ function collide(a: ChipBody, b: ChipBody): void {
   a.y -= ny * overlap * aShare;
   b.x += nx * overlap * bShare;
   b.y += ny * overlap * bShare;
+}
 
+/**
+ * Applies one body's half of the contact impulse, in the direction it is thrown.
+ * A held chip is driven by the drag, so it keeps its velocity untouched.
+ */
+function kick(
+  body: ChipBody,
+  nx: number,
+  ny: number,
+  impulse: number,
+  relative: number,
+  knocked: boolean,
+): void {
+  if (body.held) return;
+  body.vx += impulse * nx;
+  body.vy += impulse * ny;
+  // A struck chip goes free too, so a thrown chip scatters the ones it hits.
+  body.free = Math.max(body.free, Math.min(1, Math.abs(relative) / 6));
+  body.adrift = body.adrift || knocked;
+}
+
+/** Trades the contact impulse and its spin shear between two touching chips. */
+function resolveImpulse(a: ChipBody, b: ChipBody, nx: number, ny: number): void {
   const relative = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
   if (relative > 0) return;
   const impulse = -(1 + RESTITUTION) * relative * 0.5;
   // A hard enough knock sends the struck chip adrift as well, so a thrown chip
   // rearranges the ones it hits rather than briefly disturbing them.
-  const knocked = Math.abs(relative) > THROW_SPEED && (a.adrift || b.adrift || a.held || b.held);
-  if (!a.held) {
-    a.vx -= impulse * nx * (b.held ? 2 : 1);
-    a.vy -= impulse * ny * (b.held ? 2 : 1);
-    // A struck chip goes free too, so a thrown chip scatters the ones it hits.
-    a.free = Math.max(a.free, Math.min(1, Math.abs(relative) / 6));
-    a.adrift = a.adrift || knocked;
-  }
-  if (!b.held) {
-    b.vx += impulse * nx * (a.held ? 2 : 1);
-    b.vy += impulse * ny * (a.held ? 2 : 1);
-    b.free = Math.max(b.free, Math.min(1, Math.abs(relative) / 6));
-    b.adrift = b.adrift || knocked;
-  }
+  const knocked = Math.abs(relative) > THROW_SPEED && disturbed(a, b);
+  kick(a, -nx, -ny, impulse * impulseShare(b), relative, knocked);
+  kick(b, nx, ny, impulse * impulseShare(a), relative, knocked);
 
   const shear = impulse * SPIN_TRANSFER;
   a.spin -= shear;
   b.spin += shear;
+}
+
+/**
+ * Resolves one elastic collision between two chips. A held chip acts as
+ * infinite mass — it shoves its neighbours aside and never moves itself, which
+ * is what makes dragging a chip through the field read as solid.
+ */
+function collide(a: ChipBody, b: ChipBody): void {
+  // A chip still waiting on its entrance is parked off-screen and inert.
+  if (Math.max(a.delay, b.delay) > 0) return;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const distance = Math.max(Math.hypot(dx, dy), 0.0001);
+  const overlap = a.r + b.r - distance;
+  if (overlap <= 0) return;
+
+  const nx = dx / distance;
+  const ny = dy / distance;
+  separate(a, b, nx, ny, overlap);
+  resolveImpulse(a, b, nx, ny);
 }
 
 /**
@@ -886,81 +1098,122 @@ export function releaseChip(body: ChipBody, vx: number, vy: number): void {
   body.adrift = true;
 }
 
+/** Applies the home spring, damping, and one integration step to a free chip. */
+function advanceChip(body: ChipBody, step: number, options: StepOptions): void {
+  body.free = Math.max(0, body.free - FREE_DECAY * step);
+  body.bounce = Math.max(0, body.bounce - BOUNCE_DECAY * step);
+
+  // An adrift chip carries its home along with it, so the spring never hauls
+  // it back to the slot it was knocked out of. Once it parks, that spot
+  // becomes its home for good and the spring holds it there like any other.
+  if (body.adrift) {
+    if (body.free <= 0 && Math.hypot(body.vx, body.vy) < PARK_SPEED) {
+      body.adrift = false;
+    }
+    // Home is stored without the shared drift, so the chip does not shift
+    // when the cursor lean eases back to zero.
+    body.homeX = body.x - options.drift.x;
+    body.homeY = body.y - options.drift.y;
+  }
+
+  // The whole field shares one drift, so the chips move together with the
+  // cursor rather than each buzzing against its own proximity force.
+  const targetX = body.homeX + options.drift.x;
+  const targetY = body.homeY + options.drift.y;
+  body.vx += (targetX - body.x) * HOME_SPRING * (1 - body.free) * step;
+  body.vy += (targetY - body.y) * HOME_SPRING * (1 - body.free) * step;
+
+  const retained = mix(SETTLED_DAMPING, FREE_DAMPING, Math.max(body.free, body.bounce));
+  const decay = retained ** step;
+  body.vx *= decay;
+  body.vy *= decay;
+  clampSpeed(body);
+
+  body.x += body.vx * step;
+  body.y += body.vy * step;
+}
+
+/**
+ * Rings a chip upright and caps how far it may lean. A chip in flight may
+ * tumble; one landing on its slot may only lean, and the limit tightens as the
+ * thrown state decays, so a tossed chip straightens out on its way home instead
+ * of parking at whatever angle it stopped at.
+ */
+function spinChip(body: ChipBody, step: number): void {
+  body.spin += -body.angle * UPRIGHT_SPRING * step;
+  body.spin *= SPIN_DAMPING ** step;
+  body.spin = clamp(body.spin, -MAX_SPIN, MAX_SPIN);
+  body.angle += body.spin * step;
+  const tilt = mix(MAX_TILT, THROWN_TILT, body.held ? 1 : body.free);
+  if (Math.abs(body.angle) > tilt) {
+    body.angle = Math.sign(body.angle) * tilt;
+    body.spin = 0;
+  }
+  body.tumble += step * 0.05;
+}
+
+/** Collides `a` against every chip after it in the array. */
+function collideFrom(bodies: ChipBody[], a: ChipBody, start: number): void {
+  for (let index = start; index < bodies.length; index += 1) {
+    const b = bodies[index];
+    if (b) collide(a, b);
+  }
+}
+
+/** Resolves every chip-against-chip contact in the field, once. */
+function collideAll(bodies: ChipBody[]): void {
+  for (let index = 0; index < bodies.length; index += 1) {
+    const a = bodies[index];
+    if (a) collideFrom(bodies, a, index + 1);
+  }
+}
+
+/** Advances one chip by a substep: motion, then walls, then spin. */
+function stepBody(body: ChipBody, step: number, options: StepOptions): void {
+  // Staggered entrance: a delayed chip is not simulated at all, so it hangs
+  // exactly where the scene parked it until its turn to drop.
+  if (body.delay > 0) {
+    body.delay -= step;
+    return;
+  }
+  if (!body.held) advanceChip(body, step, options);
+  constrain(body, options);
+  spinChip(body, step);
+}
+
 /** Advances every chip by one solver substep. */
 function solve(bodies: ChipBody[], step: number, options: StepOptions): void {
   for (const body of bodies) {
-    // Staggered entrance: a delayed chip is not simulated at all, so it hangs
-    // exactly where the scene parked it until its turn to drop.
-    if (body.delay > 0) {
-      body.delay -= step;
-      continue;
-    }
-
-    if (!body.held) {
-      body.free = Math.max(0, body.free - FREE_DECAY * step);
-      body.bounce = Math.max(0, body.bounce - BOUNCE_DECAY * step);
-
-      // An adrift chip carries its home along with it, so the spring never hauls
-      // it back to the slot it was knocked out of. Once it parks, that spot
-      // becomes its home for good and the spring holds it there like any other.
-      if (body.adrift) {
-        if (body.free <= 0 && Math.hypot(body.vx, body.vy) < PARK_SPEED) {
-          body.adrift = false;
-        }
-        // Home is stored without the shared drift, so the chip does not shift
-        // when the cursor lean eases back to zero.
-        body.homeX = body.x - options.drift.x;
-        body.homeY = body.y - options.drift.y;
-      }
-
-      // The whole field shares one drift, so the chips move together with the
-      // cursor rather than each buzzing against its own proximity force.
-      const targetX = body.homeX + options.drift.x;
-      const targetY = body.homeY + options.drift.y;
-      body.vx += (targetX - body.x) * HOME_SPRING * (1 - body.free) * step;
-      body.vy += (targetY - body.y) * HOME_SPRING * (1 - body.free) * step;
-
-      const retained = mix(SETTLED_DAMPING, FREE_DAMPING, Math.max(body.free, body.bounce));
-      const decay = retained ** step;
-      body.vx *= decay;
-      body.vy *= decay;
-      clampSpeed(body);
-
-      body.x += body.vx * step;
-      body.y += body.vy * step;
-    }
-
-    constrain(body, options);
-
-    body.spin += -body.angle * UPRIGHT_SPRING * step;
-    body.spin *= SPIN_DAMPING ** step;
-    body.spin = clamp(body.spin, -MAX_SPIN, MAX_SPIN);
-    body.angle += body.spin * step;
-    // A chip in flight may tumble; one landing on its slot may only lean. The
-    // limit tightens as the thrown state decays, so a tossed chip straightens
-    // out on its way home instead of parking at whatever angle it stopped at.
-    const tilt = mix(MAX_TILT, THROWN_TILT, body.held ? 1 : body.free);
-    if (Math.abs(body.angle) > tilt) {
-      body.angle = Math.sign(body.angle) * tilt;
-      body.spin = 0;
-    }
-    body.tumble += step * 0.05;
+    stepBody(body, step, options);
   }
 
-  for (let i = 0; i < bodies.length; i += 1) {
-    for (let j = i + 1; j < bodies.length; j += 1) {
-      const a = bodies[i];
-      const b = bodies[j];
-      if (!a || !b) continue;
-      collide(a, b);
-    }
-  }
+  collideAll(bodies);
 
   // Collisions can shove a chip back into a protected rectangle, so the walls
   // and exclusions have the last word every substep.
   for (const body of bodies) {
     constrain(body, options);
   }
+}
+
+/**
+ * How far a chip covers in a second. A held chip is teleported by the drag, so
+ * its span is measured over the frame rather than derived from velocity.
+ */
+function reachOf(body: ChipBody, frame: number): number {
+  if (body.delay > 0) return 0;
+  return body.held
+    ? Math.hypot(body.x - body.prevX, body.y - body.prevY) / frame
+    : Math.hypot(body.vx, body.vy);
+}
+
+/** The fastest chip in the field, which sets how short the substeps must be. */
+function fastestReach(bodies: ChipBody[], frame: number): number {
+  let fastest = 0;
+  for (const body of bodies) {
+    fastest = Math.max(fastest, reachOf(body, frame));
+  }
+  return fastest;
 }
 
 /**
@@ -975,17 +1228,7 @@ function solve(bodies: ChipBody[], step: number, options: StepOptions): void {
  */
 export function stepChips(bodies: ChipBody[], dt: number, options: StepOptions): void {
   const frame = Math.min(dt, 1 / 30);
-  let fastest = 0;
-  for (const body of bodies) {
-    if (body.delay > 0) continue;
-    // A held chip is teleported by the drag, so its span is measured, not derived
-    // from velocity.
-    const reach = body.held
-      ? Math.hypot(body.x - body.prevX, body.y - body.prevY) / frame
-      : Math.hypot(body.vx, body.vy);
-    fastest = Math.max(fastest, reach);
-  }
-
+  const fastest = fastestReach(bodies, frame);
   const substeps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil((fastest * frame) / SWEEP_STEP)));
   const step = frame / substeps;
   for (let index = 0; index < substeps; index += 1) {

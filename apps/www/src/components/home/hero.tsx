@@ -15,6 +15,27 @@ const NAMED_AGENTS = 3;
 /** How many integrations the headline's "+ others" stands for. */
 const NAMED_OVERFLOW = AGENT_BRANDS.length - NAMED_AGENTS;
 
+/** Shared easing for every hero entrance. */
+const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
+
+/** Entrance for one block of hero copy: a short rise, skipped under reduced motion. */
+function riseIn(reduceMotion: boolean | null, delay = 0) {
+  return {
+    initial: reduceMotion ? false : { opacity: 0, y: 18 },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.6, delay, ease: EASE_OUT },
+  };
+}
+
+/** Entrance for the screenshot: a longer, deeper lift with a slight tilt. */
+function liftIn(reduceMotion: boolean | null) {
+  return {
+    initial: reduceMotion ? false : { opacity: 0, y: 120, rotateX: 14, scale: 0.94 },
+    animate: { opacity: 1, y: 0, rotateX: 0, scale: 1 },
+    transition: { duration: 1.1, delay: 0.2, ease: EASE_OUT },
+  };
+}
+
 /** Landing hero: headline, download CTA, the 3D agent field, and the app shot. */
 export function Hero() {
   const reduceMotion = useReducedMotion();
@@ -56,9 +77,7 @@ export function Hero() {
       <div className="mx-auto flex max-w-5xl flex-col items-center text-center">
         <motion.h1
           ref={headingRef}
-          initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          {...riseIn(reduceMotion)}
           className="font-heading type-display-xxl mt-5 text-balance"
         >
           Run teams of coding agents in <span className="text-gradient-animated">parallel</span>
@@ -66,9 +85,7 @@ export function Hero() {
 
         <motion.p
           ref={subheadRef}
-          initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+          {...riseIn(reduceMotion, 0.08)}
           // No `max-w`/`text-balance` here: both forced the one-sentence subhead
           // to break, and the line reads as one statement under the headline.
           // It still wraps on its own below ~700px.
@@ -80,9 +97,7 @@ export function Hero() {
 
         <motion.div
           ref={actionsRef}
-          initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}
+          {...riseIn(reduceMotion, 0.16)}
           className="mt-9 flex flex-wrap items-center justify-center gap-3"
         >
           <Button className="pill-cta gap-2">
@@ -103,9 +118,7 @@ export function Hero() {
       </div>
 
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 120, rotateX: 14, scale: 0.94 }}
-        animate={{ opacity: 1, y: 0, rotateX: 0, scale: 1 }}
-        transition={{ duration: 1.1, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        {...liftIn(reduceMotion)}
         style={{ perspective: 1600 }}
         className="relative mx-auto mt-12 w-full max-w-[1225px]"
       >

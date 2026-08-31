@@ -53,38 +53,74 @@ function columnX(depth: number): number {
   return MARGIN_X + (depth / (DEPTH - 1)) * (WIDTH - MARGIN_X * 2);
 }
 
+/**
+ * How many attempts a node spawns. The root fans wide; deeper nodes mostly split
+ * in two, and some run on alone so the tree reads as attempts that kept going
+ * rather than a grid.
+ */
+function childCount(depth: number, random: () => number): number {
+  if (depth === 1) return 3;
+  return random() < 0.25 ? 1 : 2;
+}
+
+/** One child node and the rail that reaches it. */
+interface GraphBranch {
+  node: GraphNode;
+  edge: GraphEdge;
+}
+
+/** Seats one parent's children on their generation's column. */
+function growBranches(
+  parent: GraphNode,
+  depth: number,
+  spread: number,
+  random: () => number,
+): GraphBranch[] {
+  const x = columnX(depth);
+  const children = childCount(depth, random);
+  return Array.from({ length: children }, (_unused, index) => {
+    const centred = children === 1 ? 0 : (index / (children - 1)) * 2 - 1;
+    const drift = parent.y + centred * spread + (random() - 0.5) * spread * 0.35;
+    const y = Math.min(HEIGHT - MARGIN_Y, Math.max(MARGIN_Y, drift));
+    const dx = (x - parent.x) * 0.55;
+    return {
+      node: { x, y, depth },
+      edge: {
+        d: `M${parent.x} ${parent.y} C${parent.x + dx} ${parent.y} ${x - dx} ${y} ${x} ${y}`,
+        depth,
+        offset: y / HEIGHT,
+      },
+    };
+  });
+}
+
+/** Grows one generation out of the last, collecting its nodes and rails. */
+function growGeneration(
+  generation: readonly GraphNode[],
+  depth: number,
+  random: () => number,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): GraphNode[] {
+  const spread = SPREAD / depth;
+  const branches = generation.flatMap((parent) => growBranches(parent, depth, spread, random));
+  for (const branch of branches) {
+    nodes.push(branch.node);
+    edges.push(branch.edge);
+  }
+  return branches.map((branch) => branch.node);
+}
+
+/** Lays the whole tree out, one generation at a time. */
 function buildGraph(): { nodes: readonly GraphNode[]; edges: readonly GraphEdge[] } {
   const random = makeRandom(0x9e37);
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
   const root: GraphNode = { x: columnX(0), y: HEIGHT / 2, depth: 0 };
-  nodes.push(root);
+  const nodes: GraphNode[] = [root];
+  const edges: GraphEdge[] = [];
 
-  let generation: GraphNode[] = [root];
+  let generation: readonly GraphNode[] = [root];
   for (let depth = 1; depth < DEPTH; depth += 1) {
-    const next: GraphNode[] = [];
-    const spread = SPREAD / depth;
-    const x = columnX(depth);
-    for (const parent of generation) {
-      // The root fans wide; deeper nodes mostly split in two, and some run on
-      // alone so the tree reads as attempts that kept going rather than a grid.
-      const children = depth === 1 ? 3 : random() < 0.25 ? 1 : 2;
-      for (let index = 0; index < children; index += 1) {
-        const centred = children === 1 ? 0 : (index / (children - 1)) * 2 - 1;
-        const drift = parent.y + centred * spread + (random() - 0.5) * spread * 0.35;
-        const y = Math.min(HEIGHT - MARGIN_Y, Math.max(MARGIN_Y, drift));
-        const child: GraphNode = { x, y, depth };
-        next.push(child);
-        nodes.push(child);
-        const dx = (x - parent.x) * 0.55;
-        edges.push({
-          d: `M${parent.x} ${parent.y} C${parent.x + dx} ${parent.y} ${x - dx} ${y} ${x} ${y}`,
-          depth,
-          offset: y / HEIGHT,
-        });
-      }
-    }
-    generation = next;
+    generation = growGeneration(generation, depth, random, nodes, edges);
   }
 
   return { nodes, edges };

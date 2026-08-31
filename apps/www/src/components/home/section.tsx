@@ -64,23 +64,31 @@ export function SectionShell({
   );
 }
 
+/** Frame shapes the landing media frame supports, and the class each maps to. */
+const ASPECT_CLASS = {
+  video: "aspect-video",
+  wide: "aspect-[21/9]",
+  portrait: "aspect-[9/16]",
+  square: "aspect-square",
+} as const;
+
+/** Frame shape; the phone and the wide band need something other than 16:9. */
+export type MediaAspect = keyof typeof ASPECT_CLASS;
+
 function MediaFrame({
   className,
   aspect,
   children,
 }: {
   className?: string;
-  aspect?: "video" | "wide" | "portrait" | "square";
+  aspect?: MediaAspect;
   children: ReactNode;
 }) {
   return (
     <div
       className={cn(
         "border-border bg-card shadow-raised relative flex w-full items-center justify-center overflow-hidden rounded-xl border",
-        aspect === "video" && "aspect-video",
-        aspect === "wide" && "aspect-[21/9]",
-        aspect === "portrait" && "aspect-[9/16]",
-        aspect === "square" && "aspect-square",
+        aspect && ASPECT_CLASS[aspect],
         className,
       )}
     >
@@ -98,7 +106,7 @@ export function MediaVideo({
   src: string;
   className?: string;
   /** Frame shape; the phone and the wide band need something other than 16:9. */
-  aspect?: "video" | "wide" | "portrait" | "square";
+  aspect?: MediaAspect;
 }) {
   const reduceMotion = useReducedMotion();
 

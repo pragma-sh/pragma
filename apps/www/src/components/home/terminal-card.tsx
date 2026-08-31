@@ -10,6 +10,30 @@ export interface TerminalLine {
   tone?: "muted" | "success" | "accent";
 }
 
+/** Colour a line of program output carries, by tone. */
+function outputToneClass(tone: TerminalLine["tone"]): string {
+  if (tone === "success") return "text-success";
+  if (tone === "accent") return "text-brand";
+  return "text-muted-foreground";
+}
+
+/** One printed line: a shell prompt, or a tinted line of output under it. */
+function TerminalLineRow({ line, index }: { line: TerminalLine; index: number }) {
+  if (line.command) {
+    return (
+      <div className={index > 0 ? "mt-3" : undefined}>
+        <span className="text-brand select-none">$ </span>
+        <span className="text-foreground">{line.command}</span>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <span className={outputToneClass(line.tone)}>{line.output}</span>
+    </div>
+  );
+}
+
 /**
  * Static terminal frame used where a screenshot would say less than the command
  * itself. Purely decorative — it carries no live state and is hidden from the
@@ -40,27 +64,7 @@ export function TerminalCard({
       <pre className="overflow-x-auto px-4 py-4 font-mono text-[13px] leading-[1.5]">
         <code>
           {lines.map((line, index) => (
-            <div
-              key={line.command ?? line.output ?? index}
-              className={index > 0 && line.command ? "mt-3" : undefined}
-            >
-              {line.command ? (
-                <>
-                  <span className="text-brand select-none">$ </span>
-                  <span className="text-foreground">{line.command}</span>
-                </>
-              ) : (
-                <span
-                  className={cn(
-                    line.tone === "success" && "text-success",
-                    line.tone === "accent" && "text-brand",
-                    (!line.tone || line.tone === "muted") && "text-muted-foreground",
-                  )}
-                >
-                  {line.output}
-                </span>
-              )}
-            </div>
+            <TerminalLineRow key={line.command ?? line.output ?? index} line={line} index={index} />
           ))}
         </code>
       </pre>

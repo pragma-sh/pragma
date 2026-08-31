@@ -141,32 +141,32 @@ const ROWS: readonly ComparisonRow[] = [
   },
 ];
 
+/** The mark each support level is drawn with, and the tint it carries. */
+const SUPPORT_MARKS = {
+  yes: { Icon: Check, label: "Yes", size: "size-4", tone: "text-muted-foreground" },
+  partial: { Icon: Circle, label: "Partial", size: "size-3", tone: "text-muted-foreground" },
+  no: { Icon: Minus, label: "No", size: "size-4", tone: "text-muted-foreground/40" },
+} as const;
+
+/**
+ * One matrix cell: an icon for a support level, or the value itself where the
+ * answer is a name rather than a yes or no.
+ */
 function SupportCell({ value, highlight }: { value: Support; highlight?: boolean }) {
-  if (value === "yes") {
-    return (
-      <span className={highlight ? "text-brand" : "text-muted-foreground"}>
-        <Check className="mx-auto size-4" />
-        <span className="sr-only">Yes</span>
-      </span>
-    );
-  }
-  if (value === "partial") {
-    return (
-      <span className="text-muted-foreground">
-        <Circle className="mx-auto size-3" />
-        <span className="sr-only">Partial</span>
-      </span>
-    );
-  }
-  if (value === "no") {
-    return (
-      <span className="text-muted-foreground/40">
-        <Minus className="mx-auto size-4" />
-        <span className="sr-only">No</span>
-      </span>
-    );
-  }
-  return <span className="text-xs">{value}</span>;
+  const mark = SUPPORT_MARKS[value as keyof typeof SUPPORT_MARKS] as
+    | (typeof SUPPORT_MARKS)[keyof typeof SUPPORT_MARKS]
+    | undefined;
+  if (!mark) return <span className="text-xs">{value}</span>;
+
+  // Accent blue marks the Pragma column's own support: a selection signal, which
+  // is the one job `DESIGN.md` gives it.
+  const tone = value === "yes" && highlight ? "text-brand" : mark.tone;
+  return (
+    <span className={tone}>
+      <mark.Icon className={`mx-auto ${mark.size}`} />
+      <span className="sr-only">{mark.label}</span>
+    </span>
+  );
 }
 
 /**

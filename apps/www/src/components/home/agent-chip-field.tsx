@@ -84,6 +84,30 @@ const LINE_MERGE_OVERLAP = 0.5;
 /** Stable empty default for `exclusionRefs`, so the prop keeps referential equality. */
 const NO_EXCLUSIONS: readonly RefObject<HTMLElement | null>[] = [];
 
+/** Draws `image` centred and contained inside the square texture canvas. */
+function drawContained(context: CanvasRenderingContext2D, image: HTMLImageElement): void {
+  const ratio = image.naturalWidth > 0 ? image.naturalWidth / image.naturalHeight : 1;
+  const inset = TEXTURE_SIZE * 0.66;
+  const width = ratio >= 1 ? inset : inset * ratio;
+  const height = ratio >= 1 ? inset / ratio : inset;
+  context.drawImage(image, (TEXTURE_SIZE - width) / 2, (TEXTURE_SIZE - height) / 2, width, height);
+}
+
+/** Rasterises a loaded image into a texture. `null` when 2D canvas is missing. */
+function rasterise(image: HTMLImageElement): Texture | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = TEXTURE_SIZE;
+  canvas.height = TEXTURE_SIZE;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  drawContained(context, image);
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.anisotropy = 4;
+  return texture;
+}
+
 /**
  * Rasterises a brand mark into a square canvas texture. Going through a canvas
  * (rather than `TextureLoader`) is deliberate: several marks are SVGs without an
@@ -93,32 +117,7 @@ function loadLogoTexture(source: string): Promise<Texture | null> {
   return new Promise((resolve) => {
     const image = new Image();
     image.crossOrigin = "anonymous";
-    image.addEventListener("load", () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = TEXTURE_SIZE;
-      canvas.height = TEXTURE_SIZE;
-      const context = canvas.getContext("2d");
-      if (!context) {
-        resolve(null);
-        return;
-      }
-      const ratio = image.naturalWidth > 0 ? image.naturalWidth / image.naturalHeight : 1;
-      const inset = TEXTURE_SIZE * 0.66;
-      const width = ratio >= 1 ? inset : inset * ratio;
-      const height = ratio >= 1 ? inset / ratio : inset;
-      context.drawImage(
-        image,
-        (TEXTURE_SIZE - width) / 2,
-        (TEXTURE_SIZE - height) / 2,
-        width,
-        height,
-      );
-      const texture = new CanvasTexture(canvas);
-      texture.colorSpace = SRGBColorSpace;
-      texture.minFilter = LinearFilter;
-      texture.anisotropy = 4;
-      resolve(texture);
-    });
+    image.addEventListener("load", () => resolve(rasterise(image)));
     image.addEventListener("error", () => resolve(null));
     image.src = source;
   });
@@ -188,6 +187,56 @@ function AgentChip({ brand, texture }: { brand: AgentBrand; texture: Texture | u
   );
 }
 
+/** One line of content, as the box every fragment of it paints into. */
+interface LineBox {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** Whether `rect` sits on the same line as the box being built. */
+function sharesLine(line: LineBox, rect: DOMRect): boolean {
+  const overlap = Math.min(line.bottom, rect.bottom) - Math.max(line.top, rect.top);
+  return overlap > Math.min(line.bottom - line.top, rect.height) * LINE_MERGE_OVERLAP;
+}
+
+/** Whether a rectangle covers any pixels at all. */
+function isPainted(rect: DOMRect): boolean {
+  return rect.width > 0 && rect.height > 0;
+}
+
+/**
+ * Merges client rects down to one box per line. Fragments of one line arrive as
+ * separate rectangles (a styled span, each button of a row), so they are merged
+ * by vertical overlap rather than by an exact top: a superscript or a taller
+ * button shares its line without sharing its box.
+ */
+function mergeLines(rects: readonly DOMRect[]): LineBox[] {
+  const lines: LineBox[] = [];
+  for (const rect of rects) {
+    const line = lines[lines.length - 1];
+    if (line && sharesLine(line, rect)) {
+      line.top = Math.min(line.top, rect.top);
+      line.bottom = Math.max(line.bottom, rect.bottom);
+      line.left = Math.min(line.left, rect.left);
+      line.right = Math.max(line.right, rect.right);
+      continue;
+    }
+    lines.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
+  }
+  return lines;
+}
+
+/** Clips a line box to its element's own layout box. */
+function clipToBox(line: LineBox, box: DOMRect): DOMRect {
+  const left = Math.max(box.left, line.left);
+  const right = Math.min(box.right, line.right);
+  const top = Math.max(box.top, line.top);
+  const bottom = Math.min(box.bottom, line.bottom);
+  return new DOMRect(left, top, right - left, bottom - top);
+}
+
 /**
  * The boxes an element's content actually paints into: one rectangle per line
  * of it, each clamped to the element's own layout box.
@@ -203,38 +252,200 @@ function contentRects(element: HTMLElement): DOMRect[] {
   const range = document.createRange();
   range.selectNodeContents(element);
   const rects = Array.from(range.getClientRects())
-    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .filter(isPainted)
     .toSorted((a, b) => a.top - b.top);
   if (rects.length === 0) return [box];
 
-  // Fragments of one line arrive as separate rectangles (a styled span, each
-  // button of a row), so they are merged back by vertical overlap rather than
-  // by an exact top: a superscript or a taller button shares its line without
-  // sharing its box.
-  const lines: { top: number; bottom: number; left: number; right: number }[] = [];
-  for (const rect of rects) {
-    const line = lines[lines.length - 1];
-    const overlap = line ? Math.min(line.bottom, rect.bottom) - Math.max(line.top, rect.top) : 0;
-    if (line && overlap > Math.min(line.bottom - line.top, rect.height) * LINE_MERGE_OVERLAP) {
-      line.top = Math.min(line.top, rect.top);
-      line.bottom = Math.max(line.bottom, rect.bottom);
-      line.left = Math.min(line.left, rect.left);
-      line.right = Math.max(line.right, rect.right);
-      continue;
-    }
-    lines.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
-  }
-
-  const clamped = lines
-    .map((line) => {
-      const left = Math.max(box.left, line.left);
-      const right = Math.min(box.right, line.right);
-      const top = Math.max(box.top, line.top);
-      const bottom = Math.min(box.bottom, line.bottom);
-      return new DOMRect(left, top, right - left, bottom - top);
-    })
-    .filter((rect) => rect.width > 0 && rect.height > 0);
+  const clamped = mergeLines(rects)
+    .map((line) => clipToBox(line, box))
+    .filter(isPainted);
   return clamped.length > 0 ? clamped : [box];
+}
+
+/** What the pointer is holding, and where on the chip the grab landed. */
+interface Grab {
+  index: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * Identifies a seating by the geometry it was planned from, rounded to a
+ * twentieth of a world unit. Re-seating only when this changes is what lets the
+ * entrance animation settle into stable home slots instead of re-seating every
+ * frame.
+ */
+function seatingKey(
+  exclusions: readonly ExclusionRect[],
+  bounds: { x: number; y: number },
+): string {
+  return [
+    ...exclusions.flatMap((rect) =>
+      [rect.centerX, rect.centerY, rect.halfX, rect.halfY].map((value) => Math.round(value * 20)),
+    ),
+    Math.round(bounds.x * 20),
+    Math.round(bounds.y * 20),
+  ].join(":");
+}
+
+/**
+ * Moves every chip's home onto a freshly planned layout, at the scale it was
+ * planned at, so the physics radius and the drawn mesh always agree.
+ */
+function seatBodies(
+  bodies: ChipBody[],
+  homes: readonly { x: number; y: number }[],
+  scale: number,
+): void {
+  bodies.forEach((body, index) => {
+    body.r = CHIP_RADIUS * chipScale(index) * scale;
+    const home = homes[index];
+    if (!home) return;
+    body.homeX = home.x;
+    body.homeY = home.y;
+    // A re-seat is a fresh layout, so chips that had been knocked out of
+    // place rejoin it rather than keeping wherever they were left.
+    body.adrift = false;
+  });
+}
+
+/**
+ * Parks every chip above the hero for the page-load entrance, so each one drops
+ * onto its own slot: staggered, and springy enough to bounce.
+ */
+function stageDrop(
+  bodies: ChipBody[],
+  homes: readonly { x: number; y: number }[],
+  ceiling: number,
+): void {
+  bodies.forEach((body, index) => {
+    const home = homes[index];
+    if (!home) return;
+    body.x = home.x;
+    body.y = ceiling + DROP_HEIGHT;
+    // Teleporting a chip means its old position is meaningless as a sweep
+    // origin — a segment from it would cross rectangles the chip never
+    // travelled through.
+    body.prevX = body.x;
+    body.prevY = body.y;
+    body.vx = 0;
+    body.vy = 0;
+    body.bounce = ENTRANCE_BOUNCE;
+    // Bottom slots drop first. Dropping top-down instead lets each chip
+    // overshoot into the empty slot below it and get buried by the next one,
+    // which lands the whole lane in reverse order.
+    body.delay = (bodies.length - 1 - index) * DROP_STAGGER;
+    // No entrance spin: a chip that arrives turning spends the next few
+    // seconds rocking back to square, which reads as broken rather than
+    // playful. It falls flat and lands flat.
+    body.angle = 0;
+    body.spin = 0;
+  });
+}
+
+/**
+ * Plans a seating for the measured geometry and applies it, dropping the chips
+ * in from above when this is the first one. Returns the scale it seated at.
+ *
+ * Planning from real per-chip radii matters: seating the oversized prominent
+ * chips on slots sized for a plain one leaves them permanently overlapping,
+ * which the collision solver and the home spring then argue about every frame.
+ */
+function reseat(
+  bodies: ChipBody[],
+  bounds: { x: number; y: number },
+  exclusions: readonly ExclusionRect[],
+  drop: boolean,
+): number {
+  const { scale, homes } = planField(
+    bodies.map((_body, index) => CHIP_RADIUS * chipScale(index)),
+    bounds,
+    exclusions,
+  );
+  seatBodies(bodies, homes, scale);
+  if (drop) stageDrop(bodies, homes, bounds.y);
+  return scale;
+}
+
+/**
+ * Leans the field by the distance the cursor just travelled, then eases it back
+ * once the cursor stops. Feeding one shared offset (instead of a per-chip
+ * proximity force) is what keeps a moving cursor from buzzing individual chips
+ * against their slots.
+ */
+function advanceDrift(
+  target: { x: number; y: number },
+  drift: { x: number; y: number },
+  travel: { x: number; y: number } | null,
+  step: number,
+): void {
+  if (travel) {
+    target.x += travel.x;
+    target.y += travel.y;
+    const reach = Math.hypot(target.x, target.y);
+    if (reach > DRIFT_LIMIT) {
+      target.x *= DRIFT_LIMIT / reach;
+      target.y *= DRIFT_LIMIT / reach;
+    }
+  }
+  const settle = DRIFT_RETURN ** step;
+  target.x *= settle;
+  target.y *= settle;
+  const follow = 1 - Math.exp(-DRIFT_FOLLOW * step);
+  drift.x += (target.x - drift.x) * follow;
+  drift.y += (target.y - drift.y) * follow;
+}
+
+/**
+ * Carries the held chip on the cursor and reads its throw velocity back off the
+ * distance it actually covered, so a bounce against the UI kills the toss the
+ * same way a real collision would.
+ */
+function carryDragged(
+  bodies: ChipBody[],
+  grab: Grab | null,
+  world: { x: number; y: number },
+  step: number,
+): void {
+  if (!grab) return;
+  const body = bodies[grab.index];
+  if (!body) return;
+  const targetX = world.x + grab.offsetX;
+  const targetY = world.y + grab.offsetY;
+  body.vx = body.vx * (1 - CARRY_SMOOTHING) + ((targetX - body.x) / step) * CARRY_SMOOTHING;
+  body.vy = body.vy * (1 - CARRY_SMOOTHING) + ((targetY - body.y) / step) * CARRY_SMOOTHING;
+  body.x = targetX;
+  body.y = targetY;
+  body.free = 1;
+}
+
+/** Writes the simulated state onto the drawn groups. */
+function paintChips(
+  bodies: readonly ChipBody[],
+  groups: readonly (Group | null)[],
+  time: number,
+  fieldScale: number,
+): void {
+  bodies.forEach((body, index) => {
+    const group = groups[index];
+    if (!group) return;
+    group.scale.setScalar(chipScale(index) * fieldScale);
+    group.position.set(
+      body.x,
+      body.y,
+      // Prominent chips ride nearer the camera, so they read as the front row.
+      // Keyed to prominence alone — folding in the compact scale would push
+      // every chip *away* from the camera in band mode.
+      (chipScale(index) - 1) * PROMINENCE_DEPTH + Math.sin(time * 0.08 + body.tumble) * IDLE_DEPTH,
+    );
+    // Idle tumble stays shallow so a settled chip reads as facing the viewer;
+    // the z term is the physics angle, which springs back to upright.
+    group.rotation.set(
+      Math.sin(time * 0.07 + body.tumble) * 0.05,
+      Math.sin(time * 0.05 + body.tumble) * 0.09,
+      body.angle,
+    );
+  });
 }
 
 /** Simulated field of chips; owns the body array and drives the group transforms. */
@@ -257,9 +468,9 @@ function ChipField({
   const exclusions = useRef<ExclusionRect[]>([]);
   const seatedFor = useRef("");
   /** The chip currently under the pointer, and where on it the grab landed. */
-  const drag = useRef<{ index: number; offsetX: number; offsetY: number } | null>(null);
+  const drag = useRef<Grab | null>(null);
   /** Cursor position last frame; `null` until the first frame establishes one. */
-  const previousPointer = useRef<Vector3 | null>(null);
+  const previousPointer = useRef<{ x: number; y: number } | null>(null);
   /** Where the field wants to lean, and where it has actually leaned so far. */
   const driftTarget = useRef({ x: 0, y: 0 });
   const drift = useRef({ x: 0, y: 0 });
@@ -365,114 +576,25 @@ function ChipField({
     const parallax = cameraZ / Math.max(cameraZ - MAX_CHIP_DEPTH, 0.001);
     const bounds = { x: viewport.width / 2 / parallax, y: viewport.height / 2 / parallax };
 
-    // Re-seat only when the measured geometry actually moved, so the entrance
-    // animation settles into stable home slots instead of re-seating every frame.
-    const key = [
-      ...exclusions.current.flatMap((rect) =>
-        [rect.centerX, rect.centerY, rect.halfX, rect.halfY].map((value) => Math.round(value * 20)),
-      ),
-      Math.round(bounds.x * 20),
-      Math.round(bounds.y * 20),
-    ].join(":");
+    const key = seatingKey(exclusions.current, bounds);
     if (key !== seatedFor.current) {
       seatedFor.current = key;
-      // Real per-chip radii: seating the oversized prominent chips on slots
-      // sized for a plain one leaves them permanently overlapping, which the
-      // collision solver and the home spring then argue about every frame.
-      const { scale, homes } = planField(
-        bodies.map((_body, index) => CHIP_RADIUS * chipScale(index)),
-        bounds,
-        exclusions.current,
-      );
-      // Whichever layout was chosen, every chip is resized to the scale it was
-      // seated at, so the physics radius and the drawn mesh always agree.
-      fieldScale.current = scale;
-      bodies.forEach((body, index) => {
-        body.r = CHIP_RADIUS * chipScale(index) * scale;
-      });
-      bodies.forEach((body, index) => {
-        const home = homes[index];
-        if (!home) return;
-        body.homeX = home.x;
-        body.homeY = home.y;
-        // A re-seat is a fresh layout, so chips that had been knocked out of
-        // place rejoin it rather than keeping wherever they were left.
-        body.adrift = false;
-      });
-
-      // First seating is the page-load entrance: park every chip above the hero
-      // and let it drop onto its slot, staggered, springy enough to bounce.
-      if (!dropped.current) {
-        dropped.current = true;
-        bodies.forEach((body, index) => {
-          const home = homes[index];
-          if (!home) return;
-          body.x = home.x;
-          body.y = bounds.y + DROP_HEIGHT;
-          // Teleporting a chip means its old position is meaningless as a sweep
-          // origin — a segment from it would cross rectangles the chip never
-          // travelled through.
-          body.prevX = body.x;
-          body.prevY = body.y;
-          body.vx = 0;
-          body.vy = 0;
-          body.bounce = ENTRANCE_BOUNCE;
-          // Bottom slots drop first. Dropping top-down instead lets each chip
-          // overshoot into the empty slot below it and get buried by the next
-          // one, which lands the whole lane in reverse order.
-          body.delay = (bodies.length - 1 - index) * DROP_STAGGER;
-          // No entrance spin: a chip that arrives turning spends the next few
-          // seconds rocking back to square, which reads as broken rather than
-          // playful. It falls flat and lands flat.
-          body.angle = 0;
-          body.spin = 0;
-        });
-      }
+      fieldScale.current = reseat(bodies, bounds, exclusions.current, !dropped.current);
+      dropped.current = true;
     }
 
-    pointerWorld.current.set(
+    const world = pointerWorld.current.set(
       (pointer.x * viewport.width) / 2,
       (pointer.y * viewport.height) / 2,
       0,
     );
 
-    // Cursor drift: the field leans by exactly the distance the cursor just
-    // travelled, in the same direction, then eases back once it stops. Feeding
-    // one shared offset (instead of a per-chip proximity force) is what keeps a
-    // moving cursor from buzzing individual chips against their slots.
     const step = Math.max(Math.min(delta, 1 / 30), 1 / 240);
-    if (previousPointer.current) {
-      driftTarget.current.x += pointerWorld.current.x - previousPointer.current.x;
-      driftTarget.current.y += pointerWorld.current.y - previousPointer.current.y;
-      const reach = Math.hypot(driftTarget.current.x, driftTarget.current.y);
-      if (reach > DRIFT_LIMIT) {
-        driftTarget.current.x *= DRIFT_LIMIT / reach;
-        driftTarget.current.y *= DRIFT_LIMIT / reach;
-      }
-      previousPointer.current.set(pointerWorld.current.x, pointerWorld.current.y, 0);
-    } else {
-      previousPointer.current = pointerWorld.current.clone();
-    }
-    const settle = DRIFT_RETURN ** step;
-    driftTarget.current.x *= settle;
-    driftTarget.current.y *= settle;
-    const follow = 1 - Math.exp(-DRIFT_FOLLOW * step);
-    drift.current.x += (driftTarget.current.x - drift.current.x) * follow;
-    drift.current.y += (driftTarget.current.y - drift.current.y) * follow;
-
-    // Carry the held chip on the cursor and read its throw velocity back off the
-    // distance it actually covered, so a bounce against the UI kills the toss the
-    // same way a real collision would.
-    const held = drag.current ? bodies[drag.current.index] : undefined;
-    if (drag.current && held) {
-      const targetX = pointerWorld.current.x + drag.current.offsetX;
-      const targetY = pointerWorld.current.y + drag.current.offsetY;
-      held.vx = held.vx * (1 - CARRY_SMOOTHING) + ((targetX - held.x) / step) * CARRY_SMOOTHING;
-      held.vy = held.vy * (1 - CARRY_SMOOTHING) + ((targetY - held.y) / step) * CARRY_SMOOTHING;
-      held.x = targetX;
-      held.y = targetY;
-      held.free = 1;
-    }
+    const previous = previousPointer.current;
+    const travel = previous ? { x: world.x - previous.x, y: world.y - previous.y } : null;
+    previousPointer.current = { x: world.x, y: world.y };
+    advanceDrift(driftTarget.current, drift.current, travel, step);
+    carryDragged(bodies, drag.current, world, step);
 
     stepChips(bodies, delta, {
       bounds,
@@ -480,29 +602,7 @@ function ChipField({
       exclusions: exclusions.current,
     });
 
-    const time = state.clock.elapsedTime;
-    bodies.forEach((body, index) => {
-      const group = groups.current[index];
-      if (!group) return;
-      const scale = chipScale(index) * fieldScale.current;
-      group.scale.setScalar(scale);
-      group.position.set(
-        body.x,
-        body.y,
-        // Prominent chips ride nearer the camera, so they read as the front row.
-        // Keyed to prominence alone — folding in the compact scale would push
-        // every chip *away* from the camera in band mode.
-        (chipScale(index) - 1) * PROMINENCE_DEPTH +
-          Math.sin(time * 0.08 + body.tumble) * IDLE_DEPTH,
-      );
-      // Idle tumble stays shallow so a settled chip reads as facing the viewer;
-      // the z term is the physics angle, which springs back to upright.
-      group.rotation.set(
-        Math.sin(time * 0.07 + body.tumble) * 0.05,
-        Math.sin(time * 0.05 + body.tumble) * 0.09,
-        body.angle,
-      );
-    });
+    paintChips(bodies, groups.current, state.clock.elapsedTime, fieldScale.current);
   });
 
   return (
