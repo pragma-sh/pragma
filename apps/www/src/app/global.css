@@ -416,3 +416,46 @@
     opacity: 0;
   }
 }
+
+/*
+ * The docs sidebar is a self-contained panel at the viewport's left edge.
+ * Stock Fumadocs stretches the panel surface across the whole sidebar grid
+ * area — a flexible left gutter plus the fixed 268px column — and pins its
+ * items to the inline end next to the content. Below ~1550px the gutter is
+ * zero so nothing shows, but on wider viewports the surface stretches left
+ * while the items stay right, which reads as a huge strip of left padding.
+ * Pinning the panel to the inline start keeps its items (and its hairline)
+ * at the edge at every width.
+ */
+@media (min-width: 48rem) {
+  #nd-sidebar {
+    width: var(--fd-sidebar-width);
+    inset-inline-end: auto;
+    align-items: flex-start;
+  }
+}
+
+/*
+ * Platform-aware keyboard shortcuts in docs (<Keys mac="..." other="..." /> in
+ * src/components/keys.tsx). The docs layout sets data-platform on <html> before
+ * paint; without it (no JS) both variants render.
+ */
+kbd.keys {
+  display: inline-block;
+  padding: 0 0.4em;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+html[data-platform="mac"] kbd.keys-other {
+  display: none;
+}
+
+html[data-platform="other"] kbd.keys-mac {
+  display: none;
+}
