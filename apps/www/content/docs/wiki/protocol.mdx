@@ -1,0 +1,72 @@
+---
+title: Protocol
+description: The wire format, request kinds, RPC methods, and subscription events shared by every client.
+---
+
+`crates/pragma-protocol` defines everything two processes need to agree on. Any frame,
+tag, or binary change bumps the crate version; Release Please mirrors it into
+`daemon.protocolVersion`, and clients refuse a `Hello` mismatch.
+
+## Frames
+
+Every frame is `[4-byte big-endian length][1-byte tag][body]`, capped at 16 MiB:
+
+| Tag | Meaning       | Body                                                |
+| --- | ------------- | --------------------------------------------------- |
+| 0   | JSON control  | serde frames below                                  |
+| 1   | Binary output | `[2-byte BE sid length][sid][raw PTY output bytes]` |
+| 2   | Binary input  | same layout, raw PTY input                          |
+
+Binary frames never decode UTF-8 on the hot path — output is bytes end to end.
+
+## Handshake and classes
+
+- Server → client: `Hello { protocolVersion }`, first frame on every connection.
+- Client → server requests carry a `requestId` plus kind and optional context
+  (`sessionId`, `worktreeId`, `cwd`, `cols`/`rows`, `data`, `shell`, `rpc`,
+  `subscription`, `control`, `controlResult`).
+- First request decides the connection class: `RegisterController` = the app's control
+  connection (only `ControlResult` replies flow back); anything else = normal client.
+
+## Request kinds
+
+`Spawn`, `Attach`, `Write`, `Resize`, `Kill`, `KillForCwd`, `AgentReport`,
+`AgentMessage`, `AgentDecision`, `AgentAnswer`, `AgentInput`, `AgentInterrupt`,
+`SubscribeAgents`, `MarkAgentsSeen`, `Rpc`, `Subscribe`, `RegisterController`,
+`Control`, `ControlResult`, `PublishWorkspace`.
+
+Server → client frames: `Hello`, `Response` (ok/error), `Rpc` response (payload or
+`RpcError { code, message, details }`), `Event`, `Control` (envelope to the
+controller), `ControlResult`.
+
+Protocol error codes: `invalidPayload`, `unsupportedMethod`, `notFound`, `staleWrite`,
+`permissionDenied`, `internal`.
+
+## Attach contract
+
+An attach stream begins with `Replay { sessionId, cursor, reset }` — the absolute
+output-byte cursor the server resumed from. Reconnecting clients send their last cursor
+on `Attach`; `reset: true` means the scrollback window could not cover it and the client
+should clear its screen. Scrollback is capped at 10,000 frames **and** 8 MiB.
+
+## RPC methods
+
+`git`, `filesystem`, `database`, `kanban`, `worktrees`, `projects`, `tabs`, `settings`,
+`github`, `ai`, `exec`, `automations`, `plugins`, `tunnel`, `scratchpads`, `wsl`,
+`fanouts` — dispatched by the server (which owns some) or forwarded into `pragma-core`
+(`git`, `filesystem`, `exec`, `scratchpads`). The [gateway](/docs/wiki/gateway) exposes
+each as `POST /v1/rpc/{method}`.
+
+## Subscription events
+
+`Subscribe { event, cursor }` yields a JSON `Snapshot` then full-replacement `Delta`
+frames. Kinds: `agentStatus`, `worktreeChanged`, `kanbanChanged`, `tabsChanged`,
+`fileChanged`, `echoMode`, `automationPending`, `automationsChanged`, `workspace`,
+`fanouts`. Event streams use a bounded poll loop and hang up slow writers rather than
+buffering without limit.
+
+## Shared names
+
+`ProtocolRpcMethod` and `ProtocolEventKind` live in `packages/constants/values.json`
+and generate into both Rust and TypeScript — the compiler, not a code review, catches a
+misspelled method.

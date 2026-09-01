@@ -1,0 +1,81 @@
+---
+title: Usage limits
+description: defineUsageLimitProvider — surface your agent's plan or API usage in the app.
+---
+
+The toolbar's [usage-limits popover](/docs/user-guide/usage-limits) is fed by plugin
+providers. A provider polls a source — typically your agent CLI's usage command — and
+reports structured limits.
+
+```tsx
+import {
+  definePlugin,
+  defineUsageLimitProvider,
+  runProviderCommand,
+  CLI_MISSING_STATUS,
+} from "@pragma/plugin";
+
+usageLimits: [
+  defineUsageLimitProvider({
+    id: "my-agent",
+    title: "My Agent",
+    iconPath: "./assets/agent.svg",
+    dashboardUrl: "https://my-agent.dev/dashboard",
+    primaryLimitId: "messages",
+    refreshIntervalMs: 30_000, // minimum 15s; backoff on failure up to 15min
+    load: async (ctx) => {
+      const outcome = await runProviderCommand(ctx, ["my-agent", "usage", "--json"]);
+      if (outcome.kind === "missing") {
+        return {
+          status: "unavailable",
+          reason: "not-configured",
+          message: "Install the my-agent CLI to see usage.",
+        };
+      }
+      if (outcome.kind === "failed") {
+        return { status: "unavailable", reason: "error", message: outcome.stderr };
+      }
+      const data = JSON.parse(outcome.stdout);
+      return {
+        status: "ready",
+        observedAt: Date.now(),
+        summary: data.messages,           // the collapsed-row limit
+        limits: [data.messages, data.tokens],
+      };
+    },
+  }),
+],
+```
+
+## Shapes
+
+```ts
+interface UsageLimit {
+  id: string;
+  title: string;
+  used: number; // percent 0–100
+  limit: number | null; // null = unlimited → "Unlimited"
+  resetsInMs?: number; // drives the "Resets in" countdown
+}
+
+type UsageLimitsResult =
+  | { status: "ready"; observedAt: number; summary?: UsageLimit; limits: UsageLimit[] }
+  | {
+      status: "unavailable";
+      reason: "not-configured" | "authentication-required" | "unsupported" | "error";
+      message: string;
+    };
+```
+
+`runProviderCommand` executes a command and classifies the result:
+`{ kind: "missing" }` when the binary is absent (exit status `CLI_MISSING_STATUS` = 20),
+`{ kind: "failed"; stderr }`, or `{ kind: "ok"; stdout }`. Report unavailable states
+honestly — the popover renders them instead of fake numbers.
+
+The app renders the summary when collapsed, every limit when expanded, colours the
+progress bar (warning from 50%, destructive from 75%), and links `dashboardUrl`.
+
+<Callout title="Not for UI work">
+  A provider is data-only and runs host-side. UI goes in `ui` contributions; this API exists so the
+  same popover covers every agent, including the ones you ship.
+</Callout>

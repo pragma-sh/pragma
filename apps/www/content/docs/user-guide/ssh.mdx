@@ -1,0 +1,41 @@
+---
+title: SSH support
+description: Work on remote machines — a remote project runs its own server, and Pragma drives it like a local one.
+---
+
+Add a project over SSH from **Add project → Remote**: host, port (default 22), user, and
+the project path on that machine. Authentication is whichever your machine supports:
+
+- **Agent** — your running `ssh-agent` identities.
+- **Key** — a key file with an optional passphrase.
+- **Password**.
+
+## How it works
+
+Pragma bootstraps its own `pragma-server` on the remote machine and connects to it
+through an SSH channel. The remote server owns the remote terminals, git operations, file
+tree, and worktrees; your desktop renders them. Connection details (host, port, user,
+auth method) persist locally; agent authentication reconnects automatically.
+
+<Callout title="One model, no sync layer">
+  There is no file syncing and no polling: everything — terminals, diffs, file views — is served
+  live from the remote host, exactly like a local project.
+</Callout>
+
+## What works unchanged
+
+- Terminals and agent sessions, with status dots, notifications, and chimes.
+- Worktrees — create, nest, fan out, merge, delete on the remote host.
+- The file tree, editor, diffs, PDF and media viewers.
+- Git operations and the GitHub views.
+
+## What differs
+
+Remote worktrees disable the features that must run on your machine:
+
+- **Open in editor** launchers (VS Code, Cursor, …).
+- **Inline AI edit** (<Keys mac="⌘K" other="Ctrl+K" />) and the palette's **Ask AI**.
+
+Everything else behaves as it does locally. Fanouts, the agent board, scratchpads, and
+[usage limits](/docs/user-guide/usage-limits) are all host-driven, so they work the same
+on a remote project.

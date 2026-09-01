@@ -1,0 +1,81 @@
+---
+title: Files & Git changes
+description: The file tree, editor, viewers, and the changes panel — review code before it leaves your machine.
+---
+
+<video src="/media/files.mp4" controls muted loop playsInline />
+
+The right sidebar has three subtabs — **Files**, **Changes**, and **Pull Request** — plus
+anything plugins contribute. This page covers the first two;
+[Pull Request](/docs/user-guide/github) has its own page.
+
+## Files
+
+A lazy-loading file tree per worktree. Create files and folders inline; right-click for
+**Rename** (inline input) and **Delete**. Deleting is unconfirmed by design — it is a git
+checkout — and non-empty directories are refused. The shortcut is{" "}
+<Keys mac="⌘⌫" other="Ctrl+Delete" />.
+
+### The editor
+
+Click any text file to edit it in place, with highlighting for its language.
+**<Keys mac="⌘F" other="Ctrl+F" />** opens find-and-replace: fuzzy matching, match counts,
+case sensitivity, and replace-one or replace-all.
+
+Saves are deliberate — **<Keys mac="⌘S" other="Ctrl+S" />**, and nothing touches disk until
+you do, so half-finished experiments stay local. Files that aren't text (binaries, very
+large files) open in a viewer or a placeholder instead of garbage.
+
+With [integrated AI](/docs/user-guide/ai) enabled, select lines and press
+**<Keys mac="⌘K" other="Ctrl+K" />** for an inline edit: describe the change, review it as
+red/green hunks, accept or reject.
+
+### Markdown
+
+`.md` files open in a **WYSIWYG** mode — tables and task lists included — that you can
+switch to **Raw** for the source. Both share one buffer, so you can flip between them
+freely. <Keys mac="⌘K" other="Ctrl+K" /> inline edits work in either; in WYSIWYG the
+shortcut jumps to Raw with the selection held.
+
+### Viewers
+
+- **PDF** opens in a built-in viewer. Zoom with{" "}
+  <Keys mac="⌘+/−/0" other="Ctrl+/−/0" />.
+- **Images, video, and audio** open in a viewer with zoom and drag-to-pan. SVG stays in
+  the code editor, where it belongs.
+
+### Open in your editor
+
+The toolbar's editor launcher opens the worktree in **VS Code, Cursor, Windsurf, Zed,
+Sublime Text, IntelliJ IDEA**, or the system file explorer. The button remembers your
+last pick; the chevron's **Choose editor** menu changes it. Also available per worktree
+from the sidebar context menu. Disabled for SSH-remote worktrees.
+
+## Changes
+
+The **Changes** tab is the worktree's git state, polled live:
+
+- **Staged changes**, **Unstaged changes**, and **Committed changes** — clicking any file
+  opens a unified diff beside the terminal.
+- Diffs resolve against the worktree's **Pragma parent branch** (main's baseline is its
+  upstream), so a moving main never scrambles the review.
+
+Per file: **Stage changes** / **Unstage changes**, **Discard changes** (unstaged only;
+confirmed — it is irreversible). Per group: stage all, unstage all, discard all unstaged.
+
+### Commit and push
+
+The commit box generates a message with **Shift+Tab** when AI is available, or takes a
+typed one. Committing stages-and-commits the staged files.
+
+Once no changes remain, the commit controls give way to lifecycle actions:
+
+- **Sync with remote** — pull (a conflict aborts the sync cleanly) then push, with
+  ahead/behind counts.
+- **Delete worktree** — offered for a fully clean child worktree.
+
+### Reviewing the whole branch
+
+The **Committed changes** group is the branch's commits against its parent. Before
+pushing, read it as one diff — generated changes cannot hide between commits. The same
+diff powers the PR pre-flight and the sidebar's merge glyph.

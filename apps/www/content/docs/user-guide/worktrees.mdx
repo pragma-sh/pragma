@@ -1,0 +1,134 @@
+---
+title: Creating a worktree
+description: Single worktrees, fanouts, agent prompting in the dialog, pinning, renaming — everything on the left sidebar.
+---
+
+<video src="/media/worktrees.mp4" controls muted loop playsInline />
+
+Everything Pragma does starts from a worktree. This page covers the whole left sidebar:
+the creation dialog, fanout mode, and every affordance on a worktree row.
+
+## The worktree tree
+
+The sidebar lists the selected project's worktrees:
+
+- **main** first, then children. Nested worktrees render **indented** under their parent
+  with expand/collapse carets.
+- Each row shows an agent status dot (aggregate of the worktree's tabs) and, once a
+  worktree is merged or its PR merged, a merge glyph instead of the branch glyph.
+- Hold <Keys mac="⌘" other="Ctrl" /> to see `1…9` number badges and jump straight to a
+  worktree.
+- Hovering a non-main row reveals three actions: **Pin**, **New child**, and
+  **Delete worktree**.
+
+**Right-click a row** for the full menu: Rename · Pin / Unpin · Copy worktree path · Copy
+branch name · **Open in editor** (VS Code, Cursor, Windsurf, Zed, Sublime Text, IntelliJ
+IDEA, or the file explorer) · Hide · Delete.
+
+## Creating a single worktree
+
+Click **New worktree off main** at the top of the sidebar (or **New child** on a row to
+branch from that worktree instead of main). The dialog:
+
+| Field           | Behaviour                                                                              |
+| --------------- | -------------------------------------------------------------------------------------- |
+| **Branch name** | Required; spaces become dashes.                                                        |
+| **Title**       | Optional display name shown in the sidebar; defaults to the branch name.               |
+| **Agent**       | Optional agent + model selection; the model list loads from the agent itself.          |
+| **Prompt**      | A markdown editor describing the task. Empty prompt = create the worktree, no session. |
+
+Submit with **Create worktree** or **<Keys mac="⌘↵" other="Ctrl+↵" />** — the shortcut works from
+any field.
+
+<Callout title="The prompt drives the agent">
+  The prompt is passed to the agent exactly as written. Write it like you would type it into the
+  agent's own TUI — it is the same conversation, just launched for you.
+</Callout>
+
+While it creates, a full-frame progress screen walks through **Syncing base** (when you
+accepted the sync offer), **Creating worktree**, and **Running scripts** when the project
+defines `setup` commands in `.pragma/scripts.json`. A failure before the worktree exists
+offers Dismiss; a later failure offers Retry.
+
+### Syncing main first
+
+If main is behind its remote, a **Main is behind remote** alert asks whether to sync
+before creating. Sync first for up-to-date branches, or create without syncing — for
+example when you are deliberately branching off an older base.
+
+## Fan out
+
+<video src="/media/fanout.mp4" controls muted loop playsInline />
+
+One prompt, several isolated attempts, keep the winner. Switch the dialog to **Fan out**:
+
+- Each **attempt row** has its own agent and model selection. Mix and match — try the
+  same task on two agents, or two models on one agent. There is no attempt-count ceiling;
+  two is the minimum.
+- The branch field is always required: Pragma creates a fresh **coordination parent**
+  worktree branched from where you opened the dialog. Attempts branch under it, each from
+  the same captured base commit — so their diffs are directly comparable.
+- Submit with **Create & Fanout**.
+
+Attempts group under the parent in the sidebar, labelled by harness and model, each with
+its own status dot. The parent row carries a fanout indicator that opens the comparison.
+
+### Comparing attempts
+
+**Compare implementations** (toolbar, with the fanout parent selected) replaces the
+workspace with a column per attempt:
+
+- **Scratchpads** — the attempts' scratchpads paired across columns.
+- **Agent sessions** — every column is a real, interactive terminal.
+- **Code** — each attempt's diff against the shared base commit, deletions red and
+  insertions green.
+
+Resize columns; pick nothing until you have looked around.
+
+### Keeping a winner
+
+**Pick this implementation** (or **Pick implementation** on an attempt's toolbar) opens
+the `Keep {attempt}?` dialog. Pragma will:
+
+1. Commit any uncommitted winner work under an AI-generated message.
+2. Merge the winner into the parent worktree.
+3. Promote the winner's scratchpads to the parent.
+4. Stop sessions and delete every attempt — the winner included.
+
+This cannot be undone. A merge conflict stops before anything is deleted and leaves every
+attempt in place; a merge failure parks the fanout so you can retry the finalization. You
+can also `pragma-cli fanout pick --member <member-id>` from a terminal — agents do this
+too, via their skill.
+
+Other fanout actions: **Retry** relaunches a failed attempt in its existing worktree,
+**Cancel** keeps the checkouts and marks the fanout cancelled.
+
+## Pinned worktrees
+
+Pin the worktrees you keep coming back to:
+
+- **Pin** appears on row hover and in the context menu.
+- Pinned rows are **promoted to the top**, newest pin first, separated from the tree by a
+  separator.
+- A filled pin glyph on the row unpins on click.
+
+Pins are per user (stored locally), not checked into the repo.
+
+## Renaming, hiding, deleting
+
+- **Rename** — double-click a row (or the context menu). Enter commits, Escape cancels.
+  Renaming changes the display title only; the branch keeps its name.
+- **Hide** — tucks a finished worktree out of the way. Hidden worktrees are listed under
+  a collapsible **"Show N hidden"** section with a per-row **Show worktree** button.
+- **Delete** — removes the checkout. Refuses when the worktree has uncommitted changes
+  unless you force it. Project `teardown` scripts run first and can veto the deletion by
+  failing. Optionally delete the branch too.
+
+## Ports and scratchpads cards
+
+Below the tree, the sidebar shows two cards when they have content:
+
+- **Ports** — open TCP listeners grouped by worktree and terminal tab; click to focus the
+  tab that owns the process. Only processes started from Pragma terminals are listed.
+- **Scratchpads** — the selected worktree's agent-authored documents. See
+  [Scratchpads](/docs/user-guide/scratchpads).

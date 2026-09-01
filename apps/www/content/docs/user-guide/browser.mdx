@@ -1,0 +1,44 @@
+---
+title: Browser
+description: A native browser tab for dev servers and preview builds, with a design mode that hands UI fixes to an agent.
+---
+
+Open a browser tab from the new-tab menu (**Browser**, <Keys mac="⌘B" other="Ctrl+B" />). It is a real native
+web view, rendered above the app, so dev servers and preview builds live beside the
+terminal serving them.
+
+## Toolbar
+
+- **Back**, **Forward**, **Reload** (<Keys mac="⌘R" other="Ctrl+R" />).
+- **Address bar** — schemeless public hosts get `https://`; localhost and loopback
+  addresses get `http://`.
+- **Dev tools** (<Keys mac="⌘⇧I" other="Ctrl+⇧I" />), **Open externally**, **Screenshot**, and
+  **Find on page**.
+- **More options** — **<Keys mac="⌘⇧C" other="Ctrl+⇧C" />** copies the URL.
+
+## Design mode
+
+<Callout title="Local servers only">
+  The design-mode toggle is promoted onto the toolbar for loopback URLs with an explicit port — it
+  exists to fix the UI your agent is building, not to scrape the web.
+</Callout>
+
+Click the paintbrush to enter design mode, then:
+
+1. **Hover** — the nearest element highlights.
+2. **Click** — a pill input opens on the element.
+3. **Type a change and press +** — the change is staged.
+
+Staged changes accumulate in the design-mode popover. Hand them all to an agent in one
+click: Pragma launches a **background agent session** (it never steals focus from your
+work) with a prompt containing the origin and port, each element's HTML and route, and
+your words.
+
+A failed page load (timeout or an empty document) shows a retry instead of a broken pane.
+
+## Splits and agents
+
+A browser tab is a first-class tab: split it beside a terminal, run it in a worktree, and
+let an agent read a screenshot of its own output. Combined with
+[project scripts](/docs/user-guide/project-scripts), a common layout is a split of
+`run` script, agent terminal, and the browser pointed at the port.

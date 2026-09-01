@@ -1,0 +1,96 @@
+---
+title: Workspace & more
+description: The fs, git, exec, events, workspace, theme, assets, and push namespaces.
+---
+
+## Workspace subscription
+
+```ts
+for await (const event of client.workspace.subscribe()) {
+  const { projects, worktrees, tabs } = event.snapshot ?? event.delta;
+}
+```
+
+The `workspace` event is the full host picture — projects, worktrees, tabs — snapshot
+first, then full-replacement deltas. It is how a headless client knows where to launch
+an agent, and how the phone renders its launcher.
+
+## Generic events
+
+```ts
+for await (const event of client.events.subscribe("agentStatus", { worktreeId })) {
+  // { type: "snapshot" | "delta", subscription, payload }
+}
+```
+
+`subscribe(event, { cursor?, worktreeId?, cwd?, signal? })` works for every protocol
+event kind: `agentStatus`, `worktreeChanged`, `kanbanChanged`, `tabsChanged`,
+`fileChanged`, `automationPending`, `automationsChanged`, `workspace`, `fanouts`.
+`fileChanged` requires `worktreeId` and an absolute trusted `cwd`.
+
+## fs — filesystem in a worktree
+
+All paths resolve inside the given worktree root (containment enforced by the host):
+
+```ts
+await client.fs.listDir({ root, path: "src" });
+await client.fs.readFile({ root, path: "src/index.ts" }); // { text, binary, truncated }
+await client.fs.writeFile({ root, path, contents });
+await client.fs.createFile({ root, path });
+await client.fs.createFolder({ root, path });
+await client.fs.pathExists({ root, path });
+await client.fs.rename({ root, from, to });
+await client.fs.delete({ root, path });
+```
+
+## git — worktrees and branches
+
+The worktree operations live here (there is no `client.worktrees` namespace):
+
+```ts
+// create / remove
+await client.git.createWorktree({ parentRoot, branch, path });
+await client.git.createWorktreeAt?.({}); // fanout base commits use the host's own path
+await client.git.removeWorktree({ repoRoot, worktreePath, force: false });
+await client.git.deleteBranch({ repoRoot, branch });
+
+// inspect
+const changes = await client.git.worktreeChanges({ root, parentBranch });
+const dirty = await client.git.isDirty({ root });
+
+// stage / commit
+await client.git.stageAll({ root });
+await client.git.commitStaged({ root, message });
+await client.git.mergeWorktreeToParent({ root });
+
+// remote sync
+await client.git.githubFetchAndSync({ root }); // pull then push
+await client.git.githubPushBranch({ root });
+```
+
+Also here: file/pr diffs, discard helpers, `githubRepoInfo`, default PR titles,
+`ensurePragmaExcluded` (writes the `.pragma/` exclusions into the repo's git exclude).
+
+## exec
+
+```ts
+const results = await client.exec.run({
+  root,
+  commands: [{ command: "bun run test" }],
+  maxConcurrent: 2,
+});
+// CommandResult[] { stdout, stderr, exitCode }
+```
+
+## theme, assets, push, health
+
+```ts
+const theme = await client.theme.get({ root }); // overrides only, global ← project
+const asset = await client.assets.toDataUri(hash); // plugin icon assets, authed fetch
+await client.push.register({ token }); // device push token
+await client.push.presence({ focused: true }); // suppress phone pushes while focused
+const health = await client.health.check(); // { status, protocolVersion, gatewayVersion }
+```
+
+`client.assets.fetch(hash)` returns `{ bytes, mime }` — the token rides the request
+header, so asset URLs are never bare `<img>` links.

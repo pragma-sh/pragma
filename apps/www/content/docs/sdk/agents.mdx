@@ -1,0 +1,105 @@
+---
+title: Agents
+description: Report status, surface questions and approvals, and await the user's answer — the API behind the status dots.
+---
+
+`client.agents` is how a program — usually an agent integration — reports into the app
+and talks back with the user. The desktop's coloured dots, the notification, the approval
+toast, and the phone push are all renderings of these reports.
+
+## Status reports
+
+```ts
+await client.agents.report({
+  agent: "claude-code",
+  worktreeId: "wt_123",
+  status: "running", // "running" | "attention" | "done" | "cleared"
+});
+```
+
+Convenience wrappers set the status for you:
+
+```ts
+import {
+  reportStarted, // status: "running"
+  reportStopped, // status: "done"
+  reportAttention, // status: "attention"
+  reportCleared, // status: "cleared"
+  reportSessionName,
+  reportMessage,
+} from "@pragma/sdk";
+```
+
+`reportSessionName({ agent, sessionName })` names the hosting tab (a user rename always
+wins). `reportMessage({ agent, message })` publishes a rich message shown in the app.
+
+## Questions — round trips, not just events
+
+An attention report can carry a **question** with options, or a **command approval**, and
+the agent blocks until the user answers:
+
+```ts
+import { reportAttention, awaitAgentAnswer, awaitAgentDecision } from "@pragma/sdk";
+
+// A question with tappable options
+const requestId = "q-1";
+await reportAttention({
+  agent: "my-agent",
+  kind: "question",
+  question: "Which database for the fixture?",
+  options: [
+    { label: "Postgres", description: "matches prod" },
+    { label: "SQLite", description: "fastest" },
+  ],
+  requestId,
+  client, // required for the standalone helpers
+});
+const answer = await awaitAgentAnswer({ agent: "my-agent", requestId, client });
+// string reply, or null when dismissed / timed out
+
+// A command approval
+await reportAttention({
+  agent: "my-agent",
+  kind: "command",
+  command: "rm -rf dist",
+  requestId: "q-2",
+  client,
+});
+const approved = await awaitAgentDecision({ agent: "my-agent", requestId: "q-2", client });
+// true (allow), false (deny), or null on timeout
+```
+
+The standalone helpers no-op (or resolve `null`) unless a `client` is passed **or** the
+full `PRAGMA_*` environment is present.
+
+## The connection — full duplex
+
+`client.agents.connect()` opens the agent event stream filtered to one agent + tab and
+exposes every direction:
+
+```ts
+const conn = await client.agents.connect({ agent: "my-agent", tabId });
+
+for await (const event of conn) {
+  // agent status changes, messages, decisions, answers, inputs, interrupts
+}
+
+await conn.send("also add tests"); // interject input into the TUI
+await conn.answer(requestId, "Postgres"); // answer a question
+await conn.decide(requestId, true); // approve / deny a command
+await conn.interrupt(); // send ESC into the session
+conn.close();
+```
+
+Pass `prompt` in `ConnectOptions` to attach **and** deliver an initial prompt.
+`awaitDecision`/`awaitAnswer` are convenience wrappers over this stream.
+
+## Catalog and launching
+
+- `client.agents.catalog()` — `GET /v1/agents/catalog`: every registered agent with its
+  models, reasoning levels, and permission modes (assembled by the plugin host).
+- `client.agents.launch(payload)` — `POST /v1/control/agentSessionLaunch`: create a
+  worktree/tab and start an agent session, optionally `headless: true` (works while the
+  desktop is closed). Returns `{ worktreeId, tabId }`.
+- `client.agents.markAgentsSeen({ tabId })` — clear the "seen" latch for a tab, the same
+  call the desktop makes when you view it.

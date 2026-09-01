@@ -1,0 +1,56 @@
+---
+title: Worktrees
+description: pragma-cli worktree — list, create, rename, hide, and delete worktrees.
+---
+
+```
+pragma-cli worktree <command>
+```
+
+## list
+
+```sh
+pragma-cli worktree list [--worktree <ID>]
+```
+
+Lists the worktrees of the project owning the given (or current) worktree. The main
+worktree row comes first; each row carries its id, title, branch, and `is_main` flag.
+
+## create
+
+```sh
+pragma-cli worktree create [--parent <ID>] --branch <BRANCH> [--title <TITLE>]
+```
+
+Creates a child worktree under `--parent` (default: the current worktree, from
+`PRAGMA_WORKTREE_ID`). The app performs the `git worktree add`, registers the row, and
+runs the project's `setup` scripts — the same pipeline as the UI dialog. There is no
+prompt parameter: launching an agent session is a separate step (`agent start` or the
+UI), so a script can create the worktree and decide on sessions later.
+
+## rename
+
+```sh
+pragma-cli worktree rename <id> <title>
+```
+
+Sets the display title (empty string clears it back to the branch name).
+
+## hide / unhide
+
+```sh
+pragma-cli worktree hide <id>
+pragma-cli worktree unhide <id>
+```
+
+Hidden worktrees stay registered but disappear from the sidebar tree.
+
+## delete
+
+```sh
+pragma-cli worktree delete <id> [--delete-branch] [--force]
+```
+
+Refuses when the worktree has uncommitted changes unless `--force` is given. Project
+`teardown` scripts run first and a failure blocks the deletion. `--delete-branch` also
+removes the branch. Confirm before scripting this — it deletes the checkout.

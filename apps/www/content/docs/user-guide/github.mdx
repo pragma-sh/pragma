@@ -1,0 +1,63 @@
+---
+title: GitHub
+description: Sign in once, then open, review, and fix pull requests beside the worktree the code came from.
+---
+
+<video src="/media/github.mp4" controls muted loop playsInline />
+
+## Signing in
+
+Settings → **GitHub**, or the first time you open a PR view. Pragma uses the OAuth
+**device flow** — a browser opens at `github.com/login/device` with a code — requesting
+the `repo` scope only. If you already use the `gh` CLI, Pragma can adopt its token
+instead. The token is stored in a `0600` file; nothing else reads it.
+
+## Creating a pull request
+
+The right sidebar's **Pull Request** tab opens the create view when the worktree has no
+open PR:
+
+- AI drafts the **title and body from the actual diff** — regenerate with **Shift+Tab**,
+  edit freely in a markdown WYSIWYG.
+- Pre-flight checks catch an uncommitted or unpushed branch before you submit.
+- A **"Created with Pragma"** footer (a heading link, an "Open worktree" link, and the
+  opt-out line) is appended. Disable the signature under Settings → GitHub → Pull
+  requests — global scope, applies everywhere.
+
+The AI **Commit & PR** button in the sidebar header does the whole pipeline at once:
+commits all changes as AI-planned commits, pushes, drafts the PR, and switches you to the
+view.
+
+## Reviewing a pull request
+
+The **PR Review** tab (opened from a PR view) is the full review surface:
+
+- **Checks** — pass/fail/pending counts with a per-check dropdown, plus **Sync with Base
+  Branch** and, on conflicts, a confirmed **Abort Merge**.
+- **Changed files** — read every file as a side-by-side diff against the base, with a
+  per-file done-toggle.
+- **Review threads** — reply inline in markdown, resolve and unresolve optimistically,
+  right from the app.
+
+## Fixing with AI
+
+Every review thread offers:
+
+- **Fix** — launch an agent on that one comment.
+- **Add to fix it list** — collect several comments.
+
+The tab header's **Address fix it list** hands the whole list to an agent — in the same
+worktree, or on a fresh one it creates for the fix. The agent receives every comment with
+its file and context in one prompt.
+
+## Stacks
+
+A PR can sit on top of another. When GitHub reports a stack, Pragma links it to your
+local ancestor chain:
+
+- Missing layers get tracking worktrees, created bottom-to-top.
+- **Sync stack** runs the stack sync in a terminal.
+- **Merge stack** merges the top PR asynchronously, then offers to delete the matched
+  stack worktrees and branches.
+
+Each piece stays reviewable on its own — no more one giant branch.

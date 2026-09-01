@@ -1,0 +1,7 @@
+{
+  "title": "Automations",
+  "description": "Cron and event tasks that run on the host, written with @pragma/automations.",
+  "icon": "Timer",
+  "root": true,
+  "pages": ["index", "writing-automations", "lifecycle"]
+}

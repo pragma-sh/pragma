@@ -1,0 +1,80 @@
+---
+title: Disk layout
+description: Every directory and file Pragma writes, plus the PRAGMA_* environment variables.
+---
+
+## Per-instance server directory
+
+Scoped by channel. macOS: `~/Library/Application Support/com.pragma.app/<channel>/`;
+Linux: `$XDG_RUNTIME_DIR/<channel>` (fallback: app data dir); Windows:
+`%APPDATA%\com.pragma.app\<channel>`. Production `<channel>` is `pragma`; dev builds
+use `pragma-dev-<hash>`.
+
+| File                     | Purpose                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| `daemon.sock`            | The owner-only Unix socket.                                           |
+| `server.lock`            | `flock` target; contains the server pid. Never deleted.               |
+| `server.log`             | Server stdout/stderr (Troubleshooting → Open Server Logs).            |
+| `gateway.json`           | `{ port, token, pid, protocolVersion }` discovery file (0600).        |
+| `gateway-token`          | Persistent bearer token (0600).                                       |
+| `gateway-devices.json`   | Authenticated mobile installs + push tokens.                          |
+| `gateway.log`            | Gateway stdout/stderr.                                                |
+| `workspace.json`         | Persisted workspace snapshot (headless launches with the app closed). |
+| `plugin-roots.json`      | Registered project roots for the plugin catalog.                      |
+| `fanouts.json`           | Durable fanout records (0600, atomic writes).                         |
+| `automations-state.json` | Per-content-hash trust verdicts for automations.                      |
+| `bin/pragma-cli`         | Dev-channel CLI install target.                                       |
+
+The desktop keeps its own SQLite state (kanban cards, settings, split layouts, worktree
+rows, selection) in the app data directory — tab _agent metadata_ lives in the server's
+`workspace.json`, everything else client-side.
+
+## `~/.pragma/`
+
+| Path                | Purpose                                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `config.json`       | Global settings: `plugins[]`, `tunnel`, `agentStatus`, `github.prSignature`, `gateway.webEnabled`, `other`. |
+| `keybindings.json`  | Global keybinding overrides.                                                                                |
+| `theme.json`        | Global colour overrides (merged: defaults ← global ← project).                                              |
+| `automations/`      | Global automations (implicitly trusted).                                                                    |
+| `assets/sounds/`    | Global agent alert clips (≤5 s, ≤5 MB).                                                                     |
+| `automation-cache/` | The automations sidecar's managed dependency + entry cache.                                                 |
+| `plugins/npm/`      | Official plugins installed through the app.                                                                 |
+| `pragma-wsl/`       | Inside WSL distros: the WSL server's socket directory.                                                      |
+
+The production CLI installs to `~/.local/bin/pragma-cli` (Windows: alongside the app
+data dir); that directory is prepended to `PATH` in Pragma terminals.
+
+## `<project>/.pragma/`
+
+Checked in (worktree copies are never scanned for automations; the worktrees and
+scratchpads directories are git-excluded via `$GIT_DIR/info/exclude`).
+
+| Path               | Purpose                                                   |
+| ------------------ | --------------------------------------------------------- |
+| `config.json`      | Project settings: `plugins[]`, `terminal`, `agentStatus`. |
+| `keybindings.json` | Project keybinding overrides (win over global).           |
+| `theme.json`       | Project colour overrides (win over global).               |
+| `scripts.json`     | `setup` / `teardown` / `runScripts` definitions.          |
+| `automations/`     | Project automations (approval required).                  |
+| `assets/sounds/`   | Project agent alert clips.                                |
+| `worktrees/`       | Created worktrees (git-excluded).                         |
+| `scratchpads/`     | Agent-authored MDX + comment threads (git-excluded).      |
+
+## `PRAGMA_*` environment variables
+
+Set in every Pragma terminal session (plus extras noted):
+
+| Variable                                       | Meaning                                                                      |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| `PRAGMA_TAB_ID`                                | Current tab/session id.                                                      |
+| `PRAGMA_WORKTREE_ID`                           | Owning worktree id.                                                          |
+| `PRAGMA_SERVER_SOCKET`                         | Server socket path (CLI target). `PRAGMA_DAEMON_SOCKET` is the legacy alias. |
+| `PRAGMA_GATEWAY_URL` / `PRAGMA_GATEWAY_TOKEN`  | HTTP gateway endpoint + bearer token (SDK target).                           |
+| `PRAGMA_CLI`                                   | Installed CLI binary path.                                                   |
+| `PRAGMA_FANOUT_ID` / `PRAGMA_FANOUT_MEMBER_ID` | Set inside fanout attempt sessions.                                          |
+| `PRAGMA_WORKTREE_PATH` / `PRAGMA_PROJECT_PATH` | Set for setup/teardown script execution.                                     |
+
+Process-level (not terminal sessions): `PRAGMA_APP_DATA_DIR`,
+`PRAGMA_SERVER_CHANNEL` (legacy `PRAGMA_DAEMON_CHANNEL`), `PRAGMA_RESOURCE_DIR`,
+`PRAGMA_AUTOMATIONS_CACHE`, `PRAGMA_WEB_ROOT`.

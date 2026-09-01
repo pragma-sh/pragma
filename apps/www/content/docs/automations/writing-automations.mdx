@@ -1,0 +1,98 @@
+---
+title: Writing automations
+description: defineAutomation, triggers, the AutomationContext, and how dependencies are installed.
+---
+
+## defineAutomation
+
+A file exports **one default** `defineAutomation` result:
+
+```ts
+import { defineAutomation } from "@pragma/automations";
+
+export default defineAutomation({
+  name: "Stale branch sweep", // required
+  description: "Comment on worktrees idle for 14 days", // required
+  trigger: { type: "cron", schedule: "0 12 * * 5" },
+  run: async (ctx, payload) => {
+    // payload is the trigger's payload, or undefined
+  },
+});
+```
+
+Validation is strict — the sidecar rejects a file whose default export does not carry
+the `pragmaAutomation` marker, or whose `name`/`description` are empty, whose `trigger`
+is not `cron` or `event`, or whose `run` is not a function.
+
+## Triggers
+
+### cron
+
+```ts
+trigger: { type: "cron", schedule: "0 9 * * 1-5" }
+```
+
+Standard cron syntax, evaluated by the server on a 20-second tick. The computed
+`nextRunAt` shows in Settings → Automations.
+
+### event
+
+```ts
+trigger: {
+  type: "event",
+  listen: (ctx, fire) => {
+    const timer = setInterval(() => fire({ reason: "tick" }), 60_000);
+    return () => clearInterval(timer); // dispose — called on unload/shutdown
+  },
+},
+run: (ctx, payload) => { /* ... */ },
+```
+
+`listen` registers the trigger and returns an optional **dispose function**. Call `fire`
+whenever the event happens; each call invokes `run` with the payload. Disposals run when
+the automation is unloaded, reloaded, or when the sidecar shuts down (stdin EOF — the
+signal the supervisor uses even after an abrupt kill, so always clean up).
+
+## The context
+
+```ts
+interface AutomationContext {
+  log: AutomationLogger;   // info / warn / error — surfaced in the app
+  paths: {
+    project: string;       // the automation's project root (or global dir)
+    worktree: string;      // same as project today
+    global: boolean;       // true for ~/.pragma automations
+  };
+  fs: {
+    find(path, { name?, minBytes? }): Promise<string[]>; // bounded file search
+  };
+  git: Record<string, never>; // reserved for future use
+}
+```
+
+`log` lines appear in the automation's status in the app. `fs.find` skips generated
+directories (`node_modules`, `.git`, `.pragma`, `target`, …) and is bounded — use it to
+locate files without walking the whole tree yourself.
+
+## Dependencies
+
+Bare imports (anything that is not a builtin, a relative path, or `@pragma/automations`
+itself) are installed automatically with `bun add` into a managed cache when the
+automation loads. Imports of `@pragma/automations` are rewritten to the runtime shim —
+your file is loaded from a cache copy, and a source change produces a new cache version.
+
+Two practical rules:
+
+- Keep imports narrow; every bare import is installed at load time.
+- The source file is capped at 2 MiB; larger files are reported truncated.
+
+## What automations can do
+
+Anything the host can: shell out to `pragma-cli`, call the gateway with `@pragma/sdk`
+(the terminal environment's `PRAGMA_*` variables are the sidecar's — read
+[Getting started](/docs/sdk/getting-started) for the client construction), or write
+files. An automation that needs user visibility should **publish a scratchpad**:
+
+```sh
+pragma-cli scratchpad create --title "Stale branches" report.mdx
+```

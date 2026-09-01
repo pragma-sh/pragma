@@ -1,0 +1,52 @@
+---
+title: Mobile app
+description: Pragma Go — pair your phone or open a browser and run the same workspace from anywhere.
+---
+
+<video src="/media/go.mp4" controls muted loop playsInline />
+
+Pragma Go is the mobile client (iOS, iPadOS, Android, and the web). It talks to the same
+host as the desktop through the **gateway** — a localhost HTTP server the desktop starts
+— exposed over a tunnel you configure.
+
+## Pairing a device
+
+Settings → **Pragma Go**:
+
+1. Turn on **Remote access**. Pragma starts the tunnel and shows a **QR code**.
+2. Scan it with Pragma Go. The payload contains the tunnel URL, the gateway token, and
+   the protocol version.
+
+Prefer manual? Expand **Manual** for copyable **URL** and **Token** rows.
+
+The tunnel command lives in `~/.pragma/config.json` under `tunnel`; the default uses
+`ngrok http {port}`. Any command that prints a URL works — `urlPattern` tells Pragma how
+to read it back. **Regenerate token** invalidates every paired device.
+
+## Pragma Go on the web
+
+**Enable web access** serves the Pragma Go web build from the same gateway. When the
+tunnel is active you get a **Web app link** — it carries the token in the URL _fragment_
+(#), which browsers never send to a server, so the link can be pasted into a browser on
+any machine. The warning is real: the link contains the token, treat it like a password.
+
+## What you can do from the phone
+
+- Create worktrees and launch agents — sessions appear on the desktop as background tabs.
+- Watch running sessions and read scrollback.
+- **Answer questions and approve commands** — the same prompts the desktop shows, answered
+  from wherever you are.
+- Read and comment on [scratchpads](/docs/user-guide/scratchpads).
+- Your custom agents and their icons resolve exactly as they do on the desktop.
+
+## Notifications
+
+Agent status drives push notifications to paired devices, using the same wording and
+sound choices as the desktop. If the desktop is focused, pushes are suppressed — one
+device needs the answer, not both.
+
+<Callout title="Security model">
+  The gateway binds to localhost. Only the tunnel you configure exposes it, every `/v1` route
+  requires the bearer token, and the web bundle itself is served unauthenticated — it is public
+  code, the data routes are not.
+</Callout>

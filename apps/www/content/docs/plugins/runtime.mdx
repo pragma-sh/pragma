@@ -1,0 +1,102 @@
+---
+title: Runtime & themes
+description: Hooks, storage, events, the SDK handle, lifecycle hooks, and defineTheme.
+---
+
+## Hooks (React)
+
+Available inside any contributed component:
+
+| Hook                                   | Returns                                                   |
+| -------------------------------------- | --------------------------------------------------------- |
+| `usePluginConfig()`                    | Your validated config object.                             |
+| `useSdk()`                             | The ready `PragmaClient`.                                 |
+| `useProject()`                         | `{ id, name, path }` or `null`.                           |
+| `useTheme()`                           | `"light" \| "dark"`.                                      |
+| `useWebViewPayload<T>()`               | The payload passed to `openWebView`.                      |
+| `useNotify()`                          | `(message, { variant?, description?, native? }) => void`. |
+| `useStoredState<T>(key, v)`            | Persisted, plugin-scoped state.                           |
+| `useSdkQuery(fn, deps)`                | `{ data?, error, loading, refetch }` wrapper.             |
+| `useEvent(name, handler)`              | Subscribe to an app event.                                |
+| `useWorktreeChanges(root)`             | Git changes for a worktree.                               |
+| `useBranchStatus(root)`                | Ahead/behind status.                                      |
+| `useDirEntries(root, path)`            | File listings.                                            |
+| `useFileContents(root, path)`          | File contents.                                            |
+| `useAgentStatuses(worktreeId)`         | Live agent statuses (`running/attention/done`).           |
+| `useAgentMessages(worktreeId, tabId?)` | Rich agent messages.                                      |
+| `useSessions()`                        | Live sessions (`{ id, cwd }`).                            |
+
+Non-React equivalents live in the runtime module: `getTheme()`, `subscribeTheme()`,
+`subscribeEvent()`, `listSessions()`.
+
+## The context object
+
+Lifecycle hooks receive a `PluginContext`:
+
+```ts
+interface PluginContext<TConfig = unknown> {
+  pluginId: string; // derived from package.json name
+  pluginDir?: string;
+  config: TConfig; // parsed by your zod schema
+  project: PluginProject | null;
+  sdk: PragmaClient; // configured with gateway credentials
+  notify: (message, options?) => void;
+  storage?: PluginStorage; // get / set / delete, host-bound
+}
+```
+
+```tsx
+export default definePlugin({
+  /* ... */
+  onInstall: async (ctx) => {
+    /* once per installation (host side) */
+  },
+  onPragmaLoad: async (ctx) => {
+    /* once per server boot (host side) */
+  },
+  activate: (ctx) => {
+    // in-process setup; return a dispose function
+    const off = ctx.sdk.events.subscribe("agentStatus", () => {});
+    return () => off();
+  },
+});
+```
+
+`onInstall` and `onPragmaLoad` run **host-side** in the `pragma-plugins` sidecar (under
+Bun), keyed by boot id so they run once — that is where Node-only work belongs.
+
+## Events
+
+`useEvent(eventName, handler)` / `subscribeEvent(name, handler)` listen to application
+events such as `agent.report` (typed `AgentReportPayload`) and your plugin's own
+**deep links**: `pragma://plugin/<pluginId>/<path>?params` arrives as
+`PluginDeepLinkEvent { pluginId, path, url, params }`.
+
+## Theming
+
+```tsx
+import { defineTheme } from "@pragma/plugin";
+
+themes: [
+  defineTheme({
+    id: "paper",
+    name: "Paper",
+    description: "Warm light palette",
+    colors: {
+      light: { canvas: "oklch(0.98 0.01 90)", primary: "oklch(0.2 0.02 90)" },
+      dark: { canvas: "oklch(0.18 0.01 90)" },
+    },
+  }),
+],
+```
+
+Token keys omit the `--` prefix and follow the
+[token groups](/docs/user-guide/theming#token-groups). Applying a theme copies its
+values into the user's `.pragma/theme.json` — it is a starting point they own, never a
+forced override.
+
+## UI primitives
+
+`@pragma/plugin/ui` exports the host's `Button` and `Kbd`;
+`@pragma/plugin/icons` the host icon map. Use them so your UI tracks the app's theme —
+and reach for the theme CSS variables in your own styles rather than literal colours.

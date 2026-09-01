@@ -1,0 +1,63 @@
+---
+title: Sessions
+description: Spawn, attach, write to, resize, rename, and kill terminal sessions on the host.
+---
+
+A **session** is one live PTY the host server owns. `client.sessions` drives it.
+
+## Spawn
+
+```ts
+const { sessionId } = await client.sessions.spawn({
+  cwd: "/path/to/worktree",
+  cols: 120,
+  rows: 40,
+  // optional shell profile, command, agent id, title, environment
+});
+```
+
+`spawn` posts `POST /v1/sessions` and returns the session id immediately; output flows
+through the event stream. Agent sessions (spawned with an agent id from the catalog)
+carry startup/prefill handling and get `PRAGMA_FANOUT_*` variables inside fanout
+attempts.
+
+## Attach — the event stream
+
+```ts
+for await (const event of client.sessions.attach(sessionId)) {
+  switch (event.type) {
+    case "replay":
+      // scrollback replay; event.cursor is the absolute output-byte cursor
+      break;
+    case "output":
+      // event.data: Uint8Array of raw PTY output
+      break;
+    case "title":
+    case "exit":
+  }
+}
+```
+
+The stream is NDJSON over `GET /v1/sessions/{id}/events`. The first event is a
+**replay**: the server re-sends as much scrollback as it can cover, and `reset: true`
+means the connection's cursor fell outside the retained window. Reconnecting clients send
+their last cursor back on attach to resume seamlessly.
+
+## Input, resize, rename, kill
+
+```ts
+await client.sessions.write(sessionId, new TextEncoder().encode("cargo test\r"));
+await client.sessions.resize(sessionId, { cols: 100, rows: 30 });
+await client.sessions.rename(sessionId, "build"); // renames the hosting tab
+await client.sessions.kill(sessionId);
+await client.sessions.killForCwd("/path/to/worktree"); // kill every session in a cwd
+```
+
+`write` posts raw octet-stream bytes to `POST /v1/sessions/{id}/input` — no JSON, no
+escaping.
+
+## Use cases
+
+- **Headless agents**: spawn a session per attempt and read its output from a script.
+- **Custom clients**: the mobile app is built exactly on these routes.
+- **Supervision**: `killForCwd` is how tooling tears down everything a worktree started.
