@@ -1,0 +1,56 @@
+---
+title: Lifecycle
+description: Where automations live, trust approval, statuses, and the RPC/event surface.
+---
+
+## Where files live
+
+| Scope   | Directory                        | Trust              |
+| ------- | -------------------------------- | ------------------ |
+| Global  | `~/.pragma/automations/`         | Implicitly trusted |
+| Project | `<project>/.pragma/automations/` | Requires approval  |
+
+Files are discovered by scanning these directories — **never** worktree copies, which is
+why a project automation is approved once for the project, not once per worktree. A
+file's identity is the hash of its path, and its **content hash** decides whether a
+trust verdict still applies — edit an approved automation and it asks again.
+
+## Trust
+
+Every discovered automation is `trusted`, `approved`, `pending`, or `rejected`. New
+project automations land as **pending** and surface in the app as a one-time prompt
+(the `automationPending` event). Approve or reject in Settings → Automations. Rejections
+stick per content hash.
+
+## Statuses
+
+| Status     | Meaning                                                      |
+| ---------- | ------------------------------------------------------------ |
+| `pending`  | Discovered, not yet trusted.                                 |
+| `loaded`   | Approved and loaded into the sidecar (event triggers armed). |
+| `running`  | A `run` is executing.                                        |
+| `idle`     | Loaded, nothing executing (cron waits for its next tick).    |
+| `rejected` | Trust denied.                                                |
+| `error`    | The sidecar reported a load or runtime error.                |
+
+The list refreshes on the `automationsChanged` event; `lastRunAt` and `nextRunAt` come
+from the server's 20-second cron tick.
+
+## Run now
+
+**Run now** in Settings → Automations (or the automations RPC `runNow`) invokes `run`
+immediately with no payload — the fastest way to test a new automation.
+
+## RPC and events
+
+Automation management is the `automations` RPC domain, actions: `registerRoots`,
+`list`, `approve`, `reject`, `runNow`, `readSource`, `writeSource` (2 MiB source cap).
+Events: `automationPending` (one pending automation) and `automationsChanged` (full
+list). The Settings page is a client of exactly this surface.
+
+<Callout title="Sidecar contract">
+  The `pragma-automations` sidecar speaks NDJSON over stdin (`load`, `unload`, `runNow`, `reload`)
+  and emits (`ready`, `loaded`, `status`, `log`, `error`, `unloaded`). That contract is shared with
+  `crates/pragma-server/src/automations.rs` — see [wiki → Server](/docs/wiki/server) for how
+  sidecars are supervised.
+</Callout>

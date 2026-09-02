@@ -1,0 +1,24 @@
+{
+  "title": "User guide",
+  "description": "Everything you need to run coding agents in Pragma.",
+  "icon": "BookOpen",
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "quick-start",
+    "core-model",
+    "worktrees",
+    "agent-board",
+    "browser",
+    "files",
+    "github",
+    "project-scripts",
+    "usage-limits",
+    "ai",
+    "scratchpads",
+    "ssh",
+    "mobile",
+    "keybindings",
+    "theming"
+  ]
+}

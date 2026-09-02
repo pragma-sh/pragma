@@ -1,0 +1,96 @@
+---
+title: Server
+description: pragma-server — session lifecycle, scrollback, agent status, fanouts, and sidecar supervision.
+---
+
+`crates/pragma-server` is the persistent host. One process per channel; everything below
+lives in `src/`.
+
+## Sessions
+
+`Session` wraps a `portable_pty` pseudo-terminal:
+
+- **Spawn** (`registry.rs`): duplicate-id check outside the PTY open; default grid
+  80×24. Shell resolution: requested `ShellProfile` → project `.pragma/config.json`
+  `terminal` block → global config → platform default (`pragma_platform::shell`).
+- **Environment** exported into every session: `TERM=xterm-256color`,
+  `COLORTERM=truecolor`, `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`,
+  `PRAGMA_SERVER_SOCKET` (+ legacy `PRAGMA_DAEMON_SOCKET`), `PRAGMA_GATEWAY_URL` /
+  `PRAGMA_GATEWAY_TOKEN` (from `gateway.json` when the protocol version matches), and
+  `PRAGMA_CLI` + a `PATH` prepended with the CLI's directory. Fanout attempts add
+  `PRAGMA_FANOUT_ID` / `PRAGMA_FANOUT_MEMBER_ID`.
+- **Output pipeline**: a reader thread (64 KiB reads) → `OutputCoalescer` (8 ms trailing
+  window, 256 KiB cap) → broadcast to subscribers. Slow subscribers are disconnected
+  with a replay cursor instead of being allowed to buffer without bound.
+- **Scrollback**: capped at 10,000 frames _and_ 8 MiB (coalesced frames can be large).
+- **Input**: binary frames written straight to the PTY, never queued through coalescing.
+- **Titles**: OSC 0/2 titles are parsed out of the raw stream; the shell names the tab
+  unless the user renamed it.
+- **Exit**: the registry removes the session and purges the tab's agent statuses.
+  There is no server-side "respawn" — clients kill and re-spawn.
+
+**Agent sessions** (`spawn_agent_session`) are server-owned: grid 120×40, tagged with a
+catalog agent id, startup input and prompt prefill scheduled (bracketed prefills wait
+for alt-screen entry with a bounded extra wait). Headless launches
+(`headless: true` or no controller) create real git checkouts under
+`<project>/.pragma/worktrees/<uuid>` via `pragma-core` and merge them into the
+workspace mirror; the desktop adopts them from disk later.
+
+## Agent status
+
+`Registry::report_agent` keys entries by `(worktreeId, tabId, agent)` and merges
+reports (status-less `session-name` reports keep the previous status). Broadcasts:
+
+- `EventFrame::Agent` to every `SubscribeAgents` stream (the desktop bridge and the
+  gateway's agent stream).
+- A full-replacement `Delta` on the `agentStatus` subscription.
+
+Rich payloads have bounded replay so late subscribers catch up: messages (200 per
+session), decisions/answers (5 s window / 64 entries), inputs and interrupts (no
+buffer — always watcher delivery). `MarkAgentsSeen` downgrades stored `done` states so
+a reconnecting viewer does not re-show stale green.
+
+## Fanouts
+
+`fanouts.rs` (`FanoutStore`) + `fanout_host.rs` (side effects behind a `FanoutHost`
+trait) + pure rules in `pragma-core::fanout`. Durable state: `fanouts.json` beside the
+socket, written atomically with owner-only permissions.
+
+- **Statuses** — fanout: `provisioning, active, attention, partial, ready, failed,
+interrupted, cancelled, finalizing, needsResolution, cleanupFailed, completed`;
+  member: `pending, provisioning, running, attention, done, failed, interrupted,
+cancelled, selected`. Member status is derived from agent reports.
+- **Invariants**: one active fanout per parent; all attempts branch from one captured
+  base commit (`git worktree add -b … <commit>`); a dirty parent is refused; after a
+  restart, live members become `interrupted` and the prompt is never auto-replayed.
+- **Pick** runs as durable stages — `validating → committingWinner (AI commit message
+via pragma-ai) → merging → promotingScratchpads → stoppingSessions → cleaningUp →
+completed` — and a retry resumes at the first incomplete stage. A merge conflict
+  parks in `needsResolution` with everything intact; partial cleanup reports
+  `cleanupFailed` with survivors. Descendant worktrees block finalize.
+- **Ops**: `Create, Get, Read (scrollback), Send, Retry, Cancel, Pick`. `Send` delivers
+  through the member's watcher (delivery = reached the watcher; TUI ACK is not
+  observable). Attempt branches: `fanout/<fanoutShortId>/<memberShortId>`.
+
+## Sidecar supervision
+
+| Sidecar      | Mechanism                                                                                                                                                                                                       |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| automations  | Scans global + project automation dirs every 5 s; cron tick 20 s; trust state in `automations-state.json`; NDJSON pump to the sidecar.                                                                          |
+| plugins host | Lazily respawned `pragma-plugins`; RPC domain `plugins` (`catalog`, `registerRoots`, `readAsset`, `usageLimits`, `reload`); roots persisted in `plugin-roots.json`.                                             |
+| watchers     | `WatcherSupervisor` spawns one `pragma-watch` per live agent session (5 s reconcile; fresh gateway credentials after a gateway restart; exponential backoff 5 s→5 m on crash loops). Nothing else may spawn it. |
+| tunnel       | Child process from `~/.pragma/config.json` `tunnel.command`; stdout scanned against `urlPattern`; status `idle/starting/active/error`; restarted at server startup.                                             |
+
+## Other server duties
+
+- **Workspace mirror**: the desktop publishes snapshots (debounced); the server
+  persists `workspace.json` and serves the `workspace` subscription so headless
+  clients see projects/worktrees/tabs while the app is closed.
+- **File watching**: `notify-debouncer-full`, 150 ms debounce, `.git` filtered, bounded
+  per-subscriber queues; the last listener tears the watcher down.
+- **Ports**: only listeners whose process ancestry reaches a Pragma session root are
+  reported — the security boundary for the Ports card.
+- **WSL**: the server answers the `wsl` RPC for its own host, so an SSH host reports its
+  own distributions.
+- **Tabs RPC**: terminal _agent metadata_ only (agent id, agent title) — the desktop
+  owns the rest of tab state.

@@ -1,0 +1,69 @@
+---
+title: Client & bridges
+description: pragma-client — the transport library, the SSH bridge, WSL relaying, and relay mode.
+---
+
+`crates/pragma-client` is the synchronous transport library the desktop (and future CLI
+code) uses to talk to hosts. It is endpoint-agnostic above the transport: an endpoint is
+either a **managed local server** or a bare **socket path** backed by a bridge.
+
+## PragmaClient
+
+- A small idle **connection pool** (4) so concurrent RPCs run in parallel on their own
+  connections; a transport error retries once on a fresh connection.
+- `rpc(method, payload)` waits without a deadline while host work runs (a user's
+  `git push` hooks can be slow), restoring timeouts before returning the connection to
+  the pool.
+- `control(method, payload)` waits unbounded on purpose — a timeout-plus-retry here
+  could duplicate an `agentSessionLaunch` that already succeeded.
+- **Input writer**: a dedicated thread with a bounded queue (256 messages / 4 MiB,
+  frames split at 64 KiB) and capped backoff, so a saturated PTY never blocks callers.
+- Server bootstrap: `connect_with_spawn` / `connect_compatible` (Hello version probe),
+  `kill_stale_server` (verified-pid process-tree kill), `spawn_server` (channel + data
+  dir + resource dir env; logs to `server.log`), `restart()`, `read_log()`,
+  `server_protocol_version()`.
+
+## Event streams
+
+`open_event_stream` connects, writes the request, reads frames until the matching
+`Response`, then **clears the read timeout** and hands the socket to a pump. The 5 s
+read timeout exists for request mode only — an idle subscription must not look like a
+dropped connection. Used for attach (with cursor), subscriptions, and the agent stream.
+
+## SSH bridge (`ssh.rs`)
+
+A remote project is served by a `pragma-server` running **on the remote host**, reached
+through SSH streamlocal forwarding:
+
+1. Authenticate (agent → key+passphrase → password), run a bootstrap command that
+   ensures the remote server (right binary, right version), and bind a **local**
+   owner-only socket.
+2. Each local connection opens one `channel_open_direct_streamlocal` to the remote
+   socket; a pump copies raw bytes. **No reframing, no interpretation** — the local
+   endpoint behaves exactly like the remote socket.
+
+`ssh_exec` runs one-shot remote probes (paths, git version). Readiness timeout is 10 s.
+Non-secret route metadata (host, port, user, auth method) persists in the client's
+local router SQLite (`router.rs`).
+
+## WSL (`wsl.rs`)
+
+Two separate problems, only the first shipped:
+
+- **Shell selection (built)**: a session can launch `wsl.exe -d <distro>` on the host's
+  own ConPTY. The chosen shell travels as a `ShellProfile` and resolves through
+  `pragma_platform::shell::resolve_profile_launch`.
+- **Host-level WSL (not built)**: `start_wsl_bridge` exists but nothing calls it. The
+  design is deliberate: the Linux `pragma-server` runs _unchanged inside the
+  distribution_, and the bridge relays over the stdio of `wsl.exe -d <distro> --exec
+pragma-server --relay` instead of forwarding a TCP port — because socket owner-only
+  permissions are the whole access-control story, and a localhost listener would trade
+  that for a user setting. The WSL server uses its own channel (`pragma-wsl`) so its
+  socket lands at `$HOME/.pragma/pragma-wsl/daemon.sock` inside the distro.
+
+## Relay mode
+
+`pragma-server --relay` turns the server into a full-duplex byte pipe between stdin and
+its socket: 32 KiB buffers, two threads, no interpretation, exit when either side
+closes. It is the half of the WSL design that already ships, and the transport-agnostic
+way to reach a server across any stdio-capable channel.

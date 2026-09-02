@@ -1,0 +1,88 @@
+---
+title: Quick start
+description: From an empty Pragma window to your first reviewed and shipped agent change.
+---
+
+This guide walks you through the shortest useful loop: add a project, create a worktree
+with an agent in it, review what the agent did, and ship it.
+
+## 1. Add a project
+
+Open the **Add project** menu at the bottom of the left sidebar. Two tabs:
+
+- **Local** — open an existing git checkout from disk, or paste a remote URL and
+  **Clone remote** into Pragma's projects directory.
+- **Remote** — connect a project over SSH (see [SSH support](/docs/user-guide/ssh)).
+
+<Callout title="Git required">
+  Pragma drives real git worktrees, so the folder you add must be a git checkout (or a remote URL
+  git can clone).
+</Callout>
+
+The project appears in the project switcher at the bottom of the sidebar, with the
+repository's main checkout shown as the **main** worktree.
+
+## 2. Create a worktree with an agent in it
+
+Click **New worktree off main** (the plus button at the top of the sidebar):
+
+1. Give it a **branch name** — spaces become dashes.
+2. Optionally set a **display title** so the sidebar reads nicely.
+3. Pick an **agent** and, where the agent supports it, a model.
+4. Type a **prompt** describing the task. A rich markdown editor, so paste specs freely.
+
+Press **<Keys mac="⌘↵" other="Ctrl+↵" />**. Pragma creates the git worktree, opens a
+terminal, and launches the agent with your prompt. Leaving the prompt empty still creates
+the worktree — with an empty terminal and no agent session.
+
+<Callout title="Main is behind its remote?">
+  If main has commits to sync, Pragma asks whether to sync before creating the worktree. Syncing
+  first keeps your new branch up to date; you can also create without syncing.
+</Callout>
+
+## 3. Watch it work
+
+The worktree appears in the sidebar under its parent. Its agent dot tells you the story
+without opening anything:
+
+- **Yellow** — running.
+- **Green** — done.
+- **Red** — needs you: a question, or a command approval.
+
+When the agent finishes you get a chime and a system notification
+(configurable under [Agent status settings](/docs/user-guide/theming#agent-alert-sounds)).
+
+## 4. Review the changes
+
+Open the **Changes** tab on the right sidebar. Staged, unstaged, and committed changes
+are listed separately, and clicking any file opens a unified diff beside the terminal the
+agent wrote it in.
+
+- Diffs resolve against the worktree's **parent branch**, so a moving main never scrambles
+  the review.
+- Stage files, commit with a generated message (**Shift+Tab** to let AI write it), and
+  push — no second git client.
+- Before pushing, review the branch diff against its parent so generated changes never
+  hide between commits.
+
+See [Files & Git changes](/docs/user-guide/files) for the full tour.
+
+## 5. Ship it
+
+Open the **Pull Request** tab (right sidebar), draft the title and body — AI drafts them
+from the actual diff — and open the PR. From there you can read review threads inline,
+flag comments into a fix-it list, and hand the list to an agent.
+
+## 6. Merge and clean up
+
+When the PR is merged, the worktree's icon becomes a merge glyph in the sidebar. Delete
+the worktree from its context menu — optionally deleting the branch too. If the project
+defines `teardown` scripts in `.pragma/scripts.json`, they run before the checkout is
+removed.
+
+## Where to go from here
+
+- [Fan out one prompt to several agents](/docs/user-guide/worktrees#fan-out) and keep the
+  winner.
+- Manage prompts as cards on the [agent board](/docs/user-guide/agent-board).
+- Pair your phone with [Pragma Go](/docs/user-guide/mobile).

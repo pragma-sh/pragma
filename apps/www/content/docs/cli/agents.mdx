@@ -1,0 +1,89 @@
+---
+title: Agents
+description: pragma-cli agent — status reporting, questions and approvals, session names, and agent verify.
+---
+
+```
+pragma-cli agent <command>
+```
+
+This is the API agent hooks use to render status into the app. Every command reads the
+agent id from `--agent` and the worktree/tab context from the environment.
+
+## start / status
+
+```sh
+pragma-cli agent start --worktree <ID> --agent <ID> [--model <ID>] [--prompt <PROMPT>]
+pragma-cli agent status [--worktree <ID>] [--watch]
+```
+
+`start` launches an agent session **through the app** (brokered, so UI state stays
+consistent). It is not supported for plugin-defined agents — launch those from the
+Pragma UI so their model and argument builders run. `status` reads the current statuses
+directly from the server and works while the app is closed; `--watch` follows changes.
+
+## report
+
+```sh
+pragma-cli agent report --agent <ID> <subcommand>
+```
+
+| Subcommand                   | Effect                                                                |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `started`                    | Yellow dot — running.                                                 |
+| `stopped`                    | Green dot — done. `--worktree-id` overrides the environment worktree. |
+| `attention`                  | Red dot — the user is needed (see below).                             |
+| `cleared`                    | Remove the indicator entirely (agent exited without a result).        |
+| `session-name --name <NAME>` | Name the hosting tab (user renames win).                              |
+
+`attention` carries what the user must act on:
+
+- `--kind question --question "..." --options '[{"label":"Yes","description":"..."}]'
+--request-id <id>` — a question with tappable options (multi-question forms use
+  `--questions` with a JSON array).
+- `--kind command --command "<cmd>" --request-id <id>` — a command approval.
+
+Always pass a `--request-id` and block on the answer (below) — the same prompt renders in
+the desktop and on paired phones.
+
+## ask and answer
+
+```sh
+# agent side: publish, then block
+pragma-cli agent await-decision --agent <ID> --request-id <ID> [--timeout 300]
+pragma-cli agent await-answer --agent <ID> --request-id <ID> [--timeout 300] [--dismiss-output <VALUE>]
+
+# publisher side: resolve someone else's request
+pragma-cli agent decide --agent <ID> --request-id <ID> (--allow | --deny)
+pragma-cli agent answer --agent <ID> --request-id <ID> (--text <REPLY> | --dismiss)
+
+# interjection (fire and forget)
+pragma-cli agent input --agent <ID> --text "<message>" [--request-id <ID>]
+```
+
+`await-decision` prints `allow`/`deny` and exits 0; on timeout it prints nothing and
+exits non-zero, so a harness hook can fall back to its native prompt. `await-answer`
+prints the reply text; `--dismiss-output` turns a dismissal into a normal exit with a
+value of your choosing.
+
+`agent message --agent <ID> (--payload '<JSON>' | --stdin)` publishes a rich
+`AgentMessage`.
+
+## verify
+
+```sh
+pragma-cli agent verify --agent <ID> [--scenario <ID>] [--jobs <N>] [--headed]
+  [--model <ID> | --pick-model-cmd "<args>"] [--attempts <N>] [--fail-fast]
+```
+
+A conformance suite that launches your agent and exercises the whole reporting surface —
+reply, session naming, command approvals (allowed and denied), question forms, message
+submit, subagents, aborts, interrupts, usage limits, and stream integrity. Scenarios are
+skipped automatically when the agent's catalog entry declares `excludeFeatures`. Pass
+`--headed` to watch, `--prompts <FILE>` to override scenario prompts, `--jobs` (max 16)
+to parallelize.
+
+<Callout title="Building an integration?">
+  Verify is the last gate of a new agent plugin — see [Plugins → Agents](/docs/plugins/agents) and
+  the shipped integrations in `packages/*-plugin` for the full pattern.
+</Callout>

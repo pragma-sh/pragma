@@ -1,0 +1,75 @@
+---
+title: Architecture
+description: The processes on a host, the app launch sequence, and the one-server-per-channel rule.
+---
+
+## Processes on a host
+
+| Process              | Spawned by        | Role                                                                                              |
+| -------------------- | ----------------- | ------------------------------------------------------------------------------------------------- |
+| `pragma-server`      | Desktop app       | Persistent host: PTY sessions, scrollback, agent status, RPC, subscriptions, sidecar supervision. |
+| `pragma-gateway`     | Desktop app       | Localhost HTTP/JSON API in front of the server socket.                                            |
+| `pragma-automations` | Server            | Automation discovery/execution sidecar (long-lived, NDJSON stdin).                                |
+| `pragma-plugins`     | Server            | Plugin catalog sidecar: catalog, assets, usage limits, server-side plugin hooks.                  |
+| `pragma-watch`       | Server            | **One per live agent session** — types phone/app interjections into agent TUIs.                   |
+| `pragma-ai`          | Server (one-shot) | AI helpers — e.g. commit messages during a fanout pick.                                           |
+| `pragma-github`      | Staged/bundled    | GitHub helper sidecar (keeps credentials host-side).                                              |
+| tunnel (`ngrok` …)   | Server            | Remote access; lifetime = server lifetime, not app lifetime.                                      |
+| `pragma-cli`         | App (installed)   | CLI in agent terminals; connects to the socket per command.                                       |
+| Desktop app          | You               | The controller: UI + control broker.                                                              |
+
+Sidecar staging is keyed in `tauri.conf.json` `bundle.externalBin`; on Windows the NSIS
+installer stops sidecars explicitly (`installer-hooks.nsh`) because a running image
+cannot be overwritten.
+
+## Socket, channel, and auth
+
+- The server listens on exactly one **`daemon.sock`** per _channel_, in a channel-scoped
+  directory (`server_paths()` in `crates/pragma-server/src/main.rs`):
+  macOS `~/Library/Application Support/com.pragma.app/<channel>`, Linux
+  `$XDG_RUNTIME_DIR/<channel>` (fallback app data), Windows
+  `%APPDATA%\com.pragma.app\<channel>`.
+- Production channel is `pragma`; dev builds derive `pragma-dev-<hash>` from the
+  workspace root, so a dev instance never fights a production install.
+- **There is no in-band auth.** The socket is bound then `chmod 0600` (Unix) or given an
+  owner-only ACL (Windows) — filesystem permissions are the entire access-control story.
+  This is also why the WSL bridge relays over stdio instead of forwarding a TCP port.
+
+## Launch sequence
+
+1. The app resolves its channel, opens its SQLite store.
+2. `PtyClient::connect_with_spawn()` probes the socket: connect, read the `Hello` frame,
+   compare `protocolVersion`.
+3. No server, or a version mismatch → `kill_stale_server()` reads the pid from
+   `server.lock`, verifies the process name, and kills the **whole process tree**
+   (sidecars, watchers, PTYs, tunnel) — then `spawn_server()` starts a fresh one
+   (`--detach`, logs appended to `server.log`).
+4. The server raises its open-file limit, `flock`s `server.lock` (pid inside), takes the
+   socket path (live server refuses; dead socket file unlinks), binds owner-only, and
+   writes `Hello` as the first frame of every accepted connection.
+5. The **first request decides the connection class**: `RegisterController` makes it the
+   app's control connection; anything else is a plain client.
+6. The app ensures the gateway (`gateway.json` health check, else spawn + wait for the
+   discovery file) and starts one **agent event stream per connected host** — local plus
+   each SSH remote — with a 500 ms reconnect loop.
+7. The frontend publishes workspace snapshots to the server (debounced) so headless and
+   phone launches keep working while the app is closed.
+
+## One server per channel
+
+`flock` + socket liveness probe cover each other's blind spots, and nothing ever deletes
+`server.lock`. Replacement works because the app always kills the old tree first. The
+same discipline applies to the gateway: a live same-version gateway is reused; a live
+_different_-version gateway is killed by verified pid and replaced.
+
+## The controller split
+
+Two request kinds make the split real:
+
+- **Control requests** (`POST /v1/control/*` from the SDK, or `Control` frames) are
+  forwarded to the connected controller — the desktop — whose `ControlResult` answers
+  them. Creating an agent-board draft, launching a session "through the app", and
+  plugin UI state live here. If no controller is connected, launch-style control
+  requests degrade gracefully: the server creates the worktree itself and the desktop
+  adopts it from disk on next start (`adopt_headless_worktrees`).
+- **Everything else** — spawn, attach, RPC, subscriptions — the server answers alone.

@@ -1,0 +1,75 @@
+---
+title: Gateway
+description: pragma-gateway — the HTTP surface, bearer auth, the web bundle, and push notifications.
+---
+
+`crates/pragma-gateway` is a tiny `tiny_http` server on `127.0.0.1` (ephemeral port by
+default) that translates HTTP/JSON into server-socket frames. It depends on socket I/O
+only — no `pragma-core`, no business logic.
+
+## Routes
+
+```
+GET  /v1/health                      (no auth)   GET  /v1/version
+POST /v1/rpc/{method}                            — pass-through for protocol RPC methods
+POST /v1/sessions                                GET  /v1/sessions/{id}/events
+POST /v1/sessions/{id}/input        (octet-stream)
+POST /v1/sessions/{id}/resize                   DELETE /v1/sessions/{id}
+DELETE /v1/sessions?cwd=…                        — kill every session in a cwd
+POST /v1/agents/{reports,messages,decisions,answers,inputs,interrupts}
+GET  /v1/agents/events               (NDJSON)    GET  /v1/agents/catalog
+POST /v1/tabs/{tabId}/agents/seen
+GET  /v1/subscriptions/{event}       (NDJSON snapshot + deltas)
+GET  /v1/theme?root=…                            GET  /v1/scratchpads?root=…
+GET  /v1/assets/{hash}                           — plugin assets by content hash
+POST /v1/control/{method}                        — brokered to the desktop controller
+POST|GET|DELETE /v1/push/tokens     POST /v1/push/test     POST /v1/push/presence
+GET  /web/{*path}                    (no auth)  — the web client bundle
+```
+
+Every `/v1` route requires the bearer token; only `/v1/health` and `/web` are public.
+
+## Auth and discovery
+
+- The token is 48 alphanumeric characters, persisted in `gateway-token` (0600), stable
+  across restarts; the app's **Regenerate token** kills the gateway and deletes the
+  file. `--token` overrides.
+- `gateway.json` beside the socket records `{ port, token, pid, protocolVersion }`
+  (0600) — the discovery file everything reads. Terminal sessions get
+  `PRAGMA_GATEWAY_URL`/`PRAGMA_GATEWAY_TOKEN` from it.
+- Bearer comparison is constant-time. Device identity rides headers
+  (`x-pragma-device-id`, `-name`, `-platform`, `-app-version`) into a persisted device
+  registry.
+- Startup conflict policy: live same-version gateway → reuse; live different-version →
+  kill by **verified** pid and replace; dead file → remove.
+
+## The web bundle
+
+Serving `/web` requires both `gateway.webEnabled: true` in the global config and a
+staged bundle (`--web-root` / `PRAGMA_WEB_ROOT`); missing either is a 404/503, never a
+half answer.
+
+- The bundle ships a **`manifest.json`** mapping every path to
+  `{ file, contentType, etag, gzip, immutable }`. A request path is a **map key** —
+  it is never joined onto a filesystem path, so path traversal is not expressible
+  rather than merely blocked.
+- Text assets are stored gzip-only and served gzip-only. Content-hashed files are
+  `immutable`; `index.html` is `no-cache`. Unmatched extension-less paths fall back to
+  `index.html` (SPA routes); file-looking paths 404.
+- `/web` is deliberately **unauthenticated** — a browser cannot attach a bearer token
+  to a `<script src>`. The bundle is public code; the data routes are not. The pairing
+  link carries the token in the URL **fragment**, which browsers never send to a
+  server.
+
+## Push notifications
+
+Two background threads (worker + workspace mirror) subscribe to the server's agent
+status stream and push to registered Expo devices:
+
+- A **latch** per `worktree+tab+agent(+requestId)` mirrors the desktop's alert-once
+  rule (`running`/`cleared` releases it).
+- A desktop **presence heartbeat** (`POST /v1/push/presence`, 90 s TTL) suppresses
+  pushes while the desktop is focused — one device needs the answer, not both.
+- Notification wording is the same template set the desktop uses, rendered by a Rust
+  twin of the app's text module.
+- `DeviceNotRegistered` from Expo drops the token.

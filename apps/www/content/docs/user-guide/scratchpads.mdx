@@ -1,0 +1,53 @@
+---
+title: Scratchpads
+description: Interactive MDX documents agents publish for you — and comment threads you answer with.
+---
+
+A scratchpad is an agent-authored MDX document. Instead of a wall of terminal text, an
+agent publishes something you can read at your own pace, edit, comment on, and hand back.
+
+## Where they live
+
+`.pragma/scratchpads/` in the worktree, git-excluded. The sidebar's **Scratchpads** card
+lists the selected worktree's documents; each opens as its own tab.
+
+A scratchpad is two files: `<name>.mdx` (the document, with a managed frontmatter line
+Pragma maintains) and `<name>.mdx.comments.json` (the comment thread). Don't author
+scratchpad files by hand — the managed frontmatter is what makes the tooling work.
+
+## Reading and editing
+
+The scratchpad tab has two modes sharing one buffer:
+
+- **Editor** — rich markdown editing; MDX components render live in sandboxed iframes.
+  Agents can ship interactive blocks (questions, diff reviews, progress) using the
+  scratchpad UI components.
+- **Raw** — CodeMirror with inline <Keys mac="⌘K" other="Ctrl+K" /> AI edits, for tweaking the source directly.
+
+If the file changes on disk (the agent updated it), a **Changed on disk — reload** button
+appears.
+
+## Commenting
+
+Select a block and leave a comment. Comments collect in the thread; sending submits as
+**one prompt to the attached agent** — the agent re-reads the document and addresses each
+comment in order. If no agent is attached, Pragma offers a picker of the worktree's
+agent sessions.
+
+## Creating them
+
+Agents create scratchpads from their own terminal:
+
+```sh
+pragma-cli scratchpad create --title "Architecture" result.mdx
+```
+
+The command writes the managed frontmatter, registers the document, and opens a
+scratchpad tab for you. When a fanout pick promotes a winner, the winner's scratchpads
+are promoted with it — the comparison's scratchpad columns stay with the work that
+survives.
+
+<Callout title="Mobile and browser">
+  Paired devices read scratchpads through the same host — comments and agent handoff work
+  identically from the phone. See [Mobile app](/docs/user-guide/mobile).
+</Callout>

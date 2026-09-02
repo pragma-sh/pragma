@@ -1,0 +1,7 @@
+{
+  "title": "Plugin development",
+  "description": "Extend the desktop app with @pragma/plugin — tabs, commands, agents, usage limits, and themes.",
+  "icon": "Puzzle",
+  "root": true,
+  "pages": ["index", "getting-started", "ui", "agents", "usage-limits", "runtime"]
+}
