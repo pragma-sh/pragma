@@ -35,12 +35,12 @@ Everything starts in the [issue tracker](https://github.com/pragma-sh/pragma/iss
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-| --- | --- | --- |
-| [Bun](https://bun.sh) | 1.3.14 or newer | Package manager and task runner. npm/yarn/pnpm are not supported. |
-| [Rust](https://www.rust-lang.org/tools/install) | current stable, with `clippy` and `rustfmt` | Keep it current — CI clippy runs newer lints than a stale local stable. |
-| [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) | per platform | Linux additionally needs the GTK/WebKit packages plus `libpipewire-0.3-dev`, `libgbm-dev`, and `libclang-dev` (see the `rust`/`build` jobs in CI for the exact list). Windows needs nothing extra — WebView2 ships with the OS. |
-| [Xcode](https://developer.apple.com/xcode/) / [Android Studio](https://developer.android.com/studio) | latest | Only if you work on Pragma Go. |
+| Tool                                                                                                 | Version                                     | Notes                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Bun](https://bun.sh)                                                                                | 1.3.14 or newer                             | Package manager and task runner. npm/yarn/pnpm are not supported.                                                                                                                                                               |
+| [Rust](https://www.rust-lang.org/tools/install)                                                      | current stable, with `clippy` and `rustfmt` | Keep it current — CI clippy runs newer lints than a stale local stable.                                                                                                                                                         |
+| [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/)                              | per platform                                | Linux additionally needs the GTK/WebKit packages plus `libpipewire-0.3-dev`, `libgbm-dev`, and `libclang-dev` (see the `rust`/`build` jobs in CI for the exact list). Windows needs nothing extra — WebView2 ships with the OS. |
+| [Xcode](https://developer.apple.com/xcode/) / [Android Studio](https://developer.android.com/studio) | latest                                      | Only if you work on Pragma Go.                                                                                                                                                                                                  |
 
 Platform floor for running the app: macOS, Linux, or Windows 10 version 1809 (build 17763) — ConPTY sets that floor and the server panics below it.
 
@@ -180,15 +180,15 @@ Every app, crate, and package has its own `AGENTS.md`. **Read the relevant one b
 
 The overriding priority is a clean, reusable architecture with consistent rules across TypeScript and Rust. Reuse before you write; lift duplicated logic the moment it appears twice; do not be afraid to create a new package.
 
-| What | Where |
-| --- | --- |
-| A value used by both frontend and backend | `packages/constants` (`values.json`) — never hand-copied across the boundary |
-| A value or helper shared by frontend modules | `apps/pragma/src/lib/` |
-| Anything that calls the Rust backend | `apps/pragma/src/lib/tauri.ts` — never `invoke()` from a component |
-| GitHub REST/GraphQL | `apps/pragma/src/lib/github.ts` — never a second Octokit |
-| A reusable UI primitive | `apps/pragma/src/components/ui/` (prefer `shadcn add`) |
-| Anything that differs between operating systems | `crates/pragma-platform` — never a bare `#[cfg(unix)]` at the call site |
-| A helper that a future app could reuse | a new `packages/*` |
+| What                                            | Where                                                                        |
+| ----------------------------------------------- | ---------------------------------------------------------------------------- |
+| A value used by both frontend and backend       | `packages/constants` (`values.json`) — never hand-copied across the boundary |
+| A value or helper shared by frontend modules    | `apps/pragma/src/lib/`                                                       |
+| Anything that calls the Rust backend            | `apps/pragma/src/lib/tauri.ts` — never `invoke()` from a component           |
+| GitHub REST/GraphQL                             | `apps/pragma/src/lib/github.ts` — never a second Octokit                     |
+| A reusable UI primitive                         | `apps/pragma/src/components/ui/` (prefer `shadcn add`)                       |
+| Anything that differs between operating systems | `crates/pragma-platform` — never a bare `#[cfg(unix)]` at the call site      |
+| A helper that a future app could reuse          | a new `packages/*`                                                           |
 
 Three platform reflexes that are visible bugs on Windows if you get them wrong: use `pragma_platform::path::canonicalize` (not `std::fs`'s, which returns `\\?\C:\…`); spawn with `pragma_platform::process::command` (not a bare `Command::new`, which pops a console window); and name executables with `pragma_client::executable_name` (not a bare string, which misses `.exe`). Compare paths with `Path`, never `String`.
 
@@ -196,13 +196,13 @@ Three platform reflexes that are visible bugs on Windows if you get them wrong: 
 
 Formatting is automated and non-negotiable — **oxfmt** for TypeScript, **rustfmt** for Rust, both auto-applied on commit and enforced in CI. Do not argue with the formatter.
 
-| Concept | TypeScript | Rust |
-| --- | --- | --- |
-| Variables / functions | `camelCase` | `snake_case` |
-| Types / components | `PascalCase` | `PascalCase` |
-| Constants | `UPPER_SNAKE` (true consts), `camelCase` objects | `UPPER_SNAKE` |
-| Files | `kebab-case.ts`, `PascalCase.tsx` for components | `snake_case.rs` |
-| Wire JSON keys | `camelCase` | `camelCase` on the wire, `snake_case` fields via serde rename |
+| Concept               | TypeScript                                       | Rust                                                          |
+| --------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
+| Variables / functions | `camelCase`                                      | `snake_case`                                                  |
+| Types / components    | `PascalCase`                                     | `PascalCase`                                                  |
+| Constants             | `UPPER_SNAKE` (true consts), `camelCase` objects | `UPPER_SNAKE`                                                 |
+| Files                 | `kebab-case.ts`, `PascalCase.tsx` for components | `snake_case.rs`                                               |
+| Wire JSON keys        | `camelCase`                                      | `camelCase` on the wire, `snake_case` fields via serde rename |
 
 - **Strictness is on everywhere.** TS runs `strict` with `noUncheckedIndexedAccess` and `noUnusedLocals`/`noUnusedParameters`; Rust runs clippy `all` + `pedantic` as `-D warnings` with `unsafe_code = "forbid"`. Never silence a lint without a comment saying why.
 - **Errors are values, surfaced explicitly.** TS: throw or return typed errors, narrow with `instanceof`, never swallow. Rust: return `Result` and use `?`; reserve `expect`/`panic!` for genuinely unrecoverable startup invariants.
