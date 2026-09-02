@@ -1,7 +1,13 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
 import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { ScrollView, View, type LayoutChangeEvent } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  View,
+  type LayoutChangeEvent,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RememberBrowserToggle } from "@/components/RememberBrowserToggle";
@@ -73,42 +79,59 @@ export default function PairScreen() {
   }
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{
-        padding: 16,
-        paddingTop: insets.top + 16,
-        paddingBottom: insets.bottom + 24,
-        gap: 20,
-      }}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text className="text-sm text-muted-foreground">
-        On your computer, open Pragma → Remote access to show the pairing QR code, then point your
-        camera at it.
-      </Text>
+    <KeyboardAvoidingView behavior={keyboardBehavior} className="flex-1 bg-background">
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        className="flex-1"
+        contentContainerStyle={{
+          padding: 16,
+          paddingTop: insets.top + 16,
+          paddingBottom: insets.bottom + 24,
+          gap: 20,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text className="text-sm text-muted-foreground">
+          On your computer, open Pragma → Remote access to show the pairing QR code, then point your
+          camera at it.
+        </Text>
 
-      <CameraScanner
-        frozen={busy}
-        granted={permission?.granted ?? false}
-        handledRef={handledRef}
-        onRequest={requestPermission}
-        onScan={onScan}
-      />
+        <CameraScanner
+          frozen={busy}
+          granted={permission?.granted ?? false}
+          handledRef={handledRef}
+          onRequest={requestPermission}
+          onScan={onScan}
+        />
 
-      <PairingStatus busy={busy} error={error} />
-      <RememberBrowserToggle />
-      <ManualPairingForm
-        busy={busy}
-        onSubmit={onManualSubmit}
-        setToken={setManualToken}
-        setUrl={setManualUrl}
-        token={manualToken}
-        url={manualUrl}
-      />
-    </ScrollView>
+        <PairingStatus busy={busy} error={error} />
+        <RememberBrowserToggle />
+        <ManualPairingForm
+          busy={busy}
+          onSubmit={onManualSubmit}
+          setToken={setManualToken}
+          setUrl={setManualUrl}
+          token={manualToken}
+          url={manualUrl}
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
+
+/**
+ * How the pairing form gets clear of the keyboard, which differs by platform
+ * and must not be doubled up.
+ *
+ * iOS keeps the focused input visible on its own once the scroll view knows the
+ * keyboard's height, which is exactly what `automaticallyAdjustKeyboardInsets`
+ * tells it — so `KeyboardAvoidingView` is a plain flex container there.
+ * Android's edge-to-edge window (`android.edgeToEdgeEnabled`) does not resize
+ * when the keyboard opens, so the scroll view never learns its height and the
+ * view has to do the lifting instead. Applying both on one platform
+ * double-counts the keyboard and leaves a gap its size beneath the form.
+ */
+const keyboardBehavior = Platform.OS === "android" ? "height" : undefined;
 
 function validateScan(
   raw: string,

@@ -1,0 +1,59 @@
+# EAS Build archive filter.
+#
+# eas-cli builds the upload archive from .gitignore files only — it does NOT read
+# .git/info/exclude, so `.pragma/worktrees/` (whole extra checkouts, tens of GB) was
+# being uploaded on every build. When this file exists it REPLACES the root
+# .gitignore for archive purposes, so the root rules are repeated here verbatim.
+# Nested .gitignore files (apps/*, packages/*) still apply.
+
+# --- copy of the root .gitignore ---
+node_modules/
+.pnp.*
+.expo/
+dist/
+apps/pragma/src-tauri/resources/plugins/
+apps/pragma/src-tauri/resources/web/
+build/
+out/
+.turbo/
+target/
+**/src/generated/
+rust_out
+qtest.typescript
+apps/*/src-tauri/gen/
+coverage/
+.DS_Store
+*.local
+.idea/
+.vscode/*
+!.vscode/extensions.json
+bench-report.json
+*.log
+.env
+.env.*
+!.env.example
+.fallow/
+.tokensave
+.playwright-mcp/
+.rwx/downloads/
+.vercel
+.env*.local
+
+# --- EAS-only exclusions ---
+
+# Pragma's own worktrees: full checkouts living inside the repo. Excluded from git
+# through .git/info/exclude, which eas-cli does not honor.
+.pragma/
+
+# Marketing videos/screenshots (~70 MB). The mobile build never reads them.
+apps/www/public/media/
+apps/www/public/*.png
+
+# Desktop icon sources; the mobile app has its own under apps/pragma-go/assets.
+apps/pragma/src-tauri/icons/
+apps/pragma/src-tauri/icons-dev/
+
+# CI definitions and git internals.
+.github/
+.rwx/
+.husky/

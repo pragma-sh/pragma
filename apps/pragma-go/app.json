@@ -9,7 +9,7 @@
     "icon": "./assets/images/icon.png",
     "newArchEnabled": true,
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/f3c3210c-7991-427e-a088-c63e63c81a73",
@@ -23,8 +23,7 @@
         "CFBundleDisplayName": "Pragma Go",
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pragma Go connects to the Pragma desktop app on your computer, which may be on the same local network."
-      },
-      "buildNumber": "5"
+      }
     },
     "android": {
       "package": "sh.pragma.go",

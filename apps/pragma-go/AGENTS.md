@@ -126,7 +126,7 @@ from the desktop.
 - **Expo SDK 57** + **expo-router** (file-based routing, typed routes, React Compiler).
 - **EAS Update** (`eas.json` + `expo-updates`): preview channel publishes OTA on `main`
   via `.eas/workflows/update.yml`. Native binary bumps still go through EAS Build
-  (`runtimeVersion.policy: appVersion`).
+  (`runtimeVersion.policy: fingerprint`).
 - **New Architecture** enabled; requires a **custom dev build** (not Expo Go) because
   of native modules (liquid glass, native tabs, gesture-handler/reanimated 4).
 - **NativeWind v4** (Tailwind) for styling; tokens live in `global.css` + `tailwind.config.js`.
@@ -548,6 +548,14 @@ eas submit --platform ios --latest
   `android.versionCode` and `autoIncrement` on the production profile bumps them
   server-side; `app.json`'s `version` (the marketing version, `1.0.0`) stays the
   source of truth for the store listing. Do not hand-bump the build number.
+- **The repo root has an `.easignore`, and it is load-bearing.** eas-cli builds the
+  upload archive from `.gitignore` files only — it never reads `.git/info/exclude`,
+  which is where `.pragma/worktrees/` (whole extra checkouts of this repo, tens of
+  gigabytes) is excluded. Without the `.easignore` those worktrees are uploaded on
+  every build: a 1.4 GB archive and a seven-minute upload for 91 MB of tracked files.
+  **A root `.easignore` replaces the root `.gitignore` for archive purposes**, so it
+  repeats those rules verbatim; nested `.gitignore` files still apply. Add a rule to
+  both files when you add a new ignored build output at the root.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.
@@ -561,13 +569,22 @@ build, no review.
 eas update --branch production --message "fix: keep sheet actions above the keyboard"
 ```
 
-- **`runtimeVersion.policy` is `appVersion`.** An update is only served to
-  builds whose runtime version matches, and here that is `expo.version`
-  (`1.0.0`) — so every build of 1.0.0 takes the same updates regardless of
-  build number, and bumping `version` deliberately cuts old binaries off from
-  new JS. Change anything native (a new module, a config-plugin change, an SDK
-  bump) and you must ship a new binary: the old one keeps the old native code
-  and an OTA JS bundle expecting the new one crashes on launch.
+- **`runtimeVersion.policy` is `fingerprint`, and it was `appVersion` until it
+  cost us a broken build.** An update is only served to builds whose runtime
+  version matches. Under `appVersion` that version was `expo.version`, so every
+  build of `1.0.0` shared one runtime identity no matter what native code it
+  actually contained — and a native change is invisible to a marketing version.
+  That is exactly how build 8 (a native change over build 7) booted, downloaded
+  the newest `production` update, which had been published from build 7's tree,
+  and replaced its own newer embedded bundle with JS written for the previous
+  native code. Under `fingerprint`, EAS hashes the native inputs (native
+  modules, config plugins, the resolved app config) and only offers a bundle
+  whose hash matches the running binary, so that mismatch is not expressible
+  rather than merely avoidable by discipline. The rule it replaces still holds
+  in spirit: change anything native and you must ship a new binary — but now a
+  stale bundle is silently withheld instead of silently applied. Note the
+  fingerprint changes on native-affecting edits, so an OTA-only fix must not
+  touch them, or it will publish under a runtime version no shipped build has.
 - **Each build profile has a `channel`** (`development` / `preview` /
   `production`) which EAS maps to a branch of the same name. `--branch` on
   `eas update` names the branch, not the channel.
