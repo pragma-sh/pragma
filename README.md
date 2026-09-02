@@ -1,11 +1,24 @@
 <div align="center">
 
-<h1>Pragma</h1>
-
-<h3>Run teams of coding agents in parallel.</h3>
+<h1>Pragma — Run teams of coding agents in parallel.</h1>
 
 <p>Run Claude Code, Codex, OpenCode, Cursor and more each in their own worktree.<br />
 Agents, terminals, diffs, and pull requests in one workspace.</p>
+
+<p>
+  <a href="./packages/claude-code-plugin"><img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat-square&logo=claude&logoColor=white" alt="Claude Code plugin" /></a>
+  <a href="https://pragma-app.sh/docs/plugins"><img src="https://img.shields.io/badge/OpenCode%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%2B7-agent%20plugins-6C5CE7?style=flat-square&logo=opencode&logoColor=white" alt="10 agent plugins" /></a>
+  <a href="./skills"><img src="https://img.shields.io/badge/Agent%20Skills-pragma-8B5CF6?style=flat-square&logo=anthropic&logoColor=white" alt="Agent Skills" /></a>
+</p>
+
+<p>
+  <a href="https://github.com/pragma-sh/pragma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/pragma-sh/pragma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/pragma-sh/pragma?style=flat-square&color=0B7285" alt="License: AGPL-3.0-only" /></a>
+  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-1c1c1e?style=flat-square&logo=apple&logoColor=white" alt="Platforms: macOS, Linux, Windows" />
+  <a href="https://v2.tauri.app"><img src="https://img.shields.io/badge/Tauri%20v2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Built with Tauri v2" /></a>
+  <img src="https://img.shields.io/badge/Rust-CE422B?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-000000?style=flat-square&logo=bun&logoColor=white" alt="Bun" /></a>
+</p>
 
 <img src="apps/www/public/pragma-app.png" alt="Pragma desktop app" width="100%" />
 
@@ -19,14 +32,6 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="https://pragma-app.sh/plugins">Plugins</a>
   &nbsp;·&nbsp;
   <a href="./CONTRIBUTING.md">Contributing</a>
-</p>
-
-<p>
-  <a href="https://github.com/pragma-sh/pragma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/pragma-sh/pragma/ci.yml?branch=main&label=CI" alt="CI status" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/pragma-sh/pragma?color=blue" alt="License: AGPL-3.0-only" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platforms: macOS, Linux, Windows" />
-  <a href="https://v2.tauri.app"><img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?logo=tauri&logoColor=white" alt="Built with Tauri v2" /></a>
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-000000?logo=bun&logoColor=white" alt="Runtime: Bun" /></a>
 </p>
 
 </div>
