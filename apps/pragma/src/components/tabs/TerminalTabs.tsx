@@ -20,6 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { IconButton, IconTooltip } from "@/components/ui/icon-button";
+import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { AgentsMenu } from "@/components/agents/AgentsMenu";
 import {
@@ -749,6 +750,7 @@ function NewTabMenu({
       <DropdownMenuTrigger asChild>
         <IconButton
           className="mr-2"
+          data-tour={TOUR_ANCHOR.newTab}
           disabled={disabled}
           label="New tab"
           size="icon-sm"

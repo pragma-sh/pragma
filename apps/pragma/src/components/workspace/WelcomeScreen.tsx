@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Globe, Pin, PinOff, TerminalSquare } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
+import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { IconTooltip } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAgentsList } from "@/hooks/use-agents-list";
@@ -148,7 +149,7 @@ function LaunchAgentPanel() {
   const ordered = useMemo(() => sortAgentsByPin(agents, pins), [agents, pins]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col gap-3">
+    <div className="flex h-full min-w-0 flex-col gap-3" data-tour={TOUR_ANCHOR.launchAgent}>
       <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
         Launch agent
       </h2>

@@ -16,6 +16,7 @@ import {
   ColorPickerSelection,
 } from "@/components/ui/color-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ThemePresetGrid } from "@/components/settings/ThemePresetGrid";
 import { errorMessage } from "@/lib/errors";
 import { writeTheme, type ConfigScope } from "@/lib/tauri";
 import {
@@ -27,12 +28,7 @@ import {
   type ThemeFile,
 } from "@/lib/theme";
 import { cssColorToRgbaString, rgbaToOklch, type Rgba } from "@/lib/theme-color";
-import {
-  isThemePreset,
-  THEME_OPTIONS,
-  withThemePreset,
-  type ThemePreset,
-} from "@/lib/theme-presets";
+import { withThemePreset, type ThemePreset } from "@/lib/theme-presets";
 import {
   THEME_TOKEN_GROUPS,
   themeTokenLabel,
@@ -302,45 +298,14 @@ function ThemePresets({
         Published coding and developer-brand palettes. Applying one writes complete light and dark
         ramps to this scope.
       </p>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {THEME_OPTIONS.map((preset) => {
-          const active =
-            isThemePreset(current, preset) ||
-            (preset.usesThemeDefaults === true && defaultIsActive);
-          const colors = preset[mode];
-          return (
-            <button
-              key={preset.id}
-              className={cn(
-                "group flex min-w-0 items-center gap-3 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent",
-                active && "border-primary ring-1 ring-primary",
-              )}
-              disabled={disabled}
-              title={`${preset.source} · ${preset.sourceUrl}`}
-              type="button"
-              onClick={() => void onSelect(preset)}
-            >
-              <span className="flex shrink-0 -space-x-1.5" aria-hidden>
-                <span
-                  className="size-6 rounded-full border-2 border-background"
-                  style={{ backgroundColor: colors.primary }}
-                />
-                <span
-                  className="size-6 rounded-full border-2 border-background"
-                  style={{ backgroundColor: colors.secondary }}
-                />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{preset.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {preset.source}
-                </span>
-              </span>
-              {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
-            </button>
-          );
-        })}
-      </div>
+      <ThemePresetGrid
+        className="mt-4"
+        current={current}
+        defaultIsActive={defaultIsActive}
+        disabled={disabled}
+        mode={mode}
+        onSelect={(preset) => void onSelect(preset)}
+      />
     </section>
   );
 }

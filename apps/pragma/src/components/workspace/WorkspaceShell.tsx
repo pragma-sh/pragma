@@ -30,6 +30,7 @@ import { terminalManager } from "@/lib/terminal-manager";
 import { reloadWebview, restartServer } from "@/lib/troubleshooting";
 import { useKanban } from "@/state/kanban-context";
 import { LeftSidebarProvider } from "@/state/left-sidebar-context";
+import { useOnboarding } from "@/state/onboarding-context";
 import { RightSidebarProvider } from "@/state/right-sidebar-context";
 import { useWorkspace } from "@/state/workspace-context";
 import { FanoutComparison } from "@/components/fanout/FanoutComparison";
@@ -123,9 +124,16 @@ function useNativeMenuActions(
   onOpenCommandMode: () => void,
 ) {
   const shell = useKanban();
+  const onboarding = useOnboarding();
   const handleMenuAction = useEffectEvent(async (action: MenuAction) => {
     const actions = {
       "settings.open": shell.openSettings,
+      "onboarding.start-tour": async () => {
+        await onboarding.restartTour();
+        // The tour anchors only exist once a project is open, so say why nothing
+        // happened rather than arming a tour the user never sees.
+        if (workspace.projects.length === 0) toast.info("Open a project to start the tour");
+      },
       "tabs.new-terminal": async () => {
         await workspace.createTerminalTab();
       },

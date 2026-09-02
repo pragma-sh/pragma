@@ -58,6 +58,17 @@ vi.mock("@/state/github-context", () => ({
   useGitHub: vi.fn(),
 }));
 
+vi.mock("@/state/onboarding-context", () => ({
+  useOnboarding: () => ({
+    loading: false,
+    active: false,
+    tourPending: false,
+    finish: () => Promise.resolve(),
+    finishTour: () => Promise.resolve(),
+    restart: () => Promise.resolve(),
+  }),
+}));
+
 vi.mock("@/state/ai-context", () => ({
   useAi: vi.fn(),
 }));

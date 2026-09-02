@@ -23,6 +23,7 @@ mod hosts;
 mod icons;
 mod kanban;
 mod keybindings;
+mod onboarding;
 mod plugin_distribution;
 mod plugins;
 mod ports;
@@ -72,6 +73,8 @@ const MENU_OPEN_COMMAND_PALETTE: &str = "workspace.open-command-palette";
 const MENU_OPEN_COMMAND_MODE: &str = "workspace.open-command-mode";
 /// Menu item id for opening the full-frame Settings view.
 const MENU_OPEN_SETTINGS: &str = "settings.open";
+/// Menu item id for replaying the guided workspace tour.
+const MENU_START_TOUR: &str = "onboarding.start-tour";
 
 /// Accelerators of the workspace menu items. They mirror the default keybindings
 /// and are cleared while Settings records a shortcut (see
@@ -96,6 +99,17 @@ fn menu_accelerator(id: &str) -> &'static str {
 /// The workspace menu items whose accelerators Settings can suspend while
 /// recording a keyboard shortcut.
 struct WorkspaceAccelerators(Vec<MenuItem<tauri::Wry>>);
+
+/// The Pragma-owned menu items, built once and then placed by the per-platform
+/// installer that knows which submenu each platform actually exposes.
+struct WorkspaceMenuItems {
+    open_settings: MenuItem<tauri::Wry>,
+    start_tour: MenuItem<tauri::Wry>,
+    new_terminal_tab: MenuItem<tauri::Wry>,
+    close_active_tab: MenuItem<tauri::Wry>,
+    open_command_palette: MenuItem<tauri::Wry>,
+    open_command_mode: MenuItem<tauri::Wry>,
+}
 /// Tauri event the menu emits to the frontend; payload is one of the menu ids
 /// above. The workspace shell handles it so tab lifecycle and feedback stay
 /// consistent with their UI controls.
@@ -218,6 +232,7 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
                 | MENU_OPEN_COMMAND_PALETTE
                 | MENU_OPEN_COMMAND_MODE
                 | MENU_OPEN_SETTINGS
+                | MENU_START_TOUR
         ) {
             let _ = app.emit(MENU_EVENT, action);
         }
@@ -262,6 +277,9 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         true,
         Some(menu_accelerator(MENU_OPEN_COMMAND_MODE)),
     )?;
+    // No accelerator: replaying the tour is a rare, deliberate action, and an
+    // unregistered chord here would shadow one the workspace already owns.
+    let start_tour = MenuItem::with_id(app, MENU_START_TOUR, "Guided Tour", true, None::<&str>)?;
     app.manage(WorkspaceAccelerators(vec![
         open_settings.clone(),
         new_terminal_tab.clone(),
@@ -270,25 +288,18 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
         open_command_mode.clone(),
     ]));
 
+    let items = WorkspaceMenuItems {
+        open_settings,
+        start_tour,
+        new_terminal_tab,
+        close_active_tab,
+        open_command_palette,
+        open_command_mode,
+    };
     #[cfg(target_os = "macos")]
-    install_macos_workspace_menu(
-        app,
-        menu,
-        &open_settings,
-        &new_terminal_tab,
-        &close_active_tab,
-        &open_command_palette,
-        &open_command_mode,
-    )?;
+    install_macos_workspace_menu(app, menu, &items)?;
     #[cfg(not(target_os = "macos"))]
-    install_non_macos_workspace_menu(
-        menu,
-        &open_settings,
-        &new_terminal_tab,
-        &close_active_tab,
-        &open_command_palette,
-        &open_command_mode,
-    )?;
+    install_non_macos_workspace_menu(menu, &items)?;
     Ok(())
 }
 
@@ -296,11 +307,7 @@ fn install_workspace_menu(app: &tauri::AppHandle, menu: &Menu<tauri::Wry>) -> ta
 fn install_macos_workspace_menu(
     app: &tauri::AppHandle,
     menu: &Menu<tauri::Wry>,
-    open_settings: &MenuItem<tauri::Wry>,
-    new_terminal_tab: &MenuItem<tauri::Wry>,
-    close_active_tab: &MenuItem<tauri::Wry>,
-    open_command_palette: &MenuItem<tauri::Wry>,
-    open_command_mode: &MenuItem<tauri::Wry>,
+    items: &WorkspaceMenuItems,
 ) -> tauri::Result<()> {
     // Tauri's default app submenu has a generated id, so resolve its stable
     // first position rather than looking up an id that does not exist.
@@ -310,7 +317,8 @@ fn install_macos_workspace_menu(
         .next()
         .and_then(|item| item.as_submenu().cloned())
     {
-        app_menu.insert(open_settings, 2)?;
+        app_menu.insert(&items.open_settings, 2)?;
+        app_menu.insert(&items.start_tour, 3)?;
     }
     // Replace File entirely: its default Close Window item keeps Cmd+W even when
     // removed in place on macOS.
@@ -320,10 +328,10 @@ fn install_macos_workspace_menu(
         "File",
         true,
         &[
-            new_terminal_tab,
-            close_active_tab,
-            open_command_palette,
-            open_command_mode,
+            &items.new_terminal_tab,
+            &items.close_active_tab,
+            &items.open_command_palette,
+            &items.open_command_mode,
         ],
     )?;
     menu.remove_at(1)?;
@@ -345,11 +353,7 @@ fn install_macos_workspace_menu(
 #[cfg(not(target_os = "macos"))]
 fn install_non_macos_workspace_menu(
     menu: &Menu<tauri::Wry>,
-    open_settings: &MenuItem<tauri::Wry>,
-    new_terminal_tab: &MenuItem<tauri::Wry>,
-    close_active_tab: &MenuItem<tauri::Wry>,
-    open_command_palette: &MenuItem<tauri::Wry>,
-    open_command_mode: &MenuItem<tauri::Wry>,
+    items: &WorkspaceMenuItems,
 ) -> tauri::Result<()> {
     if let Some(window_menu) = menu
         .get("window")
@@ -357,11 +361,12 @@ fn install_non_macos_workspace_menu(
     {
         // Neither platform offers a reachable File menu, so surface Pragma tab
         // actions here.
-        window_menu.append(open_settings)?;
-        window_menu.append(new_terminal_tab)?;
-        window_menu.append(close_active_tab)?;
-        window_menu.append(open_command_palette)?;
-        window_menu.append(open_command_mode)?;
+        window_menu.append(&items.open_settings)?;
+        window_menu.append(&items.start_tour)?;
+        window_menu.append(&items.new_terminal_tab)?;
+        window_menu.append(&items.close_active_tab)?;
+        window_menu.append(&items.open_command_palette)?;
+        window_menu.append(&items.open_command_mode)?;
     }
     Ok(())
 }
@@ -1124,7 +1129,11 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     automations::start(app.handle().clone(), pty.clone());
     control::start(app.handle().clone(), pty, LOCAL_HOST.to_string());
     ssh_host::reconnect_remote_hosts(app.handle().clone());
-    if let Err(error) = keybindings::load_or_ensure(app.path().home_dir()?) {
+    let home_dir = app.path().home_dir()?;
+    if let Err(error) = agent_sounds::seed_bundled_sounds(app.handle(), &home_dir) {
+        log::warn!("failed to seed bundled agent sounds: {error}");
+    }
+    if let Err(error) = keybindings::load_or_ensure(home_dir) {
         log::warn!("failed to load keybindings config: {error}");
     }
     if cfg!(debug_assertions) {
@@ -1178,8 +1187,10 @@ pub fn run() {
             read_plugin_bundle,
             plugin_distribution::install_official_plugin,
             plugin_distribution::available_plugin_binaries,
-            plugin_distribution::plugin_onboarding_dismissed,
-            plugin_distribution::set_plugin_onboarding_dismissed,
+            onboarding::onboarding_state,
+            onboarding::set_onboarding_completed,
+            onboarding::set_onboarding_tour_completed,
+            onboarding::install_pragma_skill,
             plugin_distribution::agent_plugin_prompt_dismissed,
             plugin_distribution::set_agent_plugin_prompt_dismissed,
             gateway_connection_info,
