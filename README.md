@@ -1,12 +1,27 @@
-# Pragma
+<div align="center">
 
-**Run teams of coding agents in parallel.**
+<h1>Pragma</h1>
 
-Run Claude Code, Codex, OpenCode, Cursor and more each in their own worktree.
+<h3>Run teams of coding agents in parallel.</h3>
 
-[Website](https://pragma-app.sh)  ·  [Documentation](https://pragma-app.sh/docs)  ·  [Download](https://github.com/pragma-sh/pragma/releases/latest)  ·  [Plugins](https://pragma-app.sh/plugins)  ·  [Contributing](./CONTRIBUTING.md)
+<p>Run Claude Code, Codex, OpenCode, Cursor and more each in their own worktree.<br />
+Agents, terminals, diffs, and pull requests in one workspace.</p>
 
-Agents, terminals, diffs, and pull requests in one workspace.
+<img src="apps/www/public/pragma-app.png" alt="Pragma desktop app" width="100%" />
+
+<p>
+  <a href="https://pragma-app.sh">Website</a>
+  &nbsp;·&nbsp;
+  <a href="https://pragma-app.sh/docs">Documentation</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/pragma-sh/pragma/releases/latest">Download</a>
+  &nbsp;·&nbsp;
+  <a href="https://pragma-app.sh/plugins">Plugins</a>
+  &nbsp;·&nbsp;
+  <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
+
+</div>
 
 ---
 
