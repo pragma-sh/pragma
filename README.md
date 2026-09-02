@@ -21,6 +21,14 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p>
+  <a href="https://github.com/pragma-sh/pragma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/pragma-sh/pragma/ci.yml?branch=main&label=CI" alt="CI status" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/pragma-sh/pragma?color=blue" alt="License: AGPL-3.0-only" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platforms: macOS, Linux, Windows" />
+  <a href="https://v2.tauri.app"><img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?logo=tauri&logoColor=white" alt="Built with Tauri v2" /></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-000000?logo=bun&logoColor=white" alt="Runtime: Bun" /></a>
+</p>
+
 </div>
 
 ---
