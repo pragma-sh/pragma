@@ -18,6 +18,8 @@ import {
   quantizeHeight,
   useOnboardingLayout,
 } from "@/components/onboarding/use-onboarding-layout";
+import { useAi } from "@/state/ai-context";
+import { useGitHub } from "@/state/github-context";
 import { useOnboarding } from "@/state/onboarding-context";
 
 /** The first-run flow, in order. Each entry owns its own copy and actions. */
@@ -45,6 +47,8 @@ const STEPS: { id: string; label: string; Step: ComponentType<StepProps> }[] = [
  */
 export function OnboardingModal() {
   const onboarding = useOnboarding();
+  const { dismissSetup: dismissGitHubSetup } = useGitHub();
+  const { dismissSetup: dismissAiSetup } = useAi();
   const layout = useOnboardingLayout();
   const [index, setIndex] = useState(0);
   // The height the current step's copy column asked for, rounded to the step
@@ -116,7 +120,14 @@ export function OnboardingModal() {
             </div>
           }
           reportContentHeight={reportContentHeight}
-          skipAll={() => void onboarding.finish()}
+          skipAll={() => {
+            // Flow-wide skip stands in for every step's own skip, so it must
+            // record the same "don't ask again" flags a step-by-step skip
+            // would have, not just the tutorial's own completion flag.
+            void dismissGitHubSetup();
+            void dismissAiSetup();
+            void onboarding.finish();
+          }}
         >
           <Step
             key={entry.id}
