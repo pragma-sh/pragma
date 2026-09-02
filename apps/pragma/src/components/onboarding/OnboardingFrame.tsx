@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 
 import { useOnboardingFlow } from "@/components/onboarding/onboarding-progress";
 import { useOnboardingLayout } from "@/components/onboarding/use-onboarding-layout";
@@ -65,66 +65,137 @@ export function OnboardingFrame({
   skipLabel?: string;
   title: string;
 }) {
-  const { orientation } = useOnboardingLayout();
-  const side = media !== undefined && orientation === "side";
-  const flow = useOnboardingFlow();
-  const { bodyRef, columnRef, contentRef } = useReportedColumnHeight(flow?.reportContentHeight);
+  const { bodyRef, columnRef, contentRef, progress, side, skipAll, split } = useFrameLayout(media);
   return (
     <div className={cn("flex min-h-0 flex-1", side ? "flex-row" : "flex-col")}>
-      {media && side ? (
-        // The panel takes its width from the row's definite height at 16:9, so
-        // the clip fills it exactly. `min-w-0` is load-bearing: a flex item's
-        // automatic minimum size is otherwise its content's intrinsic size, and
-        // the content is a video, so the panel would claim the clip's native
-        // width and push the copy column out of the dialog.
-        <div className="aspect-video h-full w-auto min-w-0 shrink-0 overflow-hidden border-r bg-muted">
-          {media}
-        </div>
-      ) : null}
+      <SidePanel media={media} side={side} />
       <div
         className={cn("flex min-h-0 min-w-0 flex-col", side ? "w-[28rem] flex-none" : "flex-1")}
         ref={columnRef}
       >
-        {flow ? <div className="shrink-0 px-6 pt-5">{flow.progress}</div> : null}
-        <div className="min-h-0 flex-1 overflow-y-auto" ref={bodyRef}>
-          {media && !side ? (
-            // Stacked, the banner is part of the scrolling body rather than
-            // pinned above it: full width and exactly 16:9, so it scrolls out
-            // of the way when the copy under it is taller than the dialog
-            // instead of holding a fixed share of a short window.
-            <div className="aspect-video w-full shrink-0 overflow-hidden border-b bg-muted">
-              {media}
-            </div>
-          ) : null}
-          {/* Only the side-by-side column is already a readable measure; the
-            full-width layouts are wider than one, so they cap and centre.
-            The body's padding lives here so the banner above stays full-bleed —
-            `useReportedColumnHeight` measures this element, so it still counts. */}
-          <div
-            className={cn("px-6 pt-6 pb-4", !side && "mx-auto w-full max-w-2xl")}
-            ref={contentRef}
-          >
-            <StepHeading
-              description={description}
-              icon={icon}
-              split={media !== undefined}
-              title={title}
-            />
-            {children ? <div className="mt-5">{children}</div> : null}
-            {footnote ? (
-              <div className="text-muted-foreground mt-5 text-xs leading-5">{footnote}</div>
-            ) : null}
-          </div>
-        </div>
+        <StepProgress progress={progress} />
+        <StepBody
+          banner={media}
+          bodyRef={bodyRef}
+          contentRef={contentRef}
+          description={description}
+          footnote={footnote}
+          icon={icon}
+          side={side}
+          split={split}
+          title={title}
+        >
+          {children}
+        </StepBody>
         <StepFooter
           nextDisabled={nextDisabled}
           nextLabel={nextLabel}
           onBack={onBack}
           onNext={onNext}
           onSkip={onSkip}
-          onSkipAll={flow?.skipAll}
+          onSkipAll={skipAll}
           skipLabel={skipLabel}
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Everything the frame needs to decide before it renders: which layout the step
+ * is in, the flow's own chrome, and the refs that report the column's height.
+ *
+ * `split` is "this step has a clip at all" — the copy is left-aligned in both
+ * media layouts — while `side` is the stronger "and there is room to put it
+ * beside the copy", which only the side-by-side layout satisfies.
+ */
+function useFrameLayout(media: ReactNode) {
+  const { orientation } = useOnboardingLayout();
+  const flow = useOnboardingFlow();
+  const split = media !== undefined;
+  const refs = useReportedColumnHeight(flow?.reportContentHeight);
+  return {
+    ...refs,
+    progress: flow?.progress,
+    side: split && orientation === "side",
+    skipAll: flow?.skipAll,
+    split,
+  };
+}
+
+/**
+ * The clip beside the copy on a side-by-side step; nothing at all otherwise.
+ *
+ * The panel takes its width from the row's definite height at 16:9, so the clip
+ * fills it exactly. `min-w-0` is load-bearing: a flex item's automatic minimum
+ * size is otherwise its content's intrinsic size, and the content is a video,
+ * so the panel would claim the clip's native width and push the copy column out
+ * of the dialog.
+ */
+function SidePanel({ media, side }: { media?: ReactNode; side: boolean }) {
+  if (!media || !side) return null;
+  return (
+    <div className="aspect-video h-full w-auto min-w-0 shrink-0 overflow-hidden border-r bg-muted">
+      {media}
+    </div>
+  );
+}
+
+/** The flow's progress row, pinned above the scrolling body — absent outside a flow. */
+function StepProgress({ progress }: { progress?: ReactNode }) {
+  if (!progress) return null;
+  return <div className="shrink-0 px-6 pt-5">{progress}</div>;
+}
+
+/**
+ * The step's scrolling body: an optional stacked banner, then the heading, the
+ * step's own content, and its footnote.
+ *
+ * Stacked, the banner is part of this scrolling body rather than pinned above
+ * it: full width and exactly 16:9, so it scrolls out of the way when the copy
+ * under it is taller than the dialog instead of holding a fixed share of a
+ * short window.
+ */
+function StepBody({
+  banner,
+  bodyRef,
+  children,
+  contentRef,
+  description,
+  footnote,
+  icon,
+  side,
+  split,
+  title,
+}: {
+  banner?: ReactNode;
+  bodyRef: RefObject<HTMLDivElement | null>;
+  children?: ReactNode;
+  contentRef: RefObject<HTMLDivElement | null>;
+  description: string;
+  footnote?: ReactNode;
+  icon: ReactNode;
+  side: boolean;
+  split: boolean;
+  title: string;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto" ref={bodyRef}>
+      {banner && !side ? (
+        <div className="aspect-video w-full shrink-0 overflow-hidden border-b bg-muted">
+          {banner}
+        </div>
+      ) : null}
+      {/* Only the side-by-side column is already a readable measure; the
+        full-width layouts are wider than one, so they cap and centre.
+        The body's padding lives here so the banner above stays full-bleed —
+        `useReportedColumnHeight` measures this element, so it still counts. */}
+      <div className={cn("px-6 pt-6 pb-4", !side && "mx-auto w-full max-w-2xl")} ref={contentRef}>
+        <StepHeading description={description} icon={icon} split={split} title={title} />
+        {children ? <div className="mt-5">{children}</div> : null}
+        {footnote ? (
+          <div className="text-muted-foreground mt-5 text-xs leading-5">{footnote}</div>
+        ) : null}
       </div>
     </div>
   );
