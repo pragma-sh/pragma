@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 
 import { officialPluginLock } from "@pragma/plugin-registry";
 
-import { loadOfficialPlugins, pluginInstallUrl } from "./plugins";
+import { loadOfficialPlugins, pluginDetailUrl, pluginInstallUrl, pluginNpmUrl } from "./plugins";
 
 const originalFetch = globalThis.fetch;
 
@@ -22,9 +22,21 @@ describe("plugin gallery data", () => {
     }
   });
 
-  it("encodes scoped package names in install links", () => {
+  it("routes install links through the same-origin deep-link forwarder", () => {
     expect(pluginInstallUrl("@pragma-sh/opencode-plugin")).toBe(
-      "pragma://install-plugin?package=%40pragma-sh%2Fopencode-plugin",
+      "/install-plugin?package=%40pragma-sh%2Fopencode-plugin",
+    );
+  });
+
+  it("links detail pages by package identity", () => {
+    expect(pluginDetailUrl("@pragma-sh/opencode-plugin")).toBe(
+      "/plugins/@pragma-sh/opencode-plugin",
+    );
+  });
+
+  it("links every official plugin to its npm package page", () => {
+    expect(pluginNpmUrl("@pragma-sh/opencode-plugin")).toBe(
+      "https://www.npmjs.com/package/@pragma-sh/opencode-plugin",
     );
   });
 

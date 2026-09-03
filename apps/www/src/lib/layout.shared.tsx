@@ -1,7 +1,8 @@
-import Image from "next/image";
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
-import { appName, docsRoute, gitConfig, pluginsRoute } from "./shared";
+import { BrandFavicon } from "@/components/brand-favicon";
+
+import { appName, docsRoute, pluginsRoute, repoUrl } from "./shared";
 
 /** Navigation options shared by the marketing layout and the docs layout. */
 export function baseOptions(): BaseLayoutProps {
@@ -9,7 +10,7 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <>
-          <Image src="/icon.png" alt="" width={24} height={24} className="size-6" priority />
+          <BrandFavicon className="size-6" />
           <span className="font-semibold">{appName}</span>
         </>
       ),
@@ -18,6 +19,6 @@ export function baseOptions(): BaseLayoutProps {
       { text: "Plugins", url: pluginsRoute, active: "nested-url" },
       { text: "Docs", url: docsRoute, active: "nested-url" },
     ],
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
+    githubUrl: repoUrl,
   };
 }
