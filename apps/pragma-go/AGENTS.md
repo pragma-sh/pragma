@@ -456,9 +456,9 @@ Local Expo config plugins live in `plugins/` and are registered by path in
 
 Every icon is rendered from one vector source — `@pragma/brand`, a redraw of
 the desktop app's mark (`apps/pragma/src-tauri/icons`, which ships only raster
-files). That package owns the geometry and the palettes and nothing else;
-`scripts/icon-variants.ts` owns the Expo- and platform-shaped decisions on top
-of it. `bun run --filter pragma-go icons` regenerates the Icon Composer bundle,
+files). That package owns geometry, palettes, and the shared compact favicon
+treatment; `scripts/icon-variants.ts` owns the Expo- and platform-shaped
+decisions on top of it. `bun run --filter pragma-go icons` regenerates the Icon Composer bundle,
 PNGs, theme-aware `public/favicon.svg`, and `public/index.html`. **Do not
 hand-edit any of those outputs**; they are committed because `expo prebuild`
 and `expo export` read them as plain files and neither native builds nor CI run

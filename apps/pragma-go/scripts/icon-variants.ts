@@ -25,6 +25,8 @@
 import {
   CANVAS,
   DARK_PLATE,
+  faviconLayer,
+  faviconSvg,
   INK,
   type MarkPalette,
   markMarkup,
@@ -34,6 +36,8 @@ import {
   ON_TRANSPARENT,
   placedMark,
 } from "@pragma/brand";
+
+export { faviconSvg } from "@pragma/brand";
 
 /**
  * Coverage for the Android adaptive foreground.
@@ -93,65 +97,9 @@ function svg(body: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}" fill="none">${body}</svg>`;
 }
 
-/**
- * How much heavier the favicon's stroke is than the app icon's.
- *
- * At its authored weight the outline lands under half a pixel at 16px and
- * dissolves. 1.9x is the point where the bowl's counter still reads as a hole
- * at 16px but the mark is not yet a blob at 48px.
- */
-const FAVICON_STROKE_SCALE = 1.9;
-
-/**
- * Places the mark on the rounded plate a favicon uses.
- *
- * The stacked cards are dropped — they are the first thing to turn to noise —
- * but the window outline and its `>_` stay, so the tab icon reads as the same
- * mark as the app icon rather than as a bare letter.
- */
-function faviconLayer(plate: string, ink: string, idPrefix: string): string {
-  const palette: MarkPalette = {
-    stroke: ink,
-    fill: "none",
-    cardStroke: ink,
-    cardStrokeFar: ink,
-    cardFill: "none",
-    cardFillFar: "none",
-    detail: ink,
-  };
-  return `<rect width="${CANVAS}" height="${CANVAS}" rx="224" fill="${plate}"/>
-    ${placedMark(palette, {
-      coverage: 0.7,
-      cards: false,
-      idPrefix,
-      strokeScale: FAVICON_STROKE_SCALE,
-    })}`;
-}
-
-/**
- * The tab icon, as a self-contained SVG that swaps ink with the OS theme.
- *
- * A rounded plate rather than a full-bleed square: browsers do not mask a
- * favicon, and a hard-edged square reads as a screenshot in a tab strip.
- */
-export function faviconSvg(): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}" fill="none">
-  <style>
-    .dark { display: none }
-    @media (prefers-color-scheme: dark) {
-      .light { display: none }
-      .dark { display: inline }
-    }
-  </style>
-  <g class="light">${faviconLayer(INK, "#ffffff", "fav-light")}</g>
-  <g class="dark">${faviconLayer("#ffffff", INK, "fav-dark")}</g>
-</svg>
-`;
-}
-
 /** The raster favicon Expo turns into `/favicon.ico`. */
 function faviconPngSvg(): string {
-  return svg(faviconLayer(INK, "#ffffff", "fav"));
+  return svg(faviconLayer(INK, ON_DARK.stroke, "fav"));
 }
 
 /**
