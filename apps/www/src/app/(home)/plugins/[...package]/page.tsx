@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { loadOfficialPlugins, pluginInstallUrl, pluginNpmUrl } from "@/lib/plugins";
 import { pluginsRoute } from "@/lib/shared";
 
+type Plugin = Awaited<ReturnType<typeof loadOfficialPlugins>>[number];
+type PluginImage = NonNullable<Plugin["manifest"]["images"]>[number];
+
 /**
  * Resolves the `[...package]` segments back to the npm package identity. Next
  * delivers dynamic params URL-encoded (`%40pragma-sh/...`), so decode each
@@ -43,6 +46,108 @@ export async function generateMetadata(
   };
 }
 
+function PluginHeader({ plugin, icon }: { plugin: Plugin; icon: PluginImage | undefined }) {
+  return (
+    <header className="mt-8 grid gap-10 border-b pb-10 md:grid-cols-[1fr_auto] md:items-end">
+      <div className="flex items-center gap-5">
+        {icon ? (
+          <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-background p-3">
+            {/* URLs are reviewed and cached in official lock metadata. */}
+            <img className="max-h-full max-w-full" alt={icon.alt} src={icon.url} />
+          </div>
+        ) : null}
+        <div className="min-w-0">
+          <h1 className="truncate text-3xl font-semibold tracking-tight sm:text-4xl">
+            {plugin.manifest.name}
+          </h1>
+          <p className="mt-2 truncate font-mono text-xs text-muted-foreground">
+            {plugin.package} · v{plugin.version}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-3 md:justify-end">
+        <Button asChild className="pill-cta">
+          <a href={pluginInstallUrl(plugin.package)}>Install in Pragma</a>
+        </Button>
+        <Button asChild className="pill-cta" variant="secondary">
+          <a href={pluginNpmUrl(plugin.package)} target="_blank" rel="noreferrer">
+            View on npm
+          </a>
+        </Button>
+      </div>
+    </header>
+  );
+}
+
+function PluginMetadata({ plugin, command }: { plugin: Plugin; command: string }) {
+  const { manifest } = plugin;
+  return (
+    <aside className="space-y-6 self-start border-l pl-8">
+      <div>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          Package
+        </h2>
+        <p className="mt-2 break-all font-mono text-sm">{plugin.package}</p>
+      </div>
+      {manifest.categories?.length ? (
+        <div>
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Categories
+          </h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {manifest.categories.map((category) => (
+              <span
+                className="border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
+                key={category}
+              >
+                {category}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {manifest.agentBinary ? (
+        <div>
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Agent binary
+          </h2>
+          <p className="mt-2 font-mono text-sm">{manifest.agentBinary}</p>
+        </div>
+      ) : null}
+      <div>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          Install command
+        </h2>
+        <div className="mt-2 overflow-hidden border border-border/70 bg-background/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+          <span className="mr-2 text-foreground/40">$</span>
+          <span className="break-all">{command}</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function PluginScreenshots({ screenshots }: { screenshots: PluginImage[] }) {
+  if (screenshots.length === 0) return null;
+  return (
+    <section className="grid gap-4 border-t pt-10 sm:grid-cols-2" aria-label="Screenshots">
+      {screenshots.map((image) => (
+        <div className="flex items-center justify-center border bg-background p-8" key={image.url}>
+          <img className="max-h-96 max-w-full" alt={image.alt} src={image.url} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function descriptionParagraphs(description: string | undefined): string[] {
+  if (!description) return [];
+  return description
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+}
+
 export default async function PluginDetailPage(props: PageProps<"/plugins/[...package]">) {
   const params = await props.params;
   const plugin = await findPlugin(params.package);
@@ -51,12 +156,7 @@ export default async function PluginDetailPage(props: PageProps<"/plugins/[...pa
   const { manifest } = plugin;
   // The lead already carries the short description — extra paragraphs only
   // exist when the lock's manifest ships extended copy.
-  const paragraphs = manifest.longDescription
-    ? manifest.longDescription
-        .split(/\n{2,}/)
-        .map((paragraph) => paragraph.trim())
-        .filter((paragraph) => paragraph.length > 0)
-    : [];
+  const paragraphs = descriptionParagraphs(manifest.longDescription);
   const [icon, ...screenshots] = manifest.images ?? [];
   const command = [manifest.install.command, ...(manifest.install.args ?? [])].join(" ");
 
@@ -69,34 +169,7 @@ export default async function PluginDetailPage(props: PageProps<"/plugins/[...pa
         ← All plugins
       </Link>
 
-      <header className="mt-8 grid gap-10 border-b pb-10 md:grid-cols-[1fr_auto] md:items-end">
-        <div className="flex items-center gap-5">
-          {icon ? (
-            <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-background p-3">
-              {/* URLs are reviewed and cached in official lock metadata. */}
-              <img className="max-h-full max-w-full" alt={icon.alt} src={icon.url} />
-            </div>
-          ) : null}
-          <div className="min-w-0">
-            <h1 className="truncate text-3xl font-semibold tracking-tight sm:text-4xl">
-              {manifest.name}
-            </h1>
-            <p className="mt-2 truncate font-mono text-xs text-muted-foreground">
-              {plugin.package} · v{plugin.version}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-3 md:justify-end">
-          <Button asChild className="pill-cta">
-            <a href={pluginInstallUrl(plugin.package)}>Install in Pragma</a>
-          </Button>
-          <Button asChild className="pill-cta" variant="secondary">
-            <a href={pluginNpmUrl(plugin.package)} target="_blank" rel="noreferrer">
-              View on npm
-            </a>
-          </Button>
-        </div>
-      </header>
+      <PluginHeader plugin={plugin} icon={icon} />
 
       <div className="grid gap-12 py-10 md:grid-cols-[2fr_1fr]">
         <div>
@@ -107,63 +180,10 @@ export default async function PluginDetailPage(props: PageProps<"/plugins/[...pa
             </p>
           ))}
         </div>
-
-        <aside className="space-y-6 self-start border-l pl-8">
-          <div>
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Package
-            </h2>
-            <p className="mt-2 break-all font-mono text-sm">{plugin.package}</p>
-          </div>
-          {manifest.categories?.length ? (
-            <div>
-              <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Categories
-              </h2>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {manifest.categories.map((category) => (
-                  <span
-                    className="border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
-                    key={category}
-                  >
-                    {category}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {manifest.agentBinary ? (
-            <div>
-              <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Agent binary
-              </h2>
-              <p className="mt-2 font-mono text-sm">{manifest.agentBinary}</p>
-            </div>
-          ) : null}
-          <div>
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Install command
-            </h2>
-            <div className="mt-2 overflow-hidden border border-border/70 bg-background/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
-              <span className="mr-2 text-foreground/40">$</span>
-              <span className="break-all">{command}</span>
-            </div>
-          </div>
-        </aside>
+        <PluginMetadata plugin={plugin} command={command} />
       </div>
 
-      {screenshots.length > 0 ? (
-        <section className="grid gap-4 border-t pt-10 sm:grid-cols-2" aria-label="Screenshots">
-          {screenshots.map((image) => (
-            <div
-              className="flex items-center justify-center border bg-background p-8"
-              key={image.url}
-            >
-              <img className="max-h-96 max-w-full" alt={image.alt} src={image.url} />
-            </div>
-          ))}
-        </section>
-      ) : null}
+      <PluginScreenshots screenshots={screenshots} />
     </main>
   );
 }

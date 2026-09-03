@@ -30,9 +30,8 @@ export function webDeepLinkUrl(action: string, query: Record<string, string>): s
 export function deepLinkQuery(params: Record<string, string | string[] | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined) continue;
-    const resolved = Array.isArray(value) ? value.at(-1) : value;
-    if (resolved !== undefined && resolved !== "") search.set(key, resolved);
+    const resolved = [value].flat().at(-1);
+    if (resolved) search.set(key, resolved);
   }
   return search.toString();
 }
