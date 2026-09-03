@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
   "name": "Kimi Code CLI",
   "description": "Launch Kimi Code CLI in Pragma with live status, approvals, questions, subagents, and session naming.",
+  "longDescription": "Launch Kimi Code CLI from the Pragma launcher with live status, questions, usage limits, subagents, and session naming. Subagent activity is reported alongside the main session, so nested work stays attributed to the tab that started it.",
   "categories": ["agent-plugin"],
   "images": [
     {
@@ -9,6 +10,9 @@
       "alt": "Kimi logo"
     }
   ],
-  "install": { "command": "node", "args": ["dist/install.mjs"] },
+  "install": {
+    "command": "node",
+    "args": ["dist/install.mjs"]
+  },
   "agentBinary": "kimi"
 }

@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
   "name": "Cursor Agent",
   "description": "Launch Cursor Agent in Pragma with live status, session naming, and account usage.",
+  "longDescription": "Launch Cursor Agent from the Pragma launcher with live status, session naming, and account usage. The session reports into Pragma while it runs, so long Cursor jobs stay visible from any worktree without watching the terminal.",
   "categories": ["agent-plugin"],
   "images": [
     {
@@ -9,6 +10,9 @@
       "alt": "Cursor logo"
     }
   ],
-  "install": { "command": "sh", "args": ["scripts/install-local.sh"] },
+  "install": {
+    "command": "sh",
+    "args": ["scripts/install-local.sh"]
+  },
   "agentBinary": "cursor-agent"
 }

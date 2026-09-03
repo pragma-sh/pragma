@@ -14,6 +14,8 @@ export interface PluginInstallCommand {
 export interface PragmaPluginManifest {
   name: string;
   description: string;
+  /** Extended copy shown on the gallery detail page; falls back to `description`. */
+  longDescription?: string;
   categories?: PluginCategory[];
   images?: Array<{ url: string; alt: string }>;
   install: PluginInstallCommand;
