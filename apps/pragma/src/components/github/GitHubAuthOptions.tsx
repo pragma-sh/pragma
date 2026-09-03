@@ -5,10 +5,10 @@ import { Copy, Loader2, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { openExternal } from "@/lib/open-external";
 import { useGitHub } from "@/state/github-context";
 import {
   type DeviceFlowStart,
-  browserOpenExternal,
   githubPollDeviceFlow,
   githubStartDeviceFlow,
   githubUseCliToken,
@@ -24,9 +24,10 @@ type FlowState =
 /**
  * The two GitHub sign-in options — OAuth device flow (recommended) and the `gh`
  * CLI (shown only when `gh` is authenticated) — plus the device-flow
- * walkthrough. Reused by both the full-screen setup modal and the Pull Request
+ * walkthrough. Reused by both the onboarding GitHub step and the Pull Request
  * subtab's logged-out state, so the options stay identical (DRY). On success it
- * calls `refresh()`; the parent decides what to render next.
+ * returns to idle and calls `refresh()`; the parent decides what to render next
+ * — it may well keep these options mounted.
  */
 export function GitHubAuthOptions({ className }: { className?: string }) {
   const { status, refresh } = useGitHub();
@@ -54,6 +55,10 @@ export function GitHubAuthOptions({ className }: { className?: string }) {
       if (!activeRef.current) {
         return;
       }
+      // Back to idle before the refresh: the surface hosting these options may
+      // stay mounted after a successful sign-in (the onboarding step does), and
+      // a busy phase that is never cleared leaves the button spinning forever.
+      setFlow({ phase: "idle" });
       toast.success(`Signed in as ${user.login}`);
       await refresh();
     } catch (cause) {
@@ -71,6 +76,7 @@ export function GitHubAuthOptions({ className }: { className?: string }) {
       if (!activeRef.current) {
         return;
       }
+      setFlow({ phase: "idle" });
       toast.success(`Signed in as ${user.login}`);
       await refresh();
     } catch (cause) {
@@ -147,7 +153,7 @@ function DeviceCodePrompt({ className, start }: { className?: string; start: Dev
         </div>
         <Button
           className="h-auto p-0 text-xs"
-          onClick={() => void browserOpenExternal(start.verificationUri)}
+          onClick={() => void openExternal(start.verificationUri)}
           variant="link"
         >
           Open {start.verificationUri}

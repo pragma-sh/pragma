@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PlusCloseIcon } from "@/components/ui/plus-close-icon";
 import { Separator } from "@/components/ui/separator";
+import { TOUR_ANCHOR } from "@/components/onboarding/WorkspaceTour";
 import { CreateProjectDialog } from "@/components/dialogs/CreateProjectDialog";
 import { CreateWorktreeDialog } from "@/components/dialogs/CreateWorktreeDialog";
 import { InstallUpdateButton } from "@/components/sidebar/InstallUpdateButton";
@@ -153,6 +154,7 @@ function ExpandedProjectSidebar({
         <div className="flex shrink-0 items-center">
           <Button
             aria-label="New worktree off main"
+            data-tour={TOUR_ANCHOR.newWorktree}
             disabled={!mainWorktreeId}
             size="icon-sm"
             title="New worktree off main"
@@ -209,7 +211,12 @@ function AddMenu({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button aria-label="Add project or worktree" size="icon-sm" variant="ghost">
+        <Button
+          aria-label="Add project or worktree"
+          data-tour={TOUR_ANCHOR.addProject}
+          size="icon-sm"
+          variant="ghost"
+        >
           <PlusCloseIcon open={open} />
         </Button>
       </DropdownMenuTrigger>

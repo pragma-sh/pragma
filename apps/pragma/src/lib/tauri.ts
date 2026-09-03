@@ -1357,7 +1357,8 @@ export type MenuAction =
   | "troubleshooting.restart-daemon"
   | "troubleshooting.reload"
   | "troubleshooting.open-daemon-logs"
-  | "settings.open";
+  | "settings.open"
+  | "onboarding.start-tour";
 
 /** Config file selected by Settings. */
 export type ConfigScope = "global" | "project";
@@ -1410,16 +1411,6 @@ export function availablePluginBinaries(binaries: string[]): Promise<string[]> {
   return invoke<string[]>("available_plugin_binaries", { binaries });
 }
 
-/** Whether first-run agent plugin recommendations were completed or dismissed. */
-export function pluginOnboardingDismissed(): Promise<boolean> {
-  return invoke<boolean>("plugin_onboarding_dismissed");
-}
-
-/** Persists first-run agent plugin recommendation completion. */
-export function setPluginOnboardingDismissed(dismissed: boolean): Promise<void> {
-  return invoke("set_plugin_onboarding_dismissed", { dismissed });
-}
-
 /** Whether prompts after manually running an unconnected agent are disabled. */
 export function agentPluginPromptDismissed(): Promise<boolean> {
   return invoke<boolean>("agent_plugin_prompt_dismissed");
@@ -1428,6 +1419,38 @@ export function agentPluginPromptDismissed(): Promise<boolean> {
 /** Persists whether manual agent-command integration prompts are disabled. */
 export function setAgentPluginPromptDismissed(dismissed: boolean): Promise<void> {
   return invoke("set_agent_plugin_prompt_dismissed", { dismissed });
+}
+
+/** Persisted first-run onboarding flags. */
+export interface OnboardingState {
+  /** Whether the first-run tutorial finished or was skipped. */
+  completed: boolean;
+  /** Whether the in-workspace guided tour finished or was skipped. */
+  tourCompleted: boolean;
+}
+
+/** Reads the persisted first-run onboarding flags. */
+export function onboardingState(): Promise<OnboardingState> {
+  return invoke<OnboardingState>("onboarding_state");
+}
+
+/** Persists whether the first-run tutorial is finished. */
+export function setOnboardingCompleted(completed: boolean): Promise<void> {
+  return invoke("set_onboarding_completed", { completed });
+}
+
+/** Persists whether the in-workspace guided tour is finished. */
+export function setOnboardingTourCompleted(completed: boolean): Promise<void> {
+  return invoke("set_onboarding_tour_completed", { completed });
+}
+
+/**
+ * Installs the bundled Pragma skill into the named global skill directories and
+ * resolves with the absolute path written for each. Targets are
+ * `constants.onboarding.skill.targets[].id` values.
+ */
+export function installPragmaSkill(targets: string[]): Promise<string[]> {
+  return invoke<string[]>("install_pragma_skill", { targets });
 }
 
 /** Reads global or project `.pragma/theme.json`; a missing file reports `exists: false`. */

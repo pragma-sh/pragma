@@ -9,6 +9,7 @@
 
 use base64::Engine;
 use pragma_constants::{AgentSound, AgentSoundList, SettingsScope, CONSTANTS};
+use tauri::path::BaseDirectory;
 use tauri::{Manager, State};
 
 use pragma_core::fs::FsRequest;
@@ -52,6 +53,45 @@ fn sound_relative_path(name: &str) -> AppResult<String> {
         "{}/{trimmed}",
         CONSTANTS.agent_status.sounds_dir_name
     ))
+}
+
+/// Resource directory holding the clips shipped with the app.
+const BUNDLED_SOUNDS_DIR: &str = "sounds";
+
+/// Copies the bundled clips into the global sounds directory the first time it is
+/// missing, so a fresh install has alert sounds to pick from without the user
+/// supplying audio of their own.
+///
+/// Seeding is skipped whenever the directory already exists, so a clip the user
+/// deleted stays deleted and an edited clip is never overwritten by an update.
+pub fn seed_bundled_sounds(app: &tauri::AppHandle, home: &std::path::Path) -> AppResult<()> {
+    let target = home.join(CONSTANTS.agent_status.sounds_dir_name.as_str());
+    if target.exists() {
+        return Ok(());
+    }
+    let source = app
+        .path()
+        .resolve(BUNDLED_SOUNDS_DIR, BaseDirectory::Resource)?;
+    let entries = match std::fs::read_dir(&source) {
+        Ok(entries) => entries,
+        // A dev build run straight from cargo has no resource directory; that is
+        // not an error worth failing startup over.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    std::fs::create_dir_all(&target)?;
+    for entry in entries {
+        let path = entry?.path();
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        // Only real clips travel: the directory also ships a credits file.
+        if sound_relative_path(&name.to_string_lossy()).is_err() {
+            continue;
+        }
+        std::fs::copy(&path, target.join(name))?;
+    }
+    Ok(())
 }
 
 fn scope_name(scope: ConfigScope) -> SettingsScope {
@@ -223,6 +263,30 @@ mod tests {
             sound_relative_path("  alert.mp3 ").unwrap(),
             format!("{}/alert.mp3", CONSTANTS.agent_status.sounds_dir_name)
         );
+    }
+
+    /// Every shipped clip has to survive `sound_relative_path`, or seeding would
+    /// silently skip it and a fresh install would come up with no sounds at all.
+    #[test]
+    fn bundled_clips_are_playable_names() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(BUNDLED_SOUNDS_DIR);
+        let mut clips = 0;
+        for entry in std::fs::read_dir(&dir).expect("bundled sounds directory") {
+            let path = entry.expect("directory entry").path();
+            let name = path
+                .file_name()
+                .expect("file name")
+                .to_string_lossy()
+                .into_owned();
+            if name == "CREDITS.md" {
+                continue;
+            }
+            sound_relative_path(&name).unwrap_or_else(|_| panic!("{name} is not a playable clip"));
+            clips += 1;
+        }
+        assert!(clips > 0, "no clips are bundled");
     }
 
     #[test]
