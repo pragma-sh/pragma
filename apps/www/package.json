@@ -13,6 +13,7 @@
     "lint": "oxlint ."
   },
   "dependencies": {
+    "@pragma/brand": "workspace:*",
     "@pragma/plugin-registry": "workspace:*",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",

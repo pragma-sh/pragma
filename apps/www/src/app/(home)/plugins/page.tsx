@@ -4,7 +4,8 @@ import { PluginCard } from "@/components/plugin-card";
 import { loadOfficialPlugins } from "@/lib/plugins";
 
 export const metadata: Metadata = {
-  title: "Plugins | Pragma",
+  // The root layout template appends "— Pragma".
+  title: "Plugins",
   description: "Browse reviewed plugins for Pragma and install them into the desktop app.",
 };
 

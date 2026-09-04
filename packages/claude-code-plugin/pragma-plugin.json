@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
   "name": "Claude Code",
   "description": "Launch Claude Code in Pragma with live status, questions, usage limits, and session naming.",
+  "longDescription": "Launch Claude Code from the Pragma launcher and the integration reports live status, questions, approvals, usage limits, and session naming back to the app. Status lands on the tab, the sidebar, and agent alerts, so several Claude Code sessions stay readable side by side across worktrees.",
   "categories": ["agent-plugin"],
   "images": [
     {
@@ -9,6 +10,9 @@
       "alt": "Claude Code logo"
     }
   ],
-  "install": { "command": "sh", "args": ["scripts/install.sh"] },
+  "install": {
+    "command": "sh",
+    "args": ["scripts/install.sh"]
+  },
   "agentBinary": "claude"
 }

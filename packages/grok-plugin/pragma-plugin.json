@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
   "name": "Grok Build",
   "description": "Launch Grok Build in Pragma with live status, questions, usage limits, and session naming.",
+  "longDescription": "Launch Grok Build from the Pragma launcher with live status, questions, usage limits, and session naming. Status and alerts arrive through the same agent-status plumbing as the built-in agents, so Grok sessions mix cleanly with everything else on the board.",
   "categories": ["agent-plugin"],
   "images": [
     {
@@ -9,6 +10,9 @@
       "alt": "Grok logo"
     }
   ],
-  "install": { "command": "node", "args": ["dist/install.mjs"] },
+  "install": {
+    "command": "node",
+    "args": ["dist/install.mjs"]
+  },
   "agentBinary": "grok"
 }
