@@ -506,11 +506,12 @@ impl Registry {
         self.watchers.reconcile(&self.plugins, &desired);
     }
 
-    /// One entry per live session whose mirrored tab records an agent.
+    /// One entry per live session whose mirrored tab or runtime report identifies an agent.
     ///
     /// Both halves matter: the session map proves the PTY is still running
-    /// (the desktop's snapshot can outlive it, and does after a crash), while
-    /// the snapshot is the only place the tab's agent id lives.
+    /// (the desktop's snapshot can outlive it, and does after a crash). The
+    /// snapshot carries launched agent ids; runtime reports identify manually
+    /// started agents in otherwise-plain terminal tabs.
     fn desired_watchers(&self) -> Vec<DesiredWatcher> {
         // The two locks are taken in sequence, never nested: the session map is
         // copied out and released before the workspace lock is acquired.
@@ -523,6 +524,11 @@ impl Registry {
                 .map(|session| (session.id().to_string(), session.worktree_id().to_string()))
                 .collect()
         };
+        let reported = self
+            .agent_statuses
+            .lock()
+            .map(|statuses| statuses.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
         let Ok(workspace) = self.workspace.lock() else {
             return Vec::new();
         };
@@ -534,8 +540,17 @@ impl Registry {
             .iter()
             .filter(|tab| matches!(tab.kind, TabKind::Terminal))
             .filter_map(|tab| {
-                let agent_id = tab.agent_id.clone()?;
                 let worktree_id = live.get(&tab.id)?;
+                let agent_id = tab.agent_id.clone().or_else(|| {
+                    let mut agents = reported
+                        .iter()
+                        .filter(|(reported_worktree, reported_tab, _)| {
+                            reported_worktree == worktree_id && reported_tab == &tab.id
+                        })
+                        .map(|(_, _, agent)| agent);
+                    let first = agents.next()?.clone();
+                    agents.all(|agent| agent == &first).then_some(first)
+                })?;
                 Some(DesiredWatcher {
                     tab_id: tab.id.clone(),
                     worktree_id: worktree_id.clone(),
@@ -1268,6 +1283,7 @@ impl Registry {
             .agent_statuses
             .lock()
             .map_err(|_| RegistryError::LockPoisoned)?;
+        let needs_watcher_reconcile = !statuses.contains_key(&key);
         // Merge with the stored entry: a status-less report (`session-name`)
         // must not disturb the last status, and a status report without a
         // session name must not drop the last reported name.
@@ -1292,6 +1308,12 @@ impl Registry {
         let tab_id = payload.tab_id.clone();
         statuses.insert(key, payload);
         drop(statuses);
+        if needs_watcher_reconcile {
+            // A manually started agent has no catalog id on its mirrored tab.
+            // Start its watcher before publishing status so a phone cannot see
+            // a reply target whose input consumer has not even been spawned.
+            self.reconcile_watchers();
+        }
         // A fanout attempt's member status follows its agent, but is a separate
         // vocabulary: the attempt can be `done` while the fanout is still only
         // `partial` because a sibling failed.
@@ -2012,6 +2034,32 @@ mod tests {
             )
             .expect("session should spawn");
         assert_eq!(registry.desired_watchers().len(), 1);
+    }
+
+    #[test]
+    fn desired_watchers_use_unique_runtime_reports_for_plain_terminal_tabs() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_agent_tab("/tmp/sandbox"));
+        registry
+            .spawn(
+                "tab-1".to_string(),
+                "worktree-main".to_string(),
+                dir.path().to_string_lossy().to_string(),
+                80,
+                24,
+                None,
+            )
+            .expect("session should spawn");
+        let mut payload = agent_payload(AgentStatus::Cleared);
+        payload.agent = "claude-code".to_string();
+        payload.worktree_id = "worktree-main".to_string();
+        registry.report_agent(payload).expect("report should store");
+
+        let desired = registry.desired_watchers();
+
+        assert_eq!(desired.len(), 1);
+        assert_eq!(desired[0].agent_id, "claude-code");
     }
 
     #[test]

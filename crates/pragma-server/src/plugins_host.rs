@@ -303,15 +303,11 @@ impl PluginsRegistry {
             .ok_or_else(|| PluginsError::InvalidRequest("missing agentId".to_string()))?;
         let plugin_id = payload.get("pluginId").and_then(Value::as_str);
         self.ensure_catalog_fresh()?;
-        let watcher = self
+        let watchers = self
             .watchers
             .lock()
-            .map_err(|_| PluginsError::LockPoisoned)?
-            .iter()
-            .find(|watcher| {
-                watcher.agent_id == agent_id && plugin_id.is_none_or(|id| watcher.plugin_id == id)
-            })
-            .cloned();
+            .map_err(|_| PluginsError::LockPoisoned)?;
+        let watcher = resolve_watcher(&watchers, agent_id, plugin_id);
         serde_json::to_value(watcher)
             .map_err(|error| PluginsError::Operation(format!("serialize watcher: {error}")))
     }
@@ -526,6 +522,29 @@ impl PluginsRegistry {
         eprintln!("usage limits update failed for {plugin_id}/{provider_id}: {message}");
         Ok(json!({ "ok": true }))
     }
+}
+
+fn resolve_watcher(
+    watchers: &[WatcherSpec],
+    agent_id: &str,
+    plugin_id: Option<&str>,
+) -> Option<WatcherSpec> {
+    let belongs_to_plugin =
+        |watcher: &&WatcherSpec| plugin_id.is_none_or(|plugin_id| watcher.plugin_id == plugin_id);
+    if let Some(watcher) = watchers
+        .iter()
+        .filter(belongs_to_plugin)
+        .find(|watcher| watcher.agent_id == agent_id)
+    {
+        return Some(watcher.clone());
+    }
+
+    let mut matches = watchers
+        .iter()
+        .filter(belongs_to_plugin)
+        .filter(|watcher| watcher.watcher_agent == agent_id);
+    let watcher = matches.next()?.clone();
+    matches.next().is_none().then_some(watcher)
 }
 
 fn required_log_field(payload: &Value, field: &str) -> Result<String, PluginsError> {
@@ -754,9 +773,48 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        is_lowercase_hex_sha256, AssetEntry, PluginsError, PluginsRegistry, SidecarEvent,
-        PLUGIN_ROOTS_FILE,
+        is_lowercase_hex_sha256, resolve_watcher, AssetEntry, PluginsError, PluginsRegistry,
+        SidecarEvent, WatcherSpec, PLUGIN_ROOTS_FILE,
     };
+
+    fn watcher(plugin_id: &str, agent_id: &str, watcher_agent: &str) -> WatcherSpec {
+        WatcherSpec {
+            plugin_id: plugin_id.to_string(),
+            agent_id: agent_id.to_string(),
+            watcher_agent: watcher_agent.to_string(),
+            main_path: "/plugin.mjs".to_string(),
+            config: json!({}),
+        }
+    }
+
+    #[test]
+    fn resolves_unique_runtime_agent_watcher_for_existing_sessions() {
+        let watchers = vec![watcher(
+            "pragma.claude-code",
+            "pragma.claude-code",
+            "claude-code",
+        )];
+
+        let resolved = resolve_watcher(&watchers, "claude-code", None).expect("unique watcher");
+
+        assert_eq!(resolved.agent_id, "pragma.claude-code");
+    }
+
+    #[test]
+    fn rejects_ambiguous_runtime_agent_watcher() {
+        let watchers = vec![
+            watcher("pragma.claude-code", "pragma.claude-code", "claude-code"),
+            watcher("custom.claude-code", "custom.claude-code", "claude-code"),
+        ];
+
+        assert!(resolve_watcher(&watchers, "claude-code", None).is_none());
+        assert_eq!(
+            resolve_watcher(&watchers, "claude-code", Some("custom.claude-code"))
+                .expect("plugin disambiguates")
+                .agent_id,
+            "custom.claude-code"
+        );
+    }
 
     #[test]
     fn validates_lowercase_hex_sha256() {
