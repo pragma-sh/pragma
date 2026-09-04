@@ -298,9 +298,11 @@ submit keys and timing.
 
 This server owns one `pragma-watch` sidecar per live agent session, because it owns the
 sessions. `WatcherSupervisor::reconcile` re-derives the desired set — every live session
-whose mirrored tab records an `agentId` — and starts what is missing, stops what is no
-longer wanted, and replaces what is stale. It runs on a timer (`RECONCILE_INTERVAL`, 5s)
-plus directly after a headless launch and after each workspace publish.
+whose mirrored tab records an `agentId`, plus plain terminal tabs with one unambiguous
+runtime agent report — and starts what is missing, stops what is no longer wanted, and
+replaces what is stale. Runtime matching uses plugin-local `watcherAgent` only when unique;
+otherwise no watcher starts. It runs on a timer (`RECONCILE_INTERVAL`, 5s), directly after
+a headless launch or workspace publish, and after a manually started agent's first report.
 
 A timer rather than a spawn hook, because the three ways a watcher goes bad are all
 invisible as events:
