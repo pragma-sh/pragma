@@ -110,37 +110,56 @@ async function watchCursorOutput(ctx: Parameters<NonNullable<typeof baseWatcher.
   let trustHandled = false;
   try {
     for await (const chunk of ctx.output) {
-      if (!trustHandled) {
-        outputBuffer = `${outputBuffer}${chunk}`.slice(-16_384);
-        const text = outputBuffer
-          .replace(CURSOR_CONTROL_SEQUENCE, " ")
-          .replace(/\s+/g, " ")
-          .toLowerCase();
-        if (text.includes(CURSOR_TRUST_TITLE) && text.includes(CURSOR_TRUST_ACTION)) {
-          trustHandled = true;
-          await writeCursorKeys(ctx, "a");
-        }
-      }
+      const trust = await handleCursorTrust(ctx, outputBuffer, chunk, trustHandled);
+      outputBuffer = trust.buffer;
+      trustHandled = trust.handled;
 
-      titleBuffer += chunk;
-      const parsed = extractCursorTitles(titleBuffer);
-      titleBuffer = parsed.remaining;
-      for (const title of parsed.titles) {
-        if (CURSOR_QUESTION_TITLE.test(title) && !awaitingQuestion) {
-          awaitingQuestion = true;
-          // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
-          await reportCursorStatus(ctx, "attention", "question");
-        } else if (CURSOR_ACTIVE_TITLE.test(title) && awaitingQuestion) {
-          awaitingQuestion = false;
-          // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
-          await reportCursorStatus(ctx, "running", null);
-        }
-      }
+      const titles = await handleCursorTitles(ctx, `${titleBuffer}${chunk}`, awaitingQuestion);
+      titleBuffer = titles.remaining;
+      awaitingQuestion = titles.awaitingQuestion;
     }
   } catch {
     // Output transport may reconnect independently; keep watcher alive until session exit.
   }
   await waitForAbort(ctx.signal);
+}
+
+async function handleCursorTrust(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  buffer: string,
+  chunk: string,
+  handled: boolean,
+): Promise<{ buffer: string; handled: boolean }> {
+  if (handled) return { buffer, handled };
+
+  const nextBuffer = `${buffer}${chunk}`.slice(-16_384);
+  const text = nextBuffer.replace(CURSOR_CONTROL_SEQUENCE, " ").replace(/\s+/g, " ").toLowerCase();
+  const promptReady = text.includes(CURSOR_TRUST_TITLE) && text.includes(CURSOR_TRUST_ACTION);
+  if (!promptReady) return { buffer: nextBuffer, handled };
+
+  await writeCursorKeys(ctx, "a");
+  return { buffer: nextBuffer, handled: true };
+}
+
+async function handleCursorTitles(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  buffer: string,
+  awaitingQuestion: boolean,
+): Promise<{ remaining: string; awaitingQuestion: boolean }> {
+  const parsed = extractCursorTitles(buffer);
+  let awaiting = awaitingQuestion;
+  for (const title of parsed.titles) {
+    if (CURSOR_QUESTION_TITLE.test(title) && !awaiting) {
+      awaiting = true;
+      // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
+      await reportCursorStatus(ctx, "attention", "question");
+    } else if (CURSOR_ACTIVE_TITLE.test(title) && awaiting) {
+      awaiting = false;
+      // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
+      await reportCursorStatus(ctx, "running", null);
+    }
+  }
+  return { remaining: parsed.remaining, awaitingQuestion: awaiting };
 }
 
 async function writeCursorKeys(
