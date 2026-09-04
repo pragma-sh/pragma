@@ -27,7 +27,8 @@
     "files",
     "scratchpads",
     "fanout",
-    "updates"
+    "updates",
+    "onboarding"
   ],
   "properties": {
     "app": {
@@ -98,6 +99,9 @@
     },
     "updates": {
       "$ref": "#/definitions/Updates"
+    },
+    "onboarding": {
+      "$ref": "#/definitions/Onboarding"
     }
   },
   "definitions": {
@@ -3985,6 +3989,55 @@
         "linux-aarch64-appimage",
         "windows-x86_64"
       ]
+    },
+    "Onboarding": {
+      "title": "Onboarding",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shipped values for the first-run onboarding flow: where its preview videos stream from, and which global skill directories the skills step can install into.",
+      "required": ["mediaBaseUrl", "skill"],
+      "properties": {
+        "mediaBaseUrl": {
+          "type": "string",
+          "description": "Base URL the onboarding preview videos are streamed from (the marketing site's `public/media`). Videos are streamed rather than bundled so installers stay small."
+        },
+        "skill": {
+          "$ref": "#/definitions/OnboardingSkill"
+        }
+      }
+    },
+    "OnboardingSkill": {
+      "title": "OnboardingSkill",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The Pragma skill offered during onboarding and the global directories it can be installed into.",
+      "required": ["id", "targets"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Directory name the skill is written as, inside each target directory."
+        },
+        "targets": {
+          "type": "array",
+          "description": "Install destinations offered by the skills step.",
+          "items": { "$ref": "#/definitions/OnboardingSkillTarget" }
+        }
+      }
+    },
+    "OnboardingSkillTarget": {
+      "title": "OnboardingSkillTarget",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One skill install destination. The frontend sends `id` over IPC; the backend resolves `directory` against the home directory.",
+      "required": ["id", "directory", "label"],
+      "properties": {
+        "id": { "type": "string", "description": "Stable identifier sent over IPC." },
+        "directory": {
+          "type": "string",
+          "description": "Directory holding the skill, relative to the user's home directory."
+        },
+        "label": { "type": "string", "description": "Button label shown in onboarding." }
+      }
     },
     "Updates": {
       "title": "Updates",

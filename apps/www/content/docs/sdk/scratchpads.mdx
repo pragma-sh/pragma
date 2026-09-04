@@ -1,0 +1,75 @@
+---
+title: Scratchpads
+description: Read, comment on, attach agents to, and prompt through scratchpad documents.
+---
+
+`client.scratchpads` composes the filesystem, agent, and
+[@pragma/scratchpad-contract](https://github.com/pragma-sh/pragma) APIs so the mobile
+client and scripts get the same scratchpad experience as the desktop. See
+[Scratchpads](/docs/user-guide/scratchpads) for the user-facing tour.
+
+## List and read
+
+```ts
+const scratchpads = await client.scratchpads.getScratchpads({
+  root: "/path/to/worktree",
+});
+// ScratchpadFile { id, title, filePath, contents, agentTabId, agentId, createdAt }
+```
+
+Only managed documents (created with `pragma-cli scratchpad create`) are listed; the host
+parses the frontmatter.
+
+## Comments
+
+```ts
+const comments = await client.scratchpads.getComments({
+  root,
+  filePath,
+});
+
+const comment = await client.scratchpads.comment(
+  { root, filePath },
+  { index: 2, quote: "The relevant paragraph…" },
+  "Can you expand on the cache invalidation?",
+);
+
+// or replace the whole thread
+await client.scratchpads.setComments({ root, filePath }, comments);
+```
+
+Comment ids: when you don't supply one, a Hermes-safe fallback id is generated — the
+contract avoids `crypto.randomUUID` on purpose for React Native compatibility.
+
+## Attach an agent and send the thread
+
+```ts
+await client.scratchpads.attachAgent({
+  root,
+  filePath,
+  tabId: "tab_123",
+  agentId: "opencode",
+});
+
+const result = await client.scratchpads.sendAttached({
+  root,
+  filePath,
+  worktreeId,
+  text: "Please address the comments",
+});
+// { delivered: boolean, agent?, tabId? }
+// delivered: false means nothing was attached — nothing was sent
+```
+
+`sendAttached` re-reads the managed frontmatter at call time, so an agent that detached
+in the meantime is respected. Deliveries are addressed to the agent's **runtime id** —
+the last `.`-segment of the qualified `plugin.agent` catalog id, which is what the event
+stream keys on (`runtimeAgentId` is exported for exactly this).
+
+## The contract underneath
+
+`@pragma/scratchpad-contract` (re-exported through the SDK bundle) owns the file format:
+`parseScratchpadDocument`, `replaceScratchpadBody`, `attachScratchpadAgent`,
+`parseScratchpadComments`, `createScratchpadComment`, `unresolvedCommentsPrompt` — the
+shared wording both the desktop and the mobile client send to agents. Never write
+scratchpad files by hand; create them with the CLI and edit them through this API.

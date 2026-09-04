@@ -1,0 +1,73 @@
+---
+title: "@pragma/sdk"
+description: A typed TypeScript client for a running Pragma host — sessions, agent events, fanouts, scratchpads, and the workspace.
+---
+
+`@pragma/sdk` is a TypeScript client for the **Pragma gateway** — the HTTP/JSON surface a
+running host exposes. The mobile app, the browser build, and agent plugins all speak
+through it; anything you build can too.
+
+```ts
+import { PragmaClient } from "@pragma/sdk";
+
+const client = new PragmaClient(); // config from the environment
+
+for await (const event of client.workspace.subscribe()) {
+  console.log(event.snapshot?.projects.length, "projects");
+}
+```
+
+## What it does
+
+<Cards>
+  <Card
+    title="Getting started"
+    description="Construct the client, configure the gateway, and handle errors."
+    href="/docs/sdk/getting-started"
+  />
+  <Card
+    title="Sessions"
+    description="Spawn, attach, write to, resize, and kill terminal sessions — with scrollback replay."
+    href="/docs/sdk/sessions"
+  />
+  <Card
+    title="Agents"
+    description="Report status, ask questions, request approvals, and await the answers."
+    href="/docs/sdk/agents"
+  />
+  <Card
+    title="Fanouts"
+    description="Create, watch, message, retry, cancel, and pick fanouts programmatically."
+    href="/docs/sdk/fanouts"
+  />
+  <Card
+    title="Scratchpads"
+    description="Read, comment on, and send prompts through agent-authored MDX documents."
+    href="/docs/sdk/scratchpads"
+  />
+  <Card
+    title="Workspace & more"
+    description="fs, git, exec, events, theme, push, and asset namespaces."
+    href="/docs/sdk/workspace"
+  />
+</Cards>
+
+## Design notes
+
+- **Fetch-based, streaming with NDJSON.** Subscriptions and session event streams are
+  newline-delimited JSON over `fetch` + `ReadableStream` — no sockets, no SSE, so it runs
+  in Node, Bun, React Native (the mobile client uses it), and browsers.
+- **Dual ESM/CJS** with `.d.ts`, built with bunup. Types for every wire shape
+  (`Fanout`, `KanbanPromptCard`, …) are re-exported from `@pragma/constants`, so TS and
+  Rust agree by construction.
+- **Typed errors.** `PragmaGatewayError` (the gateway answered with a code and details)
+  vs `PragmaTransportError` (network, config, or non-JSON response).
+- **The gateway is the only transport.** The SDK never talks to the Unix socket directly
+  and never shells out to `pragma-cli` — that is the
+  [CLI](/docs/cli)'s job.
+
+<Callout title="Agents inside Pragma terminals">
+  If your code runs in a Pragma terminal, the environment is already configured
+  (`PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, `PRAGMA_WORKTREE_ID`) — construct
+  the client with no arguments.
+</Callout>

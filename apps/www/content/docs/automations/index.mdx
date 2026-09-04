@@ -1,0 +1,51 @@
+---
+title: Automations
+description: Small host-side tasks on a cron schedule or an event trigger — authored with defineAutomation.
+---
+
+Automations are small TypeScript tasks that run **on the host**, supervised by the Pragma
+server — not in your terminal, not on your phone. Wake a stale agent at 9am, sweep stale
+branches every Friday, react to a file appearing in a directory.
+
+```ts
+import { defineAutomation } from "@pragma/automations";
+
+export default defineAutomation({
+  name: "Morning standup prep",
+  description: "Summarize open worktrees into a scratchpad",
+  trigger: { type: "cron", schedule: "0 9 * * 1-5" },
+  run: (ctx) => {
+    ctx.log.info("collecting worktree status");
+    // ...
+  },
+});
+```
+
+<Cards>
+  <Card
+    title="Writing automations"
+    description="defineAutomation, triggers, the context object, and dependencies."
+    href="/docs/automations/writing-automations"
+  />
+  <Card
+    title="Lifecycle"
+    description="Where files live, trust approval, scheduling, run-now, and events."
+    href="/docs/automations/lifecycle"
+  />
+</Cards>
+
+## How they run
+
+- The server scans `~/.pragma/automations/` (global) and each registered project's
+  `.pragma/automations/` (never worktrees), every 5 seconds.
+- Approved automations load into the **`pragma-automations` sidecar**, a Bun process the
+  server supervises. Cron schedules are evaluated on a 20-second tick.
+- Everything is managed in **Settings → Automations** (global scope): the discovered
+  list, trust approval, and **Run now**.
+- Automations are project-scoped for trust purposes but run with the project root as
+  their `paths.project`, so one task can serve every worktree.
+
+<Callout title="Not a job scheduler for app code">
+  Automations share a runtime with your project: keep them small and deterministic, use `ctx.log`
+  over `console`, and treat `run` as fire-and-forget — there is no retry queue.
+</Callout>

@@ -1,0 +1,65 @@
+---
+title: Theming & customization
+description: Per-user and per-project colour overrides, built-in palettes, plugin themes, and agent alert sounds.
+---
+
+## Colour overrides
+
+Every colour in the app is a token, and every token can be overridden in an optional
+`.pragma/theme.json`:
+
+```json
+{
+  "colors": {
+    "dark": { "canvas": "oklch(0.16 0.01 260)" },
+    "light": { "canvas": "oklch(0.98 0.005 260)" }
+  }
+}
+```
+
+Two scopes, merged per token — defaults ← global (`~/.pragma/theme.json`) ← project
+(`<project>/.pragma/theme.json`). Switching projects re-applies instantly, so a project
+can carry its own look. Settings → **Theme** edits either scope with live previews and
+the built-in palette picker.
+
+### Token groups
+
+| Group             | Tokens                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| **Surfaces**      | canvas, background, foreground, elevated, card, popover                                    |
+| **Controls**      | primary, secondary, muted, accent (each with foreground variants, primary adds hover)      |
+| **Edges & focus** | border, input, ring, selection, overlay                                                    |
+| **State**         | destructive, success, warning, skill, diff-added, diff-removed                             |
+| **Sidebar**       | sidebar, sidebar-foreground, sidebar-primary, sidebar-accent, sidebar-border, sidebar-ring |
+
+Values are `oklch(...)` strings. The app renders dark-only; the light ramp exists for
+the preview and for future use.
+
+## Built-in palettes
+
+Settings → **Theme** ships with: **Pragma** (default), **GitHub**, **Vercel**,
+**VS Code**, **Atom One**, **Solarized**, **Gruvbox**, **Catppuccin**, **Rosé Pine**,
+**Tokyo Night**, **Ayu**, and **Zed**. Applying a preset replaces only the selected
+scope's `colors` block — your other settings stay. Plugins can contribute further
+palettes with `defineTheme` (see [Plugins → Themes](/docs/plugins/runtime)).
+
+## Agent alert sounds
+
+When an agent reports **done** or **needs attention**, Pragma plays a chime and posts a
+system notification. Per scope (Settings → **Agent Status**, global and project):
+
+- `notificationsEnabled` — on/off.
+- `soundName` — a clip from `.pragma/assets/sounds/` in the home directory (global) or
+  project root (project). Import your own: up to 5 seconds, mp3/wav/ogg/m4a/aac/flac/
+  webm, 5 MB.
+
+Notification text follows templates — "`{agent}` finished", "`{agent}` needs attention",
+"`{agent}` is waiting for an answer", "`{agent}` wants to run a command" — and macOS
+notifications deep-link to the exact worktree and tab.
+
+## Terminal appearance
+
+The terminal uses JetBrainsMonoNL Nerd Font at 14px with a 5000-line scrollback limit.
+Shell selection per project is a settings topic — see
+[.pragma/config.json](/docs/user-guide/core-model#where-things-live) and Settings →
+**Terminal** / **WSL**.

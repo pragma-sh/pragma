@@ -1,0 +1,7 @@
+{
+  "title": "SDK",
+  "description": "@pragma/sdk — the typed TypeScript client for a Pragma host.",
+  "icon": "SquareCode",
+  "root": true,
+  "pages": ["index", "getting-started", "sessions", "agents", "fanouts", "scratchpads", "workspace"]
+}

@@ -1,0 +1,65 @@
+---
+title: Welcome to Pragma
+description: An agentic development environment where every coding agent gets its own worktree, terminal, and attention budget.
+---
+
+Pragma is a desktop app for running teams of coding agents. Launch Claude Code, Codex,
+opencode, Cursor, and other agents from one window, each in **its own git worktree** with
+a real native terminal — then keep working while they do.
+
+![The Pragma desktop app](/pragma-app.png)
+
+## The short version
+
+- **Many projects, one window.** A rail of projects at the bottom-left; switching projects
+  never closes a session.
+- **Every agent in its own worktree.** Pragma creates the git worktree and branch for you.
+  A worktree can nest under another, so a follow-up task branches off work in progress,
+  not off main.
+- **Real terminals, native TUIs.** Agents run their own CLI exactly as it ships, in a
+  GPU-accelerated terminal alongside your dev servers and test runs.
+- **Status you can trust.** Plugins report running, done, and needs-you as coloured dots,
+  a chime, and a system notification — an idle agent never waits unnoticed.
+- **Everything around the agent.** An agent board, git and GitHub views, editors, a
+  browser, project scripts, integrated AI, automations, and a plugin API.
+
+## What to read next
+
+<Cards>
+  <Card
+    title="Quick start"
+    description="Create your first worktree, run an agent, and ship the result."
+    href="/docs/user-guide/quick-start"
+  />
+  <Card
+    title="Core model"
+    description="Projects, nested worktrees, tabs, sessions, and agent status — how Pragma is put together."
+    href="/docs/user-guide/core-model"
+  />
+  <Card
+    title="Creating a worktree"
+    description="Single worktrees and fanouts, agent prompting, pinning, and everything else on the left sidebar."
+    href="/docs/user-guide/worktrees"
+  />
+  <Card
+    title="Agent board"
+    description="Turn tasks into cards and take them from prompt to pull request."
+    href="/docs/user-guide/agent-board"
+  />
+  <Card
+    title="Theming"
+    description="Override any colour per user or per project, or apply a built-in palette."
+    href="/docs/user-guide/theming"
+  />
+  <Card
+    title="Mobile app"
+    description="Pair Pragma Go and run your workspace from the couch."
+    href="/docs/user-guide/mobile"
+  />
+</Cards>
+
+<Callout title="Agents, this is for you too">
+  If a coding agent is reading this: append `.md` to any docs URL to fetch that page as raw markdown
+  (for example, `/docs/user-guide/core-model.md`), or read every page at once from
+  [/llms-full.txt](/llms-full.txt).
+</Callout>

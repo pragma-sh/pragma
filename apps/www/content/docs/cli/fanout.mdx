@@ -1,0 +1,85 @@
+---
+title: Fanout
+description: pragma-cli fanout — one prompt, several isolated attempts, pick the winner.
+---
+
+```
+pragma-cli fanout <command>
+```
+
+Fanout commands talk directly to the host server, so they work even while the desktop is
+closed. See [Creating a worktree → Fan out](/docs/user-guide/worktrees#fan-out) for the
+UI side and [SDK → Fanouts](/docs/sdk/fanouts) for the programmatic API.
+
+## create
+
+```sh
+pragma-cli fanout create [PROMPT] \
+  [--prompt-file <PATH|-] \
+  [--parent <ID> | --new-parent <BRANCH> [--parent-title <T>] [--from <ID>]] \
+  --agent <SELECTOR>... [--reasoning <ID>] [--jobs <N>] [--idempotency-key <KEY>]
+```
+
+- `--agent` is repeatable; each value is a selector of the form
+  `agent[.model[.reasoning]]` (`--reasoning` is a shorthand for the last part).
+  Duplicates are allowed — race the same agent against itself.
+- At least **two** attempts are required.
+- With `--new-parent <BRANCH>`, a fresh coordination parent is branched (`--from` picks
+  the base worktree). `--parent <ID>` hosts the fanout on an existing worktree.
+- A dirty parent is refused; the base commit is captured once so every attempt's diff is
+  comparable.
+- Partial provisioning exits non-zero **and** prints the persisted members, so a script
+  can retry the failed ones.
+
+The created attempt sessions get `PRAGMA_FANOUT_ID` and `PRAGMA_FANOUT_MEMBER_ID` in
+their environment — an attempt agent knows it is racing.
+
+## show / read
+
+```sh
+pragma-cli fanout show [<FANOUT_ID>] [--watch]
+pragma-cli fanout read [<ID>] [--member <ID>|--all] [--lines N]
+```
+
+`show --watch` follows the fanout's status and every member. `read` prints attempt
+terminal scrollback (default 200 lines) — plain text, ANSI stripped.
+
+## send
+
+```sh
+pragma-cli fanout send [<ID>] [--member <ID>|--all] \
+  (--message <TEXT> | --message-file <PATH|-) [--message-id <ID>] [--no-wait]
+```
+
+Delivers a follow-up message to members' agents (through each member's watcher, which
+types it into the live TUI). Waits for delivery unless `--no-wait`; the same
+`--message-id` re-delivers idempotently.
+
+## retry / cancel
+
+```sh
+pragma-cli fanout retry [<ID>] [--member <ID>]
+pragma-cli fanout cancel [<ID>]
+```
+
+`retry` relaunches a member's agent in its existing worktree (work is kept).
+`cancel` stops the fanout but keeps every checkout.
+
+## pick — destructive
+
+```sh
+pragma-cli fanout pick [<ID>] --member <ID> [--yes]
+```
+
+Merges the chosen attempt into the parent, promotes its scratchpads, stops the sessions,
+and deletes every attempt checkout — the winner included. Without `--yes` the command
+prints every worktree and branch it will delete and requires a typed `yes`. A merge
+conflict parks the fanout with everything intact; a partial cleanup reports the
+survivors instead of pretending it completed.
+
+## Ids and defaults
+
+There is deliberately **no `fanout list`**. Omitted ids resolve from the environment:
+`PRAGMA_FANOUT_ID`, or the fanout owning `PRAGMA_WORKTREE_ID` (as parent or attempt).
+`--member` defaults to `PRAGMA_FANOUT_MEMBER_ID` — inside an attempt, bare
+`fanout pick --member` targets yourself.

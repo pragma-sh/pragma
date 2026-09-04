@@ -1,0 +1,51 @@
+---
+title: Keybindings & command palette
+description: Every default chord, per-project overrides, and the command palette that finds worktrees, tabs, and commands.
+---
+
+## Default keybindings
+
+Overrides live in `~/.pragma/keybindings.json` (global) and
+`.pragma/keybindings.json` (project, wins). Settings → **Keybindings** edits both with a
+record button and a per-action reset.
+
+Shortcuts are shown for your platform.
+
+| Action                    | Shortcut                                                       |
+| ------------------------- | -------------------------------------------------------------- |
+| New terminal tab          | <Keys mac="⌘T" other="Ctrl+T" />                               |
+| New browser tab           | <Keys mac="⌘B" other="Ctrl+B" />                               |
+| Close tab                 | <Keys mac="⌘W" other="Ctrl+W" />                               |
+| Next / previous tab       | <Keys mac="Ctrl+Tab / Ctrl+⇧Tab" other="Alt+Tab / Alt+⇧Tab" /> |
+| Clear terminal            | <Keys mac="⌘K" other="Ctrl+K" />                               |
+| Split horizontal          | <Keys mac="⌘/" other="Ctrl+/" />                               |
+| Split vertical            | <Keys mac="⌘⇧/" other="Ctrl+⇧/" />                             |
+| Command palette           | <Keys mac="⌘P" other="Ctrl+P" />                               |
+| Command mode              | <Keys mac="⌘⇧P" other="Ctrl+⇧P" />                             |
+| Browser reload            | <Keys mac="⌘R" other="Ctrl+R" />                               |
+| Browser dev tools         | <Keys mac="⌘⇧I" other="Ctrl+⇧I" />                             |
+| Copy browser URL          | <Keys mac="⌘⇧C" other="Ctrl+⇧C" />                             |
+| Delete file (editor)      | <Keys mac="⌘⌫" other="Ctrl+Delete" />                          |
+| Scroll terminal to bottom | <Keys mac="⌘End" other="Ctrl+End" />                           |
+| Switch to project N       | <Keys mac="Ctrl+1…9" other="Alt+1…9" />                        |
+| Switch to worktree N      | <Keys mac="⌘1…9" other="Ctrl+1…9" />                           |
+| Switch to tab N           | <Keys mac="Alt+⇧1…9" other="Alt+⇧1…9" />                       |
+
+Number badges appear on sidebar rows and tabs while the modifier is held.
+
+## Command palette
+
+**<Keys mac="⌘P" other="Ctrl+P" />** opens the palette. It searches the selected project's worktrees and
+their tabs immediately; PR discovery and filename/code search hydrate as results arrive.
+Selecting a worktree **scopes** the palette to it (Backspace clears the scope).
+
+Type `>` (or press **<Keys mac="⌘⇧P" other="Ctrl+⇧P" />**) to enter **command mode**: every registered
+command, including navigation, remote access, "Restart Server", "Open Server Logs",
+[automations](/docs/automations), and plugin commands.
+
+The palette also surfaces live state:
+
+- `Ask AI {message}` — the first row when you type a question
+  ([integrated AI](/docs/user-guide/ai)).
+- **Open ports** and **running project scripts** — Enter focuses them, Shift+Enter
+  closes them.

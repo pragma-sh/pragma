@@ -1,0 +1,17 @@
+{
+  "title": "Wiki",
+  "description": "Internal documentation — how Pragma works: processes, protocol, server, bridges, and storage.",
+  "icon": "Network",
+  "root": true,
+  "pages": [
+    "index",
+    "architecture",
+    "protocol",
+    "server",
+    "client-bridges",
+    "core",
+    "gateway",
+    "platform",
+    "disk-layout"
+  ]
+}

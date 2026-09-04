@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { wcagContrast } from "culori";
+import { converter, wcagContrast } from "culori";
 
 import {
   PRAGMA_THEME_PRESET,
@@ -90,6 +90,24 @@ describe("theme presets", () => {
       elevated: "#202020",
       border: "#2b2b2b",
     });
+  });
+
+  it("dims every preset with a scrim no lighter than its own background", () => {
+    const tooLight: string[] = [];
+    for (const preset of THEME_OPTIONS) {
+      const colors = themePresetColors(preset);
+      for (const mode of ["light", "dark"] as const) {
+        const overlay = colors[mode].overlay;
+        if (!overlay) throw new Error(`${preset.name} ${mode} has no overlay`);
+        const scrim = converter("oklch")(overlay);
+        const background = converter("oklch")(colors[mode].background ?? "");
+        if (!scrim || !background) throw new Error(`${preset.name} ${mode} overlay is not a color`);
+        if (scrim.l > background.l) {
+          tooLight.push(`${preset.name} ${mode} ${overlay}`);
+        }
+      }
+    }
+    expect(tooLight).toEqual([]);
   });
 
   it("replaces colors while preserving unrelated theme metadata", () => {

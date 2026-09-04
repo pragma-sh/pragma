@@ -164,6 +164,10 @@ than no guide.
   `~/.pragma/keybindings.json`, overridable per project. Shipped defaults for such settings
   belong in `@pragma/constants` (e.g. `tunnel.defaultCommand`, `agentStatus.*`, `updates.*`)
   so Rust and TS agree, never hard-coded in one language.
+- First-run onboarding is **one** flow (`apps/pragma/src/components/onboarding`), not a
+  stack of setup modals: a progress-bar dialog whose every step is skippable, followed by
+  a `data-tour`-anchored guided tour. Adding first-run behaviour means adding a step there.
+  The Pragma skill it can install globally is `skills/pragma`, compiled into the app.
 - Desktop Settings is a full-frame UI wrapper over global/project `.pragma/config.json`
   and `keybindings.json`; native `Cmd+,` opens it on macOS. Plugins, Keybindings, Themes,
   and Agent Status have both a global and a project scope (project wins); GitHub, AI,
@@ -175,7 +179,10 @@ than no guide.
   See _User themes_ in `apps/pragma/AGENTS.md`.
 - Agent alert clips live in `.pragma/assets/sounds` (home directory for global clips,
   project root for project clips) and are read through the owning host, so a remote
-  project's clips work the same as a local one's.
+  project's clips work the same as a local one's. A starter set (CC0, from
+  `akx/Notifications`) ships in `apps/pragma/src-tauri/resources/sounds` and is copied
+  into the home-directory scope on first launch — only when that directory is missing,
+  so a deleted clip stays deleted.
 - The pull-request footer is text-only — a heading, a tagline, a small "Open worktree"
   link, and the opt-out line. It references **no** hosted image: a raw URL on `main` would
   be a published contract baked into other people's repositories. Keep it that way.

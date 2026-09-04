@@ -1,0 +1,65 @@
+---
+title: Getting started
+description: Scaffold a plugin with create-pragma-plugin, register it in .pragma/config.json, and load it.
+---
+
+## Scaffold
+
+```sh
+bun packages/create-pragma-plugin/dist/cli.js my-plugin \
+  --name my-plugin --pm bun --capabilities ui,commands,agents
+```
+
+Capabilities: `ui` (sidebar tab), `commands`, `agents`. The generator produces a
+self-contained Vite project: a single ESM bundle at `./dist/index.js` (`main` points
+at it), React aliased to `@pragma/plugin/react` / `@pragma/plugin/react-dom` /
+`@pragma/plugin/jsx-runtime`.
+
+```sh
+cd my-plugin
+bun install
+bun run build
+```
+
+`@pragma/…` is a reserved package scope — rename your plugin before publishing.
+
+## Register
+
+Add the plugin to the global `~/.pragma/config.json` or the project's
+`.pragma/config.json`:
+
+```json
+{
+  "plugins": [{ "path": "./my-plugin", "config": { "level": 3 } }]
+}
+```
+
+- `path` — relative paths resolve against the config file's directory; absolute paths
+  (`/…`, `~/…`, `C:\…`) work as given. npm specifiers are not supported for hand-written
+  entries — install official plugins from the
+  [plugin gallery](https://pragma.sh/plugins) or in-app instead.
+- `config` — optional object validated by the plugin's own zod schema. Changing it does
+  not need a reload.
+- There is no `enabled` flag: presence installs, deletion removes.
+
+Restart Pragma (or rely on dev hot-reload, which invalidates a changed bundle by mtime)
+and the plugin's contributions appear. Failures are per-plugin and surface as a toast
+plus a `failed` entry — one broken plugin never takes down the app.
+
+## Manifest fields the host reads
+
+| `package.json` field              | Meaning                                        |
+| --------------------------------- | ---------------------------------------------- |
+| `name`                            | Plugin id (also the storage scope).            |
+| `version`                         | Used for module caching and API compatibility. |
+| `main`                            | Path to the ESM bundle.                        |
+| `pragma.pluginId` / `pragma.main` | Optional explicit overrides.                   |
+
+The manifest is read **without executing your code**.
+
+## API versioning
+
+`definePlugin` stamps the compiled `PLUGIN_API_VERSION` into the definition; the host
+checks compatibility (semver) before importing your bundle. Regenerating against an
+updated `@pragma/plugin` picks up the new stamp — a mismatching bundle is reported, not
+loaded.

@@ -40,6 +40,10 @@ The Rust side parses `values.json` against the schema-generated types at startup
 - `gateway.discoveryFile` / `gateway.tokenHeader` — local HTTP gateway discovery file
   name and bearer auth header. The gateway port is intentionally runtime-assigned and
   must not be added as a constant.
+- `onboarding.*` — first-run flow values: `mediaBaseUrl` for the streamed preview clips,
+  and `skill.id` / `skill.targets[]` (`id`, home-relative `directory`, button `label`) for
+  the global skill directories the skills step installs into. Rust resolves `directory`
+  against the home directory; the frontend only ever sends `id` over IPC.
 - `theme.fileName` / `theme.modes` — location and color-scheme blocks of the optional
   `.pragma/theme.json` color overrides (see `apps/pragma/AGENTS.md`). Only the file
   contract is shared; the token catalog is derived from `apps/pragma/src/index.css`.

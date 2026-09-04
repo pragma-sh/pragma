@@ -1,0 +1,65 @@
+---
+title: Agent board
+description: Turn tasks into cards and take them from prompt to pull request without leaving one screen.
+---
+
+<video src="/media/agent-board.mp4" controls muted loop playsInline />
+
+The agent board is a high-level alternative to managing agents through terminal tabs.
+Toggle it with **Board** in the toolbar (Escape exits, the header shows **Exit agent
+board**). The board is **project-scoped** and replaces the center workspace; the sidebar
+stays.
+
+## Columns
+
+| Column            | Meaning                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| **Drafts**        | Prompts written down but not started. "New draft" lives here. |
+| **In progress**   | Cards whose agent session is running.                         |
+| **Review needed** | Cards whose agent reported done and is waiting on a human.    |
+| **Completed**     | Cards finished — optionally with a PR attached.               |
+
+Column headers carry counts. Moves the board does not allow are rejected with "That move
+isn't available — use the card's actions to advance it."
+
+## Cards
+
+A card shows its **branch name**, its agent icon and model, its prompt (three-line
+clamp), and a live status dot while in progress. Completed cards show a **PR #N** badge,
+**Merged** when the PR lands, or a spinner while the PR is being opened.
+
+- **Drafts** open a draft dialog: edit the markdown prompt, pick agent and model, and
+  choose the branch — an existing one, or type a new name and pick `Create {branch}`.
+- **In progress** cards open the card's worktree and session. A "Back to agent board"
+  control returns you.
+
+## Starting a card
+
+Moving a draft into **In progress** (or **Start** on the card) launches in the
+background: Pragma creates or reuses the worktree — with the same main-behind sync gate
+as the normal dialog — and spawns the agent PTY **without mounting a terminal**. The
+board stays up and usable while the agent works. Open the card later and the full
+scrollback is there.
+
+The in-progress → review-needed transition is **automatic**: it fires when the agent
+reports done.
+
+## Completing a card
+
+Dragging a card into **Completed** (or using the card's action) opens the completion
+dialog with two choices:
+
+- **Commit all and open PR** — commits everything with AI-planned commits, pushes the
+  branch, drafts the pull request, and runs entirely in the background. The card keeps
+  the PR number.
+- **Go to worktree** — marks the card complete and opens the worktree in the normal
+  workspace.
+
+Completed cards are read-only; delete one with the hover **Delete card** button.
+
+## Cards and everything else
+
+The board sits on top of the same worktrees, sessions, and PR views as the rest of the
+app — a card is a view onto a worktree, not a separate system. The completion pipeline is
+the same one behind the AI **Commit & PR** button, and the PR it opens lands in the same
+[Pull Request views](/docs/user-guide/github).

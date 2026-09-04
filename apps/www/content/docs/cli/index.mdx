@@ -1,0 +1,72 @@
+---
+title: "pragma-cli"
+description: The terminal control surface for Pragma — worktrees, tabs, splits, browser, agents, fanouts, and scratchpads.
+---
+
+`pragma-cli` is the control surface agents (and you) use from inside a Pragma terminal.
+It is installed and kept current by the app itself: production builds put it in
+`~/.local/bin/pragma-cli` and Pragma terminals prepend that directory to `PATH` and set
+`PRAGMA_CLI`. There is nothing to install.
+
+```sh
+pragma-cli fanout create "Add token refresh" \
+  --agent claude-code --agent codex --agent opencode
+```
+
+## How it talks to Pragma
+
+- Most commands connect to the host server over its local Unix socket
+  (`PRAGMA_SERVER_SOCKET`), verify the protocol version, and exit. If Pragma is not
+  running you get a distinct, scriptable error: "Pragma is not running. Launch the app
+  first."
+- Commands that default to the current context read the environment Pragma exports:
+  `PRAGMA_WORKTREE_ID`, `PRAGMA_TAB_ID`, `PRAGMA_FANOUT_ID`,
+  `PRAGMA_FANOUT_MEMBER_ID`.
+- Auth on the socket is filesystem permissions — the socket is owner-only, so anything
+  running as your user may speak to it and nothing else can.
+
+## Output formats
+
+| Flag     | Effect                                                    |
+| -------- | --------------------------------------------------------- |
+| _(none)_ | Human output — aligned tables, short lines.               |
+| `--json` | One JSON value per command.                               |
+| `--toon` | TOON (token-oriented notation) — compact, agent-friendly. |
+
+Both structured flags serialize the same data; they are global and mutually exclusive.
+Scripts and agents should prefer `--json` or `--toon`.
+
+## Command groups
+
+<Cards>
+  <Card
+    title="Worktrees"
+    description="list, create, rename, hide/unhide, delete."
+    href="/docs/cli/worktrees"
+  />
+  <Card
+    title="Tabs, splits & browser"
+    description="Open and drive tabs, read scrollback, set split layouts, control the browser."
+    href="/docs/cli/tabs"
+  />
+  <Card
+    title="Agents"
+    description="Status reporting, questions and approvals, session names, and agent verify."
+    href="/docs/cli/agents"
+  />
+  <Card
+    title="Fanout"
+    description="One prompt, several attempts: create, show, read, send, retry, cancel, pick."
+    href="/docs/cli/fanout"
+  />
+  <Card
+    title="Scratchpad"
+    description="Publish managed MDX documents from a terminal."
+    href="/docs/cli/scratchpad"
+  />
+</Cards>
+
+<Callout title="Prefer the SDK for long-lived code">
+  The CLI is one-shot: connect, act, exit. For anything long-running — watchers, dashboards,
+  integrations — use [@pragma/sdk](/docs/sdk), which speaks HTTP to the gateway instead.
+</Callout>

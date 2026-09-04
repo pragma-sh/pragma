@@ -1,0 +1,40 @@
+---
+title: Platform
+description: pragma-platform — the six OS seams and the rules that keep platform bugs out of call sites.
+---
+
+`crates/pragma-platform` owns every OS difference. The rule: a platform difference is a
+**missing implementation that returns an error naming it** — never a bare
+`#[cfg(unix)]` at a call site with a silently-empty `#[cfg(not(unix))]` twin. That
+pattern is how a security guarantee once quietly disappeared (a GitHub token written
+world-readable on Windows), and the crate exists so it cannot happen again.
+
+## The seams
+
+| Module    | Unix                           | Windows                                         | What it owns                                                                                                                                                                                           |
+| --------- | ------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ipc`     | `std::os::unix::net` (AF_UNIX) | `uds_windows` (AF_UNIX, Win10 1803+)            | The local socket: bind with owner-restricted perms, connect, shutdown. Named pipes were rejected: they lack read timeouts and socket shutdown, which the wake-a-blocked-reader design depends on.      |
+| `path`    | `std::fs::canonicalize`        | same, then **strip the `\\?\` verbatim prefix** | Canonical paths external programs accept; `home_dir`. Verbatim paths make git refuse to work and break prefix comparisons.                                                                             |
+| `perms`   | `chmod 0600 / 0700`            | `icacls /inheritance:r /grant:r <user>:(F)`     | Owner-only files and directories; `create_private_file` restricts the _empty_ file before contents exist.                                                                                              |
+| `process` | `sysinfo`, `kill`, `pkill`     | `sysinfo`, `taskkill`, `tasklist`               | Kill, **kill-tree**, liveness (verified by process name), the process table, and windowless child spawning (`CREATE_NO_WINDOW` — a console child of a GUI process pops a console window without it).   |
+| `shell`   | `$SHELL` else platform default | probe `pwsh.exe` then `powershell.exe`          | Which shell a PTY launches **and its interactive args**: PowerShell takes `-NoLogo`, never the POSIX `-l`; `resolve_profile_launch` maps a `ShellProfile` to a native launch or `wsl.exe -d <distro>`. |
+| `wsl`     | no distributions, ever         | parse `wsl.exe --list --verbose`                | Distribution listing — lives here so a host answers the `wsl` RPC about _itself_ (an SSH host must report its own distros).                                                                            |
+
+## The call-site rules these enable
+
+- Canonicalize with `pragma_platform::path::canonicalize`, never `std::fs`'s.
+- Spawn with `pragma_platform::process::command` (or `process_env::command`, which wraps
+  it), never a bare `Command::new`.
+- Name executables with `pragma_client::executable_name` — it appends `EXE_SUFFIX`, so
+  `pragma-cli` becomes `pragma-cli.exe` on Windows. This applies to paths you _write_,
+  not just ones you read.
+
+## Two rules that are not seams but bite the same way
+
+- **A path is not a string.** Compare with `Path` (`/` and `\` are equivalent
+  separators on Windows), never assert on a `"dir/file"` suffix, and test absolutes
+  with `Path::is_absolute` — `starts_with('/')` silently rejects every Windows form.
+- **Clear the read timeout on a long-lived stream.** `configure_stream` sets a 5 s
+  timeout for request mode; leave it on an idle subscription and every quiet 5 s looks
+  like a drop, so the client warns and reconnects forever. Call `set_read_timeout(None)`
+  once the response arrives (`open_event_stream` does exactly this).

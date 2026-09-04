@@ -1,6 +1,8 @@
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
 
+import { Keys } from "@/components/keys";
+
 /**
  * MDX component map for docs pages; extend this to expose custom components to authors.
  *
@@ -11,6 +13,7 @@ import type { MDXComponents } from "mdx/types";
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
+    Keys,
     ...components,
   } as MDXComponents;
 }

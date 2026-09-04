@@ -1,5 +1,5 @@
 import type { ThemeFile, ThemeOverrides } from "@/lib/theme";
-import { cssColorToRgba, rgbaToOklch } from "@/lib/theme-color";
+import { cssColorToRgba, type Rgba, rgbaToOklch } from "@/lib/theme-color";
 import { THEME_DEFAULTS, THEME_TOKENS, type ThemeMode } from "@/lib/theme-tokens";
 
 interface ThemePalette {
@@ -590,7 +590,32 @@ export const THEME_OPTIONS: readonly ThemePreset[] = [PRAGMA_THEME_PRESET, ...TH
 
 const presetColorsCache = new WeakMap<ThemePreset, Record<ThemeMode, ThemeOverrides>>();
 
-function paletteOverrides(value: ThemePalette): ThemeOverrides {
+/**
+ * A modal scrim has to darken the app in both modes. Deriving it from
+ * `foreground` paints a *white* wash over a dark preset — Vercel's dark
+ * foreground is `#ffffff` — so the scrim is built from whichever of the
+ * palette's canvas and foreground is darker, at the alpha the shipped
+ * defaults in `index.css` use for that mode.
+ */
+function overlayColor(value: ThemePalette, mode: ThemeMode): string {
+  const alpha = mode === "dark" ? 0.62 : 0.4;
+  const candidates = [value.canvas, value.foreground]
+    .map((color) => cssColorToRgba(color))
+    .filter((rgba): rgba is Rgba => rgba !== null);
+  const darkest = candidates.reduce<Rgba | null>(
+    (best, rgba) => (best === null || luminance(rgba) < luminance(best) ? rgba : best),
+    null,
+  );
+  const [r, g, b] = darkest ?? [0, 0, 0, 1];
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Relative brightness of an sRGB tuple, used only to order two candidates. */
+function luminance([r, g, b]: Rgba): number {
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function paletteOverrides(value: ThemePalette, mode: ThemeMode): ThemeOverrides {
   return {
     canvas: value.canvas,
     background: value.background,
@@ -613,7 +638,7 @@ function paletteOverrides(value: ThemePalette): ThemeOverrides {
     input: value.input,
     ring: value.primary,
     selection: value.selection,
-    overlay: `${value.foreground}66`,
+    overlay: overlayColor(value, mode),
     destructive: value.destructive,
     "destructive-foreground": value.destructiveForeground,
     success: value.success,
@@ -657,8 +682,8 @@ export function themePresetColors(preset: ThemePreset): Record<ThemeMode, ThemeO
         dark: Object.fromEntries(THEME_TOKENS.map((token) => [token, THEME_DEFAULTS.dark[token]])),
       }
     : {
-        light: oklchOverrides(paletteOverrides(preset.light)),
-        dark: oklchOverrides(paletteOverrides(preset.dark)),
+        light: oklchOverrides(paletteOverrides(preset.light, "light")),
+        dark: oklchOverrides(paletteOverrides(preset.dark, "dark")),
       };
   presetColorsCache.set(preset, colors);
   return colors;

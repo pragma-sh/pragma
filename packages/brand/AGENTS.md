@@ -15,7 +15,7 @@ treatment directly.
 | ----------------- | ------------------------------------------------------------------------------------- |
 | `src/mark.ts`     | Geometry in a 1024x1024 design space; `markMarkup`, `placedMark`                      |
 | `src/palettes.ts` | `ON_DARK`, `ON_LIGHT`, `ON_TRANSPARENT`, `TINTED`, `MONOCHROME`, plate colours, `INK` |
-| `src/favicon.ts`  | Shared compact favicon layer and theme-aware SVG document                            |
+| `src/favicon.ts`  | Shared compact favicon layer and theme-aware SVG document                             |
 
 ## What belongs here, and what does not
 

@@ -14,7 +14,6 @@ use crate::error::{AppError, AppResult};
 use crate::process_env;
 use crate::pty::PtyClient;
 
-const ONBOARDING_DISMISSED_KEY: &str = "plugins.installOnboardingDismissed";
 const AGENT_PROMPT_DISMISSED_KEY: &str = "plugins.agentCommandPromptDismissed";
 const MAX_COMMAND_OUTPUT_BYTES: usize = 16 * 1024;
 
@@ -356,19 +355,6 @@ pub fn available_plugin_binaries(binaries: Vec<String>) -> AppResult<Vec<String>
         .filter(|binary| executable.is_match(binary))
         .filter(|binary| process_env::find_executable(binary).is_some())
         .collect())
-}
-
-#[tauri::command]
-pub fn plugin_onboarding_dismissed(db: State<'_, Db>) -> AppResult<bool> {
-    Ok(db.setting(ONBOARDING_DISMISSED_KEY)?.as_deref() == Some("true"))
-}
-
-#[tauri::command]
-pub fn set_plugin_onboarding_dismissed(db: State<'_, Db>, dismissed: bool) -> AppResult<()> {
-    db.set_setting(
-        ONBOARDING_DISMISSED_KEY,
-        if dismissed { "true" } else { "false" },
-    )
 }
 
 #[tauri::command]

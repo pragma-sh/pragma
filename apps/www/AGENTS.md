@@ -34,12 +34,12 @@ but a bare `next dev`/`tsc` in a clean checkout will fail until you run `fumadoc
 apps/www/
 ├── DESIGN.md                # the marketing design system — tokens + rules, edited before the CSS
 ├── content/docs/            # MDX documentation pages (the /docs sidebar mirrors this tree)
-├── proxy.ts                 # serves raw markdown for `.md` URLs and markdown-preferring clients
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
 │   ├── media/               # product screenshots and self-hosted screen recordings
 │   └── pragma-app.png       # hero screenshot of the desktop app
 └── src/
+    ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
     │   ├── (home)/          # marketing route group (landing, plugins, privacy, deep-link
     │   │                    # forwarders /open + /install-plugin, plugins/[...package]) in
@@ -281,9 +281,26 @@ apps/www/
   analytics and hosted services as _disclosed-before-they-launch_, so adding either means
   editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
   Support is handled through GitHub issues, so there is no support page here.
-- **Docs content is a placeholder.** Pragma is still being implemented; `content/docs`
-  holds one index page so the route, the search index, and the llms.txt output have
-  something to serve. Add real pages as features land.
+- **Docs content mirrors the product's six audiences.** `content/docs/` holds
+  `user-guide/`, `sdk/`, `cli/`, `automations/`, `plugins/`, and `wiki/` — each with its
+  own `meta.json` and an `index.mdx` landing page. A new page joins its folder's
+  `meta.json` `pages` array or it does not appear in the sidebar. The root
+  `content/docs/meta.json` pins the folder order (User guide first, then the rest); a new
+  root folder must be added to it or it is not shown. `sdk`, `cli`, `automations`,
+  `plugins`, and `wiki` are `root: true` sidebar sections — navigating into one collapses
+  the sidebar to just that section. `user-guide` is deliberately a plain, `defaultOpen`
+  folder instead, so its pages stay visible alongside every other section. Write from the source, not from memory: UI labels, command flags, and API
+  names come from the components and crates they describe.
+- **Keyboard shortcuts are platform-aware — never write `⌘X / Ctrl+X` in prose.** Use
+  the `<Keys mac="⌘K" other="Ctrl+K" />` component (registered in `components/mdx.tsx`).
+  Both variants are server-rendered; the docs layout sniffs the user agent into
+  `data-platform` on `<html>` before paint and CSS hides the one that does not apply, so
+  `<Keys>` stays a server component and no-JS readers see both. The keybindings table
+  uses it too — do not reintroduce macOS/other columns.
+- **MDX pitfalls.** `{...}` in prose is a JSX expression — put literal brace text
+  (dialog titles like `Keep {attempt}?`, templates like `{agent}`) in backticks.
+  Build (`bun run --filter www build`) prerenders every page and is the only check that
+  catches this; `tsc` alone does not.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
