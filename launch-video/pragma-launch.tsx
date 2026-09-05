@@ -81,17 +81,19 @@ export const PRAGMA_LAUNCH_DURATION_IN_FRAMES =
   frames.github +
   frames.close;
 
-function CornerAgentChips() {
+function CornerAgentChips({ animate = true }: { animate?: boolean }) {
   const frame = useCurrentFrame();
 
   return (
     <AbsoluteFill style={{ pointerEvents: "none" }}>
       {cornerAgents.map((agent, index) => {
-        const entrance = interpolate(frame, [index * 3, index * 3 + 18], [0, 1], {
-          extrapolateLeft: "clamp",
-          extrapolateRight: "clamp",
-          easing: Easing.out(Easing.cubic),
-        });
+        const entrance = animate
+          ? interpolate(frame, [index * 3, index * 3 + 18], [0, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+              easing: Easing.out(Easing.cubic),
+            })
+          : 1;
         const floatX = Math.sin((frame + agent.phase) / 24) * 8;
         const floatY = Math.cos((frame + agent.phase) / 21) * 10;
         const turn = agent.rotation + Math.sin((frame + agent.phase) / 30) * 2.5;
@@ -203,8 +205,6 @@ function ProductClip({ src }: { src: string }) {
 }
 
 function Open() {
-  const frame = useCurrentFrame();
-
   return (
     <AbsoluteFill
       style={{
@@ -217,20 +217,8 @@ function Open() {
         textAlign: "center",
       }}
     >
-      <CornerAgentChips />
-      <div
-        style={{
-          opacity: interpolate(frame, [6, 24], [0, 1], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-          }),
-          translate: `0 ${interpolate(frame, [6, 26], [42, 0], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-            easing: Easing.bezier(0.16, 1, 0.3, 1),
-          })}px`,
-        }}
-      >
+      <CornerAgentChips animate={false} />
+      <div>
         <div
           style={{
             maxWidth: 1680,
