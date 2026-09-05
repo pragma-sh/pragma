@@ -24,7 +24,7 @@
     "plugins:validate": "bun run --filter @pragma/plugin-registry validate",
     "video:music": "bun launch-video/generate-lofi.ts",
     "video:studio": "remotion studio launch-video/index.ts",
-    "video:render": "remotion render launch-video/index.ts PragmaLaunch .github/assets/pragma-launch.mp4 && bun launch-video/sync-public.ts",
+    "video:render": "remotion render launch-video/index.ts PragmaLaunch .github/assets/pragma-launch.mp4",
     "video:typecheck": "tsc -p launch-video/tsconfig.json --noEmit",
     "generate": "turbo run generate",
     "lint": "oxlint",
