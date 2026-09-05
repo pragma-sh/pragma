@@ -38,7 +38,7 @@ apps/www/
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
 │   ├── media/               # product screenshots and self-hosted screen recordings
-│   └── pragma-app.png       # hero screenshot of the desktop app
+│   └── pragma-app.png       # poster and reflected still for the hero launch film
 └── src/
     ├── app/
     │   ├── (home)/          # marketing route group (landing, plugins, privacy) in the `.artboard` layout
@@ -124,7 +124,8 @@ apps/www/
 - **One per-section backdrop.** The fanout scene moved behind its section at low opacity when
   its media column became a video slot. It is the sole exception. Do not bring back the
   `dots`/`lines`/`hatch` patterns or add backdrop variants to other sections.
-- **The hero screenshot reflects into the section below it.** The reflection is a second
+- **The hero launch film reflects into the section below it.** The reflection uses its
+  static poster so the page does not decode the film twice. It is a second
   `<Image>` anchored to the top of a window 46% of the shot's height and flipped about
   its own centre, which lands the shot's bottom edge on the seam. Three things have to
   hold together for it to cross the boundary: the hero has **no** `overflow-hidden` (it

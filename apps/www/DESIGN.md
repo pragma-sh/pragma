@@ -359,7 +359,7 @@ canvas with a single glowing spotlight card is the page signature.
 ### Grid & Container
 
 - Max content width is 1152px (`max-w-6xl`) with side gutters that scale toward
-  `{spacing.xl}` on desktop; the hero screenshot is allowed a wider 1225px well.
+  `{spacing.xl}` on desktop; the hero launch film is allowed a wider 1225px well.
 - The feature run is one 12-column grid: copy in 5 columns, media in 7, and `flip` is the
   only variation between sections.
 - The bento grid is hand-packed to 12 columns per row and collapses to 1-up below 640px.
@@ -377,14 +377,14 @@ band of charcoal cards, then back to canvas — like cuts in a dark film.
 | -------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- |
 | 0 (flat)       | No shadow, no border                                                          | Canvas-mounted display type, feature points, footer |
 | 1 (charcoal)   | `{colors.surface-1}` lift on canvas                                           | Cards, media tiles, secondary buttons               |
-| 2 (light-edge) | `rgba(255,255,255,0.10)` 0.5px top edge + `rgba(0,0,0,0.25)` 0 10px 30px drop | Floating hero screenshot, terminal card             |
+| 2 (light-edge) | `rgba(255,255,255,0.10)` 0.5px top edge + `rgba(0,0,0,0.25)` 0 10px 30px drop | Floating hero launch film, terminal card            |
 | 3 (selected)   | `rgba(0,153,255,0.15)` 0 0 0 1px ring                                         | Focused inputs, selected option                     |
 
 ### Decorative Depth
 
 - **Gradient spotlight cards** are the dominant depth device — color saturation against
   black canvas substitutes for shadow-driven elevation.
-- **The hero screenshot** sits in a `{colors.surface-1}` frame with the level-2 treatment
+- **The hero launch film** sits in a `{colors.surface-1}` frame with the level-2 treatment
   and reflects into the section below it.
 - **The blue ring** is the only chromatic depth signal, and only for focus/selection.
 
