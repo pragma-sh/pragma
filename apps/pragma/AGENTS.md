@@ -285,7 +285,8 @@ paths are evaluated on the remote host, not the desktop client. The
 the setup-skip flag persists in the `settings` table (`github.setupDismissed`).
 
 Auth state is held by `state/github-context.tsx` (`useGitHub`) and gates both the
-full-screen `GitHubSetupModal` and the **Pull Request** right-sidebar subtab. The PR
+GitHub step of the first-run onboarding flow and the **Pull Request** right-sidebar
+subtab. The PR
 subtab (`right-sidebar/PullRequestTab`) resolves logged-out → create
 (`CreatePullRequestView`, TipTap markdown editor) → view (`ViewPullRequestView`). A PR
 view keeps each check-run/status name and state; its merge card shows passed/failed/pending
@@ -479,6 +480,48 @@ only while this explicit setting is true. Encode/validate helpers live in
 `gateway-devices.json`, which the gateway updates from authenticated mobile identity
 headers, and exposes supported global/project `.pragma/config.json` values through forms.
 
+## First-run onboarding
+
+One flow, not a stack of modals. `components/onboarding/OnboardingModal.tsx` is the
+single first-run surface: a non-dismissible dialog with a progress bar whose steps are
+welcome → GitHub → AI provider → agent plugins → the Pragma skill → theme → add a
+project. It replaced the separate `GitHubSetupModal`, `AiSetupModal`, and
+`AgentPluginSetupModal` — **do not reintroduce a second first-run modal**; add a step.
+
+- **Every step is skippable**, and skipping still records that step's own flag
+  (`github.setupDismissed`, `ai.setupDismissed`), so a skipped step does not come back
+  through another door.
+- **Steps reuse the real surfaces** — `GitHubAuthOptions`, `AiAuthOptions`, the theme
+  `ThemePresetGrid` that Settings → Theme also renders, and
+  `useRecommendedAgentPlugins` (the agent-CLI probe the old modal owned). A step is
+  copy plus layout, never a second implementation of the thing it configures.
+- **Preview clips stream** from `constants.onboarding.mediaBaseUrl` (the marketing
+  site's `public/media`) instead of being bundled: the two clips are ~12 MB and play
+  once. `PreviewVideo` falls back to a placeholder when the site is unreachable.
+- **The skill step writes to disk.** `install_pragma_skill` (Rust, `onboarding.rs`)
+  extracts the `skills/pragma` tree — compiled in with `include_dir!`, so dev and every
+  installer behave the same — into `~/.agents/skills/pragma` and/or
+  `~/.claude/skills/pragma`, per `constants.onboarding.skill.targets`.
+- **The AI step's OAuth login must survive re-renders and StrictMode.** `ai_login`
+  spawns one `pragma-ai login` sidecar that binds a fixed loopback callback port. An
+  effect that restarts on a fresh `onSuccess` identity, or StrictMode's mount →
+  cleanup → mount, then races a second spawn against the first: the orphan keeps the
+  port and every later attempt dies with `Failed to start server. Is port <n> in use?`
+  and never opens a browser. `AiAuthOptions` therefore reads its callbacks through a
+  ref (effect deps are the provider alone), and `ai_login` spawns **while holding the
+  registry lock**, replacing any live session for the same id, so a cancel can never
+  land between spawn and insert.
+- **Completion lives in the settings table** (`onboarding.completed`,
+  `onboarding.tourCompleted`) behind `state/onboarding-context.tsx`. An unreachable
+  backend degrades to "already onboarded" rather than gating the app.
+
+Afterwards `components/onboarding/WorkspaceTour.tsx` runs a four-stop guided tour on the
+generic `components/ui/tour.tsx` primitive (spotlight cutout + card, Escape skips). Its
+anchors are `data-tour` attributes named by `TOUR_ANCHOR`, so restyling or rewording a
+control cannot break the tour; a step whose anchor is missing is skipped rather than
+stranding the tour. The tour waits for a project, because three of its four anchors only
+exist then. Settings → Other has a **Replay the tutorial** button that clears both flags.
+
 ## Settings sections
 
 `components/settings/SettingsWorkspace.tsx` is the shell: a scope toggle (Global /
@@ -572,6 +615,14 @@ in the webview (only it can decode audio) and byte-capped on the host. `lib/agen
 resolves the effective settings (project over global over `CONSTANTS.agentStatus`),
 caches them until `pragma:config-changed`, and `agent-alert.ts` plays the chosen clip —
 falling back to the built-in chime — before deciding whether to raise a notification.
+
+The clips a fresh install starts with are bundled, not synthesized:
+`src-tauri/resources/sounds/*.wav` (CC0, provenance in that directory's `CREDITS.md`) are
+copied into the home-directory sounds directory by `agent_sounds::seed_bundled_sounds` at
+startup. It runs **only when that directory does not exist**, so an update never
+resurrects a clip the user deleted or overwrites one they edited. They are 16-bit PCM WAV
+rather than Ogg on purpose: `decodeAudioData` — the playback path — has no Ogg Vorbis
+support in WKWebView.
 
 ## Workspace mirror publisher
 
@@ -731,8 +782,9 @@ route through the owning host via `pragma-core` RPC.
 ## Native menubar + Settings / Troubleshooting menus
 
 Built once in `src-tauri/src/lib.rs` `install_menu` — `Menu::default(app)`, native
-**Settings…** (`⌘,` on macOS) opening a full-frame workspace with a back button, plus a
-`Troubleshooting` submenu with **Restart Server** and **Open Server Logs**. Menu clicks
+**Settings…** (`⌘,` on macOS) opening a full-frame workspace with a back button,
+**Guided Tour** (replays the workspace tour only — never the first-run tutorial — via
+`restartTour` on `onboarding-context`), plus a `Troubleshooting` submenu with **Restart Server** and **Open Server Logs**. Menu clicks
 are forwarded as the `pragma:menu` Tauri event; `workspace-context` handles them via
 `onMenuAction` in `lib/tauri.ts`. **Restart Server** calls `restart_daemon`
 (`PtyClient::restart` = kill + respawn + confirm reachable) with a `sonner` toast.
@@ -745,8 +797,9 @@ state so `set_menu_accelerators_enabled` can suspend them while Settings records
 
 Workspace accelerators (Settings, New Terminal Tab, Close Tab, Command Palette, Command
 Mode) **must** be real menu items — the webview otherwise swallows chords like `⌘T`/`⌃T`.
-`install_workspace_menu` builds them once, then hands them to `install_macos_workspace_menu`
-or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
+`install_workspace_menu` builds them once into a `WorkspaceMenuItems` struct (one struct,
+not a growing argument list — clippy's `too_many_arguments` caps it at seven), then hands
+that to `install_macos_workspace_menu` or `install_non_macos_workspace_menu`; the latter covers **both Linux and Windows**, which
 share Ctrl-based chords. Both non-macOS platforms append to the `window` submenu because
 it is the only one `Menu::default` gives a stable id — Windows' File submenu gets a
 generated id, so `menu.get("file")` can never resolve it. Keep the non-macOS arm gated

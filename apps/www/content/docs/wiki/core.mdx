@@ -1,0 +1,76 @@
+---
+title: Core
+description: pragma-core — pure host business logic for git, filesystem, exec, scratchpads, and fanout rules.
+---
+
+`crates/pragma-core` is the host's business-logic boundary: synchronous, no Tauri, no
+I/O surprises. `Core::handle_rpc` implements exactly four RPC domains — `filesystem`,
+`git`, `exec`, `scratchpads` — and returns `UnsupportedMethod` for everything else
+(server- or desktop-owned). `rpc.rs` maps `CoreError` onto protocol error codes.
+
+## git (git.rs)
+
+The worktree engine. Highlights:
+
+- **CreateWorktree** — `git worktree add -b <branch> <path>` from the parent, or
+  `sourceBranch` to materialize an existing `origin` branch as a tracking worktree
+  (fetch refspec + `--track`) — how stacked PR layers get local worktrees.
+- **CreateWorktreeAt** — `git worktree add -b … <commit>` with commit validation:
+  fanout attempts all branch from one captured base so their diffs are comparable.
+- **Worktree location** — `<project>/.pragma/worktrees/<id>`; headless/fanout checkouts
+  use uuid names.
+- **Git exclusions** — `ensure_pragma_excluded` writes `.pragma/worktrees/` and
+  `.pragma/scratchpads/` into the repo's real `$GIT_DIR/info/exclude` (asking git for
+  the common dir rather than assuming `.git`), migrates a legacy broad `.pragma/`
+  entry, and is idempotent.
+- **Inspect/stage/commit/discard** — worktree changes (merge-base diffing), staging
+  helpers, commits, merge-to-parent, PR file diffs, GitHub push/pull/sync/abort
+  helpers, branch deletion, dirtiness.
+- Every git subprocess goes through `process_env::git()` so a GUI-launched host finds
+  `git` on `PATH`.
+
+## filesystem (fs.rs)
+
+`ListDir, CreateFile, CreateFolder, PathExists, HomeDir, ReadFile, WriteFile,
+ListFileNames, ReadBytes, ReadBytesRange, WriteBytes, Rename, Delete, PaletteSearch`.
+
+- **Containment**: every path resolves through `resolve_in_worktree`, canonicalizing
+  both sides with `pragma_platform::path::canonicalize` (never `std`'s, whose Windows
+  `\\?\` verbatim output breaks git and prefix checks).
+- Binary reads are chunked (4 MiB) with caller-driven paging — how the PDF viewer
+  streams.
+- `PaletteSearch` is the command palette's file finder: bounded filename + smart-case
+  literal search over `git ls-files` output, with deadlines and cancellation.
+
+## exec (exec.rs)
+
+Bounded, concurrent command execution for setup/teardown scripts and the CLI's
+`tab exec`. Setup/teardown runs get `PRAGMA_WORKTREE_PATH`, `PRAGMA_PROJECT_PATH`, and
+`PRAGMA_WORKTREE_ID` in their environment.
+
+## scratchpads (scratchpads.rs)
+
+The host-side parser the desktop, gateway, and CLI all agree on:
+
+- Lists managed MDX documents under `.pragma/scratchpads/` — files **without** the
+  managed `pragmaScratchpad` frontmatter line (or with an unknown version) are skipped,
+  which is exactly why hand-written files are invisible.
+- `comments_path(file)` is the sibling `<file>.mdx.comments.json`.
+- `detach_agent` nulls the attachment fields — used by fanout promotion before attempt
+  worktrees are deleted.
+
+## fanout (fanout.rs)
+
+The pure rules the server's state machine calls: `resolve_selector`
+(`agent[.model[.reasoning]]` against the catalog), `attempt_branch`
+(`fanout/<fanoutShortId>/<memberShortId>`), `short_id`, `derive_title` (first prompt
+line), `aggregate_status` (roll-up that never overrides finalize-owned states),
+`is_active`, and `promotion_path` (scratchpad promotion naming on collision).
+
+## Project config resolution
+
+`.pragma/config.json` reads are **tolerant by design** — absent, malformed, or typo'd
+files fall back to defaults rather than failing a session. Terminal fields
+(`terminal.shell`, `backend`, `distro`, `hiddenDistros`) resolve per field: project
+scope first, then the home file, so a project that pins only `shell` still inherits the
+global `backend`.

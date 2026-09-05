@@ -1,0 +1,66 @@
+---
+title: Tabs, splits & browser
+description: pragma-cli tab, split, and browser — open tabs, read scrollback, set layouts, and drive the embedded browser.
+---
+
+## tab
+
+```
+pragma-cli tab <command>
+```
+
+| Command                                                                   | What it does                                                 |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `tab list [--worktree <ID>] [--all]`                                      | List the worktree's tabs.                                    |
+| `tab read <tab> [--lines N] [--offset N] [--bytes N] [--plain] [--watch]` | Read scrollback.                                             |
+| `tab open [--worktree <ID>] --kind <kind> [...targets] [--title <T>]`     | Open a new tab.                                              |
+| `tab close <tab>`                                                         | Close a tab.                                                 |
+| `tab rename <tab> <title>`                                                | Rename a tab.                                                |
+| `tab exec [--worktree <ID>] -- <command...>`                              | Run a command **without** a tab; capture stdout/stderr/exit. |
+
+`tab open --kind` accepts `terminal`, `browser`, `editor`, `diff`, `log`, `pr-review`,
+with `--command`, `--url`, `--file`, and `--diff-side <committed|staged|unstaged|
+worktree>` filling in the target.
+
+`tab read` streams the session's scrollback: `--lines` (default 1000) and `--bytes` cap
+the read, `--plain` strips ANSI styling, and `--watch` follows the output live. Reads
+talk to the server directly, so they work **while the app is closed**.
+
+`tab exec` is the scripting escape hatch — run a command in the worktree's environment
+and get structured output back, no terminal created.
+
+## split
+
+```
+pragma-cli split <command>
+```
+
+| Command                                                                               | What it does                                  |
+| ------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `split set --worktree <ID> <JSON\|->`                                                 | Set a recursive split layout (JSON or stdin). |
+| `split add-tab --worktree <ID> --side <left\|right\|top\|bottom> --kind <kind> [...]` | Add a tab into a split side.                  |
+| `split clear --worktree <ID>`                                                         | Reset to a single pane.                       |
+
+Splits persist per worktree, so a script can stage a worktree's whole layout — dev
+server left, browser right — before you even look at it.
+
+## browser
+
+```
+pragma-cli browser <command>
+```
+
+Drive a browser tab:
+
+| Command                                                     | What it does                                |
+| ----------------------------------------------------------- | ------------------------------------------- |
+| `browser navigate <tab> <url>`                              | Go to a URL.                                |
+| `browser back <tab>` / `forward <tab>` / `reload <tab>`     | History.                                    |
+| `browser scroll <tab> [--x N] [--y N] [--to top\|bottom]`   | Scroll the page.                            |
+| `browser focus <tab> <selector>` / `click <tab> <selector>` | Interact by CSS selector.                   |
+| `browser screenshot <tab> [--out FILE]`                     | Capture the pane.                           |
+| `browser exec <tab> <js\|->`                                | Evaluate JavaScript (`-` reads from stdin). |
+| `browser close <tab>`                                       | Close the tab.                              |
+
+Together with `tab read`, this is enough for an agent to verify its own web work: make a
+change, reload, screenshot, read the console-visible result.

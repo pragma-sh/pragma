@@ -2,8 +2,8 @@
 
 Public website for Pragma: a Next.js (App Router) app serving marketing pages at `/`,
 plugin gallery at `/plugins`, and documentation at `/docs`. It is **not** part of desktop
-app. Its only `@pragma/*` dependency is data-only `@pragma/plugin-registry`; nothing in
-desktop app may import from website.
+app. Its `@pragma/*` dependencies are data-only `@pragma/plugin-registry` and render-only
+`@pragma/brand`; nothing in desktop app may import from website.
 
 ## Stack
 
@@ -34,14 +34,16 @@ but a bare `next dev`/`tsc` in a clean checkout will fail until you run `fumadoc
 apps/www/
 ├── DESIGN.md                # the marketing design system — tokens + rules, edited before the CSS
 ├── content/docs/            # MDX documentation pages (the /docs sidebar mirrors this tree)
-├── proxy.ts                 # serves raw markdown for `.md` URLs and markdown-preferring clients
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
 │   ├── media/               # product screenshots and self-hosted screen recordings
 │   └── pragma-app.png       # poster and reflected still for the hero launch film
 └── src/
+    ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, plugins, privacy) in the `.artboard` layout
+    │   ├── (home)/          # marketing route group (landing, plugins, privacy, deep-link
+    │   │                    # forwarders /open + /install-plugin, plugins/[...package]) in
+    │   │                    # the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
     │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
@@ -51,6 +53,11 @@ apps/www/
     ├── components/
     │   ├── ui/              # shadcn primitives — do not hand-edit, re-add via the CLI
     │   ├── mdx.tsx          # MDX component map exposed to docs authors
+    │   ├── site-navbar.tsx  # shared floating marketing/docs nav + docs mobile sidebar trigger
+    │   ├── brand-favicon.tsx # compact mark rendered from @pragma/brand geometry
+    │   ├── github-mark.tsx  # shared GitHub brand glyph
+    │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
+    │   ├── deep-link-forward.tsx  # one pragma:// hand-off page (auto-redirect + fallback pills)
     │   └── home/            # landing page sections
     │       ├── agents.ts            # the shipped agent integrations (id, name, mark, tint)
     │       ├── agent-chip-field.tsx # react-three-fiber canvas of floating agent chips
@@ -64,7 +71,8 @@ apps/www/
         ├── css-color.ts     # resolves a CSS token to hex so three.js can use the palette
         ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
-        ├── plugins.ts       # official-lock fetch, validation, install deep links
+        ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
+        ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
         ├── updates.ts       # Desktop check API: evaluate `release.json`, GitHub fetch, dev fixture
         ├── source.ts        # Fumadocs content source + LLM/OG/markdown URL helpers
         └── layout.shared.tsx # nav options shared by the home and docs layouts
@@ -85,6 +93,23 @@ apps/www/
   token in a component — a literal hex or a hand-mixed grey in a `className` is a bug.
 - **Route strings live in `lib/shared.ts`.** `/docs`, `/og/docs`, and `/llms.mdx/docs` are
   referenced by the source loader, the proxy, and the page components — change them there.
+- **`/{action}` pages forward deep links; they do not parse them.** GitHub's markdown
+  sanitizer keeps only `http`/`https` hrefs, so every link that must survive a PR body
+  points at a web route (`/open?...`, `/install-plugin?...`) whose `DeepLinkForward`
+  component relays the query verbatim to `pragma://{action}` — once automatically on
+  mount, and again through the primary pill anchor for browsers that suppress programmatic
+  external-protocol launches. The action is a constant in the route file, never user
+  input; add a new action by adding a route, not by widening a parser. The desktop's
+  parser (`apps/pragma/src/lib/deep-link.ts`) owns what the params mean.
+- **The plugin gallery consumes the official lock, and the detail page degrades with it.**
+  `/plugins/[...package]` joins the segments back into the npm package identity and
+  renders whatever the lock carries: `longDescription` falls back to `description`, the
+  "View on npm" button is derived from the package identity alone (`pluginNpmUrl` — every
+  official entry is an npm release), and screenshots render only when the manifest ships
+  more than the header logo. Manifest changes only reach the remote lock when the packages
+  are republished (`plugins.yml` publish → refresh-lock); never commit `lock:local`
+  output — its tarball integrity hashes describe locally-packed bytes, not the npm
+  releases the desktop verifies against.
 - **`GET /api/updates` is the desktop check endpoint.** It must not import `@pragma/*`.
   The desktop sends `platform` plus running `ui`/`app`/`server`/`protocol` versions.
   Apply mode (`reload` vs `restart`) comes from `release.json`, never from the query.
@@ -207,10 +232,10 @@ apps/www/
 - **Shadow strength is theme-dependent.** `--shadow-raised`/`--shadow-floating` resolve
   through per-theme `*-value` custom properties, because a drop that reads on a near-black
   surface is a smear on a white one.
-- **Agent marks are copies, not imports.** This app ships no `@pragma/*` dependency, so the
-  official marks in `public/agents/` are copied from each `packages/*-plugin/assets/`
-  directory. Adding an agent plugin means copying its mark here and adding a row to
-  `components/home/agents.ts`.
+- **Agent marks are copies, not imports.** `@pragma/brand` supplies only Pragma's own mark;
+  official agent marks in `public/agents/` remain copies from each
+  `packages/*-plugin/assets/` directory. Adding an agent plugin means copying its mark here
+  and adding a row to `components/home/agents.ts`.
 - **The hero canvas is opt-in per visitor.** `AgentChipField` renders nothing under
   `prefers-reduced-motion`; the page must read correctly without it. Width is not a
   gate — a narrow viewport re-seats the field instead of dropping it.
@@ -244,10 +269,10 @@ apps/www/
   `planField` and `stepChips` by that magnification (`MAX_CHIP_DEPTH`), so the seating
   and the physics work in the box the chips actually land in. Changing a chip's z offset
   means changing `MAX_CHIP_DEPTH` with it.
-- **The nav is `sticky`, not fixed.** It takes its own 56px above the hero and only
-  overlays it once the page scrolls, so the field's top inset is a small breathing gap,
-  not the nav's height. Every pixel of that inset comes straight out of the band's
-  depth.
+- **The shared nav floats at the same viewport position on both surfaces.** Marketing uses
+  `sticky` so its 68px row (12px top offset plus 56px bar) remains in flow above the hero;
+  docs uses `fixed` because a full-width grid child changes Fumadocs' mobile track sizing.
+  Docs adds matching top padding and reserves that offset for its sticky sidebar.
 - **`/privacy` is an App Store submission artifact, not a marketing page.** App Store
   Connect stores its URL for Pragma Go and App Review follows it, which is why it is
   reached by URL and deliberately kept out of the site navigation. Change its route only
@@ -257,9 +282,26 @@ apps/www/
   analytics and hosted services as _disclosed-before-they-launch_, so adding either means
   editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
   Support is handled through GitHub issues, so there is no support page here.
-- **Docs content is a placeholder.** Pragma is still being implemented; `content/docs`
-  holds one index page so the route, the search index, and the llms.txt output have
-  something to serve. Add real pages as features land.
+- **Docs content mirrors the product's six audiences.** `content/docs/` holds
+  `user-guide/`, `sdk/`, `cli/`, `automations/`, `plugins/`, and `wiki/` — each with its
+  own `meta.json` and an `index.mdx` landing page. A new page joins its folder's
+  `meta.json` `pages` array or it does not appear in the sidebar. The root
+  `content/docs/meta.json` pins the folder order (User guide first, then the rest); a new
+  root folder must be added to it or it is not shown. `sdk`, `cli`, `automations`,
+  `plugins`, and `wiki` are `root: true` sidebar sections — navigating into one collapses
+  the sidebar to just that section. `user-guide` is deliberately a plain, `defaultOpen`
+  folder instead, so its pages stay visible alongside every other section. Write from the source, not from memory: UI labels, command flags, and API
+  names come from the components and crates they describe.
+- **Keyboard shortcuts are platform-aware — never write `⌘X / Ctrl+X` in prose.** Use
+  the `<Keys mac="⌘K" other="Ctrl+K" />` component (registered in `components/mdx.tsx`).
+  Both variants are server-rendered; the docs layout sniffs the user agent into
+  `data-platform` on `<html>` before paint and CSS hides the one that does not apply, so
+  `<Keys>` stays a server component and no-JS readers see both. The keybindings table
+  uses it too — do not reintroduce macOS/other columns.
+- **MDX pitfalls.** `{...}` in prose is a JSX expression — put literal brace text
+  (dialog titles like `Keep {attempt}?`, templates like `{agent}`) in backticks.
+  Build (`bun run --filter www build`) prerenders every page and is the only check that
+  catches this; `tsc` alone does not.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

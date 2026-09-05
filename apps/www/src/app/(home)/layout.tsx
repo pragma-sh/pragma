@@ -1,5 +1,6 @@
 import { HomeLayout } from "fumadocs-ui/layouts/home";
 
+import { SiteNavbar } from "@/components/site-navbar";
 import { baseOptions } from "@/lib/layout.shared";
 
 /**
@@ -16,7 +17,11 @@ export default function Layout({ children }: LayoutProps<"/">) {
         No theme switch on the marketing nav: the artboard is dark-only, so the
         control would be a no-op here. `/docs` still offers it.
       */}
-      <HomeLayout {...baseOptions()} themeSwitch={{ enabled: false }}>
+      <HomeLayout
+        {...baseOptions()}
+        slots={{ header: SiteNavbar }}
+        themeSwitch={{ enabled: false }}
+      >
         {children}
       </HomeLayout>
     </div>

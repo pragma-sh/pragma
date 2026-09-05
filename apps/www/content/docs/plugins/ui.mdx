@@ -1,0 +1,105 @@
+---
+title: UI contributions
+description: Sidebar tabs and cards, settings pages, topper items, commands, and web views.
+---
+
+UI contributions live on `definePlugin({ ui: ... })`. Every contribution accepts an
+optional `when?: (ctx) => boolean` render guard, evaluated by the host against your
+config.
+
+## Sidebar tabs
+
+```tsx
+import { definePlugin, defineSidebarTab } from "@pragma/plugin";
+
+export default definePlugin({
+  name: "Review Queue",
+  ui: {
+    sidebarTabs: [
+      defineSidebarTab({
+        id: "queue",
+        title: "Queue",
+        icon: MyIcon, // optional PluginIcon
+        component: Queue, // receives { webViewPayload? }
+        when: (ctx) => ctx.config.enabled,
+      }),
+    ],
+  },
+});
+```
+
+Tabs render in the project sidebar and receive the project context through the
+[hooks](/docs/plugins/runtime).
+
+## Sidebar cards
+
+```tsx
+sidebarCards: [defineSidebarCard({ title: "Alerts", component: AlertsCard })];
+```
+
+Collapsible cards below the worktree tree, next to the built-in Ports and Scratchpads
+cards.
+
+## Settings pages
+
+```tsx
+settingsPages: [
+  defineSettingsPage({ id: "queue", title: "Review Queue", component: QueueSettings }),
+];
+```
+
+Adds a page to Settings, available in both global and project scope like the built-ins.
+
+## Topper items
+
+```tsx
+topper: [defineTopperItem({ align: "right", component: SyncBadge })];
+```
+
+Small components in the top toolbar's left or right cluster (next to the agents menu and
+usage-limits gauge).
+
+## Commands
+
+```tsx
+import { definePlugin, defineCommand } from "@pragma/plugin";
+
+commands: [
+  defineCommand({
+    id: "review-queue.open",
+    title: "Open review queue",
+    defaultBinding: "mod+shift+r",
+    run: (ctx, args) => ctx.notify("Review queue opened"),
+  }),
+];
+```
+
+Commands appear in the [command palette](/docs/user-guide/keybindings#command-palette)
+(command mode) and are bindable like built-ins; `defaultBinding` merges with the user's
+keybinding files. `hidden` keeps a command out of the palette while keeping it callable.
+
+## Web views
+
+```tsx
+import { definePlugin, defineWebView } from "@pragma/plugin";
+
+const webView = defineWebView({ id: "docs", title: "Docs", component: DocsPage });
+
+// open it from a command or hook:
+webView.open({ title: "Project docs", payload: { page: "intro" }, dedupeKey: "docs" });
+```
+
+`openWebView(webViewOrId, options)` opens by handle or unambiguous id. `payload`
+reaches the component via `useWebViewPayload()`, and `dedupeKey` focuses an existing
+instance instead of opening a second one. Web views render as their own tab kind.
+
+## Config
+
+```tsx
+import { z } from "@pragma/plugin"; // the host's zod — never bundle your own
+
+config: z.object({ enabled: z.boolean().default(true), level: z.number().optional() }),
+```
+
+The schema validates every `plugins[].config` entry at load; `usePluginConfig()` and
+`ctx.config` hand your components the parsed value.

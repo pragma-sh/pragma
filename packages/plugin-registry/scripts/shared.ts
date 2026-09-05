@@ -5,6 +5,7 @@ export const packageRoot = resolve(import.meta.dir, "..");
 export interface PluginManifest {
   name: string;
   description: string;
+  longDescription?: string;
   categories?: string[];
   images?: Array<{ url: string; alt: string }>;
   install: { command: string; args?: string[] };
@@ -46,6 +47,11 @@ export function validateManifest(manifest: PluginManifest, context: string): voi
     manifest.images?.some((image) => !image.url.startsWith("https://") || !image.alt.trim()),
     context,
     "images require HTTPS URLs and alt text",
+  );
+  rejectInvalidManifest(
+    manifest.longDescription !== undefined && !manifest.longDescription.trim(),
+    context,
+    "longDescription must not be empty when present",
   );
   rejectInvalidManifest(
     manifest.categories?.includes("agent-plugin") && !manifest.agentBinary,

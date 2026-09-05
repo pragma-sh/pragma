@@ -1,0 +1,97 @@
+---
+title: Agents & watchers
+description: Register a coding agent with defineAgent and drive its status with a watcher.
+---
+
+Registering an agent makes it launchable from Pragma's new-tab menu, agent menus, the
+board, fanouts, and phones — with your icon, your models, and status reporting.
+
+## defineAgent
+
+```tsx
+import { definePlugin, defineAgent } from "@pragma/plugin";
+
+const myAgent = defineAgent({
+  id: "my-agent",
+  name: "My Agent",
+  icon: AgentIcon,
+  iconPath: "./assets/agent.svg", // optional: browser URL, absolute path, or plugin-relative
+  launch: { command: ["my-agent", "chat"] },
+  models: async (ctx) => [{ id: "m-1", name: "Model 1" }],
+  permissionModes: [{ id: "default", name: "Default" }],
+  args: {
+    model: (id) => ["--model", id],
+    reasoning: (id) => ["--reasoning", id],
+    permissionMode: (id) => ["--permission", id],
+  },
+  startupInput: [{ delayMs: 500, data: "/init\r" }],
+  prefillMode: "bracketed", // or "plain"
+  prefillSubmit: "\r",
+  prefillDelayMs: 200,
+  excludeFeatures: ["usageLimits"], // skip matching `agent verify` scenarios
+});
+```
+
+The `args` builders translate the user's selections (model, reasoning, permission mode)
+into launch arguments. `startupInput` writes keystrokes after the TUI starts;
+prompt **prefill** sends the user's typed prompt and its submit key as two PTY writes
+(bracketed mode waits for the terminal's alt screen, bounded by a generous timeout, so
+agents that redraw themselves don't eat the prompt).
+
+## Watchers — status and round trips
+
+A watcher attaches to a launched session, reads its output, and reports status through
+the [SDK](/docs/sdk/agents):
+
+```tsx
+import { definePlugin, defineWatcher, reportStarted, reportAttention, reportStopped } from "@pragma/plugin";
+
+watchers: [
+  defineWatcher({
+    agent: "my-agent",
+    watch: async (ctx) => {
+      await reportStarted({ agent: ctx.agentId, client: ctx.sdk });
+      for await (const chunk of ctx.output) {
+        if (/awaiting your approval/.test(chunk)) {
+          await reportAttention({
+            agent: ctx.agentId,
+            kind: "command",
+            command: matchedCommand,
+            requestId,
+            client: ctx.sdk,
+          });
+          const approved = await ctx.sdk.agents.awaitDecision({
+            agent: ctx.agentId, requestId,
+          });
+          await ctx.sendKeys(approved ? "y\r" : "n\r");
+        }
+      }
+      await reportStopped({ agent: ctx.agentId, client: ctx.sdk });
+    },
+  }),
+],
+```
+
+`WatcherContext` gives you:
+
+| Member               | Meaning                                                   |
+| -------------------- | --------------------------------------------------------- |
+| `sdk`                | A ready `PragmaClient` with gateway credentials.          |
+| `agentId` / `config` | The plugin-qualified agent id and your validated config.  |
+| `session`            | `{ id, tabId, worktreeId }`.                              |
+| `output`             | Async iterable of decoded terminal output chunks.         |
+| `sendKeys(data)`     | Write into the live session (answer prompts, press keys). |
+| `reportMessage(msg)` | Publish a rich agent message.                             |
+| `signal`             | Aborts when the session exits or the watcher is stopped.  |
+
+The host supervises one `pragma-watch` sidecar per live session — it re-establishes
+itself with fresh gateway credentials after a gateway restart and backs off on crash
+loops. Interjections from the app and phones (`AgentInput`) are always delivered through
+the watcher, because submit keys and timing are TUI-specific.
+
+## Verifying
+
+`pragma-cli agent verify --agent <your-id>` runs the conformance suite — status
+transitions, session naming, question forms, approvals, aborts, and stream integrity.
+Catalog `excludeFeatures` entries skip the scenario groups your agent genuinely lacks.
+See [CLI → Agents](/docs/cli/agents#verify).

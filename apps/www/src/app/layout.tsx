@@ -20,8 +20,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: appName, template: `%s — ${appName}` },
   description: appDescription,
-  // The desktop app's own icon, so the tab and the nav mark match the product.
-  icons: { icon: "/icon.png", apple: "/icon.png" },
+  // `app/icon.ts` supplies the brand-generated favicon; keep the larger raster for Apple touch.
+  icons: { apple: "/icon.png" },
 };
 
 export default function Layout({ children }: LayoutProps<"/">) {

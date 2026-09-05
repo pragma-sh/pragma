@@ -1,0 +1,37 @@
+---
+title: Scratchpad
+description: pragma-cli scratchpad create — publish a managed MDX document for the user.
+---
+
+```sh
+pragma-cli scratchpad create --title <TITLE> <MDX_FILE|->
+```
+
+The only command in the group, and the **only supported way to create a scratchpad**.
+It:
+
+1. Reads MDX from the file, or from stdin with `-`.
+2. Writes a managed document under the current worktree's `.pragma/scratchpads/`,
+   creating the managed frontmatter (id, title, created timestamp, and the agent tab
+   attachment from `PRAGMA_TAB_ID`).
+3. Opens a scratchpad tab in the app so the user sees it immediately.
+
+```sh
+# publish a report the user can read, edit, and comment on
+pragma-cli scratchpad create --title "Refactor plan" plan.mdx
+
+# stream a document from another command
+generate-notes | pragma-cli scratchpad create --title "Release notes" -
+```
+
+<Callout title="Why not write the file directly?">
+  A scratchpad is a contract, not a text file: the managed frontmatter is what lets the app list it,
+  attach an agent, promote it in a fanout pick, and route comment threads. Files written by hand are
+  ignored by design.
+</Callout>
+
+Requirements: the current tab must be a registered agent tab and the app must be
+connected. Reading and commenting on scratchpads programmatically is the
+[SDK's](/docs/sdk/scratchpads) job — see
+[@pragma/scratchpad-contract](/docs/sdk/scratchpads#the-contract-underneath) for the
+file format.

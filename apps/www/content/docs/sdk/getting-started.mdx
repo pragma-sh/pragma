@@ -1,0 +1,93 @@
+---
+title: Getting started
+description: Install @pragma/sdk, construct a client, configure the gateway, and handle errors.
+---
+
+## Installation
+
+`@pragma/sdk` ships as part of the Pragma workspace. Reference it as a workspace
+dependency in a monorepo that vendors Pragma, or install a published release:
+
+```sh
+bun add @pragma/sdk
+```
+
+The package is dual ESM/CJS with TypeScript definitions; `@pragma/scratchpad-contract` is
+bundled in.
+
+## Constructing the client
+
+```ts
+import { PragmaClient } from "@pragma/sdk";
+
+const client = new PragmaClient({
+  baseUrl: "http://127.0.0.1:54321",
+  token: "<gateway token>",
+});
+```
+
+`PragmaClientConfig`:
+
+| Field   | Type                     | Fallback                    |
+| ------- | ------------------------ | --------------------------- |
+| baseUrl | `string`                 | `PRAGMA_GATEWAY_URL`        |
+| token   | `string`                 | `PRAGMA_GATEWAY_TOKEN`      |
+| fetch   | `FetchLike`              | global `fetch`              |
+| headers | `Record<string, string>` | — (sent with every request) |
+
+Missing baseUrl or token throws `PragmaTransportError` at construction. The SDK reads
+**no other files** — discovering the gateway is the app's job (the gateway writes
+`gateway.json` beside its socket; Pragma terminals receive both values as environment
+variables).
+
+Every request sends `Authorization: Bearer <token>`. `204`/`202` responses return
+`undefined`; any other non-OK response throws.
+
+## The namespaces
+
+| Namespace            | Purpose                                                                   |
+| -------------------- | ------------------------------------------------------------------------- |
+| `client.sessions`    | Spawn, attach (event stream), write, resize, kill terminals.              |
+| `client.agents`      | Status reports, messages, questions, approvals, the agent event channel.  |
+| `client.fanouts`     | Create/get/read/send/retry/cancel/pick fanouts + subscriptions.           |
+| `client.scratchpads` | List, read, comment on, attach agents to, and prompt through scratchpads. |
+| `client.workspace`   | Subscribe to the full workspace snapshot (projects, worktrees, tabs).     |
+| `client.events`      | Subscribe to any protocol event (`agentStatus`, `fanouts`, …).            |
+| `client.fs`          | Filesystem operations scoped to a worktree root.                          |
+| `client.git`         | Worktree changes, staging, commits, branches, GitHub sync helpers.        |
+| `client.exec`        | Run commands on the host.                                                 |
+| `client.theme`       | Read merged theme overrides (global ← project).                           |
+| `client.assets`      | Fetch plugin assets by content hash (`toDataUri` included).               |
+| `client.push`        | Register device push tokens, presence, test pushes.                       |
+| `client.health`      | Unauthenticated `GET /v1/health` — liveness + versions.                   |
+
+Plus two one-off methods on the client itself:
+
+- `client.rpc(method, payload)` — any protocol RPC method, typed loosely.
+- `client.createBoardDraft(payload)` — create an agent-board draft card
+  (returns the created `KanbanPromptCard`).
+
+## Environment helpers
+
+```ts
+import { PRAGMA_ENV_KEYS, hasPragmaEnvironment, readEnv } from "@pragma/sdk";
+```
+
+`hasPragmaEnvironment()` is true when **all four** keys are present:
+`PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`,
+`PRAGMA_WORKTREE_ID`. The standalone report helpers (see
+[Agents](/docs/sdk/agents)) use this to decide whether they can act.
+
+## Errors
+
+```ts
+import { PragmaGatewayError, PragmaTransportError } from "@pragma/sdk";
+```
+
+- **`PragmaGatewayError`** — the gateway answered. Fields: `code`, `httpStatus`,
+  `details`. For fanout failures, `details` carries the typed
+  `FanoutFailure` (failure code, member, finalize stage).
+- **`PragmaTransportError`** — construction misconfiguration, network failure, or a
+  non-JSON response.
+
+Every method also accepts a trailing `{ signal?: AbortSignal }` options object.

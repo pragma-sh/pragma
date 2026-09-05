@@ -1,15 +1,22 @@
+import Link from "next/link";
 import type { LockedPlugin } from "@pragma/plugin-registry";
 
 import { Button } from "@/components/ui/button";
-import { pluginInstallUrl } from "@/lib/plugins";
+import { pluginDetailUrl, pluginInstallUrl } from "@/lib/plugins";
 
+/**
+ * One grid cell of the official gallery — a preview of the plugin detail page.
+ * The title carries a stretched link (`after:absolute after:inset-0`), so the
+ * whole card opens the detail route while the install anchor keeps its own
+ * target; nothing nests an anchor inside an anchor.
+ */
 export function PluginCard({ plugin }: { plugin: LockedPlugin }) {
   const { manifest } = plugin;
   const image = manifest.images?.[0];
   const command = [manifest.install.command, ...(manifest.install.args ?? [])].join(" ");
 
   return (
-    <article className="group flex min-h-72 flex-col bg-card/40 p-6 transition-colors hover:bg-card/70">
+    <article className="group relative flex min-h-72 flex-col bg-card/40 p-6 transition-colors hover:bg-card/70">
       <div className="flex items-start justify-between gap-5">
         <div className="flex min-w-0 items-center gap-4">
           {image ? (
@@ -19,7 +26,14 @@ export function PluginCard({ plugin }: { plugin: LockedPlugin }) {
             </div>
           ) : null}
           <div className="min-w-0 text-left">
-            <h2 className="truncate text-lg font-medium tracking-tight">{manifest.name}</h2>
+            <h2 className="truncate text-lg font-medium tracking-tight">
+              <Link
+                className="underline-offset-4 after:absolute after:inset-0 group-hover:underline focus-visible:underline focus-visible:outline-none"
+                href={pluginDetailUrl(plugin.package)}
+              >
+                {manifest.name}
+              </Link>
+            </h2>
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
               {plugin.package}
             </p>
@@ -50,7 +64,7 @@ export function PluginCard({ plugin }: { plugin: LockedPlugin }) {
         <span className="break-all">{command}</span>
       </div>
 
-      <Button asChild className="mt-4 w-full" size="sm">
+      <Button asChild className="pill-cta relative z-10 mt-4 w-full">
         <a href={pluginInstallUrl(plugin.package)}>Install in Pragma</a>
       </Button>
     </article>

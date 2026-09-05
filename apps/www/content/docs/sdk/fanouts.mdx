@@ -1,0 +1,82 @@
+---
+title: Fanouts
+description: Create, observe, message, and finalize multi-attempt fanouts from code.
+---
+
+A **fanout** runs one prompt in several isolated attempts under a coordination parent
+worktree. The SDK drives the same RPC the desktop and the CLI use — see
+[Creating a worktree → Fan out](/docs/user-guide/worktrees#fan-out) for the UI side.
+
+## Create
+
+```ts
+const result = await client.fanouts.create({
+  prompt: "Add token refresh and tests",
+  members: [
+    { selector: "opencode.grok-3" }, // agent[.model[.reasoning]]
+    { selector: "claude-code" },
+  ],
+  parent: { type: "new", branch: "fan/token-refresh" },
+});
+```
+
+- `create` resolves on **partial provisioning** (`partial: true` with per-member
+  `failures`) instead of throwing — the record exists either way.
+- A fresh coordination parent is always branched from an existing worktree; an existing
+  worktree can also host the fanout (`FanoutExistingParent`).
+- One parent holds **at most one active fanout**.
+
+## Observe
+
+```ts
+for await (const event of client.fanouts.subscribe({ fanoutId })) {
+  // { type: "snapshot", fanout } then { type: "delta", fanout }
+}
+```
+
+The subscription yields a snapshot followed by deltas (v1 deltas are full replacements).
+`client.fanouts.get(reference)` fetches once.
+
+Member status flows from the attempts' agent reports:
+`pending → provisioning → running → (attention) → done | failed | interrupted | cancelled
+| selected`.
+
+## Message, retry, cancel
+
+```ts
+await client.fanouts.send({
+  fanoutId,
+  target: { type: "all" }, // or one member
+  message: "Also cover the edge case in the tests",
+});
+await client.fanouts.retry({ fanoutId, memberId }); // relaunch in the existing worktree
+await client.fanouts.cancel({ fanoutId }); // keeps every checkout
+```
+
+`send` waits for delivery per member (re-tried via each member's watcher) unless
+`waitForDelivery: false`; the same `messageId` re-delivers idempotently.
+
+## Read attempt output
+
+```ts
+const { targets } = await client.fanouts.read({
+  fanoutId,
+  target: { type: "all" },
+  lines: 200,
+});
+// each target carries base64-decoded bytes of the attempt's terminal scrollback
+```
+
+## Pick the winner — destructive
+
+```ts
+const pick = await client.fanouts.pick({ fanoutId, memberId });
+```
+
+`pick` merges the chosen attempt into the parent, promotes its scratchpads, stops the
+sessions, and deletes every attempt checkout. The host executes it as durable stages —
+`validating → committingWinner → merging → promotingScratchpads → stoppingSessions →
+cleaningUp → completed` — and a retry resumes at the first incomplete stage. A merge
+conflict parks the fanout in `needsResolution` with everything intact; a partial cleanup
+reports `cleanupFailed` with the survivors. The SDK performs **no confirmation** — the
+caller (UI or CLI) owns that.

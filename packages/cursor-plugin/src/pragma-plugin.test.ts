@@ -19,6 +19,45 @@ it("launches Cursor's unambiguous binary", () => {
     "abort",
     "interrupt",
   ]);
+  expect(cursorAgentPlugin.agents?.[0]?.startupInput).toBeUndefined();
+});
+
+it("approves workspace trust only after Cursor renders the complete prompt", async () => {
+  const watcher = cursorAgentPlugin.watchers?.[0];
+  const controller = new AbortController();
+  const sendKeys = vi.fn(async () => {});
+  const context = {
+    sdk: {
+      agents: {
+        connect: async () => ({
+          async *[Symbol.asyncIterator]() {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            controller.abort();
+            yield* [];
+          },
+        }),
+        report: async () => {},
+      },
+    },
+    agentId: "cursor",
+    config: undefined,
+    session: { id: "session-1", tabId: "tab-1", worktreeId: "worktree-1" },
+    output: (async function* () {
+      yield "\x1b[1mWorkspace Trust";
+      yield " Required\x1b[0m\n";
+      expect(sendKeys).not.toHaveBeenCalled();
+      yield "[a] Trust this workspace";
+      yield "\r\x1b[1AWorkspace Trust Required\n[a] Trust this workspace";
+    })(),
+    sendKeys,
+    reportMessage: async () => {},
+    signal: controller.signal,
+  };
+
+  await watcher?.watch(context as never);
+
+  expect(sendKeys).toHaveBeenCalledOnce();
+  expect(sendKeys).toHaveBeenCalledWith("a");
 });
 
 it("reports question attention from Cursor's OSC titles", async () => {

@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/pragma-sh/pragma/main/packages/plugin-registry/pragma-plugin.schema.json",
   "name": "Prime Agent",
   "description": "Launch Prime Agent in Pragma with live status, session naming, and interjections.",
+  "longDescription": "Launch Prime Agent from the Pragma launcher with live status, session naming, and interjections. Prime Agent sessions report into the same agent board as every other integration, and mid-run messages are delivered straight into the session.",
   "categories": ["agent-plugin"],
   "images": [
     {
@@ -9,6 +10,9 @@
       "alt": "Prime Agent logo"
     }
   ],
-  "install": { "command": "prime-agent", "args": ["package", "install", "."] },
+  "install": {
+    "command": "prime-agent",
+    "args": ["package", "install", "."]
+  },
   "agentBinary": "prime-agent"
 }

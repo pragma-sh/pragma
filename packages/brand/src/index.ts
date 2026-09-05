@@ -1,6 +1,7 @@
 // `@pragma/brand` — the Pragma mark, and the colours it is painted in.
 
 export { CANVAS, markMarkup, type MarkPalette, placedMark } from "./mark";
+export { faviconLayer, faviconSvg } from "./favicon";
 export {
   DARK_PLATE,
   INK,

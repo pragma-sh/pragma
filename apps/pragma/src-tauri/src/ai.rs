@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -141,6 +142,38 @@ struct PullRequestContext {
     committed_diff: String,
 }
 
+/// Monotonically increasing token identifying one sidecar spawn. A frontend id
+/// can be spawned more than once (React's `StrictMode` double-mount restarts the
+/// same login), so the id alone cannot tell a live run from the one it
+/// replaced.
+static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+
+fn next_run() -> u64 {
+    NEXT_RUN.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Deregister `id` only when the entry still belongs to `run`.
+///
+/// A superseded run's reader thread reaches EOF *after* its replacement has
+/// already registered under the same id. Removing unconditionally would then
+/// evict the live session: its stdout would keep streaming events to the
+/// frontend while `ai_login_respond` found no stdin to answer on, so the flow
+/// stalled on the first prompt and the sidecar survived every later cancel as
+/// an orphan holding the OAuth loopback port.
+fn take_current<T>(
+    map: &Mutex<HashMap<String, T>>,
+    id: &str,
+    run: u64,
+    run_of: impl Fn(&T) -> u64,
+) -> Option<T> {
+    let mut guard = map.lock().ok()?;
+    if guard.get(id).is_some_and(|entry| run_of(entry) == run) {
+        guard.remove(id)
+    } else {
+        None
+    }
+}
+
 /// Live OAuth login sessions, keyed by a frontend-supplied id. Holds the child
 /// (for cancellation) and its stdin (to answer interactive prompts). Cloning
 /// shares the same map so the reader thread can deregister a finished session.
@@ -150,11 +183,17 @@ pub struct LoginRegistry(Arc<Mutex<HashMap<String, LoginHandle>>>);
 struct LoginHandle {
     child: Child,
     stdin: ChildStdin,
+    run: u64,
 }
 
 /// In-flight palette Ask AI sidecar runs, keyed by a frontend-supplied id.
 #[derive(Default, Clone)]
-pub struct AskRegistry(Arc<Mutex<HashMap<String, Child>>>);
+pub struct AskRegistry(Arc<Mutex<HashMap<String, AskHandle>>>);
+
+struct AskHandle {
+    child: Child,
+    run: u64,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -762,7 +801,15 @@ pub fn ai_ask(
         .take()
         .ok_or_else(|| AppError::Ai("failed to capture ai sidecar stdout".to_string()))?;
 
-    registry.0.lock()?.insert(id.clone(), child);
+    let run = next_run();
+    if let Some(mut previous) = registry
+        .0
+        .lock()?
+        .insert(id.clone(), AskHandle { child, run })
+    {
+        let _ = previous.child.kill();
+        let _ = previous.child.wait();
+    }
 
     let map = registry.0.clone();
     thread::spawn(move || {
@@ -784,9 +831,8 @@ pub fn ai_ask(
                 break;
             }
         }
-        let child = map.lock().ok().and_then(|mut guard| guard.remove(&id));
-        if let Some(mut child) = child {
-            let _ = child.wait();
+        if let Some(mut handle) = take_current(&map, &id, run, |handle| handle.run) {
+            let _ = handle.child.wait();
         }
     });
 
@@ -796,9 +842,9 @@ pub fn ai_ask(
 /// Abort an in-flight palette Ask AI run and drop its sidecar.
 #[tauri::command]
 pub fn ai_ask_cancel(registry: State<'_, AskRegistry>, id: String) -> AppResult<()> {
-    if let Some(mut child) = registry.0.lock()?.remove(&id) {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(mut handle) = registry.0.lock()?.remove(&id) {
+        let _ = handle.child.kill();
+        let _ = handle.child.wait();
     }
     Ok(())
 }
@@ -821,6 +867,20 @@ pub fn ai_login(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
+    // Spawn *while holding the registry lock*, so a cancel for this id can only
+    // run before the spawn or after the insert - never in between. Without that,
+    // a cancel that lands mid-spawn finds no session, and the sidecar it meant to
+    // stop survives as an orphan still holding the OAuth loopback port, so every
+    // later login for that provider dies with "Failed to start server. Is port
+    // <n> in use?". React's StrictMode double-mount makes that the common case.
+    let mut sessions = registry.0.lock()?;
+    // Restarting the same id (a remount) replaces the previous attempt: stop it
+    // first so it releases its callback port before the new one binds.
+    if let Some(mut previous) = sessions.remove(&id) {
+        let _ = previous.child.kill();
+        let _ = previous.child.wait();
+    }
+
     let mut child = command.spawn()?;
     let stdout = child
         .stdout
@@ -831,10 +891,9 @@ pub fn ai_login(
         .take()
         .ok_or_else(|| AppError::Ai("failed to capture ai sidecar stdin".to_string()))?;
 
-    registry
-        .0
-        .lock()?
-        .insert(id.clone(), LoginHandle { child, stdin });
+    let run = next_run();
+    sessions.insert(id.clone(), LoginHandle { child, stdin, run });
+    drop(sessions);
 
     let map = registry.0.clone();
     thread::spawn(move || {
@@ -858,9 +917,9 @@ pub fn ai_login(
         }
         // Deregister and reap the child so a finished login does not leave a
         // zombie on Unix. Take the handle out under the lock, then `wait()`
-        // outside it (the sidecar has already exited or is exiting).
-        let handle = map.lock().ok().and_then(|mut guard| guard.remove(&id));
-        if let Some(mut handle) = handle {
+        // outside it (the sidecar has already exited or is exiting). Only this
+        // run's own entry is removed - see `take_current`.
+        if let Some(mut handle) = take_current(&map, &id, run, |handle| handle.run) {
             let _ = handle.child.wait();
         }
     });
@@ -877,11 +936,12 @@ pub fn ai_login_respond(
     cancelled: bool,
 ) -> AppResult<()> {
     let mut guard = registry.0.lock()?;
-    if let Some(handle) = guard.get_mut(&id) {
-        let payload = json!({ "value": value, "cancelled": cancelled });
-        writeln!(handle.stdin, "{payload}")?;
-        handle.stdin.flush()?;
-    }
+    let handle = guard
+        .get_mut(&id)
+        .ok_or_else(|| AppError::Ai("this sign-in is no longer running".to_string()))?;
+    let payload = json!({ "value": value, "cancelled": cancelled });
+    writeln!(handle.stdin, "{payload}")?;
+    handle.stdin.flush()?;
     Ok(())
 }
 
@@ -899,10 +959,12 @@ pub fn ai_login_cancel(registry: State<'_, LoginRegistry>, id: String) -> AppRes
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::Path;
     use std::process::{Command, Stdio};
+    use std::sync::Mutex;
 
-    use super::{parse_status, pull_request_context, refuse_remote_ai_host};
+    use super::{parse_status, pull_request_context, refuse_remote_ai_host, take_current};
     use crate::hosts::LOCAL_HOST;
     use serde_json::json;
 
@@ -1022,5 +1084,19 @@ mod tests {
         assert!(context.git_log.contains("add feature"));
         assert!(context.diff_stat.contains("feature.txt"));
         assert!(context.committed_diff.contains("feature.txt"));
+    }
+
+    #[test]
+    fn take_current_leaves_a_replacement_registered() {
+        let map: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
+        map.lock().expect("lock").insert("id".to_string(), 2);
+
+        // The superseded run (1) exits after its replacement (2) registered.
+        assert_eq!(take_current(&map, "id", 1, |run| *run), None);
+        assert_eq!(map.lock().expect("lock").get("id").copied(), Some(2));
+
+        // The live run still deregisters itself when it finishes.
+        assert_eq!(take_current(&map, "id", 2, |run| *run), Some(2));
+        assert!(map.lock().expect("lock").is_empty());
     }
 }

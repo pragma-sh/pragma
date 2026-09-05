@@ -1,0 +1,79 @@
+---
+title: Wiki
+description: Internal documentation — the host-server architecture behind the Pragma desktop app.
+---
+
+This section documents how Pragma actually works: the processes on a host, the wire
+protocol between them, and where every byte lands on disk. It is written for
+contributors and the curious — user-facing behaviour lives in the
+[user guide](/docs/user-guide).
+
+## The one-paragraph version
+
+The **desktop app is a controller, not a host**. It renders UI and brokers control
+decisions, but a persistent **`pragma-server`** owns the terminals, scrollback, agent
+status, and sidecars, listening on an owner-only Unix socket. A small HTTP
+**`pragma-gateway`** fronts the same server for remote clients — the mobile app, the
+web build, and `@pragma/sdk`. **`pragma-cli`** is installed into agent terminals to speak
+to the socket directly. The desktop can therefore be closed, restarted, or updated while
+sessions keep running.
+
+<Cards>
+  <Card
+    title="Architecture"
+    description="Processes, launch sequence, and the one-server-per-channel rule."
+    href="/docs/wiki/architecture"
+  />
+  <Card
+    title="Protocol"
+    description="Frames, requests, RPC methods, and subscription events."
+    href="/docs/wiki/protocol"
+  />
+  <Card
+    title="Server"
+    description="Sessions, scrollback, agent status, fanouts, and sidecars."
+    href="/docs/wiki/server"
+  />
+  <Card
+    title="Client & bridges"
+    description="The transport library, the SSH bridge, WSL, and relay mode."
+    href="/docs/wiki/client-bridges"
+  />
+  <Card
+    title="Core"
+    description="Pure host business logic: git, filesystem, exec, scratchpads."
+    href="/docs/wiki/core"
+  />
+  <Card
+    title="Gateway"
+    description="HTTP routes, auth, the web bundle, and push notifications."
+    href="/docs/wiki/gateway"
+  />
+  <Card
+    title="Platform"
+    description="The OS seams and why every platform difference lives there."
+    href="/docs/wiki/platform"
+  />
+  <Card
+    title="Disk layout"
+    description="Every file Pragma writes, and every PRAGMA_* variable."
+    href="/docs/wiki/disk-layout"
+  />
+</Cards>
+
+## Where the code lives
+
+| Crate / package          | Role                                                        |
+| ------------------------ | ----------------------------------------------------------- |
+| `crates/pragma-server`   | Persistent host server: PTYs, status, fanouts, sidecars.    |
+| `crates/pragma-client`   | Client transport library + SSH/WSL bridges.                 |
+| `crates/pragma-core`     | Pure host business logic (git, fs, exec, scratchpads).      |
+| `crates/pragma-gateway`  | Localhost HTTP gateway.                                     |
+| `crates/pragma-platform` | OS seams: IPC, paths, perms, processes, shells, WSL.        |
+| `crates/pragma-protocol` | Wire frames and shared names.                               |
+| `crates/pragma-cli`      | The agent-facing CLI.                                       |
+| `apps/pragma`            | The Tauri desktop app (controller).                         |
+| `packages/*`             | SDK, plugin API, automations, sidecars, agent integrations. |
+
+Shared constants flow from one JSON schema (`packages/constants/schema.json`) into both
+TypeScript and Rust, so the two languages cannot disagree about a wire name.

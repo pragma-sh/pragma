@@ -1,0 +1,71 @@
+---
+title: Plugin development
+description: The @pragma/plugin API — sidebar tabs, cards, commands, web views, agents, watchers, usage limits, and themes.
+---
+
+Pragma's own agent integrations are plugins. Everything they use is public, so anything
+you build sits at the same level as what ships.
+
+```tsx
+import { definePlugin, defineSidebarTab, useProject } from "@pragma/plugin";
+
+function Queue() {
+  const project = useProject();
+  return <div>Queue for {project?.name ?? "none"}</div>;
+}
+
+export default definePlugin({
+  name: "Review Queue",
+  description: "Everything waiting on me, across every worktree.",
+  ui: {
+    sidebarTabs: [defineSidebarTab({ id: "queue", title: "Queue", component: Queue })],
+  },
+});
+```
+
+<Cards>
+  <Card
+    title="Getting started"
+    description="Scaffold a plugin, register it, and load it."
+    href="/docs/plugins/getting-started"
+  />
+  <Card
+    title="UI contributions"
+    description="Sidebar tabs and cards, settings pages, topper items, commands, and web views."
+    href="/docs/plugins/ui"
+  />
+  <Card
+    title="Agents & watchers"
+    description="defineAgent, model lists, prefill, and the watcher that drives status."
+    href="/docs/plugins/agents"
+  />
+  <Card
+    title="Usage limits"
+    description="defineUsageLimitProvider — power the usage-limits popover for your agent."
+    href="/docs/plugins/usage-limits"
+  />
+  <Card
+    title="Runtime & themes"
+    description="Hooks, storage, events, the SDK handle, and defineTheme."
+    href="/docs/plugins/runtime"
+  />
+</Cards>
+
+## The model
+
+- A plugin is **one self-contained ESM bundle** (`main` in its `package.json`).
+- The host injects React, React DOM, the JSX runtime, zod, UI primitives, and icons —
+  **never bundle them**. `@pragma/plugin` is a compile-time stub that delegates to the
+  host bridge (`globalThis.__PRAGMA__`).
+- Registration is declarative: a `plugins[]` entry in `.pragma/config.json`
+  ([global](/docs/user-guide/core-model#where-things-live) or per project). Presence
+  installs it; project scope wins over global, which wins over the bundled plugins.
+- The **agent catalog**, usage-limit providers, and server-side hooks run in the
+  `pragma-plugins` host sidecar; UI contributions run in the desktop webview. One
+  `definePlugin` call contributes to both.
+
+<Callout title="Browser-safe code">
+  A static `node:` import or a module-scope `process.*` read in the plugin entry fails the webview
+  load (`status: "failed"`). Server-side work belongs in the sidecar hooks (`onInstall`,
+  `onPragmaLoad`) which run under Bun.
+</Callout>

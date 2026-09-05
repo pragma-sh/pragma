@@ -6,6 +6,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useOnboarding } from "@/state/onboarding-context";
 import { useUpdates } from "@/state/updates-context";
 
 /**
@@ -20,6 +21,7 @@ export function OtherSection({
   persist: (patch: OtherSettings) => Promise<void>;
 }) {
   const { runtime, offer, checking, checkNow } = useUpdates();
+  const onboarding = useOnboarding();
   const defaultUrl = runtime?.checkUrl ?? constants.updates.devCheckUrl;
   const serverUrl = settings.serverUrl ?? "";
   const autoDownload = settings.autoDownload ?? constants.updates.autoDownload;
@@ -87,6 +89,22 @@ export function OtherSection({
             onCheckedChange={(checked) => void persist({ autoDownload: checked })}
           />
         </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Onboarding"
+        description="Replays the first-run walkthrough and the guided workspace tour. Nothing you have already connected is undone."
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            void onboarding.restart();
+            toast.success("Onboarding will replay");
+          }}
+        >
+          Replay the tutorial
+        </Button>
       </SettingsCard>
 
       <SettingsCard title="This install" description="Versions this process reports on a check.">

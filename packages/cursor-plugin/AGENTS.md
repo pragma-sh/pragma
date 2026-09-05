@@ -172,8 +172,10 @@ definition.
 
 Its icon asset stays in this package under `assets/`, not in Pragma core.
 
-- `startupInput: [{ delayMs: 5000, data: "a" }]` accepts Cursor's TUI workspace-trust
-  gate for new git worktree paths.
+- The watcher accepts Cursor's workspace-trust gate with `a` only after terminal output
+  contains both `Workspace Trust Required` and `Trust this workspace`. Never restore a
+  blind timed startup input: trusted workspaces reach the normal composer first, where a
+  delayed `a` corrupts prompts and defeats mobile transcript deduplication.
 - `prefillDelayMs: 14000` waits for the real Cursor Agent TUI input before prompt paste.
 - `prefillMode: "plain"` pastes the prompt unbracketed; the prompt's own `\n`s are
   inserted as newlines (Cursor's TUI only submits on a parsed `return` key, not on a

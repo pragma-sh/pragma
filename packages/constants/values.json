@@ -184,6 +184,16 @@
     "identifier": "com.pragma.app",
     "version": "0.0.0"
   },
+  "onboarding": {
+    "mediaBaseUrl": "https://pragma-app.sh/media",
+    "skill": {
+      "id": "pragma",
+      "targets": [
+        { "id": "all-agents", "directory": ".agents/skills", "label": "All agents" },
+        { "id": "claude-code", "directory": ".claude/skills", "label": "Claude Code" }
+      ]
+    }
+  },
   "updates": {
     "checkUrl": "https://pragma-app.sh/api/updates",
     "devCheckUrl": "http://localhost:3000/api/updates",

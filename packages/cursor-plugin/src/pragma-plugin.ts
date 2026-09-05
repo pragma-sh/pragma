@@ -12,6 +12,10 @@ import { createTuiWatcher } from "@pragma/watcher-kit";
 
 /** Lets Cursor's paste-aware TUI commit interjected text before Enter. */
 const INTERJECT_SUBMIT_DELAY_MS = 200;
+const CURSOR_TRUST_TITLE = "workspace trust required";
+const CURSOR_TRUST_ACTION = "trust this workspace";
+// oxlint-disable-next-line no-control-regex -- ANSI CSI/OSC framing uses ESC and BEL bytes.
+const CURSOR_CONTROL_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 const baseWatcher = createTuiWatcher({
   agent: "cursor",
   handleDecisions: false,
@@ -44,7 +48,7 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       agent: "cursor",
       async watch(ctx) {
         try {
-          await Promise.all([baseWatcher.watch(ctx), watchCursorTitles(ctx)]);
+          await Promise.all([baseWatcher.watch(ctx), watchCursorOutput(ctx)]);
         } finally {
           try {
             await ctx.sdk.agents.report({
@@ -69,7 +73,6 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       iconPath: "assets/cursor.svg",
       launch: { command: ["cursor-agent", "--force", "--approve-mcps"] },
       excludeFeatures: ["commandApproval", "subagents", "abort", "interrupt"],
-      startupInput: [{ delayMs: 5000, data: "a" }],
       prefillDelayMs: 14000,
       prefillMode: "plain",
       prefillSubmit: "\r",
@@ -99,29 +102,75 @@ export default cursorAgentPlugin;
 const CURSOR_QUESTION_TITLE = /^(?:choice asker|ask question)$/i;
 const CURSOR_ACTIVE_TITLE = /^cursor agent$/i;
 
-/** Reports Cursor's question state from OSC window titles in its PTY output. */
-async function watchCursorTitles(ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0]) {
-  let buffer = "";
+/** Handles Cursor's output-only trust and question signals. */
+async function watchCursorOutput(ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0]) {
+  let titleBuffer = "";
+  let outputBuffer = "";
   let awaitingQuestion = false;
+  let trustHandled = false;
   try {
     for await (const chunk of ctx.output) {
-      buffer += chunk;
-      const parsed = extractCursorTitles(buffer);
-      buffer = parsed.remaining;
-      for (const title of parsed.titles) {
-        if (CURSOR_QUESTION_TITLE.test(title) && !awaitingQuestion) {
-          awaitingQuestion = true;
-          await reportCursorStatus(ctx, "attention", "question");
-        } else if (CURSOR_ACTIVE_TITLE.test(title) && awaitingQuestion) {
-          awaitingQuestion = false;
-          await reportCursorStatus(ctx, "running", null);
-        }
-      }
+      const trust = await handleCursorTrust(ctx, outputBuffer, chunk, trustHandled);
+      outputBuffer = trust.buffer;
+      trustHandled = trust.handled;
+
+      const titles = await handleCursorTitles(ctx, `${titleBuffer}${chunk}`, awaitingQuestion);
+      titleBuffer = titles.remaining;
+      awaitingQuestion = titles.awaitingQuestion;
     }
   } catch {
     // Output transport may reconnect independently; keep watcher alive until session exit.
   }
   await waitForAbort(ctx.signal);
+}
+
+async function handleCursorTrust(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  buffer: string,
+  chunk: string,
+  handled: boolean,
+): Promise<{ buffer: string; handled: boolean }> {
+  if (handled) return { buffer, handled };
+
+  const nextBuffer = `${buffer}${chunk}`.slice(-16_384);
+  const text = nextBuffer.replace(CURSOR_CONTROL_SEQUENCE, " ").replace(/\s+/g, " ").toLowerCase();
+  const promptReady = text.includes(CURSOR_TRUST_TITLE) && text.includes(CURSOR_TRUST_ACTION);
+  if (!promptReady) return { buffer: nextBuffer, handled };
+
+  await writeCursorKeys(ctx, "a");
+  return { buffer: nextBuffer, handled: true };
+}
+
+async function handleCursorTitles(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  buffer: string,
+  awaitingQuestion: boolean,
+): Promise<{ remaining: string; awaitingQuestion: boolean }> {
+  const parsed = extractCursorTitles(buffer);
+  let awaiting = awaitingQuestion;
+  for (const title of parsed.titles) {
+    if (CURSOR_QUESTION_TITLE.test(title) && !awaiting) {
+      awaiting = true;
+      // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
+      await reportCursorStatus(ctx, "attention", "question");
+    } else if (CURSOR_ACTIVE_TITLE.test(title) && awaiting) {
+      awaiting = false;
+      // oxlint-disable-next-line no-await-in-loop -- Preserve terminal title transition order.
+      await reportCursorStatus(ctx, "running", null);
+    }
+  }
+  return { remaining: parsed.remaining, awaitingQuestion: awaiting };
+}
+
+async function writeCursorKeys(
+  ctx: Parameters<NonNullable<typeof baseWatcher.watch>>[0],
+  data: string,
+): Promise<void> {
+  try {
+    await ctx.sendKeys(data);
+  } catch {
+    // A transient write failure must not stop output monitoring.
+  }
 }
 
 function extractCursorTitles(buffer: string): { remaining: string; titles: string[] } {

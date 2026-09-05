@@ -1,0 +1,44 @@
+---
+title: Usage limits
+description: See how much of each agent's plan or API quota is left, without leaving the app.
+---
+
+The **Usage limits** popover (the gauge icon in the toolbar, left of the project script
+buttons) shows what each connected agent's provider reports about your plan or API usage.
+
+## What it shows
+
+One accordion section per provider:
+
+- Collapsed: the provider's icon and **primary limit** as "N% used" with a progress bar.
+- Expanded: every limit the provider reports, each with its percentage, a **Resets in**
+  countdown, and a **View dashboard** button that opens the provider's own site.
+
+The bar turns warning-coloured from 50% and destructive from 75%. A plan without a finite
+limit reads **Unlimited**.
+
+## Providers
+
+Usage limits are a plugin contribution, so coverage follows the agent integrations.
+Shipped with Pragma:
+
+| Provider       | Notes                              |
+| -------------- | ---------------------------------- |
+| Claude Code    | Claude Pro/Max subscription usage. |
+| Codex          | ChatGPT Plus/Pro usage.            |
+| Cursor         |                                    |
+| OpenCode Go    |                                    |
+| Grok           |                                    |
+| GitHub Copilot |                                    |
+| Junie          |                                    |
+
+Pi and Prime Agent do not report limits until their CLIs expose an endpoint Pragma can
+read. Building a provider for your own agent is part of the
+[plugin API](/docs/plugins/usage-limits) — `defineUsageLimitProvider`.
+
+## Refreshing
+
+Each provider declares its own refresh interval (at minimum 15 seconds), with exponential
+backoff up to 15 minutes on failures. Opening the popover always refreshes. Providers
+report their own unavailable states — "not configured", "authentication required", or a
+plain error — instead of fake numbers.

@@ -6,8 +6,8 @@ in. Source of truth for every rendered Pragma icon.
 The package emits **SVG markup as strings** and has no dependencies — no
 rasteriser, no filesystem, no platform knowledge. Consumers decide what to do
 with the markup: `apps/pragma-go/scripts/` rasterises it with `sharp` into the
-Expo icon set, and anything else that needs the mark (a docs page, a preview,
-a future desktop icon build) can import the same strings.
+Expo icon set, while website surfaces consume the shared compact favicon
+treatment directly.
 
 ## Files
 
@@ -15,6 +15,7 @@ a future desktop icon build) can import the same strings.
 | ----------------- | ------------------------------------------------------------------------------------- |
 | `src/mark.ts`     | Geometry in a 1024x1024 design space; `markMarkup`, `placedMark`                      |
 | `src/palettes.ts` | `ON_DARK`, `ON_LIGHT`, `ON_TRANSPARENT`, `TINTED`, `MONOCHROME`, plate colours, `INK` |
+| `src/favicon.ts`  | Shared compact favicon layer and theme-aware SVG document                             |
 
 ## What belongs here, and what does not
 
@@ -24,8 +25,9 @@ decisions that should look the same wherever Pragma renders its icon.
 **Not here:** which slots a platform has, what each slot requires, and how the
 markup becomes a file. iOS appearance rules, the Android adaptive safe zone,
 Expo's `removeTransparency` behaviour, and the web shell all live with the app
-that ships them (`apps/pragma-go/scripts/icon-variants.ts`). A second consumer
-gets its own slot list, not a branch inside this package.
+that ships them (`apps/pragma-go/scripts/icon-variants.ts`). The compact favicon
+treatment is shared because both web clients render the same browser slot; each
+consumer still owns how that SVG is served or embedded.
 
 ## The geometry was traced, not eyeballed
 

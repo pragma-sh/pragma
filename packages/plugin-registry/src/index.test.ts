@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { join } from "node:path";
 
 import { officialPluginList, officialPluginLock } from "./index";
 
@@ -13,6 +14,19 @@ describe("official plugin registry", () => {
     for (const plugin of officialPluginLock.plugins) {
       expect(plugin.manifest.categories).toContain("agent-plugin");
       expect(plugin.manifest.agentBinary).toBeTruthy();
+    }
+  });
+
+  it("ships detail-page copy in every workspace manifest", async () => {
+    for (const packageName of officialPluginList.packages) {
+      const source = join(import.meta.dir, "..", "..", packageName.split("/").at(-1) ?? "");
+      const manifest = (await Bun.file(join(source, "pragma-plugin.json")).json()) as {
+        longDescription?: string;
+      };
+      expect(
+        manifest.longDescription?.length ?? 0,
+        `${packageName}: missing longDescription`,
+      ).toBeGreaterThan(0);
     }
   });
 });

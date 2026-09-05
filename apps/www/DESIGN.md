@@ -205,11 +205,13 @@ components:
     typography: "{typography.body-sm}"
     rounded: "{rounded.xs}"
   top-nav:
-    backgroundColor: "{colors.canvas}"
+    backgroundColor: "{colors.surface-1}"
     textColor: "{colors.ink}"
     typography: "{typography.body-sm}"
-    rounded: "{rounded.xs}"
+    rounded: "{rounded.full}"
     height: 56px
+    maxWidth: 1024px
+    offset: 12px
   footer:
     backgroundColor: "{colors.canvas}"
     textColor: "{colors.ink-muted}"
@@ -462,6 +464,24 @@ carries a low-opacity **branch graph** behind its copy instead — a sideways tr
 commit splitting into attempts, drawn monotone in `currentColor` with a slow pulse travelling
 out along each rail; it is geometry, not a second gradient spotlight.
 
+### Plugin gallery
+
+The `/plugins` index is a hairline grid of preview cells on `{colors.canvas}`: a logo tile,
+the name in `{typography.headline}`, package and version in `{typography.mono}`, the
+one-line description in `{typography.body}`, category chips, and the install command in a
+mono frame. The whole cell is one link to the plugin's detail page — hovering lifts the
+cell — while the white `button-primary` pill (`Install in Pragma`) stays the only primary
+action inside it and must keep its own click target.
+
+The detail page repeats the header block (logo, name, mono package + version) and carries
+two pills: `button-primary` (`Install in Pragma`) and `button-secondary`
+(`View on npm`). The extended description runs in `{typography.body-lg}` for the lead and
+`{typography.body}` in `{colors.ink-muted}` for the rest, on canvas. Package, categories,
+agent binary, and the install command sit in a `{colors.hairline}`-ruled aside; additional
+manifest images sit in `{rounded.xl}` hairline-ruled tiles. Deep-link forwarder pages
+(`/open`, `/install-plugin`) are single centered cards on canvas with the same two-pill
+row — they exist to hand a query to the `pragma://` scheme, not to be read.
+
 ### Comparison
 
 **`comparison-row`** — a row of the feature matrix. `{colors.canvas}` ground,
@@ -471,8 +491,12 @@ never a coloured fill.
 
 ### Navigation
 
-**`top-nav`** — Sticky bar on `{colors.canvas}` with the Pragma mark and wordmark left and
-the docs/GitHub links right. Height 56px, type `{typography.body-sm}`.
+**`top-nav`** — A centered floating capsule on `{colors.surface-1}`, offset 12px from the
+viewport top. It carries the favicon treatment of the Pragma mark, the product links, docs
+search, and explicit GitHub and Download actions. Height 56px, max width 1024px, rounded
+`{rounded.full}`, type `{typography.body-sm}`, with the standard floating shadow. It is
+sticky in the marketing flow and fixed over the Fumadocs grid so both surfaces keep the
+same position; docs also exposes its sidebar trigger on mobile.
 
 ### Footer
 
@@ -531,6 +555,8 @@ and columns of caption-sized links right. Text `{colors.ink-muted}`, padding 64p
 
 - Pill buttons keep a minimum 44px tap height across all viewports.
 - Circular icon buttons are 40px on desktop and grow to 44px on touch viewports.
+- The floating navigation keeps Search, GitHub, Download, and the docs sidebar trigger
+  reachable as icon buttons when text labels no longer fit.
 
 ### Collapsing Strategy
 

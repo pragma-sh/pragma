@@ -1,0 +1,59 @@
+---
+title: Integrated AI
+description: Pragma's built-in AI helpers — inline edits, commit messages, PR drafts, and palette answers — powered by your own provider accounts.
+---
+
+<video src="/media/ai.mp4" controls muted loop playsInline />
+
+Pragma's own AI is small on purpose: it writes the commit, drafts the pull request, edits
+the file under your cursor, and answers the quick question. It is not another agent —
+your [agents](/docs/user-guide/core-model#sessions-and-agents) do the heavy lifting.
+
+## Setup
+
+The first launch shows **Enable AI features**: connect a provider by **subscription
+sign-in** (browser OAuth) or by pasting an **API key**. Featured providers:
+
+- Claude Code (Claude Pro/Max)
+- Codex (ChatGPT Plus/Pro)
+- GitHub Copilot
+- OpenRouter
+- Google AI (Gemini)
+- opencode Go
+
+**More options** lists the rest (Anthropic, OpenAI, and others). Connect as many as you
+like; **Add another provider** chains them. Skip is always available, and
+Settings → **AI Providers** lists connected accounts with sign-out.
+
+Your credentials, your accounts, your usage — nothing is proxied through a Pragma
+service.
+
+## Inline edit
+
+In any code editor, select lines and press **<Keys mac="⌘K" other="Ctrl+K" />**:
+
+1. A pill opens under the selection; describe the change.
+2. The result lands as **red/green hunks** with accept/reject bars.
+3. Accept hunks one at a time (**<Keys mac="⌘↵" other="Ctrl+↵" />**, or +Shift for all),
+   reject with **<Keys mac="⌘⌫" other="Ctrl+Backspace" />**, walk hunks with
+   **Alt+↑/↓**, or **Abort** while running.
+
+The model gets read-only tools — read, grep, find, list — so it understands context, but
+**nothing touches disk until you save**. Inline edit is available on local worktrees,
+not over SSH.
+
+## Commit messages and pull requests
+
+- The Changes tab's commit box: **Shift+Tab** generates a commit message from the staged
+  diff.
+- The PR create view: **Shift+Tab** drafts a title and body from the branch diff.
+- The **Commit & PR** button (right sidebar header) plans and makes all the commits,
+  pushes, and drafts the PR in one action.
+- The [agent board's](/docs/user-guide/agent-board) "Commit all and open PR" and a
+  fanout pick's final commit message use the same pipeline.
+
+## Ask from the palette
+
+Type a question in the [command palette](/docs/user-guide/keybindings#command-palette)
+and the top row becomes `Ask AI {message}`: a streamed answer scoped to the current
+project and worktree, with read-only tools. Escape cancels. Not available over SSH.

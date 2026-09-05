@@ -24,3 +24,9 @@ export const gitConfig = {
   repo: "pragma",
   branch: "main",
 };
+
+/** Public source repository. */
+export const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
+
+/** Latest desktop release and platform-specific downloads. */
+export const downloadUrl = `${repoUrl}/releases/latest`;

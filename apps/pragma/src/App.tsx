@@ -1,16 +1,16 @@
 import { MotionConfig } from "motion/react";
 
-import { AiSetupModal } from "@/components/ai/AiSetupModal";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
-import { GitHubSetupModal } from "@/components/github/GitHubSetupModal";
+import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
+import { WorkspaceTour } from "@/components/onboarding/WorkspaceTour";
 import { AgentPluginInstallPrompt } from "@/components/plugins/AgentPluginInstallPrompt";
-import { AgentPluginSetupModal } from "@/components/plugins/AgentPluginSetupModal";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { PluginProvider } from "@/plugins/PluginProvider";
 import { AiProvider } from "@/state/ai-context";
 import { AutomationsProvider } from "@/state/automations-context";
 import { GitHubProvider } from "@/state/github-context";
 import { KanbanProvider } from "@/state/kanban-context";
+import { OnboardingProvider } from "@/state/onboarding-context";
 import { OpenPortsProvider } from "@/state/open-ports-context";
 import { ThemeProvider } from "@/state/theme-context";
 import { WorkspaceProvider } from "@/state/workspace-context";
@@ -29,29 +29,30 @@ function App() {
       <AiProvider>
         <GitHubProvider>
           <WorkspaceProvider>
-            <ThemeProvider>
-              <PluginProvider>
-                <OpenPortsProvider>
-                  <KanbanProvider>
-                    <AutomationsProvider>
-                      <ConfirmCloseProvider>
-                        <WorktreeCreationProvider>
-                          <FanoutsProvider>
-                            <UpdatesProvider>
-                              <WorkspaceShell />
-                              <GitHubSetupModal />
-                              <AiSetupModal />
-                              <AgentPluginSetupModal />
-                              <AgentPluginInstallPrompt />
-                            </UpdatesProvider>
-                          </FanoutsProvider>
-                        </WorktreeCreationProvider>
-                      </ConfirmCloseProvider>
-                    </AutomationsProvider>
-                  </KanbanProvider>
-                </OpenPortsProvider>
-              </PluginProvider>
-            </ThemeProvider>
+            <OnboardingProvider>
+              <ThemeProvider>
+                <PluginProvider>
+                  <OpenPortsProvider>
+                    <KanbanProvider>
+                      <AutomationsProvider>
+                        <ConfirmCloseProvider>
+                          <WorktreeCreationProvider>
+                            <FanoutsProvider>
+                              <UpdatesProvider>
+                                <WorkspaceShell />
+                                <OnboardingModal />
+                                <WorkspaceTour />
+                                <AgentPluginInstallPrompt />
+                              </UpdatesProvider>
+                            </FanoutsProvider>
+                          </WorktreeCreationProvider>
+                        </ConfirmCloseProvider>
+                      </AutomationsProvider>
+                    </KanbanProvider>
+                  </OpenPortsProvider>
+                </PluginProvider>
+              </ThemeProvider>
+            </OnboardingProvider>
           </WorkspaceProvider>
         </GitHubProvider>
       </AiProvider>

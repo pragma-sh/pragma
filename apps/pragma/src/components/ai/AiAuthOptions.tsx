@@ -21,8 +21,8 @@ import {
   aiLoginCancel,
   aiLoginRespond,
   aiSetApiKey,
-  browserOpenExternal,
 } from "@/lib/tauri";
+import { openExternal } from "@/lib/open-external";
 import { useAi } from "@/state/ai-context";
 
 /** Which sub-view of the auth flow is showing. */
@@ -245,9 +245,9 @@ function reactToLoginEvent(
   setError: (error: string | null) => void,
 ): void {
   if (event.type === "auth") {
-    void browserOpenExternal(event.url);
+    void openExternal(event.url);
   } else if (event.type === "device-code") {
-    void browserOpenExternal(event.verificationUri);
+    void openExternal(event.verificationUri);
   } else if (event.type === "result") {
     onSuccess();
   } else if (event.type === "error") {
@@ -265,6 +265,11 @@ function useOAuthLogin(
   setEvents: Dispatch<SetStateAction<Array<{ key: number; event: AiLoginEvent }>>>,
 ): void {
   const activeRef = useRef(true);
+  // The callbacks are read through a ref so a parent re-render (a new inline
+  // `onSuccess`) never re-runs the effect: restarting the flow would cancel the
+  // sidecar mid-OAuth and re-open the browser.
+  const handlersRef = useRef({ onSuccess, setError });
+  handlersRef.current = { onSuccess, setError };
   useEffect(() => {
     activeRef.current = true;
     const id = idRef.current;
@@ -273,17 +278,17 @@ function useOAuthLogin(
         return;
       }
       setEvents((prev) => [...prev, { key: keyRef.current++, event }]);
-      reactToLoginEvent(event, onSuccess, setError);
+      reactToLoginEvent(event, handlersRef.current.onSuccess, handlersRef.current.setError);
     }).catch((cause) => {
       if (activeRef.current) {
-        setError(cause instanceof Error ? cause.message : "Login failed.");
+        handlersRef.current.setError(cause instanceof Error ? cause.message : "Login failed.");
       }
     });
     return () => {
       activeRef.current = false;
       void aiLoginCancel(id);
     };
-  }, [provider, onSuccess, setError, idRef, keyRef, setEvents]);
+  }, [provider, idRef, keyRef, setEvents]);
 }
 
 /** Derive the last event and whether we're awaiting a prompt/manual-code/select. */
@@ -370,8 +375,13 @@ function OAuthFlow({
 
   const { last, awaitingInput, awaitingSelect } = deriveLastState(events);
 
+  // A reply that lands on no session leaves the flow looking dead — the option
+  // buttons stay up and nothing else happens — so surface the refusal instead
+  // of dropping it.
   const sendReply = useCallback((value: string) => {
-    void aiLoginRespond(idRef.current, value, false);
+    aiLoginRespond(idRef.current, value, false).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Could not answer the sign-in prompt.");
+    });
     setReply("");
   }, []);
 
@@ -409,7 +419,7 @@ function OAuthFlow({
 function OAuthEventRow({ event }: { event: AiLoginEvent }) {
   if (event.type === "auth") {
     return (
-      <Button onClick={() => void browserOpenExternal(event.url)} size="sm" variant="outline">
+      <Button onClick={() => void openExternal(event.url)} size="sm" variant="outline">
         <ExternalLink className="size-4" data-icon="inline-start" />
         Open sign-in page
       </Button>
@@ -421,7 +431,7 @@ function OAuthEventRow({ event }: { event: AiLoginEvent }) {
         <div className="font-mono text-base tracking-widest">{event.userCode}</div>
         <Button
           className="mt-1 h-auto p-0 text-xs"
-          onClick={() => void browserOpenExternal(event.verificationUri)}
+          onClick={() => void openExternal(event.verificationUri)}
           variant="link"
         >
           {event.verificationUri}

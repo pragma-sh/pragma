@@ -1,0 +1,57 @@
+---
+title: Project scripts
+description: Define setup, teardown, and run scripts in .pragma/scripts.json and run them from the toolbar.
+---
+
+Project scripts are commands the project itself declares, checked into
+`.pragma/scripts.json` at the project root:
+
+```json
+{
+  "setup": ["bun install", "cargo fetch"],
+  "teardown": ["docker compose down"],
+  "runScripts": {
+    "run": [{ "command": "bun run dev" }],
+    "build": [{ "command": "bun run build" }],
+    "test:watch": [{ "command": "bun run test --watch" }]
+  }
+}
+```
+
+<Callout title="Setup and teardown are headless; run scripts are tabs">
+  `setup` and `teardown` run without a visible terminal. `runScripts` open as real terminal tabs you
+  can watch and interact with.
+</Callout>
+
+## Setup and teardown
+
+- **`setup`** runs headlessly after a worktree is created — it is the **"Running
+  scripts"** step of the creation screen. New worktrees arrive with dependencies
+  installed and caches warm.
+- **`teardown`** runs headlessly before a worktree is deleted. **A failure blocks the
+  deletion** — use it to stop containers, release ports, or clean caches that must not
+  leak.
+
+Commands run concurrently, capped at four at a time.
+
+## Run scripts
+
+Every key under `runScripts` becomes a toolbar button on the tab strip:
+
+- **`run`** and **`build`** are reserved defaults — Play for run, Hammer for build.
+- Any other key is a custom button ("Run test:watch"), with an optional Iconify `icon`.
+- While active, the button turns into a stop control; stopping restores the worktree's
+  previous split layout (a run script temporarily replaces it).
+- Config changes hot-reload — edit `.pragma/scripts.json` and the buttons update within
+  a moment. Parse errors surface in the button tooltip.
+
+Running scripts also appear in the command palette: Enter opens the script tab,
+Shift+Enter closes it.
+
+<Callout title="Where did my buttons go?">
+  Scripts are defined per project. A worktree created before you added `runScripts` gets the buttons
+  as soon as the file is saved — no restart needed.
+</Callout>
+
+A typical split: `run` on the left, the agent terminal in the middle,
+[browser](/docs/user-guide/browser) pointed at the dev server on the right.

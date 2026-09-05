@@ -1,0 +1,109 @@
+---
+title: Core model
+description: Projects, nested worktrees, tabs, sessions, and agent status — the concepts Pragma is built on.
+---
+
+Pragma's UI is small because everything hangs off five concepts. Learn them once and every
+screen reads the same way.
+
+<Callout title="A useful definition">
+  A **git worktree** is a second checkout of the same repository, in its own directory, on its own
+  branch. Pragma leans on them heavily: agents work in worktrees so they never step on each other —
+  or on you.
+</Callout>
+
+## Projects
+
+A **project** is a git checkout you have registered — opened from disk, cloned from a
+remote URL, or connected over SSH. Projects live in the **project switcher** strip at the
+bottom of the left sidebar, each with an aggregated agent status dot. Hold the modifier
+key to see <Keys mac="Ctrl+1…9" other="Alt+1…9" /> shortcuts and jump straight to a
+project. Right-click a project to remove its registration — that never deletes the
+checkout files.
+
+Every project's settings are its own `.pragma/config.json`, checked into the repo, with a
+global `~/.pragma/config.json` behind it. See [Core model files](#where-things-live).
+
+## Worktrees — including nested ones
+
+The main checkout is labelled **main**; everything else Pragma creates is a child
+worktree in `<project>/.pragma/worktrees/`, git-excluded so the repo stays clean.
+
+- **Every worktree gets a branch.** Pragma creates it; you name it.
+- **Worktrees nest.** A child worktree can be the parent of another — a follow-up task
+  branches off the work in progress, not off main. Nested worktrees render indented in
+  the sidebar with expand/collapse carets.
+- **Diffs follow the chain.** A worktree's changes resolve against its Pragma parent
+  branch, so reviewing a nested task means reviewing _that task only_.
+- **Merge state is visible.** When a worktree is merged into its parent — or its PR is
+  merged — the sidebar row's glyph becomes a merge icon.
+
+Worktrees can be **pinned** to the top of the tree (newest pin first), **hidden** (kept
+but out of the way, listed under "Show N hidden"), and **renamed** with a double-click on
+the row. See [Creating a worktree](/docs/user-guide/worktrees).
+
+## Tabs
+
+A worktree opens into a **tab strip**. Tab kinds:
+
+| Kind         | What it is                                                         |
+| ------------ | ------------------------------------------------------------------ |
+| `terminal`   | A real PTY — an agent's TUI, a shell, a dev server, a test watch.  |
+| `browser`    | A native web view with an address bar, dev tools, and design mode. |
+| `editor`     | Edit any file in place, with explicit saves and inline AI edits.   |
+| `scratchpad` | An agent-authored MDX document you can read, edit, and comment on. |
+| `diff`       | A read-only side-by-side diff view.                                |
+| `log`        | The Pragma server log (Troubleshooting → Open Server Logs).        |
+| `pr-review`  | A pull-request review view: files, threads, and inline comments.   |
+| `plugin`     | A web view contributed by a plugin.                                |
+
+Tabs can be **split** horizontally or vertically (<Keys mac="⌘/" other="Ctrl+/" /> and{" "}
+
+<Keys mac="⌘⇧/" other="Ctrl+⇧/" />
+), dragged to reorder, renamed, and closed. Splits persist per worktree across restarts.
+
+## Sessions and agents
+
+A **session** is one live terminal process the host server owns — with scrollback, a
+title, and an owner worktree. An **agent** is a coding-agent CLI (or anything else)
+running in one. Agent integrations are plugins that report status into the app:
+
+| Status      | Dot colour | Meaning                                          |
+| ----------- | ---------- | ------------------------------------------------ |
+| `running`   | Yellow     | The agent is working.                            |
+| `done`      | Green      | The agent finished.                              |
+| `attention` | Red        | The agent needs you — a question or an approval. |
+| `cleared`   | None       | The status was seen or the agent exited quietly. |
+
+Dots aggregate upward: tab → worktree → project. Viewing a tab clears its green; an
+attention state always survives until answered. Configuring the integrations themselves
+is a [plugin](/docs/plugins) topic — the shipped ones cover Claude Code, Codex, opencode,
+Cursor, Copilot, Grok, Junie, Kimi, Pi, and Prime Agent.
+
+## Fanouts
+
+A **fanout** runs one prompt in several isolated attempts under a coordination parent
+worktree, so you can compare them side by side and merge the one that actually worked.
+Attempts are ordinary worktrees with their own branches, grouped under the parent in the
+sidebar. See [Creating a worktree → Fan out](/docs/user-guide/worktrees#fan-out).
+
+## Where things live
+
+| Location                                   | Purpose                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| `<project>/.pragma/config.json`            | Project settings: shell, plugins, agent status. Checked in.               |
+| `<project>/.pragma/worktrees/`             | Created worktrees. Git-excluded.                                          |
+| `<project>/.pragma/scratchpads/`           | Agent-authored MDX documents. Git-excluded.                               |
+| `<project>/.pragma/scripts.json`           | [Project scripts](/docs/user-guide/project-scripts).                      |
+| `<project>/.pragma/theme.json`             | Per-project colour overrides.                                             |
+| `<project>/.pragma/keybindings.json`       | Per-project keybinding overrides.                                         |
+| `<project>/.pragma/automations/`           | Project [automations](/docs/automations).                                 |
+| `<project>/.pragma/assets/sounds/`         | Project agent alert clips.                                                |
+| `~/.pragma/config.json`                    | Global settings: plugins, tunnel, agent alerts, GitHub, updates.          |
+| `~/.pragma/keybindings.json`, `theme.json` | Global overrides for the same files, merged per value with the project's. |
+| `~/.pragma/automations/`                   | Global automations (implicitly trusted).                                  |
+| `~/.local/bin/pragma-cli`                  | The CLI, installed and updated by the app so agents can use it.           |
+
+<Callout title="Deep dive">
+  The full story — server, gateway, protocol, and every file on disk — is in the [wiki](/docs/wiki).
+</Callout>
