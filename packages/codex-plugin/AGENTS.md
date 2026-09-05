@@ -96,6 +96,13 @@ waits up to `PRAGMA_APPROVAL_TIMEOUT` (default 300 seconds), then returns Codex'
 After a remote verdict, script reasserts running before returning; denial is model-visible
 feedback and does not necessarily end turn.
 
+Concurrent permission hooks queue behind a turn-scoped directory lock: Pragma carries
+one attention request per agent/tab, so publishing all commands at once hides earlier
+requests. While a command owns the lock, tool-completion and subagent `started` reports
+are suppressed to preserve its attention. Each verdict releases the lock and restores
+running only if its turn still owns the active marker; a late decision after abort must
+not revive the old turn. Locks are scoped by turn so an old waiter cannot block a new one.
+
 Codex 0.144.4 has no `request_user_input` hook. The turn-scoped transcript does record a
 `response_item` function call before Codex shows its question UI, followed by a matching
 `function_call_output` after resolution. The same offset-scoped watcher used for aborts parses

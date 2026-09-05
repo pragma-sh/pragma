@@ -36,6 +36,11 @@ fi
 interrupt_pattern='"type":"turn_aborted"'
 
 report() {
+  # Parallel tools and children must not clear another command's approval.
+  if [ "${1:-}" = started ] && [ -f "$marker" ] &&
+    [ -d "${state_prefix}.approval-$(safe_id "$(cat "$marker" 2>/dev/null)")" ]; then
+    return 0
+  fi
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
@@ -475,12 +480,29 @@ case "${1:-}" in
   permission)
     [ -f "$marker" ] || exit 0
     input="$(cat)"
+    permission_token="$(cat "$marker" 2>/dev/null || true)"
+    [ -n "$permission_token" ] || exit 0
+    permission_lock="${state_prefix}.approval-$(safe_id "$permission_token")"
+    # Pragma exposes one attention request per agent/tab. Queue concurrent
+    # PermissionRequest hooks so every command keeps its own visible request
+    # until its decision arrives. Scope the lock to the turn so an aborted
+    # hook cannot block or clear a later turn's approval.
+    while ! mkdir "$permission_lock" 2>/dev/null; do
+      [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
+      sleep "$watch_interval"
+    done
+    trap 'rmdir "$permission_lock" 2>/dev/null || true' 0
+    trap 'exit 0' HUP INT TERM
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
     command_text="$(extract_command "$input")"
     turn_id="$(json_field turn_id "$input")"
     request_id="${agent}-$(safe_id "${tab}-${turn_id:-$(date +%s)}-$$")"
     report attention --kind command --command "$command_text" --request-id "$request_id"
     verdict="$("$pragma_cli" agent await-decision \
       --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" 2>/dev/null || true)"
+    rmdir "$permission_lock" 2>/dev/null || true
+    trap - 0
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
     case "$verdict" in
       allow)
         report started

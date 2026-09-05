@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -363,6 +363,91 @@ describe("report.sh", () => {
       JSON.stringify({ tool_name: "Bash", tool_input: { command: "bun test" } }),
     );
     expect(output).toBe("");
+  });
+
+  it("ignores a decision when a different turn has taken ownership", () => {
+    run("started", { stdin: JSON.stringify({ turn_id: "old-turn" }) });
+    writeFileSync(
+      join(binDir, "pragma-cli"),
+      `#!/usr/bin/env sh
+printf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"
+if [ "$1 $2" = "agent await-decision" ]; then
+  printf 'new-turn' > "$TMPDIR/pragma-cli-codex-$PRAGMA_TAB_ID.active"
+  printf 'allow'
+fi
+`,
+      { mode: 0o755 },
+    );
+    expect(runRaw("permission", JSON.stringify({ tool_name: "Bash" }))).toBe("");
+    expect(reports().filter((report) => report.endsWith(" started"))).toHaveLength(1);
+    expect(existsSync(join(tmpEnvDir, `pragma-cli-codex-${TAB_ID}.approval-old-turn`))).toBe(false);
+  });
+
+  it("queues concurrent approvals and preserves attention until each decision", async () => {
+    writeFileSync(
+      join(binDir, "pragma-cli"),
+      `#!/usr/bin/env sh
+printf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"
+if [ "$1 $2" = "agent await-decision" ]; then
+  while [ ! -f "$PRAGMA_TEST_DECISION_FILE" ]; do sleep 0.02; done
+  cat "$PRAGMA_TEST_DECISION_FILE"
+fi
+`,
+      { mode: 0o755 },
+    );
+    run("started", { stdin: JSON.stringify({ turn_id: "parallel-turn" }) });
+    const launch = (command: string) => {
+      const decisionFile = join(workdir, command);
+      const child = spawn("sh", [REPORT_SH, "permission"], {
+        env: {
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          TMPDIR: tmpEnvDir,
+          PRAGMA_TAB_ID: TAB_ID,
+          PRAGMA_TEST_LOG: logPath,
+          PRAGMA_SERVER_SOCKET: join(workdir, "server.sock"),
+          PRAGMA_TEST_DECISION_FILE: decisionFile,
+          PRAGMA_WATCH_INTERVAL: "0.02",
+        },
+      });
+      let output = "";
+      child.stdout.on("data", (data) => {
+        output += data.toString();
+      });
+      const finished = new Promise<string>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", () => resolve(output));
+      });
+      child.stdin.end(JSON.stringify({ tool_name: "Bash", tool_input: { command } }));
+      return { decisionFile, finished };
+    };
+    const first = launch("first");
+    let second: ReturnType<typeof launch> | undefined;
+    const attention = () => reports().filter((report) => report.includes(" attention "));
+    try {
+      await waitFor(() => attention().length === 1);
+      expect(attention()).toHaveLength(1);
+      second = launch("second");
+      run("running");
+      run("subagent-start", { stdin: JSON.stringify({ agent_id: "child" }) });
+      expect(reports().at(-1)).toContain(" attention ");
+      expect(attention()).toHaveLength(1);
+
+      writeFileSync(first.decisionFile, "allow");
+      expect(JSON.parse(await first.finished).hookSpecificOutput.decision.behavior).toBe("allow");
+      await waitFor(() => attention().length === 2);
+      expect(attention()).toHaveLength(2);
+      expect(attention()[0]).not.toBe(attention()[1]);
+      run("running");
+      expect(reports().at(-1)).toContain(" attention ");
+
+      writeFileSync(second.decisionFile, "deny");
+      expect(JSON.parse(await second.finished).hookSpecificOutput.decision.behavior).toBe("deny");
+      expect(reports().at(-1)).toBe("agent report --agent codex started");
+    } finally {
+      writeFileSync(first.decisionFile, "deny");
+      if (second) writeFileSync(second.decisionFile, "deny");
+      await Promise.all([first.finished, second?.finished]);
+    }
   });
 
   itWithPython3("reports a transcript question and resumes after its answer", async () => {
