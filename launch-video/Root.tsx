@@ -1,6 +1,6 @@
 import { Composition } from "remotion";
 
-import { PragmaLaunch, PRAGMA_LAUNCH_DURATION_IN_FRAMES } from "./pragma-launch";
+import { PragmaLaunch, PRAGMA_LAUNCH_DURATION_IN_FRAMES } from "./PragmaLaunch";
 
 /** Remotion composition registry for Pragma launch media. */
 export function RemotionRoot() {

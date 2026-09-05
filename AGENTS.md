@@ -142,7 +142,7 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma-sh/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
-├── launch-video/                 # Remotion source for the README launch film
+├── launch-video/                 # Remotion source for the README launch film → see skills/launch-video/SKILL.md
 ├── remotion.config.ts            # Render settings; website public assets provide source media
 ├── skills/                       # Canonical user-facing skills; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
