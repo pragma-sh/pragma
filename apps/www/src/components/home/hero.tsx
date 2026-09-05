@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
@@ -27,7 +27,7 @@ function riseIn(reduceMotion: boolean | null, delay = 0) {
   };
 }
 
-/** Entrance for the screenshot: a longer, deeper lift with a slight tilt. */
+/** Entrance for the launch film: a longer, deeper lift with a slight tilt. */
 function liftIn(reduceMotion: boolean | null) {
   return {
     initial: reduceMotion ? false : { opacity: 0, y: 120, rotateX: 14, scale: 0.94 },
@@ -36,10 +36,11 @@ function liftIn(reduceMotion: boolean | null) {
   };
 }
 
-/** Landing hero: headline, download CTA, the 3D agent field, and the app shot. */
+/** Landing hero: headline, download CTA, the 3D agent field, and the launch film. */
 export function Hero() {
   const reduceMotion = useReducedMotion();
   const shotRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const subheadRef = useRef<HTMLParagraphElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,17 @@ export function Hero() {
   // Per-block (and, inside a block, per-line) rectangles give the chips the
   // heading's real silhouette to bend around.
   const protectedRefs = useMemo(() => [headingRef, subheadRef, actionsRef, noteRef, shotRef], []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (reduceMotion) {
+      video.pause();
+      return;
+    }
+    void video.play();
+  }, [reduceMotion]);
 
   // The chips seat in a band arcing over the copy until the hero is wide enough
   // for side gutters that hold a column, so the hero reserves the depth that
@@ -126,20 +138,24 @@ export function Hero() {
           ref={shotRef}
           className="border-border bg-card shadow-floating relative overflow-hidden rounded-xl border"
         >
-          <Image
-            src="/pragma-app.png"
-            alt="The Pragma desktop app running ten coding agents in parallel worktrees"
-            width={5104}
-            height={2612}
-            priority
-            className="w-full"
-          />
+          <video
+            ref={videoRef}
+            aria-hidden
+            autoPlay
+            className="block aspect-video w-full"
+            loop
+            muted
+            playsInline
+            poster="/pragma-app.png"
+            preload="metadata"
+            tabIndex={-1}
+          >
+            <source src="/media/pragma-launch.mp4" type="video/mp4" />
+          </video>
         </div>
         {/*
-          Reflection. The copy is anchored to the top of a window 46% of the
-          shot's height, so flipping it about its own centre lands the shot's
-          bottom edge exactly on the seam. It runs past the hero's own box and
-          on into the section below, which is why the section no longer clips.
+          Reflection. The film poster keeps this layer static, avoiding a second
+          decoder while preserving the hero's reflected edge below the fold.
         */}
         <div
           aria-hidden
