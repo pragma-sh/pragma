@@ -142,6 +142,8 @@ than no guide.
 │   ├── github-helpers/          # `@pragma/github-helpers` — Octokit host sidecar; `src/cli.ts` is `pragma-github`
 │   ├── opencode-plugin/         # `@pragma-sh/opencode-plugin` ESM opencode status plugin
 │   └── plugins-host/            # `@pragma/plugins-host` — `pragma-plugins` host sidecar (agent catalog + icon assets)
+├── launch-video/                 # Remotion source for the README launch film
+├── remotion.config.ts            # Render settings; website public assets provide source media
 ├── skills/                       # Canonical user-facing skills; symlinked into `.agents/skills`
 ├── tsconfig.base.json           # Shared strict TS config (every package extends it)
 ├── Cargo.toml                   # Rust workspace (shared deps + lints + release profile)
@@ -247,6 +249,8 @@ bun run dev:www            # Run the marketing + docs site (Next.js, http://loca
 bun run dev:command -- <dev-id> "<command>" # Open command in a new terminal tab in that dev build
 bun run --filter pragma tauri:build   # Build the desktop app (macOS/Linux/Windows bundles)
 bun run benchmark          # Terminal lag benchmark: launches its own dev instance → see packages/bench/AGENTS.md
+bun run video:studio       # Preview the launch film in Remotion Studio
+bun run video:render       # Render .github/assets/pragma-launch.mp4 for README
 
 # Pragma Go (Expo, apps/pragma-go) — see apps/pragma-go/AGENTS.md
 bun run dev:go:ios         # First run: build dev client + boot iOS simulator

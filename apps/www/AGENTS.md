@@ -37,7 +37,7 @@ apps/www/
 ├── public/
 │   ├── agents/              # official agent marks, copied from `packages/*-plugin/assets`
 │   ├── media/               # product screenshots and self-hosted screen recordings
-│   └── pragma-app.png       # hero screenshot of the desktop app
+│   └── pragma-app.png       # hero screenshot and reflected still
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/

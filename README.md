@@ -20,7 +20,7 @@ Agents, terminals, diffs, and pull requests in one workspace.</p>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-000000?style=flat-square&logo=bun&logoColor=white" alt="Bun" /></a>
 </p>
 
-<img src="apps/www/public/pragma-app.png" alt="Pragma desktop app" width="100%" />
+<video src="https://github.com/user-attachments/assets/b3a5f0c9-730c-47ac-8cf2-a8f872d14d66" controls width="100%"></video>
 
 <p>
   <a href="https://pragma-app.sh">Website</a>
