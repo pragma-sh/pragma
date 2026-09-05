@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { loadFont as loadGeist } from "@remotion/google-fonts/Geist";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 import { Audio, Video } from "@remotion/media";
@@ -130,7 +129,7 @@ function CornerAgentChips() {
   );
 }
 
-function Statement({ children, subtitle }: { children: ReactNode; subtitle?: string }) {
+function Statement({ children, subtitle }: { children: string; subtitle?: string }) {
   const frame = useCurrentFrame();
 
   return (
