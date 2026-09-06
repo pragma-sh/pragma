@@ -176,18 +176,26 @@ pub fn command_args(program: &str, command: &str) -> Vec<String> {
 /// so the two are built separately rather than sharing one escape.
 #[must_use]
 pub fn interactive_command_line(program: &str, parts: &[String]) -> String {
-    let quote: fn(&str) -> String = if is_powershell(program) {
-        quote_powershell
-    } else if is_cmd(program) {
-        quote_cmd
-    } else {
-        quote_posix
-    };
     parts
         .iter()
-        .map(|part| quote(part))
+        .map(|part| quote_for_shell(program, part))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Quotes one value the way `program`'s shell parses it, for splicing into a
+/// command string that shell will run (e.g. as an argument to a generated
+/// `cd`). See [`interactive_command_line`] for why POSIX and PowerShell/`cmd`
+/// quoting are not interchangeable.
+#[must_use]
+pub fn quote_for_shell(program: &str, value: &str) -> String {
+    if is_powershell(program) {
+        quote_powershell(value)
+    } else if is_cmd(program) {
+        quote_cmd(value)
+    } else {
+        quote_posix(value)
+    }
 }
 
 /// POSIX single-quoting: everything is literal inside `'…'`, and an embedded

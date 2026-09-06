@@ -2301,7 +2301,12 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Shared script execution limits used by project lifecycle scripts.",
-      "required": ["maxConcurrentCommands", "configPath"],
+      "required": [
+        "maxConcurrentCommands",
+        "configPath",
+        "migrationSources",
+        "migrationCommitMessage"
+      ],
       "properties": {
         "maxConcurrentCommands": {
           "type": "integer",
@@ -2312,9 +2317,50 @@
           "type": "string",
           "minLength": 1,
           "description": "Project-root-relative POSIX path of the optional project script config file. Read by the Rust backend and matched against worktree file-watch events by the frontend to hot-reload script buttons."
+        },
+        "migrationSources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ScriptMigrationSource"
+          },
+          "description": "Other agent orchestrators whose checked-in lifecycle-script config Pragma can import into `.pragma/scripts.json`. Order is the detection priority: when a project carries more than one, the first match wins."
+        },
+        "migrationCommitMessage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Conventional-commit subject for the generated `.pragma/scripts.json` commit, written when the import prompt's commit toggle is on. The commit carries no trailers: the user is its sole author."
         }
       }
     },
+    "ScriptMigrationSource": {
+      "title": "ScriptMigrationSource",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One importable foreign script config: its identifier, display name, and the project-root-relative paths that identify it.",
+      "required": ["id", "label", "configPaths"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier the frontend sends back over IPC to import this source. Never a display string."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool name shown in the import prompt."
+        },
+        "configPaths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Project-root-relative POSIX paths this tool stores its lifecycle scripts in, in probe order."
+        }
+      }
+    },
+
     "Agents": {
       "title": "Agents",
       "type": "object",

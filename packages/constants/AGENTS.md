@@ -47,6 +47,10 @@ The Rust side parses `values.json` against the schema-generated types at startup
 - `theme.fileName` / `theme.modes` — location and color-scheme blocks of the optional
   `.pragma/theme.json` color overrides (see `apps/pragma/AGENTS.md`). Only the file
   contract is shared; the token catalog is derived from `apps/pragma/src/index.css`.
+- `scripts.migrationSources` / `scripts.migrationCommitMessage` — the other orchestrators
+  whose checked-in lifecycle scripts Pragma can import into `.pragma/scripts.json` (in
+  detection priority order), and the commit subject used when the import prompt's commit
+  toggle is on. See _Importing another tool's project scripts_ in `apps/pragma/AGENTS.md`.
 - `protocol.*` — RPC method, event, and error names shared by Rust and TypeScript.
 - `github.*` — OAuth client id, scopes, endpoint URLs.
 - Keybindings schema — default key bindings registered in both TS (`useShortcuts`) and

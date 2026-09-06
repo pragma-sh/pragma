@@ -3,6 +3,7 @@ import { MotionConfig } from "motion/react";
 import { ConfirmCloseProvider } from "@/components/editor/confirm-close";
 import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
 import { WorkspaceTour } from "@/components/onboarding/WorkspaceTour";
+import { ScriptMigrationDialog } from "@/components/dialogs/ScriptMigrationDialog";
 import { AgentPluginInstallPrompt } from "@/components/plugins/AgentPluginInstallPrompt";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { PluginProvider } from "@/plugins/PluginProvider";
@@ -43,6 +44,7 @@ function App() {
                                 <OnboardingModal />
                                 <WorkspaceTour />
                                 <AgentPluginInstallPrompt />
+                                <ScriptMigrationDialog />
                               </UpdatesProvider>
                             </FanoutsProvider>
                           </WorktreeCreationProvider>

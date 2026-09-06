@@ -92,7 +92,7 @@ fn read_scripts_json(pty: &PtyClient, project_root: &str) -> Option<String> {
 
 /// Validates and parses a `scripts.json` body. `path` is used only for error
 /// messages.
-fn parse_config(raw: &str, path: &Path) -> AppResult<LoadedProjectScripts> {
+pub(crate) fn parse_config(raw: &str, path: &Path) -> AppResult<LoadedProjectScripts> {
     let value: Value = serde_json::from_str(raw).map_err(|error| {
         AppError::InvalidInput(format!("{} is not valid JSON: {error}", path.display()))
     })?;
