@@ -1382,6 +1382,33 @@ stores the string verbatim (same pattern as split layouts). The mount-time `relo
 rehydrates via `hydrate-selection`; a persist effect writes on every selection change,
 gated by `didHydrateRef` and deduped by `lastPersistedRef`.
 
+## Importing another tool's project scripts
+
+A repository that used Superset, Emdash, or Orca already carries the commands Pragma
+wants. `src-tauri/src/script_migration.rs` reads those configs through the project host's
+`filesystem` RPC (so a remote project migrates the same way) and offers them as a
+`.pragma/scripts.json` import. `ScriptMigrationDialog` (mounted in `App.tsx`) probes once
+per project selection and shows the prompt with a commit toggle; committing stages the
+generated file and commits it as `scripts.migrationCommitMessage`. The commit carries no
+`Co-Authored-By` trailer — GitHub resolves that trailer to a user or bot account by
+verified email, never to an organization, so a `pragma-sh` credit would render as an
+unlinked name.
+
+- **The sources and their paths live in `@pragma/constants`** (`scripts.migrationSources`),
+  in detection priority order. A project carrying several configs is offered exactly one —
+  the first that yields commands — because the point is one decision, not a queue of them.
+- **No offer is made when it would be empty or unwanted**: `.pragma/scripts.json` already
+  exists, the config holds no commands, or the user dismissed this project (a
+  `script_migration_dismissed:<projectId>` settings row, set by "Don't ask again" and by a
+  successful import).
+- **Foreign vocabulary is translated, not copied verbatim.** Superset's `cwd` becomes a
+  `cd … &&` prefix and its `SUPERSET_*` variables are rewritten to the `PRAGMA_*` ones
+  lifecycle scripts actually get; Emdash's `shellSetup` is prefixed onto each command.
+- **`orca.yaml` is read as a deliberately small YAML subset** (`setup`/`run`/`teardown`
+  keys, scalar, inline `[a, b]`, or block list) rather than by adding a YAML dependency.
+  It is best-effort input the user reviews in the prompt before anything is written; do
+  not grow it into a general YAML parser.
+
 ## Project command palette
 
 `Cmd+P` (macOS) / `Ctrl+P` (Linux) opens

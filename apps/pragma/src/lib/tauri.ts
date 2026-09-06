@@ -486,6 +486,43 @@ export function loadProjectScripts(projectId: string): Promise<ProjectScriptsCon
 }
 
 /**
+ * Another orchestrator's lifecycle scripts, detected in a project and ready to
+ * be imported into `.pragma/scripts.json`.
+ */
+export interface ScriptMigrationOffer {
+  /** Stable source id (`superset`, `emdash`, `orca`). */
+  sourceId: string;
+  /** Tool name to show in the prompt. */
+  sourceLabel: string;
+  /** Project-root-relative path the commands came from. */
+  configPath: string;
+  setup: string[];
+  run: string[];
+  teardown: string[];
+  /** Exact `.pragma/scripts.json` body the import would write. */
+  preview: string;
+}
+
+/**
+ * Detects an importable Superset/Emdash/Orca script config for a project.
+ * Null when the project already has `.pragma/scripts.json`, the offer was
+ * dismissed, or no supported config holds commands.
+ */
+export function detectScriptMigration(projectId: string): Promise<ScriptMigrationOffer | null> {
+  return invoke<ScriptMigrationOffer | null>("detect_script_migration", { projectId });
+}
+
+/** Writes the detected import to `.pragma/scripts.json`, optionally committing it. */
+export function applyScriptMigration(projectId: string, commit: boolean): Promise<void> {
+  return invoke("apply_script_migration", { projectId, commit });
+}
+
+/** Records that a project's import offer should not be shown again. */
+export function dismissScriptMigration(projectId: string): Promise<void> {
+  return invoke("dismiss_script_migration", { projectId });
+}
+
+/**
  * Returns the persisted active selection (last active project + per-project
  * last active worktree) as opaque, frontend-owned JSON, or null on first
  * launch. The shape is owned by the frontend; Rust stores the string verbatim.

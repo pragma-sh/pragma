@@ -31,6 +31,7 @@ pub(crate) use pragma_core::process_env;
 mod projects;
 mod pty;
 mod scratchpads;
+mod script_migration;
 mod scripts;
 mod ssh_host;
 mod updates;
@@ -1240,6 +1241,9 @@ pub fn run() {
             worktrees::hide_worktree,
             worktrees::delete_worktree,
             scripts::load_project_scripts,
+            script_migration::detect_script_migration,
+            script_migration::apply_script_migration,
+            script_migration::dismiss_script_migration,
             editors::open_worktree,
             agent_notifications::show_agent_notification,
             control::start_agent,
