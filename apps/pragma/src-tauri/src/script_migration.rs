@@ -82,7 +82,7 @@ pub fn detect_script_migration(
     }
     let project = db.project(&project_id)?;
     let pty = hosts.for_project(&db, &project_id)?;
-    Ok(detect_on_host(&pty, &project.path))
+    detect_on_host(&pty, &project.path)
 }
 
 /// Writes the detected import to `.pragma/scripts.json` on the project's host,
@@ -97,7 +97,7 @@ pub fn apply_script_migration(
 ) -> AppResult<()> {
     let project = db.project(&project_id)?;
     let pty = hosts.for_project(&db, &project_id)?;
-    let offer = detect_on_host(&pty, &project.path).ok_or_else(|| {
+    let offer = detect_on_host(&pty, &project.path)?.ok_or_else(|| {
         AppError::InvalidInput("no importable script config was found for this project".to_string())
     })?;
     write_scripts_config(&pty, &project.path, &offer.preview)?;
@@ -129,9 +129,22 @@ fn dismiss(db: &Db, project_id: &str) -> AppResult<()> {
 
 /// Probes every configured source on `pty`'s host and builds the first offer
 /// that yields commands.
-fn detect_on_host(pty: &PtyClient, project_root: &str) -> Option<ScriptMigrationOffer> {
-    if read_text(pty, project_root, CONSTANTS.scripts.config_path.as_str()).is_some() {
-        return None;
+///
+/// Checks for an existing `.pragma/scripts.json` with `PathExists` rather than
+/// `read_text`'s best-effort read: a read failure there (permission denied, a
+/// transient host error) must not be mistaken for "no file", or a migration
+/// gets offered — and later applied — over a config the read merely couldn't
+/// see. Errors here propagate instead of being swallowed.
+fn detect_on_host(pty: &PtyClient, project_root: &str) -> AppResult<Option<ScriptMigrationOffer>> {
+    let target_exists: bool = fs_rpc(
+        pty,
+        &FsRequest::PathExists {
+            root: project_root.to_string(),
+            path: CONSTANTS.scripts.config_path.to_string(),
+        },
+    )?;
+    if target_exists {
+        return Ok(None);
     }
     for source in &CONSTANTS.scripts.migration_sources {
         for config_path in &source.config_paths {
@@ -144,10 +157,10 @@ fn detect_on_host(pty: &PtyClient, project_root: &str) -> Option<ScriptMigration
             if imported.is_empty() {
                 continue;
             }
-            return Some(offer(source, config_path.as_str(), &imported));
+            return Ok(Some(offer(source, config_path.as_str(), &imported)));
         }
     }
-    None
+    Ok(None)
 }
 
 fn offer(
@@ -216,6 +229,12 @@ fn write_scripts_config(pty: &PtyClient, project_root: &str, body: &str) -> AppR
 }
 
 /// Stages and commits the generated config on the project's host.
+///
+/// Commits with `CommitPath` rather than `CommitStaged`: the dialog promises
+/// this commits only the imported config, but `CommitStaged` records the
+/// whole index, so any other work the user already had staged would ride
+/// along under the generated-config message. Scoping the commit to this one
+/// path leaves the rest of the index exactly as it was.
 fn commit_scripts_config(pty: &PtyClient, project_root: &str) -> AppResult<()> {
     host_rpc::<()>(
         pty,
@@ -226,8 +245,9 @@ fn commit_scripts_config(pty: &PtyClient, project_root: &str) -> AppResult<()> {
     )?;
     host_rpc::<()>(
         pty,
-        &GitRequest::CommitStaged {
+        &GitRequest::CommitPath {
             root: project_root.to_string(),
+            path: CONSTANTS.scripts.config_path.to_string(),
             message: commit_message(),
         },
     )
@@ -464,9 +484,17 @@ fn commands(value: &Value) -> Vec<String> {
     .collect()
 }
 
+/// Prefixes `command` with a `cd` into `cwd`, quoted for the shell that will
+/// run it (the same shell `pragma-core`'s exec RPC resolves at run time), so a
+/// directory containing spaces or other shell-significant characters does not
+/// split the `cd` into the wrong path or break the command apart.
 fn prefix_cwd(command: &str, cwd: Option<&str>) -> String {
     match cwd {
-        Some(cwd) if !cwd.trim().is_empty() && cwd != "." => format!("cd {cwd} && {command}"),
+        Some(cwd) if !cwd.trim().is_empty() && cwd != "." => {
+            let shell = pragma_platform::shell::default_shell();
+            let quoted = pragma_platform::shell::quote_for_shell(&shell, cwd);
+            format!("cd {quoted} && {command}")
+        }
         _ => command.to_string(),
     }
 }
@@ -536,6 +564,22 @@ mod tests {
             imported.teardown,
             vec!["cd apps/web && docker-compose down -v".to_string()]
         );
+    }
+
+    #[test]
+    fn quotes_a_cwd_containing_a_space() {
+        let imported = parse(
+            "superset",
+            ".superset/config.json",
+            r#"{
+              "cwd": "apps/web client",
+              "setup": ["bun install"]
+            }"#,
+        );
+        let shell = pragma_platform::shell::default_shell();
+        let quoted = pragma_platform::shell::quote_for_shell(&shell, "apps/web client");
+        assert_eq!(imported.setup, vec![format!("cd {quoted} && bun install")]);
+        assert!(imported.setup[0].contains("apps/web client"));
     }
 
     #[test]

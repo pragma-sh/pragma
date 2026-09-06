@@ -125,6 +125,14 @@ pub enum GitRequest {
     UnstageAll { root: String },
     /// Commits the staged index with a message.
     CommitStaged { root: String, message: String },
+    /// Commits only `path`, leaving any other staged changes in the index
+    /// untouched. Used for a generated-file commit that must not sweep up
+    /// whatever else the user already had staged.
+    CommitPath {
+        root: String,
+        path: String,
+        message: String,
+    },
     /// Merges a child worktree's branch into its parent worktree.
     MergeWorktreeToParent {
         parent_root: String,
@@ -228,6 +236,9 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
     if let Some(value) = handle_lifecycle_request(&request)? {
         return Ok(value);
     }
+    if let Some(value) = handle_index_request(&request)? {
+        return Ok(value);
+    }
     match request {
         GitRequest::WorktreeChanges {
             root,
@@ -283,17 +294,6 @@ pub fn handle(payload: Value) -> CoreResult<Value> {
         )?),
         GitRequest::DiscardAllUnstaged { root } => {
             to_value(discard_all_unstaged(Path::new(&root))?)
-        }
-        GitRequest::StageFile { root, path } => to_value(stage_file(Path::new(&root), &path)?),
-        GitRequest::StageAll { root } => to_value(stage_all(Path::new(&root))?),
-        GitRequest::UnstageFile {
-            root,
-            path,
-            old_path,
-        } => to_value(unstage_file(Path::new(&root), &path, old_path.as_deref())?),
-        GitRequest::UnstageAll { root } => to_value(unstage_all(Path::new(&root))?),
-        GitRequest::CommitStaged { root, message } => {
-            to_value(commit_staged(Path::new(&root), &message)?)
         }
         GitRequest::MergeWorktreeToParent {
             parent_root,
@@ -412,6 +412,30 @@ fn handle_lifecycle_request(request: &GitRequest) -> CoreResult<Option<Value>> {
         GitRequest::ListHeadlessWorktrees { project_root } => {
             to_value(list_headless_worktrees(Path::new(project_root)))?
         }
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
+}
+
+/// Staging/unstaging and committing the index.
+fn handle_index_request(request: &GitRequest) -> CoreResult<Option<Value>> {
+    let value = match request {
+        GitRequest::StageFile { root, path } => to_value(stage_file(Path::new(root), path)?)?,
+        GitRequest::StageAll { root } => to_value(stage_all(Path::new(root))?)?,
+        GitRequest::UnstageFile {
+            root,
+            path,
+            old_path,
+        } => to_value(unstage_file(Path::new(root), path, old_path.as_deref())?)?,
+        GitRequest::UnstageAll { root } => to_value(unstage_all(Path::new(root))?)?,
+        GitRequest::CommitStaged { root, message } => {
+            to_value(commit_staged(Path::new(root), message)?)?
+        }
+        GitRequest::CommitPath {
+            root,
+            path,
+            message,
+        } => to_value(commit_path(Path::new(root), path, message)?)?,
         _ => return Ok(None),
     };
     Ok(Some(value))
@@ -1195,6 +1219,21 @@ fn commit_staged(root: &Path, message: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// Commits only `path`. Passing a pathspec makes `git commit` record just the
+/// changes under it, leaving any other already-staged path in the index
+/// untouched afterward — unlike [`commit_staged`], which commits the whole
+/// index.
+fn commit_path(root: &Path, path: &str, message: &str) -> CoreResult<()> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err(CoreError::InvalidPayload(
+            "commit message is empty".to_string(),
+        ));
+    }
+    run_git(root, &["commit", "-m", trimmed, "--", path])?;
+    Ok(())
+}
+
 /// Merges a child worktree's branch into its parent worktree. Both must be clean.
 fn merge_worktree_to_parent(
     parent_root: &Path,
@@ -1973,13 +2012,13 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        bounded_map, commit_file_diff, commit_staged, create_worktree, discard_all_unstaged,
-        discard_unstaged_file, ensure_pragma_excluded, file_diff, github_abort_merge,
-        github_fetch_and_sync, github_merge_base_branch, github_merge_in_progress,
-        github_pull_branch, github_sync_branch, has_unmerged_paths, list_headless_worktrees,
-        merge_worktree_to_parent, merged_status, remove_worktree, stage_file, unstage_file,
-        worktree_changes, worktree_commits, worktree_is_dirty, MergedStatusItem,
-        PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
+        bounded_map, commit_file_diff, commit_path, commit_staged, create_worktree,
+        discard_all_unstaged, discard_unstaged_file, ensure_pragma_excluded, file_diff,
+        github_abort_merge, github_fetch_and_sync, github_merge_base_branch,
+        github_merge_in_progress, github_pull_branch, github_sync_branch, has_unmerged_paths,
+        list_headless_worktrees, merge_worktree_to_parent, merged_status, remove_worktree,
+        stage_file, unstage_file, worktree_changes, worktree_commits, worktree_is_dirty,
+        MergedStatusItem, PRAGMA_SCRATCHPADS_EXCLUDE, PRAGMA_WORKTREES_EXCLUDE,
     };
 
     fn run(dir: &Path, args: &[&str]) {
@@ -2307,6 +2346,25 @@ mod tests {
         let changes = worktree_changes(&child_path, Some("main")).expect("changes");
         assert!(changes.staged.is_empty());
         assert!(changes.unstaged.iter().any(|c| c.path == "base.txt"));
+    }
+
+    #[test]
+    fn commit_path_leaves_other_staged_paths_staged() {
+        let (child_path, _main_path) = project_with_child();
+        std::fs::write(child_path.join("base.txt"), "changed\n").expect("modify base");
+        std::fs::write(child_path.join("other.txt"), "unrelated\n").expect("write other");
+        run(&child_path, &["add", "base.txt", "other.txt"]);
+
+        commit_path(&child_path, "base.txt", "commit base only").expect("commit path");
+
+        let changes = worktree_changes(&child_path, Some("main")).expect("changes");
+        assert!(
+            changes.staged.iter().any(|c| c.path == "other.txt"),
+            "unrelated staged file must survive the scoped commit"
+        );
+        assert!(!changes.staged.iter().any(|c| c.path == "base.txt"));
+        assert!(changes.committed.iter().any(|c| c.path == "base.txt"));
+        assert!(!changes.committed.iter().any(|c| c.path == "other.txt"));
     }
 
     #[test]
