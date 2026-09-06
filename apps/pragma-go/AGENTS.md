@@ -206,7 +206,6 @@ lib/
   haptics.ts                     # haptic intent wrappers
   widgets/                       # widget-data (pure, Vitest) + widget layouts + app→widget sync
   push.ts                        # Expo push: permission, token registration, unregister + retry
-  push-check.ts                  # pure: settings notification check → one readable line (Vitest)
   push-route.ts                  # pure: notification data → chat route (Vitest)
   scan-frame.ts                  # pure: barcode report → highlight rectangle (Vitest)
   pending-revocation.ts          # pure: queue of unacknowledged unregisters (Vitest)
@@ -366,17 +365,14 @@ implemented in `lib/widgets/`:
   minting needs an EAS project id from the runtime manifest or `extra.eas.projectId`
   in `app.json`; without it `registerForPush` returns `unsupported` and the app runs
   unchanged.
-- **Silence has several unrelated causes, so Settings names the one in play.** Push can
-  be quiet because permission was refused, because the build has no push service (a
-  simulator, the browser), because the host has no phone registered, because the
-  desktop window is focused and the gateway is deliberately holding alerts back, or
-  because Expo refused the message — an APNs key the EAS project never got shows up
-  only as an `InvalidCredentials` ticket, and nothing else ever reports it. The
-  Notifications card in `app/(tabs)/settings/index.tsx` registers and then calls
-  `client.push.test()`, which now answers `200` with `{ sent, errors }` so the
-  rejection reaches the phone verbatim; `lib/push-check.ts` holds the pure mapping to
-  one line. The agent-alert path logs the same rejections on the host. Before
-  debugging anything else, check the desktop is not simply in front of the user.
+- **Silence has several unrelated causes.** Push can be quiet because permission was
+  refused, because the build has no push service (a simulator, the browser), because the
+  host has no phone registered, because the desktop window is focused and the gateway is
+  deliberately holding alerts back, or because Expo refused the message — an APNs key the
+  EAS project never got shows up only as an `InvalidCredentials` ticket. The app exposes
+  no in-app check for this: the agent-alert path logs the same rejections on the host, and
+  `client.push.test()` remains available over the gateway. Before debugging anything else,
+  check the desktop is not simply in front of the user.
 - **An unregister the host never acknowledged is queued, never dropped.** Unpair has to
   work with the desktop unreachable, but discarding the failed `DELETE /v1/push/tokens`
   would leave the gateway pushing agent-alert text to a phone that can no longer ask it
