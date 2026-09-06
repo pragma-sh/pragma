@@ -562,9 +562,21 @@ A JavaScript-only fix ships with `eas update`; no new binary, no new TestFlight
 build, no review.
 
 ```bash
-eas update --branch production --message "fix: keep sheet actions above the keyboard"
+bun run --filter pragma-go update --message "fix: keep sheet actions above the keyboard"
 ```
 
+- **Publish through the `update` script, never a bare `eas update`.** The
+  fingerprint hashes the _resolved_ app config, and `app.config.ts` only adds
+  `with-store-ios-cleanup` when `PRAGMA_STORE_BUILD` is set (see _Config
+  plugins_). `eas.json` sets that variable for **builds**; `eas update` runs on
+  your machine, where it is unset, so a bare invocation publishes under a
+  fingerprint no shipped binary has and the update is silently never served —
+  no error, no warning, just a build that keeps its embedded bundle forever.
+  The `update` script sets it, which is the whole reason it exists. Diagnose a
+  suspected mismatch with `eas fingerprint:compare --build-id <id>`, and confirm
+  the fix by comparing the build's `fingerprint.hash` from
+  `eas build:list --json` against a local
+  `PRAGMA_STORE_BUILD=1 bunx expo-updates fingerprint:generate --platform ios`.
 - **`runtimeVersion.policy` is `fingerprint`, and it was `appVersion` until it
   cost us a broken build.** An update is only served to builds whose runtime
   version matches. Under `appVersion` that version was `expo.version`, so every

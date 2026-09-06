@@ -13,6 +13,7 @@
     "preexport:web": "bunx turbo run build --filter=pragma-go^...",
     "export:web": "EXPO_BASE_URL=/web expo export --platform web --output-dir dist",
     "prebuild": "expo prebuild",
+    "update": "PRAGMA_STORE_BUILD=1 eas update --branch production --platform all",
     "icons": "bun run scripts/generate-icons.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

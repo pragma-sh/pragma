@@ -258,6 +258,7 @@ bun run dev:go:android     # First run: build dev client + boot Android emulator
 bun run dev:go             # Metro dev server (after the dev client is installed once)
 bun run --filter pragma-go web           # Metro dev server for the browser build
 bun run --filter pragma web:stage        # Export + stage the web bundle into the desktop resources
+bun run --filter pragma-go update        # Publish an OTA update to the production channel (sets PRAGMA_STORE_BUILD)
 
 # Quality gates (root)
 bun run lint               # oxlint across the repo
