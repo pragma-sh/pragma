@@ -26,7 +26,8 @@
     "prepack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun --bun vitest run",
-    "lint": "oxlint ."
+    "lint": "oxlint .",
+    "hook:parse": "bun hooks/parse.ts"
   },
   "devDependencies": {
     "@pragma/plugin": "workspace:*",

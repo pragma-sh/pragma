@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -149,27 +149,6 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
   }
 }
 
-/**
- * Whether a *working* `python3` is on PATH.
- *
- * `report.sh` parses content-bearing hook fields (prompt, transcript text,
- * questions) with Python 3 and treats it as optional, degrading to status-only
- * reporting without it. Assertions that depend on that parsing are therefore
- * conditional, or they fail on any host lacking it. Presence alone is not enough
- * to check: Windows ships an App Execution Alias named `python3` that only
- * prints "Python was not found", so this runs the interpreter.
- */
-const hasPython3 = (() => {
-  try {
-    execFileSync("python3", ["-c", ""], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-const itWithPython3 = hasPython3 ? it : it.skip;
-
 describe("report.sh", () => {
   it("no-ops outside Pragma", () => {
     expect(run("started", { socket: false })).toEqual([]);
@@ -182,7 +161,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  itWithPython3("reports normal turn start and stop with the fallback reply", () => {
+  it("reports normal turn start and stop with the fallback reply", () => {
     // No transcript_path: the assistant reply must come from the Stop
     // payload's last_assistant_message, delivered before the stopped report.
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth" }) });
@@ -208,7 +187,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  itWithPython3("derives the session name from only the first prompt", () => {
+  it("derives the session name from only the first prompt", () => {
     run("started", {
       stdin: JSON.stringify({ turn_id: "turn-1", prompt: "Fix auth\nwith regression tests" }),
     });
@@ -219,7 +198,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  itWithPython3("marks a truncated session name with an ellipsis", () => {
+  it("marks a truncated session name with an ellipsis", () => {
     const prompt = "x".repeat(49);
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt }) });
     expect(reports().filter((call) => call.includes(" session-name "))).toEqual([
@@ -227,7 +206,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  itWithPython3("derives a new session name after session clear", () => {
+  it("derives a new session name after session clear", () => {
     run("started", { stdin: JSON.stringify({ turn_id: "turn-1", prompt: "First session" }) });
     run("cleared");
     run("started", { stdin: JSON.stringify({ turn_id: "turn-2", prompt: "Next session" }) });
@@ -237,54 +216,51 @@ describe("report.sh", () => {
     ]);
   });
 
-  itWithPython3(
-    "streams transcript assistant markdown during the turn and never duplicates it on stop",
-    async () => {
-      const current = transcript();
-      run("started", { stdin: current.input });
-      appendFileSync(
-        current.path,
-        `${JSON.stringify({
-          type: "event_msg",
-          payload: { type: "agent_message", message: "Interim: reading **files**." },
-        })}\n`,
-      );
-      await waitFor(() => messages().length > 1);
-      expect(messages().at(-1)).toEqual(
-        expect.objectContaining({
-          id: "codex-turn-1-assistant-000",
-          role: "assistant",
-          text: "Interim: reading **files**.",
-        }),
-      );
-      expect(reports()).toEqual([
-        "agent report --agent codex started",
-        "agent report --agent codex session-name --name Fix auth",
-      ]);
+  it("streams transcript assistant markdown during the turn and never duplicates it on stop", async () => {
+    const current = transcript();
+    run("started", { stdin: current.input });
+    appendFileSync(
+      current.path,
+      `${JSON.stringify({
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Interim: reading **files**." },
+      })}\n`,
+    );
+    await waitFor(() => messages().length > 1);
+    expect(messages().at(-1)).toEqual(
+      expect.objectContaining({
+        id: "codex-turn-1-assistant-000",
+        role: "assistant",
+        text: "Interim: reading **files**.",
+      }),
+    );
+    expect(reports()).toEqual([
+      "agent report --agent codex started",
+      "agent report --agent codex session-name --name Fix auth",
+    ]);
 
-      // The final reply lands in the transcript just before Stop fires; the stop
-      // handler must sync it (watcher may not have polled yet) exactly once and
-      // must not re-send last_assistant_message through the fallback path.
-      const reply = "# Result\n\n- one\n- two\n\n```bash\necho hi\n```";
-      appendFileSync(
-        current.path,
-        `${JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: reply } })}\n`,
-      );
-      run("stopped", {
-        stdin: JSON.stringify({
-          turn_id: "turn-1",
-          transcript_path: current.path,
-          last_assistant_message: reply,
-        }),
-      });
-      const assistant = messages().filter((message) => message.role === "assistant");
-      expect(assistant).toEqual([
-        expect.objectContaining({ id: "codex-turn-1-assistant-000" }),
-        expect.objectContaining({ id: "codex-turn-1-assistant-001", text: reply }),
-      ]);
-      expect(reports().at(-1)).toBe("agent report --agent codex stopped");
-    },
-  );
+    // The final reply lands in the transcript just before Stop fires; the stop
+    // handler must sync it (watcher may not have polled yet) exactly once and
+    // must not re-send last_assistant_message through the fallback path.
+    const reply = "# Result\n\n- one\n- two\n\n```bash\necho hi\n```";
+    appendFileSync(
+      current.path,
+      `${JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: reply } })}\n`,
+    );
+    run("stopped", {
+      stdin: JSON.stringify({
+        turn_id: "turn-1",
+        transcript_path: current.path,
+        last_assistant_message: reply,
+      }),
+    });
+    const assistant = messages().filter((message) => message.role === "assistant");
+    expect(assistant).toEqual([
+      expect.objectContaining({ id: "codex-turn-1-assistant-000" }),
+      expect.objectContaining({ id: "codex-turn-1-assistant-001", text: reply }),
+    ]);
+    expect(reports().at(-1)).toBe("agent report --agent codex stopped");
+  });
 
   it("does not emit stopped without a prior start", () => {
     expect(run("stopped")).toEqual([]);
@@ -299,7 +275,7 @@ describe("report.sh", () => {
     ]);
   });
 
-  itWithPython3("tracks subagents so parent stop cannot finish early", () => {
+  it("tracks subagents so parent stop cannot finish early", () => {
     run("started");
     run("subagent-start", { stdin: JSON.stringify({ agent_id: "child-1" }) });
     expect(messages()).toContainEqual(
@@ -318,7 +294,7 @@ describe("report.sh", () => {
     expect(reports().at(-1)).toBe("agent report --agent codex stopped");
   });
 
-  itWithPython3("reports command attention and returns allow", () => {
+  it("reports command attention and returns allow", () => {
     run("started");
     const output = runRaw(
       "permission",
@@ -365,7 +341,134 @@ describe("report.sh", () => {
     expect(output).toBe("");
   });
 
-  itWithPython3("reports a transcript question and resumes after its answer", async () => {
+  it.each(["auto_review", "guardian_subagent"])(
+    "defers to %s without publishing command attention",
+    (reviewer) => {
+      const current = transcript([
+        { type: "turn_context", payload: { turn_id: "turn-1", approvals_reviewer: reviewer } },
+      ]);
+      run("started");
+      const output = runRaw(
+        "permission",
+        JSON.stringify({
+          turn_id: "turn-1",
+          transcript_path: current.path,
+          tool_name: "Bash",
+          tool_input: { command: "bun test" },
+        }),
+      );
+      expect(output).toBe("");
+      expect(reports()).toEqual(["agent report --agent codex started"]);
+      expect(calls().some((call) => call.includes("await-decision"))).toBe(false);
+    },
+  );
+
+  it("does not reuse an automatic reviewer from an earlier turn", () => {
+    const current = transcript([
+      { type: "turn_context", payload: { turn_id: "old-turn", approvals_reviewer: "auto_review" } },
+      { type: "turn_context", payload: { turn_id: "turn-1", approvals_reviewer: "user" } },
+    ]);
+    appendFileSync(current.path, '\n{"type":');
+    run("started");
+    const output = runRaw(
+      "permission",
+      JSON.stringify({
+        turn_id: "turn-1",
+        transcript_path: current.path,
+        tool_name: "Bash",
+      }),
+      "allow",
+    );
+    expect(JSON.parse(output).hookSpecificOutput.decision.behavior).toBe("allow");
+    expect(reports()[1]).toContain(" attention ");
+  });
+
+  it("ignores a decision when a different turn has taken ownership", () => {
+    run("started", { stdin: JSON.stringify({ turn_id: "old-turn" }) });
+    writeFileSync(
+      join(binDir, "pragma-cli"),
+      `#!/usr/bin/env sh
+printf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"
+if [ "$1 $2" = "agent await-decision" ]; then
+  printf 'new-turn' > "$TMPDIR/pragma-cli-codex-$PRAGMA_TAB_ID.active"
+  printf 'allow'
+fi
+`,
+      { mode: 0o755 },
+    );
+    expect(runRaw("permission", JSON.stringify({ tool_name: "Bash" }))).toBe("");
+    expect(reports().filter((report) => report.endsWith(" started"))).toHaveLength(1);
+    expect(existsSync(join(tmpEnvDir, `pragma-cli-codex-${TAB_ID}.approval-old-turn`))).toBe(false);
+  });
+
+  it("queues concurrent approvals and preserves attention until each decision", async () => {
+    writeFileSync(
+      join(binDir, "pragma-cli"),
+      `#!/usr/bin/env sh
+printf '%s\\n' "$*" >> "$PRAGMA_TEST_LOG"
+if [ "$1 $2" = "agent await-decision" ]; then
+  while [ ! -f "$PRAGMA_TEST_DECISION_FILE" ]; do sleep 0.02; done
+  cat "$PRAGMA_TEST_DECISION_FILE"
+fi
+`,
+      { mode: 0o755 },
+    );
+    run("started", { stdin: JSON.stringify({ turn_id: "parallel-turn" }) });
+    const launch = (command: string) => {
+      const decisionFile = join(workdir, command);
+      const child = spawn("sh", [REPORT_SH, "permission"], {
+        env: {
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          TMPDIR: tmpEnvDir,
+          PRAGMA_TAB_ID: TAB_ID,
+          PRAGMA_TEST_LOG: logPath,
+          PRAGMA_SERVER_SOCKET: join(workdir, "server.sock"),
+          PRAGMA_TEST_DECISION_FILE: decisionFile,
+          PRAGMA_WATCH_INTERVAL: "0.02",
+        },
+      });
+      let output = "";
+      child.stdout.on("data", (data) => {
+        output += data.toString();
+      });
+      const finished = new Promise<string>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", () => resolve(output));
+      });
+      child.stdin.end(JSON.stringify({ tool_name: "Bash", tool_input: { command } }));
+      return { decisionFile, finished };
+    };
+    const first = launch("first");
+    let second: ReturnType<typeof launch> | undefined;
+    const attention = () => reports().filter((report) => report.includes(" attention "));
+    try {
+      await waitFor(() => attention().length === 1);
+      expect(attention()).toHaveLength(1);
+      second = launch("second");
+      run("running");
+      run("subagent-start", { stdin: JSON.stringify({ agent_id: "child" }) });
+      expect(reports().at(-1)).toContain(" attention ");
+      expect(attention()).toHaveLength(1);
+
+      writeFileSync(first.decisionFile, "allow");
+      expect(JSON.parse(await first.finished).hookSpecificOutput.decision.behavior).toBe("allow");
+      await waitFor(() => attention().length === 2);
+      expect(attention()).toHaveLength(2);
+      expect(attention()[0]).not.toBe(attention()[1]);
+      run("running");
+      expect(reports().at(-1)).toContain(" attention ");
+
+      writeFileSync(second.decisionFile, "deny");
+      expect(JSON.parse(await second.finished).hookSpecificOutput.decision.behavior).toBe("deny");
+      expect(reports().at(-1)).toBe("agent report --agent codex started");
+    } finally {
+      writeFileSync(first.decisionFile, "deny");
+      if (second) writeFileSync(second.decisionFile, "deny");
+      await Promise.all([first.finished, second?.finished]);
+    }
+  });
+
+  it("reports a transcript question and resumes after its answer", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -412,7 +515,7 @@ describe("report.sh", () => {
     expect(reports().at(-1)).toBe("agent report --agent codex started");
   });
 
-  itWithPython3("reports multi-question requests as one attention with --questions", async () => {
+  it("reports multi-question requests as one attention with --questions", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -438,7 +541,7 @@ describe("report.sh", () => {
     );
   });
 
-  itWithPython3("abort watcher clears current turn", async () => {
+  it("abort watcher clears current turn", async () => {
     const current = transcript();
     run("started", { stdin: current.input });
     appendFileSync(
@@ -454,7 +557,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
-  itWithPython3("abort watcher ignores a prior turn marker", async () => {
+  it("abort watcher ignores a prior turn marker", async () => {
     const current = transcript([{ type: "event_msg", payload: { type: "turn_aborted" } }]);
     run("started", { stdin: current.input });
     await sleep(350);
@@ -465,7 +568,7 @@ describe("report.sh", () => {
     expect(existsSync(markerPath())).toBe(true);
   });
 
-  itWithPython3("starts the abort watcher before reporting running", () => {
+  it("starts the abort watcher before reporting running", () => {
     const current = transcript();
     run("started", { stdin: current.input });
     const log = calls();

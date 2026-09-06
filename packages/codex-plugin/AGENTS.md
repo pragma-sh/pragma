@@ -14,6 +14,9 @@ packages/codex-plugin/
 │   └── codex.png                    # Official Codex artwork, launcher + usage icon
 ├── hooks/
 │   ├── hooks.json                   # Codex lifecycle hook declarations
+│   ├── parse.ts                     # Bun entry point for JSON/transcript parsing
+│   ├── transcript.ts                # Streaming rollout reader + turn reviewer lookup
+│   ├── questions.ts                 # Native question request parsing
 │   └── report.sh                    # Event -> pragma-cli state machine
 ├── scripts/install-local.sh         # Codex marketplace add + plugin install
 ├── src/pragma-plugin.ts             # Pragma agent, watcher, models, usage limits
@@ -71,7 +74,7 @@ Pragma chat consumers (mobile) while the turn is still running instead of one bu
 batches share a timestamp; consumers tiebreak by id). A sent-count state file dedupes
 across polls and across the final sync that `stopped` performs before reporting done —
 so the reply event always precedes the `stopped` report. `Stop`'s `last_assistant_message`
-remains only as a fallback when no transcript (or no python3) is available; it reuses the
+remains only as a fallback when no transcript (or no Bun) is available; it reuses the
 unindexed `codex-<turn>-assistant` id. Rollout granularity is per completed message —
 Codex does not persist token deltas to the rollout, so this is the finest streaming the
 hook surface offers.
@@ -90,11 +93,31 @@ once per session, and resets that state on `SessionStart`.
 
 ## Permission decisions
 
+Codex 0.153.4 invokes `PermissionRequest` before routing through automatic review.
+The hook payload omits the reviewer, but the rollout's matching `turn_context` records
+`approvals_reviewer` (verified 2026-09-05). The Bun helper `hooks/parse.ts approval-reviewer`
+reads the latest context for the exact hook `turn_id`; `auto_review` and
+`guardian_subagent` return no hook output and publish no attention, allowing Codex to
+review natively. Never infer this from global config, another turn, or command text.
+Missing context/Bun preserves the existing human approval path. This transcript field
+must be reverified when updating the tested Codex version.
+
+All JSON and transcript parsing uses Bun/TypeScript; there is no Python dependency.
+`hook:parse` exposes the shell-invoked parser as a package script so static analysis
+recognizes its entry point. Hook tests cover parsing unconditionally.
+
 `PermissionRequest` is a blocking Codex hook. Script reports command text plus request id,
 waits up to `PRAGMA_APPROVAL_TIMEOUT` (default 300 seconds), then returns Codex's documented
 `allow` or `deny` decision JSON. Timeout emits no hook output, so Codex uses native prompt.
 After a remote verdict, script reasserts running before returning; denial is model-visible
 feedback and does not necessarily end turn.
+
+Concurrent permission hooks queue behind a turn-scoped directory lock: Pragma carries
+one attention request per agent/tab, so publishing all commands at once hides earlier
+requests. While a command owns the lock, tool-completion and subagent `started` reports
+are suppressed to preserve its attention. Each verdict releases the lock and restores
+running only if its turn still owns the active marker; a late decision after abort must
+not revive the old turn. Locks are scoped by turn so an old waiter cannot block a new one.
 
 Codex 0.144.4 has no `request_user_input` hook. The turn-scoped transcript does record a
 `response_item` function call before Codex shows its question UI, followed by a matching
@@ -220,6 +243,11 @@ to echo the exact marker returned through the native question editor. `question-
 needs a server + `pragma-cli` that carry the
 `questions` attention field end to end (see the shared harness `agent_verify`). Any scenario
 failure is actionable.
+
+When global Codex config selects automatic review, run human-approval verification with
+`--pick-model-cmd '--model <model-id> --config approvals_reviewer="user"'`.
+Otherwise the plugin correctly defers to native review and the harness receives no
+command attention. Also verify `command-no-permission` with the normal automatic reviewer.
 
 The shared approval scenarios (`command-allow`/`command-deny`/`decision-timeout`/
 `abort-mid-approval`) prompt for `rm -f /tmp/pragma-verify-*`, not `ls`: Codex's default

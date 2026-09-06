@@ -24,18 +24,16 @@ subagent_dir="${state_prefix}.subagents"
 approval_timeout="${PRAGMA_APPROVAL_TIMEOUT:-300}"
 watch_interval="${PRAGMA_WATCH_INTERVAL:-1}"
 watch_max="${PRAGMA_WATCH_MAX:-86400}"
-py3="$(command -v python3 2>/dev/null || true)"
-# Being on PATH is not proof of being usable: Windows ships an App Execution
-# Alias at ~/AppData/Local/Microsoft/WindowsApps/python3 that only prints
-# "Python was not found" and exits nonzero. That satisfies `command -v`, so the
-# emptiness checks would wrongly take the has-python branch. Run it once and
-# drop it unless it actually executes.
-if [ -n "$py3" ] && ! "$py3" -c '' >/dev/null 2>&1; then
-  py3=""
-fi
+bun_bin="$(command -v bun 2>/dev/null || true)"
+parser="$(dirname "$0")/parse.ts"
 interrupt_pattern='"type":"turn_aborted"'
 
 report() {
+  # Parallel tools and children must not clear another command's approval.
+  if [ "${1:-}" = started ] && [ -f "$marker" ] &&
+    [ -d "${state_prefix}.approval-$(safe_id "$(cat "$marker" 2>/dev/null)")" ]; then
+    return 0
+  fi
   "$pragma_cli" agent report --agent "$agent" "$@" >/dev/null 2>&1 || true
 }
 
@@ -44,52 +42,23 @@ message_ts_ms() {
 }
 
 json_field() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$2" | "$py3" -c '
-import json, sys
-try:
-    value = json.load(sys.stdin)
-    for key in sys.argv[1].split("."):
-        value = value.get(key) if isinstance(value, dict) else None
-except Exception:
-    value = None
-if isinstance(value, str):
-    print(value)
-' "$1" 2>/dev/null
+  [ -n "$bun_bin" ] || return 0
+  printf '%s' "$2" | "$bun_bin" "$parser" json-field "$1" 2>/dev/null
 }
 
 json_value() {
-  [ -n "$py3" ] || return 0
-  printf '%s' "$2" | "$py3" -c '
-import json, sys
-try:
-    value = json.load(sys.stdin)
-    for key in sys.argv[1].split("."):
-        value = value.get(key) if isinstance(value, dict) else None
-except Exception:
-    value = None
-if value is not None:
-    print(json.dumps(value, separators=(",", ":")))
-' "$1" 2>/dev/null
+  [ -n "$bun_bin" ] || return 0
+  printf '%s' "$2" | "$bun_bin" "$parser" json-value "$1" 2>/dev/null
 }
 
 content_message() {
   role="$1"
   text="$2"
   stable_id="$3"
-  [ -n "$py3" ] && [ -n "$text" ] || return 0
+  [ -n "$bun_bin" ] && [ -n "$text" ] || return 0
   ts="$(message_ts_ms)"
   active="$(active_subagent_count)"
-  payload=$("$py3" -c '
-import json, sys
-print(json.dumps({
-    "id": sys.argv[1],
-    "role": sys.argv[2],
-    "text": sys.argv[3],
-    "subAgentsActive": int(sys.argv[4]),
-    "ts": int(sys.argv[5]),
-}))
-' "$stable_id" "$role" "$text" "$active" "$ts" 2>/dev/null)
+  payload=$("$bun_bin" "$parser" content-message "$stable_id" "$role" "$text" "$active" "$ts" 2>/dev/null)
   [ -n "$payload" ] || return 0
   "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
 }
@@ -160,69 +129,8 @@ interrupted_since() {
 question_snapshot() {
   path="$1"
   offset="$2"
-  [ -n "$py3" ] && [ -n "$path" ] && [ -f "$path" ] || return 0
-  "$py3" - "$path" "$offset" <<'PY' 2>/dev/null
-import json
-import sys
-
-path, offset = sys.argv[1], int(sys.argv[2])
-pending = {}
-with open(path, "rb") as transcript:
-    transcript.seek(offset)
-    lines = transcript.read().decode("utf-8", errors="ignore").splitlines()
-
-for line in lines:
-    try:
-        item = json.loads(line)
-    except Exception:
-        continue
-    if item.get("type") != "response_item" or not isinstance(item.get("payload"), dict):
-        continue
-    payload = item["payload"]
-    if payload.get("type") == "function_call" and payload.get("name") == "request_user_input":
-        call_id = payload.get("call_id") or payload.get("id")
-        arguments = payload.get("arguments")
-        try:
-            arguments = json.loads(arguments) if isinstance(arguments, str) else arguments
-        except Exception:
-            continue
-        questions = arguments.get("questions") if isinstance(arguments, dict) else None
-        if not isinstance(call_id, str) or not isinstance(questions, list) or not questions:
-            continue
-        parsed = []
-        for question in questions:
-            if not isinstance(question, dict):
-                continue
-            text = question.get("question")
-            if not isinstance(text, str) or not text.strip():
-                continue
-            options = []
-            for option in question.get("options", []):
-                if not isinstance(option, dict) or not isinstance(option.get("label"), str):
-                    continue
-                normalized = {"label": option["label"]}
-                if isinstance(option.get("description"), str):
-                    normalized["description"] = option["description"]
-                options.append(normalized)
-            parsed.append({"question": text, "options": options})
-        if not parsed:
-            continue
-        entry = {"state": "pending", "requestId": call_id}
-        if len(parsed) == 1:
-            entry["question"] = parsed[0]["question"]
-            entry["options"] = parsed[0]["options"]
-        else:
-            # Multi-question requests ride on the `questions` field; the
-            # legacy single-question fields stay for exactly one question.
-            entry["questions"] = parsed
-        pending[call_id] = entry
-    elif payload.get("type") == "function_call_output":
-        call_id = payload.get("call_id")
-        if isinstance(call_id, str):
-            pending.pop(call_id, None)
-
-print(json.dumps(next(reversed(pending.values())) if pending else {"state": "none"}))
-PY
+  [ -n "$bun_bin" ] && [ -n "$path" ] && [ -f "$path" ] || return 0
+  "$bun_bin" "$parser" question-snapshot "$path" "$offset" 2>/dev/null
 }
 
 sync_question() {
@@ -268,53 +176,10 @@ sync_messages() {
   transcript="$1"
   offset="$2"
   token="$3"
-  [ -n "$py3" ] && [ -n "$transcript" ] && [ -f "$transcript" ] || return 0
+  [ -n "$bun_bin" ] && [ -n "$transcript" ] && [ -f "$transcript" ] || return 0
   active="$(active_subagent_count)"
   ts="$(message_ts_ms)"
-  "$py3" - "$transcript" "$offset" "$messages_file" "codex-${token}-assistant" "$active" "$ts" 2>/dev/null <<'PY' |
-import json
-import sys
-
-path, offset, sent_path, id_prefix, active, ts = sys.argv[1:7]
-try:
-    with open(sent_path, encoding="utf-8") as handle:
-        sent = int(handle.read().strip() or "0")
-except Exception:
-    sent = 0
-
-with open(path, "rb") as transcript:
-    transcript.seek(int(offset))
-    lines = transcript.read().decode("utf-8", errors="ignore").splitlines()
-
-messages = []
-for line in lines:
-    try:
-        item = json.loads(line)
-    except Exception:
-        continue
-    payload = item.get("payload")
-    if item.get("type") != "event_msg" or not isinstance(payload, dict):
-        continue
-    if payload.get("type") != "agent_message":
-        continue
-    text = payload.get("message")
-    if isinstance(text, str) and text.strip():
-        messages.append(text)
-
-for index, text in enumerate(messages):
-    if index < sent:
-        continue
-    print(json.dumps({
-        "id": f"{id_prefix}-{index:03d}",
-        "role": "assistant",
-        "text": text,
-        "subAgentsActive": int(active),
-        "ts": int(ts),
-    }, separators=(",", ":")))
-
-with open(sent_path, "w", encoding="utf-8") as handle:
-    handle.write(str(len(messages)))
-PY
+  "$bun_bin" "$parser" sync-messages "$transcript" "$offset" "$messages_file" "codex-$token-assistant" "$active" "$ts" 2>/dev/null |
     while IFS= read -r payload; do
       [ -n "$payload" ] || continue
       "$pragma_cli" agent message --agent "$agent" --payload "$payload" >/dev/null 2>&1 || true
@@ -332,29 +197,8 @@ start_abort_watcher() {
 }
 
 extract_command() {
-  input="$1"
-  if [ -n "$py3" ]; then
-    printf '%s' "$input" | "$py3" -c '
-import json, sys
-try:
-    value = json.load(sys.stdin)
-except Exception:
-    value = {}
-tool = value.get("tool_name") or "Codex tool"
-args = value.get("tool_input")
-if isinstance(args, str):
-    detail = args
-elif isinstance(args, dict):
-    detail = args.get("command") or args.get("description")
-    if not isinstance(detail, str):
-        detail = json.dumps(args, separators=(",", ":"), sort_keys=True)
-else:
-    detail = ""
-print(f"{tool} {detail}".strip())
-' 2>/dev/null
-    return
-  fi
-  printf '%s' "$input" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p' | head -n 1
+  [ -n "$bun_bin" ] || return 0
+  printf '%s' "$1" | "$bun_bin" "$parser" extract-command 2>/dev/null
 }
 
 watch_abort() {
@@ -437,7 +281,7 @@ case "${1:-}" in
     sync_messages "$transcript" "$offset" "$token"
     sent="$(cat "$messages_file" 2>/dev/null || echo 0)"
     if [ "${sent:-0}" = 0 ]; then
-      # No transcript (or no python3): fall back to the Stop payload's reply.
+      # No transcript (or no Bun): fall back to the Stop payload's reply.
       reply="$(json_field last_assistant_message "$input")"
       if [ -n "$reply" ]; then
         content_message assistant "$reply" "codex-${token}-assistant"
@@ -475,12 +319,36 @@ case "${1:-}" in
   permission)
     [ -f "$marker" ] || exit 0
     input="$(cat)"
-    command_text="$(extract_command "$input")"
     turn_id="$(json_field turn_id "$input")"
+    transcript="$(json_field transcript_path "$input")"
+    # PermissionRequest precedes Codex's automatic reviewer. Defer without
+    # attention or a verdict when this turn belongs to that native path.
+    reviewer="$("$bun_bin" "$parser" approval-reviewer "$transcript" "$turn_id" 2>/dev/null || true)"
+    case "$reviewer" in
+      auto_review|guardian_subagent) exit 0 ;;
+    esac
+    permission_token="$(cat "$marker" 2>/dev/null || true)"
+    [ -n "$permission_token" ] || exit 0
+    permission_lock="${state_prefix}.approval-$(safe_id "$permission_token")"
+    # Pragma exposes one attention request per agent/tab. Queue concurrent
+    # PermissionRequest hooks so every command keeps its own visible request
+    # until its decision arrives. Scope the lock to the turn so an aborted
+    # hook cannot block or clear a later turn's approval.
+    while ! mkdir "$permission_lock" 2>/dev/null; do
+      [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
+      sleep "$watch_interval"
+    done
+    trap 'rmdir "$permission_lock" 2>/dev/null || true' 0
+    trap 'exit 0' HUP INT TERM
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
+    command_text="$(extract_command "$input")"
     request_id="${agent}-$(safe_id "${tab}-${turn_id:-$(date +%s)}-$$")"
     report attention --kind command --command "$command_text" --request-id "$request_id"
     verdict="$("$pragma_cli" agent await-decision \
       --agent "$agent" --request-id "$request_id" --timeout "$approval_timeout" 2>/dev/null || true)"
+    rmdir "$permission_lock" 2>/dev/null || true
+    trap - 0
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$permission_token" ] || exit 0
     case "$verdict" in
       allow)
         report started
