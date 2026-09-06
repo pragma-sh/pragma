@@ -156,7 +156,25 @@
   },
   "scripts": {
     "maxConcurrentCommands": 4,
-    "configPath": ".pragma/scripts.json"
+    "configPath": ".pragma/scripts.json",
+    "migrationSources": [
+      {
+        "id": "superset",
+        "label": "Superset",
+        "configPaths": [".superset/config.json"]
+      },
+      {
+        "id": "emdash",
+        "label": "Emdash",
+        "configPaths": [".emdash.json"]
+      },
+      {
+        "id": "orca",
+        "label": "Orca",
+        "configPaths": ["orca.yaml", "orca.yml", ".orca/config.json"]
+      }
+    ],
+    "migrationCommitMessage": "chore(config): add pragma-app.sh config"
   },
   "agents": {
     "startDelayMs": 500,
