@@ -144,12 +144,21 @@ export type {
   AgentReasoning,
   AgentModelEntry,
   AgentFeature,
-  AgentIcon,
+  PluginIconRef,
   AgentLaunchCommand,
   AgentLaunchConfig,
   AgentStartupInput,
   CatalogAgent,
   AgentCatalog,
+  UsageLimit,
+  UsageLimitsPolicy,
+  UsageLimitsProvider,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsSnapshot,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
+  Welcome,
   WorkspaceSnapshot,
   AgentSessionLaunchPayload,
   NewWorktreeSpec,
@@ -165,3 +174,23 @@ export type {
 export const constants = values as Constants;
 
 export default constants;
+
+export {
+  formatWelcomeHeading,
+  pickWelcomeHeading,
+  welcomeHeadingText,
+  welcomeLocation,
+  type WelcomeHeadingKind,
+  type WelcomeHeadingParts,
+} from "./welcome";
+
+export {
+  formatDuration,
+  isStaleReading,
+  percentUsed,
+  resetsInMs,
+  resolvePrimaryLimit,
+  usagePercentLabel,
+  usageSeverity,
+  type UsageSeverity,
+} from "./usage-limits";

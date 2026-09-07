@@ -19,7 +19,7 @@ mod generated {
 
 pub use generated::{
     AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
-    AgentFileChangeKind, AgentIcon, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
+    AgentFileChangeKind, AgentInput, AgentInterrupt, AgentMessage, AgentMessageKind,
     AgentMessageRole, AgentModelEntry, AgentQuestion, AgentReasoning, AgentReportKind,
     AgentReportPayload, AgentSessionLaunchPayload, AgentSound, AgentSoundList, AgentStatus,
     AgentStatusDefaults, AgentStatusSettings, AgentToolCall, AgentToolCallStatus, Agents, AppInfo,
@@ -39,15 +39,17 @@ pub use generated::{
     KanbanPromptStatus, KanbanSchedulingMode, KeybindingChord, KeybindingChordModifiersItem,
     Keybindings, KeybindingsConfig, KeybindingsFiles, Links, NewWorktreeSpec, OpenPort,
     OtherSettings, PairingPayload, PaletteSearchMatch, PaletteSearchMatchKind,
-    PaletteSearchResponse, Platform, PlatformChord, Project, ProjectIcon, ProjectScriptsConfig,
-    Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod, QuestionOption,
-    RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode, RunScriptSplit,
-    RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource,
-    ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit,
-    SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings,
-    Tunnel, UpdateApplyMode, UpdatePlatform, Updates, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro,
-    WslDistroList,
+    PaletteSearchResponse, Platform, PlatformChord, PluginIconRef, Project, ProjectIcon,
+    ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
+    QuestionOption, RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
+    RunScriptSplit, RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads,
+    ScriptMigrationSource, ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal,
+    SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend,
+    TerminalDefaults, TerminalSettings, Tunnel, UpdateApplyMode, UpdatePlatform, Updates,
+    UsageLimit, UsageLimitsPolicy, UsageLimitsProvider, UsageLimitsReady, UsageLimitsResult,
+    UsageLimitsSnapshot, UsageLimitsUnavailable, UsageLimitsUnavailableReason, Welcome,
+    WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit,
+    WorktreeCommitList, WorktreeStatus, Wsl, WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.

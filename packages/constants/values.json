@@ -301,5 +301,28 @@
         "cliCommand": "idea"
       }
     ]
+  },
+  "usageLimits": {
+    "minRefreshIntervalMs": 15000,
+    "maxRetryIntervalMs": 900000,
+    "staleAfterMs": 300000,
+    "loadTimeoutMs": 120000
+  },
+  "welcome": {
+    "locationPlaceholder": "{location}",
+    "located": [
+      "What should we build in {location}?",
+      "What are we going to ship in {location}?",
+      "What will we create in {location}?",
+      "What should we make next in {location}?",
+      "Ready when you are — what should we build in {location}?"
+    ],
+    "generic": [
+      "What should we build?",
+      "What are we going to ship?",
+      "What will we create?",
+      "What should we make next?",
+      "Ready when you are — what should we build?"
+    ]
   }
 }

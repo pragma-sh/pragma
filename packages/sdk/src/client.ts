@@ -15,6 +15,7 @@ import { ScratchpadsClient } from "./scratchpads-client";
 import { SessionsClient } from "./sessions-client";
 import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
+import { UsageLimitsClient } from "./usage-limits-client";
 import type { PragmaClientConfig } from "./transport";
 import { WorkspaceClient } from "./workspace-client";
 
@@ -33,6 +34,7 @@ export class PragmaClient {
   readonly theme: ThemeClient;
   readonly health: HealthClient;
   readonly scratchpads: ScratchpadsClient;
+  readonly usageLimits: UsageLimitsClient;
 
   private readonly transport: Transport;
 
@@ -51,6 +53,7 @@ export class PragmaClient {
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
+    this.usageLimits = new UsageLimitsClient(this.transport);
   }
 
   rpc<T = unknown>(

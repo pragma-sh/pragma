@@ -1,4 +1,4 @@
-import type { AgentIcon as AgentIconRef } from "@pragma/sdk";
+import type { PluginIconRef } from "@pragma/sdk";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Image, View } from "react-native";
 import { SvgCss } from "react-native-svg/css";
@@ -23,7 +23,7 @@ type ResolvedIcon = { kind: "svg"; xml: string } | { kind: "raster"; uri: string
 const iconCache = new Map<string, ResolvedIcon>();
 
 interface AgentIconProps {
-  icon?: AgentIconRef | null;
+  icon?: PluginIconRef | null;
   /** Emoji/glyph shown while loading or when no icon is available. */
   fallback: string;
   size?: number;
@@ -58,7 +58,7 @@ export function AgentIcon({ icon, fallback, size = 24 }: AgentIconProps) {
 
 async function loadIcon(
   client: NonNullable<ReturnType<typeof useConnection>["client"]>,
-  icon: AgentIconRef,
+  icon: PluginIconRef,
   isCancelled: () => boolean,
   setResolved: (icon: ResolvedIcon | null) => void,
 ): Promise<void> {
@@ -72,7 +72,7 @@ async function loadIcon(
 
 async function fetchIcon(
   client: NonNullable<ReturnType<typeof useConnection>["client"]>,
-  icon: AgentIconRef,
+  icon: PluginIconRef,
 ): Promise<ResolvedIcon> {
   const asset = await client.assets.fetch(icon.hash);
   const resolved = await resolveIconBytes(client, icon, asset.bytes);
@@ -83,7 +83,7 @@ async function fetchIcon(
 /** Decodes fetched icon bytes into the form its renderer takes. */
 async function resolveIconBytes(
   client: NonNullable<ReturnType<typeof useConnection>["client"]>,
-  icon: AgentIconRef,
+  icon: PluginIconRef,
   bytes: Uint8Array,
 ): Promise<ResolvedIcon> {
   if (!icon.mime.includes("svg")) {

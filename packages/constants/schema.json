@@ -28,7 +28,9 @@
     "scratchpads",
     "fanout",
     "updates",
-    "onboarding"
+    "onboarding",
+    "welcome",
+    "usageLimits"
   ],
   "properties": {
     "app": {
@@ -102,9 +104,206 @@
     },
     "onboarding": {
       "$ref": "#/definitions/Onboarding"
+    },
+    "welcome": {
+      "$ref": "#/definitions/Welcome"
+    },
+    "usageLimits": {
+      "$ref": "#/definitions/UsageLimitsPolicy"
     }
   },
   "definitions": {
+    "UsageLimitsPolicy": {
+      "title": "UsageLimitsPolicy",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Host refresh policy for plugin usage-limit providers. The host owns the single cache every client reads, so these bounds are shared rather than restated per client.",
+      "required": ["minRefreshIntervalMs", "maxRetryIntervalMs", "staleAfterMs", "loadTimeoutMs"],
+      "properties": {
+        "minRefreshIntervalMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Floor the host clamps a provider's requested `refreshIntervalMs` to. A provider is never invoked more often than this, however many clients ask."
+        },
+        "maxRetryIntervalMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Ceiling for the exponential backoff applied after consecutive provider failures."
+        },
+        "staleAfterMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "How long a cached reading is served as last-good before clients label it stale. The reading is still shown: an unavailable or unknown provider is never rendered as zero usage."
+        },
+        "loadTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "How long the host waits for the plugins sidecar to answer one usage-limits request before failing it."
+        }
+      }
+    },
+    "UsageLimit": {
+      "title": "UsageLimit",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One finite or unlimited usage category reported by a provider.",
+      "required": ["id", "title", "used", "limit"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "used": { "type": "number", "minimum": 0 },
+        "limit": {
+          "type": ["number", "null"],
+          "description": "A null limit represents unlimited usage."
+        },
+        "resetsInMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Milliseconds until this category resets, measured from `observedAt`."
+        }
+      }
+    },
+    "UsageLimitsUnavailableReason": {
+      "title": "UsageLimitsUnavailableReason",
+      "type": "string",
+      "description": "Why a provider cannot currently report usage limits. Distinct from a load failure: these are states the user or platform must resolve.",
+      "enum": ["not-configured", "authentication-required", "unsupported", "error"]
+    },
+    "UsageLimitsReady": {
+      "title": "UsageLimitsReady",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A successful provider snapshot. `summary` is an optional collapsed-row metric derived separately from the detailed limits.",
+      "required": ["status", "observedAt", "limits"],
+      "properties": {
+        "status": { "type": "string", "const": "ready" },
+        "observedAt": {
+          "type": "number",
+          "description": "Unix time in milliseconds when the provider observed these values."
+        },
+        "summary": { "$ref": "#/definitions/UsageLimit" },
+        "limits": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UsageLimit" }
+        }
+      }
+    },
+    "UsageLimitsUnavailable": {
+      "title": "UsageLimitsUnavailable",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A provider state that requires user or platform action before loading.",
+      "required": ["status", "reason", "message"],
+      "properties": {
+        "status": { "type": "string", "const": "unavailable" },
+        "reason": { "$ref": "#/definitions/UsageLimitsUnavailableReason" },
+        "message": { "type": "string" }
+      }
+    },
+    "UsageLimitsResult": {
+      "title": "UsageLimitsResult",
+      "description": "Result returned by a usage-limit provider, discriminated by `status`.",
+      "anyOf": [
+        { "$ref": "#/definitions/UsageLimitsReady" },
+        { "$ref": "#/definitions/UsageLimitsUnavailable" }
+      ]
+    },
+    "UsageLimitsProvider": {
+      "title": "UsageLimitsProvider",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One usage-limit provider as the host reports it: the static metadata declared by the plugin, plus the host's cached reading. Metadata travels with the reading so a client renders the card without a second catalog lookup. `icon` is present only when the plugin declares a file icon; a component icon is desktop-only and never crosses the wire. `result` is absent when the provider has never produced a reading, which is not the same as zero usage.",
+      "required": ["pluginId", "providerId", "title", "dashboardUrl", "primaryLimitId"],
+      "properties": {
+        "pluginId": { "type": "string", "minLength": 1 },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider id as declared by the plugin, unique within that plugin."
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "dashboardUrl": {
+          "type": "string",
+          "description": "Absolute URL for viewing this provider's usage in its own dashboard."
+        },
+        "primaryLimitId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of the category rendered in the provider's collapsed summary row. `UsageLimitsReady.summary` overrides it when present."
+        },
+        "refreshIntervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cadence the plugin asked for. The host clamps it to `usageLimits.minRefreshIntervalMs`."
+        },
+        "icon": { "$ref": "#/definitions/PluginIconRef" },
+        "result": { "$ref": "#/definitions/UsageLimitsResult" },
+        "observedAt": {
+          "type": "number",
+          "description": "Unix milliseconds when the host cached `result`. Clients compare it against `usageLimits.staleAfterMs` to label a last-good reading stale."
+        },
+        "loading": {
+          "type": "boolean",
+          "description": "A load for this provider is in flight on the host right now."
+        }
+      }
+    },
+    "UsageLimitsSnapshot": {
+      "title": "UsageLimitsSnapshot",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Response of the `plugins`/`usageLimits` RPC: every provider visible in the requested scope.",
+      "required": ["providers"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UsageLimitsProvider" }
+        }
+      }
+    },
+    "PluginIconRef": {
+      "title": "PluginIconRef",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "mime"],
+      "description": "Reference to a plugin-contributed icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
+      "properties": {
+        "hash": {
+          "type": "string",
+          "description": "Lowercase-hex sha256 of the icon bytes; also the ETag and cache key."
+        },
+        "mime": {
+          "type": "string",
+          "description": "Icon MIME type (e.g. `image/svg+xml`)."
+        }
+      }
+    },
+    "Welcome": {
+      "title": "Welcome",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Heading copy for the no-tabs welcome surfaces. Shared because both the desktop workspace and the mobile home screen render it; the mobile all-projects home has no selected location, so the located and generic wordings are two authored lists rather than one list with the location clause cut out.",
+      "required": ["locationPlaceholder", "located", "generic"],
+      "properties": {
+        "locationPlaceholder": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Token inside each `located` heading that is replaced by the `PROJECT/WORKTREE` label. Split on rather than substituted, so the location can be rendered as its own highlighted element."
+        },
+        "located": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Headings for a surface that knows which project/worktree is selected. Every entry must contain `locationPlaceholder` exactly once."
+        },
+        "generic": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Headings for a surface with no selected location, such as the mobile all-projects home. Authored to parallel `located` index for index, never derived from it by string surgery."
+        }
+      }
+    },
     "ProtocolRpcMethod": {
       "title": "ProtocolRpcMethod",
       "description": "Top-level request/response RPC domains served by pragma-server over the Unix-socket frame protocol.",
@@ -1975,23 +2174,6 @@
         }
       }
     },
-    "AgentIcon": {
-      "title": "AgentIcon",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["hash", "mime"],
-      "description": "Reference to a plugin-contributed agent icon asset, fetched by content hash through the gateway `/v1/assets/{hash}` route.",
-      "properties": {
-        "hash": {
-          "type": "string",
-          "description": "Lowercase-hex sha256 of the icon bytes; also the ETag and cache key."
-        },
-        "mime": {
-          "type": "string",
-          "description": "Icon MIME type (e.g. `image/svg+xml`)."
-        }
-      }
-    },
     "AgentFeature": {
       "title": "AgentFeature",
       "type": "string",
@@ -2040,7 +2222,7 @@
         "icon": {
           "anyOf": [
             {
-              "$ref": "#/definitions/AgentIcon"
+              "$ref": "#/definitions/PluginIconRef"
             },
             {
               "type": "null"

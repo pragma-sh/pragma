@@ -1,5 +1,11 @@
 import { useMemo, useState } from "react";
 
+import {
+  formatWelcomeHeading,
+  pickWelcomeHeading,
+  welcomeHeadingText,
+  welcomeLocation,
+} from "@pragma/constants";
 import { Globe, Pin, PinOff, TerminalSquare } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
@@ -8,12 +14,6 @@ import { IconTooltip } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAgentsList } from "@/hooks/use-agents-list";
 import { type AgentConfig } from "@/lib/tauri";
-import {
-  formatWelcomeHeading,
-  pickWelcomeHeading,
-  welcomeHeadingText,
-  welcomeLocation,
-} from "@/lib/welcome-headings";
 import { isAgentPinned, sortAgentsByPin, toggleAgentPin, useAgentPins } from "@/state/agent-pins";
 import { useWorkspace } from "@/state/workspace-context";
 
@@ -21,7 +21,8 @@ import { useWorkspace } from "@/state/workspace-context";
 function WelcomeHeading() {
   const workspace = useWorkspace();
   // Lazy initial state so the pick survives re-renders but changes per mount.
-  const [heading] = useState(pickWelcomeHeading);
+  const [heading] = useState(() => pickWelcomeHeading("located"));
+  const [genericHeading] = useState(() => pickWelcomeHeading("generic"));
 
   const worktree = workspace.selectedWorktree;
   const location = welcomeLocation(
@@ -33,7 +34,7 @@ function WelcomeHeading() {
   if (!parts) {
     return (
       <h1 className="text-foreground text-center text-4xl font-semibold tracking-tight sm:text-5xl">
-        What should we build?
+        {genericHeading}
       </h1>
     );
   }

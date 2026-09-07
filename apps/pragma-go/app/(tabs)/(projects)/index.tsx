@@ -1,20 +1,31 @@
+import { pickWelcomeHeading } from "@pragma/constants";
 import { router, Stack } from "expo-router";
-import { ScrollView } from "react-native";
+import { useState } from "react";
+import { RefreshControl, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { Monogram, NavGroup, NavRow } from "@/components/NavRow";
 import { Text } from "@/components/ui/text";
+import { UsageLimitsSection } from "@/components/UsageLimitsSection";
 import { useProjects, useProjectStatus } from "@/lib/data/data-context";
+import { useThemeColors } from "@/lib/theme";
 import type { Project } from "@/lib/types";
+import { useUsageLimits } from "@/lib/use-usage-limits";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 
-/** Top-level list of all projects, styled as iOS Settings navigation rows. */
+/** The paired home screen: a greeting, every project, then host usage limits. */
 export default function ProjectsScreen() {
   const projects = useProjects();
   const insets = useSafeAreaInsets();
+  const { mutedForeground } = useThemeColors();
+  // No project is selected here, so the location-less wording is the honest
+  // one — picked once per mount, like the desktop welcome screen.
+  const [heading] = useState(() => pickWelcomeHeading("generic"));
   // No project is in view here: the app theme falls back to the global layer.
   useViewedProjectRoot(null);
+  const usage = useUsageLimits();
+  const [refreshing, setRefreshing] = useState(false);
 
   return (
     <>
@@ -26,13 +37,24 @@ export default function ProjectsScreen() {
         className="flex-1 bg-background"
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         contentInsetAdjustmentBehavior="automatic"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={mutedForeground}
+            onRefresh={() => {
+              setRefreshing(true);
+              void usage.refresh().finally(() => setRefreshing(false));
+            }}
+          />
+        }
       >
-        <Text className="mb-4 text-4xl font-bold text-foreground">Projects</Text>
-        <NavGroup footer={`${projects.length} projects`}>
+        <Text className="mb-4 text-4xl font-bold text-foreground">{heading}</Text>
+        <NavGroup className="mb-6" footer={`${projects.length} projects`}>
           {projects.map((project) => (
             <ProjectRow key={project.id} project={project} />
           ))}
         </NavGroup>
+        <UsageLimitsSection usage={usage} />
       </ScrollView>
     </>
   );

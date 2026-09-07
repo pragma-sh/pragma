@@ -1,6 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { UsageLimit, UsageLimitProviderDefinition, UsageLimitsResult } from "@pragma/plugin";
+import {
+  constants,
+  formatDuration,
+  isStaleReading,
+  percentUsed,
+  resetsInMs,
+  resolvePrimaryLimit,
+  usagePercentLabel,
+  usageSeverity,
+  type UsageLimit,
+  type UsageLimitsProvider,
+} from "@pragma/constants";
+import type { UsageLimitProviderDefinition } from "@pragma/plugin";
 import { ArrowUpRight, CircleGauge, Gauge } from "lucide-react";
 
 import {
@@ -24,135 +36,61 @@ import { browserOpenExternal } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { resolvePluginAssetPath } from "@/plugins/assets";
 import { usePluginRuntimeState } from "@/plugins/host-hooks";
-import {
-  pluginContextForRecord,
-  usePluginUsageLimitProviders,
-  type VisiblePluginContribution,
-} from "@/plugins/rendering";
+import { usePluginUsageLimitProviders, type VisiblePluginContribution } from "@/plugins/rendering";
 
-const MIN_REFRESH_INTERVAL_MS = 15_000;
-const MAX_RETRY_INTERVAL_MS = 15 * 60_000;
-const recordIds = new WeakMap<object, number>();
-let nextRecordId = 1;
+/** Fallback poll while the popover is open, when no provider asks for slower. */
+const OPEN_POLL_MS = constants.usageLimits.minRefreshIntervalMs;
 
-interface ProviderState {
-  result?: UsageLimitsResult;
-  loading: boolean;
-}
-
-/** Shared top-bar entry point for plugin-provided usage limits. */
+/**
+ * Shared top-bar entry point for plugin-provided usage limits.
+ *
+ * The readings come from the host, which owns the cache, the per-provider
+ * cadence, the backoff after a failure, and the validation. Asking more often
+ * than the host's own floor costs a provider nothing — the host answers from
+ * cache — so this simply asks while the user is looking.
+ */
 export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: string | null }) {
-  const providers = usePluginUsageLimitProviders(activeProjectId);
-  const providersRef = useRef(providers);
-  providersRef.current = providers;
   const runtime = usePluginRuntimeState();
-  const [states, setStates] = useState<Record<string, ProviderState>>({});
-  const [refreshNonce, setRefreshNonce] = useState(0);
-  const providerSignature = providers
-    .map((provider) => `${provider.key}:${recordId(provider.record)}`)
-    .join("\u0000");
+  const root = runtime.project?.path;
+  const [providers, setProviders] = useState<UsageLimitsProvider[]>([]);
+  const [open, setOpen] = useState(false);
+  const icons = useProviderIcons(activeProjectId);
 
   useEffect(() => {
-    if (!runtime.sdk) {
-      return;
-    }
     const sdk = runtime.sdk;
-
-    let disposed = false;
-    const timers = new Set<ReturnType<typeof setTimeout>>();
-    const activeProviders = providersRef.current;
-
-    setStates((current) => {
-      const next: Record<string, ProviderState> = {};
-      for (const provider of activeProviders) {
-        next[provider.key] = current[provider.key] ?? { loading: true };
-      }
-      return next;
-    });
-
-    for (const provider of activeProviders) {
-      let failures = 0;
-      let inFlight = false;
-      const requestedInterval = provider.contribution.refreshIntervalMs;
-      const refreshInterval =
-        requestedInterval === undefined || !Number.isFinite(requestedInterval)
-          ? MIN_REFRESH_INTERVAL_MS
-          : Math.max(MIN_REFRESH_INTERVAL_MS, requestedInterval);
-
-      const schedule = (delay: number) => {
-        const timer = setTimeout(() => {
-          timers.delete(timer);
-          void refresh();
-        }, delay);
-        timers.add(timer);
-      };
-
-      const refresh = async () => {
-        if (disposed || inFlight) {
-          return;
-        }
-        inFlight = true;
-        try {
-          const result = validateUsageLimitsResult(
-            provider.contribution,
-            await provider.contribution.load(pluginContextForRecord(provider.record, runtime)),
-          );
-          failures = 0;
-          if (!disposed) {
-            setStates((current) => ({
-              ...current,
-              [provider.key]: { result, loading: false },
-            }));
-          }
-        } catch (cause) {
-          failures += 1;
-          const message = cause instanceof Error ? cause.message : String(cause);
-          void sdk
-            .rpc("plugins", {
-              action: "logUsageLimitsError",
-              pluginId: provider.pluginId,
-              providerId: provider.contribution.id,
-              message,
-            })
-            .catch(() => undefined);
-          if (!disposed) {
-            setStates((current) => ({
-              ...current,
-              [provider.key]: {
-                ...current[provider.key],
-                loading: false,
-              },
-            }));
-          }
-        } finally {
-          inFlight = false;
-          if (!disposed) {
-            schedule(
-              failures === 0
-                ? refreshInterval
-                : Math.min(refreshInterval * 2 ** failures, MAX_RETRY_INTERVAL_MS),
-            );
-          }
-        }
-      };
-
-      void refresh();
+    if (!sdk) {
+      return undefined;
     }
-
-    return () => {
-      disposed = true;
-      for (const timer of timers) {
-        clearTimeout(timer);
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const next = await sdk.usageLimits.get(root ? { root } : {});
+        if (!disposed) {
+          setProviders(next);
+        }
+      } catch {
+        // The host is the source of truth and keeps the last good readings;
+        // a failed poll leaves what is already on screen alone.
       }
     };
-  }, [providerSignature, refreshNonce, runtime]);
+    void refresh();
+    // Poll only while the popover is open: closed, the cards are not visible
+    // and the host's cache is what the next open will read anyway.
+    const timer = open ? setInterval(() => void refresh(), OPEN_POLL_MS) : undefined;
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        clearInterval(timer);
+      }
+    };
+  }, [open, root, runtime.sdk]);
 
   if (providers.length === 0) {
     return null;
   }
 
   return (
-    <Popover onOpenChange={(open) => open && setRefreshNonce((current) => current + 1)}>
+    <Popover onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <IconButton label="Usage limits" size="icon-sm" variant="ghost">
           <Gauge />
@@ -165,9 +103,9 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
         <Accordion type="multiple">
           {providers.map((provider) => (
             <ProviderAccordionItem
-              key={provider.key}
+              key={providerKey(provider)}
+              icon={icons.get(providerKey(provider))}
               provider={provider}
-              state={states[provider.key] ?? { loading: true }}
             />
           ))}
         </Accordion>
@@ -176,54 +114,66 @@ export function UsageLimitsPopover({ activeProjectId }: { activeProjectId: strin
   );
 }
 
-/** Picks the limit shown on the collapsed accordion row, if any. */
-function resolvePrimaryLimit(
-  definition: UsageLimitProviderDefinition,
-  result: UsageLimitsResult | undefined,
-): UsageLimit | undefined {
-  if (result?.status !== "ready") {
-    return undefined;
-  }
-  return result.summary ?? result.limits.find((limit) => limit.id === definition.primaryLimitId);
+/** Stable identity of a provider across the host response and the local runtime. */
+function providerKey(provider: Pick<UsageLimitsProvider, "pluginId" | "providerId">): string {
+  return `${provider.pluginId} ${provider.providerId}`;
+}
+
+/**
+ * Icons still come from the desktop's own plugin runtime: a provider may declare
+ * its icon as a React component, which has no wire form. The host's `icon` hash
+ * covers file icons for clients that cannot load plugin code; here the local
+ * definition is richer, so it wins.
+ */
+function useProviderIcons(
+  activeProjectId: string | null,
+): Map<string, VisiblePluginContribution<UsageLimitProviderDefinition>> {
+  const contributions = usePluginUsageLimitProviders(activeProjectId);
+  return useMemo(
+    () =>
+      new Map(
+        contributions.map((contribution) => [
+          providerKey({
+            pluginId: contribution.pluginId,
+            providerId: contribution.contribution.id,
+          }),
+          contribution,
+        ]),
+      ),
+    [contributions],
+  );
 }
 
 function ProviderAccordionItem({
+  icon,
   provider,
-  state,
 }: {
-  provider: VisiblePluginContribution<UsageLimitProviderDefinition>;
-  state: ProviderState;
+  icon?: VisiblePluginContribution<UsageLimitProviderDefinition>;
+  provider: UsageLimitsProvider;
 }) {
-  const definition = provider.contribution;
-  const primary = resolvePrimaryLimit(definition, state.result);
+  const primary = resolvePrimaryLimit(provider.primaryLimitId, provider.result);
 
   return (
-    <AccordionItem className="rounded-md border px-2 not-last:mb-1" value={provider.key}>
+    <AccordionItem className="rounded-md border px-2 not-last:mb-1" value={providerKey(provider)}>
       <AccordionTrigger className="items-center gap-2 py-2 hover:no-underline">
-        <ProviderIcon definition={definition} provider={provider} />
+        <ProviderIcon icon={icon} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-xs font-medium">{definition.title}</span>
+            <span className="truncate text-xs font-medium">{provider.title}</span>
             <span className="text-[11px] font-normal text-muted-foreground">
               {primary ? usagePercentLabel(primary) : null}
             </span>
           </div>
-          {primary ? <UsageProgress limit={primary} /> : <ProviderStatus state={state} />}
+          {primary ? <UsageProgress limit={primary} /> : <ProviderStatus provider={provider} />}
         </div>
       </AccordionTrigger>
-      <ProviderAccordionContent definition={definition} state={state} />
+      <ProviderAccordionContent provider={provider} />
     </AccordionItem>
   );
 }
 
-function ProviderAccordionContent({
-  definition,
-  state,
-}: {
-  definition: UsageLimitProviderDefinition;
-  state: ProviderState;
-}) {
-  const result = state.result;
+function ProviderAccordionContent({ provider }: { provider: UsageLimitsProvider }) {
+  const result = provider.result;
   return (
     <AccordionContent className="flex flex-col gap-3 px-1 pb-3">
       {result?.status === "ready" ? (
@@ -231,13 +181,18 @@ function ProviderAccordionContent({
           <UsageLimitRow key={limit.id} limit={limit} observedAt={result.observedAt} />
         ))
       ) : (
-        <ProviderStatus state={state} verbose />
+        <ProviderStatus provider={provider} verbose />
       )}
+      {isStaleReading(provider, constants.usageLimits.staleAfterMs) ? (
+        <p className="text-[11px] text-muted-foreground">
+          Last updated {formatDuration(Date.now() - (provider.observedAt ?? 0))} ago
+        </p>
+      ) : null}
       <Button
         className="self-start"
         size="sm"
         variant="outline"
-        onClick={() => openUsageDashboard(definition.dashboardUrl)}
+        onClick={() => openUsageDashboard(provider.dashboardUrl)}
       >
         View dashboard
         <ArrowUpRight />
@@ -252,16 +207,16 @@ export function openUsageDashboard(url: string): void {
 }
 
 function ProviderIcon({
-  definition,
-  provider,
+  icon,
 }: {
-  definition: UsageLimitProviderDefinition;
-  provider: VisiblePluginContribution<UsageLimitProviderDefinition>;
+  icon?: VisiblePluginContribution<UsageLimitProviderDefinition>;
 }) {
-  const iconPath = resolvePluginAssetPath(definition.iconPath, provider.record);
+  const iconPath = icon
+    ? resolvePluginAssetPath(icon.contribution.iconPath, icon.record)
+    : undefined;
   const needsInvert = useIconNeedsInvert(iconPath);
-  if (definition.icon) {
-    const Icon = definition.icon;
+  const Icon = icon?.contribution.icon;
+  if (Icon) {
     return <Icon className="size-4 shrink-0" />;
   }
   return iconPath ? (
@@ -275,12 +230,16 @@ function ProviderIcon({
   );
 }
 
-function ProviderStatus({ state, verbose = false }: { state: ProviderState; verbose?: boolean }) {
-  const message = state.loading
-    ? "Loading..."
-    : state.result?.status === "unavailable"
-      ? state.result.message
-      : "No usage data";
+/** Why a provider is showing no bar. Never phrased, or drawn, as zero usage. */
+function ProviderStatus({
+  provider,
+  verbose = false,
+}: {
+  provider: UsageLimitsProvider;
+  verbose?: boolean;
+}) {
+  const message =
+    provider.result?.status === "unavailable" ? provider.result.message : "No usage data";
   return (
     <p
       className={cn(
@@ -294,6 +253,7 @@ function ProviderStatus({ state, verbose = false }: { state: ProviderState; verb
 }
 
 function UsageLimitRow({ limit, observedAt }: { limit: UsageLimit; observedAt: number }) {
+  const resetsIn = resetsInMs(limit, observedAt);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2 text-xs">
@@ -301,9 +261,9 @@ function UsageLimitRow({ limit, observedAt }: { limit: UsageLimit; observedAt: n
         <span className="text-muted-foreground">{usagePercentLabel(limit)}</span>
       </div>
       <UsageProgress limit={limit} />
-      {limit.resetsInMs === undefined ? null : (
+      {resetsIn === null ? null : (
         <span className="text-[11px] text-muted-foreground">
-          Resets in {formatDuration(observedAt + limit.resetsInMs - Date.now())}
+          Resets in {formatDuration(resetsIn)}
         </span>
       )}
     </div>
@@ -326,109 +286,14 @@ function UsageProgress({ limit }: { limit: UsageLimit }) {
   );
 }
 
-function recordId(record: object): number {
-  const existing = recordIds.get(record);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const id = nextRecordId;
-  nextRecordId += 1;
-  recordIds.set(record, id);
-  return id;
-}
-
-/** Calculates a bounded percentage from provider-reported quantities. */
-export function percentUsed(limit: UsageLimit): number | null {
-  if (limit.limit === null || limit.limit <= 0) {
-    return null;
-  }
-  return Math.min(100, Math.max(0, (limit.used / limit.limit) * 100));
-}
-
-/** Maps usage severity onto semantic progress colors. */
+/** Maps usage severity onto this app's semantic progress colors. */
 export function progressColorClass(percent: number): string {
-  if (percent < 50) {
+  const severity = usageSeverity(percent);
+  if (severity === "ok") {
     return "[&_[data-slot=progress-indicator]]:bg-primary";
   }
-  if (percent < 75) {
+  if (severity === "warning") {
     return "[&_[data-slot=progress-indicator]]:bg-warning";
   }
   return "[&_[data-slot=progress-indicator]]:bg-destructive";
-}
-
-function usagePercentLabel(limit: UsageLimit): string {
-  const percent = percentUsed(limit);
-  return percent === null ? "Unlimited" : `${Math.round(percent)}% used`;
-}
-
-/** Formats a reset countdown without rounding partial days up. */
-export function formatDuration(durationMs: number): string {
-  const minutes = Math.max(0, Math.ceil(durationMs / 60_000));
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.ceil(durationMs / (60 * 60_000));
-  if (hours < 48) {
-    return `${hours}h`;
-  }
-  return `${Math.floor(minutes / (60 * 24))}d`;
-}
-
-function validateUsageLimitsResult(
-  provider: UsageLimitProviderDefinition,
-  result: UsageLimitsResult,
-): UsageLimitsResult {
-  if (result.status === "unavailable") {
-    return result;
-  }
-  if (!Number.isFinite(result.observedAt)) {
-    throw new Error(`${provider.title} returned an invalid observation time`);
-  }
-  const ids = collectValidLimitIds(provider, result.limits);
-  if (result.summary !== undefined && !isValidUsageLimit(result.summary)) {
-    throw new Error(`${provider.title} returned an invalid summary limit`);
-  }
-  const summaryIsPrimary = result.summary?.id === provider.primaryLimitId;
-  if (!ids.has(provider.primaryLimitId) && !summaryIsPrimary) {
-    throw new Error(`${provider.title} did not return primary limit "${provider.primaryLimitId}"`);
-  }
-  return result;
-}
-
-function collectValidLimitIds(
-  provider: UsageLimitProviderDefinition,
-  limits: readonly UsageLimit[],
-): Set<string> {
-  const ids = new Set<string>();
-  for (const limit of limits) {
-    if (ids.has(limit.id) || !isValidUsageLimit(limit)) {
-      throw new Error(`${provider.title} returned an invalid usage limit`);
-    }
-    ids.add(limit.id);
-  }
-  return ids;
-}
-
-function isValidUsageLimit(limit: UsageLimit): boolean {
-  return (
-    Boolean(limit.id) &&
-    Boolean(limit.title) &&
-    hasValidUsedAmount(limit) &&
-    hasValidLimitAmount(limit) &&
-    hasValidResetsIn(limit)
-  );
-}
-
-function hasValidUsedAmount(limit: UsageLimit): boolean {
-  return Number.isFinite(limit.used) && limit.used >= 0;
-}
-
-function hasValidLimitAmount(limit: UsageLimit): boolean {
-  return limit.limit === null || (Number.isFinite(limit.limit) && limit.limit > 0);
-}
-
-function hasValidResetsIn(limit: UsageLimit): boolean {
-  return (
-    limit.resetsInMs === undefined || (Number.isFinite(limit.resetsInMs) && limit.resetsInMs >= 0)
-  );
 }

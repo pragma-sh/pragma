@@ -36,9 +36,17 @@ export type {
   FanoutStatus,
   FanoutSubscriptionPayload,
   KanbanPromptCard,
+  UsageLimit,
+  UsageLimitsProvider,
+  UsageLimitsReady,
+  UsageLimitsResult,
+  UsageLimitsSnapshot,
+  UsageLimitsUnavailable,
+  UsageLimitsUnavailableReason,
 } from "@pragma/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export { UsageLimitsClient, type GetUsageLimitsOptions } from "./usage-limits-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";
 export { base64ToBytes, bytesToBase64 } from "./encoding";
@@ -72,7 +80,7 @@ export type {
   AgentModelEntry,
   AgentReasoning,
   CatalogAgent,
-  AgentIcon,
+  PluginIconRef,
   AgentMessage,
   AgentMessageEvent,
   AgentQuestion,

@@ -14,7 +14,11 @@ import {
 } from "./catalog";
 import { runPluginLifecycles } from "./lifecycle";
 import { resolveManifests, type ResolvedManifest } from "./manifest";
-import { loadUsageLimits } from "./usage-limits";
+import {
+  assembleUsageProviders,
+  loadUsageLimits,
+  type UsageLimitsProviderMeta,
+} from "./usage-limits";
 
 interface LoadCommand {
   type: "load";
@@ -31,6 +35,8 @@ interface UsageLimitsCommand {
   type: "usageLimits";
   requestId: string;
   pluginId?: string;
+  /** Absolute project root whose scope the response should cover. */
+  root?: string;
 }
 
 type Command = LoadCommand | UsageLimitsCommand;
@@ -39,6 +45,8 @@ interface LoadedState {
   plugins: ResolvedPlugin[];
   sdk: PragmaClient;
   root?: string;
+  /** Static provider metadata, resolved once with the catalog. */
+  usageProviders: UsageLimitsProviderMeta[];
 }
 
 // Static agent definitions must be available while the gateway discovery file
@@ -140,8 +148,23 @@ async function load(
       }),
     previous,
   );
+  // Usage-provider icons register into the same asset map as agent icons, so a
+  // provider card fetches its mark through `/v1/assets/{hash}` like every other
+  // plugin asset. They are hashed here, at catalog time, because the icon is
+  // static metadata: a usage *reading* must not depend on reading a file.
+  const usageProviders = assembleUsageProviders(
+    plugins,
+    catalog.assets,
+    (pluginId, providerId, error) =>
+      emit({
+        type: "log",
+        pluginId,
+        level: "error",
+        message: `usage provider ${providerId} icon: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  );
   return {
-    state: { plugins, sdk, root: roots[0] },
+    state: { plugins, sdk, root: roots[0], usageProviders },
     catalog,
     watchers: assembleWatchers(plugins),
   };
@@ -227,9 +250,21 @@ class StdinLines {
       const providers = await loadUsageLimits(
         this.loaded.plugins,
         this.loaded.sdk,
-        this.loaded.root,
-        command.pluginId,
+        command.root ?? this.loaded.root,
+        { pluginId: command.pluginId, known: this.loaded.usageProviders },
       );
+      for (const provider of providers) {
+        // Every client reads this cache, so a provider that threw is logged
+        // once here rather than once per client that noticed.
+        if (provider.result?.status === "unavailable" && provider.result.reason === "error") {
+          emit({
+            type: "log",
+            pluginId: provider.pluginId,
+            level: "error",
+            message: `usage limits ${provider.providerId}: ${provider.result.message}`,
+          });
+        }
+      }
       emit({ type: "usageLimits", requestId: command.requestId, providers });
     } catch (error) {
       emit({

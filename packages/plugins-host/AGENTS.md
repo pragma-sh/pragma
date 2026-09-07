@@ -65,11 +65,23 @@ duplicate agent metadata here.
 
 ## Catalog wire types
 
-`AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `AgentIcon` are
-promoted into `@pragma/constants` (`schema.json`) so the wire type has one source of
-truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()` and `AssetsClient`. Catalog
+`AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `PluginIconRef`
+(the by-hash icon reference, used by agents *and* usage providers) and the
+`UsageLimit*` shapes are promoted into `@pragma/constants` (`schema.json`) so the wire
+type has one source of truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()`,
+`AssetsClient`, and `UsageLimitsClient`. Catalog
 agents include resolved launch commands for each model/reasoning selection plus terminal
 input timing, allowing `pragma-server` to launch agents without desktop webview.
+
+## Usage limits
+
+`usage-limits.ts` owns the whole provider path: `assembleUsageProviders` collects each
+provider's static metadata at catalog time (hashing its icon into the same asset map as
+agent icons), and `loadUsageLimits` invokes the providers and validates what they return.
+Validation lives here, not in a client — desktop, mobile, and web all render the host's
+one checked cache (`pragma-server`'s `plugins_host.rs`), so a provider is invoked once
+however many clients are looking. A project-scoped plugin's providers answer only for the
+project that contributed them.
 
 ## Assets
 
