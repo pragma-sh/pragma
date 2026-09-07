@@ -40,6 +40,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
         "fanouts" => ProtocolRpcMethod::Fanouts,
         "sessions" => ProtocolRpcMethod::Sessions,
+        "scripts" => ProtocolRpcMethod::Scripts,
         _ => return None,
     })
 }

@@ -17,6 +17,7 @@ pub mod git;
 pub mod process_env;
 pub mod rpc;
 pub mod scratchpads;
+pub mod scripts;
 pub mod sessions;
 pub mod tabs;
 pub mod watcher;
@@ -94,6 +95,9 @@ impl Core {
             // Owned by `pragma-server`'s session map: PTY liveness and the
             // viewport lease only mean anything where the PTYs actually live.
             | ProtocolRpcMethod::Sessions
+            // Owned by `pragma-server`: running a script means owning the
+            // terminals it runs in, and the record of which run they belong to.
+            | ProtocolRpcMethod::Scripts
             // Answered by `pragma-server`, which owns the host's process
             // spawning; the core router never sees it.
             | ProtocolRpcMethod::Wsl => Err(CoreError::UnsupportedMethod(

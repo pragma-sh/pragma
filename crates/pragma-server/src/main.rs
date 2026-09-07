@@ -750,6 +750,80 @@ fn handle_sessions_rpc(
     })
 }
 
+/// Routes the RPC domains `pragma-server` answers itself, rather than through
+/// `pragma-core`: these are all facts about live PTYs and the tabs around them,
+/// which only exist where the sessions do.
+fn handle_server_owned_rpc(
+    request_id: &str,
+    rpc: &pragma_protocol::RpcRequest,
+    registry: &Registry,
+) -> Option<Result<RpcResponseFrame, HandledRequestError>> {
+    match rpc.method {
+        ProtocolRpcMethod::Sessions => Some(handle_sessions_rpc(
+            request_id.to_string(),
+            rpc.payload.clone(),
+            registry,
+        )),
+        ProtocolRpcMethod::Scripts => Some(handle_scripts_rpc(
+            request_id.to_string(),
+            rpc.payload.clone(),
+            registry,
+        )),
+        _ => None,
+    }
+}
+
+/// Serves the `scripts` RPC domain: a project's named run scripts, and the runs
+/// they start.
+///
+/// On the host rather than in the desktop's React state, so a phone can start a
+/// dev server with no desktop window open — and so the "already running" answer
+/// is the same one on every device.
+fn handle_scripts_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let request = serde_json::from_value::<pragma_core::scripts::ScriptsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    let result = match request {
+        pragma_core::scripts::ScriptsRequest::List { worktree_id } => registry
+            .list_scripts(&worktree_id)
+            .map_err(|error| error.to_string())
+            .and_then(|listing| serde_json::to_value(listing).map_err(|error| error.to_string())),
+        pragma_core::scripts::ScriptsRequest::Run {
+            worktree_id,
+            name,
+            request_id: run_request_id,
+        } => registry
+            .run_script(&worktree_id, &name, &run_request_id)
+            .map_err(|error| error.to_string())
+            .and_then(|run| serde_json::to_value(run).map_err(|error| error.to_string())),
+        pragma_core::scripts::ScriptsRequest::Stop { run_id } => registry
+            .stop_script(&run_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+    };
+    Ok(match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    })
+}
+
 fn handle_rpc_request(
     request: RequestFrame,
     registry: &Registry,
@@ -833,8 +907,8 @@ fn handle_rpc_request(
     if matches!(rpc.method, ProtocolRpcMethod::Fanouts) {
         return Ok(handle_fanout_rpc(request_id, rpc.payload, registry));
     }
-    if matches!(rpc.method, ProtocolRpcMethod::Sessions) {
-        return handle_sessions_rpc(request_id, rpc.payload, registry);
+    if let Some(response) = handle_server_owned_rpc(&request_id, &rpc, registry) {
+        return response;
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {

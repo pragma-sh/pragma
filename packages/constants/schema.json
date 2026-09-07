@@ -396,7 +396,8 @@
         "scratchpads",
         "wsl",
         "fanouts",
-        "sessions"
+        "sessions",
+        "scripts"
       ]
     },
     "ProtocolEventKind": {

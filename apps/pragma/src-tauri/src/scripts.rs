@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -6,7 +5,6 @@ use std::time::Duration;
 use pragma_constants::{FileContents, Project, ProtocolRpcMethod, Worktree, CONSTANTS};
 use pragma_core::exec::{CommandResult, ExecRequest};
 use pragma_core::fs::FsRequest;
-use serde_json::Value;
 use tauri::State;
 
 use crate::db::Db;
@@ -14,25 +12,10 @@ use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 
-/// Validated project script config returned to the frontend and used by
-/// backend lifecycle hooks. Each `runScripts` entry's `command` stays as JSON
-/// because the Rust side only validates and echoes the frontend-owned split
-/// tree. Keyed by `BTreeMap` for a deterministic (alphabetical) button order
-/// in the header, since `serde_json::Map` does not preserve source order.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct LoadedProjectScripts {
-    pub setup: Vec<String>,
-    #[serde(rename = "runScripts")]
-    pub run_scripts: BTreeMap<String, ScriptDefinition>,
-    pub teardown: Vec<String>,
-}
-
-/// One named interactive script: its commands and the header button's icon.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ScriptDefinition {
-    pub command: Vec<Value>,
-    pub icon: Option<String>,
-}
+// The config contract itself lives in `pragma_core::scripts`: `pragma-server`
+// parses the same file when a phone runs a script with no desktop window open,
+// and two parsers would be two definitions of a valid `scripts.json`.
+pub use pragma_core::scripts::ProjectScripts as LoadedProjectScripts;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadlessCommandResult {
@@ -93,11 +76,11 @@ fn read_scripts_json(pty: &PtyClient, project_root: &str) -> Option<String> {
 /// Validates and parses a `scripts.json` body. `path` is used only for error
 /// messages.
 pub(crate) fn parse_config(raw: &str, path: &Path) -> AppResult<LoadedProjectScripts> {
-    let value: Value = serde_json::from_str(raw).map_err(|error| {
-        AppError::InvalidInput(format!("{} is not valid JSON: {error}", path.display()))
-    })?;
-    validate_config(&value, path)?;
-    config_from_value(&value)
+    // Every failure the shared parser reports is a malformed config file, which
+    // is this layer's `InvalidInput`; the wording already names the offending
+    // path and key.
+    pragma_core::scripts::parse_config(raw, path)
+        .map_err(|error| AppError::InvalidInput(error.to_string()))
 }
 
 /// Runs a project's `setup`/`teardown` commands on the worktree's host and
@@ -182,215 +165,6 @@ pub fn run_headless_command(
         status: result.status,
         duration: Duration::from_millis(result.duration_ms),
     })
-}
-
-fn config_from_value(value: &Value) -> AppResult<LoadedProjectScripts> {
-    let object = value.as_object().ok_or_else(|| {
-        AppError::InvalidInput("project script config must contain a JSON object".to_string())
-    })?;
-    Ok(LoadedProjectScripts {
-        setup: string_array_from_value(object.get("setup"))?,
-        run_scripts: runscripts_from_value(object.get("runScripts"))?,
-        teardown: string_array_from_value(object.get("teardown"))?,
-    })
-}
-
-fn runscripts_from_value(value: Option<&Value>) -> AppResult<BTreeMap<String, ScriptDefinition>> {
-    let Some(value) = value else {
-        return Ok(BTreeMap::new());
-    };
-    let object = value
-        .as_object()
-        .ok_or_else(|| AppError::InvalidInput("runScripts must be a JSON object".to_string()))?;
-    object
-        .iter()
-        .map(|(name, entry)| Ok((name.clone(), script_definition_from_value(entry, name)?)))
-        .collect()
-}
-
-fn script_definition_from_value(value: &Value, name: &str) -> AppResult<ScriptDefinition> {
-    let object = value.as_object().ok_or_else(|| {
-        AppError::InvalidInput(format!("runScripts.{name} must be a JSON object"))
-    })?;
-    let command = interactive_array_from_value(object.get("command"))?;
-    let icon = match object.get("icon") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(icon)) => Some(icon.clone()),
-        Some(_) => {
-            return Err(AppError::InvalidInput(format!(
-                "runScripts.{name}.icon must be a string"
-            )))
-        }
-    };
-    Ok(ScriptDefinition { command, icon })
-}
-
-fn interactive_array_from_value(value: Option<&Value>) -> AppResult<Vec<Value>> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    value
-        .as_array()
-        .cloned()
-        .ok_or_else(|| AppError::InvalidInput("expected script command array".to_string()))
-}
-
-fn string_array_from_value(value: Option<&Value>) -> AppResult<Vec<String>> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    value
-        .as_array()
-        .ok_or_else(|| AppError::InvalidInput("expected script command array".to_string()))?
-        .iter()
-        .map(|entry| {
-            entry
-                .as_str()
-                .map(ToString::to_string)
-                .ok_or_else(|| AppError::InvalidInput("expected script command string".to_string()))
-        })
-        .collect()
-}
-
-fn validate_config(value: &Value, path: &Path) -> AppResult<()> {
-    let object = value.as_object().ok_or_else(|| {
-        AppError::InvalidInput(format!("{} must contain a JSON object", path.display()))
-    })?;
-    for key in object.keys() {
-        if !matches!(key.as_str(), "setup" | "runScripts" | "teardown") {
-            return Err(AppError::InvalidInput(format!(
-                "{} has unknown key `{key}`",
-                path.display()
-            )));
-        }
-    }
-    validate_command_array(object.get("setup"), path, "setup")?;
-    validate_command_array(object.get("teardown"), path, "teardown")?;
-    validate_runscripts(object.get("runScripts"), path)?;
-    Ok(())
-}
-
-fn validate_runscripts(value: Option<&Value>, path: &Path) -> AppResult<()> {
-    let Some(value) = value else {
-        return Ok(());
-    };
-    let object = value.as_object().ok_or_else(|| {
-        AppError::InvalidInput(format!("{}.runScripts must be an object", path.display()))
-    })?;
-    for (name, entry) in object {
-        let field = format!("runScripts.{name}");
-        let entry_object = entry.as_object().ok_or_else(|| {
-            AppError::InvalidInput(format!("{}.{field} must be an object", path.display()))
-        })?;
-        for key in entry_object.keys() {
-            if !matches!(key.as_str(), "command" | "icon") {
-                return Err(AppError::InvalidInput(format!(
-                    "{}.{field} has unknown key `{key}`",
-                    path.display()
-                )));
-            }
-        }
-        validate_interactive_script_array(
-            entry_object.get("command"),
-            path,
-            &format!("{field}.command"),
-        )?;
-        if let Some(icon) = entry_object.get("icon") {
-            if !icon.is_null() && !icon.is_string() {
-                return Err(AppError::InvalidInput(format!(
-                    "{}.{field}.icon must be a string",
-                    path.display()
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_interactive_script_array(
-    value: Option<&Value>,
-    path: &Path,
-    field: &str,
-) -> AppResult<()> {
-    let Some(value) = value else {
-        return Ok(());
-    };
-    let entries = value.as_array().ok_or_else(|| {
-        AppError::InvalidInput(format!("{}.{field} must be an array", path.display()))
-    })?;
-    for (index, entry) in entries.iter().enumerate() {
-        validate_interactive_script_node(entry, path, &format!("{field}[{index}]"))?;
-    }
-    Ok(())
-}
-
-fn validate_command_array(value: Option<&Value>, path: &Path, field: &str) -> AppResult<()> {
-    let Some(value) = value else {
-        return Ok(());
-    };
-    let commands = value.as_array().ok_or_else(|| {
-        AppError::InvalidInput(format!("{}.{field} must be an array", path.display()))
-    })?;
-    for (index, command) in commands.iter().enumerate() {
-        validate_command(command, path, &format!("{field}[{index}]"))?;
-    }
-    Ok(())
-}
-
-fn validate_interactive_script_node(value: &Value, path: &Path, field: &str) -> AppResult<()> {
-    if value.is_string() {
-        return validate_command(value, path, field);
-    }
-    let object = value.as_object().ok_or_else(|| {
-        AppError::InvalidInput(format!(
-            "{}.{field} must be a command string or split object",
-            path.display()
-        ))
-    })?;
-    let has_horizontal = object.contains_key("left") || object.contains_key("right");
-    let has_vertical = object.contains_key("top") || object.contains_key("bottom");
-    if has_horizontal == has_vertical {
-        return Err(AppError::InvalidInput(format!(
-            "{}.{field} must use exactly one split axis: left/right or top/bottom",
-            path.display()
-        )));
-    }
-    let expected = if has_horizontal {
-        ["left", "right"]
-    } else {
-        ["top", "bottom"]
-    };
-    for key in object.keys() {
-        if !expected.contains(&key.as_str()) {
-            return Err(AppError::InvalidInput(format!(
-                "{}.{field} has unknown key `{key}`",
-                path.display()
-            )));
-        }
-    }
-    for key in expected {
-        let child = object.get(key).ok_or_else(|| {
-            AppError::InvalidInput(format!("{}.{field}.{key} is required", path.display()))
-        })?;
-        validate_interactive_script_node(child, path, &format!("{field}.{key}"))?;
-    }
-    Ok(())
-}
-
-fn validate_command(value: &Value, path: &Path, field: &str) -> AppResult<()> {
-    let command = value.as_str().ok_or_else(|| {
-        AppError::InvalidInput(format!(
-            "{}.{field} must be a command string",
-            path.display()
-        ))
-    })?;
-    if command.trim().is_empty() {
-        return Err(AppError::InvalidInput(format!(
-            "{}.{field} must not be empty",
-            path.display()
-        )));
-    }
-    Ok(())
 }
 
 fn format_failures(kind: &str, failures: &[HeadlessCommandResult]) -> String {

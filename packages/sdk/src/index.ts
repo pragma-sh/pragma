@@ -50,6 +50,13 @@ export type {
 } from "@pragma/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export {
+  ScriptsClient,
+  type RunScriptOptions,
+  type ScriptList,
+  type ScriptListing,
+  type ScriptRun,
+} from "./scripts-client";
 export { TabsClient, type ManagedTabs, type OpenTerminalOptions } from "./tabs-client";
 export { UsageLimitsClient, type GetUsageLimitsOptions } from "./usage-limits-client";
 export { HealthClient, type GatewayHealth } from "./health-client";

@@ -10,6 +10,7 @@ use pragma_constants::{
     ShellProfile, Tab, TabKind, ViewportLease, Worktree, CONSTANTS,
 };
 use pragma_core::git::GitRequest;
+use pragma_core::scripts::{ScriptListResult, ScriptListing, ScriptRun};
 use pragma_core::tabs::TabAgentMetadata;
 use pragma_core::watcher::WorktreeWatcher;
 use pragma_platform::ipc::LocalStream;
@@ -40,6 +41,8 @@ pub enum RegistryError {
     Watcher(String),
     #[error("port inspection failed: {0}")]
     Ports(String),
+    #[error("project scripts: {0}")]
+    Scripts(String),
     #[error("lock poisoned")]
     LockPoisoned,
 }
@@ -112,6 +115,9 @@ pub struct Registry {
     workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     /// Terminal tabs the host created, and the ids of tabs clients have closed.
     managed_tabs: Mutex<ManagedTabs>,
+    /// Live script runs by run id. Not persisted: a run is its terminals, and
+    /// those do not survive a server restart either.
+    script_runs: Mutex<HashMap<String, ScriptRun>>,
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
     tunnel: Arc<TunnelRegistry>,
@@ -367,6 +373,7 @@ impl Registry {
             pending: Mutex::new(HashMap::new()),
             workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
             managed_tabs: Mutex::new(load_managed_tabs(&server_dir)),
+            script_runs: Mutex::new(HashMap::new()),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
             plugins: PluginsRegistry::new(server_dir.clone()),
@@ -661,6 +668,161 @@ impl Registry {
             })
             .map(|worktree| (worktree.project_id.clone(), worktree.path.clone()))
             .ok_or_else(|| RegistryError::NotFound(worktree_id.to_string()))
+    }
+
+    /// Lists a project's named run scripts, and which are running here.
+    ///
+    /// The config is read from the *project root*, never from the worktree the
+    /// script will run in: a child worktree is a checkout that may predate the
+    /// script being added, and running a stale copy of one is worse than
+    /// running none.
+    pub fn list_scripts(&self, worktree_id: &str) -> Result<ScriptListResult, RegistryError> {
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let root = self.project_root(&project_id).unwrap_or(cwd);
+        let config = match read_project_scripts(&root) {
+            Ok(config) => config,
+            Err(error) => {
+                // A malformed config is shown as the error it is. An empty list
+                // would claim the project has no scripts, which is a different
+                // thing and hides the typo that caused this.
+                return Ok(ScriptListResult {
+                    scripts: Vec::new(),
+                    error: Some(error),
+                });
+            }
+        };
+        let runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let scripts = config
+            .run_scripts
+            .iter()
+            .map(|(name, definition)| ScriptListing {
+                name: name.clone(),
+                icon: definition.icon.clone(),
+                command_count: pragma_core::scripts::flatten_commands(&definition.command)
+                    .map_or(0, |commands| commands.len()),
+                run: runs
+                    .values()
+                    .find(|run| run.worktree_id == worktree_id && &run.name == name)
+                    .cloned(),
+            })
+            .collect();
+        Ok(ScriptListResult {
+            scripts,
+            error: None,
+        })
+    }
+
+    /// Starts a named script in a worktree, or returns the run already going.
+    ///
+    /// One run per script per worktree: a second tap while a dev server is
+    /// already up should show it, not start a second one fighting for the same
+    /// port. `request_id` covers the narrower case of the *same* tap arriving
+    /// twice after a retry.
+    pub fn run_script(
+        &self,
+        worktree_id: &str,
+        name: &str,
+        request_id: &str,
+    ) -> Result<ScriptRun, RegistryError> {
+        if let Some(existing) = self.existing_run(worktree_id, name)? {
+            return Ok(existing);
+        }
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let root = self.project_root(&project_id).unwrap_or(cwd);
+        let config = read_project_scripts(&root).map_err(RegistryError::Scripts)?;
+        let definition = config
+            .run_scripts
+            .get(name)
+            .ok_or_else(|| RegistryError::NotFound(format!("script `{name}`")))?;
+        let commands = pragma_core::scripts::flatten_commands(&definition.command)
+            .map_err(|error| RegistryError::Scripts(error.to_string()))?;
+        if commands.is_empty() {
+            return Err(RegistryError::Scripts(format!(
+                "script `{name}` has no commands"
+            )));
+        }
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let mut tab_ids = Vec::with_capacity(commands.len());
+        for (index, command) in commands.iter().enumerate() {
+            // One tab per command, titled by the script: on a phone these are
+            // rows to pick between, and on the desktop they are the panes the
+            // script's split tree arranges.
+            let tab = self.open_terminal_tab(
+                worktree_id,
+                &format!("{request_id}:{index}"),
+                Some(&script_tab_title(name, index, commands.len())),
+            )?;
+            // The command is typed into the live shell rather than replacing
+            // it, so the terminal survives the command exiting and shows why.
+            if let Err(error) = self.write(&tab.id, &format!("{command}\r")) {
+                eprintln!("script {name}: failed to send command {index}: {error}");
+            }
+            tab_ids.push(tab.id);
+        }
+        let run = ScriptRun {
+            run_id: run_id.clone(),
+            worktree_id: worktree_id.to_string(),
+            name: name.to_string(),
+            tab_ids,
+        };
+        let mut runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        runs.insert(run_id, run.clone());
+        Ok(run)
+    }
+
+    /// Ends a run and closes the terminals it opened. Idempotent.
+    pub fn stop_script(&self, run_id: &str) -> Result<(), RegistryError> {
+        let run = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .remove(run_id);
+        let Some(run) = run else {
+            return Ok(());
+        };
+        for tab_id in &run.tab_ids {
+            if let Err(error) = self.close_tab(tab_id) {
+                eprintln!(
+                    "stop script {}: failed to close {tab_id}: {error}",
+                    run.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The run already going for this script in this worktree, if any.
+    ///
+    /// A run whose terminals have all been closed — from the desktop, or by the
+    /// user closing the last row — is not a run any more, so it is forgotten
+    /// here rather than blocking a fresh start forever.
+    fn existing_run(
+        &self,
+        worktree_id: &str,
+        name: &str,
+    ) -> Result<Option<ScriptRun>, RegistryError> {
+        let live: std::collections::HashSet<String> = self
+            .sessions
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .keys()
+            .cloned()
+            .collect();
+        let mut runs = self
+            .script_runs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        runs.retain(|_, run| run.tab_ids.iter().any(|tab_id| live.contains(tab_id)));
+        Ok(runs
+            .values()
+            .find(|run| run.worktree_id == worktree_id && run.name == name)
+            .cloned())
     }
 
     /// Re-asserts host-owned tabs over a snapshot the desktop just published.
@@ -2200,6 +2362,31 @@ fn next_order_index(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> i64 {
         .map_or(0, |max| max + 1)
 }
 
+/// Reads and validates a project's `.pragma/scripts.json`.
+///
+/// A missing file is an empty config, not an error: most projects have no
+/// scripts. A file that exists but does not parse *is* an error, because the
+/// user wrote something and it is not doing what they meant.
+fn read_project_scripts(root: &str) -> Result<pragma_core::scripts::ProjectScripts, String> {
+    let path = Path::new(root).join(CONSTANTS.scripts.config_path.as_str());
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(pragma_core::scripts::ProjectScripts::default())
+        }
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    pragma_core::scripts::parse_config(&raw, &path).map_err(|error| error.to_string())
+}
+
+/// The title of one of a script run's terminals.
+fn script_tab_title(name: &str, index: usize, total: usize) -> String {
+    if total <= 1 {
+        return name.to_string();
+    }
+    format!("{name} {}/{total}", index + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -3352,5 +3539,161 @@ mod tests {
         let result = registry.open_terminal_tab("worktree-missing", "request-1", None);
 
         assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+    }
+
+    /// Writes a `.pragma/scripts.json` into a project root the registry knows.
+    fn with_scripts(dir: &std::path::Path, body: &str) -> Registry {
+        let registry = registry_in(dir);
+        std::fs::create_dir_all(dir.join(".pragma")).expect("create config dir");
+        std::fs::write(dir.join(".pragma/scripts.json"), body).expect("write config");
+        registry.publish_workspace(snapshot_with_project(&dir.to_string_lossy()));
+        registry
+    }
+
+    #[test]
+    fn lists_a_projects_named_scripts_with_their_command_counts() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":[{"left":"a","right":"b"}]},"test":{"command":["c"]}}}"#,
+        );
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        assert_eq!(
+            listing
+                .scripts
+                .iter()
+                .map(|script| (script.name.as_str(), script.command_count))
+                .collect::<Vec<_>>(),
+            [("dev", 2), ("test", 1)]
+        );
+        assert!(listing.scripts.iter().all(|script| script.run.is_none()));
+        assert!(listing.error.is_none());
+    }
+
+    #[test]
+    fn a_malformed_config_is_an_error_not_an_empty_list() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(dir.path(), "{ not json");
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        // "No scripts" and "your config has a typo" are different answers, and
+        // showing the first for the second hides the mistake.
+        assert!(listing.scripts.is_empty());
+        assert!(listing.error.is_some());
+    }
+
+    #[test]
+    fn a_project_with_no_config_simply_has_no_scripts() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let listing = registry.list_scripts("worktree-main").expect("list");
+
+        assert!(listing.scripts.is_empty());
+        assert!(listing.error.is_none());
+    }
+
+    #[test]
+    fn a_multi_command_script_opens_one_terminal_per_command() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":[{"left":"echo a","right":"echo b"}]}}}"#,
+        );
+
+        let run = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("run");
+
+        assert_eq!(run.tab_ids.len(), 2);
+        let titles: Vec<String> = registry
+            .managed_tabs_for(&["worktree-main".to_string()])
+            .expect("managed tabs")
+            .into_iter()
+            .filter_map(|tab| tab.title)
+            .collect();
+        assert_eq!(titles, ["dev 1/2", "dev 2/2"]);
+        registry.stop_script(&run.run_id).expect("stop");
+    }
+
+    #[test]
+    fn running_a_script_that_is_already_going_shows_the_same_run() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+        let first = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("first run");
+
+        // A different request id: a deliberate second tap, not a retry. One dev
+        // server is still the right answer.
+        let second = registry
+            .run_script("worktree-main", "dev", "request-2")
+            .expect("second run");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            registry
+                .list_scripts("worktree-main")
+                .expect("list")
+                .scripts[0]
+                .run
+                .as_ref()
+                .map(|run| run.run_id.clone()),
+            Some(first.run_id.clone())
+        );
+        registry.stop_script(&first.run_id).expect("stop");
+    }
+
+    #[test]
+    fn stopping_a_run_closes_its_terminals_and_frees_the_name() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+        let run = registry
+            .run_script("worktree-main", "dev", "request-1")
+            .expect("run");
+
+        registry.stop_script(&run.run_id).expect("stop");
+        registry
+            .stop_script(&run.run_id)
+            .expect("a repeated stop is idempotent");
+
+        assert!(registry
+            .list_scripts("worktree-main")
+            .expect("list")
+            .scripts[0]
+            .run
+            .is_none());
+        let restarted = registry
+            .run_script("worktree-main", "dev", "request-3")
+            .expect("the name is free again");
+        assert_ne!(restarted.run_id, run.run_id);
+        registry.stop_script(&restarted.run_id).expect("stop");
+    }
+
+    #[test]
+    fn running_an_unknown_script_fails_instead_of_opening_a_bare_shell() {
+        let dir = tempdir().expect("tempdir");
+        let registry = with_scripts(
+            dir.path(),
+            r#"{"runScripts":{"dev":{"command":["echo a"]}}}"#,
+        );
+
+        let result = registry.run_script("worktree-main", "missing", "request-1");
+
+        assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
+        assert!(registry
+            .managed_tabs_for(&["worktree-main".to_string()])
+            .expect("managed tabs")
+            .is_empty());
     }
 }

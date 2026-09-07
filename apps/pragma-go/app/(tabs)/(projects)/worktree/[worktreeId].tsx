@@ -8,6 +8,7 @@ import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { LaunchAgentButton } from "@/components/LaunchAgentButton";
 import { LaunchSheet } from "@/components/LaunchSheet";
 import { NavGroup, NavRow } from "@/components/NavRow";
+import { ScriptsMenuButton } from "@/components/ScriptsMenuButton";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,11 +51,17 @@ export default function WorktreeScreen() {
     hapticImpact();
     setLaunchOpen(true);
   }, []);
-  const renderLaunchAgentButton = useCallback(
+  // Header right, in the order the plan calls for: scripts, then launch. Both
+  // are the same size and hit target, so a long worktree title truncates rather
+  // than pushing either off the edge.
+  const renderHeaderActions = useCallback(
     ({ tintColor }: { tintColor?: ColorValue }) => (
-      <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
+      <View className="flex-row items-center gap-4">
+        <ScriptsMenuButton color={tintColor ?? foreground} worktreeId={worktreeId} />
+        <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
+      </View>
     ),
-    [foreground, openLaunchSheet],
+    [foreground, openLaunchSheet, worktreeId],
   );
 
   // Terminals are always offered, so "empty" is only about what already exists.
@@ -62,7 +69,7 @@ export default function WorktreeScreen() {
 
   return (
     <>
-      <WorktreeHeader headerRight={renderLaunchAgentButton} status={status} worktree={worktree} />
+      <WorktreeHeader headerRight={renderHeaderActions} status={status} worktree={worktree} />
       <WorktreeContents
         agentTabs={agentTabs}
         empty={empty}
