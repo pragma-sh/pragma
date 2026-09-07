@@ -8,7 +8,7 @@ import {
   type UsageLimit,
   type UsageLimitsProvider,
 } from "@pragma/constants";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 
 import { hapticSelection } from "@/lib/haptics";
@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 import { AgentIcon } from "./AgentIcon";
 import { IconSymbol } from "./IconSymbol";
 import { Text } from "./ui/text";
+
+/** How often the "last updated" label re-reads the clock. */
+const STALE_LABEL_TICK_MS = 30_000;
 
 /** Bar fill per severity band, mirroring the desktop popover's colors. */
 const BAR_CLASS = {
@@ -68,7 +71,7 @@ function ProviderCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const primary = resolvePrimaryLimit(provider.primaryLimitId, provider.result);
-  const stale = isStale(provider);
+  const staleLabel = useStaleLabel(provider);
 
   return (
     <View className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
@@ -99,10 +102,8 @@ function ProviderCard({
           />
         </View>
         {primary ? <UsageBar limit={primary} /> : <ProviderStatus provider={provider} />}
-        {stale ? (
-          <Text className="text-[11px] text-muted-foreground">
-            Last updated {formatDuration(Date.now() - (provider.observedAt ?? 0))} ago
-          </Text>
+        {staleLabel ? (
+          <Text className="text-[11px] text-muted-foreground">{staleLabel}</Text>
         ) : null}
       </Pressable>
       {expanded ? <ProviderDetail provider={provider} /> : null}
@@ -173,6 +174,31 @@ function UsageBar({ limit }: { limit: UsageLimit }) {
       />
     </View>
   );
+}
+
+/**
+ * How old a reading is, once it is old enough to say so.
+ *
+ * The label is state on a slow timer rather than a `Date.now()` read during
+ * render: a card that says "3m ago" has to become "4m ago" on its own, and
+ * reading the clock while rendering makes the same props paint differently.
+ */
+function useStaleLabel(provider: UsageLimitsProvider): string | null {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    const update = (): void => {
+      const now = Date.now();
+      setLabel(
+        isStale(provider, now)
+          ? `Last updated ${formatDuration(now - (provider.observedAt ?? now))} ago`
+          : null,
+      );
+    };
+    update();
+    const timer = setInterval(update, STALE_LABEL_TICK_MS);
+    return () => clearInterval(timer);
+  }, [provider]);
+  return label;
 }
 
 /** Why a provider is showing no bar: never phrased as zero usage. */

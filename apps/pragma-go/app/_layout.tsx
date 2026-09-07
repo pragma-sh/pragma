@@ -78,6 +78,7 @@ function ConnectionGate() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat/[tabId]" options={{ headerShown: true }} />
         <Stack.Screen name="scratchpad/[scratchpadId]" options={{ headerShown: true }} />
+        <Stack.Screen name="terminal/[tabId]" options={{ headerShown: true }} />
       </Stack>
       <PortalHost />
     </>

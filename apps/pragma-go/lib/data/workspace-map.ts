@@ -1,9 +1,20 @@
-import type { AgentReportPayload, Project, Tab, Worktree } from "@pragma/constants";
+import {
+  constants,
+  type AgentReportPayload,
+  type Project,
+  type Tab,
+  type Worktree,
+} from "@pragma/constants";
 
 import { statusRank } from "../agent-status";
 import { runtimeAgentId } from "../launch-form";
 import { agentSessionTitle } from "../tab-title";
-import { normalizeQuestionOptions, type AgentTab, type InboxItem } from "../types";
+import {
+  normalizeQuestionOptions,
+  type AgentTab,
+  type InboxItem,
+  type TerminalTab,
+} from "../types";
 import { worktreeLabel } from "../worktree-tree";
 
 // Pure, RN-free mapping from the host's WorkspaceSnapshot + live agent statuses
@@ -47,6 +58,32 @@ export function agentTabsBySnapshot(
       attentionKind: report?.attentionKind ?? null,
     };
     (result[tab.worktreeId] ??= []).push(agentTab);
+  }
+  return result;
+}
+
+/**
+ * Builds the per-worktree terminal-tab map: the shells and script runs, in the
+ * order the desktop shows them.
+ *
+ * The complement of {@link agentTabsBySnapshot}, and deliberately disjoint from
+ * it: a session tagged with an agent, or reporting as one, belongs under Agents.
+ * Listing it in both places would give one session two close buttons.
+ */
+export function terminalTabsBySnapshot(
+  tabs: Tab[],
+  statuses: AgentReportPayload[],
+): Record<string, TerminalTab[]> {
+  const reportsByTabId = reportsByTab(statuses);
+  const result: Record<string, TerminalTab[]> = {};
+  for (const tab of tabs) {
+    if (tab.kind !== "terminal") continue;
+    if (tab.agentId || reportsByTabId.has(tab.id)) continue;
+    (result[tab.worktreeId] ??= []).push({
+      id: tab.id,
+      worktreeId: tab.worktreeId,
+      title: tab.title?.trim() || constants.tabs.defaultTitles.fallback,
+    });
   }
   return result;
 }

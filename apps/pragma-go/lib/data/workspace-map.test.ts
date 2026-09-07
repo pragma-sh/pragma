@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentTabsBySnapshot,
+  terminalTabsBySnapshot,
   inboxFromStatuses,
   markTabStatusesSeen,
   parseAgentStatuses,
@@ -326,5 +327,45 @@ describe("markTabStatusesSeen", () => {
       running,
       other,
     ]);
+  });
+});
+
+describe("terminalTabsBySnapshot", () => {
+  it("lists plain shells, titled by the tab", () => {
+    const map = terminalTabsBySnapshot([tab({ id: "t1", title: "zsh" })], []);
+
+    expect(map.w1).toEqual([{ id: "t1", worktreeId: "w1", title: "zsh" }]);
+  });
+
+  it("falls back to the shared default when the shell has set no title", () => {
+    const map = terminalTabsBySnapshot([tab({ title: null })], []);
+
+    expect(map.w1?.[0]?.title).toBe("Shell");
+  });
+
+  it("leaves agent sessions to the Agents section", () => {
+    // Both halves of what makes a session an agent: the launch tag, and a live
+    // report from a manually started one. Listing either here would give one
+    // session two rows, and two close buttons.
+    const launched = tab({ id: "t1", agentId: "pragma.claude-code" });
+    const reporting = tab({ id: "t2", agentId: null });
+    const shell = tab({ id: "t3", agentId: null, title: "zsh" });
+
+    const map = terminalTabsBySnapshot([launched, reporting, shell], [status({ tabId: "t2" })]);
+
+    expect(map.w1?.map((entry) => entry.id)).toEqual(["t3"]);
+  });
+
+  it("ignores tabs that are not terminals", () => {
+    expect(terminalTabsBySnapshot([tab({ kind: "browser" })], [])).toEqual({});
+  });
+
+  it("groups by worktree", () => {
+    const map = terminalTabsBySnapshot(
+      [tab({ id: "t1" }), tab({ id: "t2", worktreeId: "w2" })],
+      [],
+    );
+
+    expect(Object.keys(map).toSorted()).toEqual(["w1", "w2"]);
   });
 });

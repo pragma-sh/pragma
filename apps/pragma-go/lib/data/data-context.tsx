@@ -12,11 +12,12 @@ import {
 
 import { statusForTabs } from "../agent-status";
 import { useConnection } from "../connection-context";
-import type { AgentStatus, AgentTab, InboxItem, Project, Worktree } from "../types";
+import type { AgentStatus, AgentTab, InboxItem, Project, TerminalTab, Worktree } from "../types";
 import { buildWorktreeTree, type WorktreeNode } from "../worktree-tree";
 import { MOCK_AGENT_TABS, MOCK_INBOX, MOCK_PROJECTS, MOCK_WORKTREES } from "./fixtures";
 import {
   agentTabsBySnapshot,
+  terminalTabsBySnapshot,
   inboxFromStatuses,
   markTabStatusesSeen,
   parseAgentStatuses,
@@ -37,6 +38,8 @@ interface DataContextValue {
   projects: Project[];
   worktrees: Worktree[];
   agentTabs: Record<string, AgentTab[]>;
+  /** Ordinary terminals (shells, script runs) per worktree; never agent sessions. */
+  terminalTabs: Record<string, TerminalTab[]>;
   inbox: InboxItem[];
   /** Resolve and remove an inbox item; publishes the verdict when paired. */
   resolveInboxItem: (id: string, resolution: InboxResolution) => void;
@@ -46,6 +49,10 @@ interface DataContextValue {
   clearAgent: (tabId: string) => Promise<void>;
   /** Rename an agent's workspace tab. */
   renameAgent: (tabId: string, title: string) => Promise<void>;
+  /** Open a host-owned terminal in a worktree and return its tab id. */
+  openTerminal: (worktreeId: string) => Promise<string>;
+  /** Close a terminal tab and end its process, on every device showing it. */
+  closeTerminal: (tabId: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -102,6 +109,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     );
   }, [hiddenTabIds, paired, renamedTitles, snapshot, visibleStatuses]);
 
+  // Unpaired, the fixtures carry agent sessions only: an invented shell would
+  // imply a terminal the demo cannot attach to.
+  const terminalTabs = useMemo<Record<string, TerminalTab[]>>(
+    () =>
+      paired
+        ? Object.fromEntries(
+            Object.entries(terminalTabsBySnapshot(snapshot?.tabs ?? [], statuses)).map(
+              ([worktreeId, entries]) => [
+                worktreeId,
+                entries
+                  .filter((entry) => !hiddenTabIds.has(entry.id))
+                  .map((entry) => ({ ...entry, title: renamedTitles[entry.id] ?? entry.title })),
+              ],
+            ),
+          )
+        : {},
+    [hiddenTabIds, paired, renamedTitles, snapshot, statuses],
+  );
+
   const derivedInbox = useMemo<InboxItem[]>(
     () =>
       paired
@@ -156,26 +182,67 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [client, handleUnauthorized, paired, setRenamedTitles],
   );
 
+  const openTerminal = useCallback(
+    async (worktreeId: string) => {
+      if (!paired || !client) throw new Error("Not connected to a host");
+      // A fresh request id per tap, so a retry inside this call is idempotent
+      // while a deliberate second tap still opens a second terminal.
+      const tab = await client.tabs.openTerminal({
+        worktreeId,
+        requestId: `${worktreeId}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+      });
+      return tab.id;
+    },
+    [client, paired],
+  );
+
+  const closeTerminal = useCallback(
+    async (tabId: string) => {
+      // Hide it locally first: the snapshot that drops the row arrives a beat
+      // later, and a row that lingers after an explicit close looks broken.
+      setHiddenTabIds((previous) => new Set(previous).add(tabId));
+      if (!paired || !client) return;
+      try {
+        await client.tabs.close(tabId);
+      } catch (error: unknown) {
+        setHiddenTabIds((previous) => {
+          const next = new Set(previous);
+          next.delete(tabId);
+          return next;
+        });
+        if (error instanceof PragmaGatewayError && error.httpStatus === 401) handleUnauthorized();
+        throw error;
+      }
+    },
+    [client, handleUnauthorized, paired, setHiddenTabIds],
+  );
+
   const value = useMemo<DataContextValue>(
     () => ({
       projects,
       worktrees,
       agentTabs,
+      terminalTabs,
       inbox,
       resolveInboxItem,
       markAgentSeen,
       clearAgent,
       renameAgent,
+      openTerminal,
+      closeTerminal,
     }),
     [
       projects,
       worktrees,
       agentTabs,
+      terminalTabs,
       inbox,
       resolveInboxItem,
       markAgentSeen,
       clearAgent,
       renameAgent,
+      openTerminal,
+      closeTerminal,
     ],
   );
 
@@ -559,4 +626,28 @@ function subtreeStatus(
   agentTabs: Record<string, AgentTab[]>,
 ): AgentStatus | null {
   return statusForTabs(collectTabs(node, agentTabs));
+}
+
+/** Ordinary terminals (shells, script runs) hosted by a worktree. */
+export function useTerminalTabs(worktreeId: string): TerminalTab[] {
+  const { terminalTabs } = useData();
+  return terminalTabs[worktreeId] ?? [];
+}
+
+/** A single terminal tab by id, across all worktrees. */
+export function useTerminalTab(tabId: string): TerminalTab | undefined {
+  const { terminalTabs } = useData();
+  return useMemo(() => {
+    for (const tabs of Object.values(terminalTabs)) {
+      const found = tabs.find((tab) => tab.id === tabId);
+      if (found) return found;
+    }
+    return undefined;
+  }, [terminalTabs, tabId]);
+}
+
+/** Actions on a worktree's ordinary terminals. */
+export function useTerminalActions(): Pick<DataContextValue, "openTerminal" | "closeTerminal"> {
+  const { openTerminal, closeTerminal } = useData();
+  return { openTerminal, closeTerminal };
 }

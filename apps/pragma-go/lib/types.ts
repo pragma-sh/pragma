@@ -29,6 +29,21 @@ export interface AgentTab {
 }
 
 /**
+ * One ordinary terminal in a worktree: a shell, or a project script's run.
+ *
+ * Sessions running a catalog agent are deliberately not here — they are
+ * `AgentTab`s, listed under Agents with their own chat surface, and listing a
+ * session twice would make closing it ambiguous. An agent's raw TUI is reachable
+ * from its own row instead.
+ */
+export interface TerminalTab {
+  id: string;
+  worktreeId: string;
+  /** The tab's title, or the shipped fallback when the shell has not set one. */
+  title: string;
+}
+
+/**
  * A live command/question the agent is blocked on, surfaced in the chat
  * AttentionDock. Derived from `type:"agent"` stream events with an
  * `attentionKind`; cleared when a matching decision/answer echoes back.

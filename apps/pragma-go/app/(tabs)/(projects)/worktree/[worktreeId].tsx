@@ -19,11 +19,13 @@ import {
   useAgentTabs,
   useChildWorktrees,
   useProjectRootPath,
+  useTerminalActions,
+  useTerminalTabs,
   useWorktree,
 } from "@/lib/data/data-context";
 import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import { attachmentLabel } from "@/lib/scratchpad-agent";
-import type { AgentTab } from "@/lib/types";
+import type { AgentTab, TerminalTab } from "@/lib/types";
 import { catalogAgentById, useCatalog } from "@/lib/use-catalog";
 import { useScratchpads } from "@/lib/use-scratchpads";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
@@ -37,6 +39,7 @@ export default function WorktreeScreen() {
   const worktree = useWorktree(worktreeId);
   const children = useChildWorktrees(worktreeId);
   const agentTabs = useAgentTabs(worktreeId);
+  const terminalTabs = useTerminalTabs(worktreeId);
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
   const [launchOpen, setLaunchOpen] = useState(false);
@@ -54,7 +57,8 @@ export default function WorktreeScreen() {
     [foreground, openLaunchSheet],
   );
 
-  const empty = children.length === 0 && agentTabs.length === 0;
+  // Terminals are always offered, so "empty" is only about what already exists.
+  const empty = children.length === 0 && agentTabs.length === 0 && terminalTabs.length === 0;
 
   return (
     <>
@@ -63,6 +67,7 @@ export default function WorktreeScreen() {
         agentTabs={agentTabs}
         empty={empty}
         insetBottom={insets.bottom}
+        terminalTabs={terminalTabs}
         worktreeId={worktreeId}
         worktreeNodes={children}
       />
@@ -94,12 +99,14 @@ function WorktreeContents({
   agentTabs,
   empty,
   insetBottom,
+  terminalTabs,
   worktreeId,
   worktreeNodes,
 }: {
   agentTabs: AgentTab[];
   empty: boolean;
   insetBottom: number;
+  terminalTabs: TerminalTab[];
   worktreeId: string;
   worktreeNodes: WorktreeNode[];
 }) {
@@ -110,10 +117,13 @@ function WorktreeContents({
       contentInsetAdjustmentBehavior="automatic"
     >
       <WorktreesGroup nodes={worktreeNodes} />
+      <TerminalsGroup tabs={terminalTabs} worktreeId={worktreeId} />
       <AgentTabsGroup tabs={agentTabs} />
       <ScratchpadsGroup agentTabs={agentTabs} worktreeId={worktreeId} />
       {empty ? (
-        <Text className="px-4 py-6 text-muted-foreground">No nested worktrees or agents here.</Text>
+        <Text className="px-4 py-6 text-muted-foreground">
+          Nothing running here yet. Open a terminal or launch an agent.
+        </Text>
       ) : null}
     </ScrollView>
   );
@@ -187,6 +197,110 @@ function ScratchpadsGroup({
         />
       ))}
     </NavGroup>
+  );
+}
+
+/**
+ * The worktree's ordinary terminals, with a row that opens another.
+ *
+ * Always rendered, unlike the other sections: "there is no terminal here" is
+ * exactly when the user wants to open one. Agent sessions are deliberately
+ * absent — they live under Agents, and one session with two close buttons in
+ * two sections is how a tap ends the wrong thing.
+ */
+function TerminalsGroup({ tabs, worktreeId }: { tabs: TerminalTab[]; worktreeId: string }) {
+  const { openTerminal } = useTerminalActions();
+  const { status } = useConnection();
+  const [opening, setOpening] = useState(false);
+  const [closingTab, setClosingTab] = useState<TerminalTab | null>(null);
+
+  if (status !== "paired") return null;
+
+  const open = (): void => {
+    if (opening) return;
+    setOpening(true);
+    hapticImpact();
+    void openTerminal(worktreeId)
+      .then((tabId) => {
+        router.push({ pathname: "/terminal/[tabId]", params: { tabId, worktreeId } });
+        return undefined;
+      })
+      .catch(() => Alert.alert("Couldn't open terminal", "The host could not start a shell here."))
+      .finally(() => setOpening(false));
+  };
+
+  return (
+    <NavGroup title="Terminals">
+      {tabs.map((tab) => (
+        <NavRow
+          key={tab.id}
+          onLongPress={() => setClosingTab(tab)}
+          onPress={() =>
+            router.push({
+              pathname: "/terminal/[tabId]",
+              params: { tabId: tab.id, title: tab.title, worktreeId: tab.worktreeId },
+            })
+          }
+          title={tab.title}
+        />
+      ))}
+      <NavRow
+        chevron={false}
+        onPress={open}
+        title={opening ? "Opening terminal…" : "New terminal"}
+      />
+      <CloseTerminalSheet onOpenChange={() => setClosingTab(null)} tab={closingTab} />
+    </NavGroup>
+  );
+}
+
+/**
+ * Confirms ending a terminal.
+ *
+ * Closing is not a local dismissal: the process ends and the tab disappears on
+ * the desktop too, which is worth a sentence before it happens — the session
+ * may be a project script someone is watching run.
+ */
+function CloseTerminalSheet({
+  onOpenChange,
+  tab,
+}: {
+  onOpenChange: (open: boolean) => void;
+  tab: TerminalTab | null;
+}) {
+  const { closeTerminal } = useTerminalActions();
+  const [closing, setClosing] = useState(false);
+
+  const close = (): void => {
+    if (!tab || closing) return;
+    setClosing(true);
+    void closeTerminal(tab.id)
+      .then(() => {
+        hapticSuccess();
+        onOpenChange(false);
+        return undefined;
+      })
+      .catch(() => {
+        hapticWarning();
+        Alert.alert("Couldn't close terminal", "The session could not be ended.");
+      })
+      .finally(() => setClosing(false));
+  };
+
+  return (
+    <BottomSheet onOpenChange={(open) => !open && onOpenChange(false)} open={!!tab}>
+      <View className="gap-1">
+        <Text className="text-lg font-semibold">{tab?.title}</Text>
+        <Text className="text-sm text-muted-foreground">
+          Closing ends this session and removes it everywhere, including on your computer.
+        </Text>
+      </View>
+      <View className="mt-5 gap-3">
+        <Button disabled={closing} onPress={close} variant="destructive">
+          <Text>{closing ? "Closing…" : "Close terminal"}</Text>
+        </Button>
+      </View>
+    </BottomSheet>
   );
 }
 
