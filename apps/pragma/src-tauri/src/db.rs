@@ -726,12 +726,7 @@ impl Db {
         self.tab(&id)
     }
 
-    /// Inserts a terminal tab under an id the host already minted.
-    ///
-    /// Server-created agent sessions (a headless launch, every fanout attempt)
-    /// already have a live PTY keyed by that id, so adopting the row under a
-    /// fresh id would open a second terminal instead of attaching to the one
-    /// that is running. Idempotent: an existing row is returned unchanged.
+    /// Inserts an agent terminal tab under an id the host already minted.
     pub fn adopt_agent_tab(
         &self,
         id: &str,
@@ -739,6 +734,24 @@ impl Db {
         worktree_id: &str,
         title: Option<String>,
         agent_id: &str,
+    ) -> AppResult<Tab> {
+        self.adopt_host_tab(id, project_id, worktree_id, title, Some(agent_id))
+    }
+
+    /// Inserts a terminal tab under an id the host already minted.
+    ///
+    /// Host-created sessions — a headless agent launch, a fanout attempt, a
+    /// terminal opened from a phone — already have a live PTY keyed by that id,
+    /// so adopting the row under a fresh id would open a second terminal
+    /// instead of attaching to the one that is running. Idempotent: an existing
+    /// row is returned unchanged.
+    pub fn adopt_host_tab(
+        &self,
+        id: &str,
+        project_id: &str,
+        worktree_id: &str,
+        title: Option<String>,
+        agent_id: Option<&str>,
     ) -> AppResult<Tab> {
         let worktree = self.worktree(worktree_id)?;
         if worktree.project_id != project_id {
@@ -749,7 +762,7 @@ impl Db {
         if let Ok(existing) = self.tab(id) {
             if existing.worktree_id != worktree_id {
                 return Err(AppError::InvalidInput(format!(
-                    "host agent tab `{id}` already belongs to worktree `{}`",
+                    "host tab `{id}` already belongs to worktree `{}`",
                     existing.worktree_id
                 )));
             }
