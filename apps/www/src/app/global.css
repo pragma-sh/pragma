@@ -7,10 +7,11 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Brand constants from `DESIGN.md`. These are absolute values, not theme
- * variants — the artboard palette is dark-only, so there is no light twin to
- * mix toward. Nothing outside the `.artboard` block below reads them, and
- * nothing anywhere restates one as a literal.
+ * Brand constants from `DESIGN.md`. Absolute values, not theme variants —
+ * `--ds-ink`/`--ds-on-primary` stay white-on-black even in light mode because
+ * `.spotlight` and `.text-gradient-animated` are self-contained dark cards
+ * that never flip; only `.dark .artboard` below reads them for its mapping.
+ * Nothing anywhere restates one of these as a literal.
  */
 :root {
   --ds-canvas: #090909;
@@ -28,6 +29,21 @@
   --ds-gradient-blue: #2f6bff;
   --ds-gradient-orange: #ff7a3d;
   --ds-gradient-coral: #ff5577;
+}
+
+/**
+ * The light counterpart of the constants above, for `.artboard`'s light
+ * appearance. `--ds-accent-blue`, `--ds-success`, and the gradient family are
+ * shared across both themes and stay in the block above.
+ */
+:root {
+  --ds-light-canvas: #ffffff;
+  --ds-light-surface-1: #f4f4f5;
+  --ds-light-surface-2: #e9e9ec;
+  --ds-light-hairline: #e4e4e7;
+  --ds-light-hairline-soft: #ececef;
+  --ds-light-ink: #0b0b0c;
+  --ds-light-ink-muted: #63636b;
 }
 
 /*
@@ -124,14 +140,44 @@
  * shadcn variables every primitive already reads, so a `Button`, a `Card`, or a
  * `Table` follows the brand without a single component restating a colour.
  *
- * It is applied together with `dark` on the `(home)` route group — `dark` so the
- * `dark:` variants baked into the shadcn primitives resolve on the right side,
- * `.artboard` for the values themselves. The landing page has no light mode by
- * design; `/docs` sits outside this wrapper and keeps the ramp above.
+ * `.artboard` alone is the light appearance (default); `.dark .artboard` below
+ * overrides the surface/ink tokens for dark. Geometry, tracking, and the
+ * chromatic accent are identical in both, so they live here once. `/docs` sits
+ * outside this wrapper and keeps the neutral ramp above.
  */
 .artboard {
   /* 15px — `{rounded.lg}`; `rounded-xl` lands on 19px for `{rounded.xl}` cards. */
   --radius: 0.9375rem;
+  --canvas: var(--ds-light-canvas);
+  --background: var(--ds-light-canvas);
+  --foreground: var(--ds-light-ink);
+  --elevated: var(--ds-light-surface-2);
+  --card: var(--ds-light-surface-1);
+  --card-foreground: var(--ds-light-ink);
+  --popover: var(--ds-light-surface-2);
+  --popover-foreground: var(--ds-light-ink);
+  /* The primary CTA is a pill in the ink colour, the canvas colour on top. */
+  --primary: var(--ds-light-ink);
+  --primary-foreground: var(--ds-light-canvas);
+  --primary-hover: var(--ds-light-ink);
+  --secondary: var(--ds-light-surface-1);
+  --secondary-foreground: var(--ds-light-ink);
+  --muted: var(--ds-light-surface-1);
+  --muted-foreground: var(--ds-light-ink-muted);
+  --accent: var(--ds-light-surface-2);
+  --accent-foreground: var(--ds-light-ink);
+  --success: var(--ds-success);
+  --brand: var(--ds-accent-blue);
+  --border: var(--ds-light-hairline);
+  --input: var(--ds-light-hairline);
+  /* The only chromatic depth signal in the system — focus and selection. */
+  --ring: var(--ds-accent-blue);
+  /* Body runs at about -1% tracking; the display tiers pull far harder. */
+  letter-spacing: -0.01em;
+  font-feature-settings: "cv01", "cv05", "cv09", "cv11", "ss03", "ss07", "dlig";
+}
+
+.dark .artboard {
   --canvas: var(--ds-canvas);
   --background: var(--ds-canvas);
   --foreground: var(--ds-ink);
@@ -150,19 +196,12 @@
   --muted-foreground: var(--ds-ink-muted);
   --accent: var(--ds-surface-2);
   --accent-foreground: var(--ds-ink);
-  --success: var(--ds-success);
-  --brand: var(--ds-accent-blue);
   --border: var(--ds-hairline);
   --input: var(--ds-hairline);
-  /* The only chromatic depth signal in the system — focus and selection. */
-  --ring: var(--ds-accent-blue);
   --shadow-raised-value: 0 1px 2px rgb(0 0 0 / 0.5);
   --shadow-floating-value:
     inset 0 1px 0 rgb(255 255 255 / 0.1), 0 10px 30px rgb(0 0 0 / 0.25),
     0 40px 80px -20px rgb(0 0 0 / 0.75);
-  /* Body runs at about -1% tracking; the display tiers pull far harder. */
-  letter-spacing: -0.01em;
-  font-feature-settings: "cv01", "cv05", "cv09", "cv11", "ss03", "ss07", "dlig";
 }
 
 @theme inline {
@@ -228,10 +267,16 @@
   /*
    * The artboard wrapper can only paint its own box, so the document canvas
    * behind it — overscroll, the first paint, the browser's own chrome — would
-   * stay the light default and flash white on a page that has no light mode.
-   * `color-scheme` also puts the scrollbar and form controls on the dark side.
+   * otherwise mismatch its theme. `color-scheme` also puts the scrollbar and
+   * form controls on the right side. next-themes stamps `.dark` on `<html>`
+   * before hydration, so this reads the resolved theme at first paint.
    */
   html:has(.artboard) {
+    background-color: var(--ds-light-canvas);
+    color-scheme: light;
+  }
+
+  html.dark:has(.artboard) {
     background-color: var(--ds-canvas);
     color-scheme: dark;
   }

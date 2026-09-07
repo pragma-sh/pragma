@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { appName, docsRoute, gitConfig } from "@/lib/shared";
+import { appName, compareRoute, docsRoute, gitConfig } from "@/lib/shared";
 
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 
@@ -13,7 +13,7 @@ const COLUMNS = [
       { label: "Fan out", href: "#fanout" },
       { label: "Pull requests", href: "#github" },
       { label: "Pragma Go", href: "#go" },
-      { label: "Comparison", href: "#comparison" },
+      { label: "Pragma vs Competitors", href: compareRoute },
     ],
   },
   {
