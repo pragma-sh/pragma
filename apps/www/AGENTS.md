@@ -301,6 +301,20 @@ apps/www/
   (dialog titles like `Keep {attempt}?`, templates like `{agent}`) in backticks.
   Build (`bun run --filter www build`) prerenders every page and is the only check that
   catches this; `tsc` alone does not.
+- **Competitor comparisons have one data source.** `lib/compare-data.ts` holds `ROWS` (the
+  feature matrix) and `COMPETITORS` (per-competitor copy, license, logo, migration steps).
+  The landing page's `Comparison` table and every `/compare/[slug]` page render from the
+  same array — a correction to a claim about Emdash, Orca, or Superset happens once, in
+  that file, never by editing a table's JSX directly. `SupportCell`
+  (`components/compare/support-cell.tsx`) is the one renderer for a matrix cell, shared the
+  same way. Claims there are checked against each competitor's own GitHub repository
+  (README, LICENSE, linked docs), not just its marketing site — this space ships fast
+  enough that a claim can go stale in days (see `FOOTNOTE`'s dated corrections); re-check
+  before trusting an old claim rather than assuming the array is current.
+- **Competitor logos are bundled copies, checked into `public/compare/`,** pulled from
+  each project's own `resources/build` (or equivalent) app-icon asset — the same
+  nominative-fair-use pattern as the agent marks in `public/agents/`. Never hotlink a
+  competitor's logo from their site or a CDN.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
