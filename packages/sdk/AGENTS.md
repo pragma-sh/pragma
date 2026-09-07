@@ -93,6 +93,26 @@ the user has not themed.
 `gatewayVersion`). That route is unauthenticated, so it distinguishes an unreachable
 host from a rejected token — which is what the mobile client's Settings heartbeat uses.
 
+## Host-owned terminals, scripts, and usage
+
+Four namespaces exist because the _host_ owns the thing, not the client:
+
+- `client.tabs` — `openTerminal` / `close` / `listManaged`. A tab opened here
+  belongs to the host: it survives the desktop republishing its own rows, it
+  survives a server restart, and closing it ends the process everywhere. Opens
+  take a caller-generated `requestId` and are idempotent under it.
+- `client.scripts` — `list` / `run` / `stop` for `.pragma/scripts.json`. One run
+  per script per worktree, decided by the host, so "already running" is the same
+  answer on every device.
+- `client.sessions` viewport methods — `info`, `acquireViewport`,
+  `renewViewport`, `releaseViewport`, `resizeLeased`. A session's PTY grid is
+  shared, so a small client _borrows_ it: renew while showing the terminal,
+  release on the way out, and if the client vanishes the host expires the lease
+  and restores the previous size. `attach` also takes `cursor`, which resumes
+  from the last byte this renderer accepted instead of replaying everything.
+- `client.usageLimits` — the host's single validated cache of plugin usage
+  providers. Asking often is cheap; the host decides when a provider runs.
+
 ## Fanouts
 
 `client.fanouts` is full parity with `pragma-cli fanout` over the same `fanouts`

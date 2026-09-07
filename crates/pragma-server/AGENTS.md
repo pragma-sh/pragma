@@ -18,6 +18,27 @@ scrollback, raw output, and agent-status strengths.
 - Supervising persisted remote-access tunnels so mobile connectivity survives desktop
   client exits and restarts.
 
+## Host-owned tabs, viewports, and script runs
+
+Three things the server owns outright, because a phone must work with the
+desktop window closed:
+
+- **Managed tabs** (`managed-tabs.json` beside the socket). The desktop's SQLite
+  rows stay authoritative for tabs _it_ made; for tabs the host made, the host
+  wins, so a publish that knows nothing about a just-opened terminal cannot
+  erase it. A closed tab leaves a **tombstone**, so a snapshot composed before
+  the close cannot resurrect it. Opens are idempotent per client `requestId`.
+- **Viewport leases** (`session.rs`). A session's grid is shared; a client that
+  needs a different size takes a lease, and everyone else's resize is recorded
+  as the size to restore rather than applied. Expiry is swept **on a timer**,
+  never lazily: the client that would trigger a lazy check is the one that
+  vanished, and a suspended phone would otherwise leave a desktop terminal stuck
+  at phone size. A stale release is ignored, never allowed to resize out from
+  under a newer holder.
+- **Script runs**. One run per script per worktree, with the config read from
+  the _project root_ — a child worktree's checkout may predate the script. The
+  contract itself lives in `pragma_core::scripts`, shared with the desktop.
+
 ## Remote access tunnel
 
 `tunnel.rs` owns ngrok/cloudflared process lifetime. Desktop controls it through

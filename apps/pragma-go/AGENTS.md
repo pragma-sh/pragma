@@ -121,6 +121,24 @@ from the desktop.
   agent picker uses same host catalog as launch. Submission uses the same headless-capable
   `client.agents.launch()` control route as existing-worktree launches.
 
+## Terminals
+
+A terminal screen (`app/terminal/[tabId].tsx`) attaches to a session the host is
+already running — it never starts a shell. Leaving detaches; ending a session is
+the explicit close on its row.
+
+- The renderer is `@pragma/terminal-viewer`, embedded through the
+  `TerminalWebView` platform twins (native web view / sandboxed iframe on web).
+  Output goes straight into xterm through the bridge and **never** through React
+  state.
+- `use-terminal-session.ts` borrows the PTY grid with a viewport lease rather
+  than resizing a shared session outright, resumes from its last byte cursor
+  after a dropped tunnel, and never retries an input whose delivery was
+  ambiguous — a resent keystroke can run a command twice.
+- Terminals are shells and script runs only. Agent sessions live under Agents
+  with their own chat surface; listing a session in both places would give it two
+  close buttons.
+
 ## Stack
 
 - **Expo SDK 57** + **expo-router** (file-based routing, typed routes, React Compiler).

@@ -117,6 +117,7 @@ than no guide.
 │   ├── scratchpad/              # interactive MDX scratchpad runtime/UI → see packages/scratchpad/AGENTS.md
 │   ├── scratchpad-contract/     # scratchpad file contract: managed frontmatter + comment threads → see packages/scratchpad-contract/AGENTS.md
 │   ├── scratchpad-viewer/       # read-only scratchpad web-view document → see packages/scratchpad-viewer/AGENTS.md
+│   ├── terminal-viewer/         # `@pragma/terminal-viewer` self-contained xterm document + bridge protocol → see packages/terminal-viewer/AGENTS.md
 │   ├── plugin/                  # `@pragma/plugin` public plugin API/runtime stub → see packages/plugin/AGENTS.md
 │   ├── plugin-registry/         # official npm list + generated manifest lock → see packages/plugin-registry/AGENTS.md
 │   ├── automations/             # `@pragma/automations` authoring API + sidecar runner → see packages/automations/AGENTS.md
@@ -219,6 +220,11 @@ than no guide.
   promotion naming) in `crates/pragma-core/src/fanout.rs`. The CLI
   (`pragma-cli fanout`), the SDK (`client.fanouts`), and the desktop are three
   callers of the same `fanouts` RPC — never a second implementation.
+- A terminal rendered anywhere other than the desktop (a phone web view, the
+  browser build) → `packages/terminal-viewer` (`@pragma/terminal-viewer`): one
+  self-contained xterm document plus the message protocol a native client drives
+  it with. Never a second VT implementation, and never `@xterm/addon-attach` —
+  it assumes a WebSocket, and the transport here is the authenticated gateway.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
