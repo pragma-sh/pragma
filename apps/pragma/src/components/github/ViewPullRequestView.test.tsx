@@ -347,17 +347,18 @@ describe("ViewPullRequestView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete branch" }));
 
     expect(screen.getByRole("dialog", { hidden: true })).toHaveAttribute("data-state", "closed");
-    expect(workspace.deleteWorktree).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(workspace.deleteWorktree).toHaveBeenCalledWith("worktree-1", {
+        deleteBranch: true,
+        force: true,
+      });
+    });
 
     rejectRemote(new Error("remote branch is already gone"));
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
         "Remote branch deletion failed: remote branch is already gone",
       );
-      expect(workspace.deleteWorktree).toHaveBeenCalledWith("worktree-1", {
-        deleteBranch: true,
-        force: true,
-      });
     });
   });
 });
