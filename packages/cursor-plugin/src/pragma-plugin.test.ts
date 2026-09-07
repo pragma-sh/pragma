@@ -106,6 +106,33 @@ it("includes Cursor's auto model", () => {
   ]);
 });
 
+it("keeps effort-suffixed model ids exactly as the CLI prints them", () => {
+  expect(
+    parseCursorModels(
+      [
+        "Available models",
+        "",
+        "cursor-grok-4.6-high - Cursor Grok 4.6",
+        "cursor-grok-4.6-xhigh - Cursor Grok 4.6 Extra High",
+        "gpt-5.3-codex - Codex 5.3",
+        "gpt-5.3-codex-high-fast - Codex 5.3 High Fast",
+        "",
+      ].join("\n"),
+    ),
+  ).toEqual([
+    { id: "cursor-grok-4.6-high", name: "Cursor Grok 4.6" },
+    { id: "cursor-grok-4.6-xhigh", name: "Cursor Grok 4.6 Extra High" },
+    { id: "gpt-5.3-codex", name: "Codex 5.3" },
+    { id: "gpt-5.3-codex-high-fast", name: "Codex 5.3 High Fast" },
+  ]);
+});
+
+it("passes a model straight to --model without a synthetic effort suffix", () => {
+  const agent = cursorAgentPlugin.agents?.[0];
+  expect(agent?.args.model("cursor-grok-4.6-high")).toEqual(["--model", "cursor-grok-4.6-high"]);
+  expect(agent?.args.modelReasoning).toBeUndefined();
+});
+
 it("links to Cursor's usage dashboard", () => {
   expect(cursorAgentPlugin.usageLimits?.[0]?.dashboardUrl).toBe(
     "https://cursor.com/dashboard/spending",

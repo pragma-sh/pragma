@@ -410,8 +410,10 @@ matching `PRAGMA_CLI` and prepend its directory to `PATH`; production still warn
 Agent definitions may also declare typed `excludeFeatures`; this metadata crosses the
 shared catalog so `agent verify` skips unsupported optional capability groups.
 
-Model providers may be static arrays or async plugin functions. Pragma resolves model
-lists lazily when the selector submenu is hovered/focused and caches the last result.
+Model providers may be static arrays or async plugin functions. The shared selector is one
+nested dropdown (`NestedDropdown`): hovering an agent reveals a searchable model submenu,
+and hovering a model that has reasoning reveals a regular effort submenu. It resolves
+model lists lazily when an agent submenu is hovered and caches the last result.
 Host-specific CLI parsing belongs in the plugin agent's model provider, not Rust/Tauri
 IPC. There is no provider-level Auto model; when a model has reasoning entries, the
 model-only choice is shown as Auto reasoning. Built-in agents use the plugin SDK exec

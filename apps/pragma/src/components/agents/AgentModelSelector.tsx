@@ -1,19 +1,13 @@
 import { Pin, PinOff } from "lucide-react";
 
 import { AgentIcon } from "@/components/agents/AgentIcon";
-import { IconTooltip } from "@/components/ui/icon-button";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  NestedDropdown,
+  NestedDropdownGroup,
+  NestedDropdownItem,
+} from "@/components/NestedDropdown";
+import { Button } from "@/components/ui/button";
+import { IconTooltip } from "@/components/ui/icon-button";
 import { modelSelectionLabel } from "@/lib/agent-model-selection";
 import type { AgentConfig, AgentModel, AgentModelSelection } from "@/lib/tauri";
 import { isModelPinned, sortModelsByPin, toggleModelPin, useModelPins } from "@/state/model-pins";
@@ -28,7 +22,7 @@ interface AgentModelSelectorProps {
   label?: string;
 }
 
-/** Nested agent -> model -> reasoning selector shared by agent-launch dialogs. */
+/** Nested agent → searchable model → reasoning selector shared by launch dialogs. */
 export function AgentModelSelector({
   agents,
   modelsByAgent,
@@ -40,12 +34,14 @@ export function AgentModelSelector({
 }: AgentModelSelectorProps) {
   const selectedAgent = agents.find((agent) => agent.id === value.agentId) ?? null;
   const selectedModels = selectedAgent ? (modelsByAgent[selectedAgent.id] ?? []) : [];
+
   // Non-modal: this selector always lives inside our own modal dialog overlay. A
   // modal Radix menu locks `body { pointer-events: none }` and can leave it stuck
   // after closing, which blocks sibling controls (e.g. the worktree Select).
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
+    <NestedDropdown
+      modal={false}
+      trigger={
         <Button
           type="button"
           variant="outline"
@@ -68,104 +64,129 @@ export function AgentModelSelector({
             )}
           </span>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-64">
-        {agents.length === 0 ? (
-          <DropdownMenuItem disabled>No agents configured</DropdownMenuItem>
-        ) : (
-          agents.map((agent) => (
-            <AgentSubmenu
-              key={agent.id}
-              agent={agent}
-              models={modelsByAgent[agent.id]}
-              onChange={onChange}
-              onLoadModels={onLoadModels}
-            />
-          ))
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+    >
+      {agents.length === 0 ? (
+        <NestedDropdownItem disabled>No agents configured</NestedDropdownItem>
+      ) : (
+        agents.map((agent) => (
+          <AgentSubmenu
+            key={agent.id}
+            agent={agent}
+            models={modelsByAgent[agent.id]}
+            selection={agent.id === value.agentId ? value.selection : null}
+            onChange={onChange}
+            onLoadModels={onLoadModels}
+          />
+        ))
+      )}
+    </NestedDropdown>
   );
 }
 
 function AgentSubmenu({
   agent,
   models,
+  selection,
   onChange,
   onLoadModels,
 }: {
   agent: AgentConfig;
   models: AgentModel[] | undefined;
+  selection: AgentModelSelection | null;
   onChange: (agentId: string, selection: AgentModelSelection) => void;
   onLoadModels: (agentId: string) => void;
 }) {
   const pins = useModelPins();
   const orderedModels = models ? sortModelsByPin(agent.id, models, pins) : models;
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger
-        onFocus={() => onLoadModels(agent.id)}
-        onPointerEnter={() => onLoadModels(agent.id)}
-      >
-        <AgentIcon agent={agent} />
-        <span className="truncate">{agent.name}</span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="min-w-56">
-        {orderedModels === undefined ? (
-          <DropdownMenuItem disabled>Loading models...</DropdownMenuItem>
-        ) : orderedModels.length > 0 ? (
-          orderedModels.map((model) => (
-            <ModelChoice key={model.id} agent={agent} model={model} onChange={onChange} />
-          ))
-        ) : (
-          <DropdownMenuItem disabled>No models found</DropdownMenuItem>
-        )}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+    <NestedDropdownGroup
+      emptyText="No matching models."
+      label={
+        <>
+          <AgentIcon agent={agent} />
+          <span className="truncate">{agent.name}</span>
+        </>
+      }
+      searchLabel="Search models"
+      searchPlaceholder="Search models..."
+      searchValue={agent.name}
+      searchable
+      onOpen={() => onLoadModels(agent.id)}
+    >
+      {orderedModels === undefined ? (
+        <NestedDropdownItem disabled>Loading models...</NestedDropdownItem>
+      ) : orderedModels.length > 0 ? (
+        orderedModels.map((model) => (
+          <ModelChoice
+            key={model.id}
+            agent={agent}
+            model={model}
+            selected={selection?.modelId === model.id}
+            selectedReasoningId={selection?.modelId === model.id ? selection.reasoningId : null}
+            onChange={onChange}
+          />
+        ))
+      ) : (
+        <NestedDropdownItem disabled>No models found</NestedDropdownItem>
+      )}
+    </NestedDropdownGroup>
   );
 }
 
 function ModelChoice({
   agent,
   model,
+  selected,
+  selectedReasoningId,
   onChange,
 }: {
   agent: AgentConfig;
   model: AgentModel;
+  selected: boolean;
+  selectedReasoningId: string | null;
   onChange: (agentId: string, selection: AgentModelSelection) => void;
 }) {
-  const modelSelection = { modelId: model.id, reasoningId: null };
   const pinButton = <ModelPinButton agent={agent} model={model} />;
+  const searchValue = `${model.name} ${model.id}`;
   if (model.reasoning.length === 0) {
     return (
-      <DropdownMenuItem className="gap-1.5" onSelect={() => onChange(agent.id, modelSelection)}>
+      <NestedDropdownItem
+        searchValue={searchValue}
+        selected={selected}
+        onSelect={() => onChange(agent.id, { modelId: model.id, reasoningId: null })}
+      >
         {pinButton}
         <span className="min-w-0 flex-1 truncate">{model.name}</span>
-      </DropdownMenuItem>
+      </NestedDropdownItem>
     );
   }
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="gap-1.5">
-        {pinButton}
-        <span className="min-w-0 flex-1 truncate">{model.name}</span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="min-w-44">
-        <DropdownMenuLabel>{model.name}</DropdownMenuLabel>
-        <DropdownMenuItem onSelect={() => onChange(agent.id, modelSelection)}>
-          Auto
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {model.reasoning.map((reasoning) => (
-          <DropdownMenuItem
-            key={reasoning.id}
-            onSelect={() => onChange(agent.id, { modelId: model.id, reasoningId: reasoning.id })}
-          >
-            {reasoning.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+    <NestedDropdownGroup
+      label={
+        <>
+          {pinButton}
+          <span className="min-w-0 flex-1 truncate">{model.name}</span>
+        </>
+      }
+      searchValue={searchValue}
+    >
+      <NestedDropdownItem
+        selected={selected && selectedReasoningId === null}
+        onSelect={() => onChange(agent.id, { modelId: model.id, reasoningId: null })}
+      >
+        Auto
+      </NestedDropdownItem>
+      {model.reasoning.map((reasoning) => (
+        <NestedDropdownItem
+          key={reasoning.id}
+          selected={selected && selectedReasoningId === reasoning.id}
+          onSelect={() => onChange(agent.id, { modelId: model.id, reasoningId: reasoning.id })}
+        >
+          {reasoning.name}
+        </NestedDropdownItem>
+      ))}
+    </NestedDropdownGroup>
   );
 }
 

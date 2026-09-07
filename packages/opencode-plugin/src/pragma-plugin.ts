@@ -193,8 +193,20 @@ function splitWhitespaceModel(line: string): [string | undefined, string | undef
     : [undefined, undefined];
 }
 
+/**
+ * Derives a readable name from a bare model id.
+ *
+ * OpenCode ids spell version dots as hyphens (`claude-opus-4-5` is Opus 4.5),
+ * so a blanket hyphen-to-space rewrite silently drops the dot from the version
+ * number. A hyphen sitting between two digits becomes `.`; every other
+ * separator becomes a space.
+ */
 function displayName(id: string): string {
-  return id.split("/").at(-1)?.replaceAll(/[-_]/g, " ") ?? id;
+  const bare = id.split("/").at(-1);
+  if (!bare) {
+    return id;
+  }
+  return bare.replaceAll(/(?<=\d)-(?=\d)/g, ".").replaceAll(/[-_]/g, " ");
 }
 
 function withProvider(
