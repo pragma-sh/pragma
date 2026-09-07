@@ -1065,31 +1065,30 @@ function BranchCleanupDialog({
 }) {
   const workspace = useWorkspace();
   const [deleteRemote, setDeleteRemote] = useState(true);
-  const [working, setWorking] = useState(false);
 
-  const cleanup = useCallback(async () => {
-    setWorking(true);
-    try {
+  const cleanup = useCallback(() => {
+    onOpenChange(false);
+    void (async () => {
       if (deleteRemote) {
         for (const target of targets) {
-          // eslint-disable-next-line no-await-in-loop -- parent worktrees must survive child cleanup.
-          await githubDeleteRemoteBranch(target.worktreeId);
+          try {
+            // eslint-disable-next-line no-await-in-loop -- each worktree must remain registered until its remote delete starts.
+            await githubDeleteRemoteBranch(target.worktreeId);
+          } catch (cause) {
+            toast.error(`Remote branch deletion failed: ${errorMessage(cause)}`);
+          }
         }
       }
-      for (const target of targets) {
-        // eslint-disable-next-line no-await-in-loop -- delete stack children before their parents.
-        await workspace.deleteWorktree(target.worktreeId, { deleteBranch: true, force: true });
+      try {
+        for (const target of targets) {
+          // eslint-disable-next-line no-await-in-loop -- delete stack children before their parents.
+          await workspace.deleteWorktree(target.worktreeId, { deleteBranch: true, force: true });
+        }
+        onChanged();
+      } catch {
+        // The shared workspace action reloads state and surfaces deletion failures.
       }
-      toast.success(
-        `Cleaned up ${targets.length} merged branch${targets.length === 1 ? "" : "es"}`,
-      );
-      onOpenChange(false);
-      onChanged();
-    } catch (cause) {
-      toast.error(errorMessage(cause));
-    } finally {
-      setWorking(false);
-    }
+    })();
   }, [deleteRemote, targets, workspace, onOpenChange, onChanged]);
 
   const branchNames = targets.map((target) => target.headRef).join(", ");
@@ -1117,8 +1116,7 @@ function BranchCleanupDialog({
           <Button onClick={() => onOpenChange(false)} size="sm" variant="outline">
             Keep
           </Button>
-          <Button disabled={working} onClick={() => void cleanup()} size="sm" variant="destructive">
-            {working ? <Loader2 className="animate-spin" /> : null}
+          <Button onClick={cleanup} size="sm" variant="destructive">
             Delete {targets.length === 1 ? "branch" : "branches"}
           </Button>
         </DialogFooter>
