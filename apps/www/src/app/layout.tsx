@@ -22,6 +22,19 @@ export const metadata: Metadata = {
   description: appDescription,
   // `app/icon.ts` supplies the brand-generated favicon; keep the larger raster for Apple touch.
   icons: { apple: "/icon.png" },
+  openGraph: {
+    type: "website",
+    siteName: appName,
+    title: appName,
+    description: appDescription,
+    images: [{ url: "/pragma-app.png", width: 5104, height: 2612, alt: `${appName} desktop app` }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: appName,
+    description: appDescription,
+    images: ["/pragma-app.png"],
+  },
 };
 
 export default function Layout({ children }: LayoutProps<"/">) {
