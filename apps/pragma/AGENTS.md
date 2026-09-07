@@ -318,7 +318,9 @@ missing tracking worktrees bottom-to-top. GitHub exposes no public cascading-reb
 mutation, so **Sync stack** runs the official `gh stack sync` in a terminal; do not call
 private web endpoints. **Merge stack** requests GitHub's public asynchronous merge endpoint
 for the top PR, polls through completion, then offers to delete every uniquely matched local
-stack worktree and branch.
+stack worktree and branch. Post-merge cleanup closes before I/O and delegates local cleanup
+to the shared optimistic workspace delete action; remote-branch failure is reported separately
+and must never prevent local worktree/branch deletion.
 
 The resolve/unresolve toggle is **optimistic**: `ReviewThreadCard` flips the thread in
 place and fires the GraphQL mutation in the background, reverting + toasting **only on

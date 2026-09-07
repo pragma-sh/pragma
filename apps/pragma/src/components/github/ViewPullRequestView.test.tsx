@@ -6,8 +6,10 @@ const {
   browserOpenExternal,
   github,
   githubAbortMerge,
+  githubDeleteRemoteBranch,
   githubMergeBaseBranch,
   githubMergeInProgress,
+  toast,
   workspace,
 } = vi.hoisted(() => ({
   browserOpenExternal: vi.fn(),
@@ -23,8 +25,14 @@ const {
     getPullRequestStack: vi.fn(),
   },
   githubAbortMerge: vi.fn(),
+  githubDeleteRemoteBranch: vi.fn(),
   githubMergeBaseBranch: vi.fn(),
   githubMergeInProgress: vi.fn(),
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
   workspace: {
     deleteWorktree: vi.fn(),
     openReviewTab: vi.fn(),
@@ -69,11 +77,12 @@ vi.mock("@/components/github/PullRequestStackCard", () => ({
 vi.mock("@/components/right-sidebar/ChangeGroup", () => ({
   ChangeGroup: () => null,
 }));
+vi.mock("sonner", () => ({ toast }));
 vi.mock("@/lib/github", () => github);
 vi.mock("@/lib/tauri", () => ({
   browserOpenExternal,
   githubAbortMerge,
-  githubDeleteRemoteBranch: vi.fn(),
+  githubDeleteRemoteBranch,
   githubMergeBaseBranch,
   githubMergeInProgress,
 }));
@@ -115,6 +124,7 @@ beforeEach(() => {
   github.listPullFiles.mockResolvedValue([]);
   github.listReviewThreads.mockResolvedValue([]);
   githubMergeBaseBranch.mockResolvedValue(true);
+  githubDeleteRemoteBranch.mockResolvedValue(undefined);
   githubMergeInProgress.mockResolvedValue(false);
 });
 
@@ -296,6 +306,59 @@ describe("ViewPullRequestView", () => {
         deleteBranch: true,
         force: true,
       });
+    });
+  });
+
+  it("closes cleanup immediately and still deletes locally when remote deletion fails", async () => {
+    let rejectRemote!: (cause: Error) => void;
+    github.mergePullRequest.mockResolvedValue(undefined);
+    githubDeleteRemoteBranch.mockReturnValue(
+      new Promise((_, reject) => {
+        rejectRemote = reject;
+      }),
+    );
+
+    render(
+      <ViewPullRequestView
+        onChanged={vi.fn()}
+        pr={{
+          number: 1,
+          title: "Feature",
+          body: "",
+          state: "open",
+          htmlUrl: "https://github.com/acme/widget/pull/1",
+          headRef: "feature",
+          headSha: "a1b2c3d4e5f6",
+          baseRef: "main",
+          draft: false,
+          merged: false,
+          mergeable: true,
+          user: null,
+        }}
+        repo={repo}
+        worktreeId="worktree-1"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Merge pull request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    expect(await screen.findByText("Clean up branch")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete branch" }));
+
+    expect(screen.getByRole("dialog", { hidden: true })).toHaveAttribute("data-state", "closed");
+    await waitFor(() => {
+      expect(workspace.deleteWorktree).toHaveBeenCalledWith("worktree-1", {
+        deleteBranch: true,
+        force: true,
+      });
+    });
+
+    rejectRemote(new Error("remote branch is already gone"));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Remote branch deletion failed: remote branch is already gone",
+      );
     });
   });
 });
