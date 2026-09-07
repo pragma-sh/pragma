@@ -1,0 +1,3 @@
+{
+  "excludeBranches": ["release-please--branches--**"]
+}
