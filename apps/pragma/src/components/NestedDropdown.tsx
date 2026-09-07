@@ -188,7 +188,7 @@ function GroupContent({
       <DropdownMenuGroup className={cn("group/results", search && "p-1")}>
         {children}
         {search ? (
-          <output className="hidden px-1.5 py-4 text-center text-sm text-muted-foreground group-has-[[data-slot=dropdown-menu-item]]/results:hidden group-has-[[data-slot=dropdown-menu-sub-trigger]]/results:hidden">
+          <output className="block px-1.5 py-4 text-center text-sm text-muted-foreground group-has-[[data-slot=dropdown-menu-item]]/results:hidden group-has-[[data-slot=dropdown-menu-sub-trigger]]/results:hidden">
             {emptyText}
           </output>
         ) : null}
