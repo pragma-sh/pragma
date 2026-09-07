@@ -18,10 +18,12 @@ import {
 import { COMPETITORS, FOOTNOTE, getCompetitor, ROWS } from "@/lib/compare-data";
 import { appName, compareRoute, downloadUrl } from "@/lib/shared";
 
+/** Pre-renders one `/compare/[slug]` route per competitor at build time. */
 export function generateStaticParams() {
   return COMPETITORS.map((competitor) => ({ slug: competitor.slug }));
 }
 
+/** Builds the page title/description for a competitor's comparison page. */
 export async function generateMetadata(props: PageProps<"/compare/[slug]">): Promise<Metadata> {
   const params = await props.params;
   const competitor = getCompetitor(params.slug);
@@ -33,6 +35,7 @@ export async function generateMetadata(props: PageProps<"/compare/[slug]">): Pro
   };
 }
 
+/** Detail page comparing Pragma to one competitor, feature by feature. */
 export default async function CompareDetailPage(props: PageProps<"/compare/[slug]">) {
   const params = await props.params;
   const competitor = getCompetitor(params.slug);
@@ -137,7 +140,8 @@ export default async function CompareDetailPage(props: PageProps<"/compare/[slug
           </h2>
           <p className="text-muted-foreground mt-4 max-w-2xl text-lg leading-[1.3]">
             No export step: {competitor.name} and {appName} both run agents in plain git worktrees,
-            so opening the same repository picks up everything already on disk.
+            so you can add each existing branch as a Pragma worktree in a couple clicks — nothing to
+            convert.
           </p>
           <div className="mt-10 grid gap-6 sm:grid-cols-2">
             {competitor.migration.map((step) => (

@@ -49,6 +49,7 @@ function CompetitorCard({ competitor }: { competitor: (typeof COMPETITORS)[numbe
   );
 }
 
+/** Landing page listing every competitor comparison, plus the summary feature table. */
 export default function ComparePage() {
   return (
     <main className="flex flex-1 flex-col">
@@ -85,8 +86,8 @@ export default function ComparePage() {
               </h2>
               <p className="text-muted-foreground mt-1 max-w-xl text-sm leading-relaxed">
                 All four tools use plain git worktrees, so there's nothing to export. Open your
-                project in {appName} and your existing branches show up as-is — see each comparison
-                page for the rest of the move.
+                project in {appName} and add your existing branches as Pragma worktrees — see each
+                comparison page for the rest of the move.
               </p>
             </div>
           </div>

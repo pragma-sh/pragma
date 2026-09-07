@@ -171,7 +171,7 @@ export const COMPETITORS: readonly Competitor[] = [
     migration: [
       {
         title: "Point Pragma at the same folder",
-        body: "Emdash's worktrees are plain git worktrees under your project's `.git`. Open the parent repo as a Pragma project and its worktree list — and the branches Emdash already created — show up as-is; there's nothing to export.",
+        body: "Emdash's worktrees are plain git worktrees under your project's `.git`. Open the parent repo as a Pragma project, then add each branch Emdash already created as a Pragma worktree — same checkout on disk, nothing to export.",
       },
       {
         title: "Your agent CLIs already work",
@@ -205,7 +205,7 @@ export const COMPETITORS: readonly Competitor[] = [
     migration: [
       {
         title: "Same worktrees, no conversion",
-        body: "Orca's \"Parallel Worktrees\" are git worktrees like everyone else's here. Open the repo in Pragma and every branch Orca created is already a project worktree.",
+        body: "Orca's \"Parallel Worktrees\" are git worktrees like everyone else's here. Open the repo in Pragma, then add each branch Orca created as a Pragma worktree — same checkout on disk, nothing to convert.",
       },
       {
         title: "Re-pair your phone",
@@ -238,8 +238,8 @@ export const COMPETITORS: readonly Competitor[] = [
     ],
     migration: [
       {
-        title: "Import is automatic",
-        body: "Superset's workspaces are git worktrees. Open the same repository in Pragma and its existing branches appear as worktrees with no import step.",
+        title: "No conversion needed",
+        body: "Superset's workspaces are git worktrees. Open the same repository in Pragma, then add each existing branch as a Pragma worktree — same checkout on disk, no format to convert.",
       },
       {
         title: "Board columns map onto Pragma's board",
