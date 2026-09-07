@@ -487,8 +487,9 @@ impl PtyClient {
         Ok(())
     }
 
-    #[cfg(test)]
-    fn socket_path(&self) -> PathBuf {
+    /// The host's socket, and therefore the directory holding the state it owns
+    /// (the GitHub token, the workspace mirror, the managed-tab store).
+    pub fn socket_path(&self) -> PathBuf {
         self.inner.socket_path()
     }
 

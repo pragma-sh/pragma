@@ -379,6 +379,8 @@
         "pragma-github": "./src/cli.ts",
       },
       "dependencies": {
+        "@pragma/constants": "workspace:*",
+        "@pragma/sidecar-kit": "workspace:*",
         "octokit": "^5.0.5",
       },
       "devDependencies": {

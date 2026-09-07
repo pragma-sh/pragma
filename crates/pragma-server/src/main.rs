@@ -1,10 +1,12 @@
 mod automations;
 mod fanout_host;
 mod fanouts;
+mod github;
 mod plugins_host;
 mod ports;
 mod registry;
 mod session;
+mod sidecar;
 mod tunnel;
 mod watchers;
 
@@ -769,7 +771,38 @@ fn handle_server_owned_rpc(
             rpc.payload.clone(),
             registry,
         )),
+        ProtocolRpcMethod::Github => Some(Ok(handle_github_rpc(
+            request_id.to_string(),
+            &rpc.payload,
+            registry,
+        ))),
         _ => None,
+    }
+}
+
+/// Serves the `github` RPC domain: the host's credential and what it can do.
+fn handle_github_rpc(
+    request_id: String,
+    payload: &serde_json::Value,
+    registry: &Registry,
+) -> RpcResponseFrame {
+    match registry.handle_github_rpc(payload) {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(error) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message: error.to_string(),
+                details: None,
+            }),
+        },
     }
 }
 

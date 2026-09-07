@@ -1,14 +1,16 @@
-//! GitHub integration backend: OAuth Device Flow, `gh` CLI adoption, on-disk
-//! token storage, and the worktree-scoped git operations the PR UI needs
-//! (`origin` → `owner/repo`, fetch + ahead/behind, push, PR file diffs, remote
-//! branch delete).
+//! GitHub integration frontend: OAuth Device Flow, `gh` CLI adoption, and the
+//! worktree-scoped git operations the PR UI needs (`origin` → `owner/repo`,
+//! fetch + ahead/behind, push, PR file diffs, remote branch delete).
 //!
-//! Secrets and OS work live here; the frontend talks to the GitHub REST/GraphQL
-//! API through the Octokit client in `src/lib/github.ts`, which pulls the token
-//! via [`github_token`]. The token is stored in a `0600` plaintext file under the
-//! app data dir (the same model the `gh` CLI uses) — **not** the OS keychain:
-//! keychain items are scoped to the app's code signature, so unsigned/dev builds
-//! re-prompt for access on every rebuild.
+//! **The token itself lives on the host**, in `pragma-server`'s directory beside
+//! the socket — see `crates/pragma-server/src/github.rs`. That is what lets a
+//! phone open a pull request with no desktop window running. This module runs
+//! the flows that need a browser and an OS (device flow, adopting the `gh`
+//! CLI), then hands the resulting token to the host to store; every read goes
+//! back through the host, so there is exactly one stored copy.
+//!
+//! A token this app previously wrote to its own data directory is migrated to
+//! the host once, then deleted here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use pragma_constants::{
     BranchSyncStatus, FileDiff, GitHubAuthMethod, GitHubAuthStatus, GitHubRepoRef, GitHubUser,
-    CONSTANTS,
+    ProtocolRpcMethod, CONSTANTS,
 };
 use pragma_core::git::{GitRequest, GithubRepoInfo};
 use pragma_platform::perms;
@@ -47,50 +49,83 @@ const DEVICE_FLOW_TIMEOUT: Duration = Duration::from_secs(900);
 // Token file storage
 // ---------------------------------------------------------------------------
 
-/// Owns the on-disk location of the GitHub token. Managed as Tauri state so every
-/// command resolves the same path, derived once from the app data dir. The token
-/// is a plaintext file with owner-only (`0600`) permissions — the same approach
-/// the `gh` CLI takes with `~/.config/gh/hosts.yml`. The OS keychain is
-/// intentionally avoided because its items are bound to the app's code signature,
-/// which changes on every unsigned/dev rebuild and triggers a fresh access prompt.
+/// The desktop's handle on the host-owned GitHub token.
+///
+/// It stores nothing itself. The token lives in `pragma-server`'s directory,
+/// beside the socket, so a headless host can use it — this reads that file
+/// directly and writes through the host, which applies the owner-only
+/// permissions.
+///
+/// Reading the file rather than adding a "give me the token" RPC is
+/// deliberate: the gateway proxies the `github` RPC domain to paired phones,
+/// and any action that returned the credential would be reachable from one.
+/// There is no such action. A local file read cannot be reached over the wire
+/// at all.
 #[derive(Clone)]
 pub struct TokenStore {
-    path: PathBuf,
+    /// Where this app used to keep the token, kept only to migrate it once.
+    legacy_path: PathBuf,
 }
 
 impl TokenStore {
-    /// Builds the store rooted at the app data dir.
+    /// Builds the store, remembering where the legacy token file would be.
     pub fn new(app_data_dir: &Path) -> Self {
         Self {
-            path: app_data_dir.join(TOKEN_FILE_NAME),
+            legacy_path: app_data_dir.join(TOKEN_FILE_NAME),
         }
     }
 
-    /// Reads the stored token, or `None` when the file is missing or empty.
-    fn read(&self) -> Option<String> {
-        let token = fs::read_to_string(&self.path).ok()?;
+    /// Reads the host's token, or `None` when the user is signed out.
+    fn read(&self, host: &PtyClient) -> Option<String> {
+        let token = fs::read_to_string(host_token_path(host)).ok()?;
         let token = token.trim();
+        (!token.is_empty()).then(|| token.to_string())
+    }
+
+    /// Hands a token to the host to store.
+    fn write(&self, host: &PtyClient, token: &str) -> AppResult<()> {
+        host_github(
+            host,
+            &serde_json::json!({ "action": "setToken", "token": token }),
+        )
+        .map(|_| ())
+    }
+
+    /// Asks the host to forget the token.
+    fn clear(&self, host: &PtyClient) -> AppResult<()> {
+        host_github(host, &serde_json::json!({ "action": "clearToken" })).map(|_| ())
+    }
+
+    /// Moves a token this app stored before the host owned them.
+    ///
+    /// The local copy is deleted only once the host has accepted it: losing a
+    /// token to a half-run migration would sign the user out for no reason they
+    /// could see.
+    pub fn migrate_to_host(&self, host: &PtyClient) -> AppResult<()> {
+        let Ok(token) = fs::read_to_string(&self.legacy_path) else {
+            return Ok(());
+        };
+        let token = token.trim().to_string();
         if token.is_empty() {
-            None
-        } else {
-            Some(token.to_string())
+            let _ = fs::remove_file(&self.legacy_path);
+            return Ok(());
         }
+        self.write(host, &token)?;
+        fs::remove_file(&self.legacy_path)
+            .map_err(|error| AppError::GitHub(format!("failed to remove legacy token: {error}")))
     }
+}
 
-    /// Writes the token to disk with owner-only (`0600`) permissions.
-    fn write(&self, token: &str) -> AppResult<()> {
-        write_private(&self.path, token)
-            .map_err(|error| AppError::GitHub(format!("failed to store token: {error}")))
-    }
+/// The host's token file, beside its socket.
+fn host_token_path(host: &PtyClient) -> PathBuf {
+    host.socket_path().with_file_name(TOKEN_FILE_NAME)
+}
 
-    /// Removes the stored token; a missing file is treated as success.
-    fn clear(&self) -> AppResult<()> {
-        match fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(AppError::GitHub(format!("failed to clear token: {error}"))),
-        }
-    }
+/// Sends one `github` RPC to a host.
+fn host_github(client: &PtyClient, payload: &serde_json::Value) -> AppResult<serde_json::Value> {
+    client
+        .rpc(ProtocolRpcMethod::Github, payload.clone())
+        .map_err(|error| AppError::GitHub(error.to_string()))
 }
 
 /// Writes `contents` to `path` so only the owning account can read it.
@@ -168,13 +203,14 @@ fn parse_user(body: &str) -> AppResult<GitHubUser> {
 #[tauri::command]
 pub async fn github_auth_status(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     tokens: State<'_, TokenStore>,
 ) -> AppResult<GitHubAuthStatus> {
     let setup_dismissed = db.setting(SETUP_DISMISSED_KEY)?.as_deref() == Some("true");
     let auth_method = db
         .setting(AUTH_METHOD_KEY)?
         .and_then(|value| value.parse::<GitHubAuthMethod>().ok());
-    let token = tokens.read();
+    let token = tokens.read(&hosts.local());
     let status = tauri::async_runtime::spawn_blocking(move || {
         auth_status_impl(token, auth_method, setup_dismissed)
     })
@@ -203,14 +239,18 @@ fn auth_status_impl(
 
 /// Returns the stored token for the frontend Octokit client, or `None`.
 #[tauri::command]
-pub fn github_token(tokens: State<'_, TokenStore>) -> Option<String> {
-    tokens.read()
+pub fn github_token(hosts: State<'_, Hosts>, tokens: State<'_, TokenStore>) -> Option<String> {
+    tokens.read(&hosts.local())
 }
 
 /// Clears the stored token and its recorded auth method (sign out).
 #[tauri::command]
-pub fn github_sign_out(db: State<'_, Db>, tokens: State<'_, TokenStore>) -> AppResult<()> {
-    tokens.clear()?;
+pub fn github_sign_out(
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    tokens: State<'_, TokenStore>,
+) -> AppResult<()> {
+    tokens.clear(&hosts.local())?;
     db.set_setting(AUTH_METHOD_KEY, "")
 }
 
@@ -258,12 +298,14 @@ fn gh_token() -> AppResult<String> {
 #[tauri::command]
 pub async fn github_use_cli_token(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     tokens: State<'_, TokenStore>,
 ) -> AppResult<GitHubUser> {
     let store = (*tokens).clone();
+    let host = hosts.local();
     let user = tauri::async_runtime::spawn_blocking(move || {
         let token = gh_token()?;
-        store.write(&token)?;
+        store.write(&host, &token)?;
         fetch_user(&token)
     })
     .await
@@ -377,13 +419,15 @@ fn parse_token_response(body: &str) -> PollOutcome {
 #[tauri::command]
 pub async fn github_poll_device_flow(
     db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
     tokens: State<'_, TokenStore>,
     device_code: String,
     interval: u64,
 ) -> AppResult<GitHubUser> {
     let store = (*tokens).clone();
+    let host = hosts.local();
     let user = tauri::async_runtime::spawn_blocking(move || {
-        poll_device_flow_impl(&store, &device_code, interval)
+        poll_device_flow_impl(&store, &host, &device_code, interval)
     })
     .await
     .map_err(|error| AppError::GitHub(format!("device flow poll task failed: {error}")))??;
@@ -393,6 +437,7 @@ pub async fn github_poll_device_flow(
 
 fn poll_device_flow_impl(
     store: &TokenStore,
+    host: &PtyClient,
     device_code: &str,
     interval: u64,
 ) -> AppResult<GitHubUser> {
@@ -422,7 +467,7 @@ fn poll_device_flow_impl(
             .map_err(|error| AppError::GitHub(error.to_string()))?;
         match parse_token_response(&body) {
             PollOutcome::Token(token) => {
-                store.write(&token)?;
+                store.write(host, &token)?;
                 return fetch_user(&token);
             }
             PollOutcome::Pending => {}

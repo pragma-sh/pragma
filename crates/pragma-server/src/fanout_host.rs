@@ -19,6 +19,7 @@ use crate::fanouts::{
     DeliveryTarget, FanoutHost, HostError, HostResult, LaunchSpec, ScratchpadCopy, WorktreeView,
 };
 use crate::registry::{AgentLaunch, FanoutMembership, Registry};
+use crate::sidecar::{executable_name, sidecar_executable, workspace_root};
 
 /// Maps a `pragma-core` error string onto a fanout failure code.
 fn host_error(code: FanoutFailureCode, message: impl Into<String>) -> HostError {
@@ -594,30 +595,6 @@ fn ai_command() -> Command {
 }
 
 /// Appends the platform's executable suffix, so `pragma-ai` resolves to
-/// `pragma-ai.exe` on Windows.
-fn executable_name(name: &str) -> String {
-    let suffix = std::env::consts::EXE_SUFFIX;
-    if suffix.is_empty() || name.ends_with(suffix) {
-        name.to_string()
-    } else {
-        format!("{name}{suffix}")
-    }
-}
-
-fn sidecar_executable(name: &str) -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join(name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{belongs_to_project, runtime_agent_id, setup_commands};

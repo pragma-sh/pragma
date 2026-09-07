@@ -117,6 +117,51 @@
     }
   },
   "definitions": {
+    "GitHubPullRequestState": {
+      "title": "GitHubPullRequestState",
+      "type": "string",
+      "description": "A pull request's lifecycle. `draft` is an open pull request GitHub marks as not ready; `merged` is distinct from `closed` because a merged branch is finished, not abandoned.",
+      "enum": ["draft", "open", "merged", "closed"]
+    },
+    "GitHubPullRequest": {
+      "title": "GitHubPullRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The pull request associated with a worktree's branch, found by repository plus exact head branch — which is what makes one opened outside Pragma appear.",
+      "required": ["number", "title", "url", "state", "headBranch", "baseBranch"],
+      "properties": {
+        "number": { "type": "integer" },
+        "title": { "type": "string" },
+        "url": {
+          "type": "string",
+          "description": "Canonical `https://github.com/owner/repo/pull/number`, as GitHub reports it. Clients open it with the platform link handler so the OS can route it to the GitHub app; there is no `github://` scheme to invent."
+        },
+        "state": { "$ref": "#/definitions/GitHubPullRequestState" },
+        "headBranch": { "type": "string" },
+        "baseBranch": { "type": "string" }
+      }
+    },
+    "GitHubPublishRequest": {
+      "title": "GitHubPublishRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An explicit request to push a branch and create its pull request. Separate from committing on purpose: a commit is local and a publish is not, and the user reviews the text in between.",
+      "required": ["worktreeId", "title", "body", "draft", "requestId"],
+      "properties": {
+        "worktreeId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "base": {
+          "type": ["string", "null"],
+          "description": "Base branch. Null falls back to the parent worktree's branch, then the repository default."
+        },
+        "draft": { "type": "boolean" },
+        "requestId": {
+          "type": "string",
+          "description": "Caller-generated id. Pushing succeeds and the create response is lost often enough that a blind retry would open a second pull request; the host replays the first result instead."
+        }
+      }
+    },
     "TerminalViewportPolicy": {
       "title": "TerminalViewportPolicy",
       "type": "object",

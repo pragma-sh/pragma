@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::github::GithubHost;
 use pragma_constants::{
     AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, SessionInfo,
     ShellProfile, Tab, TabKind, ViewportLease, Worktree, CONSTANTS,
@@ -115,6 +116,8 @@ pub struct Registry {
     workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
     /// Terminal tabs the host created, and the ids of tabs clients have closed.
     managed_tabs: Mutex<ManagedTabs>,
+    /// The host's GitHub credential and the operations that use it.
+    github: GithubHost,
     /// Live script runs by run id. Not persisted: a run is its terminals, and
     /// those do not survive a server restart either.
     script_runs: Mutex<HashMap<String, ScriptRun>>,
@@ -373,6 +376,7 @@ impl Registry {
             pending: Mutex::new(HashMap::new()),
             workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
             managed_tabs: Mutex::new(load_managed_tabs(&server_dir)),
+            github: GithubHost::new(&server_dir),
             script_runs: Mutex::new(HashMap::new()),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
@@ -404,6 +408,15 @@ impl Registry {
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginsError> {
         self.plugins.handle_rpc(payload)
+    }
+
+    /// Serves the `github` RPC domain. The token stays on the host; the answers
+    /// carry pull requests and logins, never credentials.
+    pub fn handle_github_rpc(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, crate::github::GithubError> {
+        self.github.handle_rpc(payload)
     }
 
     pub fn handle_automation_rpc(

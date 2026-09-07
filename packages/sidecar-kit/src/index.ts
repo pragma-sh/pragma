@@ -30,3 +30,20 @@ export function readStdinLines(onLine: (line: string) => void, onEnd?: () => voi
   process.stdin.once("end", finish);
   process.stdin.once("close", finish);
 }
+
+/**
+ * Reads all of `process.stdin` as one UTF-8 string.
+ *
+ * For the one-shot sidecars: a single JSON payload that is too long, too
+ * multi-line, or too private to pass as a command-line argument — a pull
+ * request body, an AI context — where line framing buys nothing because the
+ * process reads exactly one request and exits.
+ */
+export async function readStdin(): Promise<string> {
+  process.stdin.setEncoding("utf8");
+  let buffer = "";
+  for await (const chunk of process.stdin) {
+    buffer += chunk as string;
+  }
+  return buffer;
+}

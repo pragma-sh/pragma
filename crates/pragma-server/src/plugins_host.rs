@@ -19,6 +19,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::sidecar::{sidecar_executable, workspace_root};
 use base64::Engine;
 use pragma_constants::CONSTANTS;
 use serde::{Deserialize, Serialize};
@@ -966,21 +967,6 @@ pub fn bundled_plugins_dir() -> Option<PathBuf> {
         .into_iter()
         .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
         .find(|candidate| candidate.is_dir())
-}
-
-fn sidecar_executable(name: &str) -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join(name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf()
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use sha2::{Digest, Sha256};
 
+use crate::sidecar::{sidecar_executable, workspace_root};
 use pragma_constants::{
     AutomationInfo, AutomationRootRegistration, AutomationScope, AutomationStatus,
     AutomationTriggerKind, AutomationTrust, FileContents, ProtocolEventKind,
@@ -976,13 +977,6 @@ fn sidecar_command() -> Command {
     }
 }
 
-fn sidecar_executable(name: &str) -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join(name)))
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
 fn automation_cache_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map_or_else(std::env::temp_dir, PathBuf::from)
@@ -1175,14 +1169,6 @@ fn part_matches(part: &str, value: u64, min: u64, max: u64) -> bool {
     }
     part.parse::<u64>()
         .is_ok_and(|parsed| parsed == value && parsed >= min && parsed <= max)
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf()
 }
 
 #[cfg(test)]
