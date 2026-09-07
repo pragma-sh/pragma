@@ -6,7 +6,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -103,47 +102,98 @@ export function NestedDropdownGroup({
   const parent = useNestedDropdown();
   const [query, setQuery] = useState("");
   const context = useMemo(() => ({ query, close: parent.close }), [parent.close, query]);
-  const filterText = searchValue ?? (typeof label === "string" ? label : "");
-  if (!matchesSearch(filterText, parent.query)) return null;
-
-  function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen) onOpen?.();
-    if (!nextOpen) setQuery("");
-  }
+  if (!matchesSearch(searchValue ?? labelText(label), parent.query)) return null;
 
   return (
     <NestedDropdownContext.Provider value={context}>
-      <DropdownMenuSub onOpenChange={handleOpenChange}>
-        <DropdownMenuSubTrigger
-          disabled={disabled}
-          onFocus={() => onOpen?.()}
-          onPointerEnter={() => onOpen?.()}
+      <DropdownMenuSub onOpenChange={(open) => (open ? onOpen?.() : setQuery(""))}>
+        <GroupTrigger disabled={disabled} label={label} value={value} onOpen={onOpen} />
+        <GroupContent
+          emptyText={emptyText}
+          query={query}
+          search={searchable ? searchConfig(label, searchLabel, searchPlaceholder) : null}
+          onQueryChange={setQuery}
         >
-          {label}
-          {value ? (
-            <span className="ml-auto min-w-0 truncate text-muted-foreground">{value}</span>
-          ) : null}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className={cn("min-w-56", searchable && "p-0")}>
-          {searchable ? (
-            <SearchField
-              label={searchLabel ?? (typeof label === "string" ? `Search ${label}` : "Search")}
-              placeholder={searchPlaceholder}
-              value={query}
-              onChange={setQuery}
-            />
-          ) : null}
-          <DropdownMenuGroup className={cn("group/results", searchable && "p-1")}>
-            {children}
-            {searchable ? (
-              <output className="hidden px-1.5 py-4 text-center text-sm text-muted-foreground group-has-[[data-slot=dropdown-menu-item]]/results:hidden group-has-[[data-slot=dropdown-menu-sub-trigger]]/results:hidden">
-                {emptyText}
-              </output>
-            ) : null}
-          </DropdownMenuGroup>
-        </DropdownMenuSubContent>
+          {children}
+        </GroupContent>
       </DropdownMenuSub>
     </NestedDropdownContext.Provider>
+  );
+}
+
+/** A label is only usable as filter/search text when it is a plain string. */
+function labelText(label: ReactNode): string {
+  return typeof label === "string" ? label : "";
+}
+
+function searchConfig(
+  label: ReactNode,
+  searchLabel: string | undefined,
+  placeholder: string,
+): { label: string; placeholder: string } {
+  const text = labelText(label);
+  return { label: searchLabel ?? (text ? `Search ${text}` : "Search"), placeholder };
+}
+
+/** Submenu row that opens the group, with its optional current-value suffix. */
+function GroupTrigger({
+  label,
+  value,
+  disabled,
+  onOpen,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  disabled: boolean;
+  onOpen: (() => void) | undefined;
+}) {
+  return (
+    <DropdownMenuSubTrigger
+      disabled={disabled}
+      onFocus={() => onOpen?.()}
+      onPointerEnter={() => onOpen?.()}
+    >
+      {label}
+      {value ? (
+        <span className="ml-auto min-w-0 truncate text-muted-foreground">{value}</span>
+      ) : null}
+    </DropdownMenuSubTrigger>
+  );
+}
+
+/** Submenu body: the optional search field, the children, and the empty state. */
+function GroupContent({
+  search,
+  query,
+  emptyText,
+  onQueryChange,
+  children,
+}: {
+  search: { label: string; placeholder: string } | null;
+  query: string;
+  emptyText: string;
+  onQueryChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <DropdownMenuSubContent className={cn("min-w-56", search && "p-0")}>
+      {search ? (
+        <SearchField
+          label={search.label}
+          placeholder={search.placeholder}
+          value={query}
+          onChange={onQueryChange}
+        />
+      ) : null}
+      <DropdownMenuGroup className={cn("group/results", search && "p-1")}>
+        {children}
+        {search ? (
+          <output className="hidden px-1.5 py-4 text-center text-sm text-muted-foreground group-has-[[data-slot=dropdown-menu-item]]/results:hidden group-has-[[data-slot=dropdown-menu-sub-trigger]]/results:hidden">
+            {emptyText}
+          </output>
+        ) : null}
+      </DropdownMenuGroup>
+    </DropdownMenuSubContent>
   );
 }
 
@@ -181,11 +231,6 @@ export function NestedDropdownItem({
       {selected ? <CheckIcon className="ml-auto" /> : null}
     </DropdownMenuItem>
   );
-}
-
-/** Visual break between root items and nested groups. */
-export function NestedDropdownSeparator() {
-  return <DropdownMenuSeparator />;
 }
 
 function SearchField({
