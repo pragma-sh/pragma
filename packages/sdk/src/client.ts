@@ -2,12 +2,14 @@
 import type { BoardDraftCreatePayload, KanbanPromptCard } from "@pragma/constants";
 
 import { AgentsClient } from "./agents-client";
+import { AiClient } from "./ai-client";
 import { AssetsClient } from "./assets-client";
 import { EventsClient } from "./events-client";
 import { ExecClient } from "./exec-client";
 import { FanoutsClient } from "./fanouts-client";
 import { FsClient } from "./fs-client";
 import { GitClient } from "./git-client";
+import { GitHubClient } from "./github-client";
 import { HealthClient } from "./health-client";
 import { PushClient } from "./push-client";
 import { routes } from "./routes";
@@ -36,6 +38,8 @@ export class PragmaClient {
   readonly theme: ThemeClient;
   readonly health: HealthClient;
   readonly scratchpads: ScratchpadsClient;
+  readonly ai: AiClient;
+  readonly github: GitHubClient;
   readonly scripts: ScriptsClient;
   readonly tabs: TabsClient;
   readonly usageLimits: UsageLimitsClient;
@@ -57,6 +61,8 @@ export class PragmaClient {
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
+    this.ai = new AiClient(this.transport);
+    this.github = new GitHubClient(this.transport);
     this.scripts = new ScriptsClient(this.transport);
     this.tabs = new TabsClient(this.transport);
     this.usageLimits = new UsageLimitsClient(this.transport);

@@ -36,6 +36,8 @@ export type {
   FanoutStatus,
   FanoutSubscriptionPayload,
   KanbanPromptCard,
+  GitHubPullRequest,
+  GitHubPullRequestState,
   SessionInfo,
   Tab,
   TabKind,
@@ -50,6 +52,14 @@ export type {
 } from "@pragma/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export {
+  AiClient,
+  type AiJob,
+  type AiJobStage,
+  type AiStatus,
+  type CommitAndDraftOptions,
+} from "./ai-client";
+export { GitHubClient, type GitHubStatus, type PublishPullRequestOptions } from "./github-client";
 export {
   ScriptsClient,
   type RunScriptOptions,

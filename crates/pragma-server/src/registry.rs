@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::ai::{AiError, AiHost, CommitAndDraftRequest};
 use crate::github::GithubHost;
 use pragma_constants::{
     AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, SessionInfo,
@@ -118,6 +119,11 @@ pub struct Registry {
     managed_tabs: Mutex<ManagedTabs>,
     /// The host's GitHub credential and the operations that use it.
     github: GithubHost,
+    /// AI jobs, and the sidecar that runs them.
+    ai: Arc<AiHost>,
+    /// One lock per project, so an AI commit started from a phone and one
+    /// started from the desktop cannot stage against each other's index.
+    git_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Live script runs by run id. Not persisted: a run is its terminals, and
     /// those do not survive a server restart either.
     script_runs: Mutex<HashMap<String, ScriptRun>>,
@@ -377,6 +383,8 @@ impl Registry {
             workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
             managed_tabs: Mutex::new(load_managed_tabs(&server_dir)),
             github: GithubHost::new(&server_dir),
+            ai: Arc::new(AiHost::new(&server_dir)),
+            git_locks: Mutex::new(HashMap::new()),
             script_runs: Mutex::new(HashMap::new()),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
@@ -417,6 +425,95 @@ impl Registry {
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::github::GithubError> {
         self.github.handle_rpc(payload)
+    }
+
+    /// Serves the `ai` RPC domain: model availability, and the commit-and-draft
+    /// job a client starts and then polls.
+    pub fn handle_ai_rpc(&self, payload: &serde_json::Value) -> Result<serde_json::Value, AiError> {
+        let action = payload
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        match action {
+            "status" => Ok(AiHost::status()),
+            "commitAndDraftPullRequest" => self.start_commit_and_draft(payload),
+            "getRun" => {
+                let job_id = required_field(payload, "runId")?;
+                let job = self.ai.job(&job_id)?;
+                serde_json::to_value(job).map_err(|error| AiError::Operation(error.to_string()))
+            }
+            "cancelRun" => {
+                let job_id = required_field(payload, "runId")?;
+                self.ai.cancel(&job_id)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            other => Err(AiError::InvalidRequest(format!(
+                "unknown ai action: {other}"
+            ))),
+        }
+    }
+
+    /// Resolves what the job needs — the worktree, its parent branch, the
+    /// project's lock — and hands it to the AI host.
+    fn start_commit_and_draft(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, AiError> {
+        let worktree_id = required_field(payload, "worktreeId")?;
+        let request_id = required_field(payload, "requestId")?;
+        let (worktree, parent) = self
+            .worktree_with_parent(&worktree_id)
+            .map_err(AiError::Operation)?;
+        let project_lock = self.git_lock(&worktree.project_id)?;
+        let job = self.ai.start_commit_and_draft(CommitAndDraftRequest {
+            worktree_id,
+            request_id,
+            root: PathBuf::from(&worktree.path),
+            parent_branch: parent
+                .as_ref()
+                .map_or_else(|| "main".to_string(), |parent| parent.branch.clone()),
+            parent_path: parent.as_ref().map(|parent| PathBuf::from(&parent.path)),
+            project_lock,
+        })?;
+        serde_json::to_value(job).map_err(|error| AiError::Operation(error.to_string()))
+    }
+
+    /// A worktree and the worktree it branched from, when it has one.
+    fn worktree_with_parent(
+        &self,
+        worktree_id: &str,
+    ) -> Result<(Worktree, Option<Worktree>), String> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "workspace lock poisoned".to_string())?;
+        let snapshot = workspace
+            .as_ref()
+            .ok_or_else(|| "no workspace snapshot yet".to_string())?;
+        let worktree = snapshot
+            .worktrees
+            .iter()
+            .find(|worktree| worktree.id == worktree_id)
+            .cloned()
+            .ok_or_else(|| format!("worktree not found: {worktree_id}"))?;
+        let parent = worktree.parent_id.as_ref().and_then(|parent_id| {
+            snapshot
+                .worktrees
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
+                .cloned()
+        });
+        Ok((worktree, parent))
+    }
+
+    /// The lock guarding git operations in one project.
+    pub fn git_lock(&self, project_id: &str) -> Result<Arc<Mutex<()>>, AiError> {
+        let mut locks = self.git_locks.lock().map_err(|_| AiError::LockPoisoned)?;
+        Ok(Arc::clone(
+            locks
+                .entry(project_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        ))
     }
 
     pub fn handle_automation_rpc(
@@ -2398,6 +2495,15 @@ fn script_tab_title(name: &str, index: usize, total: usize) -> String {
         return name.to_string();
     }
     format!("{name} {}/{total}", index + 1)
+}
+
+/// Reads a required string field from an RPC payload.
+fn required_field(payload: &serde_json::Value, key: &str) -> Result<String, AiError> {
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| AiError::InvalidRequest(format!("{key} is required")))
 }
 
 #[cfg(test)]

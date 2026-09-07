@@ -1,3 +1,4 @@
+mod ai;
 mod automations;
 mod fanout_host;
 mod fanouts;
@@ -776,7 +777,35 @@ fn handle_server_owned_rpc(
             &rpc.payload,
             registry,
         ))),
+        ProtocolRpcMethod::Ai => Some(Ok(rpc_response(
+            request_id.to_string(),
+            registry
+                .handle_ai_rpc(&rpc.payload)
+                .map_err(|error| error.to_string()),
+        ))),
         _ => None,
+    }
+}
+
+/// Wraps a domain handler's result in the response frame shape.
+fn rpc_response(request_id: String, result: Result<serde_json::Value, String>) -> RpcResponseFrame {
+    match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
     }
 }
 

@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
 
+pub mod ai;
 pub mod exec;
 pub mod fanout;
 pub mod fs;
