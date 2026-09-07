@@ -47,11 +47,6 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "../../packages/constants/values.json",
-          "jsonpath": "$.app.version"
-        },
-        {
-          "type": "json",
           "path": "src-tauri/tauri.conf.json",
           "jsonpath": "$.version"
         },
@@ -77,24 +72,29 @@
       "release-type": "node",
       "component": "www"
     },
-    "crates/pragma-protocol": {
-      "release-type": "rust",
-      "component": "pragma-protocol",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "../../packages/constants/values.json",
-          "jsonpath": "$.daemon.protocolVersion"
-        }
-      ]
-    },
+    "crates/pragma-protocol": { "release-type": "rust", "component": "pragma-protocol" },
     "crates/pragma-server": { "release-type": "rust", "component": "pragma-server" },
     "crates/pragma-gateway": { "release-type": "rust", "component": "pragma-gateway" },
     "crates/pragma-cli": { "release-type": "rust", "component": "pragma-cli" },
     "crates/pragma-client": { "release-type": "rust", "component": "pragma-client" },
     "crates/pragma-core": { "release-type": "rust", "component": "pragma-core" },
     "crates/pragma-platform": { "release-type": "rust", "component": "pragma-platform" },
-    "packages/constants": { "release-type": "node", "component": "constants" },
+    "packages/constants": {
+      "release-type": "node",
+      "component": "constants",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "values.json",
+          "jsonpath": "$.app.version"
+        },
+        {
+          "type": "json",
+          "path": "values.json",
+          "jsonpath": "$.daemon.protocolVersion"
+        }
+      ]
+    },
     "packages/plugin": { "release-type": "node", "component": "plugin" },
     "packages/sdk": { "release-type": "node", "component": "sdk" },
     "packages/scratchpad": { "release-type": "node", "component": "scratchpad" },

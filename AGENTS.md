@@ -383,7 +383,10 @@ them with a signed `release.json`. That manifest is `reload` only when every sub
 previous desktop tag is under `apps/pragma/src/`; any native/server/tooling change is
 `restart`. Desktop-shipped crates/packages use Release Please's `linked-versions` group,
 so changing one also creates a desktop release instead of shipping under an unrelated
-component version. Configure `RELEASE_PLEASE_TOKEN` with contents + pull-request write
+component version. Release Please rejects `..` in `extra-files`; shared version fields in
+`packages/constants/values.json` therefore belong to the linked `constants` component,
+not to cross-component paths from the app or protocol crate. Configure
+`RELEASE_PLEASE_TOKEN` with contents + pull-request write
 access so release PRs trigger ordinary CI; the workflow falls back to `GITHUB_TOKEN`, but
 GitHub suppresses workflows caused by that token. Release builds also require
 `TAURI_SIGNING_PRIVATE_KEY`, its password, and `TAURI_SIGNING_PUBLIC_KEY`; every installer
