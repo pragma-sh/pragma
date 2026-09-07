@@ -55,6 +55,14 @@ pub type ControllerWriter = Arc<Mutex<LocalStream>>;
 /// the server restarts while the desktop app stays closed.
 const WORKSPACE_SNAPSHOT_FILE: &str = "workspace.json";
 
+/// Terminal tabs this host created itself, and the ones it has closed. Kept
+/// beside the socket so a phone-opened terminal survives a server restart, and
+/// a phone-closed one is not resurrected by a stale desktop publish.
+const MANAGED_TABS_FILE: &str = "managed-tabs.json";
+/// How many closed-tab ids to remember. A tombstone only has to outlive the
+/// stale snapshot that would resurrect its tab, which is one desktop publish.
+const TOMBSTONE_LIMIT: usize = 512;
+
 const AGENT_DECISION_REPLAY_WINDOW: Duration = Duration::from_secs(5);
 const AGENT_DECISION_REPLAY_LIMIT: usize = 64;
 /// Newest chat messages retained per agent session for subscriber replay, so a
@@ -102,6 +110,8 @@ pub struct Registry {
     /// the snapshot and fans a full-snapshot `Delta` to all live subscribers; v1
     /// keeps deltas trivial (every delta is a full replacement).
     workspace_subscribers: Mutex<Vec<Sender<EventFrame>>>,
+    /// Terminal tabs the host created, and the ids of tabs clients have closed.
+    managed_tabs: Mutex<ManagedTabs>,
     automations: Arc<AutomationsRegistry>,
     plugins: Arc<PluginsRegistry>,
     tunnel: Arc<TunnelRegistry>,
@@ -292,6 +302,47 @@ struct WorktreeFileWatch {
     _watcher: WorktreeWatcher,
 }
 
+/// Host-created terminal tabs plus the ids of tabs a client has closed.
+///
+/// The desktop's `SQLite` rows remain the source of truth for tabs *it* made;
+/// this is the other half, the tabs the host owns. Both halves have to be
+/// authoritative for the sessions they created, or a desktop publish that
+/// happened not to know about a phone-opened tab would erase it — and a
+/// publish written before a phone closed one would bring it back.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedTabs {
+    #[serde(default)]
+    tabs: Vec<Tab>,
+    /// Closed tab ids, newest last.
+    #[serde(default)]
+    tombstones: Vec<String>,
+    /// Client request id to the tab it created, so a retried open — a double
+    /// tap, or a retry after a lost response — returns the same tab instead of
+    /// opening a second shell.
+    #[serde(default)]
+    requests: HashMap<String, String>,
+}
+
+/// Reads the managed-tab store, or an empty one when absent or unreadable.
+fn load_managed_tabs(server_dir: &Path) -> ManagedTabs {
+    std::fs::read_to_string(server_dir.join(MANAGED_TABS_FILE))
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+/// Persists the managed-tab store. Best-effort: a failed write costs a
+/// phone-opened terminal its durability across a server restart.
+fn persist_managed_tabs(server_dir: &Path, managed: &ManagedTabs) {
+    let Ok(contents) = serde_json::to_string(managed) else {
+        return;
+    };
+    if let Err(error) = std::fs::write(server_dir.join(MANAGED_TABS_FILE), contents) {
+        eprintln!("failed to persist managed tabs: {error}");
+    }
+}
+
 fn prune_agent_decisions(decisions: &mut Vec<RecentAgentDecision>) {
     decisions.retain(|entry| entry.recorded_at.elapsed() <= AGENT_DECISION_REPLAY_WINDOW);
 }
@@ -315,6 +366,7 @@ impl Registry {
             controller: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             workspace: Mutex::new(load_workspace_snapshot(&server_dir)),
+            managed_tabs: Mutex::new(load_managed_tabs(&server_dir)),
             workspace_subscribers: Mutex::new(Vec::new()),
             automations: AutomationsRegistry::new(server_dir.clone()),
             plugins: PluginsRegistry::new(server_dir.clone()),
@@ -396,6 +448,9 @@ impl Registry {
     /// (the delta is the whole snapshot); row-level deltas are a later
     /// optimization. Mirrors `broadcast_agent`: dead subscribers are pruned.
     pub fn publish_workspace(&self, mut snapshot: WorkspaceSnapshot) {
+        // Host-owned tabs are re-asserted before the snapshot is adopted, not
+        // after: what is stored and what is broadcast must be the same thing.
+        self.apply_managed_tabs(&mut snapshot);
         let payload = if let Ok(mut guard) = self.workspace.lock() {
             if let Some(current) = guard.as_ref() {
                 preserve_daemon_tab_metadata(current, &mut snapshot);
@@ -448,6 +503,188 @@ impl Registry {
             payload,
         });
         Ok(result)
+    }
+
+    /// Opens a terminal tab and its PTY, owned by this host.
+    ///
+    /// Idempotent per `request_id`: a double tap on a phone, or a retry after a
+    /// lost response, returns the tab already created rather than opening a
+    /// second shell. The shell is left to the server to resolve, so a
+    /// phone-opened terminal follows the project's configured default.
+    pub fn open_terminal_tab(
+        &self,
+        worktree_id: &str,
+        request_id: &str,
+        title: Option<&str>,
+    ) -> Result<Tab, RegistryError> {
+        if let Some(existing) = self.tab_for_request(request_id)? {
+            return Ok(existing);
+        }
+        let (project_id, cwd) = self.worktree_location(worktree_id)?;
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        self.spawn(
+            tab_id.clone(),
+            worktree_id.to_string(),
+            cwd,
+            AGENT_SESSION_COLS,
+            AGENT_SESSION_ROWS,
+            None,
+        )?;
+        let tab = Tab {
+            id: tab_id.clone(),
+            project_id,
+            worktree_id: worktree_id.to_string(),
+            kind: TabKind::Terminal,
+            title: title.map(str::to_string),
+            url: None,
+            file_path: None,
+            diff_side: None,
+            diff_commit: None,
+            pr_number: None,
+            plugin_id: None,
+            plugin_view_id: None,
+            plugin_payload: None,
+            plugin_dedupe_key: None,
+            agent_id: None,
+            fanout_id: None,
+            fanout_member_id: None,
+            user_renamed: title.is_some(),
+            shell: None,
+            order_index: 0,
+            created_at: now_timestamp(),
+        };
+        {
+            let mut managed = self
+                .managed_tabs
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            managed.tabs.push(tab.clone());
+            managed.requests.insert(request_id.to_string(), tab_id);
+            managed.tombstones.retain(|id| id != &tab.id);
+            persist_managed_tabs(&self.server_dir, &managed);
+        }
+        let mirrored = tab.clone();
+        if let Err(error) = self.mutate_workspace(|snapshot| {
+            snapshot.tabs.push(Tab {
+                order_index: next_order_index(snapshot, &mirrored.worktree_id),
+                ..mirrored
+            });
+            Ok(())
+        }) {
+            // The snapshot only exists once a desktop has published one; the
+            // tab and its PTY are real either way, and `managed_tabs` is what
+            // makes them visible to the next publish.
+            eprintln!("open terminal: failed to mirror tab: {error}");
+        }
+        Ok(tab)
+    }
+
+    /// Closes a tab: ends its PTY and stops it being a tab anywhere.
+    ///
+    /// This is a cross-device effect by design — the desktop loses the tab too
+    /// — so the tombstone matters as much as the removal: a desktop snapshot
+    /// composed before the close must not bring the tab back.
+    pub fn close_tab(&self, tab_id: &str) -> Result<(), RegistryError> {
+        // A tab whose shell already exited is still closable: the row is what
+        // the user is removing.
+        match self.kill(tab_id) {
+            Ok(()) | Err(RegistryError::NotFound(_)) => {}
+            Err(error) => return Err(error),
+        }
+        {
+            let mut managed = self
+                .managed_tabs
+                .lock()
+                .map_err(|_| RegistryError::LockPoisoned)?;
+            managed.tabs.retain(|tab| tab.id != tab_id);
+            managed.requests.retain(|_, id| id != tab_id);
+            managed.tombstones.retain(|id| id != tab_id);
+            managed.tombstones.push(tab_id.to_string());
+            let overflow = managed.tombstones.len().saturating_sub(TOMBSTONE_LIMIT);
+            managed.tombstones.drain(..overflow);
+            persist_managed_tabs(&self.server_dir, &managed);
+        }
+        let _ = self.mutate_workspace(|snapshot| {
+            snapshot.tabs.retain(|tab| tab.id != tab_id);
+            Ok(())
+        });
+        Ok(())
+    }
+
+    /// The host-owned tabs for the given worktrees, for a desktop adopting them.
+    pub fn managed_tabs_for(&self, worktree_ids: &[String]) -> Result<Vec<Tab>, RegistryError> {
+        Ok(self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .tabs
+            .iter()
+            .filter(|tab| worktree_ids.iter().any(|id| id == &tab.worktree_id))
+            .cloned()
+            .collect())
+    }
+
+    /// Ids of tabs closed through this host, for a desktop pruning its own rows.
+    pub fn closed_tab_ids(&self) -> Result<Vec<String>, RegistryError> {
+        Ok(self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?
+            .tombstones
+            .clone())
+    }
+
+    fn tab_for_request(&self, request_id: &str) -> Result<Option<Tab>, RegistryError> {
+        let managed = self
+            .managed_tabs
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        let Some(tab_id) = managed.requests.get(request_id) else {
+            return Ok(None);
+        };
+        Ok(managed.tabs.iter().find(|tab| &tab.id == tab_id).cloned())
+    }
+
+    /// The project and absolute path a worktree row names.
+    fn worktree_location(&self, worktree_id: &str) -> Result<(String, String), RegistryError> {
+        let workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| RegistryError::LockPoisoned)?;
+        workspace
+            .as_ref()
+            .and_then(|snapshot| {
+                snapshot
+                    .worktrees
+                    .iter()
+                    .find(|worktree| worktree.id == worktree_id)
+            })
+            .map(|worktree| (worktree.project_id.clone(), worktree.path.clone()))
+            .ok_or_else(|| RegistryError::NotFound(worktree_id.to_string()))
+    }
+
+    /// Re-asserts host-owned tabs over a snapshot the desktop just published.
+    ///
+    /// The desktop publishes its own durable rows, which know nothing about a
+    /// tab a phone opened a moment ago and may still carry one a phone just
+    /// closed. Neither is a conflict to resolve: for tabs the host created,
+    /// the host is authoritative.
+    fn apply_managed_tabs(&self, snapshot: &mut WorkspaceSnapshot) {
+        let Ok(managed) = self.managed_tabs.lock() else {
+            return;
+        };
+        snapshot
+            .tabs
+            .retain(|tab| !managed.tombstones.iter().any(|id| id == &tab.id));
+        for tab in &managed.tabs {
+            if snapshot.tabs.iter().any(|existing| existing.id == tab.id) {
+                continue;
+            }
+            snapshot.tabs.push(Tab {
+                order_index: next_order_index(snapshot, &tab.worktree_id),
+                ..tab.clone()
+            });
+        }
     }
 
     /// Persists a launched agent's identity and default title on its owning host.
@@ -1952,6 +2189,17 @@ fn lease_ttl() -> Duration {
     Duration::from_millis(u64::try_from(CONSTANTS.terminal_viewport.lease_ms).unwrap_or(0))
 }
 
+/// The next order index for a worktree's tabs in a snapshot.
+fn next_order_index(snapshot: &WorkspaceSnapshot, worktree_id: &str) -> i64 {
+    snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.worktree_id == worktree_id)
+        .map(|tab| tab.order_index)
+        .max()
+        .map_or(0, |max| max + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -2977,5 +3225,132 @@ mod tests {
             .controller_writer()
             .expect("controller_writer")
             .is_some());
+    }
+
+    /// Opens a real shell in a real directory, the way a phone tap would.
+    fn open_terminal(registry: &Registry, dir: &std::path::Path, request_id: &str) -> Tab {
+        registry.publish_workspace(snapshot_with_project(&dir.to_string_lossy()));
+        registry
+            .open_terminal_tab("worktree-main", request_id, None)
+            .expect("a worktree with a path opens a terminal")
+    }
+
+    #[test]
+    fn opening_a_terminal_twice_with_one_request_id_opens_one_shell() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let first = open_terminal(&registry, dir.path(), "request-1");
+
+        // The retry a flaky tunnel produces, or a double tap.
+        let second = registry
+            .open_terminal_tab("worktree-main", "request-1", None)
+            .expect("a repeated request returns the tab it already made");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(
+            registry
+                .managed_tabs_for(&["worktree-main".to_string()])
+                .expect("managed tabs")
+                .len(),
+            1
+        );
+        registry.close_tab(&first.id).expect("close");
+    }
+
+    #[test]
+    fn a_host_opened_tab_survives_a_desktop_republish() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+
+        // The desktop publishes its own rows, which know nothing about it.
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let (snapshot, _rx) = registry.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        assert_eq!(payload["tabs"][0]["id"], tab.id.as_str());
+        registry.close_tab(&tab.id).expect("close");
+    }
+
+    #[test]
+    fn a_closed_tab_is_not_resurrected_by_a_stale_publish() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+        registry.close_tab(&tab.id).expect("close");
+
+        // A snapshot the desktop composed before the close still carries it.
+        let mut stale = snapshot_with_project(&dir.path().to_string_lossy());
+        stale.tabs.push(Tab { ..tab.clone() });
+        registry.publish_workspace(stale);
+
+        let (snapshot, _rx) = registry.subscribe_workspace().expect("subscribe");
+        let payload = match snapshot.first() {
+            Some(EventFrame::Snapshot { payload, .. }) => payload.clone(),
+            other => panic!("expected snapshot frame, got {other:?}"),
+        };
+        assert_eq!(
+            payload["tabs"].as_array().map(Vec::len),
+            Some(0),
+            "a tab closed on one device stays closed"
+        );
+        assert!(registry
+            .closed_tab_ids()
+            .expect("tombstones")
+            .contains(&tab.id));
+    }
+
+    #[test]
+    fn closing_a_tab_twice_is_not_an_error() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        let tab = open_terminal(&registry, dir.path(), "request-1");
+
+        registry.close_tab(&tab.id).expect("first close");
+        registry
+            .close_tab(&tab.id)
+            .expect("a retried close is idempotent, not a failure");
+
+        assert_eq!(
+            registry
+                .closed_tab_ids()
+                .expect("tombstones")
+                .iter()
+                .filter(|id| *id == &tab.id)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn host_opened_tabs_survive_a_server_restart() {
+        let dir = tempdir().expect("tempdir");
+        let tab = {
+            let registry = registry_in(dir.path());
+            let tab = open_terminal(&registry, dir.path(), "request-1");
+            tab
+        };
+
+        let reloaded = registry_in(dir.path());
+
+        let managed = reloaded
+            .managed_tabs_for(&["worktree-main".to_string()])
+            .expect("managed tabs");
+        assert_eq!(managed.len(), 1);
+        assert_eq!(managed[0].id, tab.id);
+    }
+
+    #[test]
+    fn opening_a_terminal_in_an_unknown_worktree_fails_instead_of_guessing() {
+        let dir = tempdir().expect("tempdir");
+        let registry = registry_in(dir.path());
+        registry.publish_workspace(snapshot_with_project(&dir.path().to_string_lossy()));
+
+        let result = registry.open_terminal_tab("worktree-missing", "request-1", None);
+
+        assert!(matches!(result, Err(super::RegistryError::NotFound(_))));
     }
 }

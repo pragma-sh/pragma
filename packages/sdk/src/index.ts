@@ -37,6 +37,8 @@ export type {
   FanoutSubscriptionPayload,
   KanbanPromptCard,
   SessionInfo,
+  Tab,
+  TabKind,
   UsageLimit,
   UsageLimitsProvider,
   UsageLimitsReady,
@@ -48,6 +50,7 @@ export type {
 } from "@pragma/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";
+export { TabsClient, type ManagedTabs, type OpenTerminalOptions } from "./tabs-client";
 export { UsageLimitsClient, type GetUsageLimitsOptions } from "./usage-limits-client";
 export { HealthClient, type GatewayHealth } from "./health-client";
 export { runtimeAgentId, ScratchpadsClient } from "./scratchpads-client";

@@ -638,6 +638,29 @@ fn handle_tabs_rpc(
         pragma_core::tabs::TabsRequest::ListAgents { tab_ids } => registry
             .tab_agent_metadata(&tab_ids)
             .and_then(|tabs| serde_json::to_value(tabs).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::OpenTerminal {
+            worktree_id,
+            request_id,
+            title,
+        } => registry
+            .open_terminal_tab(&worktree_id, &request_id, title.as_deref())
+            .map_err(|error| error.to_string())
+            .and_then(|tab| serde_json::to_value(tab).map_err(|error| error.to_string())),
+        pragma_core::tabs::TabsRequest::Close { tab_id } => registry
+            .close_tab(&tab_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::tabs::TabsRequest::ListManaged { worktree_ids } => registry
+            .managed_tabs_for(&worktree_ids)
+            .and_then(|tabs| Ok((tabs, registry.closed_tab_ids()?)))
+            .map_err(|error| error.to_string())
+            .and_then(|(tabs, closed_tab_ids)| {
+                serde_json::to_value(pragma_core::tabs::ManagedTabsResult {
+                    tabs,
+                    closed_tab_ids,
+                })
+                .map_err(|error| error.to_string())
+            }),
     };
     Ok(match result {
         Ok(payload) => RpcResponseFrame {

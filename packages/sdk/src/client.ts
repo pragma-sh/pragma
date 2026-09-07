@@ -13,6 +13,7 @@ import { PushClient } from "./push-client";
 import { routes } from "./routes";
 import { ScratchpadsClient } from "./scratchpads-client";
 import { SessionsClient } from "./sessions-client";
+import { TabsClient } from "./tabs-client";
 import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
 import { UsageLimitsClient } from "./usage-limits-client";
@@ -34,6 +35,7 @@ export class PragmaClient {
   readonly theme: ThemeClient;
   readonly health: HealthClient;
   readonly scratchpads: ScratchpadsClient;
+  readonly tabs: TabsClient;
   readonly usageLimits: UsageLimitsClient;
 
   private readonly transport: Transport;
@@ -53,6 +55,7 @@ export class PragmaClient {
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
+    this.tabs = new TabsClient(this.transport);
     this.usageLimits = new UsageLimitsClient(this.transport);
   }
 
