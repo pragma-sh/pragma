@@ -66,7 +66,7 @@ duplicate agent metadata here.
 ## Catalog wire types
 
 `AgentModelEntry` / `AgentReasoning` / `CatalogAgent` / `AgentCatalog` / `PluginIconRef`
-(the by-hash icon reference, used by agents *and* usage providers) and the
+(the by-hash icon reference, used by agents _and_ usage providers) and the
 `UsageLimit*` shapes are promoted into `@pragma/constants` (`schema.json`) so the wire
 type has one source of truth, shared with `@pragma/sdk`'s `AgentsClient.catalog()`,
 `AssetsClient`, and `UsageLimitsClient`. Catalog

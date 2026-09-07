@@ -308,6 +308,11 @@
     "staleAfterMs": 300000,
     "loadTimeoutMs": 120000
   },
+  "terminalViewport": {
+    "leaseMs": 30000,
+    "renewIntervalMs": 10000,
+    "sweepIntervalMs": 5000
+  },
   "welcome": {
     "locationPlaceholder": "{location}",
     "located": [

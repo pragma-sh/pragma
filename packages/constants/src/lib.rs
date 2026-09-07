@@ -43,13 +43,14 @@ pub use generated::{
     ProjectScriptsConfig, Protocol, ProtocolErrorCode, ProtocolEventKind, ProtocolRpcMethod,
     QuestionOption, RunScriptDefinition, RunScriptEntry, RunScriptHorizontalSplit, RunScriptNode,
     RunScriptSplit, RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads,
-    ScriptMigrationSource, ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal,
-    SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend,
-    TerminalDefaults, TerminalSettings, Tunnel, UpdateApplyMode, UpdatePlatform, Updates,
-    UsageLimit, UsageLimitsPolicy, UsageLimitsProvider, UsageLimitsReady, UsageLimitsResult,
-    UsageLimitsSnapshot, UsageLimitsUnavailable, UsageLimitsUnavailableReason, Welcome,
-    WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges, WorktreeCommit,
-    WorktreeCommitList, WorktreeStatus, Wsl, WslDistro, WslDistroList,
+    ScriptMigrationSource, ScriptRunStatus, Scripts, SessionInfo, SettingsScope, ShellProfile,
+    SplitHorizontal, SplitNode, SplitSplit, SplitTabLeaf, SplitVertical, Tab, TabKind,
+    TerminalBackend, TerminalDefaults, TerminalSettings, TerminalViewportPolicy, Tunnel,
+    UpdateApplyMode, UpdatePlatform, Updates, UsageLimit, UsageLimitsPolicy, UsageLimitsProvider,
+    UsageLimitsReady, UsageLimitsResult, UsageLimitsSnapshot, UsageLimitsUnavailable,
+    UsageLimitsUnavailableReason, ViewportLease, Welcome, WindowDefaults, WorkspaceSnapshot,
+    Worktree, WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro,
+    WslDistroList,
 };
 
 /// The parsed, shared constants.

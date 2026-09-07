@@ -141,6 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let core = Arc::new(Core);
     start_watcher_reconciler(&registry);
+    start_viewport_lease_sweeper(&registry);
     loop {
         // A failed accept (e.g. EMFILE from a leaked-connection fd exhaustion)
         // must not take the whole process down with it: every other
@@ -179,6 +180,28 @@ fn start_watcher_reconciler(registry: &Arc<Registry>) {
     thread::spawn(move || loop {
         registry.reconcile_watchers();
         thread::sleep(watchers::RECONCILE_INTERVAL);
+    });
+}
+
+/// Restores a terminal's grid when the client that borrowed it goes away.
+///
+/// A phone holding a viewport lease can vanish without warning — the tunnel
+/// drops, iOS suspends the app mid-frame, the user force-quits — and none of
+/// those run any client-side cleanup. Only a timer on the host can hand the
+/// desktop's terminal back to its own size.
+fn start_viewport_lease_sweeper(registry: &Arc<Registry>) {
+    let registry = Arc::clone(registry);
+    let interval = Duration::from_millis(
+        u64::try_from(
+            pragma_constants::CONSTANTS
+                .terminal_viewport
+                .sweep_interval_ms,
+        )
+        .unwrap_or(5_000),
+    );
+    thread::spawn(move || loop {
+        registry.sweep_viewport_leases();
+        thread::sleep(interval);
     });
 }
 
@@ -636,6 +659,74 @@ fn handle_tabs_rpc(
     })
 }
 
+/// Serves the `sessions` RPC domain: session liveness and viewport ownership.
+///
+/// These live on the server rather than in `pragma-core` because they are
+/// facts about running PTYs, which only exist here.
+fn handle_sessions_rpc(
+    request_id: String,
+    payload: serde_json::Value,
+    registry: &Registry,
+) -> Result<RpcResponseFrame, HandledRequestError> {
+    let request = serde_json::from_value::<pragma_core::sessions::SessionsRequest>(payload)
+        .map_err(|error| HandledRequestError::Request(error.to_string()))?;
+    let result = match request {
+        pragma_core::sessions::SessionsRequest::Info { session_id } => registry
+            .session_info(&session_id)
+            .map_err(|error| error.to_string())
+            .and_then(|info| serde_json::to_value(info).map_err(|error| error.to_string())),
+        pragma_core::sessions::SessionsRequest::AcquireViewport {
+            session_id,
+            cols,
+            rows,
+        } => registry
+            .acquire_viewport(&session_id, cols, rows)
+            .map_err(|error| error.to_string())
+            .and_then(|lease| serde_json::to_value(lease).map_err(|error| error.to_string())),
+        pragma_core::sessions::SessionsRequest::RenewViewport {
+            session_id,
+            lease_id,
+        } => registry
+            .renew_viewport(&session_id, &lease_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::sessions::SessionsRequest::ReleaseViewport {
+            session_id,
+            lease_id,
+        } => registry
+            .release_viewport(&session_id, &lease_id)
+            .map_err(|error| error.to_string())
+            .and(Ok(serde_json::json!({ "ok": true }))),
+        pragma_core::sessions::SessionsRequest::Resize {
+            session_id,
+            cols,
+            rows,
+            lease_id,
+        } => registry
+            .resize_with_lease(&session_id, cols, rows, lease_id.as_deref())
+            .map_err(|error| error.to_string())
+            .map(|applied| serde_json::json!({ "applied": applied })),
+    };
+    Ok(match result {
+        Ok(payload) => RpcResponseFrame {
+            request_id,
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(message) => RpcResponseFrame {
+            request_id,
+            ok: false,
+            payload: None,
+            error: Some(RpcError {
+                code: pragma_constants::ProtocolErrorCode::Internal,
+                message,
+                details: None,
+            }),
+        },
+    })
+}
+
 fn handle_rpc_request(
     request: RequestFrame,
     registry: &Registry,
@@ -718,6 +809,9 @@ fn handle_rpc_request(
     }
     if matches!(rpc.method, ProtocolRpcMethod::Fanouts) {
         return Ok(handle_fanout_rpc(request_id, rpc.payload, registry));
+    }
+    if matches!(rpc.method, ProtocolRpcMethod::Sessions) {
+        return handle_sessions_rpc(request_id, rpc.payload, registry);
     }
     Ok(match core.handle_rpc(rpc.method, rpc.payload) {
         Ok(payload) => RpcResponseFrame {

@@ -81,6 +81,12 @@ pub enum SessionError {
     Io(#[from] std::io::Error),
     #[error("lock poisoned")]
     LockPoisoned,
+    #[error("session has exited")]
+    Exited,
+    #[error("another client holds the viewport")]
+    ViewportLeased,
+    #[error("viewport lease is no longer held")]
+    ViewportLeaseLost,
 }
 
 mod anyhow_pty {
@@ -166,6 +172,48 @@ pub struct Session {
     output_tx: SyncSender<OutputMsg>,
     exited: AtomicBool,
     on_exit: Mutex<Option<ExitHandler>>,
+    viewport: Mutex<ViewportState>,
+}
+
+/// Who currently owns a session's PTY grid, and what to put back afterwards.
+///
+/// A phone attaching to a session the desktop is showing has to resize the
+/// shared PTY to its own much smaller viewport. A lease makes that ownership
+/// explicit and time-bounded: while it is held, everyone else's resize is
+/// remembered rather than applied, and when it ends — by release, or by the
+/// host expiring it because the holder went away — the remembered size is
+/// restored. The host has to be the one that restores it, because iOS can
+/// suspend an app before any client-side cleanup runs.
+struct ViewportState {
+    current: (u16, u16),
+    /// The most recent size asked for by someone not holding the lease.
+    desired: (u16, u16),
+    lease: Option<ViewportLeaseState>,
+    /// Incremented on every grant, so a stale release cannot undo a newer lease.
+    generation: u64,
+}
+
+struct ViewportLeaseState {
+    id: String,
+    expires_at: Instant,
+}
+
+/// A granted lease, as the RPC layer reports it back to the holder.
+pub struct ViewportGrant {
+    pub lease_id: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub previous_cols: u16,
+    pub previous_rows: u16,
+    pub generation: u64,
+}
+
+/// A session's current grid and ownership, for a client deciding how to attach.
+pub struct ViewportInfo {
+    pub cols: u16,
+    pub rows: u16,
+    pub leased: bool,
+    pub generation: u64,
 }
 
 impl Session {
@@ -240,6 +288,12 @@ impl Session {
             output_tx,
             exited: AtomicBool::new(false),
             on_exit: Mutex::new(Some(Box::new(on_exit))),
+            viewport: Mutex::new(ViewportState {
+                current: (cols, rows),
+                desired: (cols, rows),
+                lease: None,
+                generation: 0,
+            }),
         });
         Self::start_coalescer(Arc::clone(&session), output_rx);
         Self::start_reader(Arc::clone(&session), reader);
@@ -310,7 +364,193 @@ impl Session {
         Ok(())
     }
 
+    /// Resizes on behalf of the session's ordinary owner (the desktop).
+    ///
+    /// While another client holds the viewport, this records the requested size
+    /// instead of applying it — otherwise a desktop layout observer and a phone
+    /// fight over the grid — and the recorded size is what the lease restores.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), SessionError> {
+        self.resize_with_lease(cols, rows, None).map(|_| ())
+    }
+
+    /// Resizes, honouring the viewport lease. Returns whether it was applied.
+    pub fn resize_with_lease(
+        &self,
+        cols: u16,
+        rows: u16,
+        lease_id: Option<&str>,
+    ) -> Result<bool, SessionError> {
+        let apply = {
+            let mut viewport = self
+                .viewport
+                .lock()
+                .map_err(|_| SessionError::LockPoisoned)?;
+            Self::expire_lease_if_due(&mut viewport);
+            match (&viewport.lease, lease_id) {
+                (Some(lease), Some(requested)) if lease.id == requested => {
+                    viewport.current = (cols, rows);
+                    true
+                }
+                // Someone who does not hold the lease: remember the size they
+                // want, and give it to them when the lease ends.
+                (Some(_), _) => {
+                    viewport.desired = (cols, rows);
+                    false
+                }
+                (None, _) => {
+                    viewport.current = (cols, rows);
+                    viewport.desired = (cols, rows);
+                    true
+                }
+            }
+        };
+        if apply {
+            self.apply_resize(cols, rows)?;
+        }
+        Ok(apply)
+    }
+
+    /// Takes exclusive ownership of the grid and resizes to the holder's size.
+    ///
+    /// Acquisition captures the size in force beforehand, so a lease that ends
+    /// without any desktop resize in between restores exactly what was there.
+    pub fn acquire_viewport(
+        &self,
+        cols: u16,
+        rows: u16,
+        ttl: Duration,
+    ) -> Result<ViewportGrant, SessionError> {
+        if self.has_exited() {
+            return Err(SessionError::Exited);
+        }
+        let grant = {
+            let mut viewport = self
+                .viewport
+                .lock()
+                .map_err(|_| SessionError::LockPoisoned)?;
+            Self::expire_lease_if_due(&mut viewport);
+            if viewport.lease.is_some() {
+                return Err(SessionError::ViewportLeased);
+            }
+            let previous = viewport.current;
+            viewport.generation += 1;
+            let lease_id = uuid::Uuid::new_v4().to_string();
+            viewport.lease = Some(ViewportLeaseState {
+                id: lease_id.clone(),
+                expires_at: Instant::now() + ttl,
+            });
+            viewport.current = (cols, rows);
+            ViewportGrant {
+                lease_id,
+                cols,
+                rows,
+                previous_cols: previous.0,
+                previous_rows: previous.1,
+                generation: viewport.generation,
+            }
+        };
+        self.apply_resize(cols, rows)?;
+        Ok(grant)
+    }
+
+    /// Extends a held lease. A lease that already expired cannot be renewed:
+    /// the grid has been handed back, and taking it again is a new acquisition.
+    pub fn renew_viewport(&self, lease_id: &str, ttl: Duration) -> Result<(), SessionError> {
+        let mut viewport = self
+            .viewport
+            .lock()
+            .map_err(|_| SessionError::LockPoisoned)?;
+        Self::expire_lease_if_due(&mut viewport);
+        match viewport.lease.as_mut() {
+            Some(lease) if lease.id == lease_id => {
+                lease.expires_at = Instant::now() + ttl;
+                Ok(())
+            }
+            _ => Err(SessionError::ViewportLeaseLost),
+        }
+    }
+
+    /// Hands the grid back and restores the size its owner last wanted.
+    ///
+    /// A release naming a lease that is no longer current is ignored rather
+    /// than errored: it is a late message from a client whose lease already
+    /// expired, and honouring it would resize out from under a newer holder.
+    pub fn release_viewport(&self, lease_id: &str) -> Result<(), SessionError> {
+        let restore = {
+            let mut viewport = self
+                .viewport
+                .lock()
+                .map_err(|_| SessionError::LockPoisoned)?;
+            let matches = viewport
+                .lease
+                .as_ref()
+                .is_some_and(|lease| lease.id == lease_id);
+            if !matches {
+                return Ok(());
+            }
+            viewport.lease = None;
+            viewport.current = viewport.desired;
+            viewport.desired
+        };
+        if self.has_exited() {
+            // An exited session is never resized: there is no grid to restore.
+            return Ok(());
+        }
+        self.apply_resize(restore.0, restore.1)
+    }
+
+    /// Expires a lease whose holder stopped renewing, restoring the grid.
+    /// Returns whether a lease was expired.
+    pub fn expire_viewport_if_due(&self) -> bool {
+        let restore = {
+            let Ok(mut viewport) = self.viewport.lock() else {
+                return false;
+            };
+            if !Self::expire_lease_if_due(&mut viewport) {
+                return false;
+            }
+            viewport.current = viewport.desired;
+            viewport.desired
+        };
+        if !self.has_exited() {
+            let _ = self.apply_resize(restore.0, restore.1);
+        }
+        true
+    }
+
+    /// The current grid and whether someone owns it.
+    pub fn viewport_info(&self) -> ViewportInfo {
+        let Ok(mut viewport) = self.viewport.lock() else {
+            return ViewportInfo {
+                cols: 0,
+                rows: 0,
+                leased: false,
+                generation: 0,
+            };
+        };
+        Self::expire_lease_if_due(&mut viewport);
+        ViewportInfo {
+            cols: viewport.current.0,
+            rows: viewport.current.1,
+            leased: viewport.lease.is_some(),
+            generation: viewport.generation,
+        }
+    }
+
+    /// Drops an expired lease. Returns whether one was dropped, so the caller
+    /// knows it now owes the PTY a restoring resize.
+    fn expire_lease_if_due(viewport: &mut ViewportState) -> bool {
+        let expired = viewport
+            .lease
+            .as_ref()
+            .is_some_and(|lease| lease.expires_at <= Instant::now());
+        if expired {
+            viewport.lease = None;
+        }
+        expired
+    }
+
+    fn apply_resize(&self, cols: u16, rows: u16) -> Result<(), SessionError> {
         self.master
             .lock()
             .map_err(|_| SessionError::LockPoisoned)?
@@ -1128,7 +1368,7 @@ mod tests {
     use super::{
         configured_profile, configured_shell, fan_out, gateway_env, path_with_cli_dir_from,
         pragma_cli_path_from, shell, terminal_block, thread, Duration, Instant, OscChunk,
-        OscParser, OutputCoalescer, OutputMsg, Scrollback, Session, ShellProfile,
+        OscParser, OutputCoalescer, OutputMsg, Scrollback, Session, SessionError, ShellProfile,
         OSC_PENDING_MAX_BYTES, OSC_TITLE_MAX_BYTES, OUTPUT_CHANNEL_CAPACITY,
     };
     use pragma_constants::CONSTANTS;
@@ -1877,5 +2117,165 @@ mod tests {
             ),
             Some(Path::new("/data/pragma-dev-abc/bin/pragma-cli").to_path_buf())
         );
+    }
+
+    /// A real PTY, so the lease's resizes hit an actual grid rather than a stub.
+    fn leased_session() -> (tempfile::TempDir, std::sync::Arc<Session>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = Session::spawn_with_exit_handler(
+            "lease-tab".to_string(),
+            "lease-worktree".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+            120,
+            40,
+            "unused-socket",
+            None,
+            &[],
+            |_| {},
+        )
+        .expect("a shell spawns on a pseudo-terminal");
+        (dir, session)
+    }
+
+    #[test]
+    fn a_lease_takes_the_grid_and_release_gives_it_back() {
+        let (_dir, session) = leased_session();
+
+        let grant = session
+            .acquire_viewport(40, 20, Duration::from_secs(30))
+            .expect("an unleased session grants its viewport");
+        assert_eq!((grant.previous_cols, grant.previous_rows), (120, 40));
+        let info = session.viewport_info();
+        assert_eq!((info.cols, info.rows), (40, 20));
+        assert!(info.leased);
+
+        session
+            .release_viewport(&grant.lease_id)
+            .expect("the holder releases");
+
+        let info = session.viewport_info();
+        assert_eq!((info.cols, info.rows), (120, 40));
+        assert!(!info.leased);
+    }
+
+    #[test]
+    fn a_second_client_cannot_take_a_held_viewport() {
+        let (_dir, session) = leased_session();
+        let grant = session
+            .acquire_viewport(40, 20, Duration::from_secs(30))
+            .expect("first grant");
+
+        let second = session.acquire_viewport(30, 10, Duration::from_secs(30));
+
+        assert!(matches!(second, Err(SessionError::ViewportLeased)));
+        // The refused acquisition changed nothing.
+        assert_eq!(session.viewport_info().cols, 40);
+        session.release_viewport(&grant.lease_id).expect("release");
+    }
+
+    #[test]
+    fn a_non_holders_resize_is_remembered_and_restored_not_applied() {
+        let (_dir, session) = leased_session();
+        let grant = session
+            .acquire_viewport(40, 20, Duration::from_secs(30))
+            .expect("grant");
+
+        // The desktop's layout observer fires while the phone is attached.
+        let applied = session
+            .resize_with_lease(100, 30, None)
+            .expect("a deferred resize is not an error");
+
+        assert!(!applied, "the phone keeps the grid it is rendering");
+        assert_eq!(session.viewport_info().cols, 40);
+
+        session.release_viewport(&grant.lease_id).expect("release");
+
+        // Release restores what the desktop last wanted, not what it had before.
+        let info = session.viewport_info();
+        assert_eq!((info.cols, info.rows), (100, 30));
+    }
+
+    #[test]
+    fn the_holders_own_resize_is_applied() {
+        let (_dir, session) = leased_session();
+        let grant = session
+            .acquire_viewport(40, 20, Duration::from_secs(30))
+            .expect("grant");
+
+        let applied = session
+            .resize_with_lease(50, 25, Some(&grant.lease_id))
+            .expect("the holder resizes");
+
+        assert!(applied);
+        assert_eq!(session.viewport_info().cols, 50);
+    }
+
+    #[test]
+    fn an_unrenewed_lease_expires_and_hands_the_grid_back() {
+        let (_dir, session) = leased_session();
+        session
+            .acquire_viewport(40, 20, Duration::from_millis(1))
+            .expect("grant");
+        thread::sleep(Duration::from_millis(5));
+
+        assert!(
+            session.expire_viewport_if_due(),
+            "the sweeper reclaims a lease whose holder stopped renewing"
+        );
+        let info = session.viewport_info();
+        assert_eq!((info.cols, info.rows), (120, 40));
+        assert!(!info.leased);
+        assert!(
+            !session.expire_viewport_if_due(),
+            "a second sweep has nothing left to expire"
+        );
+    }
+
+    #[test]
+    fn an_expired_lease_cannot_be_renewed_or_undo_a_newer_one() {
+        let (_dir, session) = leased_session();
+        let stale = session
+            .acquire_viewport(40, 20, Duration::from_millis(1))
+            .expect("first grant");
+        thread::sleep(Duration::from_millis(5));
+        session.expire_viewport_if_due();
+
+        assert!(matches!(
+            session.renew_viewport(&stale.lease_id, Duration::from_secs(30)),
+            Err(SessionError::ViewportLeaseLost)
+        ));
+
+        let fresh = session
+            .acquire_viewport(60, 30, Duration::from_secs(30))
+            .expect("the grid is free again");
+        assert!(fresh.generation > stale.generation);
+
+        // The vanished client's late release must not resize the new holder.
+        session
+            .release_viewport(&stale.lease_id)
+            .expect("a stale release is ignored, not an error");
+        let info = session.viewport_info();
+        assert_eq!((info.cols, info.rows), (60, 30));
+        assert!(info.leased);
+    }
+
+    #[test]
+    fn a_renewal_replaces_the_deadline() {
+        let (_dir, session) = leased_session();
+        let grant = session
+            .acquire_viewport(40, 20, Duration::from_secs(30))
+            .expect("grant");
+
+        // Renewing with a short window proves the deadline is *replaced*, not
+        // extended — and, unlike sleeping out a long one, does so without
+        // racing a slow machine.
+        session
+            .renew_viewport(&grant.lease_id, Duration::from_millis(1))
+            .expect("renew");
+        assert!(!session.expire_viewport_if_due(), "not due yet");
+        thread::sleep(Duration::from_millis(5));
+
+        assert!(session.expire_viewport_if_due());
+        assert!(!session.viewport_info().leased);
     }
 }

@@ -6,8 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pragma_constants::{
-    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, ShellProfile, Tab,
-    TabKind, Worktree,
+    AgentSessionLaunchPayload, NewWorktreeSpec, OpenPort, ProtocolEventKind, SessionInfo,
+    ShellProfile, Tab, TabKind, ViewportLease, Worktree, CONSTANTS,
 };
 use pragma_core::git::GitRequest;
 use pragma_core::tabs::TabAgentMetadata;
@@ -1209,6 +1209,88 @@ impl Registry {
         Ok(())
     }
 
+    /// Resizes on behalf of a viewport-lease holder. Without a matching lease
+    /// the size is only remembered, so a background layout observer on one
+    /// device cannot fight the device the user is actually typing on.
+    pub fn resize_with_lease(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        lease_id: Option<&str>,
+    ) -> Result<bool, RegistryError> {
+        Ok(self
+            .session(session_id)?
+            .resize_with_lease(cols, rows, lease_id)?)
+    }
+
+    /// Reports a session's grid, liveness, and whether its viewport is leased.
+    pub fn session_info(&self, session_id: &str) -> Result<SessionInfo, RegistryError> {
+        let session = self.session(session_id)?;
+        let viewport = session.viewport_info();
+        Ok(SessionInfo {
+            session_id: session_id.to_string(),
+            cols: i64::from(viewport.cols),
+            rows: i64::from(viewport.rows),
+            alive: !session.has_exited(),
+            leased: viewport.leased,
+            generation: i64::try_from(viewport.generation).unwrap_or(i64::MAX),
+        })
+    }
+
+    /// Grants temporary exclusive ownership of a session's grid.
+    pub fn acquire_viewport(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<ViewportLease, RegistryError> {
+        let ttl = lease_ttl();
+        let grant = self
+            .session(session_id)?
+            .acquire_viewport(cols, rows, ttl)?;
+        Ok(ViewportLease {
+            lease_id: grant.lease_id,
+            session_id: session_id.to_string(),
+            cols: i64::from(grant.cols),
+            rows: i64::from(grant.rows),
+            previous_cols: Some(i64::from(grant.previous_cols)),
+            previous_rows: Some(i64::from(grant.previous_rows)),
+            generation: i64::try_from(grant.generation).unwrap_or(i64::MAX),
+            expires_in_ms: i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX),
+        })
+    }
+
+    /// Extends a held viewport lease.
+    pub fn renew_viewport(&self, session_id: &str, lease_id: &str) -> Result<(), RegistryError> {
+        self.session(session_id)?
+            .renew_viewport(lease_id, lease_ttl())?;
+        Ok(())
+    }
+
+    /// Hands a viewport back and restores the size its owner last wanted.
+    pub fn release_viewport(&self, session_id: &str, lease_id: &str) -> Result<(), RegistryError> {
+        self.session(session_id)?.release_viewport(lease_id)?;
+        Ok(())
+    }
+
+    /// Expires leases whose holder stopped renewing.
+    ///
+    /// This runs on a timer rather than lazily, because the client that would
+    /// have triggered a lazy check is precisely the one that disappeared: a
+    /// backgrounded phone would otherwise leave the desktop's terminal stuck at
+    /// a phone-sized grid indefinitely.
+    pub fn sweep_viewport_leases(&self) -> usize {
+        let Ok(sessions) = self.sessions.lock() else {
+            return 0;
+        };
+        let sessions: Vec<Arc<Session>> = sessions.values().cloned().collect();
+        sessions
+            .iter()
+            .filter(|session| session.expire_viewport_if_due())
+            .count()
+    }
+
     pub fn kill(&self, session_id: &str) -> Result<(), RegistryError> {
         let session = self
             .sessions
@@ -1863,6 +1945,11 @@ impl Default for Registry {
             PathBuf::new(),
         )
     }
+}
+
+/// How long a viewport lease lives without renewal.
+fn lease_ttl() -> Duration {
+    Duration::from_millis(u64::try_from(CONSTANTS.terminal_viewport.lease_ms).unwrap_or(0))
 }
 
 #[cfg(test)]

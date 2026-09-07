@@ -1179,7 +1179,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    fn provider(plugin_id: &str, result: serde_json::Value) -> serde_json::Value {
+    fn provider(plugin_id: &str, result: &serde_json::Value) -> serde_json::Value {
         json!({
             "pluginId": plugin_id,
             "providerId": "usage",
@@ -1210,11 +1210,11 @@ mod tests {
 
     #[test]
     fn treats_only_a_load_error_as_a_provider_failure() {
-        assert!(provider_failed(&provider("p", load_error())));
-        assert!(!provider_failed(&provider("p", ready(1))));
+        assert!(provider_failed(&provider("p", &load_error())));
+        assert!(!provider_failed(&provider("p", &ready(1))));
         assert!(!provider_failed(&provider(
             "p",
-            json!({ "status": "unavailable", "reason": "not-configured", "message": "Sign in" })
+            &json!({ "status": "unavailable", "reason": "not-configured", "message": "Sign in" })
         )));
         // A provider that has never produced a reading is not a cached success.
         assert!(provider_failed(
@@ -1250,7 +1250,7 @@ mod tests {
     fn serves_a_cached_reading_until_a_provider_is_due() {
         let registry = usage_registry("fresh");
         registry
-            .merge_usage_limits("", vec![provider("a", ready(5))])
+            .merge_usage_limits("", vec![provider("a", &ready(5))])
             .expect("merge");
 
         let cached = registry
@@ -1266,7 +1266,7 @@ mod tests {
     fn keeps_the_last_good_reading_when_a_provider_starts_failing() {
         let registry = usage_registry("laststood");
         registry
-            .merge_usage_limits("", vec![provider("a", ready(5))])
+            .merge_usage_limits("", vec![provider("a", &ready(5))])
             .expect("first merge");
         let first = registry
             .fresh_usage_limits("", None)
@@ -1275,7 +1275,7 @@ mod tests {
         let first_observed = first[0].get("observedAt").cloned().expect("observedAt");
 
         let merged = registry
-            .merge_usage_limits("", vec![provider("a", load_error())])
+            .merge_usage_limits("", vec![provider("a", &load_error())])
             .expect("second merge");
 
         // The card still shows real numbers; the untouched `observedAt` is what
@@ -1291,11 +1291,11 @@ mod tests {
     fn drops_a_provider_that_left_the_catalog() {
         let registry = usage_registry("dropped");
         registry
-            .merge_usage_limits("", vec![provider("a", ready(1)), provider("b", ready(1))])
+            .merge_usage_limits("", vec![provider("a", &ready(1)), provider("b", &ready(1))])
             .expect("first merge");
 
         let merged = registry
-            .merge_usage_limits("", vec![provider("a", ready(2))])
+            .merge_usage_limits("", vec![provider("a", &ready(2))])
             .expect("second merge");
 
         assert_eq!(merged.len(), 1);
@@ -1307,7 +1307,7 @@ mod tests {
     fn scopes_the_cache_by_project_root() {
         let registry = usage_registry("scoped");
         registry
-            .merge_usage_limits("/repo", vec![provider("a", ready(1))])
+            .merge_usage_limits("/repo", vec![provider("a", &ready(1))])
             .expect("merge");
 
         assert!(registry
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn narrows_a_response_to_the_requested_plugin() {
-        let providers = vec![provider("a", ready(1)), provider("b", ready(1))];
+        let providers = vec![provider("a", &ready(1)), provider("b", &ready(1))];
 
         let filtered = filter_by_plugin(providers.clone(), Some("b"));
 

@@ -39,6 +39,7 @@ fn parse_method(method: &str) -> Option<ProtocolRpcMethod> {
         "tunnel" => ProtocolRpcMethod::Tunnel,
         "scratchpads" => ProtocolRpcMethod::Scratchpads,
         "fanouts" => ProtocolRpcMethod::Fanouts,
+        "sessions" => ProtocolRpcMethod::Sessions,
         _ => return None,
     })
 }
@@ -54,6 +55,10 @@ mod tests {
         assert!(matches!(
             parse_method("filesystem"),
             Some(ProtocolRpcMethod::Filesystem)
+        ));
+        assert!(matches!(
+            parse_method("sessions"),
+            Some(ProtocolRpcMethod::Sessions)
         ));
         assert!(matches!(
             parse_method("plugins"),

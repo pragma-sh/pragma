@@ -30,7 +30,8 @@
     "updates",
     "onboarding",
     "welcome",
-    "usageLimits"
+    "usageLimits",
+    "terminalViewport"
   ],
   "properties": {
     "app": {
@@ -110,9 +111,77 @@
     },
     "usageLimits": {
       "$ref": "#/definitions/UsageLimitsPolicy"
+    },
+    "terminalViewport": {
+      "$ref": "#/definitions/TerminalViewportPolicy"
     }
   },
   "definitions": {
+    "TerminalViewportPolicy": {
+      "title": "TerminalViewportPolicy",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bounds for temporary exclusive ownership of a session's PTY grid. A second client (a phone) attaching to a session the desktop is already showing has to resize the shared PTY to its own much smaller viewport; a lease makes that ownership explicit and, crucially, time-bounded — iOS can suspend an app before any client-side cleanup runs, so the host, not the client, is what restores the desktop's size.",
+      "required": ["leaseMs", "renewIntervalMs", "sweepIntervalMs"],
+      "properties": {
+        "leaseMs": {
+          "type": "integer",
+          "description": "How long a viewport lease survives without renewal before the host expires it and restores the previous grid."
+        },
+        "renewIntervalMs": {
+          "type": "integer",
+          "description": "How often a holder should renew. Comfortably shorter than `leaseMs`, so one missed renewal on a flaky tunnel does not drop the lease."
+        },
+        "sweepIntervalMs": {
+          "type": "integer",
+          "description": "How often the host sweeps for expired leases. Expiry cannot wait for the next request: the client that would have made it is the one that vanished."
+        }
+      }
+    },
+    "SessionInfo": {
+      "title": "SessionInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a client needs to know before attaching to a session it does not own.",
+      "required": ["sessionId", "cols", "rows", "alive", "leased", "generation"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "cols": { "type": "integer" },
+        "rows": { "type": "integer" },
+        "alive": {
+          "type": "boolean",
+          "description": "The shell is still running. An exited session is never resized or respawned."
+        },
+        "leased": {
+          "type": "boolean",
+          "description": "Another client currently owns the viewport."
+        },
+        "generation": {
+          "type": "integer",
+          "description": "Incremented on every lease grant. A release naming an older generation is stale and must not undo a newer lease."
+        }
+      }
+    },
+    "ViewportLease": {
+      "title": "ViewportLease",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A granted viewport lease. The holder resizes with `leaseId`; everyone else's resize is recorded as a desired size and applied when the lease ends. `previousCols`/`previousRows` are the grid captured at acquisition, restored on release unless a newer desired size arrived meanwhile.",
+      "required": ["leaseId", "sessionId", "cols", "rows", "generation", "expiresInMs"],
+      "properties": {
+        "leaseId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "cols": { "type": "integer" },
+        "rows": { "type": "integer" },
+        "previousCols": { "type": "integer" },
+        "previousRows": { "type": "integer" },
+        "generation": { "type": "integer" },
+        "expiresInMs": {
+          "type": "integer",
+          "description": "Milliseconds until the host expires this lease without a renewal."
+        }
+      }
+    },
     "UsageLimitsPolicy": {
       "title": "UsageLimitsPolicy",
       "type": "object",
@@ -326,7 +395,8 @@
         "ports",
         "scratchpads",
         "wsl",
-        "fanouts"
+        "fanouts",
+        "sessions"
       ]
     },
     "ProtocolEventKind": {

@@ -36,6 +36,7 @@ export type {
   FanoutStatus,
   FanoutSubscriptionPayload,
   KanbanPromptCard,
+  SessionInfo,
   UsageLimit,
   UsageLimitsProvider,
   UsageLimitsReady,
@@ -43,6 +44,7 @@ export type {
   UsageLimitsSnapshot,
   UsageLimitsUnavailable,
   UsageLimitsUnavailableReason,
+  ViewportLease,
 } from "@pragma/constants";
 export { PushClient, type PushRegistration, type PushTestResult } from "./push-client";
 export { ThemeClient, type GetThemeOptions } from "./theme-client";

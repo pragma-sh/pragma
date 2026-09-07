@@ -38,5 +38,6 @@ pub fn method_name(method: ProtocolRpcMethod) -> &'static str {
         ProtocolRpcMethod::Scratchpads => "scratchpads",
         ProtocolRpcMethod::Wsl => "wsl",
         ProtocolRpcMethod::Fanouts => "fanouts",
+        ProtocolRpcMethod::Sessions => "sessions",
     }
 }
