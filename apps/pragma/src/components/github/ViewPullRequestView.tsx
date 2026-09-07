@@ -1065,11 +1065,19 @@ function BranchCleanupDialog({
 }) {
   const workspace = useWorkspace();
   const [deleteRemote, setDeleteRemote] = useState(true);
+  const cleanupStarted = useRef(false);
+
+  useEffect(() => {
+    if (open) cleanupStarted.current = false;
+  }, [open]);
 
   const cleanup = useCallback(() => {
+    if (cleanupStarted.current) return;
+    cleanupStarted.current = true;
     onOpenChange(false);
-    void (async () => {
-      if (deleteRemote) {
+
+    if (deleteRemote) {
+      void (async () => {
         for (const target of targets) {
           try {
             // eslint-disable-next-line no-await-in-loop -- each worktree must remain registered until its remote delete starts.
@@ -1078,7 +1086,10 @@ function BranchCleanupDialog({
             toast.error(`Remote branch deletion failed: ${errorMessage(cause)}`);
           }
         }
-      }
+      })();
+    }
+
+    void (async () => {
       try {
         for (const target of targets) {
           // eslint-disable-next-line no-await-in-loop -- delete stack children before their parents.
@@ -1116,7 +1127,12 @@ function BranchCleanupDialog({
           <Button onClick={() => onOpenChange(false)} size="sm" variant="outline">
             Keep
           </Button>
-          <Button onClick={cleanup} size="sm" variant="destructive">
+          <Button
+            disabled={cleanupStarted.current}
+            onClick={cleanup}
+            size="sm"
+            variant="destructive"
+          >
             Delete {targets.length === 1 ? "branch" : "branches"}
           </Button>
         </DialogFooter>
