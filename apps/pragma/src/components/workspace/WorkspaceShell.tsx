@@ -311,7 +311,7 @@ export function WorkspaceShell() {
                   The sidebar stays; only the terminal/right-sidebar area is swapped. */}
                   {/* Creating a worktree takes over the same area for the same
                   reason: it is a full-frame loading screen, not an overlay. */}
-                  {creation ? (
+                  {creation?.viewing ? (
                     <WorktreeCreationScreen />
                   ) : kanban.mode === "kanban" ? (
                     <ProjectKanbanWorkspace />

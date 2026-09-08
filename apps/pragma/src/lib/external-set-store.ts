@@ -20,6 +20,11 @@ export function createToggleSetStore(storageKey?: string) {
     }
   }
 
+  function set(id: string, present: boolean): void {
+    if (values.has(id) === present) return;
+    toggle(id);
+  }
+
   function useSnapshot(): ReadonlySet<string> {
     return useSyncExternalStore(
       subscribe,
@@ -52,5 +57,5 @@ export function createToggleSetStore(storageKey?: string) {
     }
   }
 
-  return { toggle, has: (id: string) => values.has(id), useSnapshot };
+  return { toggle, set, has: (id: string) => values.has(id), useSnapshot };
 }
