@@ -2661,11 +2661,17 @@ mod tests {
         let query = "stty size\r";
         #[cfg(windows)]
         let query = "\"$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)\"\r";
-        registry.write(&id, query).expect("write");
-
         let mut output = String::new();
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let mut next_query = Instant::now();
         while Instant::now() < deadline {
+            if Instant::now() >= next_query {
+                registry.write(&id, query).expect("write");
+                // ConPTY may consume input while PowerShell is still painting
+                // its initial prompt after the resize. Keep probing rather
+                // than making shell startup timing part of this assertion.
+                next_query = Instant::now() + std::time::Duration::from_millis(500);
+            }
             if let Ok(EventFrame::Output { data, .. }) =
                 rx.recv_timeout(std::time::Duration::from_millis(200))
             {
@@ -2675,7 +2681,7 @@ mod tests {
                 }
             }
         }
-        panic!("expected stty to report 40 120 (rows cols); output was: {output:?}");
+        panic!("expected shell to report 40 120 (rows cols); output was: {output:?}");
     }
 
     #[test]
