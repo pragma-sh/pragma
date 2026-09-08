@@ -1,12 +1,14 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { type ReactNode, useCallback, useState } from "react";
-import { Alert, ScrollView, View, type ColorValue } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, View, type ColorValue } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AgentIcon } from "@/components/AgentIcon";
 import { AgentStatusDot } from "@/components/AgentStatusDot";
 import { LaunchAgentButton } from "@/components/LaunchAgentButton";
 import { LaunchSheet } from "@/components/LaunchSheet";
+import { CommitAndPrSheet } from "@/components/CommitAndPrSheet";
+import { IconSymbol } from "@/components/IconSymbol";
 import { NavGroup, NavRow } from "@/components/NavRow";
 import { ScriptsMenuButton } from "@/components/ScriptsMenuButton";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -28,6 +30,7 @@ import { hapticImpact, hapticSuccess, hapticWarning } from "@/lib/haptics";
 import { attachmentLabel } from "@/lib/scratchpad-agent";
 import type { AgentTab, TerminalTab } from "@/lib/types";
 import { catalogAgentById, useCatalog } from "@/lib/use-catalog";
+import { useCommitAndPr, type CommitAndPr } from "@/lib/use-commit-and-pr";
 import { useScratchpads } from "@/lib/use-scratchpads";
 import { useViewedProjectRoot } from "@/lib/use-viewed-project";
 import { worktreeLabel, type WorktreeNode } from "@/lib/worktree-tree";
@@ -41,6 +44,8 @@ export default function WorktreeScreen() {
   const children = useChildWorktrees(worktreeId);
   const agentTabs = useAgentTabs(worktreeId);
   const terminalTabs = useTerminalTabs(worktreeId);
+  const commitAndPr = useCommitAndPr(worktreeId, worktree?.path);
+  const [commitOpen, setCommitOpen] = useState(false);
   const { status } = useConnection();
   const insets = useSafeAreaInsets();
   const [launchOpen, setLaunchOpen] = useState(false);
@@ -54,14 +59,31 @@ export default function WorktreeScreen() {
   // Header right, in the order the plan calls for: scripts, then launch. Both
   // are the same size and hit target, so a long worktree title truncates rather
   // than pushing either off the edge.
+  const openCommitSheet = useCallback(() => {
+    hapticImpact();
+    setCommitOpen(true);
+  }, []);
   const renderHeaderActions = useCallback(
     ({ tintColor }: { tintColor?: ColorValue }) => (
       <View className="flex-row items-center gap-4">
+        <Pressable
+          accessibilityLabel="Commit and open a pull request"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={openCommitSheet}
+        >
+          <IconSymbol
+            color={tintColor ?? foreground}
+            fallback="⌥"
+            name="arrow.triangle.branch"
+            size={22}
+          />
+        </Pressable>
         <ScriptsMenuButton color={tintColor ?? foreground} worktreeId={worktreeId} />
         <LaunchAgentButton color={tintColor ?? foreground} onPress={openLaunchSheet} />
       </View>
     ),
-    [foreground, openLaunchSheet, worktreeId],
+    [foreground, openCommitSheet, openLaunchSheet, worktreeId],
   );
 
   // Terminals are always offered, so "empty" is only about what already exists.
@@ -72,6 +94,7 @@ export default function WorktreeScreen() {
       <WorktreeHeader headerRight={renderHeaderActions} status={status} worktree={worktree} />
       <WorktreeContents
         agentTabs={agentTabs}
+        commitAndPr={commitAndPr}
         empty={empty}
         insetBottom={insets.bottom}
         terminalTabs={terminalTabs}
@@ -79,6 +102,7 @@ export default function WorktreeScreen() {
         worktreeNodes={children}
       />
       <WorktreeLaunchSheet onOpenChange={setLaunchOpen} open={launchOpen} worktree={worktree} />
+      <CommitAndPrSheet flow={commitAndPr} onOpenChange={setCommitOpen} open={commitOpen} />
     </>
   );
 }
@@ -104,6 +128,7 @@ function WorktreeHeader({
 
 function WorktreeContents({
   agentTabs,
+  commitAndPr,
   empty,
   insetBottom,
   terminalTabs,
@@ -111,6 +136,7 @@ function WorktreeContents({
   worktreeNodes,
 }: {
   agentTabs: AgentTab[];
+  commitAndPr: CommitAndPr;
   empty: boolean;
   insetBottom: number;
   terminalTabs: TerminalTab[];
@@ -123,6 +149,7 @@ function WorktreeContents({
       contentContainerStyle={{ padding: 16, gap: 24, paddingBottom: insetBottom + 24 }}
       contentInsetAdjustmentBehavior="automatic"
     >
+      <LinkedPullRequest flow={commitAndPr} />
       <WorktreesGroup nodes={worktreeNodes} />
       <TerminalsGroup tabs={terminalTabs} worktreeId={worktreeId} />
       <AgentTabsGroup tabs={agentTabs} />
@@ -155,6 +182,36 @@ function WorktreeLaunchSheet({
     />
   );
 }
+
+/**
+ * The branch's pull request, when it has one.
+ *
+ * Opened with the platform link handler on the canonical
+ * `https://github.com/owner/repo/pull/number` GitHub itself reports — so the OS
+ * routes it to the GitHub app when the user has one, and to a browser when they
+ * do not. There is no `github://` scheme to invent.
+ */
+function LinkedPullRequest({ flow }: { flow: CommitAndPr }) {
+  const pullRequest = flow.pullRequest;
+  if (!pullRequest) return null;
+  return (
+    <NavGroup title="Pull request">
+      <NavRow
+        onPress={() => void Linking.openURL(pullRequest.url)}
+        subtitle={PULL_REQUEST_STATE_LABEL[pullRequest.state]}
+        title={`#${pullRequest.number} ${pullRequest.title}`}
+      />
+    </NavGroup>
+  );
+}
+
+/** Merged reads differently from closed, so the labels keep them apart. */
+const PULL_REQUEST_STATE_LABEL = {
+  draft: "Draft",
+  open: "Open",
+  merged: "Merged",
+  closed: "Closed",
+} as const;
 
 /** The nested child worktrees section, or nothing when there are none. */
 function WorktreesGroup({ nodes }: { nodes: WorktreeNode[] }) {
