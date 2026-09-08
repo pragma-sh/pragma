@@ -46,7 +46,7 @@ interface WorktreeCreationRequest {
 }
 
 /** Live progress for the full-frame creating-worktree screen. */
-export interface WorktreeCreationState {
+interface WorktreeCreationState {
   projectId: string;
   /** Worktree the pending one hangs under, so the sidebar can place its row. */
   parentWorktreeId: string;
