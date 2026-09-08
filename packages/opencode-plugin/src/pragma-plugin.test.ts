@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { opencodeAgentPlugin } from "./pragma-plugin";
+import { opencodeAgentPlugin, parseOpenCodeModels } from "./pragma-plugin";
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
 
@@ -25,4 +25,16 @@ describe("opencode plugin entry", () => {
     expect(source).not.toMatch(/^import .*"node:/m);
     expect(source).not.toMatch(/^\s*(?:const|let|var) .*\bprocess\./m);
   });
+});
+
+it("keeps a version dot in a derived model name", () => {
+  expect(
+    parseOpenCodeModels(
+      ["opencode/claude-opus-4-5", "opencode/gemini-3.1-pro", "opencode/big-pickle"].join("\n"),
+    ),
+  ).toEqual([
+    { id: "opencode/claude-opus-4-5", name: "claude opus 4.5 (opencode)" },
+    { id: "opencode/gemini-3.1-pro", name: "gemini 3.1 pro (opencode)" },
+    { id: "opencode/big-pickle", name: "big pickle (opencode)" },
+  ]);
 });

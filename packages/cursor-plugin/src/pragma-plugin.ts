@@ -87,10 +87,6 @@ export const cursorAgentPlugin: PluginDefinition = definePlugin({
       args: {
         model: (modelId: string) => ["--model", modelId],
         reasoning: () => [],
-        modelReasoning: (modelId: string, reasoningId: string) => [
-          "--model",
-          `${modelId}[effort=${reasoningId}]`,
-        ],
         permissionMode: () => [],
       },
     }),
@@ -382,32 +378,28 @@ function isUnavailableResult(
   );
 }
 
-/** Parses Cursor Agent's `models` output into model entries with effort levels. */
+/**
+ * Parses Cursor Agent's `models` output into model entries.
+ *
+ * Every id is kept exactly as `cursor-agent` prints it. Cursor has no separate
+ * reasoning-effort flag: the effort is baked into the model id itself
+ * (`cursor-grok-4.6-high`), and the effort-stripped base (`cursor-grok-4.6`)
+ * usually is not a model at all. Grouping the list by that base and rebuilding
+ * a `--model <base>[effort=<id>]` argument produced ids the CLI rejects with
+ * `Cannot use this model: ...`, so the list stays flat.
+ */
 export function parseCursorModels(output: string): AgentModelEntry[] {
   const byId = new Map<string, AgentModelEntry>();
   for (const line of output.split("\n")) {
     const model = parseCursorModelLine(line);
-    if (!model) {
-      continue;
+    if (model && !byId.has(model.id)) {
+      byId.set(model.id, model);
     }
-    const entry = byId.get(model.baseId) ?? {
-      id: model.baseId,
-      name: cleanCursorName(model.name, model.effort),
-      reasoning: [],
-    };
-    if (model.effort && entry.reasoning?.every((item) => item.id !== model.effort)) {
-      entry.reasoning.push({ id: model.effort, name: effortName(model.effort) });
-    }
-    byId.set(model.baseId, entry);
   }
-  return [...byId.values()].map((model) =>
-    model.reasoning?.length ? model : { id: model.id, name: model.name },
-  );
+  return [...byId.values()];
 }
 
-function parseCursorModelLine(
-  line: string,
-): { baseId: string; name: string; effort: string | null } | null {
+function parseCursorModelLine(line: string): AgentModelEntry | null {
   if (!line.includes(" - ")) {
     return null;
   }
@@ -417,29 +409,5 @@ function parseCursorModelLine(
   if (!id || !name || /\s/.test(id)) {
     return null;
   }
-  return { ...splitCursorEffort(id), name };
-}
-
-function splitCursorEffort(id: string): { baseId: string; effort: string | null } {
-  const fast = id.endsWith("-fast");
-  const withoutFast = fast ? id.slice(0, -5) : id;
-  for (const effort of ["extra-high", "xhigh", "medium", "high", "low", "max", "none"]) {
-    if (withoutFast.endsWith(`-${effort}`)) {
-      const base = withoutFast.slice(0, -effort.length - 1);
-      return { baseId: fast ? `${base}-fast` : base, effort };
-    }
-  }
-  return { baseId: id, effort: null };
-}
-
-function cleanCursorName(name: string, effort: string | null): string {
-  return effort
-    ? name.replace(new RegExp(`\\s+${effortName(effort)}(?=\\s|$)`, "i"), "").trim()
-    : name;
-}
-
-function effortName(effort: string): string {
-  return effort === "xhigh" || effort === "extra-high"
-    ? "Extra High"
-    : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`;
+  return { id, name };
 }

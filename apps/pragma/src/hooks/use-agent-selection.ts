@@ -18,7 +18,7 @@ export interface AgentSelection {
   modelSelection: AgentModelSelection;
   /** The currently chosen agent, or `null` until one resolves. */
   selectedAgent: AgentConfig | null;
-  /** Lazily loads an agent's models (e.g. when its submenu is hovered). */
+  /** Lazily loads an agent's models when its submenu is hovered. */
   loadModels: (agentId: string) => void;
   /** Selects an agent + model and remembers it for next time. */
   handleAgentChange: (agentId: string, selection: AgentModelSelection) => void;
