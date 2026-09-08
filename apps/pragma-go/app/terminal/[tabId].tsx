@@ -1,8 +1,7 @@
 import { base64ToBytes } from "@pragma/sdk";
-import * as Clipboard from "expo-clipboard";
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { KeyboardAvoidingView, Linking, Platform, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Linking, Platform, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui/text";
@@ -79,13 +78,21 @@ export default function TerminalScreen() {
   );
 
   const handlePaste = useCallback(() => {
-    void Clipboard.getStringAsync().then((text) => {
+    const paste = async (): Promise<void> => {
+      const text = await readClipboard();
+      if (text === null) {
+        Alert.alert(
+          "Paste unavailable",
+          "This build of Pragma Go cannot read the clipboard. Rebuild the dev client to enable it.",
+        );
+        return;
+      }
       // Through the renderer, not as raw input: `paste` honours the program's
       // bracketed-paste mode, which is what stops a multi-line paste from
       // running each line as its own command.
       if (text) renderer.current?.send({ type: "paste", text });
-      return undefined;
-    });
+    };
+    void paste();
   }, []);
 
   const label = shellTitle ?? tab?.title ?? title ?? "Terminal";
@@ -146,4 +153,22 @@ function StatusLine({
       <Text className="text-xs text-muted-foreground">{message}</Text>
     </View>
   );
+}
+
+/**
+ * Reads the clipboard, or null when this build cannot.
+ *
+ * Loaded on demand rather than imported: `expo-clipboard` resolves its native
+ * module at import time, so a static import would throw while the router is
+ * still registering routes — taking the whole app down at launch on any client
+ * built before the dependency was added. Paste is worth a lazy import; the app
+ * starting is not worth risking for it.
+ */
+async function readClipboard(): Promise<string | null> {
+  try {
+    const clipboard = await import("expo-clipboard");
+    return await clipboard.getStringAsync();
+  } catch {
+    return null;
+  }
 }
