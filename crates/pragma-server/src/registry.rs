@@ -437,6 +437,30 @@ impl Registry {
         match action {
             "status" => Ok(AiHost::status()),
             "commitAndDraftPullRequest" => self.start_commit_and_draft(payload),
+            "generateCommitMessage" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::commit_message(Path::new(&worktree.path))
+            }
+            "generatePullRequestDraft" => {
+                let (worktree, parent) = self.ai_worktree(payload)?;
+                AiHost::pull_request_draft(
+                    Path::new(&worktree.path),
+                    parent
+                        .as_ref()
+                        .map_or("main", |parent| parent.branch.as_str()),
+                    parent
+                        .as_ref()
+                        .map(|parent| Path::new(parent.path.as_str())),
+                )
+            }
+            "inlineEdit" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::inline_edit(Path::new(&worktree.path), payload)
+            }
+            "ask" => {
+                let (worktree, _) = self.ai_worktree(payload)?;
+                AiHost::ask(Path::new(&worktree.path), payload)
+            }
             "getRun" => {
                 let job_id = required_field(payload, "runId")?;
                 let job = self.ai.job(&job_id)?;
@@ -451,6 +475,16 @@ impl Registry {
                 "unknown ai action: {other}"
             ))),
         }
+    }
+
+    /// The worktree an AI request names, and the worktree it branched from.
+    fn ai_worktree(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<(Worktree, Option<Worktree>), AiError> {
+        let worktree_id = required_field(payload, "worktreeId")?;
+        self.worktree_with_parent(&worktree_id)
+            .map_err(AiError::Operation)
     }
 
     /// Resolves what the job needs — the worktree, its parent branch, the

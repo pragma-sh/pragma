@@ -113,6 +113,24 @@ Four namespaces exist because the _host_ owns the thing, not the client:
 - `client.usageLimits` — the host's single validated cache of plugin usage
   providers. Asking often is cheap; the host decides when a provider runs.
 
+## AI and GitHub
+
+`client.ai` and `client.github` reach host-owned operations. Two rules shape them:
+
+- **Committing is a job, not a call.** `commitAndDraftPullRequest` returns
+  immediately; poll `getRun`. It is idempotent per `requestId` — reuse the id
+  when retrying, because starting twice would commit the same work under two
+  sets of messages. `cancelRun` stops the next step and never un-commits.
+- **Publishing is separate from committing**, because a commit is local and a
+  publish is not. `github.publish` pushes and creates, idempotent per
+  `requestId`; `github.pullRequest` finds an existing one, including one opened
+  outside Pragma, and reports merged separately from closed.
+
+There is deliberately **no method that returns the GitHub token**: this
+namespace is reachable from a paired phone. `ai.ask` is read-only by
+construction; anything that should change files goes through `agents.launch`,
+where the user sees and approves what it does.
+
 ## Fanouts
 
 `client.fanouts` is full parity with `pragma-cli fanout` over the same `fanouts`

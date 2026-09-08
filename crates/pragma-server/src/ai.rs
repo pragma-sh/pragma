@@ -153,6 +153,54 @@ impl AiHost {
         }
     }
 
+    /// Writes a commit message for what is currently staged.
+    ///
+    /// Read-only, and staged-only: it describes what the user has already
+    /// chosen to commit rather than everything in the worktree.
+    pub fn commit_message(root: &Path) -> Result<Value, AiError> {
+        let cwd = root.to_string_lossy().into_owned();
+        let staged = pragma_core::git::stdout_in(root, &["diff", "--cached"])
+            .map_err(|error| AiError::Operation(error.to_string()))?;
+        if staged.trim().is_empty() {
+            return Err(AiError::Operation(
+                "There are no staged changes to describe.".to_string(),
+            ));
+        }
+        Self::run_sidecar("commit-message", &cwd, &staged)
+    }
+
+    /// Drafts pull request text for the commits already on this branch.
+    pub fn pull_request_draft(
+        root: &Path,
+        parent_branch: &str,
+        parent_path: Option<&Path>,
+    ) -> Result<Value, AiError> {
+        let cwd = root.to_string_lossy().into_owned();
+        let context = pragma_core::ai::pull_request_context(root, parent_branch, parent_path)
+            .map_err(|error| AiError::Operation(error.to_string()))?;
+        Self::run_sidecar("pull-request", &cwd, &serde_json::to_string(&context)?)
+    }
+
+    /// Proposes an edit to a document the caller supplies.
+    ///
+    /// The document travels in the request rather than being read from disk:
+    /// the buffer a user is editing is what they mean, and it may not have been
+    /// saved yet.
+    pub fn inline_edit(root: &Path, payload: &Value) -> Result<Value, AiError> {
+        let cwd = root.to_string_lossy().into_owned();
+        Self::run_sidecar("inline-edit", &cwd, &payload.to_string())
+    }
+
+    /// Answers a question about the code.
+    ///
+    /// Read-only by construction: `ask` is the sidecar's question-answering
+    /// command, not an agent. Anything that should be able to change files goes
+    /// through `agents.launch`, where the user can see and approve what it does.
+    pub fn ask(root: &Path, payload: &Value) -> Result<Value, AiError> {
+        let cwd = root.to_string_lossy().into_owned();
+        Self::run_sidecar("ask", &cwd, &payload.to_string())
+    }
+
     /// Starts a commit-and-draft run, or returns the one this request already
     /// started.
     ///

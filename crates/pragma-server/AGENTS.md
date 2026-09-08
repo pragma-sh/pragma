@@ -18,6 +18,26 @@ scrollback, raw output, and agent-status strengths.
 - Supervising persisted remote-access tunnels so mobile connectivity survives desktop
   client exits and restarts.
 
+## GitHub and AI on the host
+
+The GitHub token lives in this server's directory, beside the socket — not in
+the desktop's app data — because that is what lets a phone open a pull request
+with no desktop window running. Owner-only permissions come from
+`pragma_platform::perms`, so Windows gets a real ACL.
+
+**The `github` RPC domain has no action that returns the token, and must not
+grow one:** the gateway proxies that domain to paired phones. The desktop, which
+still needs it for its own Octokit calls, reads the host's file directly — a
+local read that is not reachable over the wire.
+
+AI commits are **jobs**, in `ai.rs`. They outlive the request that started them,
+record their stage after every step, and are idempotent per caller request id.
+A job still marked running when the server starts is reported as `interrupted`,
+because that is what it was — and it keeps its commit count, since those commits
+are real. Cancelling stops the next step and never un-commits anything. Both the
+desktop and the phone call this same RPC, which is also what makes the
+per-project git lock mean something: two locks would exclude nothing.
+
 ## Host-owned tabs, viewports, and script runs
 
 Three things the server owns outright, because a phone must work with the

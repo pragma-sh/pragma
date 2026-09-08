@@ -84,6 +84,75 @@ export class AiClient {
     );
   }
 
+  /**
+   * Writes a commit message for what is currently staged.
+   *
+   * Staged, not everything: it describes what the user has already chosen to
+   * commit.
+   */
+  async generateCommitMessage(
+    worktreeId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    const result = await this.aiRpc<{ message: string }>(
+      { action: "generateCommitMessage", worktreeId },
+      options.signal,
+    );
+    return result.message;
+  }
+
+  /** Drafts pull request text for the commits already on this branch. */
+  generatePullRequestDraft(
+    worktreeId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ title: string; body: string }> {
+    return this.aiRpc<{ title: string; body: string }>(
+      { action: "generatePullRequestDraft", worktreeId },
+      options.signal,
+    );
+  }
+
+  /**
+   * Proposes an edit to a document.
+   *
+   * The document travels in the request rather than being read from disk: the
+   * buffer the user is editing is what they mean, and it may not be saved yet.
+   */
+  inlineEdit(
+    input: {
+      worktreeId: string;
+      filePath: string;
+      instruction: string;
+      doc: string;
+      startLine: number;
+      endLine: number;
+    },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ summary: string; edits: { oldText: string; newText: string }[] }> {
+    return this.aiRpc({ action: "inlineEdit", ...input }, options.signal);
+  }
+
+  /**
+   * Asks a question about the code.
+   *
+   * Read-only by construction. Anything that should be able to change files
+   * goes through `agents.launch`, where the user can see and approve what it
+   * does — a second unrestricted agent runtime is not what this is.
+   *
+   * Aborting the request stops the client waiting; the host's own work is
+   * short-lived and harmless, because nothing here writes.
+   */
+  async ask(
+    input: { worktreeId: string; question: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    const result = await this.aiRpc<{ text: string }>(
+      { action: "ask", worktreeId: input.worktreeId, question: input.question, worktrees: [] },
+      options.signal,
+    );
+    return result.text;
+  }
+
   /** Reads a run's current stage and result. */
   getRun(runId: string, options: { signal?: AbortSignal } = {}): Promise<AiJob | null> {
     return this.aiRpc<AiJob | null>({ action: "getRun", runId }, options.signal);
