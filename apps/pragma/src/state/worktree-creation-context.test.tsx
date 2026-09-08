@@ -1,5 +1,6 @@
 import type { Worktree } from "@pragma/constants";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createWorktreeMock = vi.fn();
@@ -22,13 +23,36 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+/** Minimal selection store so a change re-renders the provider itself, the way
+ *  the real workspace context does. */
+const selectionListeners = new Set<() => void>();
+const workspaceSelection = {
+  selectedWorktreeId: "main" as string | null,
+  activeTabId: null as string | null,
+  select(worktreeId: string | null) {
+    workspaceSelection.selectedWorktreeId = worktreeId;
+    for (const listener of selectionListeners) listener();
+  },
+};
+
 vi.mock("@/state/workspace-context", () => ({
-  useWorkspace: () => ({
-    refreshProject: refreshProjectMock,
-    startSession: startSessionMock,
-    selectWorktree: selectWorktreeMock,
-    createTerminalTab: createTerminalTabMock,
-  }),
+  useWorkspace: () => {
+    const selectedWorktreeId = useSyncExternalStore(
+      (listener: () => void) => {
+        selectionListeners.add(listener);
+        return () => selectionListeners.delete(listener);
+      },
+      () => workspaceSelection.selectedWorktreeId,
+    );
+    return {
+      refreshProject: refreshProjectMock,
+      startSession: startSessionMock,
+      selectWorktree: selectWorktreeMock,
+      createTerminalTab: createTerminalTabMock,
+      selectedWorktreeId,
+      activeTabId: workspaceSelection.activeTabId,
+    };
+  },
 }));
 
 import { WorktreeCreationScreen } from "@/components/workspace/WorktreeCreationScreen";
@@ -72,7 +96,7 @@ function Harness({
   prompt?: string;
   agent?: AgentConfig | null;
 }) {
-  const { startCreation, creation } = useWorktreeCreation();
+  const { startCreation, creation, viewCreation } = useWorktreeCreation();
   return (
     <>
       <button
@@ -90,8 +114,15 @@ function Harness({
       >
         start
       </button>
+      <button type="button" onClick={() => workspaceSelection.select("other")}>
+        select other
+      </button>
+      <button type="button" onClick={viewCreation}>
+        view
+      </button>
       <span data-testid="idle">{creation ? "busy" : "idle"}</span>
-      <WorktreeCreationScreen />
+      <span data-testid="viewing">{creation?.viewing ? "viewing" : "background"}</span>
+      {creation?.viewing ? <WorktreeCreationScreen /> : null}
     </>
   );
 }
@@ -129,6 +160,7 @@ describe("WorktreeCreationProvider", () => {
     cleanup();
     vi.clearAllMocks();
     emitStage = null;
+    workspaceSelection.select("main");
   });
 
   it("shows only the creating step and clears once the worktree opens", async () => {
@@ -145,6 +177,21 @@ describe("WorktreeCreationProvider", () => {
     );
     expect(selectWorktreeMock).toHaveBeenCalledWith("wt-new", "p");
     expect(createTerminalTabMock).toHaveBeenCalledWith("wt-new", { projectId: "p" });
+    await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
+  });
+
+  it("leaves the screen when the selection changes and reopens on demand", async () => {
+    const { resolve } = deferCreate();
+    renderHarness();
+
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    screen.getByRole("button", { name: "select other" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("background"));
+    // The creation keeps running while the screen is gone.
+    expect(screen.getByTestId("idle")).toHaveTextContent("busy");
+    screen.getByRole("button", { name: "view" }).click();
+    await waitFor(() => expect(screen.getByTestId("viewing")).toHaveTextContent("viewing"));
+    resolve(newWorktree);
     await waitFor(() => expect(screen.getByTestId("idle")).toHaveTextContent("idle"));
   });
 

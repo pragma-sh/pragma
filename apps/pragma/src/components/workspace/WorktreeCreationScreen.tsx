@@ -41,6 +41,10 @@ function StepRow({ step }: { step: WorktreeCreationStep }) {
  * Full-frame progress screen shown while a worktree is being created. It
  * replaces the terminal area (rather than overlaying it) because native
  * browser webviews float above HTML and would clip an overlay.
+ *
+ * Leaving it does not cancel anything: the creation runs in the provider, the
+ * sidebar keeps an optimistic spinner row for it, and clicking that row brings
+ * this screen back.
  */
 export function WorktreeCreationScreen() {
   const { creation, dismiss, retry } = useWorktreeCreation();

@@ -61,6 +61,7 @@ import {
   FanoutMembersSlot,
   useFanoutForParent,
 } from "@/components/sidebar/FanoutGroup";
+import { PendingWorktreeSlot } from "@/components/sidebar/PendingWorktreeSlot";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
 import { ShortcutHint } from "@/components/ShortcutHint";
 import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
@@ -497,6 +498,9 @@ function WorktreeTreeContent({
   onUnhide: (worktreeId: string) => void;
 }) {
   const pinnedRootCount = tree.filter((node) => pinTimes.has(node.worktree.id)).length;
+  // `buildWorktreeTree` promotes main's children to roots, so a worktree being
+  // created from main gets a root-level pending row rather than a nested one.
+  const mainWorktreeId = tree.find((node) => node.worktree.isMain)?.worktree.id;
   const separatorIndex =
     pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
   return (
@@ -514,6 +518,9 @@ function WorktreeTreeContent({
             />
           </Fragment>
         ))}
+        {mainWorktreeId ? (
+          <PendingWorktreeSlot depth={0} parentWorktreeId={mainWorktreeId} />
+        ) : null}
         {hidden.length > 0 ? (
           <HiddenWorktreesSection
             hidden={hidden}
@@ -1162,6 +1169,11 @@ function WorktreeChildren({
   return (
     <>
       <FanoutMembersSlot depth={depth + 1} worktreeId={node.worktree.id} />
+      {/* Main is never a parent in the tree, so a worktree created from it gets
+          its pending row as a root instead (see WorktreeTreeContent). */}
+      {node.worktree.isMain ? null : (
+        <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
+      )}
       {node.children.map((child) => (
         <WorktreeRow
           key={child.worktree.id}

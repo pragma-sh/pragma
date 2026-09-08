@@ -102,6 +102,19 @@ vi.mock("@/state/workspace-context", () => ({
   useWorkspace: () => workspaceMock,
 }));
 
+const viewCreationMock = vi.fn();
+let creationMock: unknown = null;
+
+vi.mock("@/state/worktree-creation-context", () => ({
+  useWorktreeCreation: () => ({
+    creation: creationMock,
+    startCreation: vi.fn(),
+    viewCreation: viewCreationMock,
+    dismiss: vi.fn(),
+    retry: vi.fn(),
+  }),
+}));
+
 vi.mock("@/state/kanban-context", () => ({
   useKanban: () => ({ exitBoard: vi.fn() }),
 }));
@@ -122,6 +135,8 @@ afterEach(() => {
   openWorktreeInEditorMock.mockReset();
   renameWorktreeMock.mockReset();
   selectWorktreeMock.mockReset();
+  viewCreationMock.mockReset();
+  creationMock = null;
   activateTabLocationMock.mockReset();
   restoreFanoutTabMock.mockReset();
   restoreFanoutTabMock.mockResolvedValue(undefined);
@@ -153,6 +168,70 @@ describe("WorktreeTree", () => {
     render(<WorktreeTree onCreateChild={vi.fn()} />);
 
     await vi.waitFor(() => expect(result.current).toEqual(["main", "child", "sibling"]));
+  });
+
+  it("shows a root-level spinner row while a worktree is created from main", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "Second feature",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    const { container } = render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    const row = await screen.findByTestId("pending-worktree-row");
+    expect(row).toHaveTextContent("Second feature");
+    // Main is never a parent row, so its pending child sits at the root depth.
+    expect(row).toHaveStyle({ paddingLeft: "8px" });
+    expect(container.querySelector(".lucide-loader-circle")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Second feature" }));
+    expect(viewCreationMock).toHaveBeenCalled();
+  });
+
+  it("nests the spinner row under a non-main parent", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "p",
+      parentWorktreeId: "child",
+      branch: "nested",
+      label: "nested",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    expect(await screen.findByTestId("pending-worktree-row")).toHaveStyle({ paddingLeft: "22px" });
+  });
+
+  it("does not show the spinner row for another project's creation", async () => {
+    worktreesMergedStatusMock.mockResolvedValue({ child: false });
+    creationMock = {
+      projectId: "other",
+      parentWorktreeId: "main",
+      branch: "feature-2",
+      label: "feature-2",
+      steps: [],
+      error: null,
+      retry: null,
+      viewing: false,
+      viewedFrom: "",
+    };
+
+    render(<WorktreeTree onCreateChild={vi.fn()} />);
+
+    await screen.findByText("feature");
+    expect(screen.queryByTestId("pending-worktree-row")).toBeNull();
   });
 
   it("uses the merged icon for a child worktree with no remaining changes", async () => {

@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import {
   type AgentConfig,
   type AgentModelSelection,
 } from "@/lib/tauri";
+import { expandWorktree } from "@/state/worktree-collapsed";
 import { useWorkspace } from "@/state/workspace-context";
 import type { Worktree } from "@pragma/constants";
 
@@ -44,16 +46,28 @@ interface WorktreeCreationRequest {
 }
 
 /** Live progress for the full-frame creating-worktree screen. */
-interface WorktreeCreationState {
+export interface WorktreeCreationState {
+  projectId: string;
+  /** Worktree the pending one hangs under, so the sidebar can place its row. */
+  parentWorktreeId: string;
   branch: string;
+  /** Row label for the optimistic sidebar row (the branch when untitled). */
+  label: string;
   steps: WorktreeCreationStep[];
   error: string | null;
   retry: { request: WorktreeCreationRequest; worktree: Worktree } | null;
+  /** Whether the progress screen currently occupies the workspace frame. */
+  viewing: boolean;
+  /** Workspace selection the screen was opened from; changing it leaves the
+   *  screen, so a creation can run in the background. */
+  viewedFrom: string;
 }
 
 interface WorktreeCreationContextValue {
   /** Non-null while a creation is running or has failed. */
   creation: WorktreeCreationState | null;
+  /** Re-opens the progress screen (from the optimistic sidebar row). */
+  viewCreation: () => void;
   /** Starts a creation in the background — the caller closes its dialog immediately. */
   startCreation: (request: WorktreeCreationRequest) => void;
   /** Clears a failed run's screen. */
@@ -101,6 +115,19 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
   // A ref so a second submit while one is in flight is ignored without the
   // callback closing over a stale `creation`.
   const runningRef = useRef(false);
+  // Identity of the current workspace selection. The progress screen is tied to
+  // the selection it was opened from: picking another worktree or tab leaves it
+  // while the creation keeps running in the background.
+  const selectionKey = `${workspace.selectedWorktreeId ?? ""}|${workspace.activeTabId ?? ""}`;
+  const selectionRef = useRef(selectionKey);
+  useEffect(() => {
+    selectionRef.current = selectionKey;
+    setCreation((current) =>
+      current && current.viewing && current.viewedFrom !== selectionKey
+        ? { ...current, viewing: false }
+        : current,
+    );
+  }, [selectionKey]);
 
   const openCreatedWorktree = useCallback(
     async (request: WorktreeCreationRequest, worktree: Worktree) => {
@@ -138,7 +165,20 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
         ...(request.syncWorktreeId ? [step("sync", "active")] : []),
         step("create", request.syncWorktreeId ? "pending" : "active"),
       ];
-      setCreation({ branch: request.branch, steps, error: null, retry: null });
+      setCreation({
+        projectId: request.projectId,
+        parentWorktreeId: request.parentWorktreeId,
+        branch: request.branch,
+        label: request.title?.trim() || request.branch,
+        steps,
+        error: null,
+        retry: null,
+        viewing: true,
+        viewedFrom: selectionRef.current,
+      });
+      // The optimistic row hangs under its parent, which has to be open for it
+      // to be visible at all.
+      expandWorktree(request.parentWorktreeId);
       // The setup scripts run inside `create_worktree`, so their stage only
       // becomes visible through the backend event.
       const unlisten = await onWorktreeCreateStage((stage) => {
@@ -201,12 +241,23 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
     [run],
   );
 
+  const viewCreation = useCallback(
+    () =>
+      setCreation((current) =>
+        current ? { ...current, viewing: true, viewedFrom: selectionRef.current } : current,
+      ),
+    [],
+  );
   const dismiss = useCallback(() => setCreation(null), []);
   const retry = useCallback(() => {
     if (runningRef.current || !creation?.retry) return;
     runningRef.current = true;
     const { request, worktree } = creation.retry;
-    setCreation((current) => (current ? { ...current, error: null } : current));
+    setCreation((current) =>
+      current
+        ? { ...current, error: null, viewing: true, viewedFrom: selectionRef.current }
+        : current,
+    );
     void openCreatedWorktree(request, worktree)
       .then(() => setCreation(null))
       .catch((cause: unknown) => {
@@ -217,8 +268,8 @@ export function WorktreeCreationProvider({ children }: { children: ReactNode }) 
       });
   }, [creation, openCreatedWorktree]);
   const value = useMemo(
-    () => ({ creation, startCreation, dismiss, retry }),
-    [creation, startCreation, dismiss, retry],
+    () => ({ creation, startCreation, viewCreation, dismiss, retry }),
+    [creation, startCreation, viewCreation, dismiss, retry],
   );
 
   return <WorktreeCreationContext value={value}>{children}</WorktreeCreationContext>;
