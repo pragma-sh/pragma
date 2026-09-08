@@ -7,8 +7,6 @@
 //! escaping the worktree and performs the actual disk access, so the same
 //! command serves a local project and an SSH-bridged remote one.
 
-use std::path::{Path, PathBuf};
-
 use pragma_constants::{
     DirEntry, FileChunk, FileContents, PaletteSearchResponse, ProtocolRpcMethod,
 };
@@ -21,14 +19,6 @@ use crate::error::{AppError, AppResult};
 use crate::hosts::Hosts;
 use crate::pty::PtyClient;
 use crate::ssh_host;
-
-/// Re-validates a worktree-relative path against escaping the worktree, returning
-/// the resolved absolute path. Used by callers that still touch the local disk
-/// directly (PR diffs, AI helpers); the core RPC path validates host-side.
-pub(crate) fn resolve_in_worktree(root: &Path, relative: &str) -> AppResult<PathBuf> {
-    pragma_core::fs::resolve_in_worktree(root, relative)
-        .map_err(|error| AppError::InvalidInput(error.to_string()))
-}
 
 /// Looks up a worktree's trusted absolute root path from the DB.
 fn worktree_root(db: &Db, worktree_id: &str) -> AppResult<String> {

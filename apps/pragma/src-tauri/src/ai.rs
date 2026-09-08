@@ -8,14 +8,15 @@
 //! `pragma-ai` binary beside the app executable (see `stage-daemon-sidecar.sh`
 //! and `tauri.conf.json` `externalBin`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
+use pragma_constants::ProtocolRpcMethod;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
@@ -23,9 +24,8 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::git::GitLocks;
 use crate::hosts::{Hosts, LOCAL_HOST};
-use crate::pty::{sidecar_executable, workspace_root};
+use crate::pty::{sidecar_executable, workspace_root, PtyClient};
 
 /// AI sidecars spawn on the desktop client and read `--cwd` from the local
 /// filesystem. Remote (SSH) worktree paths are not local — refusing them here
@@ -83,28 +83,6 @@ pub struct AiCommitAndPullRequestDraft {
     pub title: String,
     pub body: String,
     pub commit_count: usize,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CommitPlanContext {
-    allowed_paths: Vec<String>,
-    status: String,
-    diff_stat: String,
-    worktree_diff: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AiCommitPlan {
-    commits: Vec<AiCommitPlanCommit>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AiCommitPlanCommit {
-    message: String,
-    paths: Vec<String>,
 }
 
 /// One exact-text replacement an inline edit proposes for the open buffer.
@@ -452,177 +430,101 @@ pub async fn ai_inline_edit(
     .map_err(|error| AppError::Ai(error.to_string()))?
 }
 
-/// Generate a logical commit plan for all dirty worktree changes, create those
-/// commits, then generate a pull request title/body from the resulting branch.
+/// Commits every dirty change as logical commits, then drafts a pull request.
+///
+/// Runs **on the host**, not here. That is not just so a phone can do the same
+/// thing: it is what makes the two entry points mutually exclusive. When this
+/// ran locally with its own lock, a commit started on the phone and one started
+/// here could stage against each other's index — two locks exclude nothing.
+///
+/// The host returns a job immediately and this polls it, so a run survives this
+/// window closing mid-way; reopening finds the same run through the same
+/// request id rather than starting a second one.
 #[tauri::command]
 pub async fn ai_commit_all_and_generate_pull_request_draft(
     db: State<'_, Db>,
     hosts: State<'_, Hosts>,
-    locks: State<'_, GitLocks>,
     worktree_id: String,
 ) -> AppResult<AiCommitAndPullRequestDraft> {
     ensure_local_ai_worktree(&db, &hosts, &worktree_id)?;
-    let worktree = db.worktree(&worktree_id)?;
-    let Some(parent_id) = worktree.parent_id.as_deref() else {
-        return Err(AppError::InvalidInput(
-            "No parent branch to generate a pull request from.".to_string(),
-        ));
-    };
-    let parent = db.worktree(parent_id)?;
-    let lock = locks.lock_for(&worktree.project_id)?;
-    let cwd = worktree.path;
-    let parent_branch = parent.branch;
-    let parent_path = parent.path;
-
+    let client = hosts.for_project(&db, &db.worktree(&worktree_id)?.project_id)?;
+    let request_id = format!("desktop:{worktree_id}:{}", next_run());
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = lock.lock()?;
-        let allowed_paths = changed_paths(&cwd)?;
-        if allowed_paths.is_empty() {
-            return Err(AppError::InvalidInput("No changes to commit.".to_string()));
-        }
-
-        let context = CommitPlanContext {
-            allowed_paths: allowed_paths.clone(),
-            status: git_output(&cwd, &["status", "--short", "--untracked-files=normal"])
-                .unwrap_or_default(),
-            diff_stat: git_output(&cwd, &["diff", "--stat", "--find-renames", "HEAD"])
-                .unwrap_or_default(),
-            worktree_diff: git_output(&cwd, &["diff", "--find-renames", "HEAD"])
-                .unwrap_or_default(),
-        };
-        let stdin = serde_json::to_string(&context)?;
-        let value = run_oneshot(&["commit-plan", "--cwd", &cwd], Some(&stdin))?;
-        let plan = serde_json::from_value::<AiCommitPlan>(value).map_err(AppError::from)?;
-        let commits = normalize_commit_plan(plan, &allowed_paths)?;
-
-        unstage_everything(&cwd)?;
-        let mut commit_count = 0;
-        for commit in &commits {
-            stage_paths(&cwd, &commit.paths)?;
-            if staged_diff(&cwd)?.trim().is_empty() {
-                continue;
-            }
-            commit_index(&cwd, &commit.message)?;
-            commit_count += 1;
-            unstage_everything(&cwd)?;
-        }
-
-        let remaining = changed_paths(&cwd)?;
-        if !remaining.is_empty() {
-            return Err(AppError::Git(format!(
-                "failed to commit all changes; remaining paths: {}",
-                remaining.join(", ")
-            )));
-        }
-
-        let context = pull_request_context(&cwd, &parent_branch, Some(&parent_path))?;
-        let stdin = serde_json::to_string(&context)?;
-        let value = run_oneshot(&["pull-request", "--cwd", &cwd], Some(&stdin))?;
-        let draft = serde_json::from_value::<AiPullRequestDraft>(value).map_err(AppError::from)?;
-        Ok(AiCommitAndPullRequestDraft {
-            title: draft.title,
-            body: draft.body,
-            commit_count,
-        })
+        run_host_commit_job(&client, &worktree_id, &request_id)
     })
     .await
-    .map_err(|error| AppError::Ai(error.to_string()))?
+    .map_err(|error| AppError::Ai(format!("commit task failed: {error}")))?
 }
+
+/// Starts the host job and waits for it to finish.
+fn run_host_commit_job(
+    client: &PtyClient,
+    worktree_id: &str,
+    request_id: &str,
+) -> AppResult<AiCommitAndPullRequestDraft> {
+    let started = host_ai(
+        client,
+        &json!({
+            "action": "commitAndDraftPullRequest",
+            "worktreeId": worktree_id,
+            "requestId": request_id,
+        }),
+    )?;
+    let run_id = started
+        .get("jobId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::Ai("host returned no job".to_string()))?
+        .to_string();
+    loop {
+        let job = host_ai(client, &json!({ "action": "getRun", "runId": run_id }))?;
+        match job.get("stage").and_then(Value::as_str) {
+            Some("ready") => {
+                return Ok(AiCommitAndPullRequestDraft {
+                    title: job
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    body: job
+                        .get("body")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    commit_count: usize::try_from(
+                        job.get("commitCount").and_then(Value::as_u64).unwrap_or(0),
+                    )
+                    .unwrap_or(0),
+                })
+            }
+            Some("planning" | "committing" | "drafting") => {
+                std::thread::sleep(HOST_JOB_POLL_INTERVAL);
+            }
+            // Failed, cancelled, or interrupted: the host's message already
+            // says what happened and what it committed before stopping.
+            _ => {
+                return Err(AppError::Ai(
+                    job.get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("the commit run did not finish")
+                        .to_string(),
+                ))
+            }
+        }
+    }
+}
+
+/// Sends one `ai` RPC to the host that owns the worktree.
+fn host_ai(client: &PtyClient, payload: &Value) -> AppResult<Value> {
+    client
+        .rpc(ProtocolRpcMethod::Ai, payload.clone())
+        .map_err(|error| AppError::Ai(error.to_string()))
+}
+
+/// How often the host's job record is re-read while it works.
+const HOST_JOB_POLL_INTERVAL: Duration = Duration::from_millis(750);
 
 fn staged_diff(cwd: &str) -> AppResult<String> {
     git_output(cwd, &["diff", "--cached"])
-}
-
-fn normalize_commit_plan(
-    plan: AiCommitPlan,
-    allowed_paths: &[String],
-) -> AppResult<Vec<AiCommitPlanCommit>> {
-    let allowed: HashSet<&str> = allowed_paths.iter().map(String::as_str).collect();
-    let mut seen = HashSet::new();
-    let mut commits = Vec::new();
-
-    for commit in plan.commits {
-        let message = commit.message.trim().to_string();
-        if message.is_empty() {
-            return Err(AppError::Ai(
-                "ai sidecar returned a commit with no message".to_string(),
-            ));
-        }
-        let mut paths = Vec::new();
-        for path in commit.paths {
-            let path = path.trim().to_string();
-            if !allowed.contains(path.as_str()) {
-                return Err(AppError::Ai(format!(
-                    "ai sidecar returned a path outside the changed set: {path}"
-                )));
-            }
-            if seen.insert(path.clone()) {
-                paths.push(path);
-            }
-        }
-        if !paths.is_empty() {
-            commits.push(AiCommitPlanCommit { message, paths });
-        }
-    }
-
-    let missing: Vec<String> = allowed_paths
-        .iter()
-        .filter(|path| !seen.contains(path.as_str()))
-        .cloned()
-        .collect();
-    if !missing.is_empty() {
-        let Some(last) = commits.last_mut() else {
-            return Err(AppError::Ai(
-                "ai sidecar returned no usable commit plan".to_string(),
-            ));
-        };
-        last.paths.extend(missing);
-    }
-
-    if commits.is_empty() {
-        return Err(AppError::Ai(
-            "ai sidecar returned no usable commit plan".to_string(),
-        ));
-    }
-    Ok(commits)
-}
-
-fn changed_paths(cwd: &str) -> AppResult<Vec<String>> {
-    let mut paths = Vec::new();
-    for output in [
-        git_output_bytes(cwd, &["diff", "--name-only", "-z", "HEAD"]),
-        git_output_bytes(cwd, &["ls-files", "--others", "--exclude-standard", "-z"]),
-    ] {
-        for path in output?
-            .split(|byte| *byte == 0)
-            .filter(|path| !path.is_empty())
-        {
-            let path = String::from_utf8_lossy(path).into_owned();
-            if !paths.contains(&path) {
-                paths.push(path);
-            }
-        }
-    }
-    paths.sort();
-    Ok(paths)
-}
-
-fn unstage_everything(cwd: &str) -> AppResult<()> {
-    git_run(cwd, &["reset", "-q", "HEAD", "--", "."])
-}
-
-fn stage_paths(cwd: &str, paths: &[String]) -> AppResult<()> {
-    let root = Path::new(cwd);
-    for path in paths {
-        crate::fs::resolve_in_worktree(root, path)?;
-    }
-    let mut args = vec!["add".to_string(), "-A".to_string(), "--".to_string()];
-    args.extend(paths.iter().cloned());
-    git_run_owned(cwd, &args)
-}
-
-fn commit_index(cwd: &str, message: &str) -> AppResult<()> {
-    git_run(cwd, &["commit", "-m", message])
 }
 
 fn pull_request_context(
@@ -699,34 +601,6 @@ fn git_output_bytes(cwd: &str, args: &[&str]) -> AppResult<Vec<u8>> {
         ));
     }
     Ok(output.stdout)
-}
-
-fn git_run(cwd: &str, args: &[&str]) -> AppResult<()> {
-    let output = crate::process_env::command("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(AppError::Git(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn git_run_owned(cwd: &str, args: &[String]) -> AppResult<()> {
-    let output = crate::process_env::command("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(AppError::Git(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
-    }
-    Ok(())
 }
 
 fn git_output_optional(cwd: &str, args: &[&str]) -> AppResult<Option<String>> {
