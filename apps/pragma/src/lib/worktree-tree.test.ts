@@ -1,7 +1,7 @@
 import type { Worktree } from "@pragma/constants";
 import { describe, expect, it } from "vitest";
 
-import { buildWorktreeTree } from "./worktree-tree";
+import { buildWorktreeTree, pendingWorktreeIndex } from "./worktree-tree";
 
 function worktree(
   id: string,
@@ -130,5 +130,39 @@ describe("buildWorktreeTree", () => {
     );
 
     expect(tree.map((node) => node.worktree.id)).toEqual(["pinned-root", "main", "other"]);
+  });
+});
+
+describe("pendingWorktreeIndex", () => {
+  it("lands a pending row where the real (unpinned, no-PR) worktree would sort by label", () => {
+    const tree = buildWorktreeTree([
+      worktree("main", null, "main", true),
+      worktree("aaa", "main", "aaa"),
+      worktree("zzz", "main", "zzz"),
+    ]);
+
+    expect(pendingWorktreeIndex(tree, "mmm", undefined, undefined)).toBe(2);
+    expect(pendingWorktreeIndex(tree, "000", undefined, undefined)).toBe(1);
+    expect(pendingWorktreeIndex(tree, "zzzz", undefined, undefined)).toBe(3);
+  });
+
+  it("sorts after every pinned and main row, since a pending row is never pinned", () => {
+    const tree = buildWorktreeTree(
+      [worktree("main", null, "main", true), worktree("pinned", null, "pinned")],
+      { pinTimes: new Map([["pinned", 100]]) },
+    );
+
+    expect(pendingWorktreeIndex(tree, "aaa", new Map([["pinned", 100]]), undefined)).toBe(2);
+  });
+
+  it("sorts before any sibling with an open PR, since a pending row has none yet", () => {
+    const tree = buildWorktreeTree(
+      [worktree("main", null, "main", true), worktree("open", "main", "aaa-open")],
+      {
+        prLifecycles: { open: "open" },
+      },
+    );
+
+    expect(pendingWorktreeIndex(tree, "zzz", undefined, { open: "open" })).toBe(1);
   });
 });

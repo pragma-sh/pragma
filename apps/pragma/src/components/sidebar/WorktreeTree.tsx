@@ -48,7 +48,7 @@ import {
 } from "@/lib/github";
 import { subscribeToWorktreeFiles } from "@/lib/file-watch";
 import { githubRepoRef, worktreesMergedStatus } from "@/lib/tauri";
-import { buildWorktreeTree, type WorktreeNode } from "@/lib/worktree-tree";
+import { buildWorktreeTree, pendingWorktreeIndex, type WorktreeNode } from "@/lib/worktree-tree";
 import { commitOnEnterCancelOnEscape } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { useGitHub } from "@/state/github-context";
@@ -67,6 +67,7 @@ import { ShortcutHint } from "@/components/ShortcutHint";
 import { attemptWorktreeIds, fanoutForParent, orderedMembers } from "@/lib/fanout";
 import { useFanouts } from "@/state/fanouts-context";
 import { useWorkspace } from "@/state/workspace-context";
+import { useWorktreeCreation } from "@/state/worktree-creation-context";
 import {
   setWorktreeShortcutOrder,
   useShortcutHint,
@@ -478,6 +479,68 @@ function HiddenWorktreesSection({
   );
 }
 
+/**
+ * Sorted insertion index for the optimistic pending-worktree row among
+ * `siblings`, or -1 when no creation targets `parentWorktreeId` right now.
+ * Shared by the root and nested row lists so the pending row lands where the
+ * real worktree will once creation finishes, instead of jumping to it.
+ */
+function usePendingRowIndex(
+  siblings: WorktreeNode[],
+  parentWorktreeId: string | undefined,
+  pinTimes: ReadonlyMap<string, number>,
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>,
+): number {
+  const workspace = useWorkspace();
+  const { creation } = useWorktreeCreation();
+  const pendingForParent =
+    parentWorktreeId &&
+    creation &&
+    creation.projectId === workspace.selectedProjectId &&
+    creation.parentWorktreeId === parentWorktreeId;
+  return pendingForParent
+    ? pendingWorktreeIndex(siblings, creation.label, pinTimes, prLifecycleByWorktreeId)
+    : -1;
+}
+
+/** One root row, with the optimistic pending row spliced in before it when
+ *  `pendingIndex` points here. */
+function RootRow({
+  node,
+  index,
+  separatorIndex,
+  pendingIndex,
+  mainWorktreeId,
+  mergedByWorktreeId,
+  prLifecycleByWorktreeId,
+  onCreateChild,
+}: {
+  node: WorktreeNode;
+  index: number;
+  separatorIndex: number;
+  pendingIndex: number;
+  mainWorktreeId: string | undefined;
+  mergedByWorktreeId: Record<string, boolean>;
+  prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
+  onCreateChild: (parentWorktreeId: string) => void;
+}) {
+  return (
+    <Fragment>
+      {index === separatorIndex ? <Separator className="my-2" /> : null}
+      {index === pendingIndex && mainWorktreeId ? (
+        <PendingWorktreeSlot depth={0} parentWorktreeId={mainWorktreeId} />
+      ) : null}
+      <WorktreeRow
+        depth={0}
+        mergedByWorktreeId={mergedByWorktreeId}
+        node={node}
+        onCreateChild={onCreateChild}
+        prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+      />
+    </Fragment>
+  );
+}
+
 function WorktreeTreeContent({
   tree,
   hidden,
@@ -503,22 +566,24 @@ function WorktreeTreeContent({
   const mainWorktreeId = tree.find((node) => node.worktree.isMain)?.worktree.id;
   const separatorIndex =
     pinnedRootCount > 0 && pinnedRootCount < tree.length ? pinnedRootCount : -1;
+  const pendingIndex = usePendingRowIndex(tree, mainWorktreeId, pinTimes, prLifecycleByWorktreeId);
   return (
     <WorktreeShortcutOrderProvider worktreeIds={shortcutOrder}>
       <div className="space-y-1">
         {tree.map((node, index) => (
-          <Fragment key={node.worktree.id}>
-            {index === separatorIndex ? <Separator className="my-2" /> : null}
-            <WorktreeRow
-              depth={0}
-              mergedByWorktreeId={mergedByWorktreeId}
-              node={node}
-              onCreateChild={onCreateChild}
-              prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-            />
-          </Fragment>
+          <RootRow
+            key={node.worktree.id}
+            index={index}
+            mainWorktreeId={mainWorktreeId}
+            mergedByWorktreeId={mergedByWorktreeId}
+            node={node}
+            onCreateChild={onCreateChild}
+            pendingIndex={pendingIndex}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+            separatorIndex={separatorIndex}
+          />
         ))}
-        {mainWorktreeId ? (
+        {pendingIndex === tree.length && mainWorktreeId ? (
           <PendingWorktreeSlot depth={0} parentWorktreeId={mainWorktreeId} />
         ) : null}
         {hidden.length > 0 ? (
@@ -1166,24 +1231,35 @@ function WorktreeChildren({
   mergedByWorktreeId: Record<string, boolean>;
   prLifecycleByWorktreeId: Record<string, GitHubPrLifecycle>;
 }) {
+  const pinTimes = useWorktreePins();
+  // Main is never a parent in the tree, so a worktree created from it gets its
+  // pending row as a root instead (see WorktreeTreeContent).
+  const pendingIndex = usePendingRowIndex(
+    node.children,
+    node.worktree.isMain ? undefined : node.worktree.id,
+    pinTimes,
+    prLifecycleByWorktreeId,
+  );
   return (
     <>
       <FanoutMembersSlot depth={depth + 1} worktreeId={node.worktree.id} />
-      {/* Main is never a parent in the tree, so a worktree created from it gets
-          its pending row as a root instead (see WorktreeTreeContent). */}
-      {node.worktree.isMain ? null : (
-        <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
-      )}
-      {node.children.map((child) => (
-        <WorktreeRow
-          key={child.worktree.id}
-          depth={depth + 1}
-          node={child}
-          onCreateChild={onCreateChild}
-          mergedByWorktreeId={mergedByWorktreeId}
-          prLifecycleByWorktreeId={prLifecycleByWorktreeId}
-        />
+      {node.children.map((child, index) => (
+        <Fragment key={child.worktree.id}>
+          {index === pendingIndex ? (
+            <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
+          ) : null}
+          <WorktreeRow
+            depth={depth + 1}
+            node={child}
+            onCreateChild={onCreateChild}
+            mergedByWorktreeId={mergedByWorktreeId}
+            prLifecycleByWorktreeId={prLifecycleByWorktreeId}
+          />
+        </Fragment>
       ))}
+      {pendingIndex === node.children.length ? (
+        <PendingWorktreeSlot depth={depth + 1} parentWorktreeId={node.worktree.id} />
+      ) : null}
     </>
   );
 }

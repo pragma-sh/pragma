@@ -365,6 +365,10 @@ interface WorkspaceContextValue extends WorkspaceState {
 interface WorktreeTargetOptions {
   projectId?: string;
   shell?: ShellProfile | null;
+  /** False keeps the new tab (and its worktree selection) out of the
+   *  foreground — used by background worktree creation so a completion that
+   *  finishes after the user has moved on doesn't steal focus. Defaults to true. */
+  focus?: boolean;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -2055,8 +2059,9 @@ function dispatchNewTab(
   dispatch: (action: WorkspaceAction) => void,
   tab: Tab,
   paneId: string | null,
+  focus = true,
 ): void {
-  dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab });
+  dispatch(paneId ? { type: "add-tab-to-pane", tab, paneId } : { type: "add-tab", tab, focus });
 }
 
 /** Handlers needed to react to a single agent status report. */
@@ -2810,7 +2815,7 @@ function useTabCreation(
         if (selectedProjectIdRef.current !== projectId) {
           return null;
         }
-        dispatchNewTab(dispatch, tab, paneId);
+        dispatchNewTab(dispatch, tab, paneId, options?.focus);
         return tab;
       } catch (cause) {
         dispatch({ type: "load-error", error: errorMessage(cause) });
@@ -2862,7 +2867,9 @@ function useSessionLaunch(
       modelSelection?: AgentModelSelection,
       options?: WorktreeTargetOptions,
     ): Promise<Tab | null> => {
-      selectWorktree(worktreeId, options?.projectId);
+      if (options?.focus !== false) {
+        selectWorktree(worktreeId, options?.projectId);
+      }
       const tab = await createTerminalTab(worktreeId, options);
       if (!tab) {
         return null;

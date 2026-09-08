@@ -1,5 +1,6 @@
 import { CircleAlert, Loader2 } from "lucide-react";
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorktreeRowFrame } from "@/components/sidebar/WorktreeRowFrame";
 import { useWorktreeCreation } from "@/state/worktree-creation-context";
 import { useWorkspace } from "@/state/workspace-context";
@@ -41,9 +42,12 @@ export function PendingWorktreeSlot({
         )
       }
       label={
-        <span className="truncate" title={creation.branch}>
-          {creation.label}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="truncate">{creation.label}</span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{creation.branch}</TooltipContent>
+        </Tooltip>
       }
       selected={creation.viewing}
       onActivate={viewCreation}

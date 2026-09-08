@@ -133,3 +133,27 @@ function comparePrRank(
 function labelFor(worktree: Worktree): string {
   return worktree.title ?? worktree.branch;
 }
+
+/**
+ * Sorted insertion index for an optimistic pending-worktree row among
+ * `siblings`. A not-yet-created worktree is always unpinned, never main, and
+ * has no PR yet, so it belongs right after any pinned/main siblings and
+ * before any sibling with an open PR — ordered by label within that bucket.
+ * Mirrors `compareNodes` so the pending row lands where the real worktree
+ * will land once creation finishes, instead of jumping when it does.
+ */
+export function pendingWorktreeIndex(
+  siblings: WorktreeNode[],
+  label: string,
+  pinTimes: ReadonlyMap<string, number> | undefined,
+  prLifecycles: Readonly<Record<string, GitHubPrLifecycle>> | undefined,
+): number {
+  const index = siblings.findIndex((sibling) => {
+    if (pinTimes?.has(sibling.worktree.id) === true) return false;
+    if (sibling.worktree.isMain) return false;
+    const rank = prSortRank(prLifecycles?.[sibling.worktree.id]) ?? 0;
+    if (rank > 0) return true;
+    return labelFor(sibling.worktree).localeCompare(label) > 0;
+  });
+  return index === -1 ? siblings.length : index;
+}
