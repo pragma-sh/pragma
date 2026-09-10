@@ -116,13 +116,18 @@ async function postSupportRequest(
 }
 
 /**
- * Everything checked before we spend the form's quota: the honeypot, then the
- * field rules. Returns the state to answer with, or the request to send.
+ * Everything checked before we spend the form's quota: the per-connection rate
+ * limit, the honeypot, then the field rules. Returns the state to answer with,
+ * or the request to send.
  */
-function screenRequest(
+async function screenRequest(
   data: FormData,
   values: SupportRequestFields,
-): { state: SupportFormState } | { request: ValidatedSupportRequest } {
+): Promise<{ state: SupportFormState } | { request: ValidatedSupportRequest }> {
+  if (isRateLimited(await clientKey())) {
+    return { state: errorState(RATE_LIMIT_MESSAGE, values) };
+  }
+
   // Honeypot. A real person never sees this field, so anything in it is a bot.
   // Answer as though it worked: telling a bot it failed only teaches it.
   if (readField(data, "botcheck")) {
@@ -143,25 +148,16 @@ function screenRequest(
 }
 
 /**
- * Send one support request to the splitforms inbox.
+ * Send one validated request to splitforms and describe the outcome.
  *
  * The access key stays on the server. It is not a secret — splitforms says as
  * much — but keeping it out of the bundle means the form cannot be replayed
- * from a scraped page, and it lets us validate before spending the form's quota.
+ * from a scraped page.
  */
-export async function submitSupportRequest(
-  _previous: SupportFormState,
-  data: FormData,
+async function sendSupportRequest(
+  request: ValidatedSupportRequest,
+  values: SupportRequestFields,
 ): Promise<SupportFormState> {
-  const values = readFields(data);
-
-  if (isRateLimited(await clientKey())) {
-    return errorState(RATE_LIMIT_MESSAGE, values);
-  }
-
-  const screened = screenRequest(data, values);
-  if ("state" in screened) return screened.state;
-
   const accessKey = process.env.SPLIT_FORMS_ACCESS_KEY;
   if (!accessKey) {
     console.error("SPLIT_FORMS_ACCESS_KEY is not set; support form cannot submit.");
@@ -171,11 +167,22 @@ export async function submitSupportRequest(
     );
   }
 
-  const failure = await postSupportRequest(screened.request, accessKey);
+  const failure = await postSupportRequest(request, accessKey);
   if (failure) return errorState(failure, values);
 
   return sentState(
-    `Thanks — your request is with us. We reply within ${supportResponseDays} business days, to ${screened.request.email}.`,
+    `Thanks — your request is with us. We reply within ${supportResponseDays} business days, to ${request.email}.`,
     values,
   );
+}
+
+/** Entry point the form's `useActionState` calls on every submission attempt. */
+export async function submitSupportRequest(
+  _previous: SupportFormState,
+  data: FormData,
+): Promise<SupportFormState> {
+  const values = readFields(data);
+  const screened = await screenRequest(data, values);
+  if ("state" in screened) return screened.state;
+  return sendSupportRequest(screened.request, values);
 }
