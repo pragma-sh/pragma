@@ -72,6 +72,7 @@ apps/www/
         ├── css-color.ts     # resolves a CSS token to hex so three.js can use the palette
         ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
         ├── support.ts       # support route, address, reply window, topics + the pure request validator
+        ├── support-rate-limit.ts # per-connection submission cap the support action checks first
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
@@ -135,7 +136,16 @@ apps/www/
   functions, so `SupportFormState` and its initial value live in `lib/support.ts` (Next
   strips anything else, and the form then renders `undefined.fieldErrors`); and the key is
   read at request time, so a deployment without it answers with the email fallback rather
-  than failing silently. Set it in every Vercel environment.
+  than failing silently. Set it in every Vercel environment. The action checks a
+  per-connection rate limit (`lib/support-rate-limit.ts`) before the honeypot or
+  validation, so a flood cannot spend the shared splitforms quota; it is in-memory and
+  best-effort (one bucket per warm serverless instance), kept in its own module — not the
+  `"use server"` one — so the counting logic is unit-testable and `support.test.ts` can
+  reset it between cases via `resetRateLimiterForTests`. Because it sends your name,
+  email, and message to splitforms, that processor is named in `/privacy` — update that
+  page's "Services we may operate" and "Third parties" sections (and bump
+  `privacyLastUpdated` in `lib/legal.ts`) if the support form's data handling changes
+  again.
 
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep

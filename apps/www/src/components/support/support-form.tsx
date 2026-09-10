@@ -231,7 +231,7 @@ function SupportSent({ message, onReset }: { message: string; onReset: () => voi
         Request sent
       </p>
       <p className="text-muted-foreground mt-2 text-sm leading-[1.5]">{message}</p>
-      <Button type="button" variant="outline" className="mt-6" onClick={onReset}>
+      <Button type="button" variant="secondary" className="pill-cta mt-6" onClick={onReset}>
         Send another request
       </Button>
     </output>
@@ -251,12 +251,22 @@ export function SupportForm() {
   return <SupportFormBody key={attempt} onReset={() => setAttempt((value) => value + 1)} />;
 }
 
-/** The form's live region. Only an error has anything to announce. */
+/** The form's live region. On error it repeats both the summary and each field's message. */
 function FormStatus({ state }: { state: SupportFormState }) {
-  const message = state.status === "error" ? state.message : "";
+  if (state.status !== "error") {
+    return <output aria-live="polite" className="block" />;
+  }
+  const fieldErrors = Object.values(state.fieldErrors);
   return (
     <output aria-live="polite" className="block">
-      {message ? <p className="text-destructive text-sm leading-[1.5]">{message}</p> : null}
+      <p className="text-destructive text-sm leading-[1.5]">{state.message}</p>
+      {fieldErrors.length > 0 ? (
+        <ul className="text-destructive mt-1 list-disc pl-5 text-sm leading-[1.5]">
+          {fieldErrors.map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      ) : null}
     </output>
   );
 }
@@ -265,7 +275,7 @@ function FormStatus({ state }: { state: SupportFormState }) {
 function SubmitRow({ isPending }: { isPending: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-4">
-      <Button type="submit" disabled={isPending}>
+      <Button type="submit" className="pill-cta" disabled={isPending}>
         {isPending ? "Sending…" : "Send request"}
       </Button>
       <p className="text-muted-foreground text-xs leading-[1.5]">

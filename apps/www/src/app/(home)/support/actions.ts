@@ -1,5 +1,7 @@
 "use server";
 
+import { headers } from "next/headers";
+
 import {
   type SupportFormState,
   type SupportRequestFields,
@@ -7,9 +9,26 @@ import {
   type ValidatedSupportRequest,
   validateSupportRequest,
 } from "@/lib/support";
+import { isRateLimited } from "@/lib/support-rate-limit";
 
 /** splitforms' single submission endpoint. It accepts JSON and answers with JSON. */
 const SUBMIT_ENDPOINT = "https://splitforms.com/api/submit";
+
+/**
+ * The address to key the rate limiter by. First hop the platform reports, or
+ * "unknown" if none is present (including when this runs outside a request,
+ * such as a test) — the limiter still applies, just to one shared bucket.
+ */
+async function clientKey(): Promise<string> {
+  try {
+    const requestHeaders = await headers();
+    const forwardedFor = requestHeaders.get("x-forwarded-for");
+    if (forwardedFor) return forwardedFor.split(",")[0].trim();
+    return requestHeaders.get("x-real-ip") ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 function readField(data: FormData, name: string): string {
   const value = data.get(name);
@@ -58,10 +77,13 @@ function submissionBody(request: ValidatedSupportRequest, accessKey: string) {
   };
 }
 
+const RATE_LIMIT_MESSAGE =
+  "Too many requests from your connection just now. Wait a minute and send it again.";
+
 /** Read one splitforms answer. Returns the message to show, or `undefined` when it landed. */
 function responseFailure(response: Response): string | undefined {
   if (response.status === 429) {
-    return "Too many requests from your connection just now. Wait a minute and send it again.";
+    return RATE_LIMIT_MESSAGE;
   }
   if (!response.ok) {
     console.error(`splitforms rejected a support submission: HTTP ${response.status}`);
@@ -132,6 +154,10 @@ export async function submitSupportRequest(
   data: FormData,
 ): Promise<SupportFormState> {
   const values = readFields(data);
+
+  if (isRateLimited(await clientKey())) {
+    return errorState(RATE_LIMIT_MESSAGE, values);
+  }
 
   const screened = screenRequest(data, values);
   if ("state" in screened) return screened.state;
