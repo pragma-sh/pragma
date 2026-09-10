@@ -19,7 +19,6 @@
     "@react-three/fiber": "^9.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cn": "^0.2.6",
     "fumadocs-core": "^16.14.3",
     "fumadocs-mdx": "^15.2.3",
     "fumadocs-ui": "^16.14.3",

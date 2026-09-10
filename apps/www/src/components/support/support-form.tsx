@@ -19,6 +19,7 @@ import {
   supportFormInitialState,
   type SupportFormState,
   supportProducts,
+  type SupportRequestFields,
   supportResponseDays,
   supportTopics,
 } from "@/lib/support";
@@ -61,6 +62,182 @@ function describedBy(id: string, hint: boolean, error: boolean): string | undefi
   return ids.length > 0 ? ids.join(" ") : undefined;
 }
 
+/** What every field group needs: the form's id prefix, its errors, and its values. */
+type FieldGroupProps = {
+  id: string;
+  errors: Record<string, string>;
+  values: SupportRequestFields;
+};
+
+/** What each control shares: its id, its form `name`, and the copy around it. */
+type ControlProps = {
+  id: string;
+  name: string;
+  label: string;
+  hint?: string;
+  error?: string;
+  value: string;
+};
+
+type TextFieldProps = ControlProps & React.ComponentProps<typeof Input>;
+
+/** A text input wired to its label, hint, error, and echoed-back value. */
+function TextField({ id, name, label, hint, error, value, ...input }: TextFieldProps) {
+  return (
+    <Field id={id} label={label} hint={hint} error={error}>
+      <Input
+        id={id}
+        name={name}
+        defaultValue={value}
+        aria-invalid={Boolean(error)}
+        aria-describedby={describedBy(id, Boolean(hint), Boolean(error))}
+        {...input}
+      />
+    </Field>
+  );
+}
+
+type SelectFieldProps = ControlProps & {
+  placeholder: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+};
+
+/** A choice field. Radix' select is uncontrolled here, re-seeded from `value`. */
+function SelectField({ id, name, label, placeholder, options, error, value }: SelectFieldProps) {
+  return (
+    <Field id={id} label={label} error={error}>
+      <Select name={name} required defaultValue={value || undefined}>
+        <SelectTrigger
+          id={id}
+          className="w-full"
+          aria-invalid={Boolean(error)}
+          aria-describedby={describedBy(id, false, Boolean(error))}
+        >
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/** Hidden from sight and from assistive technology; only bots fill it. */
+function Honeypot({ id }: { id: string }) {
+  return (
+    <div aria-hidden className="hidden">
+      <label htmlFor={`${id}-botcheck`}>Leave this field empty</label>
+      <input id={`${id}-botcheck`} name="botcheck" tabIndex={-1} autoComplete="off" />
+    </div>
+  );
+}
+
+/** Who is asking, and where the reply goes. */
+function IdentityFields({ id, errors, values }: FieldGroupProps) {
+  return (
+    <div className="grid gap-6 sm:grid-cols-2">
+      <TextField
+        id={`${id}-name`}
+        name="name"
+        label="Your name"
+        autoComplete="name"
+        required
+        error={errors.name}
+        value={values.name}
+      />
+      <TextField
+        id={`${id}-email`}
+        name="email"
+        label="Email address"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        required
+        error={errors.email}
+        value={values.email}
+      />
+    </div>
+  );
+}
+
+/** Which app, and what kind of request — the two fields that route the message. */
+function RoutingFields({ id, errors, values }: FieldGroupProps) {
+  return (
+    <div className="grid gap-6 sm:grid-cols-2">
+      <SelectField
+        id={`${id}-product`}
+        name="product"
+        label="Which app"
+        placeholder="Choose an app"
+        options={supportProducts}
+        error={errors.product}
+        value={values.product}
+      />
+      <SelectField
+        id={`${id}-topic`}
+        name="topic"
+        label="What is this about"
+        placeholder="Choose a topic"
+        options={supportTopics}
+        error={errors.topic}
+        value={values.topic}
+      />
+    </div>
+  );
+}
+
+/** The request itself: the optional environment line and the message. */
+function DetailFields({ id, errors, values }: FieldGroupProps) {
+  const messageId = `${id}-message`;
+  const messageHint =
+    "What you expected, what happened instead, and the steps that get there. Please leave out passwords, tokens, and anything you would not publish.";
+  return (
+    <>
+      <TextField
+        id={`${id}-version`}
+        name="version"
+        label="Version and system (optional)"
+        hint="For example: Pragma 1.4.2 on macOS 26, or Pragma Go 1.2 on iPhone 15."
+        autoComplete="off"
+        error={errors.version}
+        value={values.version}
+      />
+      <Field id={messageId} label="How can we help" hint={messageHint} error={errors.message}>
+        <Textarea
+          id={messageId}
+          name="message"
+          rows={8}
+          required
+          defaultValue={values.message}
+          aria-invalid={Boolean(errors.message)}
+          aria-describedby={describedBy(messageId, true, Boolean(errors.message))}
+        />
+      </Field>
+    </>
+  );
+}
+
+/** What replaces the form once a request lands. */
+function SupportSent({ message, onReset }: { message: string; onReset: () => void }) {
+  return (
+    <output className="border-border bg-card block rounded-xl border p-6" aria-live="polite">
+      <p className="text-foreground flex items-center gap-2 text-sm font-medium">
+        <CheckIcon aria-hidden className="size-4" />
+        Request sent
+      </p>
+      <p className="text-muted-foreground mt-2 text-sm leading-[1.5]">{message}</p>
+      <Button type="button" variant="outline" className="mt-6" onClick={onReset}>
+        Send another request
+      </Button>
+    </output>
+  );
+}
+
 /**
  * The support request form. It posts to a server action rather than to
  * splitforms directly, so the access key never enters the bundle and a request
@@ -74,153 +251,50 @@ export function SupportForm() {
   return <SupportFormBody key={attempt} onReset={() => setAttempt((value) => value + 1)} />;
 }
 
+/** The form's live region. Only an error has anything to announce. */
+function FormStatus({ state }: { state: SupportFormState }) {
+  const message = state.status === "error" ? state.message : "";
+  return (
+    <output aria-live="polite" className="block">
+      {message ? <p className="text-destructive text-sm leading-[1.5]">{message}</p> : null}
+    </output>
+  );
+}
+
+/** Submit button and the reply commitment that sits beside it. */
+function SubmitRow({ isPending }: { isPending: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <Button type="submit" disabled={isPending}>
+        {isPending ? "Sending…" : "Send request"}
+      </Button>
+      <p className="text-muted-foreground text-xs leading-[1.5]">
+        We reply within {supportResponseDays} business days, to the email address you enter here.
+      </p>
+    </div>
+  );
+}
+
 function SupportFormBody({ onReset }: { onReset: () => void }) {
   const [state, action, isPending] = useActionState<SupportFormState, FormData>(
     submitSupportRequest,
     supportFormInitialState,
   );
   const id = useId();
-  const errors = state.fieldErrors;
-  const values = state.values;
+  const group = { id, errors: state.fieldErrors, values: state.values };
 
   if (state.status === "sent") {
-    return (
-      <output className="border-border bg-card block rounded-xl border p-6" aria-live="polite">
-        <p className="text-foreground flex items-center gap-2 text-sm font-medium">
-          <CheckIcon aria-hidden className="size-4" />
-          Request sent
-        </p>
-        <p className="text-muted-foreground mt-2 text-sm leading-[1.5]">{state.message}</p>
-        <Button type="button" variant="outline" className="mt-6" onClick={onReset}>
-          Send another request
-        </Button>
-      </output>
-    );
+    return <SupportSent message={state.message} onReset={onReset} />;
   }
 
   return (
     <form action={action} className="grid gap-6" noValidate>
-      {/* Honeypot. Hidden from sight and from assistive technology; only bots fill it. */}
-      <div aria-hidden className="hidden">
-        <label htmlFor={`${id}-botcheck`}>Leave this field empty</label>
-        <input id={`${id}-botcheck`} name="botcheck" tabIndex={-1} autoComplete="off" />
-      </div>
-
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Field id={`${id}-name`} label="Your name" error={errors.name}>
-          <Input
-            id={`${id}-name`}
-            name="name"
-            autoComplete="name"
-            required
-            defaultValue={values.name}
-            aria-invalid={Boolean(errors.name)}
-            aria-describedby={describedBy(`${id}-name`, false, Boolean(errors.name))}
-          />
-        </Field>
-        <Field id={`${id}-email`} label="Email address" error={errors.email}>
-          <Input
-            id={`${id}-email`}
-            name="email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            required
-            defaultValue={values.email}
-            aria-invalid={Boolean(errors.email)}
-            aria-describedby={describedBy(`${id}-email`, false, Boolean(errors.email))}
-          />
-        </Field>
-      </div>
-
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Field id={`${id}-product`} label="Which app" error={errors.product}>
-          <Select name="product" required defaultValue={values.product || undefined}>
-            <SelectTrigger
-              id={`${id}-product`}
-              className="w-full"
-              aria-invalid={Boolean(errors.product)}
-              aria-describedby={describedBy(`${id}-product`, false, Boolean(errors.product))}
-            >
-              <SelectValue placeholder="Choose an app" />
-            </SelectTrigger>
-            <SelectContent>
-              {supportProducts.map((product) => (
-                <SelectItem key={product.value} value={product.value}>
-                  {product.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field id={`${id}-topic`} label="What is this about" error={errors.topic}>
-          <Select name="topic" required defaultValue={values.topic || undefined}>
-            <SelectTrigger
-              id={`${id}-topic`}
-              className="w-full"
-              aria-invalid={Boolean(errors.topic)}
-              aria-describedby={describedBy(`${id}-topic`, false, Boolean(errors.topic))}
-            >
-              <SelectValue placeholder="Choose a topic" />
-            </SelectTrigger>
-            <SelectContent>
-              {supportTopics.map((topic) => (
-                <SelectItem key={topic.value} value={topic.value}>
-                  {topic.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-
-      <Field
-        id={`${id}-version`}
-        label="Version and system (optional)"
-        hint="For example: Pragma 1.4.2 on macOS 26, or Pragma Go 1.2 on iPhone 15."
-        error={errors.version}
-      >
-        <Input
-          id={`${id}-version`}
-          name="version"
-          autoComplete="off"
-          defaultValue={values.version}
-          aria-invalid={Boolean(errors.version)}
-          aria-describedby={describedBy(`${id}-version`, true, Boolean(errors.version))}
-        />
-      </Field>
-
-      <Field
-        id={`${id}-message`}
-        label="How can we help"
-        hint="What you expected, what happened instead, and the steps that get there. Please leave out passwords, tokens, and anything you would not publish."
-        error={errors.message}
-      >
-        <Textarea
-          id={`${id}-message`}
-          name="message"
-          rows={8}
-          required
-          defaultValue={values.message}
-          aria-invalid={Boolean(errors.message)}
-          aria-describedby={describedBy(`${id}-message`, true, Boolean(errors.message))}
-        />
-      </Field>
-
-      <output aria-live="polite" className="block">
-        {state.status === "error" && state.message ? (
-          <p className="text-destructive text-sm leading-[1.5]">{state.message}</p>
-        ) : null}
-      </output>
-
-      <div className="flex flex-wrap items-center gap-4">
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Sending…" : "Send request"}
-        </Button>
-        <p className="text-muted-foreground text-xs leading-[1.5]">
-          We reply within {supportResponseDays} business days, to the email address you enter here.
-        </p>
-      </div>
+      <Honeypot id={id} />
+      <IdentityFields {...group} />
+      <RoutingFields {...group} />
+      <DetailFields {...group} />
+      <FormStatus state={state} />
+      <SubmitRow isPending={isPending} />
     </form>
   );
 }

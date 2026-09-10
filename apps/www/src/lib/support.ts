@@ -101,6 +101,67 @@ function labelFor(options: ReadonlyArray<{ value: string; label: string }>, valu
 }
 
 /**
+ * One field's rule. Returns the message to show, or `undefined` when the value
+ * passes. Keeping each rule its own function is what lets the checks be read,
+ * tested, and extended one at a time.
+ */
+type FieldRule = (fields: SupportRequestFields) => string | undefined;
+
+function checkName({ name }: SupportRequestFields): string | undefined {
+  if (!name) return "Tell us what to call you.";
+  if (name.length > SHORT_FIELD_MAX) return `Please keep this under ${SHORT_FIELD_MAX} characters.`;
+  return undefined;
+}
+
+function checkEmail({ email }: SupportRequestFields): string | undefined {
+  if (!email) return "We need an address to reply to.";
+  if (!looksLikeEmail(email)) return "That does not look like an email address.";
+  return undefined;
+}
+
+function checkProduct({ product }: SupportRequestFields): string | undefined {
+  return labelFor(supportProducts, product) ? undefined : "Choose which app this is about.";
+}
+
+function checkTopic({ topic }: SupportRequestFields): string | undefined {
+  return labelFor(supportTopics, topic) ? undefined : "Choose what kind of request this is.";
+}
+
+function checkVersion({ version }: SupportRequestFields): string | undefined {
+  return version.length > SHORT_FIELD_MAX
+    ? `Please keep this under ${SHORT_FIELD_MAX} characters.`
+    : undefined;
+}
+
+function checkMessage({ message }: SupportRequestFields): string | undefined {
+  if (message.length < MESSAGE_MIN) {
+    return `Please describe the problem in at least ${MESSAGE_MIN} characters.`;
+  }
+  if (message.length > MESSAGE_MAX) return `Please keep this under ${MESSAGE_MAX} characters.`;
+  return undefined;
+}
+
+/** Every rule, keyed by the input `name` its message is rendered against. */
+const fieldRules: Record<keyof SupportRequestFields, FieldRule> = {
+  name: checkName,
+  email: checkEmail,
+  product: checkProduct,
+  topic: checkTopic,
+  version: checkVersion,
+  message: checkMessage,
+};
+
+/** Run every rule and collect the messages that fired. */
+function collectFieldErrors(fields: SupportRequestFields): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
+  for (const [field, rule] of Object.entries(fieldRules)) {
+    const error = rule(fields);
+    if (error) fieldErrors[field] = error;
+  }
+  return fieldErrors;
+}
+
+/**
  * Check one support request. Pure, so the rules are testable without a network
  * call and identical whether they run in the action or anywhere else later.
  *
@@ -112,35 +173,11 @@ export function validateSupportRequest(
 ):
   | { ok: true; request: ValidatedSupportRequest }
   | { ok: false; fieldErrors: Record<string, string> } {
-  const fieldErrors: Record<string, string> = {};
-
-  if (!fields.name) fieldErrors.name = "Tell us what to call you.";
-  else if (fields.name.length > SHORT_FIELD_MAX) {
-    fieldErrors.name = `Please keep this under ${SHORT_FIELD_MAX} characters.`;
-  }
-
-  if (!fields.email) fieldErrors.email = "We need an address to reply to.";
-  else if (!looksLikeEmail(fields.email)) {
-    fieldErrors.email = "That does not look like an email address.";
-  }
-
+  const fieldErrors = collectFieldErrors(fields);
   const productLabel = labelFor(supportProducts, fields.product);
-  if (!productLabel) fieldErrors.product = "Choose which app this is about.";
-
   const topicLabel = labelFor(supportTopics, fields.topic);
-  if (!topicLabel) fieldErrors.topic = "Choose what kind of request this is.";
 
-  if (fields.version.length > SHORT_FIELD_MAX) {
-    fieldErrors.version = `Please keep this under ${SHORT_FIELD_MAX} characters.`;
-  }
-
-  if (fields.message.length < MESSAGE_MIN) {
-    fieldErrors.message = `Please describe the problem in at least ${MESSAGE_MIN} characters.`;
-  } else if (fields.message.length > MESSAGE_MAX) {
-    fieldErrors.message = `Please keep this under ${MESSAGE_MAX} characters.`;
-  }
-
-  if (Object.keys(fieldErrors).length > 0 || !productLabel || !topicLabel) {
+  if (!productLabel || !topicLabel || Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
   return { ok: true, request: { ...fields, productLabel, topicLabel } };
