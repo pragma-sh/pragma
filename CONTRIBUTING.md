@@ -126,9 +126,9 @@ The `/support` page — the contact form submitted to App Store Connect as the S
 posts through a server action that needs one variable. Everything else on the site runs
 without configuration.
 
-| Variable                 | Required for                            | Where to get it                                         |
-| ------------------------ | --------------------------------------- | ------------------------------------------------------- |
-| `SPLIT_FORMS_ACCESS_KEY` | Submitting the `/support` form           | The [splitforms dashboard](https://splitforms.com/dashboard) |
+| Variable                 | Required for                   | Where to get it                                              |
+| ------------------------ | ------------------------------ | ------------------------------------------------------------ |
+| `SPLIT_FORMS_ACCESS_KEY` | Submitting the `/support` form | The [splitforms dashboard](https://splitforms.com/dashboard) |
 
 ```bash
 cp apps/www/.env.example apps/www/.env    # then fill in the key
