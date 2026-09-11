@@ -248,7 +248,7 @@ function CameraScanner({
           Camera access is needed to scan the pairing code.
         </Text>
         <Button onPress={onRequest} variant="secondary">
-          <Text>Enable camera</Text>
+          <Text>Continue</Text>
         </Button>
       </View>
     );
