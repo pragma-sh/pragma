@@ -27,17 +27,11 @@ Please include, as far as you have it:
 |                       |                                                           |
 | --------------------- | --------------------------------------------------------- |
 | First reply           | Within **2 business days**                                |
-| Assessment and a plan | Within 7 days of that first reply                         |
 | Fix                   | Shipped in the next release once the assessment is agreed |
 
 We will tell you when the fix ships and credit you in the release notes unless you ask us
 not to. Please give us a chance to ship before you publish.
 
-## Supported versions
-
-Pragma is pre-1.0 and moving fast. **Only the latest release is supported** — see the
-[releases page](https://github.com/pragma-sh/pragma/releases/latest). Fixes are not
-backported to earlier versions; the remedy for an older install is to update.
 
 ## Design decisions that are not vulnerabilities
 
