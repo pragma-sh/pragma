@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { privacyRoute } from "@/lib/legal";
+import { supportRoute } from "@/lib/support";
 import { appName, compareRoute, docsRoute, gitConfig } from "@/lib/shared";
 
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
@@ -29,8 +31,10 @@ const COLUMNS = [
     title: "Project",
     links: [
       { label: "Documentation", href: docsRoute },
+      { label: "Support", href: supportRoute },
       { label: "GitHub", href: repoUrl },
       { label: "Issues", href: `${repoUrl}/issues` },
+      { label: "Privacy", href: privacyRoute },
       { label: "License (AGPL-3.0)", href: `${repoUrl}/blob/main/LICENSE` },
     ],
   },

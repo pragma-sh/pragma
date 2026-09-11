@@ -513,6 +513,29 @@ the standard floating shadow. It is sticky in the marketing flow and fixed over 
 Fumadocs grid so both surfaces keep the same position; docs also exposes its sidebar
 trigger on mobile.
 
+### Forms
+
+**`form-panel`** — the one form on the artboard, on `/support`. It sits in a
+`{colors.surface-1}` card with the standard hairline and `{rounded.xl}` corners, inside a
+two-column band: the commitments we make (response time, language, cost, where it
+lands) on the left, the fields on the right. Below `lg` the columns stack, panel last.
+
+**`form-field`** — label `{typography.body-sm}` in `{colors.ink}`, an optional hint and
+any error in `{typography.caption}` beneath it — hint in `{colors.ink-muted}`, error in
+`{colors.destructive}`. Controls are the stock shadcn `Input`, `Textarea`, and `Select`;
+they inherit the artboard palette and are not restyled per page. Fields pair into two
+columns from `sm` up and are full width below it.
+
+Rules that hold for any form we add later:
+
+- **Every control has a visible `<label>`.** A placeholder is not a label — it disappears
+  the moment someone types, which is the moment they most need it.
+- **Errors are shown per field and repeated once in a live region**, so a screen reader
+  hears the failure without hunting for it. Never colour alone: the message is words.
+- **Optional is stated on the label**, not implied by the absence of an asterisk.
+- **Success replaces the form.** A submitted form is not re-rendered with a banner above
+  it; the panel becomes a confirmation with a plain way back to a second request.
+
 ### Footer
 
 **`footer`** — Link grid on `{colors.canvas}` with the wordmark and a closing line left,

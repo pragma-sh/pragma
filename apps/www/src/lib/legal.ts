@@ -5,7 +5,7 @@
  */
 
 /** Date the privacy policy last changed, shown on the page. */
-export const privacyLastUpdated = "August 24, 2026";
+export const privacyLastUpdated = "September 10, 2026";
 
 /**
  * Route serving the privacy policy. Submitted to App Store Connect verbatim,

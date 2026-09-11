@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { privacyLastUpdated, privacyRoute } from "@/lib/legal";
 import { appName, gitConfig } from "@/lib/shared";
+import { supportRoute } from "@/lib/support";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -108,10 +109,15 @@ export default function PrivacyPage() {
 
       <h2>Services we may operate</h2>
       <p>
-        Today Pragma has no accounts and no backend of ours; the only server involved is the one
-        running on your own computer. We may later offer optional hosted services &mdash; for
-        example an account, a relay that reaches your desktop without you configuring a tunnel, sync
-        between your devices, or a licensing and payment system.
+        Pragma has no accounts, and the only server running Pragma itself is the one on your own
+        computer. The one exception today is this website&rsquo;s support form: submitting it sends
+        your name, email address, and message to <strong>Splitforms</strong>, a form-processing
+        service, which emails the request to us. Splitforms is bound to use that data only to
+        deliver the submission; see its own{" "}
+        <a href="https://splitforms.com/legal/privacy-policy">privacy policy</a>. We may later offer
+        further optional hosted services &mdash; for example an account, a relay that reaches your
+        desktop without you configuring a tunnel, sync between your devices, or a licensing and
+        payment system.
       </p>
       <p>
         If we do, this page will describe each service before it launches: what it receives, how
@@ -161,6 +167,10 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Your tunnelling provider</strong>, if you use one to reach your desktop remotely.
+        </li>
+        <li>
+          <strong>Splitforms</strong>, which receives your name, email address, and message when you
+          submit the <a href={supportRoute}>support form</a>, so it can deliver your request to us.
         </li>
       </ul>
       <p>

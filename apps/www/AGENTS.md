@@ -41,9 +41,9 @@ apps/www/
 └── src/
     ├── proxy.ts             # serves raw markdown for `.md` URLs and markdown-preferring clients
     ├── app/
-    │   ├── (home)/          # marketing route group (landing, plugins, privacy, deep-link
-    │   │                    # forwarders /open + /install-plugin, plugins/[...package]) in
-    │   │                    # the `.artboard` layout
+    │   ├── (home)/          # marketing route group (landing, plugins, privacy, support,
+    │   │                    # deep-link forwarders /open + /install-plugin,
+    │   │                    # plugins/[...package]) in the `.artboard` layout
     │   ├── docs/            # DocsLayout + the [[...slug]] page
     │   ├── api/search/      # Fumadocs search endpoint (Orama, built from the source)
     │   ├── api/updates/     # Desktop auto-update check (`GET /api/updates`; no `@pragma/*`)
@@ -57,6 +57,7 @@ apps/www/
     │   ├── brand-favicon.tsx # compact mark rendered from @pragma/brand geometry
     │   ├── github-mark.tsx  # shared GitHub brand glyph
     │   ├── plugin-card.tsx  # gallery preview cell — stretched link to the detail page
+    │   ├── support/         # the support request form (client) posting to the route's action
     │   ├── deep-link-forward.tsx  # one pragma:// hand-off page (auto-redirect + fallback pills)
     │   └── home/            # landing page sections
     │       ├── agents.ts            # the shipped agent integrations (id, name, mark, tint)
@@ -70,6 +71,8 @@ apps/www/
     └── lib/
         ├── css-color.ts     # resolves a CSS token to hex so three.js can use the palette
         ├── legal.ts         # privacy route + last-updated date — the URL App Store Connect is given
+        ├── support.ts       # support route, address, reply window, topics + the pure request validator
+        ├── support-rate-limit.ts # per-connection submission cap the support action checks first
         ├── shared.ts        # app name, routes, GitHub repo, site URL — single source of truth
         ├── deep-link.ts     # pragma:// deep-link forwarder URL builders (web ⇄ scheme)
         ├── plugins.ts       # official-lock fetch, validation, detail/install/source links
@@ -119,6 +122,31 @@ apps/www/
   the newest restart manifest so a client that skipped native releases gets the required
   installer before a newer UI overlay. An update without the requested
   UI/platform/package-format asset is unavailable rather than an un-installable offer.
+- **`/support` is the App Store Connect Support URL, and the form key stays on the
+  server.** App Review guideline 1.5 wants a reachable page with current contact details,
+  so the reply window, the products, and the topics live in `lib/support.ts` — one place
+  the page, the footer, and the listing all read. There is deliberately **no** published
+  support address: the form is the whole channel, security reports included, because a
+  mailbox nobody reads fails App Review harder than a form that works. If one is ever
+  stood up it goes in `lib/support.ts` and nowhere else. The form posts to the
+  server action in `(home)/support/actions.ts`, which validates through
+  `validateSupportRequest` before spending the form's monthly quota and only then POSTs to
+  splitforms' `/api/submit` with `SPLIT_FORMS_ACCESS_KEY` from the environment. Two
+  consequences worth remembering: a `"use server"` module may export **only** async
+  functions, so `SupportFormState` and its initial value live in `lib/support.ts` (Next
+  strips anything else, and the form then renders `undefined.fieldErrors`); and the key is
+  read at request time, so a deployment without it answers with the email fallback rather
+  than failing silently. Set it in every Vercel environment. The action checks a
+  per-connection rate limit (`lib/support-rate-limit.ts`) before the honeypot or
+  validation, so a flood cannot spend the shared splitforms quota; it is in-memory and
+  best-effort (one bucket per warm serverless instance), kept in its own module — not the
+  `"use server"` one — so the counting logic is unit-testable and `support.test.ts` can
+  reset it between cases via `resetRateLimiterForTests`. Because it sends your name,
+  email, and message to splitforms, that processor is named in `/privacy` — update that
+  page's "Services we may operate" and "Third parties" sections (and bump
+  `privacyLastUpdated` in `lib/legal.ts`) if the support form's data handling changes
+  again.
+
 - **Every three.js component is a client component.** `@react-three/fiber` cannot render on
   the server; keep `'use client'` at the top of the file that owns the `<Canvas>` and keep
   the rest of the page a server component.
@@ -280,7 +308,9 @@ apps/www/
   actually do with data (see `apps/pragma-go/AGENTS.md`); it is written to cover future
   analytics and hosted services as _disclosed-before-they-launch_, so adding either means
   editing the page and bumping `privacyLastUpdated` **before** the code ships, not after.
-  Support is handled through GitHub issues, so there is no support page here.
+  `/support` is its sibling artifact and follows the same rules; unlike the policy it
+  _is_ linked from the footer, because App Review expects the support route to be
+  reachable by a user who never saw the listing.
 - **Docs content mirrors the product's six audiences.** `content/docs/` holds
   `user-guide/`, `sdk/`, `cli/`, `automations/`, `plugins/`, and `wiki/` — each with its
   own `meta.json` and an `index.mdx` landing page. A new page joins its folder's

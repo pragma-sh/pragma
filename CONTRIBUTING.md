@@ -31,7 +31,9 @@ Thanks for wanting to help. Please read this page before you write code — it w
 
 Rules of thumb: one concern per pull request.
 
-Everything starts in the [issue tracker](https://github.com/pragma-sh/pragma/issues).
+Everything starts in the [issue tracker](https://github.com/pragma-sh/pragma/issues) —
+except a security vulnerability, which goes through [`SECURITY.md`](./SECURITY.md)
+privately, never a public issue.
 
 ## Prerequisites
 
@@ -117,6 +119,31 @@ bun run dev:www      # Next.js + Fumadocs on http://localhost:3000
 ```
 
 Docs content is MDX under `apps/www/content/docs/`. See `apps/www/AGENTS.md`.
+
+### Environment for the contact form
+
+The `/support` page — the contact form submitted to App Store Connect as the Support URL —
+posts through a server action that needs one variable. Everything else on the site runs
+without configuration.
+
+| Variable                 | Required for                   | Where to get it                                              |
+| ------------------------ | ------------------------------ | ------------------------------------------------------------ |
+| `SPLIT_FORMS_ACCESS_KEY` | Submitting the `/support` form | The [splitforms dashboard](https://splitforms.com/dashboard) |
+
+```bash
+cp apps/www/.env.example apps/www/.env    # then fill in the key
+```
+
+- **The key is server-side only.** It is read inside `submitSupportRequest` at request
+  time and never reaches the bundle, which is why the variable has no `NEXT_PUBLIC_`
+  prefix. Do not add one.
+- **The site builds and runs without it.** Only submission fails, and it fails with a
+  message telling the user to open a GitHub issue rather than silently — so you can work
+  on the page's layout and validation with no key at all. `validateSupportRequest` is pure
+  and unit-tested, so field rules need no network either.
+- **Never commit a real key.** `apps/www/.gitignore` keeps `.env` out and `.env.example`
+  in; do not "fix" that negated pattern. In deployments the variable is set on the Vercel
+  project, in all three environments.
 
 ## Built-in Pragma scripts
 
