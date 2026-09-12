@@ -418,7 +418,6 @@ impl PluginsRegistry {
         self.sidecar.send(&json!({
             "type": "load",
             "roots": roots,
-            "bundledDir": bundled_plugins_dir(),
             "gatewayUrl": gateway_url,
             "gatewayToken": gateway_token,
             "stateDir": self.server_dir,
@@ -567,8 +566,7 @@ fn required_log_field(payload: &Value, field: &str) -> Result<String, PluginsErr
 }
 
 /// Reads the persisted plugin roots, or an empty list before the first
-/// `registerRoots` (or when the file is unreadable/corrupt — bundled agents
-/// still resolve without roots).
+/// `registerRoots` or when the file is unreadable or corrupt.
 fn load_persisted_roots(server_dir: &Path) -> Vec<String> {
     fs::read_to_string(server_dir.join(PLUGIN_ROOTS_FILE))
         .ok()
@@ -731,26 +729,6 @@ fn sidecar_command() -> Command {
     } else {
         pragma_platform::process::command(sidecar_executable(SIDECAR_NAME))
     }
-}
-
-/// Resolves the directory of plugin bundles shipped with the app. Dev reads
-/// the staged copies under the workspace `src-tauri/resources`; a release
-/// build reads them from the app resource dir the desktop forwarded via
-/// `PRAGMA_RESOURCE_DIR` when it spawned this server. `None` (no watcher /
-/// bundled agents, non-fatal) when neither location exists.
-pub fn bundled_plugins_dir() -> Option<PathBuf> {
-    let rel = Path::new(CONSTANTS.plugins.bundled_dir_name.as_str());
-    if cfg!(debug_assertions) {
-        let dir = workspace_root()
-            .join("apps/pragma/src-tauri/resources")
-            .join(rel);
-        return dir.is_dir().then_some(dir);
-    }
-    std::env::var_os("PRAGMA_RESOURCE_DIR")
-        .map(PathBuf::from)
-        .into_iter()
-        .flat_map(|dir| [dir.join("resources").join(rel), dir.join(rel)])
-        .find(|candidate| candidate.is_dir())
 }
 
 fn sidecar_executable(name: &str) -> PathBuf {

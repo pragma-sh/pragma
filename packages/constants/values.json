@@ -48,8 +48,7 @@
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
-    "storageScopes": ["global", "project"],
-    "bundledDirName": "plugins"
+    "storageScopes": ["global", "project"]
   },
   "theme": {
     "fileName": ".pragma/theme.json",

@@ -27,18 +27,13 @@ afterEach(() => {
 });
 
 describe("plugin registry", () => {
-  it("orders records bundled, then global, then project", () => {
+  it("orders records global, then project", () => {
     setPluginsForScope("project", "/p/one", [
       record({ pluginId: "project-plugin", scope: "project", projectId: "one" }),
     ]);
     setPluginsForScope("global", null, [record({ pluginId: "global-plugin" })]);
-    setPluginsForScope("bundled", null, [record({ pluginId: "bundled-plugin", scope: "bundled" })]);
 
-    expect(getAllPlugins().map((r) => r.pluginId)).toEqual([
-      "bundled-plugin",
-      "global-plugin",
-      "project-plugin",
-    ]);
+    expect(getAllPlugins().map((r) => r.pluginId)).toEqual(["global-plugin", "project-plugin"]);
   });
 
   it("filters project records by the active project, keeping others cached", () => {
@@ -58,10 +53,7 @@ describe("plugin registry", () => {
     expect(getAllPlugins()).toHaveLength(3);
   });
 
-  it("uses higher-scope plugins instead of duplicate bundled contributions", () => {
-    setPluginsForScope("bundled", null, [
-      record({ pluginId: "shared", scope: "bundled", version: "1.0.0" }),
-    ]);
+  it("uses project plugins instead of duplicate global contributions", () => {
     setPluginsForScope("global", null, [record({ pluginId: "shared", version: "2.0.0" })]);
     setPluginsForScope("project", "/p/one", [
       record({
@@ -75,7 +67,7 @@ describe("plugin registry", () => {
 
     expect(getActivePlugins(null).map((plugin) => plugin.version)).toEqual(["2.0.0"]);
     expect(getActivePlugins("one").map((plugin) => plugin.version)).toEqual(["3.0.0"]);
-    expect(getAllPlugins()).toHaveLength(3);
+    expect(getAllPlugins()).toHaveLength(2);
   });
 
   it("replaces one scope's records without touching other scopes", () => {

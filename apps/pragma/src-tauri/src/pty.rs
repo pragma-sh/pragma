@@ -524,7 +524,7 @@ pub fn instance_data_dir(app_data_dir: &Path, channel: &str) -> PathBuf {
 ///
 /// Tauri lays resources out differently per bundle format — some put them at
 /// the resource root, others under a `resources/` sub-directory — so both are
-/// probed, exactly as bundled plugins are resolved in `plugins.rs`.
+/// probed so every package format finds the web bundle.
 fn web_bundle_dir(resource_dir: &Path) -> PathBuf {
     let relative = Path::new(CONSTANTS.gateway.web.resource_dir.as_str());
     [

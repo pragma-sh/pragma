@@ -40,8 +40,7 @@ packages/plugin/
   loading the same bundle and reporting a healthy catalog. That split brain is what hid
   OpenCode from the launcher. Keep node-only work inside the function that needs it
   (`globalThis.process?.…`, `await import("node:…")`), or off the entry's import graph
-  entirely. `stage-bundled-plugins.sh` fails the build on a static `node:` import in a
-  bundled plugin's entry.
+  entirely.
 - Do not bundle React into plugin builds. Author templates alias `react`, `react-dom`, and
   `react/jsx-runtime` to `@pragma/plugin` subpaths.
 - Add exported API with JSDoc and tests. Breaking API changes require a major version bump;

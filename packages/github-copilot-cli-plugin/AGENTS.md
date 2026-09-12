@@ -129,13 +129,13 @@ bun run --filter @pragma-sh/github-copilot-cli-plugin install:local
 copilot plugin list
 ```
 
-Production builds bundle this package into Pragma's plugin resources. For local development,
-register package's absolute path in `~/.pragma/config.json`. Rebuild bundle and reload Pragma
-plugin host after edits. Then run:
+Pragma never bundles or activates this package automatically. Onboarding installs it only after
+user selection. For local development, register package's absolute path in
+`~/.pragma/config.json`, rebuild bundle, and reload Pragma plugin host after edits. Then run:
 
-Keep this bundle on `bun build`, matching the other agent plugins. Bunup's declaration build
-crashes on Windows when bundled workspace dependency paths contain backslashes; runtime plugin
-resources only consume `dist/pragma-plugin.mjs` and do not need emitted declarations.
+Keep this bundle on `bun build`, matching other agent plugins. Bunup's declaration build
+crashes on Windows when workspace dependency paths contain backslashes; runtime plugin loader
+only consumes `dist/pragma-plugin.mjs` and does not need emitted declarations.
 
 ```bash
 bun run --filter @pragma-sh/github-copilot-cli-plugin test

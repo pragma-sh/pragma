@@ -12,11 +12,11 @@ const officialPlugin = {
   manifest: { agentBinary: "opencode" },
 } as LockedPlugin;
 
-function record(scope: PluginRecord["scope"]): PluginRecord {
+function record(): PluginRecord {
   return {
     pluginId: "pragma.opencode",
     version: "1.0.0",
-    scope,
+    scope: "global",
     status: "loaded",
     config: {},
     definition: {
@@ -26,27 +26,23 @@ function record(scope: PluginRecord["scope"]): PluginRecord {
 }
 
 describe("missingAgentPluginForCommand", () => {
-  it("matches a submitted registered agent command when only bundled plugin is active", () => {
-    expect(
-      missingAgentPluginForCommand("opencode --model test", [record("bundled")], [officialPlugin]),
-    ).toBe(officialPlugin);
+  it("matches an official agent command when its plugin is not installed", () => {
+    expect(missingAgentPluginForCommand("opencode --model test", [], [officialPlugin])).toBe(
+      officialPlugin,
+    );
   });
 
   it("matches an agent executable invoked through a path", () => {
-    expect(
-      missingAgentPluginForCommand("/opt/bin/opencode", [record("bundled")], [officialPlugin]),
-    ).toBe(officialPlugin);
+    expect(missingAgentPluginForCommand("/opt/bin/opencode", [], [officialPlugin])).toBe(
+      officialPlugin,
+    );
   });
 
-  it("does not prompt when installed plugin overrides bundled plugin", () => {
-    expect(
-      missingAgentPluginForCommand("opencode", [record("global")], [officialPlugin]),
-    ).toBeNull();
+  it("does not prompt when an installed plugin provides the agent", () => {
+    expect(missingAgentPluginForCommand("opencode", [record()], [officialPlugin])).toBeNull();
   });
 
   it("ignores unrelated commands", () => {
-    expect(
-      missingAgentPluginForCommand("git status", [record("bundled")], [officialPlugin]),
-    ).toBeNull();
+    expect(missingAgentPluginForCommand("git status", [], [officialPlugin])).toBeNull();
   });
 });

@@ -62,15 +62,12 @@ bun_sidecars=(
   "@pragma/github-helpers:github-helpers:pragma-github"
   "@pragma/watcher:watcher:pragma-watch"
   "@pragma/automations:automations:pragma-automations"
-  # The plugin catalog sidecar statically bundles the built-in agent
-  # definitions from the claude-code/opencode/cursor plugin packages.
   "@pragma/plugins-host:plugins-host:pragma-plugins"
 )
 
 bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
-bash "$script_dir/stage-bundled-plugins.sh"
 bun --filter @pragma/automations build:sidecar
 bun --filter @pragma/plugins-host build:sidecar
 

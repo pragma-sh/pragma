@@ -14,7 +14,7 @@ packages/claude-code-plugin/
 ├── .claude-plugin/
 │   ├── plugin.json          # Plugin manifest (do NOT set hooks here — see gotcha below)
 │   └── marketplace.json     # For `claude plugin marketplace add`
-├── assets/                  # Claude Code brand assets used by the built-in launcher
+├── assets/                  # Claude Code brand assets used by plugin launcher
 ├── src/pragma-plugin.ts     # Agent, watcher, and structured usage-limit declaration
 ├── hooks/
 │   ├── hooks.json           # Hook definitions — auto-loaded by Claude Code
@@ -338,16 +338,13 @@ that absolute path before falling back to `pragma-cli` from `PATH`. Every call i
 `… >/dev/null 2>&1 || true` so a missing CLI or down daemon can never disrupt a Claude
 session.
 
-## Built-in launcher
+## Plugin launcher
 
-The launchable Claude Code entry is defined **here** in `src/pragma-agent.ts`; it starts
-`claude --permission-mode auto`. This is now the single source of truth: the
-`pragma-plugins` catalog sidecar (`@pragma/plugins-host`) imports it directly to assemble
-the agent catalog, and `apps/pragma/src/plugins/builtin-agents.ts` re-exports it
-(overriding `iconPath` with a browser URL and attaching the built-in watcher) so the
-webview path shares the same definition. Its icon asset stays in this package under
-`assets/`, not in Pragma core.
-Because the built-in launcher runs `--permission-mode auto`, shell commands are
+The launchable Claude Code entry is defined **here** in `src/pragma-plugin.ts`; it starts
+`claude --permission-mode auto`. This is single source of truth. After user installs this
+integration, desktop and `pragma-plugins` load same configured bundle. Its icon asset stays
+in this package under `assets/`, not in Pragma core.
+Because plugin launcher runs `--permission-mode auto`, shell commands are
 auto-approved and **never raise a command-approval attention** — `pragma-cli agent
 verify`'s `command-allow`/`command-deny` (and `decision-timeout`/`abort-mid-approval`)
 cannot pass for a launched session, so the agent declares
@@ -358,7 +355,7 @@ exclusion (and the `command-no-permission` scenario must be re-checked against t
 default allowlist).
 
 Claude Code supports `--model` and `--effort` but does not expose a supported model-list
-command, so the built-in agent uses static model metadata. Reasoning efforts are listed
+command, so plugin agent uses static model metadata. Reasoning efforts are listed
 per model and are appended as `--effort {reasoning}` when selected; choosing a model with
 Auto reasoning appends only `--model`. If Claude Code changes its supported surface,
 prefer an official CLI/API model-list command before using private databases or internal

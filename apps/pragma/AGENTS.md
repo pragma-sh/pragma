@@ -61,7 +61,6 @@ apps/pragma/
     ├── installer-hooks.nsh      # NSIS hooks: stop the detached sidecars before install/uninstall
     ├── installer-hooks.test.ts  # Guards NSIS sidecar coverage and safe MSI process handling
     ├── scripts/stage-daemon-sidecar.sh  # Builds + stages server, pragma-cli, and sidecars
-    ├── scripts/stage-bundled-plugins.sh # Fast rebuild/restage for bundled plugins
     ├── binaries/                # Staged sidecars (git-ignored; built, never committed)
     ├── icons/                   # Production app icons
     └── icons-dev/               # Dev icons
@@ -211,7 +210,7 @@ also placed in a `THEME_TOKEN_GROUPS` section. Because Vitest stubs CSS imports 
   Pragma removes that block so the stylesheet defaults, including macOS vibrancy, stay
   authoritative; merged values equal to a stylesheet default are also omitted.
 - Plugins may contribute selectable palettes with `defineTheme` and `definePlugin({ themes })`.
-  Theme Settings shows bundled/global contributions at global scope and adds active-project
+  Theme Settings shows global contributions at global scope and adds active-project
   contributions at project scope. Applying one copies its light/dark token values into
   `.pragma/theme.json`; runtime theme resolution never depends on plugin remaining installed.
 - The app renders dark-only (`<html class="dark">`). The Theme settings page previews the
@@ -388,11 +387,11 @@ to the regular plugin notification.
 Launchable agents are plugin contributions, not Tauri-loaded JSON files. Pure Pragma
 plugins use `@pragma/plugin` `defineAgent`; Claude Code, opencode, Cursor, and GitHub
 Copilot CLI agent definitions live in their host-tool plugin packages as the single source
-of truth. Staging copies their bundles, manifests, and icons under the shared bundled-plugin
-resource directory. Desktop and `pragma-plugins` discover them through the same manifest
-path as global/project plugins; no built-in registry seam exists. Agent definitions
-with the same plugin id obey scope precedence (`project > global > bundled`), so a local
-development plugin replaces its shipped copy instead of contributing duplicate agents.
+of truth. None ships as an active Pragma plugin: onboarding offers integrations for agent
+CLIs found on the machine, and only user-approved installs register global plugin paths.
+Desktop and `pragma-plugins` discover global/project plugins through `.pragma/config.json`.
+Agent definitions with the same plugin id obey scope precedence (`project > global`), so a
+project plugin replaces its global copy instead of contributing duplicate agents.
 Agent definitions carry `id`, `name`, optional `iconPath`, `launch.command`, optional model
 providers, optional
 `prefillDelayMs`, optional `startupInput` (`[{ delayMs, data }]`, sent after `start` and
@@ -418,10 +417,10 @@ and hovering a model that has reasoning reveals a regular effort submenu. It res
 model lists lazily when an agent submenu is hovered and caches the last result.
 Host-specific CLI parsing belongs in the plugin agent's model provider, not Rust/Tauri
 IPC. There is no provider-level Auto model; when a model has reasoning entries, the
-model-only choice is shown as Auto reasoning. Built-in agents use the plugin SDK exec
-service, which runs in the active project/worktree context.
+model-only choice is shown as Auto reasoning. Agent plugins use the plugin SDK exec service,
+which runs in the active project/worktree context.
 
-Built-in agent icons live in each agent plugin package's `assets/` directory and are
+Agent icons live in each agent plugin package's `assets/` directory and are
 referenced as Vite asset URLs passed through `iconPath`; do not store these host-tool
 brand assets in `apps/pragma`. External plugin agents may pass a browser URL, an
 absolute filesystem path, or a plugin-dir-relative icon path; relative paths resolve
@@ -435,11 +434,11 @@ must not wait for GitHub or execute every candidate CLI with `--version`: either
 the final onboarding step indefinitely.
 
 Manual terminal launches get a second chance after onboarding: when the submitted command
-matches an official agent whose active plugin still comes from bundled scope, the desktop
-offers to install its reviewed integration while letting the command continue. A global or
-project plugin record suppresses the prompt because it overrides the bundled launcher. The
-user can dismiss one run or persist `plugins.agentCommandPromptDismissed` in the settings
-table with **Don't show again**.
+matches an official agent without a loaded integration, the desktop offers to install its
+reviewed integration while letting the command continue. A loaded global/project plugin
+that contributes the same agent executable suppresses the prompt. The user can dismiss one
+run or persist `plugins.agentCommandPromptDismissed` in the settings table with **Don't show
+again**.
 
 Both agent-plugin install dialogs close before installation starts. Installation continues
 in the background; success or failure is reported later through a toast, so npm/network or
@@ -499,6 +498,8 @@ project. It replaced the separate `GitHubSetupModal`, `AiSetupModal`, and
   `ThemePresetGrid` that Settings → Theme also renders, and
   `useRecommendedAgentPlugins` (the agent-CLI probe the old modal owned). A step is
   copy plus layout, never a second implementation of the thing it configures.
+- **The agent-plugin step points unsupported-agent users to the Pragma skill.** Keep that
+  self-service route visible even when no supported CLI is detected.
 - **Preview clips stream** from `constants.onboarding.mediaBaseUrl` (the marketing
   site's `public/media`) instead of being bundled: the two clips are ~12 MB and play
   once. `PreviewVideo` falls back to a placeholder when the site is unreachable.
@@ -696,11 +697,8 @@ Pragma Go browser bundle in its copied debug resources. Staging after startup is
 because the gateway loads that manifest once.
 The server/gateway are spawned directly with `std::process::Command`, **not** the shell
 plugin. `pragma-cli`, `pragma-ai`, `pragma-github`, and `pragma-automations` are staged
-by the same script. Shipped plugin packages are staged under `resources/plugins/` using
-`CONSTANTS.plugins.bundledDirName`; staging is serialized because pre-push and Tauri dev
-may invoke it concurrently. While `tauri dev` is running, use
-`bun run --filter pragma plugins:refresh` after editing a bundled host-tool plugin; the
-frontend mtime poll then hot-reloads the staged bundle.
+by the same script. Agent integration plugins are installed separately by users and are
+never copied into app resources.
 
 **The Windows installer must stop the sidecars, not just the app.** Windows locks a
 running executable's image file, and Pragma's sidecars outlive the window on purpose —
@@ -739,8 +737,8 @@ runs never block on it. None of this touches runtime: the macros exist only insi
 **Anything the build writes into a watched directory will restart `tauri dev`.** The
 watcher covers `src-tauri` _and_ every Cargo path dependency (`packages/constants`,
 `crates/*`), and it reacts to the write itself, not to a content change. Because
-`tauri:dev` stages sidecars, restages bundled plugins, and regenerates constants
-immediately before starting `tauri dev`, each of those can kill the app and force a full
+`tauri:dev` stages sidecars and regenerates constants immediately before starting
+`tauri dev`, each can kill the app and force a full
 rebuild — on Windows the relink then collides with the still-running `pragma.exe`, which
 holds a lock on its own binary.
 
@@ -748,7 +746,7 @@ The two halves are fixed differently, and the boundary was measured rather than 
 
 - **Inside `src-tauri`** — ignore it in `.taurignore` or `src-tauri/.gitignore`. The
   repo-root `.gitignore` does **not** work; the watcher never reads it. `binaries/` and
-  `resources/plugins/` are ignored for exactly this reason.
+  `resources/web/` are ignored for exactly this reason.
 - **Outside `src-tauri`** — ignoring is not available: a `**/src/generated/` pattern in
   `.taurignore` did not stop `packages/constants/src/generated/constants.ts`, and neither
   did a `.gitignore` placed inside that package. Such a generator must instead **not
@@ -1420,7 +1418,7 @@ unlinked name.
 in selected project. Local worktree/tab/agent rows render immediately; PR discovery and
 host filename/code search hydrate independently. Selecting a worktree scopes palette
 without navigating; Backspace on empty scoped query clears scope. Agent status rows resolve
-their qualified agent id through the plugin catalog and render the agent's bundled icon.
+their qualified agent id through the plugin catalog and render the agent's plugin icon.
 Escape returns from a scoped worktree or editor submenu before closing the palette.
 Active run/build commands appear as running-script rows with their worktree. Enter opens
 the script tab; Shift+Enter closes that script tab through normal managed-script cleanup.

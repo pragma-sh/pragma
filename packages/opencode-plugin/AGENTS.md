@@ -11,7 +11,7 @@ through `@pragma/sdk`.
 
 ```
 packages/opencode-plugin/
-├── assets/                 # OpenCode brand assets used by the built-in launcher
+├── assets/                 # OpenCode brand assets used by plugin launcher
 ├── src/
 │   ├── index.ts             # PragmaOpencodePlugin entry point
 │   ├── hooks.ts             # Two-flag state machine (busy + attention)
@@ -186,10 +186,10 @@ split across two pieces:
    then shows a confirmation step, so the watcher sends a final Enter after the
    answer. Helper: `questionAnswerKeys`.
 
-Each built-in plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
+Each agent plugin declares its watcher in `src/pragma-plugin.ts`. The catalog sidecar
 reports matching bundle metadata to server, which starts `pragma-watch` for a headless
 launch. opencode approval/question answering additionally requires opencode status plugin
-(installed in opencode); interjection works for any watcher-backed built-in agent.
+(installed in opencode); interjection works for any watcher-backed agent.
 
 **`dispose` (agent process exiting) reports `cleared`**, not `stopped` — quitting
 opencode removes the indicator; finishing a turn (`session.idle`) still reports `done`.
@@ -204,7 +204,7 @@ accept `executable` or `cwd`; the SDK no-ops through `hasPragmaEnvironment()` un
 `PRAGMA_GATEWAY_URL`, `PRAGMA_GATEWAY_TOKEN`, `PRAGMA_TAB_ID`, and
 `PRAGMA_WORKTREE_ID` are present.
 
-## Built-in launcher
+## Plugin launcher
 
 The launchable OpenCode entry is defined **here** in `src/pragma-plugin.ts` — this is now
 the single source of truth. The `pragma-plugins` catalog sidecar imports its built bundle
@@ -214,7 +214,7 @@ under `assets/`, not in Pragma core.
 `prefillDelayMs` is set higher than the core default because opencode's TUI can take
 longer to mount its input in a background PTY before prompt paste/submit is reliable.
 
-The built-in model provider owns all opencode-specific parsing. It tries supported
+Plugin model provider owns all opencode-specific parsing. It tries supported
 opencode model-list surfaces (`opencode models --json`, then `--verbose`, then plain
 `opencode models`) and returns Pragma's generic model entries. Each model's display name
 gets its provider appended in parentheses (e.g. `Claude Sonnet 4 (anthropic)`), derived

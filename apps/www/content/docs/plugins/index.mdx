@@ -59,7 +59,7 @@ export default definePlugin({
   host bridge (`globalThis.__PRAGMA__`).
 - Registration is declarative: a `plugins[]` entry in `.pragma/config.json`
   ([global](/docs/user-guide/core-model#where-things-live) or per project). Presence
-  installs it; project scope wins over global, which wins over the bundled plugins.
+  installs it; project scope wins over global.
 - The **agent catalog**, usage-limit providers, and server-side hooks run in the
   `pragma-plugins` host sidecar; UI contributions run in the desktop webview. One
   `definePlugin` call contributes to both.
