@@ -216,4 +216,73 @@ bun run build
 For agent contributions, also run `pragma-cli agent verify --agent <catalog-id>`; verification
 launches real sessions and may consume model tokens.
 
+## Publication Handoff
+
+Complete this handoff every time this skill creates a plugin, after implementation and
+verification. First classify its ownership:
+
+- **Internal plugin:** source belongs in `pragma-sh/pragma` under `packages/*-plugin` and
+  follows that repository's release process.
+- **External plugin:** source lives in its own repository and is independently published.
+
+Do not publish or open a pull request without explicit approval for the matching route.
+
+### Internal Plugin
+
+Ask:
+
+> Would you like me to push this internal plugin through the Pragma repository and open a pull
+> request that adds it to the official plugin list?
+
+After approval:
+
+1. Keep the plugin in its existing `pragma-sh/pragma` worktree and branch. Do not create a
+   separate repository, clone Pragma again, or publish the npm package directly.
+2. Read root `AGENTS.md`, the package's `AGENTS.md`, and
+   `packages/plugin-registry/AGENTS.md`. Add package name to sorted
+   `packages/plugin-registry/official.json` `packages` array and make any other registry or
+   workflow changes those current instructions require.
+3. Run package checks, `pragma-cli agent verify` when applicable, and repository-required checks.
+   Never hand-edit `packages/plugin-registry/official.lock.json`; internal releases and lock
+   refreshes use repository's `.github/workflows/plugins.yml` process.
+4. Commit with a Conventional Commit message, push current branch, and run
+   `gh pr create --repo pragma-sh/pragma --base main ...`. PR body must summarize plugin,
+   contributions, trust surface, tests, and agent verification results.
+5. Return Pragma pull-request URL. If push or PR creation fails, report exact blocker and preserve
+   local work for retry.
+
+### External Plugin
+
+Ask:
+
+> Would you like me to publish this plugin publicly on GitHub and npm, then open a pull request
+> that adds it to Pragma's official plugin list?
+
+Before publishing, inspect tracked and untracked files for credentials, private data, generated
+artifacts, and unsuitable licenses. Confirm intended repository owner, repository name,
+visibility, and npm package identity. Official list contains npm package names, so plugin must
+publish to npm with root `pragma-plugin.json`. If npm publication is declined, publish only
+approved GitHub repository and do not submit unusable official-list pull request.
+
+After approval:
+
+1. Commit completed plugin, verify `gh auth status`, and publish or push its repository with
+   `gh repo create ... --source . --push` (or push its existing GitHub remote).
+2. Publish approved npm release and verify public package contains built entry point and root
+   `pragma-plugin.json`.
+3. Clone fresh `pragma-sh/pragma` into a temporary directory with
+   `gh repo clone pragma-sh/pragma <directory>`. Do not reuse plugin repository or assume an
+   existing Pragma checkout is current.
+4. Read clone's root `AGENTS.md` and `packages/plugin-registry/AGENTS.md`, create a focused branch,
+   and add npm package name to sorted `packages/plugin-registry/official.json` `packages` array.
+5. Follow cloned repository's current registry instructions and checks. Never hand-edit
+   `packages/plugin-registry/official.lock.json`; regenerate it only when those instructions
+   require it.
+6. Commit with a Conventional Commit message, push through a fork when upstream is not writable,
+   and run `gh pr create --repo pragma-sh/pragma --base main ...`. PR body must link the plugin
+   repository and npm package, summarize its contributions and trust surface, and report tests
+   plus `pragma-cli agent verify` results when it contributes an agent.
+7. Return plugin repository URL and Pragma pull-request URL. If publishing or PR
+   creation fails, report the exact blocker and preserve local work for retry.
+
 Source: https://github.com/pragma-sh/pragma/tree/main/packages/plugin

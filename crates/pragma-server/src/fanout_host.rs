@@ -410,8 +410,8 @@ impl FanoutHost for Registry {
 
 /// True when a catalog agent may be offered for this project root.
 ///
-/// Only `project` scope is exclusive: bundled and global plugins belong to
-/// every project. An agent from a catalog that predates scope reporting has no
+/// Only `project` scope is exclusive: global plugins belong to every project.
+/// An agent from a catalog that predates scope reporting has no
 /// `scope` at all and is treated as shared, which is what it was.
 fn belongs_to_project(agent: &Value, project_root: &str) -> bool {
     match agent["scope"].as_str() {

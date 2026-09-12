@@ -75,7 +75,6 @@ Useful variations:
 ```bash
 bun run --filter pragma tauri:build       # full desktop bundle for your platform
 bun run --filter pragma sidecar:server    # restage the server sidecar only
-bun run --filter pragma plugins:refresh   # restage the bundled plugins
 PRAGMA_SKIP_WEB=1 bun run dev             # skip the Expo web export
 bun run dev:command -- <dev-id> "<cmd>"   # open a command in a new tab of a running dev build
 bun run benchmark                         # terminal lag benchmark (drives its own dev window)

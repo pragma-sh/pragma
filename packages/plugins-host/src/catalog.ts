@@ -16,7 +16,7 @@ export const ICON_MAX_BYTES = 256 * 1024;
 /** A loaded plugin definition plus the manifest facts the hosts need. */
 export interface ResolvedPlugin {
   pluginId: string;
-  scope: "bundled" | "global" | "project";
+  scope: "global" | "project";
   root: string;
   /** Absolute plugin directory (relative icon paths resolve against it). */
   dir: string;
@@ -170,7 +170,7 @@ function adoptFallback(
 /**
  * Flattens every plugin's watcher declarations into {@link WatcherEntry}s so
  * the server can start the matching `pragma-watch` sidecar for a headless
- * launch of any agent — bundled and user-configured plugins alike.
+ * launch of any agent contributed by a configured plugin.
  */
 export function assembleWatchers(plugins: ResolvedPlugin[]): WatcherEntry[] {
   return plugins.flatMap((plugin) =>

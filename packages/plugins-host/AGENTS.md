@@ -18,12 +18,10 @@ commands on stdin, and emits NDJSON events on stdout:
 
 Supervisor stdin is the ownership boundary: EOF must terminate the Bun process so imported plugin timers cannot outlive `pragma-server`.
 
-On `load` it resolves plugin manifests in TypeScript: shipped packages under the bundled
-resource directory, global `~/.pragma/config.json`, plus
+On `load` it resolves plugin manifests in TypeScript: global `~/.pragma/config.json` plus
 each project root's `.pragma/config.json` (`manifest.ts`, mirroring the Rust
 `plugins.rs` `resolve_local_dir` semantics — accepted duplication, flagged as debt until
-resolution moves into `pragma-core`). It imports the built-in agent plugins
-(`@pragma/{claude-code,opencode,cursor}-plugin/pragma-agent`) and any local-path plugins
+resolution moves into `pragma-core`). It imports those user-configured local-path plugins
 via Bun `import()` (the `pragma-watch` precedent), resolves async model providers through a
 `PragmaClient` pointed at the local gateway, hashes icon files (`sha256`, 256 KB cap), and
 assembles the `AgentCatalog`. A flaky model provider (exec throwing, or returning no
@@ -53,15 +51,14 @@ packages/plugins-host/
 └── package.json      # bin: pragma-plugins -> src/cli.ts; build:sidecar compiles dist/pragma-plugins
 ```
 
-## Shipped agents live in plugin packages
+## Agent integrations live in plugin packages
 
-The four bundled agent definitions (`claude-code`, `opencode`, `cursor`,
-`github-copilot`) live in their plugin packages' `src/pragma-plugin.ts`. Staging copies each
-package's `package.json`,
-`dist/`, and `assets/`; desktop and catalog sidecar discover and import those same bundles.
-When plugin ids collide, project overrides global and global overrides bundled; only the winner
-contributes agents, watchers, and usage providers. Do not statically import shipped packages or
-duplicate agent metadata here.
+Official agent definitions live in each integration package's `src/pragma-plugin.ts`.
+Pragma does not bundle or activate them. Onboarding installs only integrations selected by
+the user, globally registers their package paths, then desktop and catalog sidecar discover
+those configured bundles. When plugin ids collide, project overrides global; only the winner
+contributes agents, watchers, and usage providers. Do not statically import agent packages or
+duplicate their metadata here.
 
 ## Catalog wire types
 

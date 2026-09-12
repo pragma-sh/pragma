@@ -251,8 +251,7 @@ A module-scope `process.platform` / `process.env` read fails the same way. Sympt
 one-sided and easy to misread: the Bun sidecars load the same bundle fine, so
 `/v1/agents/catalog` still lists the agent while it is **missing from the launcher** and
 Settings → Plugins shows the entry as failed. Keep node-only work lazy
-(`globalThis.process?.…`, `await import("node:…")` inside the function). For bundled
-plugins `stage-bundled-plugins.sh` enforces this at build time.
+(`globalThis.process?.…`, `await import("node:…")` inside the function).
 Host I/O (caches, credential probes, model lists) goes through `ctx.sdk.exec.run` so it
 also hits the correct machine for a remote project. Register development bundle through
 project/global `.pragma/config.json` `plugins[]`. Install runtime reporting through
@@ -324,6 +323,15 @@ input; otherwise parallel cold starts make both paths intermittently lose input.
 Also run package tests and `bun run check`. For hook packages, refresh installed copy and
 restart host before live run.
 
+## Publication Handoff
+
+After the plugin passes verification, complete `plugin-api.md`'s mandatory publication
+handoff. Choose internal route for plugins under `pragma-sh/pragma`: keep package in current
+worktree, update official list in same branch, and let repository workflow publish it. Choose
+external route for independently owned plugins: publish separate GitHub/npm package, clone fresh
+`pragma-sh/pragma`, and propose official-list change from there. Both routes require explicit
+approval and finish with `gh pr create`.
+
 ## Checklist
 
 - Real host events and abort behavior recorded in package `AGENTS.md`.
@@ -340,4 +348,6 @@ restart host before live run.
   scenarios carry that explicit reason.
 - `agent verify` applicable scenarios all pass, including abort and stream integrity.
 - Package tests and `bun run check` pass.
+- Correct internal/external publication handoff was offered; approved publication includes
+  official-list pull request.
 - Relevant `AGENTS.md` updated with new workflow or gotcha.

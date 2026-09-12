@@ -1472,7 +1472,7 @@
       "title": "Plugins",
       "type": "object",
       "additionalProperties": false,
-      "required": ["bundledDirName", "configFileName", "storageScopes"],
+      "required": ["configFileName", "storageScopes"],
       "description": "Plugin-system constants shared by the Rust config reader and the TypeScript loader.",
       "properties": {
         "configFileName": {
@@ -1487,10 +1487,6 @@
           },
           "uniqueItems": true,
           "description": "Plugin storage scopes supported by the host runtime. v1 persists global plugin key/value state; project scope is reserved for project-addressed plugin config/storage layers."
-        },
-        "bundledDirName": {
-          "type": "string",
-          "description": "Directory name (under the app resource dir) holding the plugin bundles shipped with Pragma. Each subdirectory is a normal plugin package (package.json + bundle + assets), resolved by the same manifest readers as user-configured plugins."
         }
       }
     },
@@ -2026,12 +2022,12 @@
         },
         "scope": {
           "type": ["string", "null"],
-          "enum": ["bundled", "global", "project", null],
+          "enum": ["global", "project", null],
           "description": "Where the contributing plugin was resolved from. A `project` agent belongs to exactly one project root and must not be offered to another one."
         },
         "root": {
           "type": ["string", "null"],
-          "description": "Absolute root the contributing plugin was resolved from: the project root for `project` scope, the home directory for `global`, the bundle directory for `bundled`."
+          "description": "Absolute root the contributing plugin was resolved from: the project root for `project` scope or the home directory for `global`."
         },
         "runtimeAgentId": {
           "type": ["string", "null"],

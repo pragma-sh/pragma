@@ -2,7 +2,6 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PluginDefinition } from "@pragma/plugin";
 import type { LockedPlugin } from "@pragma/plugin-registry";
 
 import { AGENT_COMMAND_SUBMITTED_EVENT } from "@/lib/agent-plugin-prompt";
@@ -33,17 +32,7 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("@/plugins/registry", () => ({
-  useActivePlugins: () => [
-    {
-      pluginId: "pragma.opencode",
-      scope: "bundled",
-      status: "loaded",
-      config: {},
-      definition: {
-        agents: [{ launch: { command: ["opencode"] } }],
-      } as PluginDefinition,
-    },
-  ],
+  useActivePlugins: () => [],
 }));
 
 vi.mock("@/state/workspace-context", () => ({

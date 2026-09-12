@@ -17,7 +17,7 @@ export function announceSubmittedCommand(command: string): void {
   );
 }
 
-/** Finds an official agent plugin whose bundled launcher matches a submitted command. */
+/** Finds an uninstalled official agent plugin matching a submitted command. */
 export function missingAgentPluginForCommand(
   command: string,
   activePlugins: readonly PluginRecord[],
@@ -26,20 +26,19 @@ export function missingAgentPluginForCommand(
   const executable = submittedExecutable(command);
   if (!executable) return null;
 
-  const record = activePlugins.find(
+  const official = officialPlugins.find(
+    (plugin) => executableName(plugin.manifest.agentBinary) === executable,
+  );
+  if (!official) return null;
+
+  const installed = activePlugins.some(
     (plugin) =>
-      plugin.scope === "bundled" &&
       plugin.status === "loaded" &&
       plugin.definition?.agents?.some(
         (agent) => executableName(agent.launch.command[0]) === executable,
       ),
   );
-  if (!record) return null;
-
-  return (
-    officialPlugins.find((plugin) => executableName(plugin.manifest.agentBinary) === executable) ??
-    null
-  );
+  return installed ? null : official;
 }
 
 function submittedExecutable(command: string): string | null {

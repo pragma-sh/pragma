@@ -153,6 +153,11 @@ export function AgentPluginsStep({ onBack, onNext }: StepProps) {
           : "Agent integrations report status, questions, and usage back into Pragma. None of the supported CLIs were found on this machine — install one later from Settings → Plugins."
       }
       icon={<Blocks className="size-6" />}
+      footnote={
+        <p>
+          Don&apos;t see your agent? Ask it to build itself an agent plugin using the Pragma skill.
+        </p>
+      }
       nextDisabled={recommended.length > 0 && packages.size === 0}
       nextLabel={recommended.length > 0 ? "Install selected" : "Continue"}
       onBack={onBack}

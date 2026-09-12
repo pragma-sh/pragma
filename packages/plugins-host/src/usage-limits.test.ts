@@ -12,7 +12,7 @@ function resolvedPlugin(
 ): ResolvedPlugin {
   return {
     pluginId: `${id}.agent`,
-    scope: "bundled",
+    scope: "global",
     root: "/plugins",
     dir: `/plugins/${id}`,
     mainPath: `/plugins/${id}/dist/main.mjs`,

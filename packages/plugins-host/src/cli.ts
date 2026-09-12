@@ -19,8 +19,6 @@ import { loadUsageLimits } from "./usage-limits";
 interface LoadCommand {
   type: "load";
   roots?: string[];
-  /** Directory holding the plugin bundles shipped with the app, if any. */
-  bundledDir?: string;
   gatewayUrl: string;
   gatewayToken: string;
   stateDir: string;
@@ -103,9 +101,9 @@ async function bundleImportUrl(mainPath: string): Promise<string> {
   return url.href;
 }
 
-async function resolvePlugins(roots: string[], bundledDir?: string): Promise<ResolvedPlugin[]> {
+async function resolvePlugins(roots: string[]): Promise<ResolvedPlugin[]> {
   const home = process.env.HOME ?? "";
-  const manifests = await resolveManifests(home, roots, bundledDir);
+  const manifests = await resolveManifests(home, roots);
   const plugins = await Promise.all(manifests.map(loadPlugin));
   return plugins.filter((plugin): plugin is ResolvedPlugin => plugin !== undefined);
 }
@@ -123,9 +121,9 @@ async function load(
     baseUrl: command.gatewayUrl || UNAVAILABLE_GATEWAY_URL,
     token: command.gatewayToken || UNAVAILABLE_GATEWAY_TOKEN,
   });
-  const plugins = await resolvePlugins(roots, command.bundledDir);
+  const plugins = await resolvePlugins(roots);
   // Each plugin resolves its async model providers against its *own* project
-  // root; a global or bundled plugin falls back to the primary root. Sharing
+  // root; a global plugin falls back to the primary root. Sharing
   // one context here let a project-scoped override answer for every project.
   const catalog = await assembleCatalog(
     plugins,

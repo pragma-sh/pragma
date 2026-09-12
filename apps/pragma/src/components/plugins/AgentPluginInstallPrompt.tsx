@@ -16,7 +16,7 @@ import { agentPluginPromptDismissed, setAgentPluginPromptDismissed } from "@/lib
 import { useActivePlugins } from "@/plugins/registry";
 import { useWorkspace } from "@/state/workspace-context";
 
-/** Offers official integration when user manually runs an agent with only bundled launcher loaded. */
+/** Offers an official integration when user manually runs an unconfigured agent. */
 export function AgentPluginInstallPrompt() {
   const { selectedProjectId } = useWorkspace();
   const activePlugins = useActivePlugins(selectedProjectId);

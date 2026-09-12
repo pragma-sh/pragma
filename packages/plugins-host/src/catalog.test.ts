@@ -78,7 +78,7 @@ function flakyAgent(models: unknown, iconPath?: string): Record<string, unknown>
 function plugin(pluginId: string, definition: unknown, dir = "/plugins/one"): ResolvedPlugin {
   return {
     pluginId,
-    scope: "bundled",
+    scope: "global",
     root: "/plugins",
     dir,
     mainPath: join(dir, "plugin.mjs"),
