@@ -77,6 +77,11 @@ Before writing extension code:
 4. Assume code has host access. Explain trust impact and avoid hidden destructive behavior.
 5. Add focused tests for behavior, then run package typecheck and tests.
 
+Every plugin-creation task also ends with the publication handoff in
+`references/plugin-api.md`. Choose its internal or external route, then ask whether the user
+wants the completed plugin published and submitted to Pragma's official plugin list. Never
+silently skip the question or perform public publishing without approval.
+
 ### Agent Plugins
 
 An **agent plugin** integrates a host coding-agent tool — OpenCode, Claude Code, Cursor, Codex, or a new TUI agent — so it reports status into Pragma and appears in the agent launcher. It has its own routes (in-process SDK plugin, shell hooks, or `createTuiWatcher`), status and message contract, `defineAgent` registration, branding icons, and `pragma-cli agent verify` gate.
