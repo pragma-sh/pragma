@@ -69,6 +69,9 @@ bun --filter @pragma/ai-helpers build:sidecar
 bun --filter @pragma/github-helpers build:sidecar
 bun --filter @pragma/watcher build:sidecar
 bun --filter @pragma/automations build:sidecar
+# The plugin catalog sidecar bundles `@pragma/sdk` and `@pragma/plugin`, which
+# resolve to their built `dist/`; build its workspace dependencies first.
+bunx turbo run build --filter=@pragma/plugins-host^...
 bun --filter @pragma/plugins-host build:sidecar
 
 mkdir -p "$src_tauri_dir/binaries"
