@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/kimi-plugin",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "description": "Kimi Code CLI plugin that reports agent status to Pragma via native hooks.",
   "license": "AGPL-3.0-only",
   "files": [

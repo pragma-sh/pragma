@@ -5422,7 +5422,7 @@ dependencies = [
 
 [[package]]
 name = "pragma"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "include_dir",
@@ -5464,7 +5464,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-bench"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "chrono",
  "clap",
@@ -5480,7 +5480,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-cli"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "comfy-table",
@@ -5497,7 +5497,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-client"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "pragma-constants",
  "pragma-platform",
@@ -5522,7 +5522,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-core"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "ignore",
@@ -5537,7 +5537,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-gateway"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -5558,7 +5558,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-platform"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "pragma-constants",
  "sysinfo",
@@ -5569,7 +5569,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-protocol"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "pragma-constants",
  "rlimit",
@@ -5580,7 +5580,7 @@ dependencies = [
 
 [[package]]
 name = "pragma-server"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

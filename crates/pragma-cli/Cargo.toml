@@ -1,6 +1,6 @@
 [package]
 name = "pragma-cli"
-version = "0.0.0"
+version = "1.0.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
@@ -17,7 +17,7 @@ workspace = true
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 pragma-constants = { path = "../../packages/constants" }
-pragma-platform = { version = "0.0.0", path = "../pragma-platform" }
+pragma-platform = { version = "1.0.0", path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
 reqwest = { workspace = true }
 serde = { workspace = true }

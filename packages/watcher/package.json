@@ -1,6 +1,6 @@
 {
   "name": "@pragma/watcher",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Host-side watcher sidecar for Pragma plugin defineWatcher contributions.",
   "license": "AGPL-3.0-only",
