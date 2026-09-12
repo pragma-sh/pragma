@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SkillsStep, ThemeStep } from "@/components/onboarding/OnboardingSteps";
+import { AgentPluginsStep, SkillsStep, ThemeStep } from "@/components/onboarding/OnboardingSteps";
 import { THEME_OPTIONS } from "@/lib/theme-presets";
 
 const invokeMock = vi.fn();
@@ -17,6 +17,27 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@/state/theme-context", () => ({
   useTheme: () => ({ global: null, project: null, errors: {}, reload: () => undefined }),
 }));
+
+describe("AgentPluginsStep", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue([]);
+  });
+
+  it("points unsupported agents to the Pragma skill", () => {
+    render(<AgentPluginsStep onNext={vi.fn()} />);
+
+    expect(
+      screen.getByText(
+        "Don't see your agent? Ask it to build itself an agent plugin using the Pragma skill.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("SkillsStep", () => {
   afterEach(() => {
