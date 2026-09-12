@@ -1,6 +1,6 @@
 {
   "daemon": {
-    "protocolVersion": "0.0.0",
+    "protocolVersion": "1.0.0",
     "socketFile": "daemon.sock",
     "lockFile": "server.lock",
     "logFile": "server.log"
@@ -20,7 +20,10 @@
       "sendUrl": "https://exp.host/--/api/v2/push/send",
       "batchSize": 100,
       "presenceTtlMs": 90000,
-      "tokenPrefixes": ["ExponentPushToken[", "ExpoPushToken["]
+      "tokenPrefixes": [
+        "ExponentPushToken[",
+        "ExpoPushToken["
+      ]
     },
     "web": {
       "enabled": false,
@@ -34,11 +37,17 @@
     "shells": {
       "macos": "/bin/zsh",
       "linux": "/bin/sh",
-      "windows": ["pwsh.exe", "powershell.exe"]
+      "windows": [
+        "pwsh.exe",
+        "powershell.exe"
+      ]
     },
     "wsl": {
       "launcher": "wsl.exe",
-      "listArgs": ["--list", "--verbose"],
+      "listArgs": [
+        "--list",
+        "--verbose"
+      ],
       "serverBinary": "pragma-server"
     }
   },
@@ -48,11 +57,17 @@
   },
   "plugins": {
     "configFileName": ".pragma/config.json",
-    "storageScopes": ["global", "project"]
+    "storageScopes": [
+      "global",
+      "project"
+    ]
   },
   "theme": {
     "fileName": ".pragma/theme.json",
-    "modes": ["light", "dark"]
+    "modes": [
+      "light",
+      "dark"
+    ]
   },
   "keybindings": {
     "configFileName": ".pragma/keybindings.json"
@@ -67,7 +82,16 @@
     "soundsDirName": ".pragma/assets/sounds",
     "maxSoundSeconds": 5,
     "maxSoundBytes": 5242880,
-    "soundExtensions": ["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "webm"],
+    "soundExtensions": [
+      "mp3",
+      "wav",
+      "ogg",
+      "oga",
+      "m4a",
+      "aac",
+      "flac",
+      "webm"
+    ],
     "notificationsEnabled": true,
     "notificationText": {
       "doneTitle": "{agent} finished",
@@ -80,7 +104,10 @@
     }
   },
   "terminalDefaults": {
-    "hiddenDistros": ["docker-desktop", "docker-desktop-data"],
+    "hiddenDistros": [
+      "docker-desktop",
+      "docker-desktop-data"
+    ],
     "rememberLastShell": false
   },
   "tabs": {
@@ -160,17 +187,25 @@
       {
         "id": "superset",
         "label": "Superset",
-        "configPaths": [".superset/config.json"]
+        "configPaths": [
+          ".superset/config.json"
+        ]
       },
       {
         "id": "emdash",
         "label": "Emdash",
-        "configPaths": [".emdash.json"]
+        "configPaths": [
+          ".emdash.json"
+        ]
       },
       {
         "id": "orca",
         "label": "Orca",
-        "configPaths": ["orca.yaml", "orca.yml", ".orca/config.json"]
+        "configPaths": [
+          "orca.yaml",
+          "orca.yml",
+          ".orca/config.json"
+        ]
       }
     ],
     "migrationCommitMessage": "chore(config): add pragma-app.sh config"
@@ -182,7 +217,9 @@
   },
   "github": {
     "oauthClientId": "Ov23li1WfY05SeQNp5tk",
-    "scopes": ["repo"],
+    "scopes": [
+      "repo"
+    ],
     "deviceCodeUrl": "https://github.com/login/device/code",
     "deviceVerifyUrl": "https://github.com/login/device",
     "accessTokenUrl": "https://github.com/login/oauth/access_token",
@@ -199,15 +236,23 @@
   "app": {
     "name": "Pragma",
     "identifier": "com.pragma.app",
-    "version": "0.0.0"
+    "version": "1.0.0"
   },
   "onboarding": {
     "mediaBaseUrl": "https://pragma-app.sh/media",
     "skill": {
       "id": "pragma",
       "targets": [
-        { "id": "all-agents", "directory": ".agents/skills", "label": "All agents" },
-        { "id": "claude-code", "directory": ".claude/skills", "label": "Claude Code" }
+        {
+          "id": "all-agents",
+          "directory": ".agents/skills",
+          "label": "All agents"
+        },
+        {
+          "id": "claude-code",
+          "directory": ".claude/skills",
+          "label": "Claude Code"
+        }
       ]
     }
   },
@@ -222,7 +267,10 @@
     "changelogLabel": "View changelog",
     "restartWarningTitle": "This update restarts the app server",
     "restartWarningBody": "Open terminal sessions will stop. Save anything you need before installing.",
-    "applyModes": ["reload", "restart"],
+    "applyModes": [
+      "reload",
+      "restart"
+    ],
     "platforms": [
       "darwin-aarch64",
       "darwin-x86_64",

@@ -1,6 +1,6 @@
 {
   "name": "@pragma-sh/opencode-plugin",
-  "version": "0.1.0-alpha.0",
+  "version": "1.0.0",
   "description": "opencode plugin that reports agent status to Pragma automatically.",
   "license": "AGPL-3.0-only",
   "files": [

@@ -1,6 +1,6 @@
 [package]
 name = "pragma-gateway"
-version = "0.0.0"
+version = "1.0.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
@@ -15,7 +15,7 @@ clap = { version = "4", features = ["derive", "env"] }
 flate2 = "1"
 pragma-client = { path = "../pragma-client", default-features = false }
 pragma-constants = { path = "../../packages/constants" }
-pragma-platform = { version = "0.0.0", path = "../pragma-platform" }
+pragma-platform = { version = "1.0.0", path = "../pragma-platform" }
 pragma-protocol = { path = "../pragma-protocol" }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = [
