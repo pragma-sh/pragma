@@ -408,6 +408,11 @@ Bun's default **isolated** linker (`@babel/preset-*` become unresolvable). The r
 `expo export` / `expo start` fail with `Cannot find module 'babel-preset-expo'` and
 friends.
 
+On macOS, React Native's Android C++ build automatically uses Homebrew `ccache` when it
+is installed. If every native compile fails with `Library not loaded` for a Homebrew
+dependency such as `libfmt`, the app is not at fault: `brew upgrade ccache` repairs the
+stale binary linkage. Confirm with `ccache --version`, then rerun the Android command.
+
 ## Config plugins (`plugins/`)
 
 Local Expo config plugins live in `plugins/` and are registered by path in
