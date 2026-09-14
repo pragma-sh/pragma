@@ -113,6 +113,9 @@ prebuild, so adding or renaming one needs `expo run:ios`, not just a Metro reloa
 - **Bun linker must be hoisted.** Root `bunfig.toml` sets `[install] linker = "hoisted"`.
   Bun's default isolated linker hides Expo's Babel plugins from Node resolution and Metro
   fails with `Cannot find module 'babel-preset-expo'`. Don't remove it.
+- On macOS, if every Android C++ compile fails because Homebrew `ccache` cannot load a
+  dependency such as `libfmt`, run `brew upgrade ccache`; stale Homebrew linkage, not app
+  source, caused the failure.
 - Reanimated 4 requires `react-native-worklets` (separate package) + its babel plugin.
 - SF Symbols only render on iOS; always pass an `IconSymbol` `fallback` glyph for Android/web.
 - `@pragma/constants` exports source TS that imports a generated file — run
