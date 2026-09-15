@@ -18,6 +18,11 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, "node_modules"),
   path.resolve(workspaceRoot, "node_modules"),
 ];
-config.resolver.disableHierarchicalLookup = true;
+// Hierarchical lookup must stay ON. Bun's hoisted linker still nests a package
+// when dependents need different majors (`semver@7.5.3` keeps `lru-cache@6`
+// under `node_modules/semver/node_modules`). With the walk disabled, semver
+// resolves the hoisted `lru-cache@11`, whose CJS entry exports `{ LRUCache }`,
+// so `new LRU()` throws "Object cannot be used as a constructor" at startup
+// and expo-updates' ErrorRecovery turns it into a launch crash (App Review).
 
 module.exports = withNativeWind(config, { input: "./global.css" });

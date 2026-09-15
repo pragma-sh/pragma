@@ -392,7 +392,15 @@ implemented in `lib/widgets/`:
 - **Status rollup matches the desktop.** `agent-status.ts` priority is
   attention > running > done; `cleared`/none render no dot.
 - **Monorepo Metro.** `metro.config.js` watches the repo root and resolves the hoisted
-  `node_modules`; keep it if you add workspace deps.
+  `node_modules`; keep it if you add workspace deps. **Never set
+  `resolver.disableHierarchicalLookup`.** The hoisted linker still nests
+  `semver@7.5.3`'s `lru-cache@6`; hiding it makes `new LRU()` throw
+  `Object cannot be used as a constructor` at startup. In a store build,
+  expo-updates' `ErrorRecovery` rethrows any JS fatal hit in the first ~10s, so this
+  shows up as a native `SIGABRT` on `expo.controller.errorRecoveryQueue` with no JS
+  stack. That exact crash got build 10 rejected by App Review. Reproduce with
+  `PRAGMA_STORE_BUILD=1 npx expo run:ios --configuration Release` and read the
+  simulator's `com.facebook.react.log` output.
 - **oxlint RN overrides.** The root `.oxlintrc.json` has an `apps/pragma-go/**`
   override turning off three web-oriented rules that misfire on React Native:
   `react/style-prop-object` (expo-status-bar `style="auto"` is a string),
