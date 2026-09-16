@@ -563,8 +563,17 @@ eas submit --platform ios --latest
   gigabytes) is excluded. Without the `.easignore` those worktrees are uploaded on
   every build: a 1.4 GB archive and a seven-minute upload for 91 MB of tracked files.
   **A root `.easignore` replaces the root `.gitignore` for archive purposes**, so it
-  repeats those rules verbatim; nested `.gitignore` files still apply. Add a rule to
-  both files when you add a new ignored build output at the root.
+  repeats those rules verbatim. Add a rule to both files when you add a new ignored
+  build output at the root.
+- **Nested `.gitignore` files are _not_ a safety net once the root `.easignore`
+  exists** — name every excluded path there. `apps/pragma-go/ios/` is ignored by the
+  app's own `.gitignore`, yet a local `expo prebuild` / `expo run:ios` tree was still
+  uploaded: build 11 shipped a 454 MB archive and failed in `Run fastlane` with
+  `…/node_modules/hermes-compiler/hermesc/osx-bin/hermesc: No such file or directory`,
+  the worker running the _uploader's_ local hermesc path out of the prebuilt Xcode
+  project. EAS prebuilds itself, so `ios/` and `android/` are now listed in
+  `.easignore`. After any local Release run, check the archive size eas-cli prints
+  (tracked sources are ~91 MB) before letting a build proceed.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.
