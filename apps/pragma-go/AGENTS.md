@@ -392,7 +392,15 @@ implemented in `lib/widgets/`:
 - **Status rollup matches the desktop.** `agent-status.ts` priority is
   attention > running > done; `cleared`/none render no dot.
 - **Monorepo Metro.** `metro.config.js` watches the repo root and resolves the hoisted
-  `node_modules`; keep it if you add workspace deps.
+  `node_modules`; keep it if you add workspace deps. **Never set
+  `resolver.disableHierarchicalLookup`.** The hoisted linker still nests
+  `semver@7.5.3`'s `lru-cache@6`; hiding it makes `new LRU()` throw
+  `Object cannot be used as a constructor` at startup. In a store build,
+  expo-updates' `ErrorRecovery` rethrows any JS fatal hit in the first ~10s, so this
+  shows up as a native `SIGABRT` on `expo.controller.errorRecoveryQueue` with no JS
+  stack. That exact crash got build 10 rejected by App Review. Reproduce with
+  `PRAGMA_STORE_BUILD=1 npx expo run:ios --configuration Release` and read the
+  simulator's `com.facebook.react.log` output.
 - **oxlint RN overrides.** The root `.oxlintrc.json` has an `apps/pragma-go/**`
   override turning off three web-oriented rules that misfire on React Native:
   `react/style-prop-object` (expo-status-bar `style="auto"` is a string),
@@ -555,8 +563,17 @@ eas submit --platform ios --latest
   gigabytes) is excluded. Without the `.easignore` those worktrees are uploaded on
   every build: a 1.4 GB archive and a seven-minute upload for 91 MB of tracked files.
   **A root `.easignore` replaces the root `.gitignore` for archive purposes**, so it
-  repeats those rules verbatim; nested `.gitignore` files still apply. Add a rule to
-  both files when you add a new ignored build output at the root.
+  repeats those rules verbatim. Add a rule to both files when you add a new ignored
+  build output at the root.
+- **Nested `.gitignore` files are _not_ a safety net once the root `.easignore`
+  exists** — name every excluded path there. `apps/pragma-go/ios/` is ignored by the
+  app's own `.gitignore`, yet a local `expo prebuild` / `expo run:ios` tree was still
+  uploaded: build 11 shipped a 454 MB archive and failed in `Run fastlane` with
+  `…/node_modules/hermes-compiler/hermesc/osx-bin/hermesc: No such file or directory`,
+  the worker running the _uploader's_ local hermesc path out of the prebuilt Xcode
+  project. EAS prebuilds itself, so `ios/` and `android/` are now listed in
+  `.easignore`. After any local Release run, check the archive size eas-cli prints
+  (tracked sources are ~91 MB) before letting a build proceed.
 - **`PRAGMA_STORE_BUILD=1`** is set by the `preview` and `production` profiles
   and is what enables `with-store-ios-cleanup` (see _Config plugins_). Never
   set it for a dev-client build.
