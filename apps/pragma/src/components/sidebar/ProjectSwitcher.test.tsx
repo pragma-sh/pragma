@@ -5,9 +5,9 @@ import type { AgentReportPayload } from "@pragma/constants";
 
 const workspace = vi.hoisted(() => ({
   projects: [
-    { id: "project-1", name: "Alpha" },
-    { id: "project-2", name: "Beta" },
-  ],
+    { id: "project-1", name: "Alpha", iconEmoji: null },
+    { id: "project-2", name: "Beta", iconEmoji: null },
+  ] as Array<{ id: string; name: string; iconEmoji: string | null }>,
   icons: {
     "project-1": { mime: "image/svg+xml", dataBase64: "PHN2Zy8+" },
   } as Record<string, { mime: string; dataBase64: string } | null>,
@@ -21,9 +21,10 @@ const workspace = vi.hoisted(() => ({
 }));
 
 const removeProject = vi.hoisted(() => vi.fn());
+const setProjectIcon = vi.hoisted(() => vi.fn());
 
 vi.mock("@/state/workspace-context", () => ({ useWorkspace: () => workspace }));
-vi.mock("@/lib/tauri", () => ({ removeProject }));
+vi.mock("@/lib/tauri", () => ({ removeProject, setProjectIcon }));
 
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { applyAgentReport, clearAllAgentStatuses } from "@/state/agent-status-store";
@@ -104,6 +105,47 @@ describe("ProjectSwitcher", () => {
     expect(
       screen.getByRole("button", { name: "Beta" }).querySelector("[title^='Agent']"),
     ).toBeNull();
+  });
+
+  it("sets a project icon from the context menu's emoji picker", async () => {
+    render(<ProjectSwitcher />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }));
+    fireEvent.click(await screen.findByText("Set icon\u2026"));
+
+    // The catalog is a dynamic import, so the grid appears a tick after mount.
+    fireEvent.change(await screen.findByLabelText("Search emoji"), {
+      target: { value: "rocket launch" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "rocket launch rockets space travel deploy ship release",
+      }),
+    );
+
+    expect(setProjectIcon).toHaveBeenCalledWith("project-2", "\u{1f680}");
+    await waitFor(() => expect(workspace.reload).toHaveBeenCalled());
+  });
+
+  it("clears a project icon with the picker's reset button", async () => {
+    workspace.projects[1] = { id: "project-2", name: "Beta", iconEmoji: "\u{1f680}" };
+    render(<ProjectSwitcher />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }));
+    fireEvent.click(await screen.findByText("Set icon\u2026"));
+    fireEvent.click(await screen.findByText("Reset to default icon"));
+
+    expect(setProjectIcon).toHaveBeenCalledWith("project-2", null);
+    workspace.projects[1] = { id: "project-2", name: "Beta", iconEmoji: null };
+  });
+
+  it("disables the reset button for a project that has no icon set", async () => {
+    render(<ProjectSwitcher />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }));
+    fireEvent.click(await screen.findByText("Set icon\u2026"));
+
+    expect(await screen.findByRole("button", { name: /Reset to default icon/ })).toBeDisabled();
   });
 
   it("removes a project from its context menu", async () => {

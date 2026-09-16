@@ -446,6 +446,15 @@ export function removeProject(projectId: string): Promise<void> {
   return invoke("remove_project", { projectId });
 }
 
+/**
+ * Sets the emoji shown for a project in the project switcher. `null` (or a
+ * blank string) clears the override, falling back to a favicon found in the
+ * checkout and then to the project name's initial.
+ */
+export function setProjectIcon(projectId: string, emoji: string | null): Promise<Project> {
+  return invoke<Project>("set_project_icon", { projectId, emoji });
+}
+
 /** Clones a remote repository and persists it as a project. */
 export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<Project> {
   return invoke<Project>("clone_project", { remoteUrl, intoDirectory });

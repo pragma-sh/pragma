@@ -26,6 +26,7 @@ apps/pragma/
 │   │   ├── brand-icons.ts/json  # Curated offline icon subset (lucide + simple-icons)
 │   │   ├── file-icons.ts        # vscode-icons rendered offline via @iconify/react
 │   │   └── utils.ts             # cn() + small utilities
+│   ├── generated/               # Git-ignored codegen output (emoji-catalog.ts; `bun run generate`)
 │   ├── hooks/                   # use-shortcuts (keybindings), use-escape-to-close
 │   ├── components/kanban/       # Project agent board (ProjectKanbanWorkspace, cards, draft/completion modals)
     │   ├── state/
@@ -1337,6 +1338,38 @@ the fanout member remains completed.
 Trigger via `toast.success(…)` from action handlers — never from inside the reducer.
 Clipboard reads/writes go through `navigator.clipboard` with a try/catch surfacing
 errors via `toast.error(…)`.
+
+## Project icons
+
+The project switcher paints one glyph per project, resolved in this order:
+
+1. `project.iconEmoji` — the emoji the user picked from the project's context
+   menu ("Set icon…"). It is a column on the `projects` row (v17 migration),
+   written by the `set_project_icon` command; blank input clears it.
+2. A favicon found in the checkout — `icons.rs` probes a fixed list of
+   directories and names and returns the bytes, which the switcher paints as a
+   `currentColor` CSS mask so it stays legible selected or not.
+3. The project name's leading initial.
+
+**The emoji list is Unicode's, not ours.**
+`scripts/generate-emoji-catalog.ts` compiles `emojibase-data` (a devDependency)
+into the git-ignored `src/generated/emoji-catalog.ts`: every emoji Unicode
+defines, with its CLDR label and keyword tags, minus the component group
+(skin-tone modifiers, regional indicators) that never stands alone. Run
+`bun run generate` after bumping the dependency; `pretypecheck` / `pretest` /
+`prebuild` run it for you. `src/lib/emoji-catalog.ts` only reshapes that data
+and owns the search.
+
+Two things to know before editing the generator:
+
+- **Developer synonyms go in `EXTRA_TERMS`**, which layers words like "docker"
+  onto 🐳 without inventing entries. Keys are matched with U+FE0F stripped,
+  because emojibase fully-qualifies emoji-presentation glyphs (its "package" is
+  `1f4e6 fe0f`); a key that resolves to nothing fails the build rather than
+  silently adding no terms.
+- **The catalog is a dynamic import** in `EmojiPicker`, so its ~105 KB lands in
+  its own chunk instead of the startup bundle. Importing `emoji-catalog`
+  statically from app code would undo that.
 
 ## Worktree lifecycle
 

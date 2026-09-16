@@ -1223,6 +1223,7 @@ pub fn run() {
             projects::list_projects,
             projects::add_project,
             projects::remove_project,
+            projects::set_project_icon,
             projects::clone_project,
             projects::get_projects_directory,
             ssh_host::connect_remote_project,

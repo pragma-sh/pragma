@@ -132,8 +132,9 @@ tasks:
         "https://github.com/pragma-sh/pragma.git" "$BASE_REF"
       bunx commitlint --from "$(git merge-base FETCH_HEAD HEAD)" --to HEAD --verbose
 
-  # Shared by every TypeScript check: the generated shared-constant types are an
-  # input to lint, typecheck, and the test suites alike.
+  # Shared by every TypeScript check: the generated shared-constant types and the
+  # desktop emoji catalog are an input to lint, typecheck, and the test suites
+  # alike.
   - key: generate
     use: [code, bun-install]
     run: bun run generate
