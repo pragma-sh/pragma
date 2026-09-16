@@ -7,12 +7,27 @@ import type { AgentTab, InboxItem, Project, Worktree } from "../types";
 const now = "2026-07-05T12:00:00.000Z";
 
 export const MOCK_PROJECTS: Project[] = [
-  { id: "proj-pragma", name: "pragma", path: "/Users/dev/pragma", orderIndex: 0, createdAt: now },
-  { id: "proj-web", name: "acme-web", path: "/Users/dev/acme-web", orderIndex: 1, createdAt: now },
+  {
+    id: "proj-pragma",
+    name: "pragma",
+    path: "/Users/dev/pragma",
+    iconEmoji: null,
+    orderIndex: 0,
+    createdAt: now,
+  },
+  {
+    id: "proj-web",
+    name: "acme-web",
+    path: "/Users/dev/acme-web",
+    iconEmoji: null,
+    orderIndex: 1,
+    createdAt: now,
+  },
   {
     id: "proj-infra",
     name: "infra",
     path: "/Users/dev/infra",
+    iconEmoji: null,
     orderIndex: 2,
     createdAt: now,
   },
