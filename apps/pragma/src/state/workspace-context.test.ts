@@ -21,7 +21,7 @@ const baseState: WorkspaceState = {
 };
 
 function project(id: string): Project {
-  return { id, name: id, path: `/tmp/${id}`, orderIndex: 0, createdAt: "now" };
+  return { id, name: id, path: `/tmp/${id}`, iconEmoji: null, orderIndex: 0, createdAt: "now" };
 }
 
 function tab(id: string, worktreeId = "worktree"): Tab {

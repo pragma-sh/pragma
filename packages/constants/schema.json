@@ -2582,7 +2582,7 @@
       "title": "Project",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "path", "orderIndex", "createdAt"],
+      "required": ["id", "name", "path", "iconEmoji", "orderIndex", "createdAt"],
       "properties": {
         "id": {
           "type": "string"
@@ -2592,6 +2592,10 @@
         },
         "path": {
           "type": "string"
+        },
+        "iconEmoji": {
+          "type": ["string", "null"],
+          "description": "User-chosen emoji shown in the project switcher; null falls back to a favicon found in the checkout, then to the project name's initial."
         },
         "orderIndex": {
           "type": "integer"

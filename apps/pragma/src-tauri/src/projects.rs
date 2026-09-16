@@ -36,6 +36,23 @@ pub fn remove_project(
     Ok(())
 }
 
+/// Sets the emoji a project shows in the project switcher. An empty or blank
+/// `emoji` clears the override, falling the switcher back to a favicon found in
+/// the checkout and then to the project name's initial.
+#[tauri::command]
+pub fn set_project_icon(
+    db: State<'_, Db>,
+    publisher: State<'_, crate::workspace_mirror::WorkspacePublisher>,
+    project_id: String,
+    emoji: Option<String>,
+) -> AppResult<Project> {
+    let emoji = emoji.map(|emoji| emoji.trim().to_string());
+    let emoji = emoji.filter(|emoji| !emoji.is_empty());
+    db.set_project_icon_emoji(&project_id, emoji.as_deref())?;
+    publisher.trigger();
+    db.project(&project_id)
+}
+
 #[tauri::command(async)]
 pub fn clone_project(
     db: State<'_, Db>,
