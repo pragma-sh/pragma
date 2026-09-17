@@ -18,7 +18,7 @@ chrono = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 pragma-client = { path = "../../crates/pragma-client" }
 pragma-constants = { path = "../constants" }
-pragma-platform = { version = "0.0.0", path = "../../crates/pragma-platform" }
+pragma-platform = { path = "../../crates/pragma-platform" }
 pragma-protocol = { path = "../../crates/pragma-protocol" }
 ratatui = "0.29"
 serde = { workspace = true }
