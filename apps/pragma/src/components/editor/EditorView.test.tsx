@@ -49,6 +49,7 @@ function editorTab(): Tab {
     title: "app.ts",
     url: null,
     filePath: "src/app.ts",
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

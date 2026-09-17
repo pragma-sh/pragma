@@ -119,6 +119,7 @@ function markdownTab(): Tab {
     title: "README.md",
     url: null,
     filePath: "README.md",
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

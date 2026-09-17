@@ -26,6 +26,7 @@ import { InstallUpdateButton } from "@/components/sidebar/InstallUpdateButton";
 import { ProjectSwitcher } from "@/components/sidebar/ProjectSwitcher";
 import { OpenPortsCard } from "@/components/sidebar/OpenPortsCard";
 import { ScratchpadsCard } from "@/components/sidebar/ScratchpadsCard";
+import { WhiteboardsCard } from "@/components/sidebar/WhiteboardsCard";
 import { WorktreeTree } from "@/components/sidebar/WorktreeTree";
 import { useProjectCycle } from "@/hooks/use-project-cycle";
 import { startWindowDrag } from "@/lib/window-drag";
@@ -178,6 +179,7 @@ function ExpandedProjectSidebar({
       </div>
       <div className="p-3">
         <OpenPortsCard />
+        <WhiteboardsCard />
         <ScratchpadsCard />
         <PluginSidebarCards />
         <Separator className="my-3" />

@@ -82,9 +82,10 @@ impl Db {
                id           TEXT PRIMARY KEY,
                project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                worktree_id  TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
-               title        TEXT,
-               file_path    TEXT,
-               diff_side    TEXT,
+                title        TEXT,
+                file_path    TEXT,
+                whiteboard_id TEXT,
+                diff_side    TEXT,
                diff_commit  TEXT,
                pr_number    INTEGER,
                user_renamed INTEGER NOT NULL DEFAULT 0,
@@ -341,6 +342,19 @@ impl Db {
             }
             conn.execute_batch("PRAGMA user_version = 16;")?;
         }
+        // v17 adds the durable host-owned whiteboard reference to client tab rows.
+        // Whiteboard contents remain in pragma-server's SQLite store.
+        if version < 17 {
+            let has_whiteboard_id: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'whiteboard_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_whiteboard_id == 0 {
+                conn.execute_batch("ALTER TABLE tabs ADD COLUMN whiteboard_id TEXT;")?;
+            }
+            conn.execute_batch("PRAGMA user_version = 17;")?;
+        }
         Ok(())
     }
 
@@ -585,7 +599,7 @@ impl Db {
     pub fn list_tabs(&self, project_id: &str) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs WHERE project_id = ?1 ORDER BY order_index, created_at",
         )?;
         let rows = stmt.query_map([project_id], tab_from_row)?;
@@ -598,7 +612,7 @@ impl Db {
     pub fn list_all_tabs(&self) -> AppResult<Vec<Tab>> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs ORDER BY project_id, order_index, created_at",
         )?;
         let rows = stmt.query_map([], tab_from_row)?;
@@ -628,6 +642,7 @@ impl Db {
             title,
             url,
             file_path,
+            None,
             diff_side,
             diff_commit,
             pr_number,
@@ -636,6 +651,40 @@ impl Db {
             None,
             None,
             shell,
+        )
+    }
+
+    /// Creates or reuses a tab projecting one host-owned whiteboard.
+    pub fn create_whiteboard_tab(
+        &self,
+        project_id: &str,
+        worktree_id: &str,
+        whiteboard_id: &str,
+        title: String,
+    ) -> AppResult<Tab> {
+        if let Some(tab) = self.list_tabs(project_id)?.into_iter().find(|tab| {
+            matches!(tab.kind, TabKind::Whiteboard)
+                && tab.worktree_id == worktree_id
+                && tab.whiteboard_id.as_deref() == Some(whiteboard_id)
+        }) {
+            return Ok(tab);
+        }
+        self.create_tab_record(
+            project_id,
+            worktree_id,
+            TabKind::Whiteboard,
+            Some(title),
+            None,
+            None,
+            Some(whiteboard_id.to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
     }
 
@@ -662,6 +711,7 @@ impl Db {
             None,
             None,
             None,
+            None,
             plugin_id,
             plugin_view_id,
             plugin_payload,
@@ -681,6 +731,7 @@ impl Db {
         title: Option<String>,
         url: Option<String>,
         file_path: Option<String>,
+        whiteboard_id: Option<String>,
         diff_side: Option<DiffSide>,
         diff_commit: Option<String>,
         pr_number: Option<i64>,
@@ -700,8 +751,8 @@ impl Db {
                 |row| row.get(0),
             )?;
             conn.execute(
-                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                "INSERT INTO tabs (id, project_id, worktree_id, kind, title, url, file_path, whiteboard_id, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, order_index, shell_backend, shell_distro)
+                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     id,
                     project_id,
@@ -710,6 +761,7 @@ impl Db {
                     title,
                     url,
                     file_path,
+                    whiteboard_id,
                     diff_side.map(diff_side_as_str),
                     diff_commit,
                     pr_number,
@@ -986,7 +1038,7 @@ impl Db {
         self.0
             .lock()?
             .query_row(
-                "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro FROM tabs WHERE id = ?1",
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id FROM tabs WHERE id = ?1",
                 [tab_id],
                 tab_from_row,
             )
@@ -997,7 +1049,7 @@ impl Db {
     pub fn tab_by_id_or_prefix(&self, tab_id: &str) -> AppResult<Tab> {
         let conn = self.0.lock()?;
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro
+            "SELECT id, project_id, worktree_id, kind, title, url, file_path, diff_side, diff_commit, pr_number, plugin_id, plugin_view_id, plugin_payload, plugin_dedupe_key, agent_id, user_renamed, order_index, created_at, shell_backend, shell_distro, whiteboard_id
              FROM tabs WHERE id = ?1 OR id LIKE ?2 ORDER BY id LIMIT 2",
         )?;
         let rows = stmt.query_map(params![tab_id, format!("{tab_id}%")], tab_from_row)?;
@@ -1019,6 +1071,7 @@ fn kind_as_str(kind: TabKind) -> &'static str {
         TabKind::Browser => "browser",
         TabKind::Editor => "editor",
         TabKind::Scratchpad => "scratchpad",
+        TabKind::Whiteboard => "whiteboard",
         TabKind::Diff => "diff",
         TabKind::Log => "log",
         TabKind::PrReview => "pr-review",
@@ -1032,6 +1085,7 @@ fn kind_from_str(value: &str) -> TabKind {
         "browser" => TabKind::Browser,
         "editor" => TabKind::Editor,
         "scratchpad" => TabKind::Scratchpad,
+        "whiteboard" => TabKind::Whiteboard,
         "diff" => TabKind::Diff,
         "log" => TabKind::Log,
         "pr-review" => TabKind::PrReview,
@@ -1158,6 +1212,7 @@ fn tab_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tab> {
         title: row.get(4)?,
         url: row.get(5)?,
         file_path: row.get(6)?,
+        whiteboard_id: row.get(20)?,
         diff_side: diff_side_from_str(row.get::<_, Option<String>>(7)?),
         diff_commit: row.get(8)?,
         pr_number: row.get::<_, Option<i64>>(9)?,

@@ -22,8 +22,10 @@ import {
   createFolder,
   createPluginWebViewTab,
   createTab,
+  createWhiteboard,
   deleteFile,
   deleteWorktree,
+  editWhiteboard,
   fileDiff,
   githubAbortMerge,
   githubMergeBaseBranch,
@@ -64,6 +66,7 @@ import {
   watchWorktreeFiles,
   writeAutomationSource,
   writeFile,
+  viewWhiteboard,
 } from "./tauri";
 
 describe("stream IPC wrappers", () => {
@@ -254,6 +257,48 @@ describe("browser IPC wrappers", () => {
     void worktreesAreRemote(["wt-1", "wt-2"]);
     expect(invokeMock).toHaveBeenCalledWith("worktrees_are_remote", {
       worktreeIds: ["wt-1", "wt-2"],
+    });
+  });
+});
+
+describe("whiteboard IPC wrappers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("forwards lossless scenes and render requests", () => {
+    const scene = {
+      type: "excalidraw" as const,
+      version: 2,
+      source: "test",
+      elements: [],
+      appState: {},
+      files: {},
+    };
+    void createWhiteboard("worktree", "Architecture", scene);
+    expect(invokeMock).toHaveBeenCalledWith("create_whiteboard", {
+      worktreeId: "worktree",
+      title: "Architecture",
+      scene,
+    });
+
+    void editWhiteboard("worktree", "board", "Updated", scene, 3);
+    expect(invokeMock).toHaveBeenCalledWith("edit_whiteboard", {
+      input: {
+        worktreeId: "worktree",
+        id: "board",
+        title: "Updated",
+        scene,
+        expectedVersion: 3,
+      },
+    });
+
+    void viewWhiteboard("worktree", "board");
+    expect(invokeMock).toHaveBeenCalledWith("view_whiteboard", {
+      worktreeId: "worktree",
+      id: "board",
+      dark: false,
     });
   });
 });

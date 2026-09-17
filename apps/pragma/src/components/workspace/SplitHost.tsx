@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Tab } from "@pragma/constants";
-import { Bot, Globe, Pencil, Plus, SquareTerminal, X } from "lucide-react";
+import { Bot, Globe, Pencil, PencilRuler, Plus, SquareTerminal, X } from "lucide-react";
 
 import { BrowserView } from "@/components/browser/BrowserView";
 import { DiffView } from "@/components/editor/DiffView";
@@ -60,6 +60,11 @@ import { type SplitLayoutNode, type SplitPaneNode, useWorkspace } from "@/state/
 const ScratchpadView = lazy(() =>
   import("@/components/scratchpad/ScratchpadView").then((module) => ({
     default: module.ScratchpadView,
+  })),
+);
+const WhiteboardView = lazy(() =>
+  import("@/components/whiteboard/WhiteboardView").then((module) => ({
+    default: module.WhiteboardView,
   })),
 );
 
@@ -278,6 +283,18 @@ const PANE_CONTENT_RENDERERS: Partial<Record<Tab["kind"], (tab: Tab, cwd: string
   log: (tab) => <LogView key={tab.id} tab={tab} />,
   "pr-review": (tab) => <ReviewTab key={tab.id} tab={tab} />,
   "plugin-webview": (tab) => <PluginWebViewTab key={tab.id} tab={tab} />,
+  whiteboard: (tab) => (
+    <Suspense
+      fallback={
+        <div className="grid h-full place-items-center text-sm text-muted-foreground">
+          Loading whiteboard...
+        </div>
+      }
+      key={tab.id}
+    >
+      <WhiteboardView tab={tab} />
+    </Suspense>
+  ),
 };
 
 /** Render a pane's active non-terminal tab. */
@@ -577,7 +594,7 @@ function PaneTab({
 }
 
 /**
- * The pane's "+" menu: a new terminal or browser tab in this pane, plus the
+ * The pane's "+" menu: a new terminal, browser, or whiteboard in this pane, plus the
  * configured agents, each launched into a terminal tab of this pane.
  */
 function PaneNewTabMenu({ paneId }: { paneId: string }) {
@@ -617,6 +634,10 @@ function PaneNewTabMenu({ paneId }: { paneId: string }) {
         <DropdownMenuItem onSelect={() => void workspace.createTabInPane(paneId, "browser")}>
           <Globe />
           Browser
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void workspace.createWhiteboard(paneId)}>
+          <PencilRuler />
+          Whiteboard
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>

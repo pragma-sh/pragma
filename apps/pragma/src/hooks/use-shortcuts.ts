@@ -35,6 +35,7 @@ interface UseShortcutsOptions {
   onCloseTopTab: () => void;
   onNewTerminalTab: () => void;
   onNewBrowserTab: () => void;
+  onNewWhiteboard: () => void;
   onClearTerminal: () => void;
   /** Browser-only actions; the handler decides whether to act on the active tab. */
   onBrowserReload: () => void;
@@ -70,6 +71,7 @@ const SIMPLE_ACTIONS: Partial<Record<KeybindingAction, ZeroArgOptionKey>> = {
   closeTopTab: "onCloseTopTab",
   newTerminalTab: "onNewTerminalTab",
   newBrowserTab: "onNewBrowserTab",
+  newWhiteboard: "onNewWhiteboard",
   browserReload: "onBrowserReload",
   browserDevtools: "onBrowserDevtools",
   browserCopyUrl: "onBrowserCopyUrl",

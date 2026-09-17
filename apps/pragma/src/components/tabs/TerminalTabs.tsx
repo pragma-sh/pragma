@@ -10,6 +10,7 @@ import {
   Globe,
   LayoutGrid,
   Pencil,
+  PencilRuler,
   Hammer,
   Play,
   Rows2,
@@ -713,7 +714,7 @@ function KanbanToggle() {
 }
 
 /**
- * The "new tab" dropdown for creating a terminal or browser tab.
+ * The "new tab" dropdown for creating a terminal, browser, or whiteboard tab.
  *
  * `worktreeId` scopes the distribution list to the host the new tab would spawn
  * on. For a project opened over SSH that is the remote daemon's machine, whose
@@ -726,6 +727,7 @@ function NewTabMenu({
   worktreeId,
   onCreateTerminal,
   onCreateBrowser,
+  onCreateWhiteboard,
 }: {
   shortcutModifier: string;
   disabled: boolean;
@@ -733,6 +735,7 @@ function NewTabMenu({
   worktreeId: string | null;
   onCreateTerminal: (shell?: ShellProfile | null) => void;
   onCreateBrowser: () => void;
+  onCreateWhiteboard: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wsl = useWslDistros(worktreeId);
@@ -801,6 +804,11 @@ function NewTabMenu({
           <Globe />
           Browser
           <DropdownMenuShortcut>{shortcutModifier}B</DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onCreateWhiteboard}>
+          <PencilRuler />
+          Whiteboard
+          <DropdownMenuShortcut>⇧{shortcutModifier}W</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -959,6 +967,7 @@ function TerminalTabStrip({
       <NewTabMenu
         disabled={!workspace.selectedWorktree}
         onCreateBrowser={() => void workspace.createBrowserTab()}
+        onCreateWhiteboard={() => void workspace.createWhiteboard()}
         onCreateTerminal={(shell) =>
           void workspace.createTerminalTab(undefined, shell === undefined ? undefined : { shell })
         }

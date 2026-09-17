@@ -54,6 +54,7 @@ export const defaultKeybindingsConfig: KeybindingsConfig = {
     closeTopTab: primaryChord("w"),
     newTerminalTab: primaryChord("t"),
     newBrowserTab: primaryChord("b"),
+    newWhiteboard: primaryChord("w", true),
     clearTerminal: primaryChord("k"),
     browserReload: primaryChord("r"),
     browserDevtools: primaryChord("i", true),

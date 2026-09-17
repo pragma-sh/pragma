@@ -624,7 +624,8 @@ fn tab_close(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_jso
         | TabKind::PrReview
         | TabKind::Log
         | TabKind::PluginWebview
-        | TabKind::Scratchpad => {}
+        | TabKind::Scratchpad
+        | TabKind::Whiteboard => {}
     }
     app.state::<Db>().delete_tab(&tab.id)?;
     emit_tabs_changed(app, "tabClosed", &tab);
@@ -700,6 +701,17 @@ struct ScratchpadMetadata<'a> {
     agent_tab_id: &'a str,
     agent_id: &'a str,
     created_at: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScratchpadCreateResult<'a> {
+    id: &'a str,
+    file_path: &'a str,
+    title: &'a str,
+    agent_tab_id: &'a str,
+    agent_id: &'a str,
+    tab_id: &'a str,
 }
 
 fn scratchpad_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<serde_json::Value> {
@@ -783,7 +795,14 @@ fn scratchpad_create(app: &AppHandle, payload: serde_json::Value) -> AppResult<s
     emit_tabs_changed(app, "tabOpened", &tab);
     app.state::<crate::workspace_mirror::WorkspacePublisher>()
         .trigger();
-    json(tab)
+    json(ScratchpadCreateResult {
+        id: &id,
+        file_path: &path,
+        title,
+        agent_tab_id: &agent_tab.id,
+        agent_id: &agent_id,
+        tab_id: &tab.id,
+    })
 }
 
 fn scratchpad_slug(title: &str) -> String {
@@ -1483,7 +1502,7 @@ fn shell_join(argv: &[String]) -> String {
 mod tests {
     use super::{
         agent_display_title, scratchpad_document, scratchpad_slug, shell_join, BrowserHistory,
-        ScratchpadMetadata,
+        ScratchpadCreateResult, ScratchpadMetadata,
     };
 
     #[test]
@@ -1501,6 +1520,23 @@ mod tests {
         assert!(document.starts_with("---\npragmaScratchpad: {"));
         assert!(document.contains("\ncustom: kept\n---\n# Body\n"));
         assert_eq!(scratchpad_slug(metadata.title), "architecture-notes");
+    }
+
+    #[test]
+    fn scratchpad_create_result_reports_managed_agent_metadata() {
+        let result = serde_json::to_value(ScratchpadCreateResult {
+            id: "scratch-1",
+            file_path: ".pragma/scratchpads/notes.mdx",
+            title: "Notes",
+            agent_tab_id: "agent-tab",
+            agent_id: "opencode",
+            tab_id: "scratchpad-tab",
+        })
+        .expect("serialize result");
+
+        assert_eq!(result["agentId"], "opencode");
+        assert_eq!(result["agentTabId"], "agent-tab");
+        assert_eq!(result["tabId"], "scratchpad-tab");
     }
 
     #[test]

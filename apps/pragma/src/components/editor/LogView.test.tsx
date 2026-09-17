@@ -25,6 +25,7 @@ function logTab(): Tab {
     title: "Server Logs",
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,

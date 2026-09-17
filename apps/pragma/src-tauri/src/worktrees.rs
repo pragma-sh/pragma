@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use pragma_constants::{TabKind, Worktree, WorktreeStatus};
+use pragma_constants::{ProtocolRpcMethod, TabKind, Worktree, WorktreeStatus};
 use pragma_core::git::GitRequest;
+use pragma_core::whiteboards::WhiteboardsRequest;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::browser;
@@ -215,6 +216,15 @@ pub fn delete_worktree(
             force,
         },
     )?;
+
+    if let Err(error) = pty.rpc(
+        ProtocolRpcMethod::Whiteboards,
+        serde_json::to_value(WhiteboardsRequest::DeleteForWorktree {
+            worktree_id: worktree_id.clone(),
+        })?,
+    ) {
+        log::warn!("failed to delete whiteboards for {worktree_id}: {error}");
+    }
 
     if delete_branch {
         // Branch deletion must run from a worktree that *doesn't* have the

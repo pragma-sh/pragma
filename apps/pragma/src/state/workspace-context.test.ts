@@ -33,6 +33,7 @@ function tab(id: string, worktreeId = "worktree"): Tab {
     title: null,
     url: null,
     filePath: null,
+    whiteboardId: null,
     diffSide: null,
     diffCommit: null,
     prNumber: null,
