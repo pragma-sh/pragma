@@ -30,6 +30,11 @@ components; `ui/primitives` contains their small shadcn-compatible building bloc
   `cm-mergeSpacer` equivalent), and a replaced line pair gets word-level segments (the
   `cm-changedText` equivalent). Its LCS table is capped at `MAX_DP_CELLS`; past that a
   differing region degrades to a wholesale replacement rather than stalling the frame.
+- **`Whiteboard` is host-rendered, with editing delegated to the host.** It requests a
+  theme-matched PNG through `globalThis.pragmaScratchpad`, passes its last seen version so
+  unchanged polls do not rerender, and never imports Excalidraw or desktop internals into the
+  sandbox. Desktop frames expose `openWhiteboard`, so clicking the preview opens the durable
+  board in its native interactive tab; hosts without an editor keep the preview read-only.
 - Keep components browser-safe and sandbox-safe. No Node APIs, Tauri APIs, storage, or direct parent access.
 - `promptAgent` must preserve default missing-agent attachment behavior while allowing a per-call callback.
 - Public functions, types, and components require JSDoc.

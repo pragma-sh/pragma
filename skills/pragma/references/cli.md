@@ -135,9 +135,17 @@ pragma-cli agent verify --agent <catalog-id> --pick-model-cmd "--model provider/
 Verification launches real sessions and can consume model tokens. Default is headless;
 pass `--headed` only to test desktop launch brokering. Load `agent-plugin.md` for full rules.
 
-## Scratchpads And Fanouts
+## Whiteboards, Scratchpads, And Fanouts
 
 ```sh
+pragma-cli whiteboard create --title "Architecture" scene.excalidraw
+pragma-cli whiteboard list
+pragma-cli whiteboard search "auth flow"
+pragma-cli whiteboard get <id>
+pragma-cli whiteboard edit <id> --title "Architecture v2" scene.excalidraw
+pragma-cli whiteboard view <id> architecture.png
+pragma-cli whiteboard delete <id> [--yes]
+
 pragma-cli scratchpad create --title "Architecture" result.mdx
 pragma-cli scratchpad create --title "Architecture" -
 
@@ -151,7 +159,11 @@ pragma-cli fanout cancel [<id>]
 pragma-cli fanout pick [<id>] --member <member-id>
 ```
 
-Create scratchpads through CLI; do not write managed directory directly. Fanouts have no
+Whiteboards preserve complete Excalidraw scene JSON and are scoped to the current worktree;
+every command accepts `--worktree <id>` instead of `$PRAGMA_WORKTREE_ID`. `view` writes a
+native-rendered PNG to the caller-provided path. Read `whiteboards.md` before constructing
+scene JSON or embedding a board in a scratchpad. Create scratchpads through CLI;
+do not write managed directory directly. Fanouts have no
 `list`: omitted id resolves from environment/current worktree. `pick` merges winner and
 deletes attempt worktrees and branches; automation needs explicit `--yes`.
 

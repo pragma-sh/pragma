@@ -1236,6 +1236,15 @@ TSX/JavaScript transforms are sufficient there. The frame bootstrap still define
 no-op `$RefreshReg$` / `$RefreshSig$` hooks because Vite's optimized development build of
 `react-dom/client` contains signature calls even though the frame itself does not use HMR.
 
+**Whiteboard tabs** — worktree-scoped Excalidraw scenes are host-owned, not files in the
+checkout. `WhiteboardView` lazy-loads `@excalidraw/excalidraw`, serializes complete scene
+JSON, and debounces optimistic writes through typed Tauri adapters. Sidebar and new-tab
+menus create/open deduplicated `whiteboard` tabs. Scratchpad `<Whiteboard id="…" />` embeds
+a host-rendered PNG through the token-scoped frame bridge and rejects cross-worktree ids;
+unchanged version polls do not rerender, while theme changes request the matching Excalidraw
+export palette. Clicking the preview opens the same board in its deduplicated interactive tab.
+Native PNG output comes from `pragma-core`, never canvas APIs in the webview.
+
 **PDF tabs** — `editor` tabs whose file is a `.pdf` (`isPdfPath`) render
 `components/pdf/PdfView.tsx` instead of `EditorView` (same `PANE_CONTENT_RENDERERS`
 dispatch; the `TabKind` stays `editor`). It is a **viewer**, not an editor: no dirty

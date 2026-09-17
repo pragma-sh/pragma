@@ -112,6 +112,8 @@ from the desktop.
   desktop's "Resolve comments" sends — then marks them resolved. Attachment is a drawer
   (`components/scratchpad/AttachAgentDrawer.tsx`) that rewrites the file's frontmatter;
   it opens only when send (or an interactive block) needs an agent and none is attached.
+  Read-only `<Whiteboard>` blocks request version- and theme-aware host PNGs through the viewer
+  message contract and `client.whiteboards`; the screen rejects ids owned by another worktree.
   The reverse link is a pill: `components/chat/ScratchpadPill.tsx` finds the scratchpads
   whose frontmatter names this chat's tab (`scratchpadsForAgentTab`) and shows the first
   (`+N` when there are more) directly above the composer, tapping through to the

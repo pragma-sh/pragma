@@ -222,6 +222,9 @@ than no guide.
 - Anything that measures perceived terminal latency → `packages/bench`
   (`bun run benchmark`). It drives a real dev window; do not add a headless
   variant that claims to measure rendering.
+- Worktree-scoped whiteboards live on the host: SQLite CRUD/search and native PNG rendering
+  in `crates/pragma-core/src/whiteboards.rs`, with `whiteboards` RPC callers in CLI, SDK,
+  desktop, and scratchpad bridge. Scene JSON stays lossless; edits use optimistic versions.
 - A reusable UI primitive → `apps/pragma/src/components/ui/` (prefer `shadcn add`).
 - Anything that calls the Rust backend → `apps/pragma/src/lib/tauri.ts` (never call
   `invoke()` directly from components).

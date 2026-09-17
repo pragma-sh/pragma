@@ -7,7 +7,8 @@ Portable fetch-based TypeScript client for the local Pragma HTTP gateway
 ## What it does
 
 Exports one `PragmaClient` class with namespaces: `fs`, `git`, `exec`, `sessions`,
-`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, and `scratchpads`. `client.rpc(method, payload)` is the low-level escape hatch for
+`agents`, `events`, `workspace`, `assets`, `push`, `theme`, `health`, `scratchpads`, and
+`whiteboards`. `client.rpc(method, payload)` is the low-level escape hatch for
 not-yet-typed gateway RPCs. Bundled by Bunup as ESM, CJS, and `.d.ts`.
 `client.createBoardDraft({ prompt, worktreeId, agentId, modelId?, reasoningId? })`
 creates a draft card through the running desktop controller.
@@ -92,6 +93,13 @@ the user has not themed.
 `client.health.check()` round-trips `GET /v1/health` (`status`, `protocolVersion`,
 `gatewayVersion`). That route is unauthenticated, so it distinguishes an unreachable
 host from a rejected token — which is what the mobile client's Settings heartbeat uses.
+
+`client.whiteboards` provides typed `create`, `get`, `list`, `search`, `edit`, `delete`,
+and `view` calls over the host's `whiteboards` RPC. CRUD methods use the shared
+`@pragma/constants` whiteboard contract. `search` sends the same `list` action with a
+required query, every id-based operation also requires `worktreeId`, and `view` decodes
+the RPC's base64 `data` into PNG `Uint8Array` bytes; pass `dark: true` to use Excalidraw's
+dark export palette.
 
 ## Fanouts
 

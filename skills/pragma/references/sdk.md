@@ -39,6 +39,7 @@ Both `baseUrl` and `token` are required. SDK does not read discovery files.
 | `fanouts`     | `create`, `get`, `read`, `send`, `retry`, `cancel`, `pick`, `subscribe` | Parallel attempts.                     |
 | `assets`      | `fetch`, `toDataUri`                                                    | Content-addressed assets.              |
 | `scratchpads` | listing, comments, attachment, sending                                  | Managed scratchpad interaction.        |
+| `whiteboards` | `create`, `get`, `list`, `search`, `edit`, `delete`, `view`             | Worktree-scoped Excalidraw scenes.     |
 | `push`        | `register`, `unregister`, `list`, `test`, `presence`                    | Paired-device push.                    |
 | `theme`       | `get`                                                                   | Merged host theme overrides.           |
 | `health`      | `check`                                                                 | Gateway reachability and versions.     |
@@ -174,6 +175,25 @@ const result = await client.scratchpads.sendAttached({ root, filePath, worktreeI
 
 Do not parse managed frontmatter independently. Missing comments file means empty thread.
 `sendAttached` returning `{ delivered: false }` is normal when no live agent is attached.
+
+## Whiteboards
+
+```ts
+const board = await client.whiteboards.create({ worktreeId, title: "Architecture", scene });
+const matches = await client.whiteboards.search({ worktreeId, query: "auth" });
+const png = await client.whiteboards.view({ worktreeId, id: board.id, dark: true }); // Uint8Array
+await client.whiteboards.edit({
+  worktreeId,
+  id: board.id,
+  title: board.title,
+  scene: nextScene,
+  expectedVersion: board.version,
+});
+```
+
+Scenes are lossless Excalidraw JSON. Preserve unknown element and app-state fields. Writes use
+`expectedVersion`; re-read and reconcile instead of blindly overwriting a version conflict.
+See `whiteboards.md` for the scene contract, a complete authoring example, and scratchpad embeds.
 
 ## Errors
 
