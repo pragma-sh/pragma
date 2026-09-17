@@ -898,18 +898,35 @@ before both xterm and PTY resize — fullscreen TUIs redraw the entire grid per
 interaction, so unbounded sizes regress latency.
 
 **Wheel reports are renderer-response-paced** while a TUI has mouse tracking on. Every wheel
-event reaches xterm so trackpad pixel deltas keep accumulating; the first generated report is
-sent immediately, then only the latest report waits until response bytes finish parsing and
-`terminal.onRender` confirms WebGL painted the next frame. The write callback alone is not
-backpressure: it fires before rendering.
-Never release several reports per redraw: macOS trackpad momentum then outruns fullscreen TUI
-rendering again and eventually starves the webview. A 250ms watchdog applies only when the prior
-report produces no output. Once response bytes arrive, no further report is admitted while they
-wait in xterm's parser; a separate short render watchdog covers a missing `onRender`. Sensitivity is 1 while mouse tracking is active (each
-threshold crossing is one report) and 3 for local scrollback's pixel damping. Pacing applies **only when
-`terminal.modes.mouseTrackingMode !== "none"`** — with tracking off, xterm scrolls its own
-viewport and is left untouched. A new gesture after `MOUSE_WHEEL_GESTURE_QUIET_MS` recovers
-from a prior report that produced no output at a scroll boundary.
+event reaches xterm, but xterm emits at most **one** report per event however far it scrolled,
+so the manager sets xterm's sensitivity to `TUI_REPORT_SENSITIVITY` (every non-zero event emits)
+and counts the distance itself with the same sensitivity/trackpad damping as local scrollback,
+repeating the report once per whole line. Letting xterm count (sensitivity 1) made a TUI scroll
+at roughly a third of the shell's speed. The first batch is sent immediately; later reports wait
+until response bytes finish parsing and `terminal.onRender` confirms WebGL painted the next
+frame, then leave as one write. The write callback alone is not backpressure: it fires before
+rendering. The queue is capped at `TUI_WHEEL_PENDING_REPORTS` (about a screen) so macOS
+trackpad momentum cannot outrun a TUI that redraws per report; a cap of 4 visibly threw away
+most of a swipe. A 250ms watchdog applies only when the prior report produces no output; a
+separate short render watchdog covers a missing `onRender`. Pacing applies **only when
+`terminal.modes.mouseTrackingMode !== "none"`**. A new gesture after
+`MOUSE_WHEEL_GESTURE_QUIET_MS` recovers from a prior report that produced no output.
+
+**The scrollbar is hidden while a TUI owns the viewport** (alternate screen or mouse tracking),
+checked on `onWriteParsed` since xterm has no mode-change event. The wheel already goes to the
+program then, so the scrollbar only led into stale pre-TUI history that rendered as garbage under
+a program redrawing in place. For the same reason Cmd+K (`clear`) writes ED3 (drop scrollback)
+instead of calling `terminal.clear()`, which would blank the program's screen.
+
+**Drops onto a terminal paste paths**, like Terminal.app. Listeners run in the capture phase so
+WebKit's default drop into xterm's textarea never runs. The webview never exposes a dropped file's
+real path (`dragDropEnabled` is off for tab dragging), and a remote PTY could not open it anyway,
+so `src/lib/terminal-drop.ts` sends the bytes through `save_dropped_file` → `FsRequest::SaveDroppedFile`
+to the PTY's host, which writes them to an owner-only `<temp>/pragma-dropped-files/<uuid>/` and
+returns the absolute path; the path is shell-quoted (backslash-escaped POSIX, single-quoted
+PowerShell) and pasted with bracketed paste. File-tree drags paste absolute worktree paths; text
+drops paste verbatim. Size limit: `terminalDefaults.maxDroppedFileBytes`. A WSL tab still gets a
+Windows path until host-level WSL exists.
 
 **Terminal font:** Nerd Font-first stack (`JetBrainsMonoNL Nerd Font`, …) at **fontSize
 14 / lineHeight 1.0**. 14px is required — at 13px macOS WebKit rounds the cell to 15px
