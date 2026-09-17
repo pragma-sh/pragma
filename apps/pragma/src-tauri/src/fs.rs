@@ -184,6 +184,21 @@ pub async fn write_file_bytes(
     )
 }
 
+/// Copies a file dropped onto a terminal to the host that runs the worktree's
+/// PTYs and returns the absolute path the shell can open.
+#[tauri::command]
+pub async fn save_dropped_file(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    hosts: State<'_, Hosts>,
+    worktree_id: String,
+    name: String,
+    contents: String,
+) -> AppResult<String> {
+    let pty = ssh_host::client_for_worktree(app, &db, &hosts, &worktree_id).await?;
+    fs_rpc(&pty, &FsRequest::SaveDroppedFile { name, contents })
+}
+
 /// Renames (or moves) a worktree-relative entry.
 #[tauri::command]
 pub async fn rename_file(

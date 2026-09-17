@@ -81,7 +81,9 @@
   },
   "terminalDefaults": {
     "hiddenDistros": ["docker-desktop", "docker-desktop-data"],
-    "rememberLastShell": false
+    "rememberLastShell": false,
+    "maxDroppedFileBytes": 10485760,
+    "droppedFilesDirName": "pragma-dropped-files"
   },
   "tabs": {
     "defaultTitles": {
