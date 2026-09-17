@@ -17,6 +17,7 @@ function installBridge(
     promptAgent: vi.fn(async () => promptResults.shift() ?? "sent"),
     requestAgentAttachment: vi.fn(async () => true),
     subscribeAgentProgress: () => () => undefined,
+    getWhiteboardSnapshot: vi.fn(async () => null),
   };
   globalThis.pragmaScratchpad = bridge;
   return bridge;

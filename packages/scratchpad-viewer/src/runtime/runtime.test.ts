@@ -132,6 +132,41 @@ describe("scratchpad viewer runtime", () => {
     expect(posted.filter((message) => message.type === "error")).toEqual([]);
   });
 
+  it("requests and renders a host whiteboard snapshot", async () => {
+    boot('<Whiteboard id="board-1" refreshIntervalMs={0} />\n');
+    await settle();
+
+    const request = posted.findLast((message) => message.type === "getWhiteboardSnapshot");
+    expect(request).toMatchObject({
+      type: "getWhiteboardSnapshot",
+      whiteboardId: "board-1",
+      dark: false,
+    });
+    if (!request || request.type !== "getWhiteboardSnapshot") {
+      throw new Error("Whiteboard snapshot request was not posted");
+    }
+
+    window.pragmaScratchpadViewer?.receive(
+      JSON.stringify({
+        type: "response",
+        requestId: request.requestId,
+        value: {
+          id: "board-1",
+          title: "System map",
+          version: 4,
+          dataUrl: "data:image/png;base64,cG5n",
+        },
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(document.querySelector<HTMLImageElement>(".pragma-whiteboard__image")).toMatchObject({
+        alt: "System map whiteboard",
+        src: "data:image/png;base64,cG5n",
+      });
+    });
+  });
+
   it("reports an unrenderable document instead of blanking", async () => {
     boot("<Nope />\n");
 

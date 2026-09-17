@@ -1,13 +1,125 @@
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { alignDiffLines } from "./diff";
 import type { DiffLine } from "./diff";
 import { promptAgent, scratchpadBridge } from "./index";
 import type { PromptAgentOptions, ScratchpadAgentProgress } from "./index";
+import type { ScratchpadWhiteboardSnapshot } from "./index";
 import { OTHER_VALUE, composeAnswer, toggleChoice } from "./question";
 import { Badge, Button, Card, Input, Progress, Textarea, type Tone } from "./primitives";
 
 const EMPTY_OPTIONS: readonly AskQuestionOption[] = [];
+
+/** Props for a live, read-only whiteboard rendering. */
+export interface WhiteboardProps {
+  id: string;
+  /** Poll interval for host-side version checks. Set to zero to disable polling. */
+  refreshIntervalMs?: number;
+}
+
+/** Live read-only PNG rendering of a worktree-scoped Pragma whiteboard. */
+export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): React.JSX.Element {
+  const [snapshot, setSnapshot] = useState<ScratchpadWhiteboardSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const versionRef = useRef<number | undefined>(undefined);
+  const darkRef = useRef<boolean | undefined>(undefined);
+  const mountedRef = useRef(true);
+  const openWhiteboard = globalThis.pragmaScratchpad?.openWhiteboard;
+
+  const open = (): void => {
+    if (!openWhiteboard) return;
+    void openWhiteboard(id).catch((cause: unknown) => {
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+  };
+
+  const refresh = useCallback(async () => {
+    try {
+      const dark = document.documentElement.classList.contains("dark");
+      const knownVersion = darkRef.current === dark ? versionRef.current : undefined;
+      const next = await scratchpadBridge().getWhiteboardSnapshot(id, knownVersion, dark);
+      if (!mountedRef.current) return;
+      if (next) {
+        versionRef.current = next.version;
+        darkRef.current = dark;
+        setSnapshot(next);
+      }
+      setError(null);
+    } catch (cause) {
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    versionRef.current = undefined;
+    darkRef.current = undefined;
+    setSnapshot(null);
+    setLoading(true);
+    void refresh();
+    const interval =
+      refreshIntervalMs > 0
+        ? globalThis.setInterval(() => void refresh(), Math.max(1000, refreshIntervalMs))
+        : null;
+    return () => {
+      mountedRef.current = false;
+      if (interval !== null) globalThis.clearInterval(interval);
+    };
+  }, [refresh, refreshIntervalMs]);
+
+  return (
+    <Card>
+      <div className="pragma-row pragma-row--between">
+        <div>
+          <span className="pragma-eyebrow">Whiteboard</span>
+          <p className="pragma-title">{snapshot?.title ?? id}</p>
+        </div>
+        <div className="pragma-row">
+          <Badge>Read only</Badge>
+          {openWhiteboard ? (
+            <Button onClick={open} size="sm" variant="ghost">
+              Open
+            </Button>
+          ) : null}
+          <Button disabled={loading} onClick={() => void refresh()} size="sm" variant="ghost">
+            Refresh
+          </Button>
+        </div>
+      </div>
+      {error ? (
+        <p className="pragma-whiteboard__error" role="alert">
+          {error}
+        </p>
+      ) : snapshot ? (
+        openWhiteboard ? (
+          <button
+            aria-label={`Open ${snapshot.title} whiteboard`}
+            className="pragma-whiteboard__open"
+            onClick={open}
+            type="button"
+          >
+            <img
+              alt={`${snapshot.title} whiteboard`}
+              className="pragma-whiteboard__image"
+              src={snapshot.dataUrl}
+            />
+          </button>
+        ) : (
+          <img
+            alt={`${snapshot.title} whiteboard`}
+            className="pragma-whiteboard__image"
+            src={snapshot.dataUrl}
+          />
+        )
+      ) : (
+        <div className="pragma-empty">Loading whiteboard...</div>
+      )}
+    </Card>
+  );
+}
 
 /** A pending-aware send to the attached agent, shared by the interactive cards. */
 interface AgentAction {

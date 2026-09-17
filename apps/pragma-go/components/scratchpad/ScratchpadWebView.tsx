@@ -12,6 +12,8 @@ import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { ScratchpadLoading } from "@/components/scratchpad/ScratchpadLoading";
 import { useHostThemeOverrides } from "@/lib/theme-context";
+import { respondToViewer } from "@/lib/viewer-response";
+import type { ScratchpadWhiteboardSnapshot } from "@/lib/whiteboard-snapshot";
 
 export interface ScratchpadWebViewProps {
   /** The scratchpad's MDX source, frontmatter included. */
@@ -28,6 +30,12 @@ export interface ScratchpadWebViewProps {
   onPromptAgent: (text: string) => Promise<"sent" | "missing-agent" | "cancelled">;
   /** A rendered component asked the host to attach an agent tab. */
   onRequestAttachment: () => Promise<boolean>;
+  /** A rendered component requested a version-aware whiteboard PNG. */
+  onGetWhiteboardSnapshot: (
+    id: string,
+    knownVersion?: number,
+    dark?: boolean,
+  ) => Promise<ScratchpadWhiteboardSnapshot | null>;
   /** The document failed to render, or a component threw. */
   onError: (message: string) => void;
 }
@@ -75,9 +83,6 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [commentMode]);
 
-  const respond = (requestId: string, value: unknown): void =>
-    send({ type: "response", requestId, value });
-
   /** Routes one page message to the prop that owns it. */
   const handlers: {
     [K in ScratchpadViewerMessage["type"]]: (
@@ -88,10 +93,17 @@ export function ScratchpadWebView(props: ScratchpadWebViewProps) {
     preview: (message) => props.onPreview(message.block),
     error: (message) => props.onError(message.message),
     promptAgent: (message) => {
-      void props.onPromptAgent(message.text).then((result) => respond(message.requestId, result));
+      respondToViewer(send, message.requestId, props.onPromptAgent(message.text));
     },
     requestAgentAttachment: (message) => {
-      void props.onRequestAttachment().then((ok) => respond(message.requestId, ok));
+      respondToViewer(send, message.requestId, props.onRequestAttachment());
+    },
+    getWhiteboardSnapshot: (message) => {
+      respondToViewer(
+        send,
+        message.requestId,
+        props.onGetWhiteboardSnapshot(message.whiteboardId, message.knownVersion, message.dark),
+      );
     },
     // Live agent progress is the chat screen's job on mobile; a component that
     // asks for it gets an empty roster rather than a hanging promise.

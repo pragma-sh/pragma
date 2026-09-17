@@ -13,7 +13,7 @@
  */
 import { evaluate } from "@mdx-js/mdx";
 import * as Scratchpad from "@pragma/scratchpad";
-import type { ScratchpadBridge } from "@pragma/scratchpad";
+import type { ScratchpadBridge, ScratchpadWhiteboardSnapshot } from "@pragma/scratchpad";
 import * as ScratchpadPrimitives from "@pragma/scratchpad/ui/primitives";
 import * as ScratchpadUi from "@pragma/scratchpad/ui";
 import * as React from "react";
@@ -109,6 +109,14 @@ const bridge: ScratchpadBridge = {
   promptAgent: (text) => requestHost((requestId) => ({ type: "promptAgent", requestId, text })),
   requestAgentAttachment: () =>
     requestHost((requestId) => ({ type: "requestAgentAttachment", requestId })),
+  getWhiteboardSnapshot: (whiteboardId: string, knownVersion?: number, dark?: boolean) =>
+    requestHost<ScratchpadWhiteboardSnapshot | null>((requestId) => ({
+      type: "getWhiteboardSnapshot",
+      requestId,
+      whiteboardId,
+      knownVersion,
+      dark,
+    })),
   subscribeAgentProgress: (tabIds, listener) => {
     const requestId = randomId();
     progressListeners.set(requestId, (entries) =>

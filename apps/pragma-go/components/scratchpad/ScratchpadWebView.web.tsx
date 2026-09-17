@@ -12,6 +12,7 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useHostThemeOverrides } from "@/lib/theme-context";
+import { respondToViewer } from "@/lib/viewer-response";
 
 import type { ScratchpadWebViewProps } from "./ScratchpadWebView";
 
@@ -218,7 +219,18 @@ function useViewerMessages(
         if (!requestPromptAgent(message)) respond(message.requestId, "cancelled");
       },
       requestAgentAttachment: (message) => {
-        void latest.current.onRequestAttachment().then((ok) => respond(message.requestId, ok));
+        respondToViewer(send, message.requestId, latest.current.onRequestAttachment());
+      },
+      getWhiteboardSnapshot: (message) => {
+        respondToViewer(
+          send,
+          message.requestId,
+          latest.current.onGetWhiteboardSnapshot(
+            message.whiteboardId,
+            message.knownVersion,
+            message.dark,
+          ),
+        );
       },
       // Live agent progress belongs to the chat screen here too, so a component
       // that asks for it gets an empty roster rather than a hanging promise.

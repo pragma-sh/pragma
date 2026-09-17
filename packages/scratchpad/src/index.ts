@@ -11,6 +11,14 @@ export interface ScratchpadAgentProgress {
   status: ScratchpadAgentStatus;
 }
 
+/** Read-only host rendering of one worktree-scoped whiteboard. */
+export interface ScratchpadWhiteboardSnapshot {
+  id: string;
+  title: string;
+  version: number;
+  dataUrl: string;
+}
+
 /** Host bridge installed only inside a rendered Pragma scratchpad. */
 export interface ScratchpadBridge {
   /** Delivers text, or reports a missing attachment or reader cancellation. */
@@ -20,6 +28,14 @@ export interface ScratchpadBridge {
     tabIds: readonly string[],
     listener: (progress: readonly ScratchpadAgentProgress[]) => void,
   ): () => void;
+  /** Returns a fresh PNG only when the board changed since `knownVersion`. */
+  getWhiteboardSnapshot(
+    id: string,
+    knownVersion?: number,
+    dark?: boolean,
+  ): Promise<ScratchpadWhiteboardSnapshot | null>;
+  /** Opens the board in the host's interactive editor when available. */
+  openWhiteboard?(id: string): Promise<void>;
 }
 
 /** Context passed when a scratchpad action has no attached agent tab. */
