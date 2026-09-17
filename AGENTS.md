@@ -272,7 +272,7 @@ bun run rust:test          # cargo test --workspace
 bun run fallow:check       # fallow audit (TS/JS): block on issues this branch introduces
 bun run check              # Lint + format/type checks + rustfmt/clippy (tests run separately)
 
-bun run generate           # Regenerate shared-constant types from schema/values
+bun run generate           # Regenerate shared-constant types from schema/values + the desktop emoji catalog
 bun run plugins:lock:local # Build/pack official workspace plugins and refresh local test lock
 bun run plugins:lock       # Refresh lock from exact published npm releases
 cargo run -p pragma-server # Run the persistent server directly for debugging

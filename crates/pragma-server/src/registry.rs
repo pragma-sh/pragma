@@ -1897,6 +1897,7 @@ mod tests {
                 id: "project-1".to_string(),
                 name: "sandbox".to_string(),
                 path: project_path.to_string(),
+                icon_emoji: None,
                 order_index: 0,
                 created_at: "2026-01-01 00:00:00".to_string(),
             }],

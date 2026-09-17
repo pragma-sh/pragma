@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ShellProfile, TerminalSettings } from "@pragma/constants";
+import type { ShellProfile } from "@pragma/constants";
 
-import { resolveDefaultProfile, resolveHiddenDistros } from "@/lib/shell-profile";
-import { readConfig } from "@/lib/tauri";
+import {
+  loadTerminalScopes,
+  resolveDefaultProfile,
+  resolveHiddenDistros,
+} from "@/lib/shell-profile";
 
 /**
  * Window event fired after Settings writes the `terminal` block, so an open
@@ -26,29 +29,6 @@ const NOTHING_CONFIGURED: ResolvedTerminalSettings = {
 };
 
 /**
- * Reads the `terminal` block of one config scope.
- *
- * A missing, unreadable, or malformed file yields `undefined` rather than
- * throwing: a broken config must not stop the new-tab menu from rendering, the
- * same tolerance the server applies when it resolves the shell.
- */
-async function readTerminalScope(
-  scope: "global" | "project",
-  projectId?: string | null,
-): Promise<TerminalSettings | undefined> {
-  try {
-    const document = await readConfig(scope, projectId);
-    if (!document?.exists) return undefined;
-    const parsed: unknown = JSON.parse(document.contents);
-    if (!parsed || typeof parsed !== "object") return undefined;
-    const terminal = (parsed as { terminal?: unknown }).terminal;
-    return terminal && typeof terminal === "object" ? (terminal as TerminalSettings) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * The default shell the session layer will launch for `projectId`, resolved
  * project-scope-first exactly as the server resolves it.
  *
@@ -59,11 +39,7 @@ export function useTerminalSettings(projectId: string | null): ResolvedTerminalS
   const [settings, setSettings] = useState<ResolvedTerminalSettings>(NOTHING_CONFIGURED);
 
   const load = useCallback(async (): Promise<ResolvedTerminalSettings> => {
-    const [project, global] = await Promise.all([
-      projectId ? readTerminalScope("project", projectId) : Promise.resolve(undefined),
-      readTerminalScope("global"),
-    ]);
-    const scopes = [project, global];
+    const scopes = await loadTerminalScopes(projectId);
     return {
       defaultProfile: resolveDefaultProfile(scopes),
       hiddenDistros: resolveHiddenDistros(scopes),

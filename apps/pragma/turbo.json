@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "generate": {
+      "inputs": ["scripts/generate-emoji-catalog.ts", "package.json"],
+      "outputs": ["src/generated/**"]
+    }
+  }
+}

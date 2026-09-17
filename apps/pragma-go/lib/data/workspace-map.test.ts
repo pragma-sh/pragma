@@ -12,6 +12,7 @@ const project: Project = {
   id: "p1",
   name: "pragma",
   path: "/x",
+  iconEmoji: null,
   orderIndex: 0,
   createdAt: "t",
 };

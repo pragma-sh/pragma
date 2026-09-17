@@ -48,8 +48,12 @@ vi.mock("@xterm/xterm", () => {
     focus = vi.fn();
     registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }));
     modes = { mouseTrackingMode: "none" as "none" | "x10" | "vt200" | "drag" | "any" };
+    buffer = { active: { type: "normal" as "normal" | "alternate" } };
     onData = vi.fn();
     onRender = vi.fn();
+    onWriteParsed = vi.fn();
+    paste = vi.fn();
+    scrollToBottom = terminalScrollToBottom;
     resize = vi.fn((cols: number, rows: number) => {
       this.cols = cols;
       this.rows = rows;
@@ -59,7 +63,6 @@ vi.mock("@xterm/xterm", () => {
     clear = terminalClear;
     reset = terminalReset;
     refresh = terminalRefresh;
-    scrollToBottom = terminalScrollToBottom;
     dispose = terminalDispose;
     constructor(options: unknown) {
       this.options = options;
@@ -124,6 +127,7 @@ import {
   TERMINAL_SCROLLBACK_LINES,
   TERMINAL_WRITE_DRAIN_TIMEOUT_MS,
   TERMINAL_WRITE_CHUNK_MAX_BYTES,
+  TUI_REPORT_SENSITIVITY,
   TUI_WHEEL_PENDING_REPORTS,
   WEBGL_RECOVERY_DELAY_MS,
   WEBGL_RECOVERY_MAX_ATTEMPTS,
@@ -497,6 +501,32 @@ describe("TerminalManager lifecycle", () => {
     ]);
   });
 
+  it("resolves whenConnected only after attach succeeds, and immediately afterwards", async () => {
+    let resolveAttach: (() => void) | undefined;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "pty_attach") {
+        return new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    const connected = vi.fn();
+
+    void manager.whenConnected(tab.id).then(connected);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    expect(connected).not.toHaveBeenCalled();
+
+    resolveAttach!();
+    await settleConnection();
+    expect(connected).toHaveBeenCalledTimes(1);
+    await expect(manager.whenConnected(tab.id)).resolves.toBeUndefined();
+  });
+
   it("surfaces bounded pre-attach input overflow", () => {
     invokeMock.mockImplementation((command: string) =>
       command === "pty_attach" ? new Promise<void>(() => undefined) : Promise.resolve(undefined),
@@ -585,6 +615,86 @@ describe("TerminalManager lifecycle", () => {
     manager.clear(tab.id);
 
     expect(terminalClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears only scrollback while a TUI owns the screen so its redraw survives", async () => {
+    terminalClear.mockClear();
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{ buffer: { active: { type: string } }; write: Mock }>;
+      }
+    ).instances.at(-1)!;
+    terminal.buffer.active.type = "alternate";
+
+    manager.clear(tab.id);
+
+    expect(terminalClear).not.toHaveBeenCalled();
+    expect(terminal.write).toHaveBeenCalledWith("\x1b[3J");
+  });
+
+  it("hides the scrollbar while a TUI owns the viewport and restores it afterwards", async () => {
+    terminalScrollToBottom.mockClear();
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          modes: { mouseTrackingMode: string };
+          onWriteParsed: Mock;
+          options: { scrollbar?: { showScrollbar?: boolean } };
+        }>;
+      }
+    ).instances.at(-1)!;
+    const onWriteParsed = terminal.onWriteParsed.mock.calls[0]![0] as () => void;
+
+    onWriteParsed();
+    expect(terminal.options.scrollbar).toBeUndefined();
+
+    terminal.modes.mouseTrackingMode = "any";
+    onWriteParsed();
+    expect(terminal.options.scrollbar?.showScrollbar).toBe(false);
+    expect(terminalScrollToBottom).toHaveBeenCalledTimes(1);
+
+    terminal.modes.mouseTrackingMode = "none";
+    onWriteParsed();
+    expect(terminal.options.scrollbar?.showScrollbar).toBe(true);
+  });
+
+  it("copies dropped files to the PTY host and pastes their escaped paths", async () => {
+    invokeMock.mockImplementation((command: string, args: { name?: string }) =>
+      Promise.resolve(command === "save_dropped_file" ? `/tmp/drops/${args.name}` : undefined),
+    );
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const terminal = (
+      Terminal as unknown as { instances: Array<{ element: HTMLElement; paste: Mock }> }
+    ).instances.at(-1)!;
+    const file = new File([new Uint8Array([1, 2, 3])], "Screen Shot.png", { type: "image/png" });
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { types: ["Files"], files: [file], getData: () => "" },
+    });
+
+    terminal.element.dispatchEvent(drop);
+    await vi.waitFor(() => expect(terminal.paste).toHaveBeenCalled());
+
+    expect(drop.defaultPrevented).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("save_dropped_file", {
+      worktreeId: tab.worktreeId,
+      name: "Screen Shot.png",
+      contents: "AQID",
+    });
+    expect(terminal.paste).toHaveBeenCalledWith("/tmp/drops/Screen\\ Shot.png ");
   });
 
   it("ignores clear for an unknown tab", () => {
@@ -1295,6 +1405,11 @@ describe("TerminalManager Shift+Enter", () => {
   });
 });
 
+/** A wheel event worth exactly one scroll line (line mode × the local sensitivity of 3). */
+function oneLineWheel(deltaY = 1 / 3): WheelEvent {
+  return new WheelEvent("wheel", { deltaY, deltaMode: WheelEvent.DOM_DELTA_LINE });
+}
+
 describe("TerminalManager mouse input", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -1351,7 +1466,7 @@ describe("TerminalManager mouse input", () => {
     expect(terminal!.options.scrollSensitivity).toBe(3);
   });
 
-  it("uses stock sensitivity while a TUI captures mouse reports", () => {
+  it("lets xterm emit a report for every wheel event while a TUI captures the mouse", () => {
     const manager = new TerminalManager();
     const element = document.createElement("div");
     document.body.append(element);
@@ -1371,12 +1486,48 @@ describe("TerminalManager mouse input", () => {
     ) => boolean;
 
     terminal.modes.mouseTrackingMode = "any";
-    expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-    expect(terminal.options.scrollSensitivity).toBe(1);
+    expect(handler(oneLineWheel())).toBe(true);
+    expect(terminal.options.scrollSensitivity).toBe(TUI_REPORT_SENSITIVITY);
 
     terminal.modes.mouseTrackingMode = "none";
-    expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+    expect(handler(oneLineWheel())).toBe(true);
     expect(terminal.options.scrollSensitivity).toBe(3);
+  });
+
+  it("sends one TUI report per line an event covers, carrying fractions forward", async () => {
+    const manager = new TerminalManager();
+    const element = document.createElement("div");
+    document.body.append(element);
+    manager.mount(tab, "/repo", element);
+    await settleConnection();
+    const terminal = (
+      Terminal as unknown as {
+        instances: Array<{
+          attachCustomWheelEventHandler: Mock<(...args: unknown[]) => unknown>;
+          modes: { mouseTrackingMode: string };
+          onData: Mock<(...args: unknown[]) => unknown>;
+        }>;
+      }
+    ).instances.at(-1)!;
+    terminal.modes.mouseTrackingMode = "any";
+    const handler = terminal.attachCustomWheelEventHandler.mock.calls[0]![0] as (
+      event: WheelEvent,
+    ) => boolean;
+    const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
+    const wheel = "\x1b[<65;10;5M";
+    const writes = () => invokeMock.mock.calls.filter(([command]) => command === "pty_write");
+
+    // Half a line: xterm still emits a report, but it is not a whole line yet.
+    handler(oneLineWheel(1 / 6));
+    onData(wheel);
+    expect(writes()).toHaveLength(0);
+
+    // The carried half plus three more lines' worth crosses three whole lines,
+    // and xterm's single report goes out as all three.
+    handler(oneLineWheel(1 / 6 + 2 / 3));
+    onData(wheel);
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0]![1]).toEqual({ sessionId: tab.id, data: wheel.repeat(3) });
   });
 
   it("keeps wheel events accumulating while batching emitted TUI reports", async () => {
@@ -1409,21 +1560,21 @@ describe("TerminalManager mouse input", () => {
       // Trackpad pixel deltas can take several events to cross xterm's whole-line
       // threshold. Until xterm emits a report, every event must reach its
       // accumulator or scrolling wedges before the TUI receives anything.
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
 
       // First emitted report starts the redraw immediately.
       onData(wheel);
       // Later events still reach xterm's accumulator while their reports wait
       // behind that redraw instead of becoming separate PTY writes.
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(wheel);
       clock += MOUSE_WHEEL_GESTURE_QUIET_MS - 1;
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(wheel);
       clock += MOUSE_WHEEL_GESTURE_QUIET_MS - 1;
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
 
       const writes = invokeMock.mock.calls.filter(([command]) => command === "pty_write");
       expect(writes).toHaveLength(1);
@@ -1432,7 +1583,7 @@ describe("TerminalManager mouse input", () => {
       // A quiet gap with no response drops stale queued motion so a deliberate
       // new gesture can go out immediately.
       clock += MOUSE_WHEEL_GESTURE_QUIET_MS;
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(wheel);
       expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(2);
     } finally {
@@ -1504,13 +1655,13 @@ describe("TerminalManager mouse input", () => {
     let clock = 1000;
     const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
     try {
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       const first = "\x1b[<65;10;5M";
       const second = "\x1b[<64;10;5M";
       onData(first);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(second);
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(second);
 
       // Receiving bytes proves the TUI consumed the report, but admitting
@@ -1518,7 +1669,7 @@ describe("TerminalManager mouse input", () => {
       channel!.onmessage(encodeOutput("redraw-start"));
       channel!.onmessage(encodeOutput("redraw-end"));
       clock += MOUSE_WHEEL_GESTURE_QUIET_MS;
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
 
       // Parsing first write starts queued second write; gate remains closed
       // until parser catches up and WebGL paints the resulting frame.
@@ -1563,9 +1714,9 @@ describe("TerminalManager mouse input", () => {
       ) => boolean;
       const onData = terminal.onData.mock.calls[0]![0] as (data: string) => void;
 
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData("first");
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData("second");
 
       expect(invokeMock.mock.calls.filter(([command]) => command === "pty_write")).toHaveLength(1);
@@ -1610,9 +1761,9 @@ describe("TerminalManager mouse input", () => {
         finishParsing = callback;
       });
 
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData("first");
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData("second");
       channelInstances.at(-1)!.onmessage(encodeOutput("redraw"));
 
@@ -1661,7 +1812,7 @@ describe("TerminalManager mouse input", () => {
     );
 
     for (let index = 0; index < TUI_WHEEL_PENDING_REPORTS + 3; index += 1) {
-      expect(handler(new WheelEvent("wheel", { deltaY: 10 }))).toBe(true);
+      expect(handler(oneLineWheel())).toBe(true);
       onData(String(index));
     }
     channelInstances.at(-1)!.onmessage(encodeOutput("redraw"));

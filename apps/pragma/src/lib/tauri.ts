@@ -446,6 +446,15 @@ export function removeProject(projectId: string): Promise<void> {
   return invoke("remove_project", { projectId });
 }
 
+/**
+ * Sets the emoji shown for a project in the project switcher. `null` (or a
+ * blank string) clears the override, falling back to a favicon found in the
+ * checkout and then to the project name's initial.
+ */
+export function setProjectIcon(projectId: string, emoji: string | null): Promise<Project> {
+  return invoke<Project>("set_project_icon", { projectId, emoji });
+}
+
 /** Clones a remote repository and persists it as a project. */
 export function cloneProject(remoteUrl: string, intoDirectory: string): Promise<Project> {
   return invoke<Project>("clone_project", { remoteUrl, intoDirectory });
@@ -838,6 +847,18 @@ export function readFileChunk(
 /** Overwrites a worktree-relative file with UTF-8 text (does not create parents). */
 export function writeFile(worktreeId: string, path: string, contents: string): Promise<void> {
   return invoke("write_file", { worktreeId, path, contents });
+}
+
+/**
+ * Copies one base64-encoded file dropped onto a terminal to the host that runs
+ * the worktree's shells, resolving to the absolute path to paste into the PTY.
+ */
+export function saveDroppedFile(
+  worktreeId: string,
+  name: string,
+  contents: string,
+): Promise<string> {
+  return invoke("save_dropped_file", { worktreeId, name, contents });
 }
 
 /** Writes one base64-encoded file dropped into a worktree directory. */
