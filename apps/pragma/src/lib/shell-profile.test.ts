@@ -6,7 +6,9 @@ import {
   NATIVE_PROFILE,
   defaultProfile,
   effectiveDefaultProfile,
+  nativeShellQuoteStyle,
   profileLabel,
+  resolveConfiguredShell,
   resolveDefaultProfile,
   resolveHiddenDistros,
   sameProfile,
@@ -145,5 +147,42 @@ describe("profileLabel", () => {
     expect(profileLabel(wslProfile("Ubuntu"))).toBe("Ubuntu");
     expect(profileLabel(wslProfile(null))).toBe("WSL (default)");
     expect(profileLabel(null)).toBe("Terminal");
+  });
+});
+
+describe("resolveConfiguredShell", () => {
+  it("prefers the project scope over the global one", () => {
+    expect(resolveConfiguredShell([{ shell: "cmd.exe" }, { shell: "pwsh.exe" }])).toBe("cmd.exe");
+  });
+
+  it("falls through to the global scope when the project names none", () => {
+    expect(resolveConfiguredShell([{ backend: "wsl" }, { shell: "pwsh.exe" }])).toBe("pwsh.exe");
+  });
+
+  it("is undefined when no scope configures a shell", () => {
+    expect(resolveConfiguredShell([undefined, undefined])).toBeUndefined();
+  });
+});
+
+describe("nativeShellQuoteStyle", () => {
+  it("defaults to PowerShell quoting when nothing is configured", () => {
+    expect(nativeShellQuoteStyle(undefined)).toBe("powershell");
+  });
+
+  it("recognizes PowerShell in either edition, by absolute path or bare name", () => {
+    expect(nativeShellQuoteStyle("pwsh.exe")).toBe("powershell");
+    expect(nativeShellQuoteStyle("powershell.exe")).toBe("powershell");
+    expect(nativeShellQuoteStyle(String.raw`C:\Program Files\PowerShell\7\pwsh.exe`)).toBe(
+      "powershell",
+    );
+  });
+
+  it("uses cmd quoting for cmd.exe", () => {
+    expect(nativeShellQuoteStyle("cmd.exe")).toBe("cmd");
+    expect(nativeShellQuoteStyle(String.raw`C:\Windows\System32\cmd.exe`)).toBe("cmd");
+  });
+
+  it("falls back to POSIX quoting for any other native shell", () => {
+    expect(nativeShellQuoteStyle("bash.exe")).toBe("posix");
   });
 });

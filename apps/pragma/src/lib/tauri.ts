@@ -849,6 +849,18 @@ export function writeFile(worktreeId: string, path: string, contents: string): P
   return invoke("write_file", { worktreeId, path, contents });
 }
 
+/**
+ * Copies one base64-encoded file dropped onto a terminal to the host that runs
+ * the worktree's shells, resolving to the absolute path to paste into the PTY.
+ */
+export function saveDroppedFile(
+  worktreeId: string,
+  name: string,
+  contents: string,
+): Promise<string> {
+  return invoke("save_dropped_file", { worktreeId, name, contents });
+}
+
 /** Writes one base64-encoded file dropped into a worktree directory. */
 export function writeFileBytes(worktreeId: string, path: string, contents: string): Promise<void> {
   return invoke("write_file_bytes", { worktreeId, path, contents });

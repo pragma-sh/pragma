@@ -1805,7 +1805,13 @@
       "title": "TerminalDefaults",
       "type": "object",
       "additionalProperties": false,
-      "required": ["hiddenDistros", "rememberLastShell"],
+      "required": [
+        "hiddenDistros",
+        "rememberLastShell",
+        "maxDroppedFileBytes",
+        "droppedFilesDirName",
+        "droppedFilesMaxAgeMs"
+      ],
       "description": "Shipped defaults for terminal launching. A user overrides these per install/project via the `terminal` key of `.pragma/config.json` (`TerminalSettings`).",
       "properties": {
         "hiddenDistros": {
@@ -1817,6 +1823,21 @@
         "rememberLastShell": {
           "type": "boolean",
           "description": "Whether a plain new tab defaults to the shell profile most recently picked for that project instead of the configured default terminal."
+        },
+        "maxDroppedFileBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest file (typically an image) that may be dropped onto a terminal. The bytes are copied to the host that runs the PTY in one `filesystem` RPC, so this plus its base64 expansion must stay inside the protocol's frame limit."
+        },
+        "droppedFilesDirName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory under the host's temporary directory that holds copies of files dropped onto a terminal, whose absolute paths are pasted into the PTY."
+        },
+        "droppedFilesMaxAgeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long a per-drop directory under `droppedFilesDirName` may sit on disk before a sweep deletes it. The host sweeps once at startup and on a fixed interval after that (`DROPPED_FILES_SWEEP_INTERVAL` in `pragma-server`), so a drop is retained for at most this age plus one sweep interval."
         }
       }
     },

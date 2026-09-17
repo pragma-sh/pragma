@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { FileTree, type FileTreeController } from "@/components/right-sidebar/FileTreeNode";
 import { IconButton, TOOLBAR_BUTTON_CLASS } from "@/components/ui/icon-button";
 import { errorMessage } from "@/lib/errors";
-import { endPathDrag, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
+import { endPathDrag, fileBase64, isPathDragActive, readDraggedPaths } from "@/lib/file-drag";
 import { useWorktreeFileChange } from "@/lib/file-watch";
 import { basename, dirname, joinPath } from "@/lib/path";
 import {
@@ -117,13 +117,6 @@ function useRootDropZone(ctrl: FileTreeController): {
     endPathDrag();
   }
   return { isDropTarget, handlers: { onDragEnter, onDragLeave, onDragOver, onDrop } };
-}
-
-async function fileBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
 }
 
 interface CreateContext {
