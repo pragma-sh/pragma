@@ -6,6 +6,7 @@
 //! moves remote-first.
 
 use serde_json::Value;
+use std::path::Path;
 use thiserror::Error;
 
 use pragma_constants::ProtocolRpcMethod;
@@ -19,6 +20,7 @@ pub mod rpc;
 pub mod scratchpads;
 pub mod tabs;
 pub mod watcher;
+pub mod whiteboards;
 
 /// Result type for host-side core operations.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -59,10 +61,18 @@ impl From<std::io::Error> for CoreError {
 /// Business modules are moved behind this seam incrementally. Until a method is
 /// implemented, the router returns a typed unsupported-method error instead of
 /// letting server protocol code grow ad-hoc dispatch branches.
-#[derive(Default)]
-pub struct Core;
+pub struct Core {
+    whiteboards: whiteboards::WhiteboardStore,
+}
 
 impl Core {
+    /// Opens host-owned durable stores under the server state directory.
+    pub fn new(state_dir: &Path) -> CoreResult<Self> {
+        Ok(Self {
+            whiteboards: whiteboards::WhiteboardStore::new(state_dir)?,
+        })
+    }
+
     /// Handles one JSON RPC payload and returns a JSON response payload.
     ///
     /// Path-based domains (`filesystem`, `git`) execute against the host's own
@@ -75,6 +85,7 @@ impl Core {
             ProtocolRpcMethod::Git => git::handle(payload),
             ProtocolRpcMethod::Exec => exec::handle(payload),
             ProtocolRpcMethod::Scratchpads => scratchpads::handle(payload),
+            ProtocolRpcMethod::Whiteboards => self.whiteboards.handle(payload),
             ProtocolRpcMethod::Database
             | ProtocolRpcMethod::Kanban
             | ProtocolRpcMethod::Worktrees
