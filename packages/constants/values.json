@@ -89,6 +89,7 @@
       "browser": "New tab",
       "log": "Server Logs",
       "scratchpad": "Scratchpad",
+      "whiteboard": "Whiteboard",
       "prReview": "PR Review",
       "pluginWebview": "Plugin"
     }
@@ -112,6 +113,13 @@
     "frontmatterKey": "pragmaScratchpad",
     "version": 1
   },
+  "whiteboards": {
+    "databaseFile": "whiteboards.db",
+    "defaultTitle": "Whiteboard",
+    "maxTitleChars": 200,
+    "maxSceneBytes": 8388608,
+    "maxRenderDimension": 4096
+  },
   "protocol": {
     "rpcMethods": [
       "git",
@@ -129,6 +137,7 @@
       "plugins",
       "tunnel",
       "scratchpads",
+      "whiteboards",
       "wsl",
       "fanouts"
     ],

@@ -14,8 +14,17 @@ mod generated {
     // objects that both languages compare: a shell profile, a tab, a worktree
     // status. Without it each comparison has to be spelled out field by field,
     // which drifts the moment the schema gains a field.
-    typify::import_types!(schema = "schema.json", derives = [PartialEq]);
+    typify::import_types!(
+        schema = "schema.json",
+        derives = [PartialEq],
+        replace = {
+            ExcalidrawScene = serde_json::Value,
+        }
+    );
 }
+
+/// Lossless Excalidraw scene JSON. Validation happens at whiteboard boundaries.
+pub type ExcalidrawScene = serde_json::Value;
 
 pub use generated::{
     AgentAnswer, AgentAttentionKind, AgentCatalog, AgentDecision, AgentFeature, AgentFileChange,
@@ -45,9 +54,10 @@ pub use generated::{
     RunScriptVerticalSplit, ScratchpadFile, ScratchpadSummary, Scratchpads, ScriptMigrationSource,
     ScriptRunStatus, Scripts, SettingsScope, ShellProfile, SplitHorizontal, SplitNode, SplitSplit,
     SplitTabLeaf, SplitVertical, Tab, TabKind, TerminalBackend, TerminalDefaults, TerminalSettings,
-    Tunnel, UpdateApplyMode, UpdatePlatform, Updates, WindowDefaults, WorkspaceSnapshot, Worktree,
-    WorktreeChanges, WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro,
-    WslDistroList,
+    Tunnel, UpdateApplyMode, UpdatePlatform, Updates, Whiteboard, WhiteboardCreateInput,
+    WhiteboardDefaults, WhiteboardEditInput, WhiteboardIdInput, WhiteboardListInput,
+    WhiteboardViewResult, WindowDefaults, WorkspaceSnapshot, Worktree, WorktreeChanges,
+    WorktreeCommit, WorktreeCommitList, WorktreeStatus, Wsl, WslDistro, WslDistroList,
 };
 
 /// The parsed, shared constants.
