@@ -64,7 +64,7 @@ const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// (see `pragma_core::fs::save_dropped_file`) with nothing else to remove
 /// them, so an hourly sweep against `terminalDefaults.droppedFilesMaxAgeMs`
 /// bounds both the disk space and how long a dropped file's contents survive.
-const DROPPED_FILES_SWEEP_INTERVAL: Duration = Duration::from_secs(3600);
+const DROPPED_FILES_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 
 const DETACH_FLAG: &str = "--detach";
 
