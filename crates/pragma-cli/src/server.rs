@@ -7,8 +7,13 @@
 
 use pragma_platform::ipc::{self, LocalStream};
 
-use pragma_constants::CONSTANTS;
-use pragma_protocol::{read_json_frame, HelloFrame, ProtocolError, ServerFrame};
+use pragma_constants::{ProtocolRpcMethod, CONSTANTS};
+use pragma_protocol::{
+    read_json_frame, write_json_frame, HelloFrame, ProtocolError, RequestFrame, RequestKind,
+    RpcRequest, RpcResponseFrame, ServerFrame,
+};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// Resolves the server socket path from the environment.
 pub fn socket_path() -> Result<String, String> {
@@ -68,6 +73,49 @@ pub fn connect() -> Result<Server, CliError> {
         Err(error) => return Err(CliError::Protocol(error)),
     }
     Ok(Server { stream })
+}
+
+/// Sends one direct host RPC and waits for its matching response.
+pub fn rpc(method: ProtocolRpcMethod, payload: Value) -> Result<Value, CliError> {
+    let Server { mut stream } = connect()?;
+    let request_id = Uuid::new_v4().to_string();
+    write_json_frame(
+        &mut stream,
+        &RequestFrame {
+            request_id: request_id.clone(),
+            kind: RequestKind::Rpc,
+            session_id: None,
+            worktree_id: None,
+            cwd: None,
+            cols: None,
+            rows: None,
+            data: None,
+            shell: None,
+            rpc: Some(RpcRequest { method, payload }),
+            subscription: None,
+            control: None,
+            control_result: None,
+        },
+    )?;
+    let _ = stream.set_read_timeout(None);
+    loop {
+        if let ServerFrame::Rpc(RpcResponseFrame {
+            request_id: id,
+            ok,
+            payload,
+            error,
+        }) = read_json_frame::<ServerFrame>(&mut stream)?
+        {
+            if id != request_id {
+                continue;
+            }
+            if ok {
+                return Ok(payload.unwrap_or(Value::Null));
+            }
+            let error = error.ok_or_else(|| CliError::server("RPC request failed"))?;
+            return Err(CliError::server(error.message));
+        }
+    }
 }
 
 /// Errors surfaced by connection setup and direct-to-server reads.
