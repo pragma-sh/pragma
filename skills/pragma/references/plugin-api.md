@@ -63,7 +63,7 @@ export default definePlugin({
 | `defineSidebarTab`         | Tab in project sidebar.                                    |
 | `defineSidebarCard`        | Card in project sidebar.                                   |
 | `defineTopperItem`         | Item in workspace topper bar.                              |
-| `defineSettingsPage`       | Page in Pragma Settings.                                   |
+| `defineSettingsPage`       | Page nested under the plugin in Settings → Plugins.        |
 | `defineWebView`            | React workspace tab; returned handle has `.open(options)`. |
 | `defineCommand`            | Command-palette action with optional default keybinding.   |
 | `defineAgent`              | Coding agent available in Pragma launcher.                 |

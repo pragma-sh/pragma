@@ -542,6 +542,21 @@ palette's "Open automations" uses it).
 Plugins add React settings sections with `defineSettingsPage` and
 `definePlugin({ ui: { settingsPages: [...] } })`. Pages follow plugin scope precedence,
 render under the standard plugin boundary, and use the same host hooks as sidebar tabs.
+They are **not** top-level navigation items: `PluginsSection` nests each plugin's pages
+under that plugin's row in the Plugins list (matched by `package.json` name, falling back
+to the config specifier), and opening one swaps the Plugins pane for the page behind a
+"Plugins" back button. Only the current scope's pages nest, since the list shows only that
+scope's configured plugins; a page whose plugin has no row in this scope still gets a row
+of its own so its settings stay reachable.
+
+**`useSdk` throws until the gateway is up, and the gateway spawns lazily.** Any
+contribution that calls it — a sidebar card is the common case, since it renders at
+startup — throws during that window, so `RenderPluginContribution` keys the plugin error
+boundary on SDK connectivity as well as the caller's reset key. Without that the boundary
+latches a startup transient as a permanent "Plugin … crashed. Pragma SDK is not connected
+yet" card, even though `useRuntimeSdk` retries every 2s and connects seconds later. A
+crash card that _survives_ connection is a real failure: check the console for
+`plugin SDK bridge: gateway unavailable, retrying`.
 
 **Other** (`OtherSection.tsx`) is global-only: override `other.serverUrl` and
 `other.autoDownload` in `~/.pragma/config.json`. Reads migrate legacy
