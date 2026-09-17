@@ -110,6 +110,7 @@ export function useScratchpadFrameBridge({
     return false;
   };
 
+  // fallow-ignore-next-line complexity -- protocol dispatcher keeps validation, same-worktree authorization, and one response/error envelope together for every request variant.
   const handleRequest = async (request: FrameRequest): Promise<void> => {
     try {
       if (request.method === "requestAgentAttachment") {

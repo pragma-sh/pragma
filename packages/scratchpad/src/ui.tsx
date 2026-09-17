@@ -18,6 +18,7 @@ export interface WhiteboardProps {
 }
 
 /** Live read-only PNG rendering of a worktree-scoped Pragma whiteboard. */
+// fallow-ignore-next-line complexity -- one preview owns polling, host-open support, and its loading/error/image states; splitting it would duplicate the shared snapshot lifecycle.
 export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<ScratchpadWhiteboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export function Whiteboard({ id, refreshIntervalMs = 3000 }: WhiteboardProps): R
     });
   };
 
+  // fallow-ignore-next-line complexity -- one bounded poll updates theme/version refs and the three request outcomes atomically.
   const refresh = useCallback(async () => {
     try {
       const dark = document.documentElement.classList.contains("dark");

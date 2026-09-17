@@ -56,6 +56,7 @@ function useRootDarkClass(): boolean {
 }
 
 /** Editable Excalidraw canvas backed by host-owned optimistic persistence. */
+// fallow-ignore-next-line complexity -- controller component composes one canvas's load, dirty, rename, and debounced-save lifecycle; the persistence callbacks are already factored below.
 export function WhiteboardView({ tab }: { tab: Tab }) {
   const whiteboardId = tab.whiteboardId;
   const { renameTerminalTab } = useWorkspace();
@@ -72,6 +73,7 @@ export function WhiteboardView({ tab }: { tab: Tab }) {
   const mountedRef = useRef(true);
   const userInteractedRef = useRef(false);
 
+  // fallow-ignore-next-line complexity -- serial save pipeline must branch on queued edits, unmount, optimistic conflicts, and title synchronization in one atomic callback.
   const flush = useCallback(async () => {
     const board = boardRef.current;
     const scene = sceneRef.current;

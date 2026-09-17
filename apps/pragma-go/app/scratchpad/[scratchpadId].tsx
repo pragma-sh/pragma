@@ -104,6 +104,7 @@ function ScratchpadContent({
   const [sending, setSending] = useState(false);
 
   const loadWhiteboardSnapshot = useCallback(
+    // fallow-ignore-next-line complexity -- gateway request must preserve the 401 unpair side effect while rethrowing every host failure to the viewer.
     async (id: string, knownVersion?: number, dark?: boolean) => {
       if (!client) throw new Error("Host is unavailable");
       try {

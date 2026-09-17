@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-class-member -- SDK namespace methods are the public API.
 import type {
   Whiteboard,
   WhiteboardCreateInput,
