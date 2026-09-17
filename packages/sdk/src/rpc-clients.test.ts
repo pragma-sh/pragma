@@ -48,6 +48,106 @@ describe("rpc namespace clients", () => {
       maxConcurrent: 1,
     });
   });
+
+  it("maps whiteboard operations and decodes rendered PNG bytes", async () => {
+    const calls: Array<{ input: string; body: unknown }> = [];
+    const scene = {
+      type: "excalidraw" as const,
+      version: 2,
+      elements: [],
+      appState: {},
+      files: {},
+    };
+    const whiteboard = {
+      id: "board-1",
+      worktreeId: "worktree-1",
+      title: "Architecture",
+      scene,
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const client = clientWithFetch(async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as { action: string };
+      calls.push({ input, body });
+      if (body.action === "list") {
+        return Response.json([whiteboard]);
+      }
+      if (body.action === "delete") {
+        return Response.json(null);
+      }
+      if (body.action === "view") {
+        return Response.json({ data: "AQID" });
+      }
+      return Response.json(whiteboard);
+    });
+
+    await expect(
+      client.whiteboards.create({ worktreeId: "worktree-1", title: "Architecture", scene }),
+    ).resolves.toEqual(whiteboard);
+    await expect(
+      client.whiteboards.get({ worktreeId: "worktree-1", id: "board-1" }),
+    ).resolves.toEqual(whiteboard);
+    await expect(client.whiteboards.list({ worktreeId: "worktree-1" })).resolves.toEqual([
+      whiteboard,
+    ]);
+    await expect(
+      client.whiteboards.search({ worktreeId: "worktree-1", query: "rectangle" }),
+    ).resolves.toEqual([whiteboard]);
+    await expect(
+      client.whiteboards.edit({
+        worktreeId: "worktree-1",
+        id: "board-1",
+        title: "Architecture",
+        scene,
+        expectedVersion: 1,
+      }),
+    ).resolves.toEqual(whiteboard);
+    await expect(
+      client.whiteboards.delete({ worktreeId: "worktree-1", id: "board-1" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.whiteboards.view({ worktreeId: "worktree-1", id: "board-1" }),
+    ).resolves.toEqual(new Uint8Array([1, 2, 3]));
+
+    expect(calls).toEqual([
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "create", worktreeId: "worktree-1", title: "Architecture", scene },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "get", worktreeId: "worktree-1", id: "board-1" },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "list", worktreeId: "worktree-1" },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "list", worktreeId: "worktree-1", query: "rectangle" },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: {
+          action: "edit",
+          worktreeId: "worktree-1",
+          id: "board-1",
+          title: "Architecture",
+          scene,
+          expectedVersion: 1,
+        },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "delete", worktreeId: "worktree-1", id: "board-1" },
+      },
+      {
+        input: "http://127.0.0.1:1/v1/rpc/whiteboards",
+        body: { action: "view", worktreeId: "worktree-1", id: "board-1" },
+      },
+    ]);
+  });
 });
 
 function clientWithFetch(

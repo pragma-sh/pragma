@@ -16,6 +16,7 @@ import { SessionsClient } from "./sessions-client";
 import { ThemeClient } from "./theme-client";
 import { Transport } from "./transport";
 import type { PragmaClientConfig } from "./transport";
+import { WhiteboardsClient } from "./whiteboards-client";
 import { WorkspaceClient } from "./workspace-client";
 
 /** Fetch-based client for the local Pragma HTTP gateway. */
@@ -33,6 +34,8 @@ export class PragmaClient {
   readonly theme: ThemeClient;
   readonly health: HealthClient;
   readonly scratchpads: ScratchpadsClient;
+  /** Durable Excalidraw whiteboards. */
+  readonly whiteboards: WhiteboardsClient;
 
   private readonly transport: Transport;
 
@@ -51,6 +54,7 @@ export class PragmaClient {
     this.theme = new ThemeClient(this.transport);
     this.health = new HealthClient(this.transport);
     this.scratchpads = new ScratchpadsClient(this.transport, this.fs, this.agents);
+    this.whiteboards = new WhiteboardsClient(this.transport);
   }
 
   rpc<T = unknown>(
