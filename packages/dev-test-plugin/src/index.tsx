@@ -7,6 +7,7 @@ import {
 } from "@pragma/plugin";
 
 import { AgentPulseCard } from "./agent-pulse-card";
+import { DevTestDiagnosticsPage } from "./diagnostics-page";
 import { FORTUNE_REROLL_EVENT, FortuneTab } from "./fortune-tab";
 import { OverviewTab } from "./overview-tab";
 import { openReportWebView, reportWebView } from "./report-webview";
@@ -25,8 +26,13 @@ export default definePlugin({
     settingsPages: [
       defineSettingsPage({
         id: "dev-test",
-        title: "Dev Test Plugin",
+        title: "Board Drafts",
         component: DevTestSettingsPage,
+      }),
+      defineSettingsPage({
+        id: "diagnostics",
+        title: "Diagnostics",
+        component: DevTestDiagnosticsPage,
       }),
     ],
     webViews: [reportWebView],
