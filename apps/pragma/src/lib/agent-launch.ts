@@ -76,13 +76,19 @@ export function startAgentInTab(
   const command = agentStartCommand([...agent.start, ...modelLaunchArgs(agent, selection)]);
   const message = prefill?.trim() ? prefill : null;
   const write = (data: string) => terminalManager.writeWhenReady(tabId, data);
-  window.setTimeout(() => {
-    runAgentCommand(command, write);
-    scheduleStartupInput(agent, write);
-    if (message) {
-      schedulePrefill(agent, message, write);
-    }
-  }, AGENT_START_DELAY_MS);
+  // Start the clocks only once the PTY is connected. A slow connect (e.g. a
+  // freshly created worktree) would otherwise queue the command, paste, and
+  // submit key and flush them as one write, so the TUI swallows the Enter.
+  void terminalManager.whenConnected(tabId).then(() => {
+    window.setTimeout(() => {
+      runAgentCommand(command, write);
+      scheduleStartupInput(agent, write);
+      if (message) {
+        schedulePrefill(agent, message, write);
+      }
+    }, AGENT_START_DELAY_MS);
+    return undefined;
+  });
 }
 
 function runAgentCommand(command: string, write: (data: string) => void): void {
